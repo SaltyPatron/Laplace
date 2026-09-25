@@ -28,10 +28,9 @@
       "propertyName": "status",
       "valueKind": "Enumerated",
       "disposition": "Testimony",
-      "relationName": "UCD_CONFUSABLE_STATUS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "objectNamespace": "unicode/confusable_status"
+      "relationName": "HAS_ATTRIBUTE",
+      "objectNamespace": "unicode/confusable_status",
+      "contextLiteral": "Confusable_Status"
     }
   ],
   "providerRoutes": [

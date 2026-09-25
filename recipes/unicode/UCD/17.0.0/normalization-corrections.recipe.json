@@ -17,31 +17,27 @@
       "propertyName": "old",
       "valueKind": "CodepointSequence",
       "disposition": "Reference, Testimony",
-      "relationName": "UCD_NORMALIZATION_OLD_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
+      "relationName": "HAS_ATTRIBUTE",
       "referenceCodec": "UnicodeCodepointSequence",
-      "sequenceSeparator": " "
+      "sequenceSeparator": " ",
+      "contextLiteral": "Normalization_Corrections_Original"
     },
     {
       "syntaxPath": "record/@new",
       "propertyName": "new",
       "valueKind": "CodepointSequence",
       "disposition": "Reference, Testimony",
-      "relationName": "UCD_NORMALIZATION_NEW_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
+      "relationName": "NORMALIZES_TO",
       "referenceCodec": "UnicodeCodepointSequence",
-      "sequenceSeparator": " "
+      "sequenceSeparator": " ",
+      "contextLiteral": "Normalization_Corrections"
     },
     {
       "syntaxPath": "record/@version",
       "propertyName": "version",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_NORMALIZATION_CORRECTION_VERSION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_VERSION"
     }
   ],
   "providerRoutes": [

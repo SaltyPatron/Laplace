@@ -17,19 +17,16 @@
       "propertyName": "type",
       "valueKind": "Enumerated",
       "disposition": "Testimony",
-      "relationName": "UCD_EMOJI_SEQUENCE_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "objectNamespace": "unicode/emoji_sequence_type"
+      "relationName": "HAS_ATTRIBUTE",
+      "objectNamespace": "unicode/emoji_sequence_type",
+      "contextLiteral": "Emoji_Sequence_Type"
     },
     {
       "syntaxPath": "record/@description",
       "propertyName": "description",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SEQUENCE_DESCRIPTION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME"
     }
   ],
   "providerRoutes": [

@@ -157,7 +157,7 @@ DECLARE
     w_end     bytea := public.laplace_hash128_blake3('test/corpus/word-end');
     w_target  bytea := laplace.word_id('β'); -- mapped floor, no database row
     sp        bytea := public.laplace_hash128_blake3('test/corpus/space');
-    zs_cat    bytea := public.laplace_hash128_blake3('test/corpus/zs-category');
+    zs_cat    bytea := laplace.word_id('Space_Separator');
     sent      bytea := public.laplace_hash128_blake3('test/corpus/sentence');
     sent2     bytea := public.laplace_hash128_blake3('test/corpus/sentence2');
     sent3     bytea := public.laplace_hash128_blake3('test/corpus/sentence3');
@@ -176,14 +176,13 @@ BEGIN
         (w_the, 2, type_word), (w_capital, 2, type_word),
         (w_of, 2, type_word), (w_france, 2, type_word),
         (w_end, 2, type_word),
-        (sp, 2, type_word), (zs_cat, 0, type_t),
+        (sp, 2, type_word), (zs_cat, 2, type_word),
         (sent, 3, type_sent), (sent2, 3, type_sent), (doc, 4, type_doc);
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
-    -- HAS_GENERAL_CATEGORY → Zs — and generation.separator_ids() resolves it.
-    INSERT INTO laplace.canonical_names (id, name)
-    VALUES (zs_cat, 'unicode/category/Zs/v1');
+    -- HAS_GENERAL_CATEGORY → Space_Separator (content) — and
+    -- generation.separator_ids() resolves it.
     INSERT INTO laplace.attestations (id, subject_id, type_id, object_id, source_id,
                               context_id, outcome, last_observed_at, observation_count,
                               sum_score_fp1e9, opponent_rd_fp1e9)

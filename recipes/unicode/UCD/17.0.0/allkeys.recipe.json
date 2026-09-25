@@ -17,18 +17,16 @@
       "propertyName": "elements",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_COLLATION_KEY",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Collation_Element"
     },
     {
       "syntaxPath": "directive/@kind",
       "propertyName": "kind",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_COLLATION_DIRECTIVE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Collation_Directive"
     },
     {
       "syntaxPath": "directive/@payload",
@@ -61,13 +59,19 @@
   ],
   "delimitedSyntax": {
     "recordName": "record",
-    "columns": ["source", "elements"],
+    "columns": [
+      "source",
+      "elements"
+    ],
     "separator": ";",
     "commentPrefix": "#",
     "trimFields": true,
     "directivePrefix": "@",
     "directiveRecordName": "directive",
-    "directiveColumns": ["kind", "payload"],
+    "directiveColumns": [
+      "kind",
+      "payload"
+    ],
     "minimumColumns": 1
   }
 }

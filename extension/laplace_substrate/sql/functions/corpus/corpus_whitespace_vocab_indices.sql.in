@@ -78,12 +78,10 @@ BEGIN
     RETURN QUERY
     WITH cat AS MATERIALIZED (
         SELECT a.subject_id AS id,
-               bool_or(cn.name IN ('unicode/category/Zs/v1',
-                                   'unicode/category/Zl/v1',
-                                   'unicode/category/Zp/v1',
-                                   'unicode/category/Cc/v1')) AS is_sep
+               -- The UCD states a character's General_Category; its value is content.
+               bool_or(a.object_id = ANY (ARRAY[laplace.word_id('Space_Separator'), laplace.word_id('Line_Separator'),
+                  laplace.word_id('Paragraph_Separator'), laplace.word_id('Control')])) AS is_sep
         FROM laplace.attestations a
-        JOIN laplace.canonical_names cn ON cn.id = a.object_id
         WHERE a.type_id = v_type              -- bound literal -> LIST prune at plan time
           AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id
         GROUP BY a.subject_id

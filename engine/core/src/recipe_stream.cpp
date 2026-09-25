@@ -64,7 +64,7 @@ struct field_rule {
     hash128_t relation, parent, entity_type, lexical_relation;
     double rank;
     std::unordered_map<std::string, std::string> aliases;
-    std::string identity_table;
+    std::string identity_table, object_literal, context_literal;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -476,12 +476,16 @@ struct laplace_recipe_stream {
         if (context_value && !context_value->empty()) {
             f.context = content(stage, *context_value);
             f.has_context = true;
+        } else if (!rule.context_literal.empty()) {
+            f.context = content(stage, rule.context_literal);
+            f.has_context = true;
         }
         if (rule.kind == 1) {
             if (raw == "Y" || raw == "Yes" || raw == "true" || raw == "True" || raw == "1") f.confirm = true;
             else if (raw == "N" || raw == "No" || raw == "false" || raw == "False" || raw == "0") f.confirm = false;
             else throw std::runtime_error("invalid boolean: " + raw);
             if (ordinary_content) content(stage, raw);
+            if (!rule.object_literal.empty()) { f.object = content(stage, rule.object_literal); f.has_object = true; }
             emit_fact(f); return;
         }
         if (emitted_testimony && nonzero(rule.lexical_relation)) {
@@ -577,8 +581,9 @@ struct laplace_recipe_stream {
         f.has_subject = true; f.has_object = true;
         if (context_value && !context_value->empty()) {
             f.context = content(stage, *context_value); f.has_context = true;
+        } else if (!rule.context_literal.empty()) {
+            f.context = content(stage, rule.context_literal); f.has_context = true;
         }
-        (void)rule;
         facts.push_back(f);
     }
     void lower_grouped(intent_stage_t* stage, const field_rule& rule, const std::string& raw,
@@ -820,7 +825,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if ((f.pair_mode != 0 || !f.relation_field.empty()) && f.relation_resolver == 0)
                     throw std::runtime_error("dynamic relation requires a declared resolver at " + f.path);
             }
-            if (rcp7) f.identity_table = r.text();
+            if (rcp7) { f.identity_table = r.text(); f.object_literal = r.text(); f.context_literal = r.text(); }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;

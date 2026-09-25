@@ -9,9 +9,7 @@
       "propertyName": "name",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_NAME",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME"
     },
     {
       "syntaxPath": "record/@sequence",

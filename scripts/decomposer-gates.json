@@ -38,10 +38,7 @@
           "relation": "HAS_SCRIPT",
           "min": 1
         },
-        {
-          "relation": "DECODES_TO",
-          "min": 1
-        },
+        { "relation": "HAS_GENERAL_CATEGORY", "min": 1 },
         {
           "relation": "CONFUSABLE_WITH",
           "min": 1

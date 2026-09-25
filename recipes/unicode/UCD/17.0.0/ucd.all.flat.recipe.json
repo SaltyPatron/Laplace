@@ -15,9 +15,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BLOCK_FIRST",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Block_First"
     },
     {
       "syntaxPath": "blocks/block/@last-cp",
@@ -30,9 +29,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BLOCK_LAST",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Block_Last"
     },
     {
       "syntaxPath": "blocks/block/@name",
@@ -45,9 +43,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BLOCK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_BLOCK"
     },
     {
       "syntaxPath": "cjk-radicals/cjk-radical/@ideograph",
@@ -60,9 +56,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CJK_RADICAL_IDEOGRAPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "CJK_Radical_Ideograph"
     },
     {
       "syntaxPath": "cjk-radicals/cjk-radical/@number",
@@ -75,9 +70,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CJK_RADICAL_NUMBER",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "CJK_Radical_Number"
     },
     {
       "syntaxPath": "cjk-radicals/cjk-radical/@radical",
@@ -90,9 +84,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CJK_RADICAL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "CJK_Radical"
     },
     {
       "syntaxPath": "do-not-emit/instead/@because",
@@ -105,9 +98,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DO_NOT_EMIT_REASON",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Do_Not_Emit_Reason"
     },
     {
       "syntaxPath": "do-not-emit/instead/@of",
@@ -120,9 +112,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DO_NOT_EMIT_SOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Do_Not_Emit_Source"
     },
     {
       "syntaxPath": "do-not-emit/instead/@use",
@@ -135,9 +126,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DO_NOT_EMIT_REPLACEMENT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Do_Not_Emit_Replacement"
     },
     {
       "syntaxPath": "named-sequences/named-sequence/@cps",
@@ -150,9 +140,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NAMED_SEQUENCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Named_Sequence"
     },
     {
       "syntaxPath": "named-sequences/named-sequence/@name",
@@ -165,9 +154,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NAMED_SEQUENCE_NAME",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME"
     },
     {
       "syntaxPath": "repertoire/*/@AHex",
@@ -182,9 +169,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_ASCII_HEX_DIGIT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "ASCII_Hex_Digit"
     },
     {
       "syntaxPath": "repertoire/*/@Alpha",
@@ -199,9 +185,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_ALPHABETIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Alphabetic"
     },
     {
       "syntaxPath": "repertoire/*/@Bidi_C",
@@ -216,9 +201,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BIDI_CONTROL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Bidi_Control"
     },
     {
       "syntaxPath": "repertoire/*/@Bidi_M",
@@ -233,9 +217,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BIDI_MIRRORED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Bidi_Mirrored"
     },
     {
       "syntaxPath": "repertoire/*/@CE",
@@ -250,9 +233,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_COMPOSITION_EXCLUSION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Composition_Exclusion"
     },
     {
       "syntaxPath": "repertoire/*/@CI",
@@ -267,9 +249,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CASE_IGNORABLE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Case_Ignorable"
     },
     {
       "syntaxPath": "repertoire/*/@CWCF",
@@ -284,9 +265,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CHANGES_WHEN_CASEFOLDED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Changes_When_Casefolded"
     },
     {
       "syntaxPath": "repertoire/*/@CWCM",
@@ -301,9 +281,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CHANGES_WHEN_CASEMAPPED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Changes_When_Casemapped"
     },
     {
       "syntaxPath": "repertoire/*/@CWKCF",
@@ -318,9 +297,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CHANGES_WHEN_NFKC_CASEFOLDED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Changes_When_NFKC_Casefolded"
     },
     {
       "syntaxPath": "repertoire/*/@CWL",
@@ -335,9 +313,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CHANGES_WHEN_LOWERCASED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Changes_When_Lowercased"
     },
     {
       "syntaxPath": "repertoire/*/@CWT",
@@ -352,9 +329,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CHANGES_WHEN_TITLECASED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Changes_When_Titlecased"
     },
     {
       "syntaxPath": "repertoire/*/@CWU",
@@ -369,9 +345,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CHANGES_WHEN_UPPERCASED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Changes_When_Uppercased"
     },
     {
       "syntaxPath": "repertoire/*/@Cased",
@@ -386,9 +361,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CASED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Cased"
     },
     {
       "syntaxPath": "repertoire/*/@Comp_Ex",
@@ -403,9 +377,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_FULL_COMPOSITION_EXCLUSION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Full_Composition_Exclusion"
     },
     {
       "syntaxPath": "repertoire/*/@DI",
@@ -420,9 +393,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DEFAULT_IGNORABLE_CODE_POINT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Default_Ignorable_Code_Point"
     },
     {
       "syntaxPath": "repertoire/*/@Dash",
@@ -437,9 +409,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DASH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Dash"
     },
     {
       "syntaxPath": "repertoire/*/@Dep",
@@ -454,9 +425,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DEPRECATED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Deprecated"
     },
     {
       "syntaxPath": "repertoire/*/@Dia",
@@ -471,9 +441,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DIACRITIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Diacritic"
     },
     {
       "syntaxPath": "repertoire/*/@EBase",
@@ -488,9 +457,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EMOJI_MODIFIER_BASE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EMOJI_PROPERTY",
+      "objectLiteral": "Emoji_Modifier_Base"
     },
     {
       "syntaxPath": "repertoire/*/@EComp",
@@ -505,9 +473,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EMOJI_COMPONENT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EMOJI_PROPERTY",
+      "objectLiteral": "Emoji_Component"
     },
     {
       "syntaxPath": "repertoire/*/@EMod",
@@ -522,9 +489,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EMOJI_MODIFIER",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EMOJI_PROPERTY",
+      "objectLiteral": "Emoji_Modifier"
     },
     {
       "syntaxPath": "repertoire/*/@EPres",
@@ -539,9 +505,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EMOJI_PRESENTATION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EMOJI_PROPERTY",
+      "objectLiteral": "Emoji_Presentation"
     },
     {
       "syntaxPath": "repertoire/*/@Emoji",
@@ -556,9 +521,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EMOJI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EMOJI_PROPERTY",
+      "objectLiteral": "Emoji"
     },
     {
       "syntaxPath": "repertoire/*/@EqUIdeo",
@@ -571,9 +535,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EQUIVALENT_UNIFIED_IDEOGRAPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "Equivalent_Unified_Ideograph"
     },
     {
       "syntaxPath": "repertoire/*/@Ext",
@@ -588,9 +551,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EXTENDER",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Extender"
     },
     {
       "syntaxPath": "repertoire/*/@ExtPict",
@@ -605,9 +567,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EXTENDED_PICTOGRAPHIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EMOJI_PROPERTY",
+      "objectLiteral": "Extended_Pictographic"
     },
     {
       "syntaxPath": "repertoire/*/@GCB",
@@ -620,9 +581,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_GRAPHEME_CLUSTER_BREAK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Grapheme_Cluster_Break"
     },
     {
       "syntaxPath": "repertoire/*/@Gr_Base",
@@ -637,9 +597,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_GRAPHEME_BASE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Grapheme_Base"
     },
     {
       "syntaxPath": "repertoire/*/@Gr_Ext",
@@ -654,9 +613,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_GRAPHEME_EXTEND",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Grapheme_Extend"
     },
     {
       "syntaxPath": "repertoire/*/@Hex",
@@ -671,9 +629,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_HEX_DIGIT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Hex_Digit"
     },
     {
       "syntaxPath": "repertoire/*/@IDC",
@@ -688,9 +645,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_ID_CONTINUE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "ID_Continue"
     },
     {
       "syntaxPath": "repertoire/*/@IDS",
@@ -705,9 +661,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_ID_START",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "ID_Start"
     },
     {
       "syntaxPath": "repertoire/*/@IDSB",
@@ -722,9 +677,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_IDS_BINARY_OPERATOR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "IDS_Binary_Operator"
     },
     {
       "syntaxPath": "repertoire/*/@IDST",
@@ -739,9 +693,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_IDS_TRINARY_OPERATOR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "IDS_Trinary_Operator"
     },
     {
       "syntaxPath": "repertoire/*/@IDSU",
@@ -756,9 +709,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_IDS_UNARY_OPERATOR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "IDS_Unary_Operator"
     },
     {
       "syntaxPath": "repertoire/*/@ID_Compat_Math_Continue",
@@ -773,9 +725,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_ID_COMPAT_MATH_CONTINUE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "ID_Compat_Math_Continue"
     },
     {
       "syntaxPath": "repertoire/*/@ID_Compat_Math_Start",
@@ -790,9 +741,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_ID_COMPAT_MATH_START",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "ID_Compat_Math_Start"
     },
     {
       "syntaxPath": "repertoire/*/@Ideo",
@@ -807,9 +757,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_IDEOGRAPHIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Ideographic"
     },
     {
       "syntaxPath": "repertoire/*/@InCB",
@@ -822,9 +771,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_INDIC_CONJUNCT_BREAK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Indic_Conjunct_Break"
     },
     {
       "syntaxPath": "repertoire/*/@InPC",
@@ -837,9 +785,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_INDIC_POSITIONAL_CATEGORY",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Indic_Positional_Category"
     },
     {
       "syntaxPath": "repertoire/*/@InSC",
@@ -852,9 +799,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_INDIC_SYLLABIC_CATEGORY",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Indic_Syllabic_Category"
     },
     {
       "syntaxPath": "repertoire/*/@JSN",
@@ -867,9 +813,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_JAMO_SHORT_NAME",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME_ALIAS",
+      "contextLiteral": "Jamo_Short_Name"
     },
     {
       "syntaxPath": "repertoire/*/@Join_C",
@@ -884,9 +829,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_JOIN_CONTROL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Join_Control"
     },
     {
       "syntaxPath": "repertoire/*/@LOE",
@@ -901,9 +845,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_LOGICAL_ORDER_EXCEPTION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Logical_Order_Exception"
     },
     {
       "syntaxPath": "repertoire/*/@Lower",
@@ -918,9 +861,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_LOWERCASE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Lowercase"
     },
     {
       "syntaxPath": "repertoire/*/@MCM",
@@ -935,9 +877,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_MODIFIER_COMBINING_MARK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Modifier_Combining_Mark"
     },
     {
       "syntaxPath": "repertoire/*/@Math",
@@ -952,9 +893,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_MATH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Math"
     },
     {
       "syntaxPath": "repertoire/*/@NChar",
@@ -969,9 +909,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NONCHARACTER_CODE_POINT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Noncharacter_Code_Point"
     },
     {
       "syntaxPath": "repertoire/*/@NFC_QC",
@@ -984,9 +923,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NFC_QUICK_CHECK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "NFC_Quick_Check"
     },
     {
       "syntaxPath": "repertoire/*/@NFD_QC",
@@ -999,9 +937,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NFD_QUICK_CHECK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "NFD_Quick_Check"
     },
     {
       "syntaxPath": "repertoire/*/@NFKC_CF",
@@ -1014,9 +951,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NFKC_CASEFOLD",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "NORMALIZES_TO",
+      "contextLiteral": "NFKC_Casefold"
     },
     {
       "syntaxPath": "repertoire/*/@NFKC_QC",
@@ -1029,9 +965,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NFKC_QUICK_CHECK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "NFKC_Quick_Check"
     },
     {
       "syntaxPath": "repertoire/*/@NFKC_SCF",
@@ -1044,9 +979,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NFKC_SIMPLE_CASEFOLD",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "NORMALIZES_TO",
+      "contextLiteral": "NFKC_Simple_Casefold"
     },
     {
       "syntaxPath": "repertoire/*/@NFKD_QC",
@@ -1059,9 +993,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NFKD_QUICK_CHECK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "NFKD_Quick_Check"
     },
     {
       "syntaxPath": "repertoire/*/@OAlpha",
@@ -1076,9 +1009,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_ALPHABETIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_Alphabetic"
     },
     {
       "syntaxPath": "repertoire/*/@ODI",
@@ -1093,9 +1025,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_DEFAULT_IGNORABLE_CODE_POINT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_Default_Ignorable_Code_Point"
     },
     {
       "syntaxPath": "repertoire/*/@OGr_Ext",
@@ -1110,9 +1041,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_GRAPHEME_EXTEND",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_Grapheme_Extend"
     },
     {
       "syntaxPath": "repertoire/*/@OIDC",
@@ -1127,9 +1057,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_ID_CONTINUE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_ID_Continue"
     },
     {
       "syntaxPath": "repertoire/*/@OIDS",
@@ -1144,9 +1073,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_ID_START",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_ID_Start"
     },
     {
       "syntaxPath": "repertoire/*/@OLower",
@@ -1161,9 +1089,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_LOWERCASE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_Lowercase"
     },
     {
       "syntaxPath": "repertoire/*/@OMath",
@@ -1178,9 +1105,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_MATH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_Math"
     },
     {
       "syntaxPath": "repertoire/*/@OUpper",
@@ -1195,9 +1121,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_OTHER_UPPERCASE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Other_Uppercase"
     },
     {
       "syntaxPath": "repertoire/*/@PCM",
@@ -1212,9 +1137,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_PREPENDED_CONCATENATION_MARK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Prepended_Concatenation_Mark"
     },
     {
       "syntaxPath": "repertoire/*/@Pat_Syn",
@@ -1229,9 +1153,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_PATTERN_SYNTAX",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Pattern_Syntax"
     },
     {
       "syntaxPath": "repertoire/*/@Pat_WS",
@@ -1246,9 +1169,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_PATTERN_WHITE_SPACE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Pattern_White_Space"
     },
     {
       "syntaxPath": "repertoire/*/@QMark",
@@ -1263,9 +1185,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_QUOTATION_MARK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Quotation_Mark"
     },
     {
       "syntaxPath": "repertoire/*/@RI",
@@ -1280,9 +1201,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_REGIONAL_INDICATOR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Regional_Indicator"
     },
     {
       "syntaxPath": "repertoire/*/@Radical",
@@ -1297,9 +1217,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_RADICAL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Radical"
     },
     {
       "syntaxPath": "repertoire/*/@SB",
@@ -1312,9 +1231,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SENTENCE_BREAK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Sentence_Break"
     },
     {
       "syntaxPath": "repertoire/*/@SD",
@@ -1329,9 +1247,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SOFT_DOTTED",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Soft_Dotted"
     },
     {
       "syntaxPath": "repertoire/*/@STerm",
@@ -1346,9 +1263,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SENTENCE_TERMINAL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Sentence_Terminal"
     },
     {
       "syntaxPath": "repertoire/*/@Term",
@@ -1363,9 +1279,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_TERMINAL_PUNCTUATION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Terminal_Punctuation"
     },
     {
       "syntaxPath": "repertoire/*/@UIdeo",
@@ -1380,9 +1295,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_UNIFIED_IDEOGRAPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Unified_Ideograph"
     },
     {
       "syntaxPath": "repertoire/*/@Upper",
@@ -1397,9 +1311,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_UPPERCASE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Uppercase"
     },
     {
       "syntaxPath": "repertoire/*/@VS",
@@ -1414,9 +1327,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_VARIATION_SELECTOR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "Variation_Selector"
     },
     {
       "syntaxPath": "repertoire/*/@WB",
@@ -1429,9 +1341,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_WORD_BREAK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Word_Break"
     },
     {
       "syntaxPath": "repertoire/*/@WSpace",
@@ -1446,9 +1357,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_WHITE_SPACE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "White_Space"
     },
     {
       "syntaxPath": "repertoire/*/@XIDC",
@@ -1463,9 +1373,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_XID_CONTINUE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "XID_Continue"
     },
     {
       "syntaxPath": "repertoire/*/@XIDS",
@@ -1480,9 +1389,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_XID_START",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "XID_Start"
     },
     {
       "syntaxPath": "repertoire/*/@age",
@@ -1495,9 +1403,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_AGE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_AGE"
     },
     {
       "syntaxPath": "repertoire/*/@bc",
@@ -1510,9 +1416,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BIDI_CLASS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_BIDI_CLASS"
     },
     {
       "syntaxPath": "repertoire/*/@blk",
@@ -1525,9 +1429,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BLOCK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_BLOCK"
     },
     {
       "syntaxPath": "repertoire/*/@bmg",
@@ -1540,9 +1442,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BIDI_MIRRORING_GLYPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_MIRROR"
     },
     {
       "syntaxPath": "repertoire/*/@bpb",
@@ -1555,9 +1455,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BIDI_PAIRED_BRACKET",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Bidi_Paired_Bracket"
     },
     {
       "syntaxPath": "repertoire/*/@bpt",
@@ -1570,9 +1469,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_BIDI_PAIRED_BRACKET_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Bidi_Paired_Bracket_Type"
     },
     {
       "syntaxPath": "repertoire/*/@ccc",
@@ -1585,9 +1483,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CANONICAL_COMBINING_CLASS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_COMBINING_CLASS"
     },
     {
       "syntaxPath": "repertoire/*/@cf",
@@ -1600,9 +1496,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CASE_FOLDING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "NORMALIZES_TO",
+      "contextLiteral": "Case_Folding"
     },
     {
       "syntaxPath": "repertoire/*/@cp",
@@ -1615,9 +1510,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_CP",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "cp"
     },
     {
       "syntaxPath": "repertoire/*/@dm",
@@ -1630,9 +1524,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DECOMPOSITION_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Decomposition_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@dt",
@@ -1645,9 +1538,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_DECOMPOSITION_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Decomposition_Type"
     },
     {
       "syntaxPath": "repertoire/*/@ea",
@@ -1660,9 +1552,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_EAST_ASIAN_WIDTH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EAST_ASIAN_WIDTH"
     },
     {
       "syntaxPath": "repertoire/*/@first-cp",
@@ -1675,9 +1565,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_FIRST-CP",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "first-cp"
     },
     {
       "syntaxPath": "repertoire/*/@gc",
@@ -1690,9 +1579,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_GENERAL_CATEGORY",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_GENERAL_CATEGORY"
     },
     {
       "syntaxPath": "repertoire/*/@hst",
@@ -1705,9 +1592,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_HANGUL_SYLLABLE_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Hangul_Syllable_Type"
     },
     {
       "syntaxPath": "repertoire/*/@jg",
@@ -1720,9 +1606,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_JOINING_GROUP",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Joining_Group"
     },
     {
       "syntaxPath": "repertoire/*/@jt",
@@ -1735,9 +1620,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_JOINING_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_JOINING_TYPE"
     },
     {
       "syntaxPath": "repertoire/*/@kAccountingNumeric",
@@ -1750,9 +1633,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KACCOUNTINGNUMERIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE",
+      "contextLiteral": "kAccountingNumeric"
     },
     {
       "syntaxPath": "repertoire/*/@kAlternateTotalStrokes",
@@ -1765,9 +1647,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KALTERNATETOTALSTROKES",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kAlternateTotalStrokes"
     },
     {
       "syntaxPath": "repertoire/*/@kBigFive",
@@ -1780,9 +1661,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KBIGFIVE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kBigFive"
     },
     {
       "syntaxPath": "repertoire/*/@kCCCII",
@@ -1795,9 +1675,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCCCII",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCCCII"
     },
     {
       "syntaxPath": "repertoire/*/@kCNS1986",
@@ -1810,9 +1689,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCNS1986",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCNS1986"
     },
     {
       "syntaxPath": "repertoire/*/@kCNS1992",
@@ -1825,9 +1703,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCNS1992",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCNS1992"
     },
     {
       "syntaxPath": "repertoire/*/@kCangjie",
@@ -1840,9 +1717,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCANGJIE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCangjie"
     },
     {
       "syntaxPath": "repertoire/*/@kCantonese",
@@ -1855,9 +1731,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCANTONESE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kCantonese"
     },
     {
       "syntaxPath": "repertoire/*/@kCheungBauer",
@@ -1870,9 +1745,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCHEUNGBAUER",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCheungBauer"
     },
     {
       "syntaxPath": "repertoire/*/@kCheungBauerIndex",
@@ -1885,9 +1759,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCHEUNGBAUERINDEX",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCheungBauerIndex"
     },
     {
       "syntaxPath": "repertoire/*/@kCihaiT",
@@ -1900,9 +1773,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCIHAIT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCihaiT"
     },
     {
       "syntaxPath": "repertoire/*/@kCompatibilityVariant",
@@ -1915,9 +1787,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCOMPATIBILITYVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kCompatibilityVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kCowles",
@@ -1930,9 +1801,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KCOWLES",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kCowles"
     },
     {
       "syntaxPath": "repertoire/*/@kDaeJaweon",
@@ -1945,9 +1815,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KDAEJAWEON",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kDaeJaweon"
     },
     {
       "syntaxPath": "repertoire/*/@kDefinition",
@@ -1960,9 +1829,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KDEFINITION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_DEFINITION"
     },
     {
       "syntaxPath": "repertoire/*/@kEACC",
@@ -1975,9 +1842,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEACC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEACC"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_AltSeq",
@@ -1990,9 +1856,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_ALTSEQ",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_AltSeq"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Cat",
@@ -2005,9 +1870,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_CAT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_Cat"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Core",
@@ -2020,9 +1884,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_CORE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_Core"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Desc",
@@ -2035,9 +1898,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_DESC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_Desc"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_FVal",
@@ -2050,9 +1912,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_FVAL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_FVal"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Func",
@@ -2065,9 +1926,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_FUNC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_Func"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_HG",
@@ -2080,9 +1940,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_HG",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_HG"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_IFAO",
@@ -2095,9 +1954,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_IFAO",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_IFAO"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_JSesh",
@@ -2110,9 +1968,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_JSESH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_JSesh"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_NoMirror",
@@ -2127,9 +1984,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_NOMIRROR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "kEH_NoMirror"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_NoRotate",
@@ -2144,9 +2000,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_NOROTATE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_PROPERTY",
+      "objectLiteral": "kEH_NoRotate"
     },
     {
       "syntaxPath": "repertoire/*/@kEH_UniK",
@@ -2159,9 +2014,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KEH_UNIK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kEH_UniK"
     },
     {
       "syntaxPath": "repertoire/*/@kFanqie",
@@ -2174,9 +2028,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KFANQIE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kFanqie"
     },
     {
       "syntaxPath": "repertoire/*/@kFenn",
@@ -2189,9 +2042,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KFENN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kFenn"
     },
     {
       "syntaxPath": "repertoire/*/@kFennIndex",
@@ -2204,9 +2056,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KFENNINDEX",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kFennIndex"
     },
     {
       "syntaxPath": "repertoire/*/@kFourCornerCode",
@@ -2219,9 +2070,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KFOURCORNERCODE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kFourCornerCode"
     },
     {
       "syntaxPath": "repertoire/*/@kGB0",
@@ -2234,9 +2084,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGB0",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGB0"
     },
     {
       "syntaxPath": "repertoire/*/@kGB1",
@@ -2249,9 +2098,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGB1",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGB1"
     },
     {
       "syntaxPath": "repertoire/*/@kGB3",
@@ -2264,9 +2112,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGB3",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGB3"
     },
     {
       "syntaxPath": "repertoire/*/@kGB5",
@@ -2279,9 +2126,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGB5",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGB5"
     },
     {
       "syntaxPath": "repertoire/*/@kGB8",
@@ -2294,9 +2140,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGB8",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGB8"
     },
     {
       "syntaxPath": "repertoire/*/@kGSR",
@@ -2309,9 +2154,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGSR",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGSR"
     },
     {
       "syntaxPath": "repertoire/*/@kGradeLevel",
@@ -2324,9 +2168,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KGRADELEVEL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kGradeLevel"
     },
     {
       "syntaxPath": "repertoire/*/@kHDZRadBreak",
@@ -2339,9 +2182,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KHDZRADBREAK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kHDZRadBreak"
     },
     {
       "syntaxPath": "repertoire/*/@kHKGlyph",
@@ -2354,9 +2196,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KHKGLYPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kHKGlyph"
     },
     {
       "syntaxPath": "repertoire/*/@kHanYu",
@@ -2369,9 +2210,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KHANYU",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kHanYu"
     },
     {
       "syntaxPath": "repertoire/*/@kHangul",
@@ -2384,9 +2224,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KHANGUL",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kHangul"
     },
     {
       "syntaxPath": "repertoire/*/@kHanyuPinlu",
@@ -2399,9 +2238,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KHANYUPINLU",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kHanyuPinlu"
     },
     {
       "syntaxPath": "repertoire/*/@kHanyuPinyin",
@@ -2414,9 +2252,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KHANYUPINYIN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kHanyuPinyin"
     },
     {
       "syntaxPath": "repertoire/*/@kIBMJapan",
@@ -2429,9 +2266,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIBMJAPAN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIBMJapan"
     },
     {
       "syntaxPath": "repertoire/*/@kIICore",
@@ -2444,9 +2280,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIICORE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIICore"
     },
     {
       "syntaxPath": "repertoire/*/@kIRGDaeJaweon",
@@ -2459,9 +2294,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRGDAEJAWEON",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRGDaeJaweon"
     },
     {
       "syntaxPath": "repertoire/*/@kIRGHanyuDaZidian",
@@ -2474,9 +2308,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRGHANYUDAZIDIAN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRGHanyuDaZidian"
     },
     {
       "syntaxPath": "repertoire/*/@kIRGKangXi",
@@ -2489,9 +2322,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRGKANGXI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRGKangXi"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_GSource",
@@ -2504,9 +2336,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_GSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_GSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_HSource",
@@ -2519,9 +2350,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_HSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_HSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_JSource",
@@ -2534,9 +2364,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_JSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_JSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_KPSource",
@@ -2549,9 +2378,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_KPSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_KPSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_KSource",
@@ -2564,9 +2392,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_KSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_KSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_MSource",
@@ -2579,9 +2406,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_MSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_MSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_SSource",
@@ -2594,9 +2420,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_SSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_SSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_TSource",
@@ -2609,9 +2434,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_TSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_TSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_UKSource",
@@ -2624,9 +2448,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_UKSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_UKSource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_USource",
@@ -2639,9 +2462,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_USOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_USource"
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_VSource",
@@ -2654,9 +2476,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KIRG_VSOURCE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kIRG_VSource"
     },
     {
       "syntaxPath": "repertoire/*/@kJIS0213",
@@ -2669,9 +2490,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJIS0213",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kJIS0213"
     },
     {
       "syntaxPath": "repertoire/*/@kJapanese",
@@ -2684,9 +2504,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJAPANESE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kJapanese"
     },
     {
       "syntaxPath": "repertoire/*/@kJapaneseKun",
@@ -2699,9 +2518,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJAPANESEKUN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kJapaneseKun"
     },
     {
       "syntaxPath": "repertoire/*/@kJapaneseOn",
@@ -2714,9 +2532,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJAPANESEON",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kJapaneseOn"
     },
     {
       "syntaxPath": "repertoire/*/@kJinmeiyoKanji",
@@ -2729,9 +2546,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJINMEIYOKANJI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kJinmeiyoKanji"
     },
     {
       "syntaxPath": "repertoire/*/@kJis0",
@@ -2744,9 +2560,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJIS0",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kJis0"
     },
     {
       "syntaxPath": "repertoire/*/@kJis1",
@@ -2759,9 +2574,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJIS1",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kJis1"
     },
     {
       "syntaxPath": "repertoire/*/@kJoyoKanji",
@@ -2774,9 +2588,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KJOYOKANJI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kJoyoKanji"
     },
     {
       "syntaxPath": "repertoire/*/@kKangXi",
@@ -2789,9 +2602,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KKANGXI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kKangXi"
     },
     {
       "syntaxPath": "repertoire/*/@kKarlgren",
@@ -2804,9 +2616,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KKARLGREN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kKarlgren"
     },
     {
       "syntaxPath": "repertoire/*/@kKorean",
@@ -2819,9 +2630,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KKOREAN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kKorean"
     },
     {
       "syntaxPath": "repertoire/*/@kKoreanEducationHanja",
@@ -2834,9 +2644,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KKOREANEDUCATIONHANJA",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kKoreanEducationHanja"
     },
     {
       "syntaxPath": "repertoire/*/@kKoreanName",
@@ -2849,9 +2658,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KKOREANNAME",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kKoreanName"
     },
     {
       "syntaxPath": "repertoire/*/@kLau",
@@ -2864,9 +2672,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KLAU",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kLau"
     },
     {
       "syntaxPath": "repertoire/*/@kMainlandTelegraph",
@@ -2879,9 +2686,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KMAINLANDTELEGRAPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kMainlandTelegraph"
     },
     {
       "syntaxPath": "repertoire/*/@kMandarin",
@@ -2894,9 +2700,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KMANDARIN",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kMandarin"
     },
     {
       "syntaxPath": "repertoire/*/@kMatthews",
@@ -2909,9 +2714,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KMATTHEWS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kMatthews"
     },
     {
       "syntaxPath": "repertoire/*/@kMeyerWempe",
@@ -2924,9 +2728,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KMEYERWEMPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kMeyerWempe"
     },
     {
       "syntaxPath": "repertoire/*/@kMojiJoho",
@@ -2939,9 +2742,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KMOJIJOHO",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kMojiJoho"
     },
     {
       "syntaxPath": "repertoire/*/@kMorohashi",
@@ -2954,9 +2756,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KMOROHASHI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kMorohashi"
     },
     {
       "syntaxPath": "repertoire/*/@kNSHU_DubenSrc",
@@ -2969,9 +2770,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KNSHU_DUBENSRC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kNSHU_DubenSrc"
     },
     {
       "syntaxPath": "repertoire/*/@kNSHU_Reading",
@@ -2984,9 +2784,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KNSHU_READING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kNSHU_Reading"
     },
     {
       "syntaxPath": "repertoire/*/@kNelson",
@@ -2999,9 +2798,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KNELSON",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kNelson"
     },
     {
       "syntaxPath": "repertoire/*/@kOtherNumeric",
@@ -3014,9 +2812,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KOTHERNUMERIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE",
+      "contextLiteral": "kOtherNumeric"
     },
     {
       "syntaxPath": "repertoire/*/@kPhonetic",
@@ -3029,9 +2826,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KPHONETIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kPhonetic"
     },
     {
       "syntaxPath": "repertoire/*/@kPrimaryNumeric",
@@ -3044,9 +2840,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KPRIMARYNUMERIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE",
+      "contextLiteral": "kPrimaryNumeric"
     },
     {
       "syntaxPath": "repertoire/*/@kPseudoGB1",
@@ -3059,9 +2854,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KPSEUDOGB1",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kPseudoGB1"
     },
     {
       "syntaxPath": "repertoire/*/@kRSAdobe_Japan1_6",
@@ -3074,9 +2868,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KRSADOBE_JAPAN1_6",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kRSAdobe_Japan1_6"
     },
     {
       "syntaxPath": "repertoire/*/@kRSUnicode",
@@ -3089,9 +2882,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KRSUNICODE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kRSUnicode"
     },
     {
       "syntaxPath": "repertoire/*/@kSBGY",
@@ -3104,9 +2896,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KSBGY",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kSBGY"
     },
     {
       "syntaxPath": "repertoire/*/@kSMSZD2003Index",
@@ -3119,9 +2910,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KSMSZD2003INDEX",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kSMSZD2003Index"
     },
     {
       "syntaxPath": "repertoire/*/@kSMSZD2003Readings",
@@ -3134,9 +2924,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KSMSZD2003READINGS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kSMSZD2003Readings"
     },
     {
       "syntaxPath": "repertoire/*/@kSemanticVariant",
@@ -3148,11 +2937,9 @@
       "objectNamespace": "unicode/property_value/kSemanticVariant",
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UPlusCodepointWithQualifier",
-      "preserveLexicalValue": true,
-      "relationName": "UCD_KSEMANTICVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "lexicalRelationName": "UCD_KSEMANTICVARIANT_SOURCE_TEXT"
+      "preserveLexicalValue": false,
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kSemanticVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kSimplifiedVariant",
@@ -3164,11 +2951,9 @@
       "objectNamespace": "unicode/property_value/kSimplifiedVariant",
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UPlusCodepointWithQualifier",
-      "preserveLexicalValue": true,
-      "relationName": "UCD_KSIMPLIFIEDVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "lexicalRelationName": "UCD_KSIMPLIFIEDVARIANT_SOURCE_TEXT"
+      "preserveLexicalValue": false,
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kSimplifiedVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kSpecializedSemanticVariant",
@@ -3180,11 +2965,9 @@
       "objectNamespace": "unicode/property_value/kSpecializedSemanticVariant",
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UPlusCodepointWithQualifier",
-      "preserveLexicalValue": true,
-      "relationName": "UCD_KSPECIALIZEDSEMANTICVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "lexicalRelationName": "UCD_KSPECIALIZEDSEMANTICVARIANT_SOURCE_TEXT"
+      "preserveLexicalValue": false,
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kSpecializedSemanticVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kSpoofingVariant",
@@ -3196,11 +2979,9 @@
       "objectNamespace": "unicode/property_value/kSpoofingVariant",
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UPlusCodepointWithQualifier",
-      "preserveLexicalValue": true,
-      "relationName": "UCD_KSPOOFINGVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "lexicalRelationName": "UCD_KSPOOFINGVARIANT_SOURCE_TEXT"
+      "preserveLexicalValue": false,
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kSpoofingVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kStrange",
@@ -3213,9 +2994,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KSTRANGE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kStrange"
     },
     {
       "syntaxPath": "repertoire/*/@kTGH",
@@ -3228,9 +3008,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTGH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kTGH"
     },
     {
       "syntaxPath": "repertoire/*/@kTGHZ2013",
@@ -3243,9 +3022,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTGHZ2013",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kTGHZ2013"
     },
     {
       "syntaxPath": "repertoire/*/@kTGT_MergedSrc",
@@ -3258,9 +3036,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTGT_MERGEDSRC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kTGT_MergedSrc"
     },
     {
       "syntaxPath": "repertoire/*/@kTGT_RSUnicode",
@@ -3273,9 +3050,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTGT_RSUNICODE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kTGT_RSUnicode"
     },
     {
       "syntaxPath": "repertoire/*/@kTaiwanTelegraph",
@@ -3288,9 +3064,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTAIWANTELEGRAPH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kTaiwanTelegraph"
     },
     {
       "syntaxPath": "repertoire/*/@kTang",
@@ -3303,9 +3078,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTANG",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kTang"
     },
     {
       "syntaxPath": "repertoire/*/@kTayNumeric",
@@ -3318,9 +3092,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTAYNUMERIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE",
+      "contextLiteral": "kTayNumeric"
     },
     {
       "syntaxPath": "repertoire/*/@kTotalStrokes",
@@ -3333,9 +3106,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KTOTALSTROKES",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kTotalStrokes"
     },
     {
       "syntaxPath": "repertoire/*/@kTraditionalVariant",
@@ -3347,11 +3119,9 @@
       "objectNamespace": "unicode/property_value/kTraditionalVariant",
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UPlusCodepointWithQualifier",
-      "preserveLexicalValue": true,
-      "relationName": "UCD_KTRADITIONALVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "lexicalRelationName": "UCD_KTRADITIONALVARIANT_SOURCE_TEXT"
+      "preserveLexicalValue": false,
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kTraditionalVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kUnihanCore2020",
@@ -3364,9 +3134,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KUNIHANCORE2020",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kUnihanCore2020"
     },
     {
       "syntaxPath": "repertoire/*/@kVietnamese",
@@ -3379,9 +3148,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KVIETNAMESE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kVietnamese"
     },
     {
       "syntaxPath": "repertoire/*/@kVietnameseNumeric",
@@ -3394,9 +3162,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KVIETNAMESENUMERIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE",
+      "contextLiteral": "kVietnameseNumeric"
     },
     {
       "syntaxPath": "repertoire/*/@kXHC1983",
@@ -3409,9 +3176,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KXHC1983",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kXHC1983"
     },
     {
       "syntaxPath": "repertoire/*/@kXerox",
@@ -3424,9 +3190,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KXEROX",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "kXerox"
     },
     {
       "syntaxPath": "repertoire/*/@kZVariant",
@@ -3438,11 +3203,9 @@
       "objectNamespace": "unicode/property_value/kZVariant",
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UPlusCodepointWithQualifier",
-      "preserveLexicalValue": true,
-      "relationName": "UCD_KZVARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "lexicalRelationName": "UCD_KZVARIANT_SOURCE_TEXT"
+      "preserveLexicalValue": false,
+      "relationName": "HAS_VARIANT_OF",
+      "contextLiteral": "kZVariant"
     },
     {
       "syntaxPath": "repertoire/*/@kZhuang",
@@ -3455,9 +3218,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KZHUANG",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "TRANSCRIBES_AS",
+      "contextLiteral": "kZhuang"
     },
     {
       "syntaxPath": "repertoire/*/@kZhuangNumeric",
@@ -3470,9 +3232,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_KZHUANGNUMERIC",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE",
+      "contextLiteral": "kZhuangNumeric"
     },
     {
       "syntaxPath": "repertoire/*/@last-cp",
@@ -3485,9 +3246,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_LAST-CP",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "last-cp"
     },
     {
       "syntaxPath": "repertoire/*/@lb",
@@ -3500,9 +3260,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_LINE_BREAK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_LINE_BREAK"
     },
     {
       "syntaxPath": "repertoire/*/@lc",
@@ -3515,9 +3273,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_LOWERCASE_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_LOWERCASE_MAPPING",
+      "contextLiteral": "Lowercase_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@na",
@@ -3530,9 +3287,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NAME",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME"
     },
     {
       "syntaxPath": "repertoire/*/@na1",
@@ -3545,9 +3300,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_UNICODE_1_NAME",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME_ALIAS",
+      "contextLiteral": "Unicode_1_Name"
     },
     {
       "syntaxPath": "repertoire/*/@nt",
@@ -3560,9 +3314,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NUMERIC_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_TYPE"
     },
     {
       "syntaxPath": "repertoire/*/@nv",
@@ -3575,9 +3327,7 @@
       "objectEntityType": "Scalar",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NUMERIC_VALUE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NUMERIC_VALUE"
     },
     {
       "syntaxPath": "repertoire/*/@sc",
@@ -3590,9 +3340,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SCRIPT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_SCRIPT"
     },
     {
       "syntaxPath": "repertoire/*/@scf",
@@ -3605,9 +3353,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SIMPLE_CASE_FOLDING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "NORMALIZES_TO",
+      "contextLiteral": "Simple_Case_Folding"
     },
     {
       "syntaxPath": "repertoire/*/@scx",
@@ -3620,10 +3367,9 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SCRIPT_EXTENSIONS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
-      "valueAliasProperty": "Script"
+      "relationName": "HAS_SCRIPT",
+      "valueAliasProperty": "Script",
+      "contextLiteral": "Script_Extensions"
     },
     {
       "syntaxPath": "repertoire/*/@slc",
@@ -3636,9 +3382,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SIMPLE_LOWERCASE_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_LOWERCASE_MAPPING",
+      "contextLiteral": "Simple_Lowercase_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@stc",
@@ -3651,9 +3396,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SIMPLE_TITLECASE_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_TITLECASE_MAPPING",
+      "contextLiteral": "Simple_Titlecase_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@suc",
@@ -3666,9 +3410,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "UCD_SIMPLE_UPPERCASE_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_UPPERCASE_MAPPING",
+      "contextLiteral": "Simple_Uppercase_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@tc",
@@ -3681,9 +3424,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_TITLECASE_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_TITLECASE_MAPPING",
+      "contextLiteral": "Titlecase_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@uc",
@@ -3696,9 +3438,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_UPPERCASE_MAPPING",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_UPPERCASE_MAPPING",
+      "contextLiteral": "Uppercase_Mapping"
     },
     {
       "syntaxPath": "repertoire/*/@vo",
@@ -3711,9 +3452,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_VERTICAL_ORIENTATION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Vertical_Orientation"
     },
     {
       "syntaxPath": "repertoire/*/name-alias/@alias",
@@ -3726,9 +3466,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NAME_ALIAS",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_NAME_ALIAS"
     },
     {
       "syntaxPath": "repertoire/*/name-alias/@type",
@@ -3741,9 +3479,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_NAME_ALIAS_TYPE",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Name_Alias_Type"
     },
     {
       "syntaxPath": "standardized-variants/standardized-variant/@cps",
@@ -3756,9 +3493,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "UCD_STANDARDIZED_VARIANT",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Standardized_Variant"
     },
     {
       "syntaxPath": "standardized-variants/standardized-variant/@desc",
@@ -3771,9 +3507,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_STANDARDIZED_VARIANT_DESCRIPTION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Standardized_Variant_Description"
     },
     {
       "syntaxPath": "standardized-variants/standardized-variant/@when",
@@ -3786,9 +3521,8 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "UCD_STANDARDIZED_VARIANT_CONDITION",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Standardized_Variant_Condition"
     }
   ],
   "structures": [
@@ -6210,7 +5944,7 @@
       "rangeRelationProperty": "Block",
       "rangeStartField": "first-cp",
       "rangeEndField": "last-cp",
-      "rangeRelationName": "UCD_BLOCK"
+      "rangeRelationName": "HAS_BLOCK"
     },
     {
       "recordName": "named-sequence",

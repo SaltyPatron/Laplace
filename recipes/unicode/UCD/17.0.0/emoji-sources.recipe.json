@@ -17,27 +17,24 @@
       "propertyName": "docomo",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SOURCE_DOCOMO",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EXTERNAL_ID",
+      "contextLiteral": "docomo"
     },
     {
       "syntaxPath": "record/@kddi",
       "propertyName": "kddi",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SOURCE_KDDI",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EXTERNAL_ID",
+      "contextLiteral": "KDDI"
     },
     {
       "syntaxPath": "record/@softbank",
       "propertyName": "softbank",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SOURCE_SOFTBANK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "relationName": "HAS_EXTERNAL_ID",
+      "contextLiteral": "SoftBank"
     }
   ],
   "providerRoutes": [

@@ -81,7 +81,13 @@ public sealed record SourceRecipeField(
     string? PairValueSeparator = null,
     bool OmitWhenEqualsSubject = false,
     bool GroupOnce = false,
-    string? IdentityTable = null);
+    string? IdentityTable = null,
+    // The claim's object when the value itself is not the object: a binary property's
+    // value (Y/N) confirms or refutes "subject HAS_PROPERTY <ObjectLiteral>".
+    string? ObjectLiteral = null,
+    // A fixed context qualifying every claim of the field (the source property the
+    // value belongs to, when the governed relation is shared by several properties).
+    string? ContextLiteral = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
