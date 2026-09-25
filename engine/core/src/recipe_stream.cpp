@@ -9,6 +9,7 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/core/pos_law.h"
+#include "laplace/core/language_law.h"
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
@@ -67,7 +68,7 @@ struct field_rule {
     double rank;
     std::unordered_map<std::string, std::string> aliases;
     std::string identity_table, object_literal, context_literal, observation_of, score_of;
-    int pos_tagset = -1;   // "pos/<tagset>" vocabulary: values resolve to canonical UPOS
+    struct vocabulary_rule { int kind = 0; int tagset = -1; } vocabulary;  // 1 pos/<tagset>, 2 lang/iso639
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -216,6 +217,24 @@ static void collect(const node& n, const std::string& path, std::vector<std::str
     if (slash == std::string::npos) throw std::runtime_error("invalid identity table path " + path);
     const std::string child = path.substr(0, slash), rest = path.substr(slash + 1);
     for (const auto& c : n.children) if (c.name == child) collect(c, rest, out);
+}
+// A governed vocabulary maps a source's value to the Laplace-standard label; a value
+// the vocabulary does not map is the source's own and stays as written.
+static field_rule::vocabulary_rule parse_vocabulary(const std::string& name, const std::string& where) {
+    field_rule::vocabulary_rule v;
+    if (name.rfind("pos/", 0) == 0 && (v.tagset = laplace_pos_tagset_from_name(name.c_str() + 4)) >= 0) v.kind = 1;
+    else if (name == "lang/iso639") v.kind = 2;
+    else throw std::runtime_error("undeclared vocabulary " + name + " at " + where);
+    return v;
+}
+static std::string governed_value(const field_rule::vocabulary_rule& v, const std::string& value) {
+    const char* canonical = nullptr;
+    if (v.kind == 1)
+        return laplace_pos_resolve_canonical(value.c_str(), static_cast<laplace_pos_tagset_t>(v.tagset),
+                                             &canonical, nullptr) == 0 && canonical ? std::string(canonical) : value;
+    if (v.kind == 2)
+        return laplace_language_canonical(value.c_str(), &canonical) == 0 && canonical ? std::string(canonical) : value;
+    return value;
 }
 static size_t rows(const intent_stage_t* s) {
     return intent_stage_entity_count(s) + intent_stage_physicality_count(s) + intent_stage_attestation_count(s);
@@ -446,13 +465,14 @@ struct laplace_recipe_stream {
         return result.id;
     }
 
-    // A governed vocabulary maps the source's value to its canonical label; an
-    // unmapped value is the source's own and stays as written.
     static std::string governed(const field_rule& rule, const std::string& value) {
-        if (rule.pos_tagset < 0) return value;
-        const char* canonical = nullptr;
-        return laplace_pos_resolve_canonical(value.c_str(), static_cast<laplace_pos_tagset_t>(rule.pos_tagset),
-                                             &canonical, nullptr) == 0 && canonical ? std::string(canonical) : value;
+        return governed_value(rule.vocabulary, value);
+    }
+    // Source attributes normalized once at parse (a lexicon's "language").
+    std::unordered_map<std::string, field_rule::vocabulary_rule> attribute_vocabularies;
+    std::string attribute_value(const std::string& key, std::string value) const {
+        const auto v = attribute_vocabularies.find(key);
+        return v == attribute_vocabularies.end() ? value : governed_value(v->second, value);
     }
     // "a|b": the first declared context the element carries, else its record carries
     // (a WN-LMF sense inherits its lexicon's language). None leaves the claim unqualified.
@@ -892,11 +912,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 f.identity_table = r.text(); f.object_literal = r.text(); f.context_literal = r.text();
                 f.observation_of = r.text(); f.score_of = r.text();
                 const std::string vocabulary = r.text();
-                if (!vocabulary.empty()) {
-                    if (vocabulary.rfind("pos/", 0) != 0
-                        || (f.pos_tagset = laplace_pos_tagset_from_name(vocabulary.c_str() + 4)) < 0)
-                        throw std::runtime_error("undeclared vocabulary " + vocabulary + " at " + f.path);
-                }
+                if (!vocabulary.empty()) f.vocabulary = parse_vocabulary(vocabulary, f.path);
             }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
@@ -964,6 +980,11 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     throw std::runtime_error("invalid identity table instruction");
                 s->tables[table.name];
                 s->table_rules.push_back(std::move(table));
+            }
+            const uint32_t attribute_vocabularies = r.number();
+            for (uint32_t k = 0; k < attribute_vocabularies; ++k) {
+                auto attribute = r.text(); auto name = r.text();
+                s->attribute_vocabularies[attribute] = parse_vocabulary(name, "attribute " + attribute);
             }
             if (!s->table_rules.empty() && s->delimited)
                 throw std::runtime_error("identity tables require the XML provider");
@@ -1035,6 +1056,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                 [&](const std::string& name, const std::string& ns,
                     std::map<std::string, std::string>&& attributes,
                     recipe_delimited_structure&& structure) {
+                    for (auto& a : attributes) a.second = s->attribute_value(a.first, std::move(a.second));
                     node n{name, ns, std::move(attributes), {}};
                     n.cells = std::move(structure.cells);
                     n.group = std::move(structure.group);
@@ -1056,10 +1078,10 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                     s->child_inherited = false;
                 } else if (e.kind == 4 && s->parent_scope_active) {
                     const std::string key = attribute_key(e);
-                    if (!s->parent_scope.attributes.emplace(
-                            key, std::string(e.value, e.value_len)).second)
+                    const std::string value = s->attribute_value(key, std::string(e.value, e.value_len));
+                    if (!s->parent_scope.attributes.emplace(key, value).second)
                         throw std::runtime_error("duplicate parent record attribute");
-                    s->parent_scope.own.emplace_back(key, std::string(e.value, e.value_len));
+                    s->parent_scope.own.emplace_back(key, value);
                 } else if (e.kind == 2) {
                     if (s->parent_scope_active) {
                         auto route = s->routes.find(s->parent_scope.name);
@@ -1110,9 +1132,10 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
             else if (e.kind == 4) {
                 if (s->stack.empty()) throw std::runtime_error("attribute outside record");
                 const std::string key = attribute_key(e);
-                if (!s->stack.back().attributes.emplace(key,std::string(e.value,e.value_len)).second)
+                const std::string value = s->attribute_value(key, std::string(e.value, e.value_len));
+                if (!s->stack.back().attributes.emplace(key, value).second)
                     throw std::runtime_error("duplicate record attribute");
-                s->stack.back().own.emplace_back(key, std::string(e.value, e.value_len));
+                s->stack.back().own.emplace_back(key, value);
             } else if (e.kind == 2) {
                 if (s->stack.empty()) throw std::runtime_error("unbalanced record");
                 node done = std::move(s->stack.back()); s->stack.pop_back();

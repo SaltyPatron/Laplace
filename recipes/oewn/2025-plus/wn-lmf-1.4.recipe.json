@@ -603,5 +603,8 @@
       },
       "structurePaths": []
     }
-  ]
+  ],
+  "attributeVocabularies": {
+    "language": "lang/iso639"
+  }
 }

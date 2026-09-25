@@ -1243,6 +1243,60 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
           f" {N} relations, {N_BANDS} bands, {bucket_size}-slot table)")
 
 
+
+def emit_language_law(path: Path) -> None:
+    """The governed language vocabulary (engine/manifest/languages.tsv): a tag as a
+    source writes it resolves to its canonical ISO 639-3 Id; a BCP-47 tag resolves by
+    its primary subtag when the full tag is not listed."""
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#") or line.startswith("tag\t"):
+            continue
+        tag, canon, _authority = line.split("\t")
+        rows.append((tag, canon))
+    rows.sort()
+    _write_text_if_changed(OUT_CORE / "include/laplace/core/language_law.h",
+        "#pragma once\n\n#include <stddef.h>\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+        "/* 0: tag resolves to its canonical ISO 639-3 Id (*out_canonical); 1: no governed\n"
+        " * authority maps it (the source's own value); -1: invalid. Case-insensitive; '_'\n"
+        " * reads as '-'; a BCP-47 tag falls back to its primary subtag. */\n"
+        "int laplace_language_canonical(const char* tag, const char** out_canonical);\n"
+        "size_t laplace_language_count(void);\n\n#ifdef __cplusplus\n}\n#endif\n")
+    lines = ['#include "laplace/core/language_law.h"', "", "#include <stdlib.h>", "#include <string.h>", "",
+             "typedef struct { const char* tag; const char* canon; } language_row_t;", "",
+             "static const language_row_t k_languages[] = {"]
+    for tag, canon in rows:
+        lines.append(f'    {{ "{tag}", "{canon}" }},')
+    lines += ["};", "",
+              "static int row_cmp(const void* key, const void* row) {",
+              "    return strcmp((const char*)key, ((const language_row_t*)row)->tag);",
+              "}", "",
+              "int laplace_language_canonical(const char* tag, const char** out_canonical) {",
+              "    char norm[64];",
+              "    size_t n = 0;",
+              "    if (!tag || !out_canonical) return -1;",
+              "    for (; tag[n] && n < sizeof(norm) - 1; ++n) {",
+              "        char c = tag[n];",
+              "        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);",
+              "        if (c == '_') c = '-';",
+              "        norm[n] = c;",
+              "    }",
+              "    if (tag[n]) return 1;",
+              "    norm[n] = 0;",
+              "    for (int pass = 0; pass < 2; ++pass) {",
+              "        const language_row_t* hit = (const language_row_t*)bsearch(",
+              "            norm, k_languages, sizeof(k_languages)/sizeof(k_languages[0]), sizeof(k_languages[0]), row_cmp);",
+              "        if (hit) { *out_canonical = hit->canon; return 0; }",
+              "        char* dash = strchr(norm, '-');",
+              "        if (!dash) break;",
+              "        *dash = 0;",
+              "    }",
+              "    *out_canonical = NULL;",
+              "    return 1;",
+              "}", "",
+              "size_t laplace_language_count(void) { return sizeof(k_languages)/sizeof(k_languages[0]); }"]
+    _write_text_if_changed(OUT_CORE / "src/generated/language_law.c", "\n".join(lines) + "\n")
+
 def main() -> int:
     global CHECK_MODE
     CHECK_MODE = "--check" in sys.argv[1:]
@@ -1260,6 +1314,7 @@ def main() -> int:
     emit_relation_law(rel)
     emit_pos_law(pos)
     emit_entity_type_law(MANIFEST / "entity_types.toml")
+    emit_language_law(MANIFEST / "languages.tsv")
     emit_highway_perfcache(rel, bin_out_dir)
     if CHECK_MODE:
         if DRIFT:

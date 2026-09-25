@@ -266,7 +266,8 @@ public sealed class SemanticSourceRecipe
         IEnumerable<SourceRecipeProviderRoute>? providerRoutes = null,
         IEnumerable<SourceRecipeArtifact>? artifacts = null,
         SourceDelimitedSyntax? delimitedSyntax = null,
-        IEnumerable<SourceIdentityTable>? identityTables = null)
+        IEnumerable<SourceIdentityTable>? identityTables = null,
+        IReadOnlyDictionary<string, string>? attributeVocabularies = null)
     {
         Authority = Required(authority, nameof(authority));
         Release = Required(release, nameof(release));
@@ -360,6 +361,8 @@ public sealed class SemanticSourceRecipe
         }
 
         IdentityTables = (identityTables ?? []).ToArray();
+        AttributeVocabularies = new SortedDictionary<string, string>(
+            (IDictionary<string, string>?)attributeVocabularies ?? new Dictionary<string, string>(), StringComparer.Ordinal);
         var tableNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (SourceIdentityTable table in IdentityTables)
         {
@@ -394,7 +397,7 @@ public sealed class SemanticSourceRecipe
     /// with per-artifact record constants).</summary>
     public SemanticSourceRecipe WithDelimitedSyntax(SourceDelimitedSyntax syntax) =>
         new(Authority, Release, Provider, Syntax, Fields, Structures, ValueAliases,
-            ProviderRoutes, Artifacts, syntax, IdentityTables);
+            ProviderRoutes, Artifacts, syntax, IdentityTables, AttributeVocabularies);
 
     public string Authority { get; }
     public string Release { get; }
@@ -407,6 +410,10 @@ public sealed class SemanticSourceRecipe
     public IReadOnlyList<SourceRecipeProviderRoute> ProviderRoutes { get; }
     public IReadOnlyList<SourceRecipeArtifact> Artifacts { get; }
     public IReadOnlyList<SourceIdentityTable> IdentityTables { get; }
+    /// <summary>Source attributes normalized once at parse through a governed vocabulary
+    /// (a WN-LMF lexicon's "language" -> ISO 639-3), so every value and context read
+    /// from them carries the Laplace-standard key.</summary>
+    public IReadOnlyDictionary<string, string> AttributeVocabularies { get; }
     /// <summary>The recipe document in its canonical JSON form.</summary>
     public string CanonicalForm => _canonicalForm.Value;
     public Hash128 RecipeId => _recipeId.Value;

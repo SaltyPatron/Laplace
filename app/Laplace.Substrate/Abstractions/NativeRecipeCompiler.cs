@@ -52,7 +52,7 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static field => field.SubjectMode != SourceSubjectMode.Record
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
-        bool identityTables = recipe.IdentityTables.Count != 0
+        bool identityTables = recipe.IdentityTables.Count != 0 || recipe.AttributeVocabularies.Count != 0
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null);
         uint version = identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
@@ -272,6 +272,12 @@ public static class NativeRecipeCompiler
                 WriteText(writer, table.ValuePath);
                 writer.Write(checked((uint)(table.AbsentValues?.Count ?? 0)));
                 foreach (string absent in table.AbsentValues ?? []) WriteText(writer, absent);
+            }
+            writer.Write(checked((uint)recipe.AttributeVocabularies.Count));
+            foreach (var pair in recipe.AttributeVocabularies)
+            {
+                WriteText(writer, pair.Key);
+                WriteText(writer, pair.Value);
             }
         }
 
