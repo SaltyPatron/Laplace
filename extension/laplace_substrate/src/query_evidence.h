@@ -65,8 +65,8 @@ typedef struct LaplaceQueryChannel
     /* Deterministic provider/calculation witnesses remain a distinct response
      * plane inside the exact same relation cell. They are a typed subset of the
      * raw witness topology above: storage stays source-attributed testimony,
-     * while COUPLE retains which response state came from sources whose governed
-     * trust class is DerivedCalculation. No scalar authority is implied here. */
+     * while COUPLE retains which response state came from claims qualified
+     * derivation/calculation. No scalar authority is implied here. */
     int64 calculation_confirm_occurrences;
     int64 calculation_draw_occurrences;
     int64 calculation_refute_occurrences;
@@ -81,7 +81,6 @@ typedef struct LaplaceQueryEvidenceStats
 {
     LaplaceConsensusScanStats forward;
     LaplaceConsensusScanStats reverse;
-    LaplaceConsensusScanStats calculation_sources;
     uint64 observation_bindings;
     uint64 calculation_bindings;
     uint64 channels;

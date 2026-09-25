@@ -92,6 +92,8 @@ typedef struct QueryEvidenceWitness
     bool context_null;
     int16 outcome;
     int64 occurrences;
+    /* The claim is a deterministic calculation (derivation/calculation qualifier). */
+    bool calculation;
 } QueryEvidenceWitness;
 
 typedef struct QueryEvidenceState
@@ -102,7 +104,6 @@ typedef struct QueryEvidenceState
     HTAB *contexts;
     HTAB *provenance;
     HTAB *witnesses;
-    HTAB *calculation_sources;
     HTAB *calculation_channel_sources;
     HTAB *calculation_contexts;
     HTAB *calculation_provenance;
@@ -627,94 +628,6 @@ bind_channel_provenance_roots(QueryEvidenceState *state, int channel_count)
     pfree(items);
 }
 
-typedef struct QueryCalculationClassify
-{
-    HTAB *sources;
-    hash128_t relation;
-    hash128_t trust_class;
-} QueryCalculationClassify;
-
-static void
-query_calculation_source(const LaplaceConsensusRow *row, void *opaque)
-{
-    QueryCalculationClassify *state = (QueryCalculationClassify *) opaque;
-    bool found;
-
-    if (row->object_is_null ||
-        !hash128_eq(&row->type, &state->relation) ||
-        !hash128_eq(&row->object, &state->trust_class) ||
-        !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
-        return;
-    (void) hash_search(state->sources, &row->subject, HASH_ENTER, &found);
-}
-
-static void
-bind_calculation_source_classes(QueryEvidenceState *state, MemoryContext work)
-{
-    HASHCTL ctl = {0};
-    HTAB *unique;
-    HASH_SEQ_STATUS sequence;
-    QueryEvidenceKey *source;
-    hash128_t *ids;
-    long count;
-    long used = 0;
-    ArrayType *subjects, *objects, *types;
-    QueryCalculationClassify classify;
-
-    ctl.keysize = sizeof(hash128_t);
-    ctl.entrysize = sizeof(hash128_t);
-    ctl.hcxt = work;
-    unique = hash_create("query evidence unique witness sources",
-                         Max((int) hash_get_num_entries(state->sources), 16),
-                         &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-
-    hash_seq_init(&sequence, state->sources);
-    while ((source = (QueryEvidenceKey *) hash_seq_search(&sequence)) != NULL)
-    {
-        bool found;
-        (void) hash_search(unique, &source->id, HASH_ENTER, &found);
-    }
-    count = hash_get_num_entries(unique);
-    if (count <= 0)
-    {
-        hash_destroy(unique);
-        return;
-    }
-    if ((uint64) count > MaxAllocSize / sizeof(hash128_t))
-        ereport(ERROR,
-                (errmsg("query evidence: witness source set exceeds allocation capacity")));
-
-    ids = (hash128_t *) palloc(sizeof(*ids) * (Size) count);
-    {
-        hash128_t *id;
-        hash_seq_init(&sequence, unique);
-        while ((id = (hash128_t *) hash_seq_search(&sequence)) != NULL)
-            ids[used++] = *id;
-    }
-    if (used != count)
-        ereport(ERROR, (errmsg("query evidence: witness source set changed during classification")));
-    hash_destroy(unique);
-
-    /* HAS_TRUST_CLASS is a canonical spine relation but intentionally is not
-     * governed by the generated relation-law table. Its durable identity is the
-     * same canonical hash used by bootstrap and managed ingestion. */
-    (void)laplace_relation_type_id("HAS_TRUST_CLASS", &classify.relation);
-    hash128_blake3_str("substrate/trust_class/DerivedCalculation/v1",
-                       &classify.trust_class);
-    classify.sources = state->calculation_sources;
-
-    subjects = hash128_array_from_ids(ids, (int) count);
-    objects = hash128_array_from_ids(&classify.trust_class, 1);
-    types = hash128_array_from_ids(&classify.relation, 1);
-    laplace_consensus_scan(subjects, objects, types,
-                           query_calculation_source, &classify,
-                           state->stats ? &state->stats->calculation_sources : NULL);
-    pfree(subjects);
-    pfree(objects);
-    pfree(types);
-    pfree(ids);
-}
-
 static void
 bind_channel_calculation_roots(QueryEvidenceState *state, int channel_count)
 {
@@ -774,7 +687,6 @@ bind_channel_calculations(QueryEvidenceState *state, int channel_count)
     HASH_SEQ_STATUS sequence;
     QueryEvidenceWitness *witness;
 
-    bind_calculation_source_classes(state, CurrentMemoryContext);
     hash_seq_init(&sequence, state->witnesses);
     while ((witness = (QueryEvidenceWitness *) hash_seq_search(&sequence)) != NULL)
     {
@@ -782,8 +694,7 @@ bind_channel_calculations(QueryEvidenceState *state, int channel_count)
         QueryEvidenceKey key;
         bool found;
 
-        if (witness->source_null ||
-            !hash_search(state->calculation_sources, &witness->source, HASH_FIND, NULL))
+        if (!witness->calculation)
             continue;
         if (witness->key.channel_index < 0 ||
             witness->key.channel_index >= channel_count)
@@ -929,6 +840,7 @@ query_observation(int ordinal, int16 role,
             witness->context_null = row->context_null;
             witness->outcome = row->outcome;
             witness->occurrences = row->occurrences;
+            witness->calculation = laplace_observation_qualified(row, "derivation", "calculation");
         }
         else if (witness->source_null != row->source_null ||
                  witness->context_null != row->context_null ||
@@ -1033,13 +945,6 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
     evidence.calculation_provenance = hash_create(
         "query calculation provenance routes", Max(channel_count, 16),
         &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-
-    MemSet(&ctl, 0, sizeof(ctl));
-    ctl.keysize = sizeof(hash128_t);
-    ctl.entrysize = sizeof(hash128_t);
-    ctl.hcxt = work;
-    evidence.calculation_sources = hash_create("query calculation sources",
-        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     evidence.channels = channels;
     evidence.stats = stats;

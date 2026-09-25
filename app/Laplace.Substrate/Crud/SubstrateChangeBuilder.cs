@@ -487,6 +487,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
+        if (CalculationSources.Contains(row.SourceId))
+            row = row with { QualifierMask = row.QualifierMask | CalculationSources.Qualifier };
         if (_attestationIndex.TryGetValue(row.Id, out int at))
         {
             var prior = _attestations[at];
@@ -508,16 +510,14 @@ public sealed class SubstrateChangeBuilder : IDisposable
                 LastObservedAtUnixUs = Math.Max(prior.LastObservedAtUnixUs, row.LastObservedAtUnixUs),
                 ObservationCount = games,
                 SumScoreFp1e9 = sum,
+                QualifierMask = prior.QualifierMask | row.QualifierMask,
             };
         }
         else
         {
             _attestationIndex[row.Id] = _attestations.Count;
 
-            var withMask = row.HighwayMask.IsZero && HighwayPerfcache.IsLoaded
-                ? row with { HighwayMask = HighwayPerfcache.MaskForRelationType(row.TypeId) }
-                : row;
-            _attestations.Add(withMask);
+            _attestations.Add(row);
         }
         return this;
     }

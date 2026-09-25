@@ -263,7 +263,7 @@ SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT context_id FROM laplace.attestations "
     "WHERE subject_id=ANY($1) AND context_id IS NOT NULL")
 SQL_QUERY("evidence.observation_bindings", "bytea[],bytea[],bytea[],int4",
-    "SELECT id,subject_id,type_id,object_id,source_id,context_id,outcome,observation_count "
+    "SELECT id,subject_id,type_id,object_id,source_id,context_id,outcome,observation_count,highway_mask "
     "FROM laplace.attestations WHERE "
     "((($4 & 1)<>0 AND subject_id=ANY($1)) OR (($4 & 2)<>0 AND object_id=ANY($1))) "
     "AND ($2 IS NULL OR source_id=ANY($2)) AND ($3 IS NULL OR type_id=ANY($3))")
@@ -273,7 +273,7 @@ SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",
     "AND ($3 IS NULL OR source_id=ANY($3)) AND ($4 IS NULL OR context_id=$4)")
 SQL_QUERY("evidence.observation_cells", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,"
-    "a.outcome,a.observation_count "
+    "a.outcome,a.observation_count,a.highway_mask "
     "FROM unnest($1,$2,$3) AS c(subject_id,type_id,object_id) "
     "JOIN laplace.attestations a ON a.subject_id=c.subject_id "
     "AND a.type_id=c.type_id AND a.object_id=c.object_id "

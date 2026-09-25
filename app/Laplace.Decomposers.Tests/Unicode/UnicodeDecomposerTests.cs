@@ -130,10 +130,8 @@ public sealed class UnicodeDecomposerTests
             e.Id == UnicodeDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == UnicodeDecomposer.CodepointType && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Contains(boot.Attestations, a =>
-            a.SubjectId == UnicodeDecomposer.Source
-            && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
-            && a.ObjectId == UnicodeDecomposer.TrustClass);
+        Assert.DoesNotContain(boot.Attestations, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_LICENSE")
             || a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERSION"));

@@ -2,6 +2,7 @@
 
 These notes state how particular parts of the machine operate. They do not order the work and they do not replace `docs/INVENTION.md`.
 
+- [`ASSIMILATION_ROADMAP.md`](ASSIMILATION_ROADMAP.md) — the inventor's 2026-09-25 corrections, the finish line, and every open workstream. Each workstream has a GitHub issue.
 - [`INGEST_BOUNDARY_AND_RECIPE_LAW.md`](INGEST_BOUNDARY_AND_RECIPE_LAW.md) — artifact, transport, parser, tier, and canonical admission are different boundaries. One recipe admits them.
 - [`DATASET_ESTATE_MODERNIZATION.md`](DATASET_ESTATE_MODERNIZATION.md) and [`DATASET_ESTATE_REFRESH_OPERATOR.md`](DATASET_ESTATE_REFRESH_OPERATOR.md) — the selected source estate and how a staged release is acquired.
 - [`REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md`](REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — a turn is an ordered witnessed trajectory on the forward program. Other models are witnesses.

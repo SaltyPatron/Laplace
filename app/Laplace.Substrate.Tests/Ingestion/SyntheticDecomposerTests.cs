@@ -60,8 +60,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                            BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(TrustClassId, 0,
                            BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0,
-                           BootstrapIntentBuilder.RelationTypeMetaTypeId)
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
 
@@ -495,7 +493,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                 .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(TrustClassId, 0, BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0, BootstrapIntentBuilder.RelationTypeMetaTypeId)
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
             await context.Writer.ApplyAsync(

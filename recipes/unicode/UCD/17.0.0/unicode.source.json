@@ -2,11 +2,12 @@
   "authority": "Unicode/UCD",
   "release": "17.0.0",
   "sourceName": "UnicodeDecomposer",
-  "trust": 1,
   "trustClass": "StandardsDerived",
   "layerOrder": 0,
   "selected": true,
-  "aliases": ["unicode"],
+  "aliases": [
+    "unicode"
+  ],
   "root": "/vault/Data/UCD/Public/UCD/latest",
   "artifacts": [
     {

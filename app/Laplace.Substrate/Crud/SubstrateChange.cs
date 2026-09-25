@@ -159,5 +159,8 @@ public sealed record AttestationRow(
     long OpponentRdFp1e9,
     long OpponentRatingFp1e9 = 1_500_000_000_000,
     long? SumScoreFp1e9 = null,
-    Mask256 HighwayMask = default,
+    // The claim's governed qualifiers (engine/manifest/qualifiers.toml): multi-select
+    // variant flags such as identifier/iso639-1 or derivation/calculation. The relation
+    // itself is type_id; its highway bit is never repeated here.
+    Mask256 QualifierMask = default,
     bool FoldReplayable = true);

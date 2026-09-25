@@ -8,7 +8,6 @@ public sealed class BootstrapIntentBuilder
 {
     private readonly Hash128 _sourceId;
     private readonly string _sourceName;
-    private readonly Hash128 _trustClassId;
     private readonly Hash128 _substrateCanonicalTypeId;
     private readonly Hash128 _sourceCanonicalSource;
     private readonly SubstrateChangeBuilder _inner;
@@ -16,7 +15,6 @@ public sealed class BootstrapIntentBuilder
     public static readonly Hash128 SourceTypeId = EntityTypeRegistry.Id("Source");
     public static readonly Hash128 TypeMetaTypeId = EntityTypeRegistry.Id("Type");
     public static readonly Hash128 RelationTypeMetaTypeId = EntityTypeRegistry.Id("RelationType");
-    public static readonly Hash128 HasTrustClassTypeId = RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS");
 
     public BootstrapIntentBuilder(Hash128 sourceId, string sourceName, Hash128 trustClassId)
         : this(sourceId, sourceName, trustClassId, witness: null) { }
@@ -29,7 +27,9 @@ public sealed class BootstrapIntentBuilder
     {
         _sourceId = sourceId;
         _sourceName = sourceName ?? throw new ArgumentNullException(nameof(sourceName));
-        _trustClassId = trustClassId;
+        // A source never testifies to its own trust class: its prior is declared on the
+        // change, and calculated evidence is qualified on each claim (CalculationSources).
+        _ = trustClassId;
         _substrateCanonicalTypeId = SourceTypeId;
         _sourceCanonicalSource = sourceId;
         _inner = new SubstrateChangeBuilder(
@@ -89,21 +89,8 @@ public sealed class BootstrapIntentBuilder
 
     public void AddAttestation(AttestationRow row) => _inner.AddAttestation(row);
 
-    private void AddTrustClassAttestation()
-    {
-        _inner.AddAttestation(NativeAttestation.CategoricalResolved(
-            subject: _sourceId,
-            typeId: HasTrustClassTypeId,
-            obj: _trustClassId,
-            sourceId: _sourceId,
-            contextId: null,
-            witnessWeight: 1.0,
-            confirm: true));
-    }
-
     public SubstrateChange Build()
     {
-        AddTrustClassAttestation();
         RelationTypeRegistry.SeedCanonical(_inner, _sourceId);
 
 

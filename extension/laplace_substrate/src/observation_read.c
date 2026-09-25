@@ -12,6 +12,7 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "laplace/core/sql_catalog.h"
+#include "laplace/core/qualifier_law.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_observation_bindings);
 
@@ -68,10 +69,10 @@ receive_observation(TupleTableSlot *slot, DestReceiver *destination)
     LaplaceObservation row = {0};
     hash128_t *ids[] = {&row.id, &row.subject, &row.type,
                        &row.object, &row.source, &row.context};
-    bool nulls[8];
-    Datum values[8];
+    bool nulls[9];
+    Datum values[9];
     OperandEntry *operand;
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 9; ++i)
         values[i] = slot_getattr(slot, i + 1, &nulls[i]);
     if (nulls[0] || nulls[1] || nulls[2] || nulls[6] || nulls[7])
         elog(ERROR, "observation bindings: missing witness identity or outcome");
@@ -82,6 +83,13 @@ receive_observation(TupleTableSlot *slot, DestReceiver *destination)
     row.context_null = nulls[5];
     row.outcome = DatumGetInt16(values[6]);
     row.occurrences = DatumGetInt64(values[7]);
+    if (!nulls[8])
+    {
+        bytea *mask = DatumGetByteaPP(values[8]);
+        if (VARSIZE_ANY_EXHDR(mask) != sizeof(row.qualifiers))
+            elog(ERROR, "observation bindings: qualifier masks must be 32 bytes");
+        memcpy(row.qualifiers, VARDATA_ANY(mask), sizeof(row.qualifiers));
+    }
     operand = (receiver->roles & 1)
         ? hash_search(receiver->operands, &row.subject, HASH_FIND, NULL) : NULL;
     if (operand)
@@ -106,13 +114,22 @@ static void
 observation_startup(DestReceiver *destination, int operation, TupleDesc descriptor)
 {
     const Oid types[] = {BYTEAOID, BYTEAOID, BYTEAOID, BYTEAOID,
-                         BYTEAOID, BYTEAOID, INT2OID, INT8OID};
+                         BYTEAOID, BYTEAOID, INT2OID, INT8OID, BYTEAOID};
     (void) destination;
     if (operation != CMD_SELECT || descriptor->natts != lengthof(types))
         elog(ERROR, "observation bindings: invalid result shape");
     for (int i = 0; i < lengthof(types); ++i)
         if (TupleDescAttr(descriptor, i)->atttypid != types[i])
             elog(ERROR, "observation bindings: invalid result column type");
+}
+
+bool
+laplace_observation_qualified(const LaplaceObservation *row, const char *family, const char *value)
+{
+    const int bit = laplace_qualifier_bit(family, value);
+    if (bit < 0)
+        elog(ERROR, "observation bindings: undeclared qualifier %s/%s", family, value);
+    return (row->qualifiers[bit / 8] & (1u << (bit % 8))) != 0;
 }
 
 static void

@@ -371,10 +371,8 @@ public sealed class SemLinkDecomposerTests
             e.Id == SemLinkDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO"));
-        Assert.Contains(boot.Attestations, a =>
-            a.SubjectId == SemLinkDecomposer.Source
-            && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
-            && a.ObjectId == SemLinkDecomposer.TrustClass);
+        Assert.DoesNotContain(boot.Attestations, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
 
         var pmBoot = writer.Captured.First(c =>
             c.Metadata.SourceContentUnitName == "bootstrap/PredicateMatrixDecomposer");

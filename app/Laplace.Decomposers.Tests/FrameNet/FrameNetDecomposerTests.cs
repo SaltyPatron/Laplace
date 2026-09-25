@@ -351,10 +351,8 @@ public sealed class FrameNetDecomposerTests
             e.Id == EntityTypeRegistry.Id("FrameNet_Frame")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"));
-        Assert.Contains(boot.Attestations, a =>
-            a.SubjectId == FrameNetDecomposer.Source
-            && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
-            && a.ObjectId == FrameNetDecomposer.TrustClass);
+        Assert.DoesNotContain(boot.Attestations, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
 
         Assert.Contains(writer.Captured[1].Entities, e =>
             e.Id == Hash128.OfCanonical("framenet/coreness/Core"));

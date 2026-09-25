@@ -2,12 +2,13 @@
   "authority": "UD",
   "release": "2.18",
   "sourceName": "UD",
-  "trust": 1,
   "trustClass": "AcademicCurated",
   "layerOrder": 2,
   "selected": true,
   "root": "/vault/Data/.refresh-20260903/UD-Treebanks",
-  "aliases": ["ud"],
+  "aliases": [
+    "ud"
+  ],
   "artifacts": [
     {
       "selector": "ud-treebanks-v2.18.tgz",
@@ -24,7 +25,11 @@
       "recipePath": "conllu.recipe.json",
       "recordDepth": 2,
       "configuration": {
-        "constants": { "language": { "pathPattern": "/([a-z]+)_[a-z0-9]+-ud-[a-z]+\\.conllu$" } }
+        "constants": {
+          "language": {
+            "pathPattern": "/([a-z]+)_[a-z0-9]+-ud-[a-z]+\\.conllu$"
+          }
+        }
       }
     },
     {

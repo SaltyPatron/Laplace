@@ -192,13 +192,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                         stagedRows[i] = StageAttestation(a);
                         int off = i * 32;
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off), a.HighwayMask.W0);
+                            masksFlat.AsSpan(off), a.QualifierMask.W0);
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off + 8), a.HighwayMask.W1);
+                            masksFlat.AsSpan(off + 8), a.QualifierMask.W1);
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off + 16), a.HighwayMask.W2);
+                            masksFlat.AsSpan(off + 16), a.QualifierMask.W2);
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off + 24), a.HighwayMask.W3);
+                            masksFlat.AsSpan(off + 24), a.QualifierMask.W3);
                     }
                     managedStage.AddAttestationsStaged(stagedRows, n, masksFlat);
                 }

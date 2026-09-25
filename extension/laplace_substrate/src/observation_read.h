@@ -12,7 +12,13 @@ typedef struct LaplaceObservation
     bool object_null, source_null, context_null;
     int16 outcome;
     int64 occurrences;
+    /* The claim's governed qualifiers (engine/manifest/qualifiers.toml); zero when
+     * the witness states none. */
+    uint8 qualifiers[32];
 } LaplaceObservation;
+
+/* Whether the witness's qualifiers carry family/value ("derivation/calculation"). */
+bool laplace_observation_qualified(const LaplaceObservation *row, const char *family, const char *value);
 
 /* ordinal is the original 1-based operand occurrence. Duplicate operands share
  * a database probe but retain every occurrence. The callback borrows the row

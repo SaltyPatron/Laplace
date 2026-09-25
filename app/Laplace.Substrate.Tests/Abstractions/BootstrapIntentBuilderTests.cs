@@ -69,19 +69,6 @@ public class BootstrapIntentBuilderTests
     }
 
     [Fact]
-    public void Build_EmitsHasTrustClassAttestation()
-    {
-        var b = new BootstrapIntentBuilder(SourceId, "TestDecomposer", TrustClassId);
-        var change = b.Build();
-        var a = Assert.Single(change.Attestations,
-            x => x.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId);
-        Assert.Equal(SourceId, a.SubjectId);
-        Assert.Equal(TrustClassId, a.ObjectId);
-        Assert.Equal(SourceId, a.SourceId);
-        Assert.Null(a.ContextId);
-    }
-
-    [Fact]
     public void Build_DoesNotTurnGovernedRelationHierarchyIntoVendorTestimony()
     {
         var change = new BootstrapIntentBuilder(
@@ -117,7 +104,6 @@ public class BootstrapIntentBuilderTests
         Assert.Equal(TypeHash("Source"), BootstrapIntentBuilder.SourceTypeId);
         Assert.Equal(TypeHash("Type"), BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Equal(TypeHash("RelationType"), BootstrapIntentBuilder.RelationTypeMetaTypeId);
-        Assert.Equal(TypeHash("HAS_TRUST_CLASS"), BootstrapIntentBuilder.HasTrustClassTypeId);
     }
 }
 

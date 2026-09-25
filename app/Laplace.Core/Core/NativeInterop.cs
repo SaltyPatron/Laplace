@@ -987,6 +987,9 @@ public static unsafe partial class NativeInterop
         long nowUnixUs,
         AttestationStagedNative* outStaged);
 
+    [LibraryImport(Library, EntryPoint = "laplace_qualifier_bit", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int QualifierBit(string family, string value);
+
     [LibraryImport(Library, EntryPoint = "laplace_pos_resolve_canonical", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int PosResolveCanonical(string tag, int tagset, byte** outCanonical, int* outIndex);
 

@@ -73,19 +73,19 @@ public class SourceGenerationRecipe
         using var stream = File.OpenRead(manifest);
         using JsonDocument document = JsonDocument.Parse(stream);
         JsonElement root = document.RootElement;
-        CheckProperties(root, ["authority", "release", "sourceName", "sourceId", "trust", "trustClass", "layerOrder", "artifacts", "aliases", "root", "selected"]);
+        CheckProperties(root, ["authority", "release", "sourceName", "sourceId", "trustClass", "layerOrder", "artifacts", "aliases", "root", "selected"]);
         string authority = Required(root, "authority"), release = Required(root, "release");
         string sourceName = Required(root, "sourceName");
         string? sourceHex = Optional(root, "sourceId");
         // The source is the witness of its observations: [authority, release] as content.
         Hash128 sourceId = sourceHex is null ? SourceWitness.Id(authority, release)
             : ParseId(sourceHex);
-        double trust = root.TryGetProperty("trust", out var weight) ? weight.GetDouble() : 1;
-        if (!double.IsFinite(trust) || trust is < 0 or > 1)
-            throw new InvalidDataException("Source generation trust must be finite and between zero and one.");
-        string trustClass = Optional(root, "trustClass") ?? "StructuredCorpus";
-        if (string.IsNullOrWhiteSpace(trustClass))
-            throw new InvalidDataException("Source generation trust class cannot be empty.");
+        // How trustworthy the witness is: a governed trust class (a standards body above an
+        // academic curation above a user-curated wiki above subtitles), whose prior seeds
+        // the standing of every claim it makes. The class is the only statement of trust.
+        string trustClass = Required(root, "trustClass");
+        double trust = Laplace.Decomposers.Abstractions.SourceTrust.ForClass(
+            SubstrateCanonicalIds.TrustClass(trustClass));
         int layer = root.TryGetProperty("layerOrder", out var layerValue) ? layerValue.GetInt32() : 0;
         if (layer is < 0 or > Laplace.Ingestion.LayerCompletion.MaxMarkedLayer)
             throw new InvalidDataException("Source generation layer is outside the supported completion range.");

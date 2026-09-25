@@ -315,10 +315,8 @@ public sealed class VerbNetDecomposerTests
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));
-        Assert.Contains(boot.Attestations, a =>
-            a.SubjectId == VerbNetDecomposer.Source
-            && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
-            && a.ObjectId == VerbNetDecomposer.TrustClass);
+        Assert.DoesNotContain(boot.Attestations, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
     }
 
     // VerbNet negates a predicate with bool="!" and marks an optional one with bool="?".

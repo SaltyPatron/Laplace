@@ -46,7 +46,7 @@ public sealed class ChessPgnChunkTests
     private static string[] EvidenceFacts(IEnumerable<SubstrateChange> changes) =>
         changes.SelectMany(change => change.Attestations)
             .Select(row => string.Join("|", row.Id, row.SubjectId, row.TypeId, row.ObjectId,
-                row.SourceId, row.ContextId, row.FoldReplayable, row.OpponentRdFp1e9, row.HighwayMask))
+                row.SourceId, row.ContextId, row.FoldReplayable, row.OpponentRdFp1e9, row.QualifierMask))
             .Distinct().Order(StringComparer.Ordinal).ToArray();
 
 

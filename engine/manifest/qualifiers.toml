@@ -43,3 +43,11 @@ values = ["change", "duplicate", "non-existent", "split", "merge"]
 name = "membership"
 base = 160
 values = ["active", "retired"]
+
+# How the claim was produced. A calculation is deterministic derived evidence (an engine's
+# evaluation, an outcome tally over recorded games), a plane distinct from observed
+# testimony inside the same relation cell (query_evidence COUPLE).
+[[family]]
+name = "derivation"
+base = 192
+values = ["calculation"]
