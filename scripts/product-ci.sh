@@ -595,11 +595,13 @@ carry_forward_undelivered_impact() {
 
   local target
   target="$(git rev-parse HEAD)"
-  carry_forward_installed_web_impact "$target"
   carry_forward_installed_native_impact "$target"
   carry_forward_installed_ingest_runtime_impact "$target"
   carry_forward_installed_extension_impact
   carry_forward_installed_application_impact "$target"
+  # Last: the SPA check only runs once publication is selected, and the
+  # application carry-forward is what selects it. Before run_build, not after.
+  carry_forward_installed_web_impact "$target"
 
   echo "::notice::component carry-forward target=$target build=${LAPLACE_BUILD_COMPONENTS:-} managed_build=${LAPLACE_MANAGED_BUILD_PROJECTS:-} delivery=${LAPLACE_DELIVERY_ACTIONS:-} publish=${LAPLACE_PUBLISH_SCOPE:-}"
 }
