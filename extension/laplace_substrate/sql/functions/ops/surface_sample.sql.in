@@ -26,7 +26,7 @@ BEGIN ATOMIC
                e.type_id,
                sum(a.observation_count)::bigint AS observations
         FROM laplace.attestations a
-        JOIN eligible e ON e.entity_id = a.subject_id
+        JOIN eligible e ON e.id = a.subject_id
         WHERE a.source_id = p_source
           AND consensus.relation_canonical(a.subject_id) IS NULL
         GROUP BY a.subject_id, e.type_id

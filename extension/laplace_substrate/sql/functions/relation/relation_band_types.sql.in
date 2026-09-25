@@ -1,8 +1,7 @@
 -- The relation-type ids in a salience band, as an ARRAY the planner can prune with.
 --
 -- The band is a property of the relation type, not of each consensus edge.
--- consensus is LIST-partitioned by type_id. Applying relation_highway_band to
--- type_id on that table blocks partition pruning and runs the function once
+-- Applying relation_highway_band to consensus.type_id runs the function once
 -- per edge. Resolve the type ids for the band first, then probe
 -- (subject_id, type_id).
 --
@@ -15,7 +14,7 @@
 -- point: 221 rows, once, versus 48M rows, per query. Same predicate, moved to the
 -- small side of the join. Materialize that indexed type set before joining
 -- entities: an EXISTS semi-join otherwise permits the planner to apply the
--- native band function to every entity before checking its interpretation.
+-- native band function to every entity before checking its type.
 --
 -- STABLE, not IMMUTABLE: relation_highway_band resolves through the manifest and
 -- the entity set can gain dynamically-minted relations at ingest. PARALLEL SAFE
@@ -30,9 +29,9 @@ BEGIN ATOMIC
         FROM laplace.entities i
         WHERE i.type_id = laplace.entity_type_id('RelationType')
     )
-    SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
-    FROM typed t JOIN laplace.entities e ON e.id = t.entity_id
-    WHERE consensus.relation_highway_band(t.entity_id) = p_band;
+    SELECT COALESCE(array_agg(t.id), '{}'::bytea[])
+    FROM typed t
+    WHERE consensus.relation_highway_band(t.id) = p_band;
 END;
 
 -- Multi-band form. Callers testing several bands (the content bands 1/2/4/7 are
@@ -47,9 +46,9 @@ BEGIN ATOMIC
         FROM laplace.entities i
         WHERE i.type_id = laplace.entity_type_id('RelationType')
     )
-    SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
-    FROM typed t JOIN laplace.entities e ON e.id = t.entity_id
-    WHERE consensus.relation_highway_band(t.entity_id) = ANY (p_bands);
+    SELECT COALESCE(array_agg(t.id), '{}'::bytea[])
+    FROM typed t
+    WHERE consensus.relation_highway_band(t.id) = ANY (p_bands);
 END;
 
 -- Retired before release: this helper shipped with no caller. Keep the DROP in

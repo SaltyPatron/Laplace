@@ -184,10 +184,6 @@ functions/converse/text_root_placements.sql.in
 functions/converse/attested_language_batch.sql.in
 functions/converse/attested_language.sql.in
 functions/converse/word_language.sql.in
-inference/synonyms.sql.in
-inference/translations.sql.in
-inference/translate_to.sql.in
-inference/language_coverage.sql.in
 functions/converse/hypernyms.sql.in
 functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
@@ -227,7 +223,6 @@ functions/converse/structural_neighbors.sql.in
 functions/converse/structural_neighbors_of.sql.in
 functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
-inference/attention.sql.in
 functions/converse/correlate.sql.in
 functions/converse/drop_recompiled_prompt_programs.sql.in
 generated/relation_family_ids.sql.in
@@ -341,6 +336,11 @@ functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
 views/v_attestation_readable.sql.in
 functions/lexical/type_label.sql.in
+inference/synonyms.sql.in
+inference/translations.sql.in
+inference/translate_to.sql.in
+inference/language_coverage.sql.in
+inference/attention.sql.in
 functions/realize/realize.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/edges.sql.in
@@ -431,7 +431,6 @@ functions/ops/backend_signal.sql.in
 functions/ops/repair.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
-views/v_entities_highway.sql.in
 views/v_word_senses.sql.in
 functions/lexical/senses_with_context.sql.in
 functions/structural/word_anchor.sql.in
@@ -440,7 +439,6 @@ functions/geometry/structural_cluster.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/drop_retired_ducet_geometry.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
-functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
@@ -490,3 +488,6 @@ functions/converse/election_token_profile.sql.in
 functions/structural/geometry_audit.sql.in
 functions/converse/resolve_audit.sql.in
 functions/mu/drop_retired_foundry_weight_knobs.sql.in
+schema/retire_interpretation_tables.sql.in
+views/v_entities_highway.sql.in
+functions/analysis/laplace_entities_at_depth.sql.in

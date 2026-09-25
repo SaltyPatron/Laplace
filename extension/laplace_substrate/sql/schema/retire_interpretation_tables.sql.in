@@ -1,0 +1,6 @@
+-- Extension update, last step. Installed BEGIN ATOMIC functions from earlier
+-- versions hold parse-time dependencies on these relations, so they can only be
+-- dropped after the current definitions have replaced those functions.
+DROP TABLE IF EXISTS laplace.entity_interpretations;
+DROP TABLE IF EXISTS laplace.physicality_observations;
+ALTER TABLE laplace.entities DROP COLUMN IF EXISTS first_observed_by;

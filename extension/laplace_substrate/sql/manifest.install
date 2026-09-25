@@ -185,10 +185,6 @@ functions/converse/text_root_placements.sql.in
 functions/converse/attested_language_batch.sql.in
 functions/converse/attested_language.sql.in
 functions/converse/word_language.sql.in
-inference/synonyms.sql.in
-inference/translations.sql.in
-inference/translate_to.sql.in
-inference/language_coverage.sql.in
 functions/converse/hypernyms.sql.in
 functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
@@ -228,7 +224,6 @@ functions/converse/structural_neighbors.sql.in
 functions/converse/structural_neighbors_of.sql.in
 functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
-inference/attention.sql.in
 functions/converse/correlate.sql.in
 seed/canonical_names_seed.sql.in
 generated/relation_family_ids.sql.in
@@ -339,6 +334,11 @@ functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
 views/v_attestation_readable.sql.in
 functions/lexical/type_label.sql.in
+inference/synonyms.sql.in
+inference/translations.sql.in
+inference/translate_to.sql.in
+inference/language_coverage.sql.in
+inference/attention.sql.in
 functions/realize/realize.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/edges.sql.in
