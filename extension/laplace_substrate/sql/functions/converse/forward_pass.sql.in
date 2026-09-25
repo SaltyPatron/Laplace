@@ -60,11 +60,10 @@ BEGIN ATOMIC
             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.type_id, c.object_id
             LIMIT GREATEST(p_per_key, 0)) c
     )
-    SELECT f.key, f.type_id, f.object_id, consensus.eff_mu_display(f.rating, f.rd),
-           f.witness_count,
-           exp(f.logit - max(f.logit) OVER w) / sum(exp(f.logit - max(f.logit) OVER w)) OVER w2
-    FROM f
-    WINDOW w AS (PARTITION BY f.key, f.type_id), w2 AS (PARTITION BY f.key, f.type_id);
+    SELECT g.key, g.type_id, g.object_id, consensus.eff_mu_display(g.rating, g.rd),
+           g.witness_count,
+           exp(g.logit - g.top) / sum(exp(g.logit - g.top)) OVER (PARTITION BY g.key, g.type_id)
+    FROM (SELECT f.*, max(f.logit) OVER (PARTITION BY f.key, f.type_id) AS top FROM f) g;
 END;
 
 -- QK: how two terms couple, and through which of their keys. Evidence is weighted by
