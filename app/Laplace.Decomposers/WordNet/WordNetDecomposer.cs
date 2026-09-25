@@ -269,7 +269,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
-        ConceptAnchor.AttestSynsetCategory(b, synId, Source, TC.StandardsDerived);
 
         foreach (var lemma in syn.Lemmas)
         {

@@ -26,7 +26,6 @@ internal static class OMWEmitter
         Hash128? synAnchor = ConceptAnchor.EmitAnchor(b, row.Offset, row.SsType, OMWDecomposer.Source);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
-        ConceptAnchor.AttestSynsetCategory(b, synId, OMWDecomposer.Source, TC.AcademicCurated);
 
         Hash128 langId = LanguageReference.Emit(
             b, row.Lang, OMWDecomposer.Source, TC.AcademicCurated);

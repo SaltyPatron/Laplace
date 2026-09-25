@@ -29,7 +29,6 @@ public static class HighwayNodeEmitter
             throw new InvalidOperationException(
                 $"vocabulary identity changed during admission: {canonicalName}");
 
-        CategoryAnchor.AttestCategory(builder, id, metaTypeId, sourceId, trust);
 
         if (parentId is { } parent)
             builder.AddAttestation(NativeAttestation.Categorical(

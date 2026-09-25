@@ -265,9 +265,6 @@ public sealed class VerbNetDecomposer
                         b, SemanticPredicateIdentityKind.VerbNet, classEntity,
                         frameOrdinal, currentPredicateOrdinal, predLabelComponent, arguments,
                         EntityTypeRegistry.VerbNetPredicate, Source);
-                    CategoryAnchor.AttestCategory(
-                        b, predicateId, EntityTypeRegistry.VerbNetPredicate,
-                        Source, TC.AcademicCurated);
                     b.AddAttestation(optional
                         ? NativeAttestation.ResolvedScored(
                             classEntity, VerbNetSource.EntailsTypeId, predicateId,

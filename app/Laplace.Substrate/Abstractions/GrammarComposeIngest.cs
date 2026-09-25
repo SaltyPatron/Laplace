@@ -78,7 +78,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     {
         if (record.ConceptAnchorKey is not { Length: > 0 }
             || record.ConceptCategoryTypeId is not { } ctype || ctype == default
-            || CategoryAnchor.Emit(builder, record.ConceptAnchorKey, ctype, sourceId, trust) is not { } conceptId)
+            || CategoryAnchor.Emit(builder, record.ConceptAnchorKey, sourceId) is not { } conceptId)
             return;
 
         if (record.ParentContainerId is { } parent && parent != default)

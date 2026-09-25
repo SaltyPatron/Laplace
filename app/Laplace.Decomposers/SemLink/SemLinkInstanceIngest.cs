@@ -144,9 +144,6 @@ internal static class SemLinkInstanceIngest
         Hash128 source = SemLinkDecomposer.Source;
         OrderedCompositionComponent sourceFileComponent =
             RequireContent(builder, record.SourceFile, source);
-        CategoryAnchor.AttestCategory(
-            builder, sourceFileComponent.Id, EntityTypeRegistry.SourceFile,
-            source, TC.AcademicCurated);
 
         OrderedCompositionComponent sentenceOrdinal =
             RequireContent(builder,
@@ -308,12 +305,7 @@ internal static class SemLinkInstanceIngest
     private static Hash128? EmitReference(SubstrateChangeBuilder builder, string key)
     {
         if (string.IsNullOrEmpty(key)) return null;
-        Hash128? id = ContentEmitter.Emit(builder, key, SemLinkDecomposer.Source);
-        if (id is { } value)
-            CategoryAnchor.AttestCategory(
-                builder, value, EntityTypeRegistry.SourceReference,
-                SemLinkDecomposer.Source, TC.AcademicCurated);
-        return id;
+        return ContentEmitter.Emit(builder, key, SemLinkDecomposer.Source);
     }
 
     private static string NormalizePropBankRole(string role)

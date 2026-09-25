@@ -1,7 +1,5 @@
--- One type-membership law over the actual substrate.
--- Structural floor type is stored on the canonical entity row. Semantic
--- classification is witnessed testimony and therefore comes from consensus.
--- No auxiliary interpretation table participates in truth.
+-- Type membership is the entity row's type. What a value is used as follows from
+-- the claims that use it; type is never recorded as testimony.
 CREATE OR REPLACE FUNCTION consensus.entity_has_type(
     p_entity bytea,
     p_type bytea)
@@ -13,14 +11,5 @@ BEGIN ATOMIC
         FROM laplace.entities e
         WHERE e.id = p_entity
           AND e.type_id = p_type
-    )
-    OR EXISTS (
-        SELECT 1
-        FROM laplace.consensus c
-        WHERE c.subject_id = p_entity
-          AND c.type_id = laplace.relation_type_id('IS_TYPED_AS')
-          AND c.object_id = p_type
-          AND c.witness_count > 0
-          AND NOT consensus.refuted(c.rating, c.rd)
     );
 END;

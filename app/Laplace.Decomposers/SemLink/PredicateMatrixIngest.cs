@@ -443,9 +443,7 @@ internal static class PredicateMatrixIngest
         {
             Hash128? id = ReferenceAnchor.Id(kind, key);
             if (id is null) return null;
-            Hash128 declarationId = CategoryAnchor.CategoryAttestationId(
-                id.Value, entityTypeId, _sourceId);
-            if (_declarations.Add(declarationId))
+            if (_declarations.Add(id.Value))
                 id = ReferenceAnchor.Emit(builder, kind, key, entityTypeId, _sourceId, _trust);
             return id;
         }
@@ -526,9 +524,7 @@ internal static class PredicateMatrixIngest
             Hash128? subjectId = AnchorAdmission.Id(record.SubjectKey, record.SubjectTypeId);
             if (subjectId is null) return null;
 
-            Hash128 declarationId = CategoryAnchor.CategoryAttestationId(
-                subjectId.Value, record.SubjectTypeId, _sourceId);
-            if (_declarations.Add(declarationId))
+            if (_declarations.Add(subjectId.Value))
                 subjectId = AnchorAdmission.Emit(
                     builder, record.SubjectKey, record.SubjectTypeId, _sourceId, _trust);
             if (subjectId is null) return null;

@@ -141,7 +141,7 @@ public static class SourceVocabularyBootstrap
 
     private static readonly string[] ArtifactRelations =
     [
-        "CONTAINS", "IS_TYPED_AS", "REQUIRES", "HAS_PROPERTY",
+        "HAS_VERSION", "REQUIRES", "HAS_PROPERTY",
     ];
 
     /// <summary>

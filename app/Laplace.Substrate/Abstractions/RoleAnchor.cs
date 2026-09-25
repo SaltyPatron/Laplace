@@ -93,7 +93,6 @@ public static class RoleAnchor
     {
         Hash128? id = Declare(builder, kind, parentId, roleKey, entityTypeId, source);
         if (id is null) return null;
-        CategoryAnchor.AttestCategory(builder, id.Value, entityTypeId, source, trust);
         return id;
     }
 

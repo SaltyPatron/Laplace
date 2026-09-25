@@ -23,7 +23,7 @@ public static class AnchorAdmission
         double trust) =>
         ReferenceKind(entityTypeId) is { } kind
             ? ReferenceAnchor.Emit(builder, kind, key, entityTypeId, source, trust)
-            : CategoryAnchor.Emit(builder, key, entityTypeId, source, trust);
+            : CategoryAnchor.Emit(builder, key, source);
 
     public static ReferenceIdentityKind? ReferenceKind(Hash128 entityTypeId)
     {

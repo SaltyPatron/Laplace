@@ -126,7 +126,7 @@ public static class FrameNetLuIngest
     {
         Hash128? luAnchor = AnchorAdmission.Emit(
             b, lu.LuKey, LuTypeId, source, SourceTrust.AcademicCurated);
-        Hash128? frameAnchor = CategoryAnchor.Emit(b, lu.FrameName, EntityTypeRegistry.FrameNetFrame, source, SourceTrust.AcademicCurated);
+        Hash128? frameAnchor = CategoryAnchor.Emit(b, lu.FrameName, source);
         if (luAnchor is null || frameAnchor is null) return;
         Hash128 luId = luAnchor.Value;
         Hash128 frameId = frameAnchor.Value;

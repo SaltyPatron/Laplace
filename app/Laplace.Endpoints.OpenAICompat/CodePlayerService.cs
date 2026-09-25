@@ -104,9 +104,6 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
                 return new Result(modality, candidate, null, false, "candidate_not_composed", receipts);
             handler.WalkWitness(record, root, candidateBuilder, unit);
             lastRoot = root;
-            candidateBuilder.AddAttestation(NativeAttestation.Categorical(
-                root, "IS_TYPED_AS", EntityTypeRegistry.CodeConcept,
-                CodePlayerSource, (Hash128?)null, CodePlayerTrust, true, 1));
 
             SubstrateChange candidateChange = candidateBuilder.Build();
             Hash128[] definitionIds = candidateChange.Attestations

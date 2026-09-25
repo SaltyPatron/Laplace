@@ -251,24 +251,10 @@ struct laplace_recipe_stream {
     hash128_t content(intent_stage_t* stage, const std::string& text) {
         return compose_content(stage, text).id;
     }
-    void attest_type(intent_stage_t* stage, hash128_t subject, hash128_t type) {
-        if (!nonzero(type)) return;
-        fact typed{};
-        check(laplace_relation_type_id("IS_TYPED_AS", &typed.relation), "type relation identity");
-        typed.object = type;
-        typed.has_object = true;
-        typed.rank = 1.0;
-        typed.explicit_rank = false;
-        attest(stage, subject, typed);
-    }
-
-    hash128_t classifier(intent_stage_t* stage, const std::string& ns,
-                         const std::string& value, hash128_t type) {
-        (void)ns; // source namespace is provenance/context, never content hash salt
+    // A classifier value is content; its class follows from the claim that uses it.
+    hash128_t classifier(intent_stage_t* stage, const std::string& value) {
         if (value.empty()) throw std::runtime_error("empty classifier binding");
-        hash128_t id = content(stage, value);
-        attest_type(stage, id, type);
-        return id;
+        return content(stage, value);
     }
 
     void build_attestation(hash128_t subj, const fact& f, laplace_attestation_staged_t& row) {
@@ -484,7 +470,6 @@ struct laplace_recipe_stream {
         }
         const bool testimony = (rule.disposition & (1u << 6)) != 0;
         const bool ordinary_content = (rule.disposition & (1u << 1)) != 0;
-        const bool reference = (rule.disposition & (1u << 5)) != 0;
         const bool default_value = rule.has_default && raw == rule.default_value;
         const bool emitted_testimony = testimony && !(default_value && rule.omit_default_testimony);
         if (!emitted_testimony && !ordinary_content) {
@@ -517,7 +502,6 @@ struct laplace_recipe_stream {
         f.has_object = true;
         if (rule.codec == 4) {
             f.object = content(stage, raw);
-            if (reference) attest_type(stage, f.object, rule.entity_type);
             emit_fact(f);
             return;
         }
@@ -539,30 +523,26 @@ struct laplace_recipe_stream {
             if (ordinary_content)
                 check(content_witness_emit_floor_atom(stage, cp, &f.object,
                     INTENT_STAGE_PG_EPOCH_UNIX_US), "field floor physicality");
-            if (reference) attest_type(stage, f.object, rule.entity_type);
         }
         else if (rule.codec == 2 || (rule.codec == 0 && rule.kind == 7)) {
             f.object = content(stage, sequence_text(raw, rule.separator));
-            if (reference) attest_type(stage, f.object, rule.entity_type);
         }
         else if (rule.kind == 4 || rule.kind == 5) {
             const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
             for (const auto& value : values) {
                 f.object = content(stage, value);
-                if (reference) attest_type(stage, f.object, rule.entity_type);
                 emit_fact(f);
             }
             return;
         }
         else if (rule.kind == 8 || rule.kind == 9) {
             f.object = content(stage, raw);
-            if (reference) attest_type(stage, f.object, rule.entity_type);
         }
         else {
             auto values = rule.kind == 3 ? split(raw, rule.separator) : std::vector<std::string>{raw};
             for (auto value : values) {
                 auto alias = rule.aliases.find(alias_key(value)); if (alias != rule.aliases.end()) value = alias->second;
-                f.object = classifier(stage, rule.object_namespace, value, rule.entity_type); emit_fact(f);
+                f.object = classifier(stage, value); emit_fact(f);
             }
             return;
         }
@@ -699,12 +679,11 @@ struct laplace_recipe_stream {
                 check(content_witness_emit_floor_atom(stage, cp, &subject,
                     INTENT_STAGE_PG_EPOCH_UNIX_US), "subject floor physicality");
             } else throw std::runtime_error("unsupported subject reference codec");
-            attest_type(stage, subject, route.entity_type);
         } else if (route.kind == 2) {
             auto value = record.get(route.identity);
             const auto alias = route.aliases.find(alias_key(value));
             if (alias != route.aliases.end()) value = alias->second;
-            subject = classifier(stage, route.object_namespace, value, route.entity_type);
+            subject = classifier(stage, value);
         } else throw std::runtime_error("unknown subject instruction");
         if (!route.range_first.empty()) {
             cursor = point(record.get(route.range_first));

@@ -81,8 +81,6 @@ public static class LanguageReference
         Hash128 id = ContentEmitter.Emit(builder, tag, sourceId)
             ?? throw new InvalidOperationException(
                 $"language tag could not be admitted as content: {tag}");
-        CategoryAnchor.AttestCategory(
-            builder, id, EntityTypeRegistry.Language, sourceId, sourceTrust);
         IdByCode.TryAdd(tag, id);
         return id;
     }

@@ -91,7 +91,6 @@ public static class PosReference
         string content = ResolveContent(tag, tagset, out bool probationary);
         Hash128 posId = ContentEmitter.Emit(b, content, sourceId)
             ?? throw new InvalidOperationException($"POS content could not be admitted: {content}");
-        CategoryAnchor.AttestCategory(b, posId, PosTypeId, sourceId, sourceTrust);
         VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset, probationary);
         return posId;
     }
@@ -117,8 +116,6 @@ public static class PosReference
         {
             Hash128 posId = ContentEmitter.Emit(builder, tag, sourceId)
                 ?? throw new InvalidOperationException($"POS content could not be admitted: {tag}");
-            CategoryAnchor.AttestCategory(
-                builder, posId, PosTypeId, sourceId, SourceTrust.SubstrateMandate);
         }
     }
 }

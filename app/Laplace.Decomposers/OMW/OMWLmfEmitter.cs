@@ -111,8 +111,6 @@ internal static class OMWLmfEmitter
             throw new InvalidOperationException(
                 $"OMW identity changed during composition: {kind}/{lexicon}/{rawId}");
 
-        CategoryAnchor.AttestCategory(
-            b, id, typeId, OMWDecomposer.Source, TC.AcademicCurated);
         return id;
     }
 

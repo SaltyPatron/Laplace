@@ -103,8 +103,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             _codeNames.Add(iso1);
             var iso1Id = ContentEmitter.Emit(b, iso1, Source)
                 ?? throw new InvalidOperationException($"ISO 639-1 code could not be composed: {iso1}");
-            CategoryAnchor.AttestCategory(
-                b, iso1Id, Iso639CodeTypeId, Source, TC.StandardsDerived);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 langId, RelTypeHasIso6391Code, iso1Id, Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
@@ -117,8 +115,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             _codeNames.Add(iso2);
             var iso2Id = ContentEmitter.Emit(b, iso2, Source)
                 ?? throw new InvalidOperationException($"ISO 639-2 code could not be composed: {iso2}");
-            CategoryAnchor.AttestCategory(
-                b, iso2Id, Iso639CodeTypeId, Source, TC.StandardsDerived);
             b.AddAttestation(NativeAttestation.Categorical(
                 langId, rel, iso2Id, Source, TC.StandardsDerived));
         }
@@ -154,8 +150,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         string script = rec.ScriptName.Trim();
         var scriptId = ContentEmitter.Emit(b, script, Source)
             ?? throw new InvalidOperationException($"script name could not be composed: {script}");
-        CategoryAnchor.AttestCategory(
-            b, scriptId, UcdClassifierTypeId, Source, TC.StandardsDerived);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             langId, RelTypeUsesScript, scriptId, Source, null,
             RelationTypeRank.StandardsStructural * TC.StandardsDerived));
@@ -166,8 +160,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         string subtag = rec.Subtag.Trim();
         var variantId = ContentEmitter.Emit(b, subtag, Source)
             ?? throw new InvalidOperationException($"language variant could not be composed: {subtag}");
-        CategoryAnchor.AttestCategory(
-            b, variantId, LanguageVariantTypeId, Source, TC.StandardsDerived);
         var parentId = LanguageReference.EmitResolvedCode(
             b, rec.ParentCode, Source, TC.StandardsDerived);
         b.AddAttestation(NativeAttestation.Categorical(
@@ -540,7 +532,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
                 Owner._codeNames.Add(canonical);
                 Hash128 codeId = ContentEmitter.Emit(b, canonical, Source)
                     ?? throw new InvalidOperationException($"ISO 639-2 code could not be composed: {canonical}");
-                CategoryAnchor.AttestCategory(b, codeId, Iso639CodeTypeId, Source, TC.StandardsDerived);
 
                 if (ContentEmitter.Emit(b, rec.English, Source) is { } english)
                     b.AddAttestation(NativeAttestation.Categorical(

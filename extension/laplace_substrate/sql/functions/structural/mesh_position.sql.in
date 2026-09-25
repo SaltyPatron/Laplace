@@ -11,10 +11,7 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH self_hub AS MATERIALIZED (
-        SELECT (SELECT t.object_id
-                FROM laplace.consensus t
-                WHERE t.subject_id=p_id AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
-                ORDER BY consensus.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS object_id
+        SELECT (SELECT e.type_id FROM laplace.entities e WHERE e.id = p_id) AS object_id
     ), up_subjects AS MATERIALIZED (
         SELECT p_id AS id
         UNION
@@ -26,16 +23,9 @@ BEGIN ATOMIC
         SELECT s.synset_id AS id, s.eff_mu, s.witnesses,
                row_number() OVER (ORDER BY s.eff_mu DESC NULLS LAST, s.synset_id) AS ord
         FROM lexical.senses(p_id) s
-        WHERE NOT EXISTS (
-          SELECT 1 FROM laplace.consensus t
-          WHERE t.subject_id=p_id AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
-            AND consensus.eff_mu(t.rating,t.rd)>0)
     ), up_rows AS MATERIALIZED (
         SELECT c.object_id AS id, c.type_id,
-               (SELECT t.object_id FROM laplace.consensus t
-                WHERE t.subject_id=c.object_id
-                  AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
-                ORDER BY consensus.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS hub_id,
+               (SELECT e.type_id FROM laplace.entities e WHERE e.id = c.object_id) AS hub_id,
                consensus.eff_mu_display(c.rating,c.rd) AS eff_mu, c.witness_count,
                row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating,c.rd) DESC NULLS LAST,
                                            c.object_id) AS ord

@@ -41,9 +41,8 @@
  *   - "string_content" is tree-sitter's private symbol name. A rename in that
  *     third-party grammar would silently re-type the substrate.
  *
- * It also duplicated EntityTypeRegistry, the governed vocabulary, which already
- * carries the real semantic type (PropBank_Roleset, VerbNet_Class, FrameNet_Frame)
- * through the IS_TYPED_AS attestation CategoryAnchor emits.
+ * It also duplicated EntityTypeRegistry, the governed vocabulary. A value's semantic
+ * class (roleset, verb class, frame) follows from the source claims that use it.
  *
  * Grammar-composed content now types by TIER, from laplace_content_tier_type_id
  * -- the same call the text lane makes -- so both lanes produce identical rows

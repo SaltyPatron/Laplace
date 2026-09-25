@@ -37,8 +37,8 @@ public enum ReferenceIdentityKind : ushort
 /// Admission path for source/catalog references.
 ///
 /// A reference serialization is still content. Declaring one stages only that ordinary
-/// content entity and its physicality. Semantic/source-reference classification is testimony
-/// around the entity (for example IS_TYPED_AS), never a second durable identity facet.
+/// content entity and its physicality. What a reference denotes follows from the source
+/// claims that use it, never from a second durable identity facet or type testimony.
 /// This preserves Laplace's global convergence law:
 ///
 /// same canonical content -> same entity -> same physicality/trajectory
@@ -73,7 +73,6 @@ public static class ReferenceAnchor
     {
         Hash128? id = Declare(builder, kind, rawKey, entityTypeId, source);
         if (id is null) return null;
-        CategoryAnchor.AttestCategory(builder, id.Value, entityTypeId, source, trust);
         return id;
     }
 
@@ -90,7 +89,6 @@ public static class ReferenceAnchor
         OrderedCompositionComponent? component = ContentEmitter.StageComponent(builder, key, source);
         if (component is not { } realized) return null;
         // entityTypeId is intentionally not written into entity storage here.
-        // Emit(...) expresses that semantic classification through IS_TYPED_AS.
         return realized.Id;
     }
 
@@ -104,7 +102,6 @@ public static class ReferenceAnchor
     {
         Hash128? id = DeclareUtf8(builder, kind, normalizedKey, entityTypeId, source);
         if (id is null) return null;
-        CategoryAnchor.AttestCategory(builder, id.Value, entityTypeId, source, trust);
         return id;
     }
 

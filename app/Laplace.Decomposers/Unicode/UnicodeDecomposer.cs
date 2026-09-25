@@ -636,8 +636,6 @@ public sealed class UnicodeDecomposer
         Hash128 id = ContentEmitter.Emit(builder, content, Source)
             ?? throw new InvalidOperationException(
                 $"Unicode classifier content could not be admitted: {content}");
-        CategoryAnchor.AttestCategory(
-            builder, id, EntityTypeRegistry.UcdClassifier, Source, TC.StandardsDerived);
         _canonicalNames.Add(content);
         return id;
     }
@@ -689,9 +687,6 @@ public sealed class UnicodeDecomposer
             Hash128 id = ContentEmitter.Emit(builder, ordinal, Source)
                 ?? throw new InvalidOperationException(
                     $"Unicode ordinal context could not be admitted: {ordinal}");
-            CategoryAnchor.AttestCategory(
-                builder, id, EntityTypeRegistry.OrdinalContext,
-                Source, TC.StandardsDerived);
         }
     }
 

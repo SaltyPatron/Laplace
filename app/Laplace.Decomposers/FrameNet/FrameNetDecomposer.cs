@@ -67,8 +67,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             Hash128 id = ContentEmitter.Emit(seed, value, Source)
                 ?? throw new InvalidOperationException(
                     $"FrameNet coreness could not be admitted: {value}");
-            CategoryAnchor.AttestCategory(
-                seed, id, CorenessTypeId, Source, TC.AcademicCurated);
         }
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
@@ -141,7 +139,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
         Hash128? targetId = resolvedTarget
             ? ContentEmitter.Emit(b, ann.TargetText!, Source) : null;
-        var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
+        var frameId = CategoryAnchor.Emit(b, ann.FrameName, Source);
         if (sentId is null || frameId is null || (resolvedTarget && targetId is null)) return;
 
         // These are structural delimiters inside the exact annotation trajectory.
@@ -256,8 +254,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             Hash128 id = ContentEmitter.Emit(b, value, Source)
                 ?? throw new InvalidOperationException(
                     $"FrameNet character offset could not be admitted: {value}");
-            CategoryAnchor.AttestCategory(
-                b, id, EntityTypeRegistry.Ordinal, Source, TC.AcademicCurated);
             return id;
         }
     }
@@ -402,8 +398,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-        Hash128? frameAnchor = CategoryAnchor.Emit(
-            b, frame.Name, FrameTypeId, Source, TC.AcademicCurated);
+        Hash128? frameAnchor = CategoryAnchor.Emit(b, frame.Name, Source);
         if (frameAnchor is null) return;
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);

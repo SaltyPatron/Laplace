@@ -207,8 +207,6 @@ public sealed class PropBankDecomposer
                 string ord = num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "m" : num;
                 Hash128 ordEntity = ContentEmitter.Emit(b, ord, Source)
                     ?? throw new InvalidOperationException($"ordinal content could not be admitted: {ord}");
-                CategoryAnchor.AttestCategory(
-                    b, ordEntity, OrdinalTypeId, Source, TC.AcademicCurated);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     roleEntity, PropBankSource.HasFeatureTypeId, ordEntity,
                     Source, null, TC.AcademicCurated));

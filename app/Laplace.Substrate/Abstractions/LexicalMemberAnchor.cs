@@ -72,7 +72,6 @@ public static class LexicalMemberAnchor
             coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
             Trajectory.Build(constituents), constituents.Length,
             null, null, 0));
-        CategoryAnchor.AttestCategory(builder, id, entityTypeId, source, trust);
         return id;
     }
 

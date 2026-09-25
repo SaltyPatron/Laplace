@@ -74,9 +74,7 @@ public sealed class CompoundIdentifierDecompositionTests
         string label = "Giving_" + Guid.NewGuid().ToString("N");
         var builder = new SubstrateChangeBuilder(source, "framenet/content-label");
 
-        Hash128? id = CategoryAnchor.Emit(
-            builder, label, EntityTypeRegistry.FrameNetFrame,
-            source, SourceTrust.AcademicCurated);
+        Hash128? id = CategoryAnchor.Emit(builder, label, source);
 
         Assert.Equal(ContentEmitter.RootId(label), id);
         Assert.True(builder.ContentStage.EntityCount > 0);

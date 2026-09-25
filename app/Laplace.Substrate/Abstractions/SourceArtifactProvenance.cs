@@ -93,11 +93,7 @@ public static class SourceArtifactProvenance
             throw new InvalidOperationException("source artifact identity changed during composition");
 
         builder.AddAttestation(NativeAttestation.Categorical(
-            sourceId, "CONTAINS", identity.ArtifactId, sourceId, trust));
-        builder.AddAttestation(NativeAttestation.Categorical(
             identity.ArtifactId, "HAS_VERSION", identity.ReleaseId, sourceId, trust));
-        builder.AddAttestation(NativeAttestation.Categorical(
-            identity.ArtifactId, "IS_TYPED_AS", identity.RoleId, sourceId, trust));
 
         if (requires is not null)
             foreach (Hash128 dependency in requires.Distinct())
@@ -193,10 +189,6 @@ public static class SourceArtifactProvenance
             composed);
         if (composed[0].Id != recipeId || composed[1].Id != roleId)
             throw new InvalidOperationException("source recipe identity changed during composition");
-        builder.AddAttestation(NativeAttestation.Categorical(
-            sourceId, "CONTAINS", recipeId, sourceId, trust));
-        builder.AddAttestation(NativeAttestation.Categorical(
-            recipeId, "IS_TYPED_AS", roleId, sourceId, trust));
         foreach (Hash128 dependency in requires.Distinct())
             builder.AddAttestation(NativeAttestation.Categorical(
                 recipeId, "REQUIRES", dependency, sourceId, trust));

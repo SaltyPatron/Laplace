@@ -95,14 +95,10 @@ internal sealed class OpenSubtitlesAlignedHandler
             Hash128 alignmentSchema = ContentEmitter.Emit(
                 builder, "opensubtitles/alignment-block512/schema/v1", _source)
                 ?? throw new InvalidOperationException("OpenSubtitles alignment schema could not be composed");
-            CategoryAnchor.AttestCategory(
-                builder, alignmentSchema, EntityTypeRegistry.SourceReference, _source, _trust);
 
             Hash128 pairReference = ContentEmitter.Emit(builder, _block.PairLabel, _source)
                 ?? throw new InvalidOperationException(
                     $"OpenSubtitles pair label could not be composed: {_block.PairLabel}");
-            CategoryAnchor.AttestCategory(
-                builder, pairReference, EntityTypeRegistry.SourceReference, _source, _trust);
 
             Hash128 leftLanguage = LanguageReference.Emit(
                 builder, _block.LeftLanguageCode, _source, _trust);
@@ -204,8 +200,6 @@ internal sealed class OpenSubtitlesAlignedHandler
             Hash128 id = ContentEmitter.Emit(builder, content, _source)
                 ?? throw new InvalidOperationException(
                     $"OpenSubtitles ordinal could not be composed: {content}");
-            CategoryAnchor.AttestCategory(
-                builder, id, EntityTypeRegistry.Ordinal, _source, _trust);
             return id;
         }
 
