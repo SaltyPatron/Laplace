@@ -7,6 +7,8 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "content_membership_read.h"
+#include "consensus_scan.h"
+#include "laplace/core/relation_law.h"
 
 /* Native breadth-first containment. One indexed set probe per frontier, then
  * one hydration read for the selected ids. Labels are a subsequent operation. */
@@ -21,6 +23,31 @@ typedef struct {
     bool exists;
 } ContainerHit;
 static SPIPlanPtr facets_plan;
+
+/* An identifier (an ILI key) is contained by nothing: text contains the words
+ * bound to it. Its containers are therefore read through its bindings, the same
+ * way display realizes an identifier through them. */
+typedef struct {
+    HTAB *seen;
+    Datum *ids;
+    int count, capacity;
+} BoundSurfaces;
+
+static void
+receive_bound_surface(const LaplaceConsensusRow *row, void *context)
+{
+    BoundSurfaces *bound = context;
+    bool found;
+    ContainerSeen *entry = hash_search(bound->seen, &row->subject, HASH_ENTER, &found);
+    if (found) return;
+    entry->ordinal = -1;
+    if (bound->count == bound->capacity) {
+        bound->capacity = bound->capacity ? bound->capacity * 2 : 16;
+        bound->ids = bound->ids ? repalloc(bound->ids, bound->capacity * sizeof(Datum))
+                                : palloc(bound->capacity * sizeof(Datum));
+    }
+    bound->ids[bound->count++] = hash128_to_datum(&row->subject);
+}
 
 static SPIPlanPtr
 container_plan(SPIPlanPtr *slot, const char *key)
@@ -51,8 +78,18 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
     HTAB *seen = hash_create("containers selected", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
     hash128_t root = datum_to_hash128(PG_GETARG_DATUM(0));
     ContainerSeen *entry = hash_search(seen, &root, HASH_ENTER, NULL); entry->ordinal = -1;
-    Datum first[] = {hash128_to_datum(&root)};
-    ArrayType *frontier = construct_array(first, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+    BoundSurfaces bound = {seen, NULL, 0, 0};
+    hash128_t has_sense;
+    bound.capacity = 16;
+    bound.ids = palloc(bound.capacity * sizeof(Datum));
+    bound.ids[bound.count++] = hash128_to_datum(&root);
+    if (laplace_relation_type_id("HAS_SENSE", &has_sense) == 0) {
+        Datum key = hash128_to_datum(&root), type = hash128_to_datum(&has_sense);
+        ArrayType *objects = construct_array(&key, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+        ArrayType *types = construct_array(&type, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+        laplace_consensus_scan(NULL, objects, types, receive_bound_surface, &bound, NULL);
+    }
+    ArrayType *frontier = construct_array(bound.ids, bound.count, BYTEAOID, -1, false, TYPALIGN_INT);
     ContainerHit *hits = NULL; Size count = 0, capacity = 0;
     for (int hop = 1; hop <= hops && count < (Size)limit; ++hop) {
         CHECK_FOR_INTERRUPTS();
