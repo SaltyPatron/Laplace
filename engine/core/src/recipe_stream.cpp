@@ -1,6 +1,5 @@
 #include "laplace/core/recipe_stream.h"
 #include "laplace/core/entity_type_law.h"
-#include "laplace/core/xml_stream.h"
 #include "laplace/core/utf8.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
@@ -13,8 +12,7 @@
 #include "laplace/core/deprel_law.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/qualifier_law.h"
-#include "recipe_delimited.hpp"
-#include "recipe_turtle.hpp"
+#include "recipe_provider.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -108,34 +106,7 @@ struct route_rule {
     } parse;
     std::vector<std::string> witness_fields;
 };
-struct node {
-    std::string name, ns;
-    std::map<std::string, std::string> attributes;
-    std::vector<node> children;
-    // Element character data, exactly as the source wrote it.
-    std::string text;
-    // Recovered source structure in source order: a delimited line's raw cells,
-    // or an XML element's own (name, value) attributes. `group` is carried by the
-    // last row of a delimited group and lists the group's lines in order.
-    std::vector<std::string> cells;
-    std::vector<std::pair<std::string, std::string>> own;
-    std::shared_ptr<const std::vector<std::vector<std::string>>> group;
-    // The self-description of the witness whose observations this record carries
-    // (a WN-LMF Lexicon's [id, version]); empty = the generation's witness.
-    std::vector<std::string> witness_parts;
-    // "Child/@attr" reads a child element's attribute (a WN-LMF entry is named by its
-    // Lemma's writtenForm, not by its packaging id).
-    std::string get(const std::string& key) const {
-        const size_t at = key.find("/@");
-        if (at != std::string::npos) {
-            const std::string child = key.substr(0, at);
-            for (const auto& c : children)
-                if (c.name == child) return c.get(key.substr(at + 2));
-            return "";
-        }
-        auto i = attributes.find(key); return i == attributes.end() ? "" : i->second;
-    }
-};
+using node = recipe_node;
 struct ordinal_span {
     uint32_t first = 0, last = 0;
 };
@@ -227,9 +198,6 @@ static std::string sequence_text(const std::string& raw, const std::string& sepa
     }
     return out;
 }
-static bool has_text(const std::string& text) {
-    return text.find_first_not_of(" \r\n\t") != std::string::npos;
-}
 // Record-relative path: "@attr" on the record itself or "Child/.../@attr" on every
 // matching descendant, in source order.
 static void collect(const node& n, const std::string& path, std::vector<std::string>& out) {
@@ -267,15 +235,16 @@ static size_t rows(const intent_stage_t* s) {
 }
 
 struct laplace_recipe_stream {
-    laplace_xml_stream_t* parser = nullptr;
+    // The standard-format reader the recipe declares; the prescan reads with its own.
+    recipe_provider_factory make_provider;
+    std::unique_ptr<recipe_syntax_provider> provider, prescan_provider;
+    // A delimited source's declared data columns (parse structures address them).
+    std::vector<std::string> delimited_columns;
+    bool delimited = false;
     hash128_t current_witness{};   // the witness of the record being lowered
-    laplace_xml_stream_t* prescan_parser = nullptr;
     std::vector<identity_table_rule> table_rules;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> tables;
-    std::vector<node> prescan_stack;
     bool prescanned = false;
-    std::unique_ptr<recipe_delimited_stream> delimited;
-    std::unique_ptr<recipe_turtle_stream> turtle;
     hash128_t witness{};
     double trust = 0;
     int depth = 2;
@@ -284,7 +253,6 @@ struct laplace_recipe_stream {
     std::unordered_map<std::string, field_rule> fields;
     std::unordered_map<std::string, structure_rule> structures;
     std::unordered_map<std::string, route_rule> routes;
-    std::vector<node> stack;
     node parent_scope{};
     std::vector<ordinal_span> parent_spans;
     bool parent_scope_active = false;
@@ -313,7 +281,6 @@ struct laplace_recipe_stream {
         }
         return parts;
     }
-    ~laplace_recipe_stream() { laplace_xml_stream_free(parser); laplace_xml_stream_free(prescan_parser); }
     // A reference names what the source says its id denotes; an unlisted id is a
     // dangling source reference, never silently kept as packaging.
     const std::string& identify(const std::string& table, const std::string& key) const {
@@ -964,7 +931,7 @@ struct laplace_recipe_stream {
                 a.first == route.range_first || a.first == route.range_last;
             field(stage, path, a.second, bound, record.attributes);
         }
-        if (has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
+        if (recipe_has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
         for (const auto& child : record.children) lower_child(stage, route, child, child.name);
         if (route.parse.on) lower_parse(stage, route, record);
         scope_attributes = nullptr;
@@ -978,7 +945,7 @@ struct laplace_recipe_stream {
         if (child.ns != route.ns) throw std::runtime_error("unaccounted nested structure: " + path);
         for (const auto& a : child.attributes)
             field(stage, prefix->second + "/@" + a.first, a.second, false, child.attributes);
-        if (has_text(child.text)) field(stage, prefix->second, child.text, false, child.attributes);
+        if (recipe_has_text(child.text)) field(stage, prefix->second, child.text, false, child.attributes);
         for (const auto& grandchild : child.children)
             lower_child(stage, route, grandchild, path + "/" + grandchild.name);
     }
@@ -1011,7 +978,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 config.record_name = r.text(); config.namespace_uri = r.text();
                 const uint32_t excluded = r.number();
                 for (uint32_t k = 0; k < excluded; ++k) config.exclude_types.push_back(r.text());
-                s->turtle = std::make_unique<recipe_turtle_stream>(std::move(config));
+                s->make_provider = [config] { return std::make_unique<recipe_turtle_provider>(config); };
             }
             if (provider_kind == 1) {
                 recipe_delimited_config config;
@@ -1055,7 +1022,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     }
                     if (generation >= 7) config.header_lines = r.number();
                 }
-                s->delimited = std::make_unique<recipe_delimited_stream>(std::move(config));
+                s->delimited = true;
+                s->delimited_columns = config.columns;
+                s->make_provider = [config] { return std::make_unique<recipe_delimited_provider>(config); };
             }
         }
         uint32_t count = r.number();
@@ -1162,7 +1131,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (parse > 1) throw std::runtime_error("invalid parse-structure instruction");
                 if (parse) {
                     if (!s->delimited) throw std::runtime_error("parse structure requires grouped delimited syntax");
-                    const auto& columns = s->delimited->config.columns;
+                    const auto& columns = s->delimited_columns;
                     auto position = [&](const std::string& name) {
                         const auto at = std::find(columns.begin(), columns.end(), name);
                         if (at == columns.end()) throw std::runtime_error("parse structure names undeclared column " + name);
@@ -1204,8 +1173,6 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 auto attribute = r.text(); auto name = r.text();
                 s->attribute_vocabularies[attribute] = parse_vocabulary(name, "attribute " + attribute);
             }
-            if (!s->table_rules.empty() && s->delimited)
-                throw std::runtime_error("identity tables require the XML provider");
             for (const auto& f : s->fields)
                 if (!f.second.identity_table.empty() && !s->tables.count(f.second.identity_table))
                     throw std::runtime_error("field references undeclared identity table at " + f.first);
@@ -1214,19 +1181,113 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     throw std::runtime_error("route references undeclared identity table " + route.first);
         }
         if (r.remaining) throw std::runtime_error("trailing recipe instructions");
-        if (provider_kind == 0)
-            s->check(laplace_xml_stream_new(&s->parser), "XML provider creation");
+        if (provider_kind == 0) {
+            const int depth = s->depth;
+            s->make_provider = [depth] { return std::make_unique<recipe_xml_provider>(depth); };
+        }
+        s->provider = s->make_provider();
         *out = s.release(); return 0;
     } catch (const std::bad_alloc&) { return -3; }
     catch (const std::exception& e) { if (s) { s->failed = true; try { s->error = e.what(); } catch (...) {} *out = s.release(); } return -2; }
     catch (...) { return -3; }
 }
-// A namespaced attribute is addressed by the source's own qualified name ("dc:type").
-static std::string attribute_key(const laplace_xml_event_t& e) {
-    if (!e.namespace_uri || !*e.namespace_uri) return e.name;
-    if (!e.prefix || !*e.prefix)
-        throw std::runtime_error("namespaced attribute has no prefix: " + std::string(e.name));
-    return std::string(e.prefix) + ":" + e.name;
+namespace {
+// Values normalized once at parse (a lexicon's "language"), through the whole record tree.
+void normalize(const laplace_recipe_stream& s, node& n) {
+    for (auto& a : n.attributes) a.second = s.attribute_value(a.first, std::move(a.second));
+    for (auto& a : n.own) a.second = s.attribute_value(a.first, std::move(a.second));
+    for (auto& c : n.children) normalize(s, c);
+}
+// The prescan collects the recipe's identity tables from whole records; scopes carry none.
+struct harvest_sink final : recipe_record_sink {
+    laplace_recipe_stream& s;
+    explicit harvest_sink(laplace_recipe_stream& stream) : s(stream) {}
+    void scope_open(node&&) override {}
+    void record(node&& done) override { s.harvest(done); }
+    void scope_close() override {}
+};
+// The lowering read: a record's route decides whether it inherits its scope's
+// attributes, and a coverage scope with no subject of its own is projected over
+// the merged spans its records cover.
+struct lowering_sink final : recipe_record_sink {
+    laplace_recipe_stream& s;
+    explicit lowering_sink(laplace_recipe_stream& stream) : s(stream) {}
+    void scope_open(node&& scope) override {
+        normalize(s, scope);
+        s.parent_scope = std::move(scope);
+        s.parent_spans.clear();
+        s.parent_scope_active = true;
+        s.child_inherited = false;
+    }
+    void record(node&& done) override {
+        normalize(s, done);
+        auto route = s.routes.find(done.name);
+        if (s.parent_scope_active) {
+            auto parent_route = s.routes.find(s.parent_scope.name);
+            if (parent_route != s.routes.end() && parent_route->second.kind == 3
+                && route != s.routes.end() && route->second.kind == 3) {
+                const std::string single = done.get(route->second.identity);
+                const std::string first = single.empty() ? done.get(route->second.first) : single;
+                const std::string last = single.empty() ? done.get(route->second.last) : single;
+                if (!first.empty() && !last.empty()) {
+                    const uint32_t lo = point(first), hi = point(last);
+                    if (lo > hi) throw std::runtime_error("inverted child coverage span");
+                    s.parent_spans.push_back({lo, hi});
+                }
+            }
+        }
+        if (route != s.routes.end() && route->second.inherit_parent_attributes) {
+            if (!s.parent_scope_active)
+                throw std::runtime_error("record requires inherited parent attributes");
+            if (done.ns != s.parent_scope.ns)
+                throw std::runtime_error("record/parent namespace mismatch");
+            for (const auto& a : s.parent_scope.attributes)
+                done.attributes.try_emplace(a.first, a.second);
+            s.child_inherited = true;
+        }
+        if (s.parent_scope_active) done.witness_parts = s.scope_witness();
+        s.pending.push_back(std::move(done));
+    }
+    void scope_close() override {
+        auto route = s.routes.find(s.parent_scope.name);
+        if (route != s.routes.end()) {
+            const bool explicit_subject =
+                !s.parent_scope.get(route->second.identity).empty()
+                || !s.parent_scope.get(route->second.first).empty()
+                || !s.parent_scope.get(route->second.last).empty();
+            if (!(s.child_inherited && !explicit_subject)
+                && route->second.kind == 3 && !explicit_subject
+                && !s.parent_spans.empty()) {
+                std::sort(s.parent_spans.begin(), s.parent_spans.end(),
+                    [](const ordinal_span& a, const ordinal_span& b) {
+                        return a.first != b.first ? a.first < b.first : a.last < b.last;
+                    });
+                std::vector<ordinal_span> merged;
+                merged.reserve(s.parent_spans.size());
+                for (const ordinal_span span : s.parent_spans) {
+                    if (span.first > span.last) throw std::runtime_error("inverted parent coverage span");
+                    if (merged.empty()
+                        || static_cast<uint64_t>(span.first) > static_cast<uint64_t>(merged.back().last) + 1)
+                        merged.push_back(span);
+                    else if (span.last > merged.back().last)
+                        merged.back().last = span.last;
+                }
+                for (const ordinal_span span : merged) {
+                    node projected = s.parent_scope;
+                    projected.attributes[route->second.first] = point_text(span.first);
+                    projected.attributes[route->second.last] = point_text(span.last);
+                    s.pending.push_back(std::move(projected));
+                }
+            } else if (!(s.child_inherited && !explicit_subject)) {
+                s.parent_scope.witness_parts = s.scope_witness();
+                s.pending.push_back(std::move(s.parent_scope));
+            }
+        }
+        s.parent_scope = {};
+        s.parent_spans.clear();
+        s.parent_scope_active = false;
+    }
+};
 }
 extern "C" int laplace_recipe_stream_requires_prescan(const laplace_recipe_stream_t* s) {
     return s && !s->table_rules.empty() ? 1 : 0;
@@ -1234,30 +1295,10 @@ extern "C" int laplace_recipe_stream_requires_prescan(const laplace_recipe_strea
 extern "C" int laplace_recipe_stream_prescan(laplace_recipe_stream_t* s, const uint8_t* bytes, size_t n, int final) {
     if (!s || s->failed || s->prescanned || s->table_rules.empty()) return -1;
     try {
-        if (!s->prescan_parser) s->check(laplace_xml_stream_new(&s->prescan_parser), "XML prescan creation");
-        const laplace_xml_event_t* events = nullptr; size_t count = 0;
-        if (laplace_xml_stream_feed(s->prescan_parser, bytes, n, final, &events, &count) != 0)
-            throw std::runtime_error(laplace_xml_stream_error(s->prescan_parser));
-        auto& stack = s->prescan_stack;
-        for (size_t i = 0; i < count; ++i) {
-            const auto& e = events[i];
-            if (e.depth < s->depth) continue;
-            if (e.kind == 1) stack.push_back(node{e.name, e.namespace_uri ? e.namespace_uri : "", {}, {}});
-            else if (e.kind == 4) {
-                if (stack.empty()) throw std::runtime_error("attribute outside record");
-                stack.back().attributes.emplace(attribute_key(e), std::string(e.value, e.value_len));
-            } else if (e.kind == 2) {
-                if (stack.empty()) throw std::runtime_error("unbalanced record");
-                node done = std::move(stack.back()); stack.pop_back();
-                if (stack.empty()) s->harvest(done);
-                else stack.back().children.push_back(std::move(done));
-            }
-        }
-        if (final) {
-            if (!stack.empty()) throw std::runtime_error("prescan ended inside a record");
-            s->prescanned = true;
-            laplace_xml_stream_free(s->prescan_parser); s->prescan_parser = nullptr;
-        }
+        if (!s->prescan_provider) s->prescan_provider = s->make_provider();
+        harvest_sink sink(*s);
+        s->prescan_provider->feed(bytes, n, final != 0, sink);
+        if (final) { s->prescanned = true; s->prescan_provider.reset(); }
         return 0;
     } catch (const std::exception& e) { s->failed = true; try { s->error = e.what(); } catch (...) {} return -2; }
     catch (...) { s->failed = true; return -3; }
@@ -1269,133 +1310,8 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
         return -1;
     }
     try {
-        auto record = [&](const std::string& name, const std::string& ns,
-            std::map<std::string, std::string>&& attributes, recipe_delimited_structure&& structure) {
-            for (auto& a : attributes) a.second = s->attribute_value(a.first, std::move(a.second));
-            node n{name, ns, std::move(attributes), {}};
-            n.cells = std::move(structure.cells);
-            n.group = std::move(structure.group);
-            s->pending.push_back(std::move(n));
-        };
-        if (s->delimited || s->turtle) {
-            if (s->delimited) s->delimited->feed(bytes, n, final != 0, record);
-            else s->turtle->feed(bytes, n, final != 0, record);
-            s->final = final != 0;
-            return 0;
-        }
-        const laplace_xml_event_t* events = nullptr; size_t count = 0;
-        if (laplace_xml_stream_feed(s->parser,bytes,n,final,&events,&count) != 0)
-            throw std::runtime_error(laplace_xml_stream_error(s->parser));
-        for (size_t i = 0; i < count; ++i) {
-            const auto& e = events[i];
-            if (e.depth + 1 == s->depth) {
-                if (e.kind == 1) {
-                    s->parent_scope = node{e.name, e.namespace_uri ? e.namespace_uri : "", {}, {}};
-                    s->parent_spans.clear();
-                    s->parent_scope_active = true;
-                    s->child_inherited = false;
-                } else if (e.kind == 4 && s->parent_scope_active) {
-                    const std::string key = attribute_key(e);
-                    const std::string value = s->attribute_value(key, std::string(e.value, e.value_len));
-                    if (!s->parent_scope.attributes.emplace(key, value).second)
-                        throw std::runtime_error("duplicate parent record attribute");
-                    s->parent_scope.own.emplace_back(key, value);
-                } else if (e.kind == 2) {
-                    if (s->parent_scope_active) {
-                        auto route = s->routes.find(s->parent_scope.name);
-                        if (route != s->routes.end()) {
-                            const bool explicit_subject =
-                                !s->parent_scope.get(route->second.identity).empty()
-                                || !s->parent_scope.get(route->second.first).empty()
-                                || !s->parent_scope.get(route->second.last).empty();
-                            if (!(s->child_inherited && !explicit_subject)
-                                && route->second.kind == 3 && !explicit_subject
-                                && !s->parent_spans.empty()) {
-                                std::sort(s->parent_spans.begin(), s->parent_spans.end(),
-                                    [](const ordinal_span& a, const ordinal_span& b) {
-                                        return a.first != b.first ? a.first < b.first : a.last < b.last;
-                                    });
-                                std::vector<ordinal_span> merged;
-                                merged.reserve(s->parent_spans.size());
-                                for (const ordinal_span span : s->parent_spans) {
-                                    if (span.first > span.last)
-                                        throw std::runtime_error("inverted parent coverage span");
-                                    if (merged.empty()
-                                        || static_cast<uint64_t>(span.first)
-                                            > static_cast<uint64_t>(merged.back().last) + 1) {
-                                        merged.push_back(span);
-                                    } else if (span.last > merged.back().last) {
-                                        merged.back().last = span.last;
-                                    }
-                                }
-                                for (const ordinal_span span : merged) {
-                                    node projected = s->parent_scope;
-                                    projected.attributes[route->second.first] = point_text(span.first);
-                                    projected.attributes[route->second.last] = point_text(span.last);
-                                    s->pending.push_back(std::move(projected));
-                                }
-                            } else if (!(s->child_inherited && !explicit_subject)) {
-                                s->parent_scope.witness_parts = s->scope_witness();
-                                s->pending.push_back(std::move(s->parent_scope));
-                            }
-                        }
-                    }
-                    s->parent_scope = {};
-                    s->parent_spans.clear();
-                    s->parent_scope_active = false;
-                }
-                continue;
-            }
-            if (e.depth < s->depth) continue;
-            if (e.kind == 1) s->stack.push_back(node{e.name,e.namespace_uri ? e.namespace_uri : "",{}, {}});
-            else if (e.kind == 4) {
-                if (s->stack.empty()) throw std::runtime_error("attribute outside record");
-                const std::string key = attribute_key(e);
-                const std::string value = s->attribute_value(key, std::string(e.value, e.value_len));
-                if (!s->stack.back().attributes.emplace(key, value).second)
-                    throw std::runtime_error("duplicate record attribute");
-                s->stack.back().own.emplace_back(key, value);
-            } else if (e.kind == 2) {
-                if (s->stack.empty()) throw std::runtime_error("unbalanced record");
-                node done = std::move(s->stack.back()); s->stack.pop_back();
-                if (s->stack.empty()) {
-                    auto route = s->routes.find(done.name);
-                    if (s->parent_scope_active) {
-                        auto parent_route = s->routes.find(s->parent_scope.name);
-                        if (parent_route != s->routes.end() && parent_route->second.kind == 3
-                            && route != s->routes.end() && route->second.kind == 3) {
-                            const std::string single = done.get(route->second.identity);
-                            const std::string first = single.empty()
-                                ? done.get(route->second.first) : single;
-                            const std::string last = single.empty()
-                                ? done.get(route->second.last) : single;
-                            if (!first.empty() && !last.empty()) {
-                                const uint32_t lo = point(first), hi = point(last);
-                                if (lo > hi)
-                                    throw std::runtime_error("inverted child coverage span");
-                                s->parent_spans.push_back({lo, hi});
-                            }
-                        }
-                    }
-                    if (route != s->routes.end() && route->second.inherit_parent_attributes) {
-                        if (!s->parent_scope_active)
-                            throw std::runtime_error("record requires inherited parent attributes");
-                        if (done.ns != s->parent_scope.ns)
-                            throw std::runtime_error("record/parent namespace mismatch");
-                        for (const auto& a : s->parent_scope.attributes)
-                            done.attributes.try_emplace(a.first, a.second);
-                        s->child_inherited = true;
-                    }
-                    if (s->parent_scope_active) done.witness_parts = s->scope_witness();
-                    s->pending.push_back(std::move(done));
-                } else s->stack.back().children.push_back(std::move(done));
-            } else if (e.kind == 3) {
-                // Character data belongs to its element; the recipe decides its disposition.
-                if (!s->stack.empty()) s->stack.back().text.append(e.value, e.value_len);
-                else if (has_text(std::string(e.value, e.value_len)))
-                    throw std::runtime_error("recipe has no text-node disposition");
-            }
-        }
+        lowering_sink sink(*s);
+        s->provider->feed(bytes, n, final != 0, sink);
         s->final = final != 0; return 0;
     } catch (const std::exception& e) { s->failed = true; try { s->error = e.what(); } catch (...) {} return -2; }
     catch (...) { s->failed = true; return -3; }
