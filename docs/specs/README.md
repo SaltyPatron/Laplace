@@ -19,8 +19,9 @@ Current specification set:
 - `36_Laplace_Forward_Pass.md` — canonical stateful forward program, including `RESOLVE → COUPLE → ORIENT → ROUTE → ...`.
 - `37_Substrate_Operation_ISA.md` — typed operation algebra; stable opcode ids are names, not execution-order numbers (`OP10 COUPLE` executes after `OP0 RESOLVE` in unconstrained cognition).
 - `38_Collections_Are_Compositions.md` — set-valued facts as one composition entity plus one attestation.
+- `39_Personality_Firmware.md` — personality firmware: the versioned, content-addressed program over the ISA that parameterizes the forward program without changing knowledge, truth or authority; the OODA loop and the Gödel extension lane; open conflicts for the inventor.
 
-Numbering gaps (01–04, 07, 10, 13, 17, 20–32, 35) belong to the superseded `specs-v1` generation preserved in [`docs/archive/specs-v1/`](../archive/specs-v1/README.md); the files `14/15/16/18/19` in this directory are relocation pointers into that archive.
+Numbering gaps (01–04, 07, 10, 13, 17, 20–32, 35) belong to the superseded `specs-v1` generation preserved in [`docs/archive/specs-v1/`](../archive/specs-v1/README.md); the files `14/15/16/18/19` in this directory are relocation pointers into that archive. The OODA/self-witnessing design record behind `15` is reconciled into `39_Personality_Firmware.md`.
 
 The common physical implementation law applies across all of them: repeated algorithmic work belongs in coarse native/set execution, while PostgreSQL owns durable indexed state/set access and SQL/C# remain orchestration/contract boundaries.
 

@@ -251,13 +251,22 @@ Issue: #1723
 
 Issue: #1726
 
-- **Documented today:**
+- **Binding spec:** [`docs/specs/39_Personality_Firmware.md`](../specs/39_Personality_Firmware.md). It reconciles the sources listed below into one contract:
+  - firmware as a versioned, content-addressed image over the ISA;
+  - the stages it parameterizes, mapped to the native parameters it takes over (`trajectory_generate.c`, `prompt_intent.h`, `task_shape.c`, `generate_walk.c`);
+  - what it can never do;
+  - `firmware_id` in every trace and receipt;
+  - rating by observed consequences;
+  - the separation of operation, program, orchestration, OODA and Gödel extension.
+
+  Its §9 records the conflicts left for the inventor: self-witnessing versus zero self-attestation (C1), stochastic versus deterministic SELECT (C2), and whether the Gödel engine is the OODA loop or only the discovery lane (C3). It also lists open questions Q1–Q5. The bullets below are the reconciliation record that led to the spec.
+- **Documented before the spec:**
   - the OODA loop and self-witnessing (archived spec 15);
   - the ISA-as-processor framing (#823);
   - the opcodes (spec 37) and the forward program (spec 36);
   - "governance/firmware" as one term of the effective mind (CAPABILITIES.md);
   - game firmware as rules over the same world (`docs/guides/knowledge-arena.md`).
-- **Not documented:**
+- **Not documented before the spec (now spec 39 §1, §3, §5, §6):**
   - personality firmware as a named, content-addressed program over the ISA;
   - which forward-program stages it parameterizes (ORIENT goals, ROUTE, STEER and SELECT policy, REALIZE voice and abstention);
   - how firmware identity appears in every trace and receipt;
@@ -273,8 +282,10 @@ Issue: #1726
 
     Personality is one class of firmware behavior. Every decision rule, parameter, tie break and trace is content-addressed and replayable. Coding firmware is a complete engineering procedure.
   - `docs/reconstruction/07_EXECUTION_CONTROL_GODEL_OODA.md`. These stay separate concerns: operation, program/recipe, orchestration, OODA (observe → orient → decide → act → observe consequence), typed feedback lanes, and Gödel extension. Gödel extension is typed incompleteness proposing a candidate calculus, program or operator, activated only on disjoint evidence.
-  - `contracts/authority-stack.json`: `personality_firmware`, `governance_boundary`, `knowledge_boundary`, `creative_extension`. It also states that prompts, internal cognition and generated output create observation state but no semantic attestations merely by being observed. That conflicts with this repository's archived spec 15, where responses self-witness; reconcile.
-- **Work:** reconcile those documents into this repository's binding specs, then implement firmware as content-addressed data the forward program loads, over the consolidated ISA (#951).
+  - `contracts/authority-stack.json`: `personality_firmware`, `governance_boundary`, `knowledge_boundary`, `creative_extension`. It also states that prompts, internal cognition and generated output create observation state but no semantic attestations merely by being observed. That conflicts with this repository's archived spec 15, where responses self-witness. Spec 39 §9 C1 records both positions for the inventor.
+- **Work:**
+  - ~~Reconcile those documents into this repository's binding specs~~ (spec 39).
+  - Implement firmware as content-addressed data the forward program loads, over the consolidated ISA (#951). Start with the default firmware (spec 39 §10), which names today's behaviour without changing any output.
 
 Related: #823, #951, #1420, #1708.
 
@@ -302,3 +313,8 @@ A component of that slice that fails is fixed in place. It is not replaced by a 
 
 1. ~~Relation rank~~: decided, read-time only (see A).
 3. **Wiktionary sense keys** when no Wikidata id exists. See H.
+4. **Personality firmware** (see K; `docs/specs/39_Personality_Firmware.md` §9):
+   - C1: whether responses and prompts self-witness as attestations (archived spec 15) or create only observation state (Laplace-Refactor authority stack).
+   - C2: whether SELECT may be a seeded stochastic draw (`spread`, `top_k`) or must be deterministic.
+   - C3: whether "Gödel engine" names the whole OODA loop or only the discovery lane.
+   - Open questions Q1–Q5.
