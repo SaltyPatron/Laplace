@@ -1093,6 +1093,14 @@ laplace_cognition_program_required(const LaplaceCognitionProgram *program)
     return program ? program->required : NULL;
 }
 
+Bitmapset *
+laplace_cognition_program_remaining(const LaplaceCognitionProgram *program)
+{
+    if (!program || !program->required)
+        return NULL;
+    return bms_difference(program->required, program->satisfied);
+}
+
 void
 laplace_cognition_program_receipt(const LaplaceCognitionProgram *program,
                                   LaplaceCognitionProgramReceipt *receipt)

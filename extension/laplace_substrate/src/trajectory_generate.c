@@ -1526,7 +1526,12 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     step_context = AllocSetContextCreate(walk_context, "forward query election",
                                          ALLOCSET_DEFAULT_SIZES);
     HTAB *geometry_table = geometry_summaries(intent, walk_context);
-    const Bitmapset *obligations = laplace_cognition_program_required(cognition);
+    /* An open conversational turn has no declared operation: its answer is the
+     * constituent that jointly grounds what the observation still requires. */
+    const bool open_turn =
+        !(intent && (intent->explicit_invocation || intent->relation_count > 0)) &&
+        !(output_relations &&
+          ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) > 0);
 
     for (int32 step = 1; step <= steps &&
          !(intent && (intent->ambiguous || intent->budget_exhausted ||
@@ -1548,6 +1553,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         MemoryContextReset(step_context);
         MemoryContextSwitchTo(step_context);
         CHECK_FOR_INTERRUPTS();
+        Bitmapset *obligations = laplace_cognition_program_remaining(cognition);
         candidate_index = new_id_index("forward candidate index", 128, step_context,
                                        sizeof(CandidateIndex));
 
@@ -1832,14 +1838,34 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                        candidate_count, retained_channel_count,
                        query_channel_count + projection_channel_count,
                        routing_hops, cognition);
-        if (output_count == 0)
+        /* STEER for an open turn: while no outputtable candidate grounds every
+         * remaining obligation, and routing budget remains, the field is routed
+         * one more hop rather than emitting a partial answer. The joint meeting
+         * of the observation's content is reached through the same typed SCAN,
+         * with each routed identity carrying its prompt ancestry. */
+        bool route_for_meeting = false;
+        if (open_turn && output_count > 0 && !bms_is_empty(obligations))
         {
-            if (!input ||
-                (semantic_hop_limit >= 0 && routing_hops >= semantic_hop_limit))
+            int need = bms_num_members(obligations), best = 0;
+            for (int i = 0; i < candidate_count; ++i)
             {
-                exhausted = true;
-                break;
+                if (!candidate_can_output(&candidates[i], intent))
+                    continue;
+                best = Max(best, candidates[i].query.positive_required_occurrences);
+                best = Max(best, candidates[i].query_traversal.positive_required_occurrences);
+                best = Max(best, candidates[i].projection.positive_required_occurrences);
             }
+            route_for_meeting = best < need;
+        }
+        const bool routing_budget =
+            input && !(semantic_hop_limit >= 0 && routing_hops >= semantic_hop_limit);
+        if (output_count == 0 && !routing_budget)
+        {
+            exhausted = true;
+            break;
+        }
+        if (output_count == 0 || (route_for_meeting && routing_budget))
+        {
             ++routing_hops;
             if (cognition)
                 laplace_cognition_program_note_route(cognition);
