@@ -1,5 +1,5 @@
--- An entity renders as itself: a type id as its registry label, content as its own
--- reconstruction (a codepoint, or the text its trajectory composes). A name a source
+-- An entity renders as itself: a type id as its registry label, a concept as the words
+-- a source says express it, content as its own reconstruction (a codepoint, or the text its trajectory composes). A name a source
 -- claims (HAS_NAME / HAS_NAME_ALIAS) is a realization used only when the entity's
 -- content does not reconstruct as text; it never replaces the content.
 CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
@@ -10,6 +10,8 @@ BEGIN ATOMIC
     SELECT COALESCE(
         (SELECT r.canonical FROM @extschema@.relation_registry() r WHERE r.type_id = p_id),
         (SELECT t.canonical FROM @extschema@.entity_type_registry() t WHERE t.type_id = p_id),
+        -- A concept renders as the words that express it (its content is an identifier).
+        realize._synset_lemma(p_id, NULL),
         -- Perfcache-backed: a valid tier-0 codepoint renders without any row.
         chr(realize.codepoint_for_id(p_id)),
         realize.render_text(p_id),

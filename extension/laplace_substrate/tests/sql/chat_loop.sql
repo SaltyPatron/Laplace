@@ -63,6 +63,7 @@ BEGIN
     VALUES
       (laplace.consensus_id(w_dog,   k_sense,   sense1),  w_dog,   k_sense,   sense1,  neutral + 200000000000, sharp_rd, 60000000, 3, now()),
       (laplace.consensus_id(sense1,  k_senseof, synset1), sense1,  k_senseof, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(w_dog,  k_sense, synset1), w_dog, k_sense, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
       -- two competing definitions: gloss1 leads, gloss2 is the runner-up
       (laplace.consensus_id(synset1, k_def,     gloss1),  synset1, k_def,     gloss1,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(synset1, k_def,     gloss2),  synset1, k_def,     gloss2,  neutral + 140000000000, sharp_rd, 60000000, 2, now()),
@@ -80,10 +81,13 @@ BEGIN
       -- in this fixture, so its surface abstains and 'd' speaks for synset1 --
       -- which also pins that the arm never falls through to the gloss.
       (laplace.consensus_id(w_d, k_sense, sense1),        w_d,     k_sense,   sense1,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_d, k_sense, synset1), w_d, k_sense, synset1, neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(w_c, k_sense, sense2),        w_c,     k_sense,   sense2,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(sense2, k_senseof, synset2),  sense2,  k_senseof, synset2, neutral + 150000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_c, k_sense, synset2), w_c, k_sense, synset2, neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(w_h, k_sense, sense3),        w_h,     k_sense,   sense3,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(sense3, k_senseof, synset3),  sense3,  k_senseof, synset3, neutral + 150000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_h, k_sense, synset3), w_h, k_sense, synset3, neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       -- translation members stay for the p_lang-driven arm (not walked when lang is NULL)
       (laplace.consensus_id(synset1, k_member,  w_dog),   synset1, k_member,  w_dog,   neutral + 100000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(synset2, k_member,  w_c),     synset2, k_member,  w_c,     neutral + 100000000000, sharp_rd, 60000000, 2, now()),

@@ -14,17 +14,16 @@ BEGIN ATOMIC
     -- Ranked in full, not capped: the render filter can reject any prefix, and a LIMIT
     -- here would turn "unrenderable" into "no name".
     WITH ranked AS MATERIALIZED (
+        -- The words a source says express the concept: word HAS_SENSE concept.
         SELECT hs.subject_id AS id,
                row_number() OVER (ORDER BY (lang.object_id IS NOT NULL) DESC,
                         consensus.eff_mu(hs.rating, hs.rd) DESC, hs.subject_id) AS rn
-        FROM laplace.v_consensus_unrefuted io
-        JOIN laplace.consensus hs ON hs.object_id = io.subject_id
-          AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        FROM laplace.v_consensus_unrefuted hs
         LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id
           AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
           AND lang.object_id = p_lang
-        WHERE io.object_id = p_id
-          AND io.type_id = laplace.relation_type_id('IS_SENSE_OF')
+        WHERE hs.object_id = p_id
+          AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
     ),
     lbl AS MATERIALIZED (
         SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s

@@ -112,6 +112,7 @@ functions/readback/render_text_fast.sql.in
 functions/readback/render_text_batch.sql.in
 functions/realize/realize_batch.sql.in
 functions/realize/resolve_name_batch.sql.in
+functions/realize/lexicalize_batch.sql.in
 functions/readback/render_batch.sql.in
 functions/converse/label_batch.sql.in
 functions/lexical/type_label_batch.sql.in

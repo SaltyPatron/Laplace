@@ -9,12 +9,14 @@ BEGIN ATOMIC
         SELECT u.id, u.ord
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
     ), batches AS MATERIALIZED (
-        SELECT realize.resolve_name_batch(p_ids) AS names,
+        SELECT realize.lexicalize_batch(p_ids) AS words,
+               realize.resolve_name_batch(p_ids) AS names,
                realize.render_text_batch(p_ids) AS bodies
     )
     SELECT COALESCE(array_agg(
                COALESCE(r.canonical,
                         t.canonical,
+                        b.words[i.ord],
                         chr(realize.codepoint_for_id(i.id)),
                         b.bodies[i.ord],
                         b.names[i.ord])

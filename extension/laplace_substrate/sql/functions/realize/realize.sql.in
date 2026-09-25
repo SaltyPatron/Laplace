@@ -34,6 +34,9 @@ BEGIN ATOMIC
     -- entity renders NULL and names 'English', a RelationType renders and names NULL,
     -- while the wolf synset renders 'wolf' and names NULL.
     SELECT COALESCE(
+        -- A concept's content is an identifier (an ILI); it is realized in language
+        -- by the words a source says express it.
+        realize._synset_lemma(p_id, p_lang),
         NULLIF(realize.render_text(p_id), ''),
         realize.resolve_name(p_id, p_lang),
         realize._translation(p_id, p_lang),

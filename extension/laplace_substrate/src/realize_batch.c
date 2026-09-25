@@ -7,10 +7,9 @@
  * matters):
  *
  *   COALESCE(
+ *     realize._synset_lemma(id, lang),  -- arm 0: lexicalization (word HAS_SENSE concept)
  *     NULLIF(realize.render_text(id), ''),  -- arm 1: exact self render
  *     realize._has_name(id, lang),      -- arm 2: first NON-EMPTY render
- *     realize._synset_lemma(id, lang),  -- arm 3: first NON-EMPTY render
- *     realize._canonical(id),           -- arm 4: resolve_name fallback, AS-IS
  *     realize._translation(id, lang),   -- arm 5: first NON-EMPTY render
  *     realize._defines(id))             -- arm 6: TOP-mu row, render AS-IS
  *
@@ -18,12 +17,9 @@
  *   - arms 2/3/5 filter candidates to non-empty renders BEFORE their LIMIT 1,
  *     so the batch walks each id's rank-ordered candidates and takes the first
  *     whose render is non-empty;
- *   - arms 4/6 have NO non-empty filter in the scalar: arm 4 returns the
- *     regexp-stripped canonical name as-is, arm 6 returns the render of the
+ *   - arm 6 has NO non-empty filter in the scalar: it returns the render of the
  *     single top-mu definition as-is (possibly NULL → overall NULL, possibly
  *     '' → '' is the final answer);
- *   - arm 3 joins plain consensus for the HAS_SENSE hop (only the IS_SENSE_OF
- *     edge goes through the unrefuted view), exactly as _realize_synset_lemma;
  *   - a NULL lang makes every lp flag false (LEFT JOIN on object_id = NULL
  *     never matches), identical to the scalar helpers;
  *   - abstention: unresolvable ids yield SQL NULL, never hex.
@@ -50,13 +46,13 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_realize_batch);
 PG_FUNCTION_INFO_V1(pg_laplace_resolve_name_batch);
+PG_FUNCTION_INFO_V1(pg_laplace_lexicalize_batch);
 
 /* ---- prepared plans, one per arm, kept across calls ---- */
 
 static SPIPlanPtr plan_has_name = NULL;
 static SPIPlanPtr plan_synset_lemma = NULL;
 static SPIPlanPtr plan_translation = NULL;
-static SPIPlanPtr plan_canonical = NULL;
 static SPIPlanPtr plan_defines = NULL;
 static SPIPlanPtr plan_render = NULL;
 
@@ -74,19 +70,19 @@ static const char *Q_HAS_NAME =
     "                      laplace.relation_type_id('HAS_NAME_ALIAS'))"
     " ORDER BY nm.subject_id, lp DESC, prim DESC, mu DESC, nm.object_id";
 
+/* Lexicalization: a concept is realized in language by the words a source says
+ * express it (word HAS_SENSE concept), strongest first, the requested language first. */
 static const char *Q_SYNSET_LEMMA =
-    "SELECT io.object_id, hs.subject_id,"
+    "SELECT hs.object_id, hs.subject_id,"
     "       (lang.object_id IS NOT NULL) AS lp,"
     "       consensus.eff_mu(hs.rating, hs.rd) AS mu"
-    " FROM laplace.v_consensus_unrefuted io"
-    " JOIN laplace.consensus hs ON hs.object_id = io.subject_id"
-    "   AND hs.type_id = laplace.relation_type_id('HAS_SENSE')"
+    " FROM laplace.v_consensus_unrefuted hs"
     " LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id"
     "   AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')"
     "   AND lang.object_id = $2"
-    " WHERE io.object_id = ANY($1)"
-    "   AND io.type_id = laplace.relation_type_id('IS_SENSE_OF')"
-    " ORDER BY io.object_id, lp DESC, mu DESC, hs.subject_id";
+    " WHERE hs.object_id = ANY($1)"
+    "   AND hs.type_id = laplace.relation_type_id('HAS_SENSE')"
+    " ORDER BY hs.object_id, lp DESC, mu DESC, hs.subject_id";
 
 static const char *Q_TRANSLATION =
     "SELECT m.subject_id, m.object_id,"
@@ -99,12 +95,6 @@ static const char *Q_TRANSLATION =
     " WHERE m.subject_id = ANY($1)"
     "   AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF')"
     " ORDER BY m.subject_id, lp DESC, mu DESC, m.object_id";
-
-static const char *Q_CANONICAL =
-    "SELECT n.id, regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\\1')"
-    " FROM laplace.canonical_names n"
-    " WHERE n.id = ANY($1) AND n.name LIKE 'substrate/%'"
-    " ORDER BY n.id";
 
 static const char *Q_DEFINES =
     "SELECT g.subject_id, g.object_id,"
@@ -187,12 +177,6 @@ typedef struct RenderEntry
  * same entity). The rows were equally valid; the choice was simply not reproducible.
  * Closing each ORDER BY on an id makes the winner a property of the data. */
 
-/* Canonical-name arm: id -> stripped name text (first row per id). */
-typedef struct CanonEntry
-{
-    IdKey key;
-    Datum text;                 /* text datum in SPI proc context */
-} CanonEntry;
 
 static void
 id_key(IdKey *key, Datum bytea_datum, const char *what)
@@ -325,16 +309,6 @@ first_nonempty(const ArmData *arm, const IdKey *key,
     return NULL;
 }
 
-static void
-run_name_arms(ArrayType *in_arr, Datum lang, bool lang_null,
-              ArmData *arm_name, ArmData *arm_lemma,
-              HTAB *render_ids, Datum **union_ids, int32 *un, int32 *ucap)
-{
-    run_arm(plan_has_name, PointerGetDatum(in_arr), lang, lang_null,
-            arm_name, render_ids, union_ids, un, ucap, "has_name");
-    run_arm(plan_synset_lemma, PointerGetDatum(in_arr), lang, lang_null,
-            arm_lemma, render_ids, union_ids, un, ucap, "synset_lemma");
-}
 
 static bool
 validate_id_array(ArrayType *arr, const char *operation)
@@ -390,8 +364,24 @@ render_union(Datum *union_ids, int32 un, const char *operation)
     return rendered;
 }
 
+static Datum label_batch(FunctionCallInfo fcinfo, bool with_names, const char *what);
+
 Datum
 pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
+{
+    return label_batch(fcinfo, true, "resolve_name_batch");
+}
+
+/* (ids bytea[], lang bytea) -> text[]: each concept's lexicalization (the best word a
+ * source says expresses it), NULL for ids nothing lexicalizes. */
+Datum
+pg_laplace_lexicalize_batch(PG_FUNCTION_ARGS)
+{
+    return label_batch(fcinfo, false, "lexicalize_batch");
+}
+
+static Datum
+label_batch(FunctionCallInfo fcinfo, bool with_names, const char *what)
 {
     MemoryContext caller = CurrentMemoryContext;
     ArrayType    *in_arr;
@@ -402,7 +392,6 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     bool          lang_null = true;
     bool          need_finish = false;
     HTAB         *render_ids;
-    HTAB         *canon;
     Datum        *union_ids;
     int32         un = 0, ucap;
     ArmData       arm_name, arm_lemma;
@@ -415,7 +404,7 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     in_arr = PG_GETARG_ARRAYTYPE_P(0);
-    if (!validate_id_array(in_arr, "resolve_name_batch"))
+    if (!validate_id_array(in_arr, what))
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
     if (!PG_ARGISNULL(1))
     {
@@ -425,60 +414,25 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     deconstruct_array(in_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &in_elems, &in_nulls, &n);
     if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
-        elog(ERROR, "resolve_name_batch: SPI_connect failed");
+        elog(ERROR, "%s: SPI_connect failed", what);
     ensure_name_plans();
 
-    render_ids = make_id_htab("resolve_name_batch render union",
+    render_ids = make_id_htab("label_batch render union",
                               sizeof(RenderEntry), Max(256, n * 2));
     ucap = Max(64, n * 2);
     union_ids = (Datum *) palloc(sizeof(Datum) * ucap);
-    run_name_arms(in_arr, lang, lang_null, &arm_name, &arm_lemma,
-                  render_ids, &union_ids, &un, &ucap);
-    rendered = render_union(union_ids, un, "resolve_name_batch");
-
-    /* THE CANONICAL ARM. realize.resolve_name's null-context branch is
-     * COALESCE(_has_name, _synset_lemma, _canonical) -- THREE arms -- and this batch
-     * carried only the first two, so it silently returned NULL where the scalar
-     * returned a name. Found by comparing the two over 2,000 tier-2 entities: 19
-     * non-null from the scalar, 18 from the batch, differing on one id that has no
-     * render and resolves canonically to 'CONTENT'. Anyone swapping the scalar for
-     * the batch to make a sweep affordable was losing canonical names.
-     *
-     * Same query and same "first row per id" rule realize_batch uses below. */
-    canon = make_id_htab("resolve_name_batch canonical", sizeof(CanonEntry), 256);
+    if (with_names)
+        run_arm(plan_has_name, PointerGetDatum(in_arr), lang, lang_null,
+                &arm_name, render_ids, &union_ids, &un, &ucap, "has_name");
+    else
     {
-        Oid   one[1] = { BYTEAARRAYOID };
-        Datum args[1] = { PointerGetDatum(in_arr) };
-        int   rc;
-
-        ensure_plan(&plan_canonical, Q_CANONICAL, 1, one);
-        rc = SPI_execute_plan(plan_canonical, args, NULL, true, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "resolve_name_batch: canonical arm failed: %s",
-                 SPI_result_code_string(rc));
-        for (uint64 r = 0; r < SPI_processed; r++)
-        {
-            HeapTuple   tup = SPI_tuptable->vals[r];
-            TupleDesc   td = SPI_tuptable->tupdesc;
-            bool        isnull;
-            Datum       in_id = SPI_getbinval(tup, td, 1, &isnull);
-            Datum       txt;
-            IdKey       ckey;
-            bool        found;
-            CanonEntry *ce;
-
-            if (isnull)
-                continue;
-            txt = SPI_getbinval(tup, td, 2, &isnull);
-            if (isnull)
-                continue;
-            id_key(&ckey, in_id, "canonical");
-            ce = (CanonEntry *) hash_search(canon, &ckey, HASH_ENTER, &found);
-            if (!found)
-                ce->text = datumCopy(txt, false, -1);
-        }
-        SPI_freetuptable(SPI_tuptable);
+        arm_name.by_id = make_id_htab("has_name unused", sizeof(ArmEntry), 32);
+        arm_name.cands = NULL;
+        arm_name.n = arm_name.cap = 0;
     }
+    run_arm(plan_synset_lemma, PointerGetDatum(in_arr), lang, lang_null,
+            &arm_lemma, render_ids, &union_ids, &un, &ucap, "lexicalization");
+    rendered = render_union(union_ids, un, what);
 
     out = (Datum *) palloc0(sizeof(Datum) * n);
     out_nulls = (bool *) palloc(sizeof(bool) * n);
@@ -501,21 +455,6 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
             out[i] = CStringGetTextDatum(label);
             MemoryContextSwitchTo(old);
             out_nulls[i] = false;
-        }
-        else
-        {
-            /* arm 3: canonical name text AS-IS, matching the scalar's third arm. */
-            CanonEntry *ce = (CanonEntry *) hash_search(canon, &key,
-                                                        HASH_FIND, NULL);
-
-            if (ce != NULL)
-            {
-                MemoryContext old = MemoryContextSwitchTo(caller);
-
-                out[i] = datumCopy(ce->text, false, -1);
-                MemoryContextSwitchTo(old);
-                out_nulls[i] = false;
-            }
         }
     }
 
@@ -551,7 +490,6 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     int32         input_render_count = 0;
     char        **input_rendered;
     ArmData       arm_name, arm_lemma, arm_trans, arm_def;
-    HTAB         *canon;
     char        **rendered;
     Datum        *out;
     bool         *out_nulls;
@@ -580,7 +518,6 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
         ensure_name_plans();
         ensure_plan(&plan_translation, Q_TRANSLATION, 2, two);
-        ensure_plan(&plan_canonical, Q_CANONICAL, 1, one);
         ensure_plan(&plan_defines, Q_DEFINES, 1, one);
     }
 
@@ -596,7 +533,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     /* ---- THE ARMS RUN ON THE RESIDUAL, NOT ON EVERY INPUT ----
      *
      * Arm 1 is the self render, so an input that renders never consults has_name,
-     * synset_lemma, translation, canonical or defines. Measured on 200 real object
+     * translation or defines. Measured on 200 real object
      * ids, 185 (92.5%) render directly -- so running all five arms over the whole
      * input array, and rendering every candidate they return, is work thrown away
      * for the overwhelming majority. realize.render_text_batch was 1,385 ms mean over
@@ -617,12 +554,18 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
          * ArmData structs for the ladder to search. That is what produced 4 wrong
          * labels out of 314 on the first attempt. */
         arm_name.by_id  = make_id_htab("has_name empty", sizeof(ArmEntry), 32);
-        arm_lemma.by_id = make_id_htab("synset_lemma empty", sizeof(ArmEntry), 32);
         arm_trans.by_id = make_id_htab("translation empty", sizeof(ArmEntry), 32);
         arm_def.by_id   = make_id_htab("defines empty", sizeof(ArmEntry), 32);
-        arm_name.cands = arm_lemma.cands = arm_trans.cands = arm_def.cands = NULL;
-        arm_name.n = arm_lemma.n = arm_trans.n = arm_def.n = 0;
-        arm_name.cap = arm_lemma.cap = arm_trans.cap = arm_def.cap = 0;
+        arm_name.cands = arm_trans.cands = arm_def.cands = NULL;
+        arm_name.n = arm_trans.n = arm_def.n = 0;
+        arm_name.cap = arm_trans.cap = arm_def.cap = 0;
+
+        /* A concept is realized in language through the words that express it
+         * (word HAS_SENSE concept); its own content is an identifier (an ILI), so
+         * this arm runs over every input and precedes the self render. Only
+         * concepts are HAS_SENSE objects, so for every other id it is one index miss. */
+        run_arm(plan_synset_lemma, PointerGetDatum(in_arr), lang, lang_null,
+                &arm_lemma, render_ids, &union_ids, &un, &ucap, "lexicalization");
 
         input_render_count = un;
         input_rendered = render_union(union_ids, un, "realize_batch inputs");
@@ -637,6 +580,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             if (in_nulls[i])
                 continue;
             id_key(&key, in_elems[i], "residual");
+            if (first_nonempty(&arm_lemma, &key, input_rendered, render_ids) != NULL)
+                continue;
             re = (RenderEntry *) hash_search(render_ids, &key, HASH_FIND, NULL);
             if (re == NULL || input_rendered[re->slot] == NULL
                 || input_rendered[re->slot][0] == '\0')
@@ -648,8 +593,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             ArrayType *resid_arr = construct_array(resid, nresid, BYTEAOID, -1,
                                                    false, TYPALIGN_INT);
 
-            run_name_arms(resid_arr, lang, lang_null, &arm_name, &arm_lemma,
-                          render_ids, &union_ids, &un, &ucap);
+            run_arm(plan_has_name, PointerGetDatum(resid_arr), lang, lang_null,
+                    &arm_name, render_ids, &union_ids, &un, &ucap, "has_name");
             run_arm(plan_translation, PointerGetDatum(resid_arr), lang, lang_null,
                     &arm_trans, render_ids, &union_ids, &un, &ucap, "translation");
             arm_input = resid_arr;
@@ -705,40 +650,6 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         SPI_freetuptable(SPI_tuptable);
     }
 
-    /* ---- canonical-name arm (text result, no rendering) ---- */
-    canon = make_id_htab("canonical", sizeof(CanonEntry), 256);
-    if (arm_input != NULL)
-    {
-        Datum args[1] = { PointerGetDatum(arm_input) };
-        int   rc = SPI_execute_plan(plan_canonical, args, NULL, true, 0);
-
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "realize_batch: canonical arm failed: %s",
-                 SPI_result_code_string(rc));
-        for (uint64 r = 0; r < SPI_processed; r++)
-        {
-            HeapTuple   tup = SPI_tuptable->vals[r];
-            TupleDesc   td = SPI_tuptable->tupdesc;
-            bool        isnull;
-            Datum       in_id = SPI_getbinval(tup, td, 1, &isnull);
-            Datum       txt;
-            IdKey       key;
-            bool        found;
-            CanonEntry *e;
-
-            if (isnull)
-                continue;
-            txt = SPI_getbinval(tup, td, 2, &isnull);
-            if (isnull)
-                continue;
-            id_key(&key, in_id, "canonical");
-            e = (CanonEntry *) hash_search(canon, &key, HASH_ENTER, &found);
-            if (!found)         /* first row per id (scalar returns first) */
-                e->text = datumCopy(txt, false, -1);
-        }
-        SPI_freetuptable(SPI_tuptable);
-    }
-
     /* Extend the retained render prefix with NEW candidates only. Re-rendering
      * the whole union would repeat every input closure even when no fallback
      * arm ran. Slots never move when render_union_add appends a new identity. */
@@ -763,13 +674,15 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     {
         IdKey       key;
         const char *label = NULL;
-        bool        have = false;
 
         out_nulls[i] = true;
         out[i] = (Datum) 0;
         if (in_nulls[i])
             continue;
         id_key(&key, in_elems[i], "input");
+
+        /* arm 0: LEXICALIZATION -- a concept renders as the words expressing it. */
+        label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
 
         /* arm 1: SELF RENDER, NULLIF '' -- CONTENT BEFORE NAME.
          *
@@ -792,38 +705,18 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             RenderEntry *re = (RenderEntry *) hash_search(render_ids, &key,
                                                           HASH_FIND, NULL);
 
-            if (re != NULL && rendered[re->slot] != NULL
+            if (label == NULL && re != NULL && rendered[re->slot] != NULL
                 && rendered[re->slot][0] != '\0')
                 label = rendered[re->slot];
         }
-        /* arms 2, 3: name then synset lemma, first non-empty render */
+        /* arm 2: an attested name, first non-empty render */
         if (label == NULL)
             label = first_nonempty(&arm_name, &key, rendered, render_ids);
-        if (label == NULL)
-            label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
-        /* arm 4: resolve_name's canonical fallback AS-IS, including empty.
-         * The scalar resolves names before considering translation; preserving
-         * that nested COALESCE order is required for identical projections. */
-        if (label == NULL)
-        {
-            CanonEntry *ce = (CanonEntry *) hash_search(canon, &key,
-                                                        HASH_FIND, NULL);
-
-            if (ce != NULL)
-            {
-                MemoryContext old = MemoryContextSwitchTo(caller);
-
-                out[i] = datumCopy(ce->text, false, -1);
-                MemoryContextSwitchTo(old);
-                out_nulls[i] = false;
-                have = true;
-            }
-        }
         /* arm 5: translation, only if resolve_name returned SQL NULL. */
-        if (label == NULL && !have)
+        if (label == NULL)
             label = first_nonempty(&arm_trans, &key, rendered, render_ids);
         /* arm 6: top-mu definition's render AS-IS (may be NULL; '' is a result) */
-        if (label == NULL && !have)
+        if (label == NULL)
         {
             ArmEntry *e = (ArmEntry *) hash_search(arm_def.by_id, &key,
                                                    HASH_FIND, NULL);

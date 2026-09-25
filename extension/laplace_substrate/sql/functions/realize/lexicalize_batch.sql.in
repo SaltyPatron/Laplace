@@ -1,0 +1,7 @@
+-- A concept renders in language through the words a source says express it
+-- (word HAS_SENSE concept): its own content is an identifier such as an ILI.
+CREATE OR REPLACE FUNCTION realize.lexicalize_batch(
+    p_ids bytea[], p_lang bytea DEFAULT NULL)
+    RETURNS text[]
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_lexicalize_batch';

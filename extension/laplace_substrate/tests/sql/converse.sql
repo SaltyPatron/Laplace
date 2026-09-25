@@ -87,8 +87,10 @@ BEGIN
     VALUES
       (laplace.consensus_id(w_dog,  k_sense,   sense1),  w_dog,  k_sense,   sense1,  neutral + 200000000000, sharp_rd, 60000000, 3, now()),
       (laplace.consensus_id(sense1, k_senseof, synset1), sense1, k_senseof, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(w_dog, k_sense, synset1), w_dog, k_sense, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
       (laplace.consensus_id(w_dog,  k_sense,   sense_b), w_dog,  k_sense,   sense_b, neutral + 250000000000, sharp_rd, 60000000, 4, now()),
       (laplace.consensus_id(sense_b, k_senseof, synset_b), sense_b, k_senseof, synset_b, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(w_dog, k_sense, synset_b), w_dog, k_sense, synset_b, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
       (laplace.consensus_id(synset1, k_def,    gloss1),  synset1, k_def,    gloss1,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(synset1, k_member, w_dog),   synset1, k_member, w_dog,   neutral + 100000000000, sharp_rd, 60000000, 2, now()),
       (laplace.consensus_id(synset1, k_member, w_p),     synset1, k_member, w_p,     neutral +  90000000000, sharp_rd, 60000000, 2, now()),
@@ -120,6 +122,7 @@ BEGIN
     VALUES
       (laplace.consensus_id(w_ja, k_sense, sense_ja),    w_ja,     k_sense,   sense_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(sense_ja, k_senseof, syn_ja), sense_ja, k_senseof, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
+      (laplace.consensus_id(w_ja, k_sense, syn_ja), w_ja, k_sense, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(w_ja, k_lang, lang_ja),      w_ja,     k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(sense_ja, k_lang, lang_ja),  sense_ja, k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now());
 
