@@ -53,7 +53,8 @@ public static class NativeRecipeCompiler
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
         bool identityTables = recipe.IdentityTables.Count != 0
-            || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null);
+            || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
+                || f.ObservationOf is not null || f.ScoreOf is not null);
         uint version = identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -169,6 +170,8 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.IdentityTable);
                 WriteText(writer, field.ObjectLiteral);
                 WriteText(writer, field.ContextLiteral);
+                WriteText(writer, field.ObservationOf);
+                WriteText(writer, field.ScoreOf);
             }
         }
 

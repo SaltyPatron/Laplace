@@ -87,7 +87,12 @@ public sealed record SourceRecipeField(
     string? ObjectLiteral = null,
     // A fixed context qualifying every claim of the field (the source property the
     // value belongs to, when the governed relation is shared by several properties).
-    string? ContextLiteral = null);
+    string? ContextLiteral = null,
+    // This integer is how many times the named sibling claim (its syntax path) was
+    // observed: games on that attestation, not a claim of its own.
+    string? ObservationOf = null,
+    // This value in [0,1] is the named sibling claim's score (a draw is 0.5).
+    string? ScoreOf = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode

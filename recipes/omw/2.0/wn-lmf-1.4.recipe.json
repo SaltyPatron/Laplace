@@ -303,9 +303,8 @@
       "syntaxPath": "Count",
       "propertyName": "count",
       "valueKind": "Integer",
-      "disposition": "Testimony",
-      "relationName": "HAS_SENSE_FREQUENCY",
-      "contextField": "language"
+      "disposition": "Occurrence",
+      "observationOf": "Sense/@synset"
     },
     {
       "syntaxPath": "Example",

@@ -11,6 +11,7 @@
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -64,7 +65,7 @@ struct field_rule {
     hash128_t relation, parent, entity_type, lexical_relation;
     double rank;
     std::unordered_map<std::string, std::string> aliases;
-    std::string identity_table, object_literal, context_literal;
+    std::string identity_table, object_literal, context_literal, observation_of, score_of;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -119,6 +120,10 @@ struct fact {
     bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
     bool has_subject = false;
     double rank = 1;
+    // A claim is a Glicko-2 game series: games observed, each scored in [0,1]
+    // (win 1, draw 0.5, loss 0). A binary claim is one game at 1 or 0.
+    int64_t games = 1;
+    double score = -1;   // < 0: the categorical score of `confirm`
 };
 struct content_form {
     hash128_t id{};
@@ -328,6 +333,13 @@ struct laplace_recipe_stream {
         const laplace_relation_def_t* definition = nullptr;
         double weight = laplace_relation_lookup(&f.relation, &definition) == 0 && definition
             ? trust : trust * f.rank;
+        if (f.games > 1 || f.score >= 0) {
+            const double score = f.score >= 0 ? f.score : (f.confirm ? 1.0 : 0.0);
+            const int64_t sum = static_cast<int64_t>(std::llround(score * 1e9)) * f.games;
+            check(laplace_attestation_aggregated_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
+                f.has_object ? 0 : 1, &witness, f.has_context ? &f.context : nullptr,
+                f.has_context ? 0 : 1, weight, f.games, sum, 0, &row), "graded testimony");
+        } else
         check(laplace_attestation_resolved_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
             f.has_object ? 0 : 1, &witness, f.has_context ? &f.context : nullptr,
             f.has_context ? 0 : 1, weight, f.confirm ? 1 : 0, 1, 0, &row), "testimony");
@@ -450,9 +462,14 @@ struct laplace_recipe_stream {
             start = bar + 1;
         }
     }
+    std::unordered_map<std::string, size_t> last_fact;
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
-        try { lower_field(stage, path, raw, subject_binding, attributes); }
+        const size_t before = facts.size();
+        try {
+            lower_field(stage, path, raw, subject_binding, attributes);
+            if (facts.size() > before) last_fact[path] = facts.size() - 1;
+        }
         catch (const std::runtime_error& e) {
             throw std::runtime_error("field " + path + " in " + record_context + ": " + e.what());
         }
@@ -463,6 +480,24 @@ struct laplace_recipe_stream {
         if (i == fields.end()) throw std::runtime_error("recipe has no field disposition");
         const auto& rule = i->second;
         if (rule.disposition & (1u << 10)) return;
+        if (!rule.observation_of.empty() || !rule.score_of.empty()) {
+            if (raw.empty()) return;
+            const std::string& of = rule.observation_of.empty() ? rule.score_of : rule.observation_of;
+            const auto target = last_fact.find(of);
+            if (target == last_fact.end()) throw std::runtime_error("no " + of + " claim precedes this " + (rule.observation_of.empty() ? "score" : "observation count"));
+            fact& claim = facts[target->second];
+            char* end = nullptr;
+            if (!rule.observation_of.empty()) {
+                const long long n = std::strtoll(raw.c_str(), &end, 10);
+                if (end == raw.c_str() || *end || n < 1) throw std::runtime_error("invalid observation count: " + raw);
+                claim.games = n;
+            } else {
+                const double v = std::strtod(raw.c_str(), &end);
+                if (end == raw.c_str() || *end || !(v >= 0 && v <= 1)) throw std::runtime_error("invalid score: " + raw);
+                claim.score = v;
+            }
+            return;
+        }
         const std::string* context_value = nullptr;
         if (!rule.context_field.empty()) context_value = context_of(rule, attributes);
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
@@ -716,6 +751,7 @@ struct laplace_recipe_stream {
             membership = true; membership_relation = route.range_relation;
         }
         facts.clear();
+        last_fact.clear();
         scope_attributes = &record.attributes;
         for (const auto& a : record.attributes) {
             // Group comment lines vary by corpus (sent_id, newdoc, translit, genre...).
@@ -841,7 +877,10 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if ((f.pair_mode != 0 || !f.relation_field.empty()) && f.relation_resolver == 0)
                     throw std::runtime_error("dynamic relation requires a declared resolver at " + f.path);
             }
-            if (rcp7) { f.identity_table = r.text(); f.object_literal = r.text(); f.context_literal = r.text(); }
+            if (rcp7) {
+                f.identity_table = r.text(); f.object_literal = r.text(); f.context_literal = r.text();
+                f.observation_of = r.text(); f.score_of = r.text();
+            }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;
