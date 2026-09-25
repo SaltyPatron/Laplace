@@ -134,10 +134,8 @@ public sealed record ChessTrajectoryRecord : ITrunkRootRecord, IIngestCompletion
     public static ChessTrajectoryRecord ForPlayer(Hash128 playerId, string name) =>
         new(null, playerId, name);
 
-    public Hash128 CompletionAttestationTypeId => Game is null
-        ? default : IngestUnitCompletion.RelationTypeId(21);
-    public Hash128 CompletionAttestationId => Game is null ? default
-        : IngestUnitCompletion.AttestationId(TrunkRootId, ChessVocabulary.TrajectorySourceId, 21);
+    public IngestUnitCompletionKey? Completion => Game is null ? null
+        : IngestUnitCompletion.Key(TrunkRootId, ChessVocabulary.TrajectorySourceId, 21);
 
     public Hash128 TrunkRootId => Game is { } game
         ? ChessTrajectoryDecomposer.MarkerId(game.LineId)

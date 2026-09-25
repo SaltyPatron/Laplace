@@ -41,27 +41,6 @@ public static class NpgsqlIngestOps
             p => p.AddWithValue(NpgsqlDbType.Uuid, runId), ct: ct, label: "verified_artifact_journal").ConfigureAwait(false);
     }
 
-    public static async Task<bool> EvidenceExistsForTypeAndSourceAsync(
-        NpgsqlDataSource ds, byte[] sourceId, byte[] typeId, CancellationToken ct = default)
-    {
-        await using var conn = await ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await EvidenceExistsForTypeAndSourceAsync(conn, sourceId, typeId, ct).ConfigureAwait(false);
-    }
-
-    public static async Task<bool> EvidenceExistsForTypeAndSourceAsync(
-        NpgsqlConnection conn, byte[] sourceId, byte[] typeId, CancellationToken ct = default)
-    {
-        var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT ops.evidence_count(p_type => @type, p_source => @source) > 0
-            """,
-            p =>
-            {
-                p.Add("type", NpgsqlDbType.Bytea).Value = typeId;
-                p.Add("source", NpgsqlDbType.Bytea).Value = sourceId;
-            }, ct: ct, label: "evidence_exists_type_source").ConfigureAwait(false);
-        return v is true;
-    }
-
     public static Task AnalyzeCoreWriteTablesAsync(
         NpgsqlDataSource ds, CancellationToken ct = default) =>
         NpgsqlRead.ExecuteNonQueryAsync(ds, """
@@ -204,19 +183,17 @@ public static class NpgsqlIngestOps
         return rows;
     }
 
-    public static async Task<bool> LayerMarkedCompleteAsync(
-        NpgsqlConnection conn, int layer, string sourceKey, CancellationToken ct = default)
+    /// <summary>Has the source witness completed the layer (laplace.ingest_layer_completion)?</summary>
+    public static async Task<bool> LayerCompletedAsync(
+        NpgsqlConnection conn, int layer, Hash128 sourceId, CancellationToken ct = default)
     {
-        var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT ops.evidence_count(
-                p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || @layer::text || '/v1'),
-                p_source => laplace.source_id(@src)) > 0
-            """,
+        var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn,
+            "SELECT ops.layer_completed(@src, @layer)",
             p =>
             {
                 p.AddWithValue("layer", layer);
-                p.AddWithValue("src", sourceKey);
-            }, ct: ct, label: "layer_marked_complete").ConfigureAwait(false);
+                p.AddWithValue("src", sourceId.ToBytes());
+            }, ct: ct, label: "layer_completed").ConfigureAwait(false);
         return v is true;
     }
 

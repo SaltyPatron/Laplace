@@ -1,10 +1,10 @@
 -- evict_source: lawful retraction + refold of one SOURCE's testimony (GH #508).
 --
 -- The evictable unit is the source. Attestation rows carry no version and their
--- context slot is provenance; versions never coexist (markers gate each lane to one
--- derivation), so "evict version v" and "evict the source's testimony" are the same
+-- context slot is provenance; versions never coexist (completion state gates each
+-- lane to one derivation), so "evict version v" and "evict the source's testimony" are the same
 -- operation — eviction IS the version transition: evict, then re-run the lane at
--- Version=N+1 and the hydrator re-derives everything the deleted markers gated.
+-- Version=N+1 and the hydrator re-derives everything the cleared completions gated.
 --
 -- Steps, per relation-type partition, per batch (one transaction each, COMMIT +
 -- RAISE LOG progress — modeled on highway_mask_rebuild / highway_mask_drain):
@@ -29,11 +29,11 @@
 --       exists for (deposit only OR-accumulates; eviction can remove an entity's
 --       last governed edge) — and drain via highway_mask_drain (p_drain), whose
 --       refresh recomputes masks from scratch and can therefore clear bits.
---   (e) The source's derivation gates, re-derived from presence probes on re-ingest
---       are deleted along with their physicality rows, so the lane's bitmap probe
---       re-yields every unit at the next run. Content entities are NEVER deleted —
---       content the lane minted (positions, tokens, scalars) is valid shared
---       content under the identity law. Physicalities carry no source attribution
+--   (e) The source's completion state (laplace.ingest_unit_completion and
+--       laplace.ingest_layer_completion rows under its witness id) is cleared before
+--       any evidence is deleted, so the lane re-yields every unit at the next run.
+--       Content entities are NEVER deleted — content the lane minted (positions,
+--       tokens, scalars) is valid shared content under the identity law. Physicalities carry no source attribution
 --       by design (geometry is content identity, not testimony): a trajectory
 --       linestring is a pure deterministic function of its entity's constituents,
 --       stays byte-correct across versions, and re-derivation re-deposits it
@@ -75,8 +75,8 @@ DECLARE
     evidence_total bigint := 0;
     refold_total   bigint := 0;
     culled_total   bigint := 0;
-    marker_total   bigint := 0;
-    file_marker_total bigint := 0;
+    layer_completion_total bigint := 0;
+    unit_completion_total  bigint := 0;
     replay_total   bigint := 0;
     t0             timestamptz := clock_timestamp();
 BEGIN
@@ -105,25 +105,6 @@ BEGIN
         ALTER COLUMN consensus_leaf SET NOT NULL;
     CREATE INDEX IF NOT EXISTS _evict_cells_leaf_idx
         ON _evict_cells (consensus_leaf);
-
-    -- File checkpoints are keyed by file identity, not the decomposer source. The
-    -- ingest journals are the ownership edge source eviction uses to find them.
-    -- context_id is the vendor owner on new markers; NULL admits legacy markers.
-    CREATE TEMP TABLE IF NOT EXISTS _evict_file_markers (
-        file_source_id bytea NOT NULL,
-        marker_type_id bytea NOT NULL,
-        owner_source_id bytea NOT NULL,
-        PRIMARY KEY (file_source_id, marker_type_id, owner_source_id));
-    TRUNCATE _evict_file_markers;
-    INSERT INTO _evict_file_markers
-        (file_source_id, marker_type_id, owner_source_id)
-    SELECT DISTINCT f.file_id,
-           realize.canonical_id(
-               'substrate/type/HasLayerCompleted/' || r.layer::text || '/v1'),
-           r.source_id
-    FROM laplace.ingest_run_journal r
-    JOIN laplace.ingest_file_journal f ON f.run_id = r.run_id
-    WHERE r.source_id = p_source AND f.file_id IS NOT NULL;
 
     IF p_relations IS NOT NULL THEN
         rels := p_relations;
@@ -167,18 +148,9 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Match ConsensusAccumulatingWriter's bounded operational namespace.
+    -- Match ConsensusAccumulatingWriter's operational namespace.
     -- These rows prove admission; they never supply rating observations.
-    SELECT array_agg(type_id) INTO operational_types
-    FROM (
-        SELECT realize.canonical_id('substrate/type/HasFileMetadata/v1') AS type_id
-        UNION ALL
-        SELECT realize.canonical_id('substrate/type/HasLayerCompleted/' || layer::text || '/v1')
-        FROM generate_series(0, 255) AS layers(layer)
-        UNION ALL
-        SELECT realize.canonical_id('substrate/type/HasUnitCompleted/' || layer::text || '/v1')
-        FROM generate_series(0, 255) AS units(layer)
-    ) marker_types;
+    operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
 
     SELECT COALESCE(array_agg(candidate ORDER BY ordinal), ARRAY[]::bytea[]) INTO rels
     FROM unnest(rels) WITH ORDINALITY AS selected(candidate, ordinal)
@@ -207,7 +179,7 @@ BEGIN
 
     -- Replay claims are applied source state. Keeping them after retraction makes a
     -- deterministic re-derive silently no-op. Invalidate replay first, before any
-    -- completion receipt or evidence can be deleted, so an interrupted eviction
+    -- completion row or evidence can be deleted, so an interrupted eviction
     -- admits repair of every row removed so far. Historical NULL-owned rows cannot
     -- be attributed safely and intentionally remain untouched.
     DELETE FROM laplace.ingest_flush_journal receipt
@@ -220,46 +192,19 @@ BEGIN
     GET DIAGNOSTICS replay_total = ROW_COUNT;
     IF replay_total > 0 THEN COMMIT; END IF;
 
-    -- Per-file completion attestations are ops markers and never enter consensus, so
-    -- retracting them needs no refold. The literal type keeps LIST pruning intact.
-    FOR rel IN SELECT DISTINCT marker_type_id FROM _evict_file_markers LOOP
-        LOOP
-            EXECUTE format($q$
-                WITH pick AS (
-                    SELECT a.id, a.subject_id
-                    FROM laplace.attestations a
-                    JOIN _evict_file_markers m
-                      ON m.marker_type_id = %L::bytea
-                     AND m.file_source_id = a.source_id
-                     AND (a.context_id = m.owner_source_id OR a.context_id IS NULL)
-                    WHERE a.type_id = %L::bytea
-                    LIMIT %s),
-                del AS (
-                    DELETE FROM laplace.attestations a
-                    USING pick
-                    WHERE a.type_id = %L::bytea
-                      AND a.id = pick.id AND a.subject_id = pick.subject_id
-                    RETURNING 1)
-                SELECT count(*) FROM del
-            $q$, rel, rel, p_batch, rel)
-            INTO n;
+    -- Completion state belongs to the witness. Any retraction invalidates it, even
+    -- when p_relations selected only part of the testimony. Commit the invalidation
+    -- before the first evidence deletion: an interrupted later batch must never leave
+    -- a completion row that hides partially retracted output.
+    DELETE FROM laplace.ingest_unit_completion WHERE witness_id = p_source;
+    GET DIAGNOSTICS unit_completion_total = ROW_COUNT;
+    DELETE FROM laplace.ingest_layer_completion WHERE witness_id = p_source;
+    GET DIAGNOSTICS layer_completion_total = ROW_COUNT;
+    IF unit_completion_total > 0 OR layer_completion_total > 0 THEN COMMIT; END IF;
 
-            EXIT WHEN n = 0;
-            file_marker_total := file_marker_total + n;
-            RAISE LOG 'evict_source: % file checkpoint(s) deleted (running %) — %s elapsed',
-                n, file_marker_total,
-                round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
-            COMMIT;
-        END LOOP;
-    END LOOP;
-
-    -- Operational receipts are owned by the actual decomposer source. Retract
-    -- them even when p_relations selected only rated testimony: any source
-    -- retraction invalidates its completion claims. Commit this invalidation before
-    -- the first durable evidence deletion: an interrupted later batch must never
-    -- leave a completion receipt that hides partially retracted output. The
-    -- transient-evidence refusal above still runs before any mutation.
-    -- No rating fold is meaningful.
+    -- Operational rows (file metadata) are owned by the actual decomposer source.
+    -- Retract them even when p_relations selected only rated testimony. No rating
+    -- fold is meaningful.
     LOOP
         WITH pick AS (
             SELECT a.id, a.type_id, a.subject_id
@@ -278,7 +223,7 @@ BEGIN
         COMMIT;
     END LOOP;
     IF operational_total > 0 THEN
-        RAISE LOG 'evict_source: % owned operational receipt(s) removed', operational_total;
+        RAISE LOG 'evict_source: % owned operational row(s) removed', operational_total;
     END IF;
 
     FOREACH rel IN ARRAY COALESCE(rels, ARRAY[]::bytea[]) LOOP
@@ -391,10 +336,9 @@ BEGIN
         END LOOP;
     END LOOP;
 
-    -- (e) marker entities: content entities are source-independent and are
-    -- never deleted by source eviction. Sources witness through attestations,
-    -- which the evidence lanes above already remove; derivation gates are
-    -- re-derived from presence probes on re-ingest.
+    -- Content entities are source-independent and are never deleted by source
+    -- eviction. Sources witness through attestations, which the evidence lanes
+    -- above already remove.
 
 
     -- (d) drain the mask-repair queue through the existing machinery (refresh
@@ -403,11 +347,10 @@ BEGIN
         CALL laplace.highway_mask_drain(p_batch);
     END IF;
 
-    RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % marker(s) removed, % file checkpoint(s) removed, % replay claim(s) removed in %s',
+    RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % layer completion(s) removed, % unit completion(s) removed, % replay claim(s) removed in %s',
         encode(p_source, 'hex'), evidence_total, refold_total, culled_total,
-        marker_total, file_marker_total, replay_total,
+        layer_completion_total, unit_completion_total, replay_total,
         round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
 
     DROP TABLE _evict_cells;
-    DROP TABLE _evict_file_markers;
 END $$;

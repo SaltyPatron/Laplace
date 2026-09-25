@@ -87,7 +87,7 @@ public class SourceGenerationRecipe
         double trust = Laplace.Decomposers.Abstractions.SourceTrust.ForClass(
             SubstrateCanonicalIds.TrustClass(trustClass));
         int layer = root.TryGetProperty("layerOrder", out var layerValue) ? layerValue.GetInt32() : 0;
-        if (layer is < 0 or > Laplace.Ingestion.LayerCompletion.MaxMarkedLayer)
+        if (layer is < 0 or > Laplace.Ingestion.LayerCompletion.MaxLayer)
             throw new InvalidDataException("Source generation layer is outside the supported completion range.");
         string[] aliases = root.TryGetProperty("aliases", out var aliasValues)
             ? aliasValues.EnumerateArray().Select(static item => item.GetString() ?? "").ToArray() : [];

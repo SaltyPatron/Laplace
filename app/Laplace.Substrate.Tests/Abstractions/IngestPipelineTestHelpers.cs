@@ -56,22 +56,18 @@ internal static class IngestPipelineTestHelpers
         changes.Sum(c => (long)c.Attestations.Length +
             (c.IntentStages.IsDefaultOrEmpty ? 0L : c.IntentStages.Sum(s => (long)s.AttestationCount)));
 
-    /// <summary>Per-file completion markers + file-metadata edges are ops provenance, not
-    /// distributional attestations — the Pillar-3a "zero attestations" gate excludes them.</summary>
-    internal static bool IsOpsMarker(Hash128 typeId)
-    {
-        if (typeId == FileEntity.MetadataRelationTypeId) return true;
-        for (int layer = 0; layer <= Laplace.Ingestion.LayerCompletion.MaxMarkedLayer; layer++)
-            if (typeId == Laplace.Ingestion.LayerCompletion.RelationTypeId(layer)) return true;
-        return false;
-    }
+    /// <summary>File-metadata edges are ops provenance, not distributional attestations —
+    /// the Pillar-3a "zero attestations" gate excludes them. Completion is never an
+    /// attestation at all.</summary>
+    internal static bool IsOpsMarker(Hash128 typeId) => typeId == FileEntity.MetadataRelationTypeId;
 
     internal static long NonMarkerAttestationCount(IEnumerable<SubstrateChange> changes) =>
         changes.Sum(c => (long)c.Attestations.Count(a => !IsOpsMarker(a.TypeId)) +
             (c.IntentStages.IsDefaultOrEmpty ? 0L : c.IntentStages.Sum(s => (long)s.AttestationCount)));
 
-    internal static long MarkerAttestationCount(IEnumerable<SubstrateChange> changes) =>
-        changes.Sum(c => (long)c.Attestations.Count(a => IsOpsMarker(a.TypeId)));
+    /// <summary>Unit completions the changes record (per-file completion state).</summary>
+    internal static long UnitCompletionCount(IEnumerable<SubstrateChange> changes) =>
+        changes.Sum(c => c.UnitCompletions.IsDefaultOrEmpty ? 0L : c.UnitCompletions.Length);
 
     internal static int ExpectedExistenceRoundChunks(int rowCount, int probeChunkSize) =>
         rowCount == 0 ? 0 : (rowCount + probeChunkSize - 1) / probeChunkSize;

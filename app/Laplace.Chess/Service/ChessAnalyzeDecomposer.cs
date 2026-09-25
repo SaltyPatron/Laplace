@@ -93,8 +93,7 @@ public sealed class ChessAnalyzeDecomposer
 /// </summary>
 public sealed record ChessAnalyzeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
-    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(21);
-    public Hash128 CompletionAttestationId =>
-        IngestUnitCompletion.AttestationId(TrunkRootId, ChessAnalyze.SourceId, 21);
+    public IngestUnitCompletionKey? Completion =>
+        IngestUnitCompletion.Key(TrunkRootId, ChessAnalyze.SourceId, 21);
     public Hash128 TrunkRootId => ChessVocabulary.AnalysisMarkerId(Game.PlayingId, ChessAnalyze.Version);
 }

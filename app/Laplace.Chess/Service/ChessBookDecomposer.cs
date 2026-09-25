@@ -86,12 +86,11 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         if (reObservePresent || ContainmentReader is not { } reader || records.Count == 0)
             return records;
 
-        var ids = records.Select(static record => record.CompletionAttestationId).ToArray();
-        var present = await reader.PresentAttestationIdsAsync(
-            IngestUnitCompletion.RelationTypeId(20), ids, ct).ConfigureAwait(false);
+        var keys = records.Select(static record => record.CompletionKey).ToArray();
+        var present = await reader.CompletedUnitsAsync(keys, ct).ConfigureAwait(false);
         var novel = new List<ChessBookRecord>(records.Count);
         for (int i = 0; i < records.Count; i++)
-            if (!present.Contains(ids[i])) novel.Add(records[i]);
+            if (!present.Contains(keys[i])) novel.Add(records[i]);
         return novel;
     }
 
@@ -477,12 +476,12 @@ public sealed record ChessBookRecord(
     internal Hash128 RootId { get; init; }
     internal Hash128 LineId { get; init; }
     // The existing semantic root can be quoted with distinct commentary. Bind
-    // the operational receipt to both actual text inputs without changing the
+    // the unit completion to both actual text inputs without changing the
     // playing, line, paragraph, or testimony identities.
     internal Hash128 CompletionContextId => Hash128.OfCanonical(
         $"chess/book-completion-input/v1/{RootId}/{ContentEmitter.RootId(Context)}/{ContentEmitter.RootId(GameText ?? string.Empty)}");
-    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(20);
-    public Hash128 CompletionAttestationId => IngestUnitCompletion.AttestationId(
+    internal IngestUnitCompletionKey CompletionKey => IngestUnitCompletion.Key(
         RootId, ChessVocabulary.BookSourceId, 20, CompletionContextId);
+    public IngestUnitCompletionKey? Completion => CompletionKey;
     public Hash128 TrunkRootId => RootId;
 }

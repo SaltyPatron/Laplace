@@ -171,11 +171,11 @@ public sealed partial class NpgsqlSubstrateWriter
 
     /// <summary>
     /// Tier-0 completeness gate, resolved ONCE per bulk run: true iff the
-    /// UnicodeDecomposer L0 HasLayerCompleted marker exists in the target DB.
+    /// UnicodeDecomposer has completed layer 0 in the target DB.
     /// While true, every tier-0 entity id is present by definition (the t0
     /// space is closed and fully seeded — UCD single-origin law) and skips
     /// the presence probe client-side. Conservative by construction: absent
-    /// marker (fresh DB, mid-unicode-seed) leaves the gate off and every t0
+    /// completion (fresh DB, mid-unicode-seed) leaves the gate off and every t0
     /// row probes as before. Entities only — t0 physicalities are NOT
     /// guaranteed 1:1 (projections land after identity content).
     /// </summary>
@@ -199,7 +199,7 @@ public sealed partial class NpgsqlSubstrateWriter
         _tier0LayerComplete = await QueryTier0LayerCompleteAsync(ct);
         if (_tier0LayerComplete)
             _log.LogInformation(
-                "WS_APPLY tier-0 gate ON: unicode L0 layer-complete marker present — "
+                "WS_APPLY tier-0 gate ON: unicode L0 layer completion present — "
                 + "tier-0 entity ids answer presence client-side, zero probes");
         // Attestation preload (~429s / 85M) is banned in-band.
         if (EnvFlag.IsSet("LAPLACE_PRESENCE_PRELOAD"))
@@ -279,9 +279,8 @@ public sealed partial class NpgsqlSubstrateWriter
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT ops.evidence_count("
-            + "p_type => realize.canonical_id('substrate/type/HasLayerCompleted/0/v1'), "
-            + "p_source => laplace.source_id('UnicodeDecomposer')) > 0";
+            "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion "
+            + "WHERE witness_id = laplace.source_id('UnicodeDecomposer') AND layer = 0)";
         return await cmd.ExecuteScalarAsync(ct) is true;
     }
 
@@ -424,6 +423,7 @@ public sealed partial class NpgsqlSubstrateWriter
         IReadOnlyList<Hash128> workingSetSources,
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation,
+        IngestCompletionRows completions,
         CancellationToken ct)
     {
         using var preparationDiagnostic = MeasureApplyPhase("native-tuples-and-merge-preparation");
@@ -614,7 +614,18 @@ public sealed partial class NpgsqlSubstrateWriter
                 if (replay is not null)
                 {
                     int replayKind = Convert.ToInt32(replay);
-                    await tx.RollbackAsync(CancellationToken.None);
+                    if (replayKind == 1 && !completions.IsEmpty)
+                    {
+                        // The journal proves this working set's evidence committed, so
+                        // its completion state is owed; record it without re-admission.
+                        await completions.InsertAsync(conn, tx, ct).ConfigureAwait(false);
+                        rtJournal++;
+                        await CommitMeasuredAsync(tx, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await tx.RollbackAsync(CancellationToken.None);
+                    }
                     if (replayKind == 2)
                         throw new LegacyReplayRequiresReconciliationException(
                             legacyWorkingSetToken!.Value);
@@ -639,6 +650,11 @@ public sealed partial class NpgsqlSubstrateWriter
                             conn, tx, token, workingSetSource, workingSetSources,
                             receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
                         rtJournal++;
+                        if (!completions.IsEmpty)
+                        {
+                            await completions.InsertAsync(conn, tx, ct).ConfigureAwait(false);
+                            rtJournal++;
+                        }
                         await CommitMeasuredAsync(tx, ct).ConfigureAwait(false);
                         if (epochRoute)
                         {
@@ -1159,6 +1175,16 @@ public sealed partial class NpgsqlSubstrateWriter
                         Rows = acceptedRows,
                     }, ct);
                 participantDiagnostic?.Complete();
+            }
+
+            // Completion state commits with the control transaction that accepts this
+            // evidence: a failed or rolled-back admission leaves no completion row.
+            if (!completions.IsEmpty)
+            {
+                using var completionDiagnostic = MeasureApplyPhase("completion-state");
+                await completions.InsertAsync(conn, tx, ct).ConfigureAwait(false);
+                rtJournal++;
+                completionDiagnostic?.Complete();
             }
 
             await CommitMeasuredAsync(tx, ct);

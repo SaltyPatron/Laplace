@@ -38,11 +38,7 @@ SELECT EXISTS(
 
     $q = @"
 
-SELECT ops.evidence_count(
-
-  p_type => realize.canonical_id('substrate/type/HasLayerCompleted/$Layer/v1'),
-
-  p_source => laplace.source_id('$Src')) > 0
+SELECT ops.layer_completed(laplace.source_id('$Src'), $Layer)
 
 "@
 

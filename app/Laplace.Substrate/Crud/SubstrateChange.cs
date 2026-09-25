@@ -21,6 +21,14 @@ public sealed record SubstrateChange(
     /// relation weight, or the first selected placement.</summary>
     public ImmutableDictionary<Hash128, double> PhysicalitySourcePriors { get; init; } =
         ImmutableDictionary<Hash128, double>.Empty;
+    /// <summary>Source units this change completes. Operational state written in the
+    /// control transaction that accepts this change's evidence; never testimony.</summary>
+    public ImmutableArray<IngestUnitCompletionKey> UnitCompletions { get; init; } = [];
+    /// <summary>Source layers this change completes (a full successful extraction).</summary>
+    public ImmutableArray<IngestLayerCompletionKey> LayerCompletions { get; init; } = [];
+
+    internal bool HasCompletions =>
+        !UnitCompletions.IsDefaultOrEmpty || !LayerCompletions.IsDefaultOrEmpty;
 
     public SubstrateChange WithSourcePrior(Hash128 sourceId, double sourceTrust)
     {
@@ -46,6 +54,43 @@ public sealed record SubstrateChange(
     {
         if (!double.IsFinite(sourceTrust) || sourceTrust < 0 || sourceTrust > 1)
             throw new ArgumentOutOfRangeException(nameof(sourceTrust), "source prior must be finite and in [0,1]");
+    }
+}
+
+/// <summary>
+/// One completed source unit: the source witness that owns it, the unit's identity,
+/// the ingest layer, and the unit's recipe/generation digest where the unit is
+/// versioned. Recorded in laplace.ingest_unit_completion, never as an attestation.
+/// </summary>
+public readonly record struct IngestUnitCompletionKey(
+    Hash128 WitnessId, Hash128 UnitId, int Layer, Hash128? Digest = null)
+{
+    public const int MaxLayer = byte.MaxValue;
+
+    public IngestUnitCompletionKey Validate()
+    {
+        if ((uint)Layer > MaxLayer)
+            throw new ArgumentOutOfRangeException(nameof(Layer), Layer, $"ingest layer must be in 0..{MaxLayer}");
+        if (WitnessId == default || UnitId == default)
+            throw new ArgumentException("unit completion requires a witness and a unit identity");
+        return this;
+    }
+}
+
+/// <summary>
+/// One completed source layer: every admitted unit of the witness at that layer applied.
+/// Recorded in laplace.ingest_layer_completion, never as an attestation.
+/// </summary>
+public readonly record struct IngestLayerCompletionKey(Hash128 WitnessId, int Layer)
+{
+    public IngestLayerCompletionKey Validate()
+    {
+        if ((uint)Layer > IngestUnitCompletionKey.MaxLayer)
+            throw new ArgumentOutOfRangeException(nameof(Layer), Layer,
+                $"ingest layer must be in 0..{IngestUnitCompletionKey.MaxLayer}");
+        if (WitnessId == default)
+            throw new ArgumentException("layer completion requires a witness identity");
+        return this;
     }
 }
 

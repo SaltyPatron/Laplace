@@ -152,7 +152,7 @@ public sealed partial class NpgsqlSubstrateWriter
         Hash128? workingSetToken, Hash128? legacyWorkingSetToken, Hash128? legacySingletonToken,
         Hash128? workingSetSource, IReadOnlyList<Hash128> workingSetSources,
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
-        WorkingSetReconciliation? reconciliation, CancellationToken ct)
+        WorkingSetReconciliation? reconciliation, IngestCompletionRows completions, CancellationToken ct)
     {
         using var connectionDiagnostic = MeasureApplyPhase("connection-and-apply-lock");
         await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -164,6 +164,7 @@ public sealed partial class NpgsqlSubstrateWriter
         return await ApplyPreparedStagesCoreAsync(
             connection, transaction, epochRoute, stages, workingSetToken,
             legacyWorkingSetToken, legacySingletonToken,
-            workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct).ConfigureAwait(false);
+            workingSetSource, workingSetSources, transactionParticipant, reconciliation,
+            completions, ct).ConfigureAwait(false);
     }
 }

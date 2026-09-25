@@ -64,7 +64,7 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
         {
             // A bare content record has no physical file occurrence to compose.
             Hash128 legacyFileRoot = record.SourceId != default ? record.SourceId : contentRoot;
-            Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, legacyFileRoot, LayerOrder);
+            Laplace.Ingestion.LayerCompletion.RecordFile(builder, legacyFileRoot, DocumentSource.SourceId, LayerOrder);
             return;
         }
 
@@ -91,7 +91,7 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
             throw new InvalidOperationException(
                 "DocumentIngestHandler: extracted document identity changed between open and compose");
 
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(
+        Laplace.Ingestion.LayerCompletion.RecordFile(
             builder,
             file.FileId,
             DocumentSource.SourceId,

@@ -279,7 +279,7 @@ def parse_audit_layer_map(text: str) -> dict[str, int] | None:
 
 
 def expected_audit_layer_map(knowledge: list[str]) -> dict[str, int]:
-    """Sequential HasLayerCompleted ordinals: iso639=1, then knowledge sources in order."""
+    """Sequential layer-completion ordinals: iso639=1, then knowledge sources in order."""
     out: dict[str, int] = {"iso639": 1}
     for i, cli in enumerate(knowledge, start=2):
         out[cli] = i
@@ -506,8 +506,6 @@ _LEGACY_TYPE_PATH = re.compile(r"substrate/type/[A-Z]")
 _TYPE_IDENTITY_CARVEOUTS = (
     "substrate/type/grammar/",
     "substrate/type/HasFileMetadata/",
-    "substrate/type/HasLayerCompleted/",
-    "substrate/type/HasUnitCompleted/",
     "substrate/type_tier/",
 )
 
@@ -530,7 +528,9 @@ def validate_type_identity_law() -> list[str]:
         (ROOT / "scripts", (".py", ".sql", ".sh")),
     ]
     skip_dirs = {"audit-2026-06-26", "node_modules", "bin", "obj"}
-    skip_files: set[str] = set()
+    # The upgrade step that retires ingest-completion attestations names their
+    # historical ids in order to delete them.
+    skip_files: set[str] = {"retire_completion_markers.sql.in"}
 
     for root, suffixes in scan_roots:
         if not root.is_dir():

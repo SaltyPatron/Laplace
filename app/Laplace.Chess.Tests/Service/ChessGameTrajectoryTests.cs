@@ -142,21 +142,17 @@ public sealed class ChessGameTrajectoryTests
     }
 
     [Fact]
-    public void Backfill_DepositsNoChessTestimonyAndOneCompletionReceipt()
+    public void Backfill_DepositsNoChessTestimonyAndOneUnitCompletion()
     {
-        // Backfill realizes an existing game's geometry. Its only attestation is
-        // operational proof that this source-owned trajectory unit completed;
-        // it must not add another observation of the game's moves or outcome.
-        var receipt = Assert.Single(ComposeBackfill().Attestations);
+        // Backfill realizes an existing game's geometry. It adds no attestation at
+        // all: its only other output is operational completion state proving this
+        // source-owned trajectory unit completed.
+        var change = ComposeBackfill();
+        Assert.Empty(change.Attestations);
+        var completion = Assert.Single(change.UnitCompletions);
         var marker = ChessTrajectoryDecomposer.MarkerId(Parsed().LineId);
-        var type = Laplace.Ingestion.IngestUnitCompletion.RelationTypeId(21);
-        Assert.Equal(type, receipt.TypeId);
-        Assert.Equal(marker, receipt.SubjectId);
-        Assert.Equal(marker, receipt.ObjectId);
-        Assert.Equal(ChessVocabulary.TrajectorySourceId, receipt.SourceId);
-        Assert.Null(receipt.ContextId);
-        Assert.Equal(Laplace.Decomposers.Abstractions.NativeAttestation.ComputeId(
-            marker, type, marker, ChessVocabulary.TrajectorySourceId, null), receipt.Id);
+        Assert.Equal(new IngestUnitCompletionKey(ChessVocabulary.TrajectorySourceId, marker, 21),
+            completion);
     }
 
     [Fact]

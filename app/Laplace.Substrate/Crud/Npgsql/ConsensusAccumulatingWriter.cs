@@ -347,8 +347,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             bool atomicWorkingSet = _persistEvidence && _inner is NpgsqlSubstrateWriter;
             bool hasEphemeralFolds = changes.Any(c => !c.EphemeralFoldInputs.IsDefaultOrEmpty);
 
-            // File-completion markers commit in the same evidence transaction as the
-            // file's testimony and its fold, so a durable marker implies current
+            // File completions commit in the same evidence transaction as the file's
+            // testimony and its fold, so a durable completion implies current
             // consensus for that file without a second post-commit apply.
             IReadOnlyList<SubstrateChange> evidenceChanges = changes;
 
@@ -594,24 +594,13 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         new(Math.Clamp(hint, 1, FoldSizing.DeltaCapacityCells));
 
     /// <summary>
-    /// Ops-marker relation types that never fold into consensus: per-file completion
-    /// markers, source-unit receipts, and file-metadata edges ride inside ordinary working-set changes (unlike
-    /// the source-level marker, whose whole change is skipped by unit-name prefix in
-    /// BuildDelta), so they must be excluded row-by-row. They are recording metadata,
-    /// not testimony — folding them would also mix marker φ with content φ in one batch.
+    /// Operational relation types that never fold into consensus: file-metadata edges
+    /// ride inside ordinary working-set changes, so they are excluded row-by-row.
+    /// Ingest completion is not here: it is operational state in its own tables and
+    /// never reaches the attestation stream.
     /// </summary>
-    private static readonly HashSet<Hash128> OpsMarkerTypeIds = BuildOpsMarkerTypeIds();
-
-    private static HashSet<Hash128> BuildOpsMarkerTypeIds()
-    {
-        var set = new HashSet<Hash128> { Laplace.Decomposers.Abstractions.FileEntity.MetadataRelationTypeId };
-        for (int layer = 0; layer <= Laplace.Ingestion.LayerCompletion.MaxMarkedLayer; layer++)
-        {
-            set.Add(Laplace.Ingestion.LayerCompletion.RelationTypeId(layer));
-            set.Add(Laplace.Ingestion.IngestUnitCompletion.RelationTypeId(layer));
-        }
-        return set;
-    }
+    private static readonly HashSet<Hash128> OpsMarkerTypeIds =
+        [Laplace.Decomposers.Abstractions.FileEntity.MetadataRelationTypeId];
 
     /// <summary>Merges attestations [start, end) of the flattened block space into
     /// <paramref name="map"/>; returns the observation count it consumed.</summary>

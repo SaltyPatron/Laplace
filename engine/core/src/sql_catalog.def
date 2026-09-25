@@ -398,13 +398,11 @@ SQL_QUERY("source.migration_retention", "bytea",
     "    SELECT 'flush_receipt_sources',to_jsonb(s) FROM laplace.ingest_flush_journal_sources s "
     "    WHERE EXISTS (SELECT FROM owned_receipts r WHERE r.working_set_id=s.working_set_id) "
     "    UNION ALL "
-    "    SELECT 'file_completion_evidence',to_jsonb(a) FROM laplace.attestations a "
-    "    WHERE EXISTS ( "
-    "        SELECT FROM laplace.ingest_run_journal r "
-    "        JOIN laplace.ingest_file_journal f ON f.run_id=r.run_id "
-    "        WHERE r.source_id=$1 AND f.file_id=a.source_id "
-    "        AND a.type_id=realize.canonical_id('substrate/type/HasLayerCompleted/' || r.layer::text || '/v1') "
-    "        AND (a.context_id=r.source_id OR a.context_id IS NULL)) "
+    "    SELECT 'unit_completions',to_jsonb(u) FROM laplace.ingest_unit_completion u "
+    "    WHERE u.witness_id=$1 "
+    "    UNION ALL "
+    "    SELECT 'layer_completions',to_jsonb(l) FROM laplace.ingest_layer_completion l "
+    "    WHERE l.witness_id=$1 "
     ") "
     "SELECT convert_to(jsonb_build_object('section',section,'row',body)::text || E'\\n','UTF8') FROM rows ")
 SQL_QUERY("chess.witness_inputs", "bytea[],bytea[],bytea[],bytea[],int4",

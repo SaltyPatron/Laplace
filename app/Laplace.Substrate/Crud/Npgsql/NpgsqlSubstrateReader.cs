@@ -65,13 +65,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT ops.evidence_count(p_type => realize.canonical_id($1)) > 0");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+            "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE layer = $1)");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
         try
         {
-            var result = await cmd.ExecuteScalarAsync(ct);
-            return result is bool b && b;
+            return await cmd.ExecuteScalarAsync(ct) is true;
         }
         catch (PostgresException)
         {
@@ -82,14 +80,13 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT ops.evidence_count(p_type => realize.canonical_id($1), p_source => $2) > 0");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+            "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion "
+            + "WHERE witness_id = $1 AND layer = $2)");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
         try
         {
-            var result = await cmd.ExecuteScalarAsync(ct);
-            return result is bool b && b;
+            return await cmd.ExecuteScalarAsync(ct) is true;
         }
         catch (PostgresException)
         {
@@ -101,36 +98,15 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         Hash128 fileId, Hash128 decomposerSourceId, int layerOrder,
         CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT EXISTS (SELECT 1 FROM laplace.attestations a "
-            + "WHERE a.type_id = realize.canonical_id($1) "
-            + "AND a.source_id = $2 AND a.context_id = $3)");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, fileId.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, decomposerSourceId.ToBytes());
-        try
-        {
-            return await cmd.ExecuteScalarAsync(ct) is true;
-        }
-        catch (PostgresException)
-        {
-            return false;
-        }
+        var done = await HasFilesCompletedAsync([fileId], decomposerSourceId, layerOrder, ct)
+            .ConfigureAwait(false);
+        return done.Contains(fileId);
     }
 
     /// <summary>
-    /// One round trip for N file roots, replacing N scalar probes. See the interface
-    /// doc for the measurement that motivated it (FrameNet: 14,900 files, 37.7 ms each,
-    /// 562s of a 561s run).
-    ///
-    /// Two separate costs are removed, not one:
-    ///   - N round trips become 1, over a bound bytea[] the planner can index-scan once;
-    ///   - the marker type id is hashed ONCE here instead of `realize.canonical_id($1)`
-    ///     re-deriving the same BLAKE3 on every call.
-    /// EXISTS, not a count: the scalar form asks `evidence_count(...) > 0`, which counts
-    /// matching rows to answer a membership question. A semi-join stops at the first hit
-    /// per source.
+    /// One round trip for N source witnesses against the layer completion key
+    /// (witness_id, layer). An unreadable completion surface means "not known complete",
+    /// never "complete": resuming re-observes; the opposite would silently skip work.
     /// </summary>
     public async Task<IReadOnlySet<Hash128>> HasSourcesCompletedAsync(
         IReadOnlyList<Hash128> sourceIds, int layerOrder, CancellationToken ct = default)
@@ -138,20 +114,15 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var done = new HashSet<Hash128>();
         if (sourceIds.Count == 0) return done;
 
-        var raw = new byte[sourceIds.Count][];
-        for (int i = 0; i < sourceIds.Count; i++) raw[i] = sourceIds[i].ToBytes();
-
         await using var cmd = _ds.CreateCommand(
-            "SELECT DISTINCT a.source_id FROM laplace.attestations a "
-            + "WHERE a.type_id = realize.canonical_id($1) "
-            + "  AND a.source_id = ANY($2)");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+            "SELECT c.witness_id FROM laplace.ingest_layer_completion c "
+            + "WHERE c.witness_id = ANY($1) AND c.layer = $2");
         cmd.Parameters.Add(new NpgsqlParameter
         {
-            Value = raw,
+            Value = ToByteArrays(sourceIds),
             NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
         });
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
         try
         {
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -161,13 +132,15 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         catch (PostgresException)
         {
-            // Same posture as the scalar form: an unreadable marker surface means
-            // "not known complete", never "complete". Resuming re-observes; the
-            // opposite would silently skip un-ingested files.
             return new HashSet<Hash128>();
         }
     }
 
+    /// <summary>
+    /// One round trip for N file roots completed by one decomposer witness. This is the
+    /// per-file resume probe: FrameNet's 14,900 files once spent 37.7 ms each on scalar
+    /// probes (562 s of a 561 s run), so membership is always asked as one set.
+    /// </summary>
     public async Task<IReadOnlySet<Hash128>> HasFilesCompletedAsync(
         IReadOnlyList<Hash128> fileIds, Hash128 decomposerSourceId, int layerOrder,
         CancellationToken ct = default)
@@ -175,21 +148,17 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var done = new HashSet<Hash128>();
         if (fileIds.Count == 0) return done;
 
-        var raw = new byte[fileIds.Count][];
-        for (int i = 0; i < fileIds.Count; i++) raw[i] = fileIds[i].ToBytes();
-
         await using var cmd = _ds.CreateCommand(
-            "SELECT DISTINCT a.source_id FROM laplace.attestations a "
-            + "WHERE a.type_id = realize.canonical_id($1) "
-            + "AND a.source_id = ANY($2) AND a.context_id = $3");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+            "SELECT DISTINCT c.unit_id FROM laplace.ingest_unit_completion c "
+            + "WHERE c.witness_id = $1 AND c.unit_id = ANY($2) AND c.layer = $3 "
+            + "AND c.digest IS NULL");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, decomposerSourceId.ToBytes());
         cmd.Parameters.Add(new NpgsqlParameter
         {
-            Value = raw,
+            Value = ToByteArrays(fileIds),
             NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
         });
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, decomposerSourceId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
         try
         {
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -198,10 +167,62 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         catch (PostgresException)
         {
-            // Unreadable marker state means not known complete. Re-observation is safe;
-            // silently skipping a file is not.
+            // Unreadable completion state means not known complete. Re-observation is
+            // safe; silently skipping a file is not.
+            done.Clear();
         }
         return done;
+    }
+
+    public async Task<IReadOnlySet<IngestUnitCompletionKey>> CompletedUnitsAsync(
+        IReadOnlyList<IngestUnitCompletionKey> keys, CancellationToken ct = default)
+    {
+        var done = new HashSet<IngestUnitCompletionKey>();
+        if (keys.Count == 0) return done;
+        await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        int chunk = Math.Max(1, _cachePlan.ProbeChunkIds);
+        for (int offset = 0; offset < keys.Count; offset += chunk)
+        {
+            int count = Math.Min(chunk, keys.Count - offset);
+            var witnesses = new byte[count][];
+            var units = new byte[count][];
+            var layers = new int[count];
+            var digests = new byte[]?[count];
+            for (int i = 0; i < count; i++)
+            {
+                var key = keys[offset + i];
+                witnesses[i] = key.WitnessId.ToBytes();
+                units[i] = key.UnitId.ToBytes();
+                layers[i] = key.Layer;
+                digests[i] = key.Digest?.ToBytes();
+            }
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT k.ord FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) "
+                + "WITH ORDINALITY AS k(witness_id, unit_id, layer, digest, ord) "
+                + "WHERE EXISTS (SELECT 1 FROM laplace.ingest_unit_completion c "
+                + "WHERE c.witness_id = k.witness_id AND c.unit_id = k.unit_id "
+                + "AND c.layer = k.layer AND c.digest IS NOT DISTINCT FROM k.digest)";
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = witnesses, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = units, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = layers, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = digests, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+                done.Add(keys[offset + (int)(r.GetInt64(0) - 1)]);
+        }
+        return done;
+    }
+
+    private static byte[][] ToByteArrays(IReadOnlyList<Hash128> ids)
+    {
+        var raw = new byte[ids.Count][];
+        for (int i = 0; i < ids.Count; i++) raw[i] = ids[i].ToBytes();
+        return raw;
     }
 
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)

@@ -1,0 +1,40 @@
+-- Completion reads over laplace.ingest_unit_completion / ingest_layer_completion.
+-- Operational state only: these answer "has this witness finished admitting",
+-- never "is this true".
+
+-- Has the witness completed the layer? NULL witness asks whether any witness has.
+CREATE OR REPLACE FUNCTION ops.layer_completed(p_witness bytea, p_layer int)
+    RETURNS boolean
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT EXISTS (
+        SELECT 1
+        FROM laplace.ingest_layer_completion c
+        WHERE c.layer = p_layer
+          AND (p_witness IS NULL OR c.witness_id = p_witness));
+END;
+
+-- Has the witness completed this unit at this layer (under this digest)?
+CREATE OR REPLACE FUNCTION ops.unit_completed(
+    p_witness bytea, p_unit bytea, p_layer int, p_digest bytea DEFAULT NULL)
+    RETURNS boolean
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT EXISTS (
+        SELECT 1
+        FROM laplace.ingest_unit_completion c
+        WHERE c.witness_id = p_witness
+          AND c.unit_id = p_unit
+          AND c.layer = p_layer
+          AND c.digest IS NOT DISTINCT FROM p_digest);
+END;
+
+-- Units a witness has completed at a layer, for resume audits and gates.
+CREATE OR REPLACE FUNCTION ops.units_completed(p_witness bytea, p_layer int)
+    RETURNS bigint
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT count(*)::bigint
+    FROM laplace.ingest_unit_completion c
+    WHERE c.witness_id = p_witness AND c.layer = p_layer;
+END;

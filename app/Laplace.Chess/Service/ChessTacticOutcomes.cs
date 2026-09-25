@@ -165,9 +165,8 @@ public static class ChessTacticOutcomes
 
 public sealed record ChessTacticOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
-    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(24);
-    public Hash128 CompletionAttestationId =>
-        IngestUnitCompletion.AttestationId(TrunkRootId, ChessTacticOutcomes.SourceId, 24);
+    public IngestUnitCompletionKey? Completion =>
+        IngestUnitCompletion.Key(TrunkRootId, ChessTacticOutcomes.SourceId, 24);
     public Hash128 TrunkRootId => ChessTacticOutcomes.MarkerId(Game.PlayingId);
 }
 

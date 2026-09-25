@@ -74,7 +74,7 @@ public sealed class MultiFileFailureIsolationTests
 
         // The two good files still composed end-to-end.
         Assert.True(ContentEntityCount(changes) > 0);
-        Assert.Equal(2, MarkerAttestationCount(changes));
+        Assert.Equal(2, UnitCompletionCount(changes));
     }
 
     [Fact]

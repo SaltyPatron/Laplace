@@ -48,13 +48,16 @@ public readonly record struct CircuitPairProposalPage(
 
 public interface ISubstrateReader
 {
+    /// <summary>Has any source witness completed this layer (laplace.ingest_layer_completion)?</summary>
     Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default);
 
+    /// <summary>Has this source witness completed this layer? Layer completion is
+    /// operational state recorded after a full successful extraction, never testimony.</summary>
     Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default);
 
     /// <summary>A per-file completion belongs to both the file identity and the
-    /// decomposer vendor. The legacy source-only marker cannot distinguish two vendor
-    /// implementations that consume identical bytes at the same layer.</summary>
+    /// decomposer witness (laplace.ingest_unit_completion): two decomposers consuming
+    /// identical bytes at the same layer never share it.</summary>
     Task<bool> HasFileCompletedAsync(
         Hash128 fileId, Hash128 decomposerSourceId, int layerOrder,
         CancellationToken ct = default) =>
@@ -62,7 +65,7 @@ public interface ISubstrateReader
 
     /// <summary>
     /// Batched form of <see cref="HasSourceCompletedAsync"/>: returns the subset of
-    /// <paramref name="sourceIds"/> that already carry the layer's completion marker.
+    /// <paramref name="sourceIds"/> that have already completed the layer.
     ///
     /// Per-file resume (#898) is ON BY DEFAULT for every <c>DecomposerMultiFile</c>, and
     /// the scalar form is called once per file inside the worker loop. MEASURED on the
@@ -96,6 +99,16 @@ public interface ISubstrateReader
         IReadOnlyList<Hash128> fileIds, Hash128 decomposerSourceId, int layerOrder,
         CancellationToken ct = default) =>
         HasSourcesCompletedAsync(fileIds, layerOrder, ct);
+
+    /// <summary>
+    /// The subset of <paramref name="keys"/> whose source unit completion is durable
+    /// (laplace.ingest_unit_completion, exact witness, unit, layer and digest). A reader
+    /// without durable completion state must fail explicitly rather than report a unit
+    /// complete or silently re-admit accepted testimony.
+    /// </summary>
+    Task<IReadOnlySet<IngestUnitCompletionKey>> CompletedUnitsAsync(
+        IReadOnlyList<IngestUnitCompletionKey> keys, CancellationToken ct = default)
+        => throw new NotSupportedException("reader does not support durable unit completion");
 
     Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default);
 

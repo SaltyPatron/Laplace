@@ -46,9 +46,9 @@ public sealed class IngestBatchPipelineTests
         Assert.Equal(
             "period-boundary/ud/en_ewt-ud-train",
             boundary.Metadata.SourceContentUnitName);
-        var marker = Assert.Single(boundary.Attestations);
-        Assert.Equal(fileRoot, marker.SourceId);
-        Assert.Equal(TestSource, marker.ContextId);
+        Assert.Empty(boundary.Attestations);
+        Assert.Equal(new IngestUnitCompletionKey(TestSource, fileRoot, 2),
+            Assert.Single(boundary.UnitCompletions));
     }
 
     [Fact]
@@ -529,7 +529,7 @@ public sealed class IngestBatchPipelineTests
             Assert.Equal(1, changes.Sum(c => c.Metadata.InputUnitsConsumed));
             Assert.Contains(changes, c =>
                 c.Metadata.SourceContentUnitName.Contains("file-3", StringComparison.Ordinal));
-            Assert.Equal(1, MarkerAttestationCount(changes));
+            Assert.Equal(1, UnitCompletionCount(changes));
             Assert.Equal(0, NonMarkerAttestationCount(changes.Where(c =>
                 c.Metadata.SourceContentUnitName.Contains("file-1", StringComparison.Ordinal)
                 || c.Metadata.SourceContentUnitName.Contains("file-2", StringComparison.Ordinal))));

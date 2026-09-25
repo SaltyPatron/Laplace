@@ -33,9 +33,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
     private sealed record SyntheticUnit(
         byte[] Utf8, Hash128 Root, Hash128 Owner, Hash128 Recipe) : IIngestCompletionRecord
     {
-        public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(2);
-        public Hash128 CompletionAttestationId =>
-            IngestUnitCompletion.AttestationId(Root, Owner, 2, Recipe);
+        public IngestUnitCompletionKey? Completion => IngestUnitCompletion.Key(Root, Owner, 2, Recipe);
     }
 
     private sealed class DeferredContentSyntheticDecomposer : IDecomposer
@@ -95,7 +93,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                         throw new InvalidOperationException("synthetic unit did not compose its exact content");
                     b.AddEntity(unit.Recipe, EntityTier.Word, EntityTypeRegistry.SourceReference);
                     // BuildAsync must finish deferred content before the control transaction
-                    // can admit this receipt together with its physicality testimony.
+                    // can record this completion together with its physicality testimony.
                     IngestUnitCompletion.Emit(b, root, SourceId, LayerOrder, unit.Recipe);
                     Interlocked.Increment(ref _composedUnits);
                 },
@@ -219,7 +217,6 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         var cold = await NewRunner(_pg.DataSource).RunAsync(producer, options);
         Assert.Equal(0, cold.UnitsFailed);
         Assert.Equal(count, producer.ComposedUnits);
-        Assert.True(cold.AttestationsInserted >= count);
 
         async Task<string> DurableStateAsync()
         {
@@ -256,9 +253,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         async Task<long> ReceiptCountAsync()
         {
             await using var command = _pg.DataSource.CreateCommand(
-                "SELECT count(*) FROM laplace.attestations WHERE source_id=$1 AND type_id=$2");
+                "SELECT count(*) FROM laplace.ingest_unit_completion WHERE witness_id=$1 AND layer=2");
             command.Parameters.AddWithValue(source.ToBytes());
-            command.Parameters.AddWithValue(IngestUnitCompletion.RelationTypeId(2).ToBytes());
             return (long)(await command.ExecuteScalarAsync())!;
         }
 

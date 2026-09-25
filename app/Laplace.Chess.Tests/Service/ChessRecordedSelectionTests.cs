@@ -359,14 +359,16 @@ public sealed class ChessRecordedSelectionTests : IDisposable
         var current = currentBuilder.Build();
         try
         {
-            var completionType = IngestUnitCompletion.RelationTypeId(0);
-            Assert.DoesNotContain(historical.Entities, row => row.Id == completionType);
-            Assert.Contains(current.Entities, row => row.Id == completionType);
+            // Completion is operational state beside the evidence, never an entity.
+            var completion = IngestUnitCompletion.Key(game.PlayingId, ChessVocabulary.PgnSourceId, 0);
+            Assert.DoesNotContain(completion, historical.UnitCompletions);
+            Assert.Contains(completion, current.UnitCompletions);
+            Assert.True(historical.Entities.Select(row => row.Id).ToHashSet()
+                .SetEquals(current.Entities.Select(row => row.Id)));
             var entities = ChessRecordingMeasurement.SelectRetainedRows(
                 historical.Entities.Select(row => Hex(row.Id)).Distinct().ToArray(),
                 current.Entities, row => row.Id, "entity");
             Assert.Equal(historical.Entities.Select(row => row.Id).Distinct(), entities.Select(row => row.Id));
-            Assert.DoesNotContain(entities, row => row.Id == completionType);
             var playings = new HashSet<Hash128> { game.PlayingId };
             var witnesses = historical.Attestations
                 .Where(row => ChessRecordingMeasurement.IsGameWitness(row, playings)).ToArray();

@@ -249,10 +249,7 @@ files AS MATERIALIZED (
         COALESCE(f.file_id,CASE WHEN cardinality(history.ids)=1 THEN history.ids[1] END) AS file_id,
         history.ids AS historical_file_ids,
         f.resume_fingerprint,f.bytes,f.status,f.disposition,f.ended_at,f.error,
-        EXISTS(SELECT 1 FROM laplace.attestations a
-          WHERE a.type_id=realize.canonical_id('substrate/type/HasLayerCompleted/2/v1')
-          AND a.subject_id=e.fingerprint AND a.object_id=e.fingerprint AND a.source_id=e.fingerprint
-          AND a.context_id=(SELECT operational FROM roster)) AS completed
+        ops.unit_completed((SELECT operational FROM roster),e.fingerprint,2) AS completed
  FROM expected e LEFT JOIN laplace.ingest_file_journal f
  ON f.run_id='{seed_run_id}'::uuid AND f.file_label='operational/'||e.relative_path
  AND f.source_name='OperationalDecomposer'

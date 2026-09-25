@@ -192,8 +192,8 @@ public sealed class ChessSyzygyDecomposer
         if (!ShouldExpandPackage(filePath, maxMen))
         {
             // Deliberately no semantic row. The generic multi-file boundary still fingerprints
-            // the exact bytes and emits HasLayerCompleted on that content identity, so this file
-            // is independently receipted and true-skipped on restart without boiling its state
+            // the exact bytes and records unit completion on that content identity, so this file
+            // is independently completed and true-skipped on restart without boiling its state
             // space into rows. Fathom consumes these mapped files lazily during search/game probes.
             yield break;
         }

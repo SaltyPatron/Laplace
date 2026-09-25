@@ -8,16 +8,17 @@ PGHOST="${PGHOST:-/var/run/postgresql}"
 PGUSER="${PGUSER:-laplace_admin}"
 DB="${LAPLACE_DBNAME:-laplace}"
 
-PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1 -tAc)
+PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1)
 
+# Layer completion is keyed by the source witness; decomposer-gates.json resolves a
+# recipe generation to its witness and a legacy decomposer to its named source.
 layer_ok() {
-  local decomposer="$1" layer="$2"
-  "${PSQL[@]}" -d "$DB" \
-    "SELECT ops.evidence_count(p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
-    | grep -qi true
+  local predicate
+  predicate="$(python3 "$SCRIPTS/source-layer-complete.py" "$@" | cut -f1)" || return 1
+  "${PSQL[@]}" -d "$DB" -tAc "SELECT ${predicate};" | grep -qiE '^(t|true)$'
 }
 
-if layer_ok UnicodeDecomposer 0 && layer_ok ISO639Decomposer 1; then
+if layer_ok unicode UnicodeDecomposer 0 && layer_ok iso639 ISO639Decomposer 1; then
   echo "floor layers OK on $DB"
   exit 0
 fi

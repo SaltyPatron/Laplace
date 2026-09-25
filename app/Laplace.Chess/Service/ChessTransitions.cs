@@ -123,8 +123,7 @@ public sealed class ChessTransitionsDecomposer
 
 public sealed record ChessTransitionRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
-    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(22);
-    public Hash128 CompletionAttestationId =>
-        IngestUnitCompletion.AttestationId(TrunkRootId, ChessTransitions.SourceId, 22);
+    public IngestUnitCompletionKey? Completion =>
+        IngestUnitCompletion.Key(TrunkRootId, ChessTransitions.SourceId, 22);
     public Hash128 TrunkRootId => ChessTransitions.MarkerId(Game.PlayingId);
 }

@@ -52,17 +52,16 @@ public sealed class ChessOpeningCompletionTests
         });
         var marker = ChessOpeningMatchDecomposer.MarkerId(game.LineId);
         var owner = ChessVocabulary.OpeningMatchSourceId;
-        var type = IngestUnitCompletion.RelationTypeId(21);
 
         foreach (var previous in new[] { empty, shallow })
         {
             using var oldBuilder = new SubstrateChangeBuilder(owner, "opening-generation");
             ChessOpeningMatchDecomposer.Match(oldBuilder, game, previous, owner);
             var old = oldBuilder.Build();
-            var oldReceipt = Assert.Single(old.Attestations, row => row.TypeId == type);
-            Assert.Equal(previous.GenerationId, oldReceipt.ContextId);
+            var oldReceipt = Assert.Single(old.UnitCompletions);
+            Assert.Equal(previous.GenerationId, oldReceipt.Digest);
             var reader = new ReceiptReader();
-            reader.Present.Add(oldReceipt.Id);
+            reader.Present.Add(oldReceipt);
 
             async Task<Hash128[]> RemainingAsync()
             {
@@ -80,11 +79,11 @@ public sealed class ChessOpeningCompletionTests
             Assert.Contains(current.Attestations, row =>
                 row.TypeId == RelationTypeRegistry.RelationTypeId(ChessSeedManifest.GameHasOpening)
                 && row.ObjectId == Id("deep-name"));
-            var currentReceipt = Assert.Single(current.Attestations, row => row.TypeId == type);
-            Assert.Equal(NativeAttestation.ComputeId(marker, type, marker, owner, deep.GenerationId),
-                currentReceipt.Id);
-            Assert.NotEqual(oldReceipt.Id, currentReceipt.Id);
-            reader.Present.Add(currentReceipt.Id);
+            var currentReceipt = Assert.Single(current.UnitCompletions);
+            Assert.Equal(new IngestUnitCompletionKey(owner, marker, 21, deep.GenerationId),
+                currentReceipt);
+            Assert.NotEqual(oldReceipt, currentReceipt);
+            reader.Present.Add(currentReceipt);
             Assert.Empty(await RemainingAsync());
         }
     }
@@ -98,11 +97,9 @@ public sealed class ChessOpeningCompletionTests
         using var builder = new SubstrateChangeBuilder(ChessVocabulary.OpeningMatchSourceId, "unversioned-catalog");
         ChessOpeningMatchDecomposer.Match(builder, ChessAnalyze.WitnessedFromParsed(parsed),
             new UnversionedView(), ChessVocabulary.OpeningMatchSourceId);
-        Assert.DoesNotContain(builder.Build().Attestations,
-            row => row.TypeId == IngestUnitCompletion.RelationTypeId(21));
+        Assert.Empty(builder.Build().UnitCompletions);
         var record = new ChessOpeningMatchRecord(ChessAnalyze.WitnessedFromParsed(parsed));
-        Assert.Equal(default(Hash128), record.CompletionAttestationId);
-        Assert.Equal(default(Hash128), record.CompletionAttestationTypeId);
+        Assert.Null(record.Completion);
     }
 
     private sealed class UnversionedView : ChessOpeningIndexView
@@ -112,14 +109,14 @@ public sealed class ChessOpeningCompletionTests
 
     private sealed class ReceiptReader : ISubstrateReader
     {
-        internal readonly HashSet<Hash128> Present = [];
+        internal readonly HashSet<IngestUnitCompletionKey> Present = [];
         public Task<bool> HasSourceEverCompletedAsync(int layer, CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> HasSourceCompletedAsync(Hash128 source, int layer, CancellationToken ct = default) => Task.FromResult(false);
         public Task<long> CountEntitiesByTypeAsync(Hash128 type, CancellationToken ct = default) => Task.FromResult(0L);
         public Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> ids, CancellationToken ct = default) =>
             throw new InvalidOperationException("catalog completion cannot be inferred from an entity");
-        public Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
-            Hash128 type, IReadOnlyList<Hash128> ids, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlySet<Hash128>>(ids.Where(Present.Contains).ToHashSet());
+        public Task<IReadOnlySet<IngestUnitCompletionKey>> CompletedUnitsAsync(
+            IReadOnlyList<IngestUnitCompletionKey> keys, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlySet<IngestUnitCompletionKey>>(keys.Where(Present.Contains).ToHashSet());
     }
 }

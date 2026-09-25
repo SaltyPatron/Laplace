@@ -33,12 +33,12 @@ public sealed class IngestCompletionGateTests
     [InlineData(true)]
     public async Task CompletionRecordWithOnlyEntityPresent_RemainsForComposition(bool cached)
     {
-        var record = new CompletedRecord(Id(1), Id(2), Id(3));
+        var record = new CompletedRecord(Id(1), Key(Id(2), Id(3)));
         var records = new List<object> { record };
         var reader = new ReceiptReader { CacheEntities = cached };
         reader.Entities.Add(record.TrunkRootId);
-        // Another receipt of the same type is not proof for this source unit.
-        reader.Receipts.Add((record.CompletionAttestationTypeId, Id(4)));
+        // Another unit completed by the same witness is not proof for this source unit.
+        reader.Receipts.Add(Key(Id(2), Id(4)));
         var handler = new CountingHandler();
         using var builder = new SubstrateChangeBuilder(Id(90), "completion-gate", null);
 
@@ -48,17 +48,16 @@ public sealed class IngestCompletionGateTests
         Assert.Empty(skipped);
         Assert.Same(record, Assert.Single(records));
         Assert.Equal(0, handler.WitnessCalls);
-        Assert.Equal(new[] { record.CompletionAttestationId },
-            Assert.Single(reader.ReceiptProbes).Ids);
+        Assert.Equal(new[] { record.Completion!.Value }, Assert.Single(reader.ReceiptProbes));
     }
 
     [Fact]
     public async Task ExactDurableReceipt_SkipsWithoutReemittingWitness()
     {
-        var record = new CompletedRecord(Id(1), Id(2), Id(3));
+        var record = new CompletedRecord(Id(1), Key(Id(2), Id(3)));
         var records = new List<object> { record };
         var reader = new ReceiptReader();
-        reader.Receipts.Add((record.CompletionAttestationTypeId, record.CompletionAttestationId));
+        reader.Receipts.Add(record.Completion!.Value);
         var handler = new CountingHandler();
         using var builder = new SubstrateChangeBuilder(Id(90), "completion-gate", null);
 
@@ -74,28 +73,29 @@ public sealed class IngestCompletionGateTests
     }
 
     [Fact]
-    public async Task ReceiptsAreBatchedByType_AndRequireBothTypeAndIdentity()
+    public async Task CompletionsAreBatched_AndRequireWitnessUnitLayerAndDigest()
     {
-        var accepted = new CompletedRecord(Id(1), Id(2), Id(3));
-        var sameIdOtherType = new CompletedRecord(Id(4), Id(5), Id(3));
-        var absent = new CompletedRecord(Id(6), Id(2), Id(7));
-        var records = new List<object> { accepted, sameIdOtherType, absent, accepted };
+        var accepted = new CompletedRecord(Id(1), Key(Id(2), Id(3)));
+        var sameUnitOtherWitness = new CompletedRecord(Id(4), Key(Id(5), Id(3)));
+        var sameUnitOtherLayer = new CompletedRecord(Id(8), Key(Id(2), Id(3), layer: 2));
+        var sameUnitOtherDigest = new CompletedRecord(Id(9), Key(Id(2), Id(3), digest: Id(10)));
+        var absent = new CompletedRecord(Id(6), Key(Id(2), Id(7)));
+        var records = new List<object>
+            { accepted, sameUnitOtherWitness, sameUnitOtherLayer, sameUnitOtherDigest, absent, accepted };
         var reader = new ReceiptReader();
-        reader.Receipts.Add((accepted.CompletionAttestationTypeId, accepted.CompletionAttestationId));
+        reader.Receipts.Add(accepted.Completion!.Value);
         var handler = new CountingHandler();
         using var builder = new SubstrateChangeBuilder(Id(90), "completion-gate", null);
 
         var skipped = await IngestExistenceGate.RemovePresentAsync(
             records, handler, reader, builder, CancellationToken.None);
 
-        Assert.Equal(new object[] { sameIdOtherType, absent }, records);
+        Assert.Equal(new object[]
+            { sameUnitOtherWitness, sameUnitOtherLayer, sameUnitOtherDigest, absent }, records);
         Assert.Equal(2, skipped.Length);
         Assert.All(skipped, x => Assert.Same(accepted, x.Record));
-        Assert.Equal(2, reader.ReceiptProbes.Count);
-        Assert.Equal(new[] { Id(3), Id(7) },
-            reader.ReceiptProbes.Single(x => x.TypeId == Id(2)).Ids);
-        Assert.Equal(new[] { Id(3) },
-            reader.ReceiptProbes.Single(x => x.TypeId == Id(5)).Ids);
+        // One batched probe over the distinct keys.
+        Assert.Equal(5, Assert.Single(reader.ReceiptProbes).Length);
         Assert.Equal(0, reader.EntityProbeCalls);
         Assert.Equal(0, handler.WitnessCalls);
     }
@@ -105,8 +105,9 @@ public sealed class IngestCompletionGateTests
     {
         var records = new List<object>
         {
-            new CompletedRecord(Id(1), default, Id(3)),
-            new CompletedRecord(Id(2), Id(4), default),
+            new CompletedRecord(Id(1), new IngestUnitCompletionKey(default, Id(3), 1)),
+            new CompletedRecord(Id(2), new IngestUnitCompletionKey(Id(4), default, 1)),
+            new CompletedRecord(Id(5), null),
         };
         var reader = new ReceiptReader { CacheEntities = true };
         reader.Entities.UnionWith(new[] { Id(1), Id(2) });
@@ -116,9 +117,13 @@ public sealed class IngestCompletionGateTests
             records, new CountingHandler(), reader, builder, CancellationToken.None);
 
         Assert.Empty(skipped);
-        Assert.Equal(2, records.Count);
+        Assert.Equal(3, records.Count);
         Assert.Empty(reader.ReceiptProbes);
     }
+
+    private static IngestUnitCompletionKey Key(
+        Hash128 witness, Hash128 unit, int layer = 1, Hash128? digest = null) =>
+        new(witness, unit, layer, digest);
 
     private static Hash128 Id(byte value)
     {
@@ -131,8 +136,7 @@ public sealed class IngestCompletionGateTests
 
     private sealed record CompletedRecord(
         Hash128 TrunkRootId,
-        Hash128 CompletionAttestationTypeId,
-        Hash128 CompletionAttestationId) : ITrunkRootRecord, IIngestCompletionRecord;
+        IngestUnitCompletionKey? Completion) : ITrunkRootRecord, IIngestCompletionRecord;
 
     private sealed class CountingHandler : IIngestRecordHandler<object>
     {
@@ -150,8 +154,8 @@ public sealed class IngestCompletionGateTests
         internal bool CacheEntities;
         internal int EntityProbeCalls;
         internal readonly HashSet<Hash128> Entities = [];
-        internal readonly HashSet<(Hash128 TypeId, Hash128 Id)> Receipts = [];
-        internal readonly List<(Hash128 TypeId, Hash128[] Ids)> ReceiptProbes = [];
+        internal readonly HashSet<IngestUnitCompletionKey> Receipts = [];
+        internal readonly List<IngestUnitCompletionKey[]> ReceiptProbes = [];
 
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default) =>
             Task.FromResult(false);
@@ -172,13 +176,13 @@ public sealed class IngestCompletionGateTests
             return Task.FromResult(bitmap);
         }
 
-        public Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
-            Hash128 typeId, IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+        public Task<IReadOnlySet<IngestUnitCompletionKey>> CompletedUnitsAsync(
+            IReadOnlyList<IngestUnitCompletionKey> keys, CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
-            ReceiptProbes.Add((typeId, ids.ToArray()));
-            return Task.FromResult<IReadOnlySet<Hash128>>(
-                ids.Where(id => Receipts.Contains((typeId, id))).ToHashSet());
+            ReceiptProbes.Add(keys.ToArray());
+            return Task.FromResult<IReadOnlySet<IngestUnitCompletionKey>>(
+                keys.Where(Receipts.Contains).ToHashSet());
         }
     }
 }

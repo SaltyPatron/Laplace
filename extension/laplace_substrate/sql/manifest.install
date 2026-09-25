@@ -10,6 +10,7 @@ schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 schema/tables/ingest_file_journal.sql.in
+schema/tables/ingest_completion.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
@@ -425,6 +426,7 @@ functions/model/model_consensus.sql.in
 functions/highway/highway_mask_rebuild.sql.in
 functions/ops/evict_source.sql.in
 functions/ops/refold_source.sql.in
+functions/ops/ingest_completion.sql.in
 functions/ops/activity.sql.in
 functions/ops/backend_signal.sql.in
 functions/ops/repair.sql.in

@@ -38,9 +38,8 @@ public sealed class ChessRelationGateTests
         // Substrate META-TYPES are a different category from relations and must not be
         // declared in the relation manifest: they are minted inline, never entered in
         // relation_types.toml, never given a highway bit, and therefore never folded
-        // (FileEntity.MetadataRelationTypeId, LayerCompletion's HasLayerCompleted, and the
-        // chess analysis watermark). Verified live: HasFileMetadata 209 attestations / 0
-        // consensus; HasLayerCompleted/2 8,995 / 0.
+        // (FileEntity.MetadataRelationTypeId and the chess analysis watermark). Verified
+        // live: HasFileMetadata 209 attestations / 0 consensus.
         //
         // The gate keeps its teeth because the exemption is not a name list: the id counts
         // only if THIS change also declares it as a meta-type entity. A typo'd or

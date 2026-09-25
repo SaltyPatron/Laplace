@@ -126,17 +126,16 @@ internal static class ChessWitnessHydrator
         if (completionOwners.Count == 0)
             throw new ArgumentException("unit completion requires an explicit output owner", nameof(completionOwners));
         chunkSize = Math.Max(1, chunkSize);
-        var typeId = IngestUnitCompletion.RelationTypeId(completionLayer);
         for (int off = 0; off < ids.Count; off += chunkSize)
         {
             int take = Math.Min(chunkSize, ids.Count - off);
-            var receipts = new Hash128[checked(take * completionOwners.Count)];
+            var receipts = new IngestUnitCompletionKey[checked(take * completionOwners.Count)];
             for (int i = 0; i < take; i++)
                 for (int owner = 0; owner < completionOwners.Count; owner++)
-                    receipts[i * completionOwners.Count + owner] = IngestUnitCompletion.AttestationId(
+                    receipts[i * completionOwners.Count + owner] = IngestUnitCompletion.Key(
                         markerId(ids[off + i]), completionOwners[owner], completionLayer, completionContextId);
 
-            var present = await reader.PresentAttestationIdsAsync(typeId, receipts, ct).ConfigureAwait(false);
+            var present = await reader.CompletedUnitsAsync(receipts, ct).ConfigureAwait(false);
             for (int i = 0; i < take; i++)
             {
                 bool complete = false;

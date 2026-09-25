@@ -82,6 +82,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         }
         if (changes.Count == 0)
             return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, false);
+        var completions = IngestCompletionRows.Collect(changes);
 
         HashSet<string>? canonicalNames = null;
         foreach (var change in changes)
@@ -247,7 +248,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         {
             var r = await ApplyStagesCoreAsync(
                 sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
-                workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
+                workingSetSource, workingSetSources, transactionParticipant, reconciliation,
+                completions, ct);
             entitiesInserted = r.e;
             physicalitiesInserted = r.p;
             attestationsInserted = r.a;
@@ -274,6 +276,20 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                     + "(already-present shared-substrate rows skipped from COPY by the apply-verify — expected)",
                     entitiesSkipped, physicalitiesSkipped);
             }
+        }
+
+        else if (!completions.IsEmpty)
+        {
+            // A change carrying only completion state (the terminal layer completion,
+            // a file boundary whose rows already committed) records it in its own
+            // transaction; there is no evidence here for it to ride with.
+            using var completionDiagnostic = MeasureApplyPhase("completion-only");
+            await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+            await completions.InsertAsync(connection, transaction, ct).ConfigureAwait(false);
+            await CommitMeasuredAsync(transaction, ct).ConfigureAwait(false);
+            roundTrips += 2;
+            completionDiagnostic?.Complete();
         }
 
         // Caller-owned prebuilt stages are retired ONLY on success. On a failed
@@ -395,6 +411,98 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         using var diagnostic = MeasureApplyPhase("control-transaction-commit");
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         diagnostic?.Complete();
+    }
+
+    /// <summary>
+    /// The completion state a batch of changes carries: unit and layer completions,
+    /// deduplicated. Inserted into laplace.ingest_unit_completion /
+    /// laplace.ingest_layer_completion on the control transaction that accepts the
+    /// batch's evidence, never as attestations.
+    /// </summary>
+    internal sealed class IngestCompletionRows
+    {
+        private static readonly IngestCompletionRows Empty = new([], []);
+        private readonly IngestUnitCompletionKey[] _units;
+        private readonly IngestLayerCompletionKey[] _layers;
+
+        private IngestCompletionRows(IngestUnitCompletionKey[] units, IngestLayerCompletionKey[] layers)
+        {
+            _units = units;
+            _layers = layers;
+        }
+
+        internal bool IsEmpty => _units.Length == 0 && _layers.Length == 0;
+
+        internal static IngestCompletionRows Collect(IReadOnlyList<SubstrateChange> changes)
+        {
+            HashSet<IngestUnitCompletionKey>? units = null;
+            HashSet<IngestLayerCompletionKey>? layers = null;
+            for (int i = 0; i < changes.Count; i++)
+            {
+                var change = changes[i];
+                if (!change.UnitCompletions.IsDefaultOrEmpty)
+                    (units ??= new()).UnionWith(change.UnitCompletions);
+                if (!change.LayerCompletions.IsDefaultOrEmpty)
+                    (layers ??= new()).UnionWith(change.LayerCompletions);
+            }
+            if (units is null && layers is null) return Empty;
+            return new(units?.ToArray() ?? [], layers?.ToArray() ?? []);
+        }
+
+        internal async Task InsertAsync(
+            NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken ct)
+        {
+            if (_units.Length > 0)
+            {
+                var witnesses = new byte[_units.Length][];
+                var units = new byte[_units.Length][];
+                var layers = new int[_units.Length];
+                var digests = new byte[]?[_units.Length];
+                for (int i = 0; i < _units.Length; i++)
+                {
+                    witnesses[i] = _units[i].WitnessId.ToBytes();
+                    units[i] = _units[i].UnitId.ToBytes();
+                    layers[i] = _units[i].Layer;
+                    digests[i] = _units[i].Digest?.ToBytes();
+                }
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText =
+                    "INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer, digest) "
+                    + "SELECT * FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) "
+                    + "ON CONFLICT ON CONSTRAINT ingest_unit_completion_key DO NOTHING";
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = witnesses, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = units, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = layers, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Integer });
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = digests, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
+                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            if (_layers.Length > 0)
+            {
+                var witnesses = new byte[_layers.Length][];
+                var layers = new int[_layers.Length];
+                for (int i = 0; i < _layers.Length; i++)
+                {
+                    witnesses[i] = _layers[i].WitnessId.ToBytes();
+                    layers[i] = _layers[i].Layer;
+                }
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText =
+                    "INSERT INTO laplace.ingest_layer_completion (witness_id, layer) "
+                    + "SELECT * FROM unnest($1::bytea[], $2::int[]) "
+                    + "ON CONFLICT (witness_id, layer) DO NOTHING";
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = witnesses, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = layers, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Integer });
+                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
     }
 
     internal static AttestationStagedNative StageAttestation(AttestationRow a) => new()

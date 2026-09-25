@@ -36,12 +36,23 @@ db_exists() {
     "SELECT 1 FROM pg_database WHERE datname='${DB}'" 2>/dev/null | grep -q 1
 }
 
+# Layer completion is operational state keyed by the source witness and layer. A
+# recipe source generation completes under its witness [authority, release]; a legacy
+# decomposer under its named source. decomposer-gates.json resolves both.
+layer_predicate() {
+  python3 "$SCRIPTS/source-layer-complete.py" "$@"
+}
+
 layer_ok() {
-  local decomposer="$1" layer="$2"
+  local cli="$1" decomposer="$2" layer="$3" predicate
   db_exists || return 1
-  "${PSQL[@]}" -d "$DB" -tAc \
-    "SELECT ops.evidence_count(p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
+  predicate="$(layer_predicate "$cli" "$decomposer" "$layer" | cut -f1)" || return 1
+  "${PSQL[@]}" -d "$DB" -tAc "SELECT ${predicate};" \
     | grep -qiE '^(t|true)$'
+}
+
+layer_label() {
+  layer_predicate "$@" | cut -f2
 }
 
 FOUNDATION=(
@@ -76,8 +87,8 @@ if [[ "$FORCE" -eq 1 || ( "$REQUIRED_LEXICAL" -eq 1 && "$CHECK_ONLY" -eq 0 ) ]];
   needs_work=1
 else
   for entry in "${FOUNDATION[@]}"; do
-    IFS=':' read -r _cli decomposer layer <<< "$entry"
-    if ! layer_ok "$decomposer" "$layer"; then
+    IFS=':' read -r cli decomposer layer <<< "$entry"
+    if ! layer_ok "$cli" "$decomposer" "$layer"; then
       needs_work=1
       break
     fi
@@ -93,7 +104,8 @@ if [[ "$CHECK_ONLY" -eq 1 ]]; then
   echo "foundation incomplete on $DB" >&2
   for entry in "${FOUNDATION[@]}"; do
     IFS=':' read -r cli decomposer layer <<< "$entry"
-    layer_ok "$decomposer" "$layer" || echo "  missing: ${cli} (source=${decomposer} layer=${layer})" >&2
+    layer_ok "$cli" "$decomposer" "$layer" \
+      || echo "  missing: ${cli} ($(layer_label "$cli" "$decomposer" "$layer"))" >&2
   done
   exit 1
 fi
@@ -105,7 +117,7 @@ fi
 CHAIN=()
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
-  if [[ "$FORCE" -eq 1 || "$REQUIRED_LEXICAL" -eq 1 ]] || ! layer_ok "$decomposer" "$layer"; then
+  if [[ "$FORCE" -eq 1 || "$REQUIRED_LEXICAL" -eq 1 ]] || ! layer_ok "$cli" "$decomposer" "$layer"; then
     CHAIN+=("$cli")
   else
     echo "skip $cli (layer complete)"
@@ -127,11 +139,11 @@ psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
 remaining=0
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
-  if ! layer_ok "$decomposer" "$layer"; then
+  if ! layer_ok "$cli" "$decomposer" "$layer"; then
     if [[ "$remaining" -eq 0 ]]; then
       echo "foundation incomplete after ingest on $DB" >&2
     fi
-    echo "  missing: ${cli} (source=${decomposer} layer=${layer})" >&2
+    echo "  missing: ${cli} ($(layer_label "$cli" "$decomposer" "$layer"))" >&2
     remaining=1
   fi
 done

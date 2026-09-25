@@ -8,9 +8,8 @@ SELECT * FROM substrate_health();
 SELECT fake_tier_band_count() AS fake_tier_bands;
 SELECT count(*) AS identity_violations FROM identity_law_violations();
 
-\echo '=== layer completion markers ==='
-SELECT layer, ops.evidence_count(
-           p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || layer || '/v1')) > 0 AS completed
+\echo '=== layer completion (any witness) ==='
+SELECT layer, ops.layer_completed(NULL, layer) AS completed
 FROM generate_series(0, 3) AS layer
 ORDER BY layer;
 
