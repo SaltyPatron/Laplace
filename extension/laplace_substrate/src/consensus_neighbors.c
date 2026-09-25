@@ -124,6 +124,7 @@ neighbor_cell(const LaplaceConsensusRow *row, void *opaque)
     edge.type = row->type;
     edge.rating = row->rating;
     edge.rd = row->rd;
+    edge.volatility = row->volatility;
     edge.witnesses = row->witnesses;
     edge.outbound = !state->reverse;
     bucket = hash_search(state->frontiers, &edge.frontier, HASH_ENTER, &found);

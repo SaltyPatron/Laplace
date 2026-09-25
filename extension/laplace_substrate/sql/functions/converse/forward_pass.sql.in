@@ -1,10 +1,16 @@
--- The forward pass's shared read primitives. Every surface (explore, matchup, facts,
--- chat) composes these instead of re-walking word -> sense -> facts by hand:
---   K  converse.bindings   a term's keys (dog -> i46360 ...), usage and language
---   V  converse.key_facts  what a key's facts are, with standing and belief share
---   QK converse.couple     which keys of two terms respond to each other, and how
--- O is realize.batch(ids, lang). A fact belongs to the key it was stated about; a
--- word reaches it only through its binding, so nothing here flattens senses.
+-- The forward program's shared read primitives (spec 36). Every surface (explore,
+-- matchup, facts, chat) composes these instead of re-walking word -> sense -> facts:
+--   converse.bindings   a term's bindings to identifiers (dog -> i46360), per language
+--   converse.key_facts  a key's own facts, each with its typed standing
+--   converse.couple     how two terms' keys respond to each other, by typed channel
+--   converse.respond    the joint response of the web to a whole observation (native)
+--   converse.translate  a term's words in another language, through its identifiers
+-- Rendering is REALIZE (realize.batch(ids, lang)). A fact belongs to the key it was
+-- stated about; a word reaches it only through its binding, so nothing flattens senses.
+-- Standing stays typed: rating, deviation, volatility, witnesses. Nothing here folds
+-- it into one score or a normalized share; a consumer declares its own ordering.
+DROP FUNCTION IF EXISTS converse.key_facts(bytea[], int) CASCADE;
+DROP FUNCTION IF EXISTS converse.couple(bytea, bytea, bytea, int) CASCADE;
 
 -- K: the bindings of each term. A binding's language is its attestation context
 -- (the lexicon's language), so in_lang says whether a source bound this term to this
@@ -38,20 +44,18 @@ BEGIN ATOMIC
     FROM evidence e;
 END;
 
--- V: each key's own facts, strongest first, with the fact's share of the key's
--- belief under that relation (Glicko-2 standing as logits; never a hard 0/1).
--- Bindings and non-salient structure are not facts about the key.
+-- V: each key's own facts with their typed standing, strongest conservative standing
+-- first. Bindings and non-salient structure are not facts about the key.
 CREATE OR REPLACE FUNCTION converse.key_facts(p_keys bytea[], p_per_key int DEFAULT 24)
     RETURNS TABLE(key bytea, type_id bytea, object_id bytea, eff_mu numeric,
-                  witnesses bigint, p double precision)
+                  witnesses bigint, rating bigint, rd bigint, volatility bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH f AS MATERIALIZED (
-        SELECT k.key, c.type_id, c.object_id, c.rating, c.rd, c.witness_count,
-               consensus.belief_logit(c.rating, c.rd) AS logit
+        SELECT k.key, c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
         FROM (SELECT DISTINCT u AS key FROM unnest(p_keys) u WHERE u IS NOT NULL) k
         CROSS JOIN LATERAL (
-            SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
+            SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
             FROM laplace.v_consensus_unrefuted c
             WHERE c.subject_id = k.key AND c.object_id IS NOT NULL
               AND c.type_id <> ALL (consensus.relation_set_ids('KEY_BINDING'))
@@ -60,23 +64,23 @@ BEGIN ATOMIC
             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.type_id, c.object_id
             LIMIT GREATEST(p_per_key, 0)) c
     )
-    SELECT g.key, g.type_id, g.object_id, consensus.eff_mu_display(g.rating, g.rd),
-           g.witness_count,
-           exp(g.logit - g.top) / sum(exp(g.logit - g.top)) OVER (PARTITION BY g.key, g.type_id)
-    FROM (SELECT f.*, max(f.logit) OVER (PARTITION BY f.key, f.type_id) AS top FROM f) g;
+    SELECT f.key, f.type_id, f.object_id, consensus.eff_mu_display(f.rating, f.rd),
+           f.witness_count, f.rating, f.rd, f.volatility
+    FROM f;
 END;
 
--- QK: how two terms couple, and through which of their keys. Evidence is weighted by
--- specificity (1 / ln(2 + how many things share it)), so a claim nearly everything
--- shares ("is a entity", "has pos NOUN") contributes almost nothing and a specific
--- shared container, fact or ancestor dominates.
+-- How two terms couple, and through which of their keys, by typed channel:
 --   usage     a structure (sentence, definition, document) containing both terms
 --   fact      the same (relation, object) stated of a key of each
 --   ancestor  a shared upward ancestor within four hops of a key of each
+-- Each row keeps its channel's own measures: sharing (how many cells state that
+-- relation/object or reach that ancestor; a claim nearly everything shares says
+-- little) and depth (hops to the ancestor). Rows come back most specific first
+-- (least shared, then shallowest); a consumer may declare its own ordering.
 CREATE OR REPLACE FUNCTION converse.couple(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
                                           p_k int DEFAULT 12)
     RETURNS TABLE(x_key bytea, y_key bytea, channel text, relation bytea, via bytea,
-                  weight double precision)
+                  sharing bigint, depth int)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH xk AS MATERIALIZED (
@@ -87,7 +91,7 @@ BEGIN ATOMIC
         UNION SELECT p_y
     ), usage AS (
         SELECT p_x AS x_key, p_y AS y_key, 'usage'::text AS channel, NULL::bytea AS relation,
-               cx.entity_id AS via, 1.0::double precision AS weight
+               cx.entity_id AS via, 1::bigint AS sharing, 0 AS depth
         FROM structural.containers_of(p_x, 1, 4096) cx
         JOIN structural.containers_of(p_y, 1, 4096) cy USING (entity_id)
     ), xf AS MATERIALIZED (
@@ -97,9 +101,10 @@ BEGIN ATOMIC
     ), shared_fact AS (
         SELECT xf.key AS x_key, yf.key AS y_key, 'fact'::text AS channel, xf.type_id AS relation,
                xf.object_id AS via,
-               1.0 / ln(2.0 + (SELECT count(*) FROM (
+               (SELECT count(*) FROM (
                    SELECT 1 FROM laplace.consensus c
-                   WHERE c.object_id = xf.object_id AND c.type_id = xf.type_id LIMIT 100000) n)) AS weight
+                   WHERE c.object_id = xf.object_id AND c.type_id = xf.type_id LIMIT 100000) n) AS sharing,
+               0 AS depth
         FROM xf JOIN yf ON yf.type_id = xf.type_id AND yf.object_id = xf.object_id
     ), up AS (
         WITH RECURSIVE walk(root, side, node, depth) AS (
@@ -118,20 +123,20 @@ BEGIN ATOMIC
     ), shared_ancestor AS (
         SELECT ux.root AS x_key, uy.root AS y_key, 'ancestor'::text AS channel,
                NULL::bytea AS relation, ux.node AS via,
-               1.0 / ((ux.depth + uy.depth)::double precision
-                      * ln(2.0 + (SELECT count(*) FROM (
-                          SELECT 1 FROM laplace.consensus c
-                          WHERE c.object_id = ux.node
-                            AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
-                          LIMIT 100000) n))) AS weight
+               (SELECT count(*) FROM (
+                   SELECT 1 FROM laplace.consensus c
+                   WHERE c.object_id = ux.node
+                     AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
+                   LIMIT 100000) n) AS sharing,
+               (ux.depth + uy.depth)::int AS depth
         FROM up ux JOIN up uy ON uy.node = ux.node AND uy.side = 'y'
         WHERE ux.side = 'x'
     ), all_evidence AS (
         SELECT * FROM usage UNION ALL SELECT * FROM shared_fact UNION ALL SELECT * FROM shared_ancestor
     )
-    SELECT e.x_key, e.y_key, e.channel, e.relation, e.via, e.weight
+    SELECT e.x_key, e.y_key, e.channel, e.relation, e.via, e.sharing, e.depth
     FROM all_evidence e
-    ORDER BY e.weight DESC, e.channel, e.via
+    ORDER BY e.sharing, e.depth, e.channel, e.via
     LIMIT GREATEST(p_k, 0);
 END;
 
@@ -149,4 +154,65 @@ BEGIN ATOMIC
     GROUP BY a.context_id
     ORDER BY sum(a.observation_count) DESC, a.context_id
     LIMIT 1;
+END;
+
+-- The joint response of the web to a whole observation (native; spec 36 COUPLE). Every
+-- term is tugged at once through its bindings and answered outward as an indexed star,
+-- hop by hop; a candidate reached from every term, each by its own typed route, is the
+-- interpretation the observation supports, so which sense of each term was meant falls
+-- out of the meeting instead of being elected first. hops, fanout (per frontier node;
+-- deeper hops use an eighth) and frontier (per hop) are the compute envelope. One row
+-- per (candidate, term) route: the key it left from, its hop count, the relation of its
+-- last step and the node it came through, the last step's typed standing, and the
+-- weakest salience and weakest conservative standing along the path. Candidates are
+-- ordered by terms answered, least salient route, fewest hops, then weakest standing.
+-- p_min_salience is ROUTE's traversal envelope: relations below it (lexical glue such as
+-- HAS_POS, scalar values, standards metadata) classify rather than connect, and are not
+-- walked through.
+CREATE OR REPLACE FUNCTION converse.respond(p_terms bytea[], p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 256, p_frontier int DEFAULT 4096, p_limit int DEFAULT 24,
+        p_min_salience double precision DEFAULT 0.3)
+    RETURNS TABLE(candidate bytea, covered int, term_ordinal int, term bytea, key bytea,
+                  hops int, relation bytea, via bytea, outbound boolean,
+                  rating bigint, rd bigint, volatility bigint, witnesses bigint,
+                  salience double precision, weakest_standing bigint)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_forward_respond'
+    LANGUAGE C STABLE PARALLEL RESTRICTED
+    ROWS 64;
+
+-- A term's words in another language, through the identifiers it binds: bubble up from
+-- the term to each identifier its bindings name in the source language, switch the
+-- language, and come down every binding of that identifier in the target language
+-- (dog -> i46360 -> Hund). Both legs keep their typed standing; a binding's language is
+-- its attestation context (the witnessing lexicon's language).
+CREATE OR REPLACE FUNCTION converse.translate(p_term bytea, p_to bytea, p_from bytea DEFAULT NULL)
+    RETURNS TABLE(key bytea, target bytea,
+                  up_rating bigint, up_rd bigint, up_witnesses bigint,
+                  down_rating bigint, down_rd bigint, down_witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH kb AS (
+        SELECT consensus.relation_set_ids('KEY_BINDING') AS ids
+    ), up AS MATERIALIZED (
+        SELECT DISTINCT a.object_id AS key, a.type_id
+        FROM laplace.attestations a, kb
+        WHERE a.subject_id = p_term
+          AND a.type_id = ANY (kb.ids)
+          AND a.object_id IS NOT NULL
+          AND (p_from IS NULL OR a.context_id = p_from)
+    ), down AS MATERIALIZED (
+        SELECT DISTINCT up.key, a.subject_id AS target, a.type_id
+        FROM up
+        JOIN laplace.attestations a
+          ON a.object_id = up.key AND a.type_id = up.type_id AND a.context_id = p_to
+        WHERE a.subject_id <> p_term
+    )
+    SELECT d.key, d.target, cu.rating, cu.rd, cu.witness_count,
+           cd.rating, cd.rd, cd.witness_count
+    FROM down d
+    JOIN laplace.consensus cd
+      ON cd.subject_id = d.target AND cd.type_id = d.type_id AND cd.object_id = d.key
+    JOIN laplace.consensus cu
+      ON cu.subject_id = p_term AND cu.type_id = d.type_id AND cu.object_id = d.key
+    ORDER BY (cd.rating - 2 * cd.rd) DESC, d.key, d.target;
 END;

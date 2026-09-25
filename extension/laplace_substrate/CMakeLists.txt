@@ -33,6 +33,7 @@ set(EXT_EXECUTION_SOURCES
     src/cognition_program.c
     src/steer_candidates.c
     src/explore_web.c
+    src/forward_respond.c
     src/trajectory_continuations.c
     src/trajectory_generate.c
 )

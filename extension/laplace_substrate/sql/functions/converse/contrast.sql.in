@@ -1,6 +1,6 @@
 -- converse.contrast(x, y, lang, k): the tale of the tape. The two terms couple first
 -- (converse.couple): the facts compared are those of the keys that respond to each
--- other, not every sense of each word. holder is x-only / both / y-only.
+-- other most specifically (least shared, shallowest), not every sense of each word. holder is x-only / both / y-only.
 CREATE OR REPLACE FUNCTION converse.contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
         p_limit int DEFAULT 60)
     RETURNS TABLE(holder text, type text, fact text, mu numeric)
@@ -12,12 +12,12 @@ BEGIN ATOMIC
         -- The strongest coupling through keys (senses), else each term's dominant key.
         SELECT COALESCE(
                  (SELECT c.x_key FROM lang, converse.couple(p_x, p_y, lang.l, 64) c
-                   WHERE c.x_key <> p_x ORDER BY c.weight DESC LIMIT 1),
+                   WHERE c.x_key <> p_x ORDER BY c.sharing, c.depth LIMIT 1),
                  (SELECT b.key FROM lang, converse.bindings(ARRAY[p_x], lang.l) b WHERE b.rank = 1),
                  p_x) AS xk,
                COALESCE(
                  (SELECT c.y_key FROM lang, converse.couple(p_x, p_y, lang.l, 64) c
-                   WHERE c.y_key <> p_y ORDER BY c.weight DESC LIMIT 1),
+                   WHERE c.y_key <> p_y ORDER BY c.sharing, c.depth LIMIT 1),
                  (SELECT b.key FROM lang, converse.bindings(ARRAY[p_y], lang.l) b WHERE b.rank = 1),
                  p_y) AS yk
     ), xf AS (

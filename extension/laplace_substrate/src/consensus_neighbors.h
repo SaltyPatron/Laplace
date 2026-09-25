@@ -10,6 +10,7 @@ typedef struct LaplaceNeighbor
     hash128_t type;
     int64 rating;
     int64 rd;
+    int64 volatility;
     int64 witnesses;
     bool outbound;
 } LaplaceNeighbor;
