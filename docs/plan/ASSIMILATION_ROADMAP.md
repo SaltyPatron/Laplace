@@ -4,6 +4,11 @@ This note records what the inventor stated and corrected during the 2026-09-25 w
 
 ## Finish line
 
+**What the invention is (inventor):** a reinvention of the generative pre-trained transformer that completely eliminates the GPU requirement, while staying compatible with conventional AI and able to consume it.
+- **The reinvention.** GPT's functions are performed through Laplace's own mechanism: GPT's steps mapped to semantic instruction sets (spec 36 forward program, spec 37 ISA), witnessed structure with Glicko-2 standing instead of learned weights, typed indexed response instead of dense attention, executed as SQL over native code.
+- **No GPU.** The semantic engine runs on CPU through native code and PostgreSQL by design (spec 36 acceptance; Laplace-Refactor constitution).
+- **Compatibility and consumption.** Conventional checkpoints are consumed as witnesses whose circuits become graded evidence. The OpenAI-compatible endpoint and MCP serve the same machine to existing tools (INVENTIONS #79). Mold-a-Model exports conventional model artifacts from current standing (spec 12).
+
 The inventor's statement of it: enough ordinary corpus ingested — WordNet, documents, UD and the rest — for the GPT-like chat the invention describes to work. Model ingestion lets a conventional model be queried directly from SQL through the invention's storage mechanisms. Every workstream below serves one of those two capabilities. They meet in consensus, where the model's knowledge and the corpus's knowledge aggregate.
 
 What sets this apart, in the inventor's words: everyone else asks 10 models, gets 10 answers, and judges them with an 11th. Laplace ingests the 10 as witnesses and asks once. The one asked is the 10 and more, and it gives one answer: their consensus with every other source, each claim carrying its standing and its witnesses.
