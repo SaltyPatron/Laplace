@@ -6,7 +6,7 @@ Every open issue (319) was classified against the invention (`docs/INVENTION.md`
 
 | Verdict | Count |
 |---|---|
-| Keep | 133 (P0 3, P1 19, P2 48, P3 63) |
+| Keep | 133 (P0 4, P1 18, P2 48, P3 63) |
 | Absorbed into an owner | 87 |
 | Superseded by current law | 41 |
 | Stale (already done or no longer exists) | 55 |
@@ -27,7 +27,6 @@ Priority: **P0** blocks the next slice (one coherent reseed, then live forward-p
 | #548 | ingest: XPOS tags are minted unnamespaced (bare NodeHash) while UPOS goes through the governed resolver | XPOS anchors now OfCanonical string ids; NEEDS INVENTOR DECISION on XPOS (governed tagset registry vs UPOS+features). |
 | #799 | EPIC: text content, file artifact, document structure, and work identity are distinct reusable compositions | NEEDS INVENTOR DECISION: file/artifact occurrence entity for USER documents vs 'files are not content' (stated for curated sources). |
 | #840 | chess: Explore ranks Na3 above e4 — the fold is correct, the move cell is unconditioned on who played it | NEEDS INVENTOR DECISION: MOVE cell conditioned on ΔElo resembles withdrawn context dimension. |
-| #1044 | tier-0 admission: all 1,114,240 codepoints are placed on the glome — including 2,048 surrogates that cannot appear in any UTF-8 content and ~753k codepoints with no recorded properties | NEEDS INVENTOR DECISION: surrogates/noncharacters/unassigned get rows/placements? affects the P0 Unicode reseed cost. |
 | #1050 | one mean, declared: chess composes with math4d_karcher_mean, text with math4d_centroid — the 'open placement defect' is answered in code but only in one lane | NEEDS INVENTOR DECISION: centroid vs Karcher fork still present (hash_composer vs chess/agent C#). |
 | #1099 | Typed relations are stranded in HAS_DEFINITION gloss text — 'capital of France' is not an election defect | capital(France) fact only in gloss text; NEEDS INVENTOR DECISION on mechanism (calculated gloss analysis vs a stating source). |
 | #1303 | consensus: source trust is asserted by 79 literals and can never be earned — and it is worth fewer than ten witnesses anyway | The inventor defined trust as the witness's class (WordNet above Wiktionary above subtitles), but INVENTIONS #104 speaks of participants earning their own standing. Can a source's trust also be earned from its track record? |
@@ -38,6 +37,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Why |
 |---|---|---|
+| #1044 | tier-0 admission: all 1,114,240 codepoints are placed on the glome — including 2,048 surrogates that cannot appear in any UTF-8 content and ~753k codepoints with no recorded properties | Decided (inventor, 2026-09-25): surrogates and unassigned codepoints get assigned too, so every codepoint in the window gets its rank and placement. The open radical-inverse law (t = radicalInverse(rank), r = √t) spreads any prefix over the whole shell and densifies it without moving earlier addresses, so the tail costs nothing geometrically (storage proof page). Applies to the P0 Unicode reseed. |
 | #1715 | Standing math: trust sets certainty, relation rank stays out of truth standing | Workstream A. |
 | #1720 | Native forward pass over curated knowledge: bindings, key facts, coupling and realization in native code | Workstream F; reword 'standing distribution' to typed standing. |
 | #1725 | EPIC: Assimilation roadmap — corpus chat and model ingestion meet in one consensus | Roadmap epic. |
@@ -53,7 +53,6 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 | #755 | Product acceptance: conversation, structural code repair, model consensus, protocol parity and export | Whole-machine acceptance: conversation, parity, code, model consensus with negative control, semantic export. |
 | #921 | Conversation: one stateful canonical forward pass across MCP and OpenAI | OpenAI/MCP serve the same program with stateful multi-turn; restate in spec 36 stages. |
 | #951 | EPIC: operation/ISA consolidation — one canonical forward program and one semantic owner per operation family | One semantic owner per operation family; firmware builds on it. |
-| #1044 | tier-0 admission: all 1,114,240 codepoints are placed on the glome — including 2,048 surrogates that cannot appear in any UTF-8 content and ~753k codepoints with no recorded properties | NEEDS INVENTOR DECISION: surrogates/noncharacters/unassigned get rows/placements? affects the P0 Unicode reseed cost. |
 | #1050 | one mean, declared: chess composes with math4d_karcher_mean, text with math4d_centroid — the 'open placement defect' is answered in code but only in one lane | NEEDS INVENTOR DECISION: centroid vs Karcher fork still present (hash_composer vs chess/agent C#). |
 | #1443 | P0 ingest correctness: physical read/batch/worker boundaries must not change canonical state | Physical-plan invariance harness as the conformance test for every #1718 provider; reconstruction only for user content. |
 | #1712 | One-implementation law: consolidate the realize/label ladder and word_case_variants into one semantic owner with parity gates | word_case_variants per row; consolidate into REALIZE, not over HAS_NAME_ALIAS/canonical_names. |
