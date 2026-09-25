@@ -102,7 +102,8 @@ public sealed class SelectedModelAnalysisEstate : IDisposable
             SafetensorsContainerParser.ParseModel(snapshot);
         string modelName = Path.GetFileName(
             directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        ModelManifest manifest = TensorRoleClassifier.Build(tensors, config, modelName);
+        ModelManifest manifest = ModelManifest.Recognize(
+            tensors, config, LlamaTokenizerParser.IdSpace(tokenizerBytes), modelName);
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens =
             LlamaTokenizerParser.Parse(tokenizerBytes);
         snapshot.VerifySourceId();

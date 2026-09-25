@@ -12,10 +12,12 @@
 #include <cstring>
 #include <new>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
 #  include <mkl_cblas.h>
+#  include "laplace/dynamics/tbb_parallel.h"
 #endif
 
 struct bilinear_contraction_context {
@@ -25,6 +27,11 @@ struct bilinear_contraction_context {
     std::vector<double> left;
     std::vector<double> right;
     bool shared_factors = false;
+    // Per-subject null of the circuit's own score distribution, derived once
+    // from the factors (see bilinear_contraction_significant_pairs).
+    bool null_ready = false;
+    std::vector<double> null_mean;
+    std::vector<double> null_sd;
 };
 
 namespace {
@@ -669,6 +676,219 @@ int bilinear_contraction_candidates_calibrate(
             out_scores_fp1e9 + i, out_outcomes + i);
         if (rc != 0) return rc;
     }
+    return 0;
+}
+
+namespace {
+
+// Exact per-subject moments of s_ij = l_i . r_j over every object j:
+//   mean_i = l_i . rbar,  var_i = l_i^T C l_i,  C = (1/n) R^T R - rbar rbar^T.
+// Neither needs the n-by-n product; C is rank-by-rank.
+int prepare_subject_null(bilinear_contraction_context_t* context)
+{
+    if (context->null_ready) return 0;
+    const std::size_t n = context->entity_count;
+    const std::size_t r = context->rank;
+    if (n < 2 || r == 0) return -1;
+    const std::vector<double>& L = context->left;
+    const std::vector<double>& R = context->shared_factors ? context->left : context->right;
+    if (L.size() != n * r || R.size() != n * r) return -1;
+
+    std::vector<double> mean(r, 0.0);
+    for (std::size_t j = 0; j < n; ++j) {
+        const double* row = R.data() + j * r;
+        for (std::size_t k = 0; k < r; ++k) mean[k] += row[k];
+    }
+    for (std::size_t k = 0; k < r; ++k) mean[k] /= (double)n;
+
+    std::vector<double> cov(r * r, 0.0);
+#ifdef LAPLACE_HAS_MKL
+    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+        (MKL_INT)r, (MKL_INT)r, (MKL_INT)n,
+        1.0 / (double)n, R.data(), (MKL_INT)r, R.data(), (MKL_INT)r,
+        0.0, cov.data(), (MKL_INT)r);
+#else
+    for (std::size_t j = 0; j < n; ++j) {
+        const double* row = R.data() + j * r;
+        for (std::size_t a = 0; a < r; ++a)
+            for (std::size_t b = 0; b < r; ++b) cov[a * r + b] += row[a] * row[b];
+    }
+    for (double& v : cov) v /= (double)n;
+#endif
+    for (std::size_t a = 0; a < r; ++a)
+        for (std::size_t b = 0; b < r; ++b) cov[a * r + b] -= mean[a] * mean[b];
+
+    context->null_mean.assign(n, 0.0);
+    context->null_sd.assign(n, 0.0);
+    const std::size_t tile = std::min(n, kProjectionTileRows);
+    std::vector<double> projected(tile * r);
+    for (std::size_t begin = 0; begin < n; begin += tile) {
+        const std::size_t rows = std::min(tile, n - begin);
+#ifdef LAPLACE_HAS_MKL
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+            (MKL_INT)rows, (MKL_INT)r, (MKL_INT)r,
+            1.0, L.data() + begin * r, (MKL_INT)r, cov.data(), (MKL_INT)r,
+            0.0, projected.data(), (MKL_INT)r);
+#else
+        for (std::size_t a = 0; a < rows; ++a)
+            for (std::size_t k = 0; k < r; ++k) {
+                double v = 0.0;
+                for (std::size_t m = 0; m < r; ++m)
+                    v += L[(begin + a) * r + m] * cov[m * r + k];
+                projected[a * r + k] = v;
+            }
+#endif
+        for (std::size_t a = 0; a < rows; ++a) {
+            const std::size_t subject = begin + a;
+            const double* l = L.data() + subject * r;
+            const double* p = projected.data() + a * r;
+            const double* self = R.data() + subject * r;
+            double mu = 0.0, var = 0.0, diagonal = 0.0;
+            for (std::size_t k = 0; k < r; ++k) {
+                mu += l[k] * mean[k];
+                var += l[k] * p[k];
+                diagonal += l[k] * self[k];
+            }
+            // The family excludes the subject itself: remove s_ii from both moments.
+            const double nn = (double)n;
+            const double second = var + mu * mu;
+            const double mu_other = (nn * mu - diagonal) / (nn - 1.0);
+            const double var_other =
+                (nn * second - diagonal * diagonal) / (nn - 1.0) - mu_other * mu_other;
+            if (!std::isfinite(mu_other) || !std::isfinite(var_other)) return -2;
+            context->null_mean[subject] = mu_other;
+            // Roundoff can leave a degenerate subject slightly negative.
+            context->null_sd[subject] = var_other > 0.0 ? std::sqrt(var_other) : 0.0;
+        }
+    }
+    context->null_ready = true;
+    return 0;
+}
+
+} // namespace
+
+extern "C"
+int bilinear_contraction_significant_pairs(
+    bilinear_contraction_context_t* context,
+    std::size_t row_begin, int symmetric,
+    int32_t* out_rows, int32_t* out_cols,
+    int64_t* out_scores_fp1e9, double* out_z,
+    std::size_t capacity,
+    std::size_t* out_count, std::size_t* out_row_end,
+    double* out_threshold)
+{
+    if (!context || !out_rows || !out_cols || !out_scores_fp1e9
+        || !out_count || !out_row_end)
+        return -1;
+    *out_count = 0;
+    *out_row_end = row_begin;
+    const std::size_t n = context->entity_count;
+    const std::size_t r = context->rank;
+    // One subject can contribute at most n-1 pairs; a page must hold one subject.
+    // An unordered family needs s_ij = s_ji, which only shared factors guarantee.
+    if (n < 2 || r == 0 || row_begin > n || capacity < n - 1
+        || n > (std::size_t)INT32_MAX || (symmetric && !context->shared_factors))
+        return -1;
+    int rc = 0;
+    try {
+        rc = prepare_subject_null(context);
+    } catch (const std::bad_alloc&) {
+        return -3;
+    }
+    if (rc != 0) return rc;
+    const double family = symmetric
+        ? (double)n * (double)(n - 1) / 2.0
+        : (double)n * (double)(n - 1);
+    const double tau = std::sqrt(2.0 * std::log(family));
+    if (out_threshold) *out_threshold = tau;
+    if (row_begin == n) return 0;
+
+    const std::vector<double>& L = context->left;
+    const std::vector<double>& R = context->shared_factors ? context->left : context->right;
+    constexpr std::size_t kSubjectTile = 256;
+    std::vector<double> block;
+    std::vector<std::vector<std::pair<int32_t, double>>> hits;
+    try {
+        block.resize(std::min(kSubjectTile, n) * n);
+        hits.resize(std::min(kSubjectTile, n));
+    } catch (const std::bad_alloc&) {
+        return -3;
+    }
+
+    std::size_t count = 0;
+    std::size_t row = row_begin;
+    while (row < n) {
+        const std::size_t rows = std::min(kSubjectTile, n - row);
+#ifdef LAPLACE_HAS_MKL
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+            (MKL_INT)rows, (MKL_INT)n, (MKL_INT)r,
+            1.0, L.data() + row * r, (MKL_INT)r, R.data(), (MKL_INT)r,
+            0.0, block.data(), (MKL_INT)n);
+#else
+        for (std::size_t a = 0; a < rows; ++a)
+            for (std::size_t j = 0; j < n; ++j) {
+                double v = 0.0;
+                for (std::size_t k = 0; k < r; ++k) v += L[(row + a) * r + k] * R[j * r + k];
+                block[a * n + j] = v;
+            }
+#endif
+        auto scan = [&](std::size_t a) {
+            std::vector<std::pair<int32_t, double>>& found = hits[a];
+            found.clear();
+            const std::size_t subject = row + a;
+            const double sd = context->null_sd[subject];
+            const double mu = context->null_mean[subject];
+            const double* scores = block.data() + a * n;
+            if (symmetric) {
+                // Unordered pair {i, j}, written once from its lower subject: it is
+                // significant when either endpoint's own null rejects it.
+                for (std::size_t j = subject + 1; j < n; ++j) {
+                    double z = -std::numeric_limits<double>::infinity();
+                    if (sd > 0.0) z = (scores[j] - mu) / sd;
+                    const double other_sd = context->null_sd[j];
+                    if (other_sd > 0.0)
+                        z = std::max(z, (scores[j] - context->null_mean[j]) / other_sd);
+                    if (z >= tau) found.emplace_back((int32_t)j, z);
+                }
+                return;
+            }
+            if (!(sd > 0.0)) return;
+            for (std::size_t j = 0; j < n; ++j) {
+                if (j == subject) continue;
+                const double z = (scores[j] - mu) / sd;
+                if (z >= tau) found.emplace_back((int32_t)j, z);
+            }
+        };
+#ifdef LAPLACE_HAS_MKL
+        laplace::tbb_ops::parallel_for(
+            oneapi::tbb::blocked_range<std::size_t>(0, rows),
+            [&](const oneapi::tbb::blocked_range<std::size_t>& range) {
+                for (std::size_t a = range.begin(); a != range.end(); ++a) scan(a);
+            });
+#else
+        for (std::size_t a = 0; a < rows; ++a) scan(a);
+#endif
+        for (std::size_t a = 0; a < rows; ++a) {
+            const auto& found = hits[a];
+            if (count + found.size() > capacity) {
+                *out_count = count;
+                *out_row_end = row + a;
+                return 0;
+            }
+            for (const auto& [col, z] : found) {
+                if (!std::isfinite(z)) return -2;
+                out_rows[count] = (int32_t)(row + a);
+                out_cols[count] = col;
+                out_scores_fp1e9[count] =
+                    (int64_t)std::llround(0.5 * (1.0 + std::tanh(z / tau)) * 1e9);
+                if (out_z) out_z[count] = z;
+                ++count;
+            }
+        }
+        row += rows;
+    }
+    *out_count = count;
+    *out_row_end = n;
     return 0;
 }
 

@@ -93,6 +93,12 @@ internal sealed class ModelCircuitEstate
 
     public long PeakNativeResidentBytes { get; private set; }
 
+    private readonly List<string> _skipped = [];
+
+    /// <summary>Circuits the recognized anatomy could not feed, each with its reason.
+    /// A skipped circuit is reported; it is never replaced by another operator.</summary>
+    public IReadOnlyList<string> Skipped => _skipped;
+
     public IEnumerable<ModelCircuitDescriptor> Enumerate(Hash128 targetTypeId)
     {
         if (targetTypeId == ModelDecomposer.SimilarToTypeId)
@@ -133,32 +139,45 @@ internal sealed class ModelCircuitEstate
         {
             TensorRole? upRole = _model.Manifest.Single(layer, TensorRoleKind.MlpUp);
             TensorRole? downRole = _model.Manifest.Single(layer, TensorRoleKind.MlpDown);
-            int intermediate = _cfg.IntermediateSize;
-            if (upRole is null || downRole is null || intermediate <= 0) continue;
+            TensorRole? gateRole = _model.Manifest.Single(layer, TensorRoleKind.MlpGate);
+            int intermediate = upRole is { Shape.Length: 2 } ? upRole.Shape[0] : 0;
+            if (upRole is null || downRole is null || intermediate <= 0)
+            {
+                _skipped.Add($"ffn layer {layer}: no recognized split up/down projections");
+                continue;
+            }
+            if (!upRole.IsRowMajorProjection || !downRole.IsRowMajorProjection
+                || gateRole is { IsRowMajorProjection: false })
+            {
+                _skipped.Add($"ffn layer {layer}: projections are stored transposed ({upRole.Orientation})");
+                continue;
+            }
+            if (_model.Manifest.FfnActivation(gateRole is not null) is not { } activation)
+            {
+                _skipped.Add($"ffn layer {layer}: declared activation '{_cfg.HiddenAct}' has no native operator");
+                continue;
+            }
             float[] up = Load(upRole.Name, (long)intermediate * d);
             float[] down = Load(downRole.Name, (long)d * intermediate);
-            if (up.Length == 0 || down.Length == 0)
-                throw new InvalidDataException($"Layer {layer} has unreadable FFN projections.");
-            var profile = ArchitectureProfile.For(_cfg);
-            TensorRole? gateRole = _model.Manifest.Single(layer, TensorRoleKind.MlpGate);
-            if (profile.HasGate && gateRole is null)
-                throw new InvalidDataException($"Layer {layer} is missing its declared FFN gate.");
             float[]? gate = gateRole is not null ? Load(gateRole.Name, (long)intermediate * d) : null;
-            if (gate is { Length: 0 })
-                throw new InvalidDataException($"Layer {layer} has an unreadable FFN gate.");
-            float[]? upBias = LoadOptionalBias(upRole.Name, intermediate);
-            float[]? gateBias = gateRole is not null ? LoadOptionalBias(gateRole.Name, intermediate) : null;
-            float[]? downBias = LoadOptionalBias(downRole.Name, d);
+            if (up.Length == 0 || down.Length == 0 || gate is { Length: 0 })
+            {
+                _skipped.Add($"ffn layer {layer}: projections have no numeric interpretation");
+                continue;
+            }
+            float[]? upBias = LoadOptionalBias(upRole.Bias, intermediate);
+            float[]? gateBias = LoadOptionalBias(gateRole?.Bias, intermediate);
+            float[]? downBias = LoadOptionalBias(downRole.Bias, d);
             using NativeBilinearContraction circuit = NativeBilinearContraction.Ffn(
                 _embedding, _cfg.VocabSize, d, _tokenRows, _entityRows, _entityCount,
                 up, upBias, gate, gateBias, down, downBias, intermediate,
-                profile.ResolveFfnActCode(gate is not null), OutputRows);
+                activation, OutputRows);
             Track(circuit);
             var tensors = new List<string> { embeddingRole.Name, upRole.Name, downRole.Name, OutputRole.Name };
             if (gateRole is not null) tensors.Add(gateRole.Name);
-            if (upBias is not null) tensors.Add(ArchitectureProfile.BiasOf(upRole.Name));
-            if (gateBias is not null) tensors.Add(ArchitectureProfile.BiasOf(gateRole!.Name));
-            if (downBias is not null) tensors.Add(ArchitectureProfile.BiasOf(downRole.Name));
+            if (upBias is not null) tensors.Add(upRole.Bias!);
+            if (gateBias is not null) tensors.Add(gateRole!.Bias!);
+            if (downBias is not null) tensors.Add(downRole.Bias!);
             yield return Describe(
                 "ffn", layer, -1, tensors, circuit);
         }
@@ -177,12 +196,20 @@ internal sealed class ModelCircuitEstate
         {
             TensorRole? qRole = _model.Manifest.Single(layer, TensorRoleKind.AttnQ);
             TensorRole? kRole = _model.Manifest.Single(layer, TensorRoleKind.AttnK);
-            if (qRole is null || kRole is null) continue;
+            if (qRole is null || kRole is null)
+            {
+                _skipped.Add($"attention layer {layer}: no recognized split query/key projections");
+                continue;
+            }
             float[] q = Load(qRole.Name, (long)attnDim * d);
             float[] k = Load(kRole.Name, (long)kvDim * d);
-            if (q.Length == 0 || k.Length == 0) continue;
-            float[]? qBias = LoadOptionalBias(qRole.Name, attnDim);
-            float[]? kBias = LoadOptionalBias(kRole.Name, kvDim);
+            if (q.Length == 0 || k.Length == 0)
+            {
+                _skipped.Add($"attention layer {layer}: projections have no numeric interpretation");
+                continue;
+            }
+            float[]? qBias = LoadOptionalBias(qRole.Bias, attnDim);
+            float[]? kBias = LoadOptionalBias(kRole.Bias, kvDim);
             for (int head = 0; head < heads; head++)
             {
                 int kvHead = checked(head * kvHeads / heads);
@@ -211,11 +238,19 @@ internal sealed class ModelCircuitEstate
         {
             TensorRole? vRole = _model.Manifest.Single(layer, TensorRoleKind.AttnV);
             TensorRole? oRole = _model.Manifest.Single(layer, TensorRoleKind.AttnO);
-            if (vRole is null || oRole is null) continue;
+            if (vRole is null || oRole is null)
+            {
+                _skipped.Add($"value-output layer {layer}: no recognized split value/output projections");
+                continue;
+            }
             float[] v = Load(vRole.Name, (long)kvDim * d);
             float[] output = Load(oRole.Name, (long)d * attnDim);
-            if (v.Length == 0 || output.Length == 0) continue;
-            float[]? vBias = LoadOptionalBias(vRole.Name, kvDim);
+            if (v.Length == 0 || output.Length == 0)
+            {
+                _skipped.Add($"value-output layer {layer}: projections have no numeric interpretation");
+                continue;
+            }
+            float[]? vBias = LoadOptionalBias(vRole.Bias, kvDim);
             for (int head = 0; head < heads; head++)
             {
                 int kvHead = checked(head * kvHeads / heads);
@@ -277,10 +312,9 @@ internal sealed class ModelCircuitEstate
                 _refs, tensorName, elements, _model.Snapshot)
             : Array.Empty<float>();
 
-    private float[]? LoadOptionalBias(string weightName, int elements)
+    private float[]? LoadOptionalBias(string? name, int elements)
     {
-        string name = ArchitectureProfile.BiasOf(weightName);
-        if (!_refs.ContainsKey(name)) return null;
+        if (name is null || !_refs.ContainsKey(name)) return null;
         float[] values = WeightTensorETL.LoadTensorF32(
             _refs, name, elements, _model.Snapshot);
         if (values.Length != elements)

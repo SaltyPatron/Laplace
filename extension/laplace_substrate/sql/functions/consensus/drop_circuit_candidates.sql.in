@@ -1,0 +1,18 @@
+-- consensus.circuit_candidates admitted a checkpoint's evidence only for pairs some
+-- other source already held in consensus, so a model contributed nothing to a fresh
+-- world. Model circuit evidence is now bounded by its own declared significance
+-- contract (bilinear_contraction_significant_pairs) and needs no prior cell. Drop
+-- the reader on upgrade; new installs never create it (removed from manifest.install).
+DO $do$
+BEGIN
+    -- Release extension membership first (no-op when the function was never a member);
+    -- the guarded DROP then removes the object.
+    BEGIN
+        EXECUTE format(
+            'ALTER EXTENSION %I DROP FUNCTION consensus.circuit_candidates(bytea[], bytea, bytea, bytea, integer)',
+            'laplace_substrate');
+    EXCEPTION WHEN OTHERS THEN
+        NULL;  -- not a member (fresh install or already released)
+    END;
+    EXECUTE 'DROP FUNCTION IF EXISTS consensus.circuit_candidates(bytea[], bytea, bytea, bytea, integer)';
+END $do$;

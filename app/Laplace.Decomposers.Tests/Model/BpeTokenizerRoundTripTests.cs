@@ -105,7 +105,7 @@ public class BpeTokenizerRoundTripTests
     }
 
     [Fact]
-    public void VocabEmission_PlacesEveryContentIdentity_AndKeepsSpecialsGoverned()
+    public void VocabEmission_PlacesEveryContentIdentity_IncludingControlPieces()
     {
         string dir = Directory.CreateTempSubdirectory("lap-tok-admission-").FullName;
         try
@@ -126,12 +126,15 @@ public class BpeTokenizerRoundTripTests
                 if (entity.TypeId == Laplace.Decomposers.Abstractions.EntityTypeRegistry.Word)
                     Assert.Contains(entity.Id, placed);
             }
+            // A control piece decodes to its literal surface content; its control role
+            // stays on the tokenizer-local record, never in a minted identity.
             Assert.All(
-                change.Entities.Where(e => records.Any(r =>
-                    r.Role.HasFlag(TokenRole.Special) && r.EntityId == e.Id)),
-                e => Assert.Equal(
-                    Laplace.Decomposers.Abstractions.EntityTypeRegistry.SourceReference,
-                    e.TypeId));
+                records.Where(r => r.Role.HasFlag(TokenRole.Special)),
+                r =>
+                {
+                    Assert.True(r.HasContentCoord);
+                    Assert.Contains(r.EntityId, placed);
+                });
         }
         finally
         {

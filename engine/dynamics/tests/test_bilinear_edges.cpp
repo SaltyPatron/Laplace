@@ -2,6 +2,9 @@
 
 #include <cmath>
 #include <vector>
+#include <cstdint>
+#include <limits>
+#include <algorithm>
 
 #include "laplace/dynamics/bilinear_edges.h"
 
@@ -516,5 +519,108 @@ TEST(BilinearEdges, NonlinearFfnUsesUntiedOutputRowsAfterAliasActivation) {
         EXPECT_EQ(expected[i], actual[i]);
         EXPECT_EQ(expected_outcome[i], actual_outcome[i]);
     }
+    bilinear_contraction_free(context);
+}
+
+namespace {
+
+// Deterministic Irwin-Hall approximately-normal draws; no library RNG so the
+// fixture is identical on every toolchain.
+std::vector<float> noise_rows(std::size_t n, std::size_t d, uint64_t seed) {
+    std::vector<float> out(n * d);
+    uint64_t state = seed;
+    for (float& v : out) {
+        double sum = 0.0;
+        for (int k = 0; k < 12; ++k) {
+            state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+            sum += (double)(state >> 11) / (double)(1ULL << 53);
+        }
+        v = (float)(sum - 6.0);
+    }
+    return out;
+}
+
+struct Pair { int32_t row; int32_t col; };
+
+std::vector<Pair> all_significant(bilinear_contraction_context_t* context,
+                                  std::size_t n, std::size_t capacity,
+                                  double* threshold, double* min_z, int symmetric = 0) {
+    std::vector<Pair> pairs;
+    std::vector<int32_t> rows(capacity), cols(capacity);
+    std::vector<int64_t> scores(capacity);
+    std::vector<double> z(capacity);
+    std::size_t begin = 0;
+    *min_z = std::numeric_limits<double>::infinity();
+    while (begin < n) {
+        std::size_t count = 0, end = 0;
+        EXPECT_EQ(0, bilinear_contraction_significant_pairs(context, begin, symmetric,
+            rows.data(), cols.data(), scores.data(), z.data(), capacity,
+            &count, &end, threshold));
+        EXPECT_GT(end, begin);
+        for (std::size_t i = 0; i < count; ++i) {
+            EXPECT_GT(scores[i], 500000000);
+            EXPECT_NE(rows[i], cols[i]);
+            *min_z = std::min(*min_z, z[i]);
+            pairs.push_back({rows[i], cols[i]});
+        }
+        begin = end;
+    }
+    return pairs;
+}
+
+}
+
+TEST(BilinearEdges, SignificantPairsFollowTheCircuitsOwnSubjectNull) {
+    const std::size_t n = 200, d = 64;
+    std::vector<float> rows = noise_rows(n, d, 0x5eedULL);
+    // Entity 1 repeats entity 0: an upper-tail departure in both directions.
+    for (std::size_t k = 0; k < d; ++k) rows[1 * d + k] = rows[0 * d + k];
+    // Entity 3 opposes entity 2: a lower-tail departure, which is not evidence.
+    for (std::size_t k = 0; k < d; ++k) rows[3 * d + k] = -rows[2 * d + k];
+    std::vector<int> tokens(n), entities(n);
+    for (std::size_t i = 0; i < n; ++i) tokens[i] = entities[i] = (int)i;
+
+    bilinear_contraction_context_t* context = nullptr;
+    double arena = 0;
+    size_t resident = 0;
+    ASSERT_EQ(0, bilinear_direct_contraction_create(rows.data(), rows.data(), n, d,
+        tokens.data(), entities.data(), n, n, &context, &arena, &resident));
+
+    double tau = 0, min_z = 0;
+    std::vector<Pair> wide = all_significant(context, n, n * n, &tau, &min_z);
+    EXPECT_NEAR(std::sqrt(2.0 * std::log((double)n * (double)(n - 1))), tau, 1e-12);
+    EXPECT_GE(min_z, tau);
+    auto has = [&](const std::vector<Pair>& set, int32_t a, int32_t b) {
+        for (const Pair& p : set) if (p.row == a && p.col == b) return true;
+        return false;
+    };
+    EXPECT_TRUE(has(wide, 0, 1));
+    EXPECT_TRUE(has(wide, 1, 0));
+    EXPECT_FALSE(has(wide, 2, 3));
+    EXPECT_FALSE(has(wide, 3, 2));
+    // The contract, not a fixed width, bounds the output.
+    EXPECT_LT(wide.size(), n);
+
+    // Paging by whole subjects yields the same ordered evidence.
+    double tau_paged = 0, min_z_paged = 0;
+    std::vector<Pair> paged = all_significant(context, n, n - 1, &tau_paged, &min_z_paged);
+    ASSERT_EQ(wide.size(), paged.size());
+    for (std::size_t i = 0; i < wide.size(); ++i) {
+        EXPECT_EQ(wide[i].row, paged[i].row);
+        EXPECT_EQ(wide[i].col, paged[i].col);
+    }
+
+    std::size_t count = 0, end = 0;
+    int32_t r1[1]; int32_t c1[1]; int64_t s1[1];
+    EXPECT_EQ(-1, bilinear_contraction_significant_pairs(context, 0, 0, r1, c1, s1,
+        nullptr, 1, &count, &end, nullptr));
+
+    // A symmetric relation writes each unordered pair once, from its lower subject.
+    double tau_sym = 0, min_z_sym = 0;
+    std::vector<Pair> unordered = all_significant(context, n, n - 1, &tau_sym, &min_z_sym, 1);
+    EXPECT_NEAR(std::sqrt(2.0 * std::log((double)n * (double)(n - 1) / 2.0)), tau_sym, 1e-12);
+    EXPECT_TRUE(has(unordered, 0, 1));
+    EXPECT_FALSE(has(unordered, 1, 0));
+    for (const Pair& p : unordered) EXPECT_LT(p.row, p.col);
     bilinear_contraction_free(context);
 }

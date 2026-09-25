@@ -77,9 +77,8 @@ public sealed class ModelTokenEdgeETLTests
         {
             ModelManifest manifest = FixtureManifest();
             IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
-            var etl = new ModelTokenEdgeETL(
-                dir, manifest, tokens,
-                SourceEntityIdConventions.ModelContentSourceId(dir)!.Value);
+            Hash128 source = SourceEntityIdConventions.ModelContentSourceId(dir)!.Value;
+            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, source, "fixture");
 
             using CollectedChanges changes = await Collect(
                 etl.EmitAsync(1, reader: null, DecomposerOptions.Default));
@@ -89,7 +88,7 @@ public sealed class ModelTokenEdgeETLTests
             PhysicalityRow physicality = Assert.Single(circuit.Physicalities);
             Assert.Equal(PhysicalityType.Projection, physicality.Type);
             Assert.Equal(
-                ModelCoordinates.CircuitId("embedding", -1, -1),
+                ModelCoordinates.CircuitId(source, "fixture", "embedding", -1, -1),
                 physicality.EntityId);
             Assert.Equal(3, physicality.NConstituents);
             Assert.Equal(1, physicality.SourceDim);
@@ -133,51 +132,68 @@ public sealed class ModelTokenEdgeETLTests
     }
 
     [Fact]
-    public async Task ExistingTypedClaims_EmitCategoricalReceiptsAndTransientScoresOnly()
+    public void SameStructuralAddress_InTwoModels_IsTwoCircuits()
     {
-        string dir = WriteEmbeddingFixture();
+        Hash128 a = SourceWitness.Id("model-a", "1");
+        Hash128 b = SourceWitness.Id("model-b", "1");
+        Hash128 left = ModelCoordinates.CircuitId(a, "model-a", "attention", 3, 5);
+        Hash128 right = ModelCoordinates.CircuitId(b, "model-b", "attention", 3, 5);
+        Assert.NotEqual(left, right);
+        Assert.Equal(left, ModelCoordinates.CircuitId(a, "model-a", "attention", 3, 5));
+        Assert.NotEqual(left, ModelCoordinates.CircuitId(a, "model-a", "attention", 3, 6));
+    }
+
+    [Fact]
+    public async Task CircuitEvidence_NeedsNoPriorConsensus_AndIsNeverARefutation()
+    {
+        // Twenty-four entities: 0 and 1 share a direction, 2 opposes 3, the rest
+        // are spread. The circuit's own per-subject null decides what is written.
+        const int n = 24, dim = 16;
+        var values = new float[n * dim];
+        ulong state = 0x9e3779b97f4a7c15UL;
+        for (int i = 0; i < values.Length; i++)
+        {
+            state = state * 6364136223846793005UL + 1442695040888963407UL;
+            values[i] = (float)((state >> 11) / (double)(1UL << 53) - 0.5);
+        }
+        for (int k = 0; k < dim; k++)
+        {
+            values[k] = 4f; values[dim + k] = 4f;
+            values[3 * dim + k] = -values[2 * dim + k];
+        }
+        string dir = WriteEmbeddingFixture(values, n, dim);
         try
         {
-            ModelManifest manifest = FixtureManifest();
-            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
-            Hash128 typeId = ModelDecomposer.SimilarToTypeId;
-            var relations = new[]
-            {
-                new CircuitRelation(tokens[0].EntityId, tokens[1].EntityId, typeId, 0, 1),
-                new CircuitRelation(tokens[0].EntityId, tokens[2].EntityId, typeId, 0, 1),
-            };
-            var reader = new CandidateReader(typeId, relations);
-            var etl = new ModelTokenEdgeETL(dir, manifest, tokens,
-                SourceEntityIdConventions.ModelContentSourceId(dir)!.Value);
+            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = Enumerable.Range(0, n)
+                .Select(i => Token(i, "t" + i, Hash128.OfCanonical("test/token/sig/" + i)))
+                .ToArray();
+            Hash128 source = SourceEntityIdConventions.ModelContentSourceId(dir)!.Value;
+            var etl = new ModelTokenEdgeETL(
+                dir, EmbeddingManifest(n, dim), tokens, source, "fixture");
 
-            using CollectedChanges changes = await Collect(etl.EmitAsync(
-                1, reader, DecomposerOptions.Default));
+            using CollectedChanges changes = await Collect(
+                etl.EmitAsync(1, reader: null, DecomposerOptions.Default));
 
-            Assert.Contains(changes,
-                item => item.Physicalities.Any(
-                    p => p.Type == PhysicalityType.Projection));
-            SubstrateChange change = Assert.Single(
-                changes.Where(item => item.Attestations.Length == 2));
-            Assert.Empty(change.Entities);
-            Assert.Empty(change.Physicalities);
-            Assert.Equal(2, change.Attestations.Length);
-            Assert.Equal(2, change.EphemeralFoldInputs.Length);
-            Assert.All(change.Attestations, row =>
+            AttestationRow[] claims = changes.SelectMany(c => c.Attestations).ToArray();
+            EphemeralFoldInput[] grades = changes.SelectMany(c => c.EphemeralFoldInputs).ToArray();
+            Assert.NotEmpty(claims);
+            Assert.Equal(claims.Length, grades.Length);
+            Assert.All(claims, claim =>
             {
-                Assert.Equal(typeId, row.TypeId);
-                Assert.False(row.FoldReplayable);
-                Assert.NotNull(row.ContextId);
-                long expectedRd = (long)(NativeAttestation.WitnessPhi(
-                    RelationTypeRegistry.Resolve("SIMILAR_TO").Rank
-                    * SourceTrust.AiModelProbe) * 1_000_000_000.0);
-                Assert.Equal(expectedRd, row.OpponentRdFp1e9);
+                Assert.Equal(ModelDecomposer.SimilarToTypeId, claim.TypeId);
+                Assert.Equal(AttestationOutcome.Confirm, claim.Outcome);
+                Assert.Equal(source, claim.SourceId);
+                Assert.NotEqual(claim.SubjectId, claim.ObjectId);
+                Assert.True((claim.QualifierMask & CalculationSources.Qualifier) == CalculationSources.Qualifier);
             });
-            Assert.Equal(AttestationOutcome.Confirm, change.Attestations[0].Outcome);
-            Assert.Equal(AttestationOutcome.Refute, change.Attestations[1].Outcome);
-            Assert.True(change.EphemeralFoldInputs[0].ScoreFp1e9 > 500_000_000);
-            Assert.True(change.EphemeralFoldInputs[1].ScoreFp1e9 < 500_000_000);
-            Assert.Equal(4, reader.RequestedTypes.Count);
-            Assert.DoesNotContain(change.Metadata.SourceContentUnitName, "top", StringComparison.OrdinalIgnoreCase);
+            Assert.All(grades, g => Assert.True(g.ScoreFp1e9 > 500_000_000));
+            bool Pair(AttestationRow c, int a, int b) =>
+                (c.SubjectId == tokens[a].EntityId && c.ObjectId == tokens[b].EntityId)
+                || (c.SubjectId == tokens[b].EntityId && c.ObjectId == tokens[a].EntityId);
+            // SIMILAR_TO is symmetric: the unordered pair is one claim.
+            Assert.Single(claims, c => Pair(c, 0, 1));
+            Assert.DoesNotContain(claims, c => Pair(c, 2, 3));
+            Assert.True(claims.Length < n * (n - 1) / 4, $"{claims.Length} claims is not a significance bound");
         }
         finally
         {
@@ -186,33 +202,17 @@ public sealed class ModelTokenEdgeETLTests
     }
 
     [Fact]
-    public async Task CanonicalWireAliases_AggregateAllEmbeddingRowsAsAnOrderIndependentSet()
+    public async Task TinyCircuit_HasNoSignificantPair_AndWritesNoClaim()
     {
-        string dir = WriteEmbeddingFixture([1, 0, -1, 0, 0, 2]);
+        string dir = WriteEmbeddingFixture([1, 0, 1, 0, -1, 0]);
         try
         {
-            Hash128 alias = Hash128.OfCanonical("test/token/alias");
-            Hash128 other = Hash128.OfCanonical("test/token/other");
-            LlamaTokenizerParser.TokenRecord[] tokens =
-            [
-                Token(1, "wire-b", alias),
-                Token(0, "wire-a", alias),
-                Token(2, "other", other),
-            ];
-            var relation = new CircuitRelation(
-                alias, other, ModelDecomposer.SimilarToTypeId, 0, 1);
-            var etl = new ModelTokenEdgeETL(
-                dir, FixtureManifest(), tokens,
-                SourceEntityIdConventions.ModelContentSourceId(dir)!.Value);
-
+            var etl = new ModelTokenEdgeETL(dir, FixtureManifest(), FixtureTokens(),
+                SourceEntityIdConventions.ModelContentSourceId(dir)!.Value, "fixture");
             using CollectedChanges changes = await Collect(etl.EmitAsync(
-                1, new CandidateReader(ModelDecomposer.SimilarToTypeId, [relation]),
-                DecomposerOptions.Default));
-            SubstrateChange change = Assert.Single(
-                changes.Where(item => item.Attestations.Length == 1));
-
-            Assert.Equal(AttestationOutcome.Draw, Assert.Single(change.Attestations).Outcome);
-            Assert.Equal(500_000_000, Assert.Single(change.EphemeralFoldInputs).ScoreFp1e9);
+                1, reader: null, DecomposerOptions.Default));
+            Assert.Contains(changes, c => c.Physicalities.Any(p => p.Type == PhysicalityType.Projection));
+            Assert.Empty(changes.SelectMany(c => c.Attestations));
         }
         finally
         {
@@ -405,15 +405,11 @@ public sealed class ModelTokenEdgeETLTests
             File.SetLastWriteTimeUtc(path, timestamp);
 
             IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
-            var candidate = new CircuitRelation(
-                tokens[0].EntityId, tokens[1].EntityId,
-                ModelDecomposer.SimilarToTypeId, 0, 1);
             var etl = new ModelTokenEdgeETL(
-                dir, FixtureManifest(), tokens, admittedSource);
+                dir, FixtureManifest(), tokens, admittedSource, "fixture");
 
             await Assert.ThrowsAsync<InvalidDataException>(() => Collect(etl.EmitAsync(
-                1, new CandidateReader(ModelDecomposer.SimilarToTypeId, [candidate]),
-                DecomposerOptions.Default)));
+                1, reader: null, DecomposerOptions.Default)));
         }
         finally
         {
@@ -422,101 +418,31 @@ public sealed class ModelTokenEdgeETLTests
     }
 
     [Fact]
-    public async Task RealMiniLmCheckpoint_ContractsACompleteExistingClaimWithoutTensorPayload()
+    public void RealMiniLmHeader_FeedsEveryCircuitKindByShape()
     {
         if (!File.Exists(Path.Combine(MiniLm, "model.safetensors")))
         {
-            _output.WriteLine("MiniLM checkpoint not installed; real-checkpoint proof skipped.");
+            _output.WriteLine("MiniLM checkpoint not installed; real-checkpoint recognition skipped.");
             return;
         }
-        if (!CodepointPerfcache.IsLoaded)
-            CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
-
         var config = ModelConfigReader.Read(Path.Combine(MiniLm, "config.json"));
         var tensors = SafetensorsContainerParser.ParseModel(MiniLm);
-        ModelManifest manifest = TensorRoleClassifier.Build(tensors, config, "all-MiniLM-L6-v2");
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens =
-            LlamaTokenizerParser.Parse(Path.Combine(MiniLm, "tokenizer.json"));
-        LlamaTokenizerParser.TokenRecord first = tokens.First(t => t.TokenId == 100);
-        LlamaTokenizerParser.TokenRecord second = tokens.First(t => t.TokenId == 101);
-        var candidate = new CircuitRelation(
-            first.EntityId, second.EntityId, ModelDecomposer.SimilarToTypeId, 0, 1);
-        var reader = new CandidateReader(ModelDecomposer.SimilarToTypeId, [candidate]);
-        Hash128 source = ModelDecomposer.SourceForModel(MiniLm).Id;
-        var etl = new ModelTokenEdgeETL(MiniLm, manifest, tokens, source);
-
-        var sw = Stopwatch.StartNew();
-        using CollectedChanges changes = await Collect(etl.EmitAsync(
-            1, reader, DecomposerOptions.Default));
-        sw.Stop();
-
-        Assert.Contains(changes,
-            item => item.Physicalities.Any(
-                p => p.Type == PhysicalityType.Projection));
-        SubstrateChange change = Assert.Single(
-            changes.Where(item => item.Attestations.Length == 1));
-        Assert.Single(change.Attestations);
-        Assert.Single(change.EphemeralFoldInputs);
-        Assert.Empty(change.Entities);
-        Assert.Empty(change.Physicalities);
-        Assert.False(change.Attestations[0].FoldReplayable);
-        Assert.InRange(change.EphemeralFoldInputs[0].ScoreFp1e9, 0, 1_000_000_000);
-        _output.WriteLine(
-            $"MiniLM exact embedding arena: vocab={manifest.Config.VocabSize}, d={manifest.Config.HiddenSize}, " +
-            $"claims=1, elapsed_ms={sw.ElapsedMilliseconds}, durable_tensor_bytes=0");
-    }
-
-    [Fact]
-    public async Task RealMiniLmLayer_ContractsAttentionValueOutputAndFfnKinds()
-    {
-        if (!File.Exists(Path.Combine(MiniLm, "model.safetensors"))) return;
-        if (!CodepointPerfcache.IsLoaded)
-            CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
-
-        var config = ModelConfigReader.Read(Path.Combine(MiniLm, "config.json"));
-        var tensors = SafetensorsContainerParser.ParseModel(MiniLm);
-        ModelManifest full = TensorRoleClassifier.Build(tensors, config, "all-MiniLM-L6-v2");
-        var manifest = new ModelManifest
+        int? ids = LlamaTokenizerParser.IdSpace(File.ReadAllBytes(Path.Combine(MiniLm, "tokenizer.json")));
+        ModelManifest manifest = ModelManifest.Recognize(tensors, config, ids, "all-MiniLM-L6-v2");
+        Assert.True(manifest.TextPlanesRunnable);
+        Assert.Equal(6, manifest.LayerCount);
+        for (int layer = 0; layer < manifest.LayerCount; layer++)
         {
-            ModelName = full.ModelName, Modality = full.Modality, Coverage = full.Coverage,
-            Config = full.Config with { NumLayers = 1 },
-            Roles = full.Roles.Where(r => r.LayerIndex <= 0).ToArray(),
-        };
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> parsed =
-            LlamaTokenizerParser.Parse(Path.Combine(MiniLm, "tokenizer.json"));
-        LlamaTokenizerParser.TokenRecord[] endpoints = parsed
-            .GroupBy(t => t.EntityId).Select(g => g.First()).Take(4).ToArray();
-        var reader = new AllModelKindCandidateReader(endpoints[0].EntityId, endpoints[1].EntityId);
-        var etl = new ModelTokenEdgeETL(MiniLm, manifest, parsed,
-            ModelDecomposer.SourceForModel(MiniLm).Id);
-
-        var sw = Stopwatch.StartNew();
-        using CollectedChanges changes = await Collect(etl.EmitAsync(
-            1, reader, DecomposerOptions.Default));
-        sw.Stop();
-        AttestationRow[] receipts = changes.SelectMany(c => c.Attestations).ToArray();
-
-        Assert.Equal(26, receipts.Length);
-        Assert.Equal(1, receipts.Count(r => r.TypeId == ModelDecomposer.SimilarToTypeId));
-        Assert.Equal(12, receipts.Count(r => r.TypeId == ModelDecomposer.AttendsTypeId));
-        Assert.Equal(12, receipts.Count(r => r.TypeId == ModelDecomposer.OvRelatesTypeId));
-        Assert.Equal(1, receipts.Count(r => r.TypeId == ModelDecomposer.CompletesToTypeId));
-        Assert.Contains(changes,
-            item => item.Physicalities.Any(
-                p => p.Type == PhysicalityType.Projection));
-        Assert.All(changes.Where(c => c.Attestations.Length > 0), c =>
-        {
-            Assert.Empty(c.Entities);
-            Assert.Empty(c.Physicalities);
-            Assert.Equal(
-                c.Attestations.Length,
-                c.EphemeralFoldInputs.Length);
-        });
-        Assert.InRange(etl.PeakNativeResidentBytes, 1, 256L * 1024 * 1024);
-        _output.WriteLine(
-            $"MiniLM full-vocabulary one-layer contraction: tokenizer_rows={parsed.Count}, " +
-            $"canonical_entities={parsed.Select(t => t.EntityId).Distinct().Count()}, " +
-            $"peak_native_resident_bytes={etl.PeakNativeResidentBytes}, elapsed_ms={sw.ElapsedMilliseconds}");
+            Assert.NotNull(manifest.Single(layer, TensorRoleKind.AttnQ)?.Bias);
+            Assert.NotNull(manifest.Single(layer, TensorRoleKind.AttnK));
+            Assert.NotNull(manifest.Single(layer, TensorRoleKind.AttnV));
+            Assert.NotNull(manifest.Single(layer, TensorRoleKind.AttnO));
+            Assert.NotNull(manifest.Single(layer, TensorRoleKind.MlpUp)?.Bias);
+            Assert.NotNull(manifest.Single(layer, TensorRoleKind.MlpDown));
+            Assert.Null(manifest.Single(layer, TensorRoleKind.MlpGate));
+        }
+        Assert.Equal(1, manifest.FfnActivation(gated: false));
+        _output.WriteLine(manifest.Anatomy.Describe());
     }
 
     private static async Task<CollectedChanges> Collect(IAsyncEnumerable<SubstrateChange> source)
@@ -592,18 +518,20 @@ public sealed class ModelTokenEdgeETLTests
         }
     }
 
-    private static string WriteEmbeddingFixture(float[]? tensorValues = null)
+    private static string WriteEmbeddingFixture(float[]? tensorValues = null, int rows = 3, int dim = 2)
     {
         string dir = Path.Combine(Path.GetTempPath(), "laplace-model-contraction-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
-        string json = "{\"embeddings.word_embeddings.weight\":{\"dtype\":\"F32\",\"shape\":[3,2],\"data_offsets\":[0,24]}}";
+        int payload = rows * dim * sizeof(float);
+        string json = "{\"embeddings.word_embeddings.weight\":{\"dtype\":\"F32\",\"shape\":[" + rows + "," + dim
+            + "],\"data_offsets\":[0," + payload + "]}}";
         byte[] header = Encoding.UTF8.GetBytes(json);
-        byte[] bytes = new byte[8 + header.Length + 24];
+        byte[] bytes = new byte[8 + header.Length + payload];
         BinaryPrimitives.WriteUInt64LittleEndian(bytes, (ulong)header.Length);
         header.CopyTo(bytes, 8);
         float[] values = tensorValues ?? [1, 0, 1, 0, -1, 0];
-        if (values.Length != 6) throw new ArgumentException("fixture requires exactly six values", nameof(tensorValues));
-        Buffer.BlockCopy(values, 0, bytes, 8 + header.Length, 24);
+        if (values.Length != rows * dim) throw new ArgumentException("fixture values disagree with its shape", nameof(tensorValues));
+        Buffer.BlockCopy(values, 0, bytes, 8 + header.Length, payload);
         File.WriteAllBytes(Path.Combine(dir, "model.safetensors"), bytes);
         return dir;
     }
@@ -658,55 +586,43 @@ public sealed class ModelTokenEdgeETLTests
         }
         File.WriteAllBytes(Path.Combine(dir, "model.safetensors"), bytes);
 
-        var roles = new List<TensorRole>(tensors.Length);
-        foreach (var tensor in tensors)
-            roles.Add(new TensorRole(
-                tensor.Name, tensor.Shape, "F32",
-                tensor.Kind,
-                tensor.Kind is TensorRoleKind.Embedding or TensorRoleKind.LmHead ? -1 : 0,
-                -1));
-        return (dir, new ModelManifest
-        {
-            ModelName = "circuit-fixture",
-            Modality = Modality.Text,
-            Coverage = Coverage.Full,
-            Config = new ModelConfig
+        ModelManifest manifest = ModelManifest.Recognize(
+            tensors.Select(t => new HeaderTensor(t.Name, "F32", t.Shape)).ToArray(),
+            ConfigResult(BertConfig(3, 2, 1, 2, 1, 3), new()
             {
-                ModelType = "bert", Architecture = "BertModel",
-                VocabSize = 3, HiddenSize = 2, NumLayers = 1,
-                NumHeads = 2, NumKvHeads = 2, HeadDim = 1,
-                IntermediateSize = 3, NumExperts = 0,
-                TieWordEmbeddings = false, QkNorm = false,
-                RopeTheta = 0, NormEps = 1e-12, HiddenAct = "gelu",
-                MlaQLoraRank = 0, MlaKvLoraRank = 0,
-                QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
-                RecipeEntityId = default, CanonicalJson = [],
-            },
-            Roles = roles,
-        });
+                ["hidden_size"] = 2, ["num_attention_heads"] = 2, ["head_dim"] = 1,
+                ["num_hidden_layers"] = 1, ["intermediate_size"] = 3,
+            }),
+            3, "circuit-fixture");
+        foreach (var tensor in tensors)
+            Assert.Equal(tensor.Kind, Assert.Single(manifest.Roles, r => r.Name == tensor.Name).Kind);
+        return (dir, manifest);
     }
 
-    private static ModelManifest FixtureManifest() => new()
+    private static ModelConfig BertConfig(int vocab, int hidden, int layers, int heads, int headDim, int interm) => new()
     {
-        ModelName = "fixture",
-        Modality = Modality.Text,
-        Coverage = Coverage.Full,
-        Config = new ModelConfig
-        {
-            ModelType = "bert", Architecture = "BertModel", VocabSize = 3,
-            HiddenSize = 2, NumLayers = 0, NumHeads = 1, NumKvHeads = 1,
-            HeadDim = 2, IntermediateSize = 0, NumExperts = 0,
-            TieWordEmbeddings = true, QkNorm = false, RopeTheta = 0,
-            NormEps = 1e-12, HiddenAct = "gelu", MlaQLoraRank = 0,
-            MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0,
-            VHeadDim = 0, RecipeEntityId = default, CanonicalJson = [],
-        },
-        Roles =
-        [
-            new TensorRole("embeddings.word_embeddings.weight", [3, 2], "F32",
-                TensorRoleKind.Embedding, -1, -1),
-        ],
+        ModelType = "bert", Architecture = "BertModel",
+        VocabSize = vocab, HiddenSize = hidden, NumLayers = layers,
+        NumHeads = heads, NumKvHeads = heads, HeadDim = headDim,
+        IntermediateSize = interm, NumExperts = 0,
+        TieWordEmbeddings = false, QkNorm = false,
+        RopeTheta = 0, NormEps = 1e-12, HiddenAct = "gelu",
+        MlaQLoraRank = 0, MlaKvLoraRank = 0,
+        QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
     };
+
+    private static ModelConfigReader.Result ConfigResult(ModelConfig config, Dictionary<string, long> ints) =>
+        new(config, Modality.Text, Coverage.Full, ints);
+
+    private static ModelManifest EmbeddingManifest(int rows, int dim) => ModelManifest.Recognize(
+        new HeaderTensor[] { new("embeddings.word_embeddings.weight", "F32", [rows, dim]) },
+        ConfigResult(BertConfig(rows, dim, 0, 1, dim, 0), new()
+        {
+            ["hidden_size"] = dim, ["num_attention_heads"] = 1,
+        }),
+        rows, "fixture");
+
+    private static ModelManifest FixtureManifest() => EmbeddingManifest(3, 2);
 
     private static IReadOnlyList<LlamaTokenizerParser.TokenRecord> FixtureTokens() =>
     [
@@ -721,34 +637,6 @@ public sealed class ModelTokenEdgeETLTests
         EntityId = entity, Tier = 0, IsByteLevel = false, Role = TokenRole.None,
         ContentX = 0, ContentY = 0, ContentZ = 0, ContentM = 0, HasContentCoord = true,
     };
-
-    private sealed class CandidateReader(Hash128 admittedType, IReadOnlyList<CircuitRelation> relations)
-        : ISubstrateReader
-    {
-        public List<Hash128> RequestedTypes { get; } = [];
-
-        public Task<CircuitCandidatePage> ReadCircuitCandidatesAsync(
-            IReadOnlyList<Hash128> vocabulary, Hash128 typeId,
-            Hash128? afterSubject, Hash128? afterObject, int pageSize,
-            CancellationToken ct = default)
-        {
-            RequestedTypes.Add(typeId);
-            IReadOnlyList<CircuitRelation> rows = typeId == admittedType && afterSubject is null
-                ? relations
-                : Array.Empty<CircuitRelation>();
-            return Task.FromResult(new CircuitCandidatePage(rows, null, null));
-        }
-
-        public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
-            => Task.FromResult(false);
-        public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
-            => Task.FromResult(false);
-        public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
-            => Task.FromResult(0L);
-        public Task<byte[]> EntitiesExistBitmapAsync(
-            IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
-            => Task.FromResult(new byte[(candidates.Count + 7) / 8]);
-    }
 
     private sealed class PrecommitVerifyingWriter : ISubstrateWriter
     {
@@ -767,38 +655,6 @@ public sealed class ModelTokenEdgeETLTests
                 changes.Sum(static change => change.Attestations.Length), 0,
                 0, TimeSpan.Zero, false);
         }
-    }
-
-    private sealed class AllModelKindCandidateReader(Hash128 subject, Hash128 obj) : ISubstrateReader
-    {
-        private static readonly HashSet<Hash128> Types =
-        [
-            ModelDecomposer.SimilarToTypeId,
-            ModelDecomposer.AttendsTypeId,
-            ModelDecomposer.OvRelatesTypeId,
-            ModelDecomposer.CompletesToTypeId,
-        ];
-
-        public Task<CircuitCandidatePage> ReadCircuitCandidatesAsync(
-            IReadOnlyList<Hash128> vocabulary, Hash128 typeId,
-            Hash128? afterSubject, Hash128? afterObject, int pageSize,
-            CancellationToken ct = default)
-        {
-            IReadOnlyList<CircuitRelation> rows = Types.Contains(typeId) && afterSubject is null
-                ? [new CircuitRelation(subject, obj, typeId, 0, 1)]
-                : Array.Empty<CircuitRelation>();
-            return Task.FromResult(new CircuitCandidatePage(rows, null, null));
-        }
-
-        public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
-            => Task.FromResult(false);
-        public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
-            => Task.FromResult(false);
-        public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
-            => Task.FromResult(0L);
-        public Task<byte[]> EntitiesExistBitmapAsync(
-            IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
-            => Task.FromResult(new byte[(candidates.Count + 7) / 8]);
     }
 
     private sealed class PairProposalReader(IReadOnlyList<CircuitPairProposal> proposals) : ISubstrateReader

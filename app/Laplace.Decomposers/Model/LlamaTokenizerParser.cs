@@ -76,16 +76,13 @@ public sealed class LlamaTokenizerParser
             (byte[] canonical, TokenRole role) = Canonicalize(raw);
             if (specialIds.Contains(tokenId)) role |= TokenRole.Special;
 
+            // A control piece ("<s>", "</s>") decodes to its literal surface like any
+            // other piece; its control role is tokenizer-local and stays on the record.
             Hash128 entityId;
             byte tier;
             double cx = double.NaN, cy = double.NaN, cz = double.NaN, cm = double.NaN;
             bool hasContent = false;
-            if (role.HasFlag(TokenRole.Special))
-            {
-                entityId = Hash128.OfCanonical($"substrate/token/special/{raw}/v1");
-                tier = EntityTier.Word;
-            }
-            else if (TryDecomposeRoot(canonical, out entityId, out tier, out cx, out cy, out cz, out cm))
+            if (TryDecomposeRoot(canonical, out entityId, out tier, out cx, out cy, out cz, out cm))
             {
                 hasContent = true;
             }
@@ -304,21 +301,16 @@ public sealed class LlamaTokenizerParser
     public static void StageVocabToken(SubstrateChangeBuilder b, TokenRecord rec, Hash128 sourceId)
     {
         Span<double> coord = stackalloc double[4];
-        if (!rec.Role.HasFlag(TokenRole.Special)
-            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
+        if (TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
         {
             foreach (var e in treeEntities) b.AddEntity(e);
             foreach (var p in treePhys) b.AddPhysicality(p);
         }
         else
         {
-            // A special/control token is a governed tokenizer reference, not
-            // ordinary textual content.  All other fallbacks are literal byte
-            // sequences and therefore owe one exact Merkle physicality.
-            Hash128 typeId = rec.Role.HasFlag(TokenRole.Special)
-                ? EntityTypeRegistry.SourceReference
-                : TextEntityBuilder.WordTypeId;
-            b.AddEntity(rec.EntityId, rec.Tier, typeId);
+            // Undecodable pieces are literal byte sequences and owe one exact
+            // Merkle physicality over their byte atoms.
+            b.AddEntity(rec.EntityId, rec.Tier, TextEntityBuilder.WordTypeId);
             if (rec.HasContentCoord)
             {
                 if (rec.CanonicalBytes.Length > 1)
@@ -476,27 +468,59 @@ public sealed class LlamaTokenizerParser
             magnitude: rec.ArenaScale - rec.Index, arenaScale: rec.ArenaScale));
     }
 
-    public readonly record struct TokenMapsToRecord(Hash128 TokenizerEntityId, TokenRecord Token);
-
-    public static async IAsyncEnumerable<TokenMapsToRecord> EnumerateMapsToRecordsAsync(
-        IReadOnlyList<TokenRecord> records,
-        Hash128 tokenizerEntityId,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    /// <summary>
+    /// The size of the tokenizer's id space: one past the largest id in the base
+    /// vocabulary or the added tokens. Reads ids only; no piece is decoded.
+    /// </summary>
+    public static int? IdSpace(ReadOnlyMemory<byte> jsonBytes)
     {
-        for (int i = 0; i < records.Count; i++)
+        using var doc = JsonDocument.Parse(jsonBytes);
+        int max = -1;
+        JsonElement vocab;
+        if ((doc.RootElement.TryGetProperty("model", out var model) && model.TryGetProperty("vocab", out vocab))
+            || doc.RootElement.TryGetProperty("vocab", out vocab))
         {
-            ct.ThrowIfCancellationRequested();
-            yield return new TokenMapsToRecord(tokenizerEntityId, records[i]);
+            if (vocab.ValueKind == JsonValueKind.Object)
+                foreach (var entry in vocab.EnumerateObject())
+                    if (entry.Value.TryGetInt32(out int id)) max = Math.Max(max, id);
         }
-        await Task.CompletedTask;
+        if (doc.RootElement.TryGetProperty("added_tokens", out var added) && added.ValueKind == JsonValueKind.Array)
+            foreach (var at in added.EnumerateArray())
+                if (at.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out int id)) max = Math.Max(max, id);
+        return max >= 0 ? max + 1 : null;
     }
 
-    public static void StageMapsToRecord(
-        SubstrateChangeBuilder b, TokenMapsToRecord rec, Hash128 sourceId)
+    /// <summary>
+    /// The tokenizer's vocabulary as one ordered composition over the decoded
+    /// canonical content of its pieces, in id order: the trajectory ordinal is the
+    /// model-local token id. A model-local id is therefore a source-local reference
+    /// (this vocabulary, ordinal) bound to shared canonical content, never an
+    /// identity of its own; two tokenizers with the same pieces in the same order
+    /// are the same vocabulary. The physicality is written under the model witness.
+    /// Returns null when the ids are not dense, since an ordinal could not then
+    /// carry the id.
+    /// </summary>
+    public static Hash128? StageVocabulary(
+        SubstrateChangeBuilder b, IReadOnlyList<TokenRecord> records, Hash128 witness)
     {
-        b.AddAttestation(NativeAttestation.Categorical(
-            rec.TokenizerEntityId, "TOKEN_MAPS_TO", rec.Token.EntityId, sourceId,
-            SourceTrust.AiModelProbe));
+        ArgumentNullException.ThrowIfNull(b);
+        ArgumentNullException.ThrowIfNull(records);
+        if (records.Count < 2) return null;
+        var constituents = new NgramTrajectory.Constituent[records.Count];
+        byte tier = 0;
+        for (int i = 0; i < records.Count; i++)
+        {
+            TokenRecord r = records[i];
+            if (r.TokenId != i || !r.HasContentCoord) return null;
+            constituents[i] = new(r.EntityId, r.ContentX, r.ContentY, r.ContentZ, r.ContentM);
+            tier = Math.Max(tier, r.Tier);
+        }
+        var composed = NgramTrajectory.Compose(
+            constituents, (byte)Math.Min(byte.MaxValue, tier + 1),
+            EntityTypeRegistry.ModelTokenizer, witness, IngestClock.NowUnixUs());
+        b.AddEntity(composed.Entity);
+        b.AddPhysicality(composed.Physicality);
+        return composed.Id;
     }
 
     private static Hash128 ResolveMergeSide(

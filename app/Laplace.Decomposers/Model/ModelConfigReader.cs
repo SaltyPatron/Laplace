@@ -1,6 +1,4 @@
-using System.Text;
 using System.Text.Json;
-using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
@@ -12,7 +10,11 @@ namespace Laplace.Decomposers.Model;
 
 public static class ModelConfigReader
 {
-    public sealed record Result(ModelConfig Config, Modality Modality, Coverage Coverage);
+    /// <param name="IntegerFields">Every top-level integer the config declares, by key:
+    /// the operator recognizer takes its open symbols from these.</param>
+    public sealed record Result(
+        ModelConfig Config, Modality Modality, Coverage Coverage,
+        IReadOnlyDictionary<string, long> IntegerFields);
 
 
     private static readonly HashSet<string> VisionTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -94,8 +96,10 @@ public static class ModelConfigReader
             int qkNope = FirstInt(root, 0, "qk_nope_head_dim");
             int vHeadDim = FirstInt(root, 0, "v_head_dim");
 
-            byte[] canonical = CanonicalizeJson(root);
-            var recipeId = Hash128.Blake3(canonical);
+            var integers = new Dictionary<string, long>(StringComparer.Ordinal);
+            foreach (var p in root.EnumerateObject())
+                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out long v))
+                    integers[p.Name] = v;
 
             var cfg = new ModelConfig
             {
@@ -119,12 +123,10 @@ public static class ModelConfigReader
                 QkRopeHeadDim = qkRope,
                 QkNopeHeadDim = qkNope,
                 VHeadDim = vHeadDim,
-                RecipeEntityId = recipeId,
-                CanonicalJson = canonical,
             };
 
             Coverage coverage = VerdictFor(cfg, modality);
-            return new Result(cfg, modality, coverage);
+            return new Result(cfg, modality, coverage, integers);
         }
     }
 
@@ -194,10 +196,9 @@ public static class ModelConfigReader
             QkRopeHeadDim = 0,
             QkNopeHeadDim = 0,
             VHeadDim = 0,
-            RecipeEntityId = Hash128.Zero,
-            CanonicalJson = Encoding.UTF8.GetBytes("{}"),
         };
-        return new Result(cfg, Modality.Unknown, Coverage.Unsupported);
+        return new Result(cfg, Modality.Unknown, Coverage.Unsupported,
+            new Dictionary<string, long>(StringComparer.Ordinal));
     }
 
     private static int FirstInt(JsonElement root, int def, params string[] keys)
@@ -241,19 +242,5 @@ public static class ModelConfigReader
             }
         }
         return def;
-    }
-
-    private static byte[] CanonicalizeJson(JsonElement root)
-    {
-        using var ms = new MemoryStream();
-        using var writer = new Utf8JsonWriter(ms);
-        writer.WriteStartObject();
-        var props = new List<JsonProperty>();
-        foreach (var p in root.EnumerateObject()) props.Add(p);
-        props.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-        foreach (var p in props) { writer.WritePropertyName(p.Name); p.Value.WriteTo(writer); }
-        writer.WriteEndObject();
-        writer.Flush();
-        return ms.ToArray();
     }
 }

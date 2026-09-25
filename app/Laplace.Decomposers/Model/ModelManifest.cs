@@ -1,50 +1,39 @@
-using Laplace.Engine.Core;
-
 namespace Laplace.Decomposers.Model;
 
-
-
-
-
-
-
-
-
-
+/// <summary>
+/// Source-scoped role of a recognized checkpoint tensor. These are coordinates of
+/// the conventional source architecture (INVENTIONS #58), resolved from the
+/// governed operator templates; they are not the native ontology of cognition.
+/// </summary>
 public enum TensorRoleKind
 {
     Unknown = 0,
 
     Norm,
-    Bias,
     Embedding,
     LmHead,
+    PositionEmbedding,
+    SegmentEmbedding,
 
     AttnQ,
     AttnK,
     AttnV,
     AttnO,
+    AttnQkv,
 
     MlpGate,
     MlpUp,
     MlpDown,
-
+    MlpGateUp,
 
     MoeRouter,
     MoeExpertGate,
     MoeExpertUp,
     MoeExpertDown,
-    MoeExpert,
 
-
-    MlaQDown,
-    MlaQUp,
-    MlaKvDown,
-    MlaKvUp,
-
-    Conv,
+    LowRankDown,
+    LowRankUp,
 }
-
 
 public enum Modality
 {
@@ -55,7 +44,6 @@ public enum Modality
     Unknown,
 }
 
-
 public enum Coverage
 {
     Full = 0,
@@ -63,24 +51,29 @@ public enum Coverage
     Unsupported,
 }
 
-
+/// <summary>
+/// One recognized slot binding: the tensor, its source-scoped role, the operator
+/// and slot that recognized it, the layout it matched in ("out,in" row-major
+/// projection, "in,out" transposed, "square" undecided, "-" not a matrix) and its
+/// bias sibling when the checkpoint has one.
+/// </summary>
 public sealed record TensorRole(
     string Name,
     int[] Shape,
     string Dtype,
     TensorRoleKind Kind,
     int LayerIndex,
-    int ExpertIndex)
+    int ExpertIndex,
+    string Operator = "",
+    string Slot = "",
+    string Orientation = "-",
+    string? Bias = null)
 {
     public bool IsLayerScoped => LayerIndex >= 0;
-    public bool IsAttention => Kind is TensorRoleKind.AttnQ or TensorRoleKind.AttnK
-                                       or TensorRoleKind.AttnV or TensorRoleKind.AttnO;
-    public bool IsMlp => Kind is TensorRoleKind.MlpGate or TensorRoleKind.MlpUp
-                                       or TensorRoleKind.MlpDown;
+
+    /// <summary>A row-major [out, in] projection that numeric circuits may consume as stored.</summary>
+    public bool IsRowMajorProjection => Orientation is "out,in" or "-";
 }
-
-
-
 
 public sealed record ModelConfig
 {
@@ -103,99 +96,162 @@ public sealed record ModelConfig
     /// <summary>Config activation identity (<c>hidden_act</c> / aliases). Empty if absent.</summary>
     public required string HiddenAct { get; init; }
 
-
     public required int MlaQLoraRank { get; init; }
     public required int MlaKvLoraRank { get; init; }
     public required int QkRopeHeadDim { get; init; }
     public required int QkNopeHeadDim { get; init; }
     public required int VHeadDim { get; init; }
 
-    public required Hash128 RecipeEntityId { get; init; }
-    public required byte[] CanonicalJson { get; init; }
-
     public bool IsMoe => NumExperts > 0;
     public bool IsMla => MlaKvLoraRank > 0 || MlaQLoraRank > 0;
-
 
     public int AttnDim => NumHeads * HeadDim;
     public int KvDim => NumKvHeads * HeadDim;
 }
 
+/// <summary>
+/// The recognized checkpoint: config dimensions re-bound to the symbols the shapes
+/// proved, the full operator anatomy, and the role of every recognized tensor.
+/// Built from headers, config and tokenizer size only, before any write, so an
+/// unfamiliar architecture is reported rather than failing mid-run.
+/// </summary>
 public sealed class ModelManifest
 {
     public required ModelConfig Config { get; init; }
+    public required ModelAnatomy Anatomy { get; init; }
     public required IReadOnlyList<TensorRole> Roles { get; init; }
     public required Modality Modality { get; init; }
     public required Coverage Coverage { get; init; }
     public required string ModelName { get; init; }
 
+    /// <summary>
+    /// Native FFN activation code for the config's declared function, or null when
+    /// the checkpoint declares one the native FFN operator does not implement; the
+    /// FFN circuits are then reported and skipped rather than substituted.
+    /// </summary>
+    public int? FfnActivation(bool gated)
+    {
+        string a = Config.HiddenAct.Trim().ToLowerInvariant();
+        if (a.Length == 0) a = gated ? "silu" : "";
+        return a switch
+        {
+            "gelu" => 1,
+            "gelu_new" or "gelu_fast" or "gelu_pytorch_tanh" => 2,
+            "quick_gelu" => 3,
+            "relu" => 4,
+            "silu" or "swish" => gated ? 0 : 5,
+            _ => null,
+        };
+    }
+
     public bool TextPlanesRunnable => Coverage == Coverage.Full && Modality == Modality.Text;
 
-
-    public TensorRole? Embedding =>
-        Roles.FirstOrDefault(r => r.Kind == TensorRoleKind.Embedding);
-
+    public TensorRole? Embedding => Roles.FirstOrDefault(r => r.Kind == TensorRoleKind.Embedding);
 
     public TensorRole? LmHead =>
         Roles.FirstOrDefault(r => r.Kind == TensorRoleKind.LmHead) ?? Embedding;
 
-    public int LayerCount
-    {
-        get
-        {
-            int max = -1;
-            foreach (var r in Roles) if (r.LayerIndex > max) max = r.LayerIndex;
-            return max + 1;
-        }
-    }
+    public int LayerCount => (int)(Anatomy.Symbol("L") ?? 0);
 
-    public IEnumerable<TensorRole> ForLayer(int layer) =>
-        Roles.Where(r => r.LayerIndex == layer);
+    public IEnumerable<TensorRole> ForLayer(int layer) => Roles.Where(r => r.LayerIndex == layer);
 
     public TensorRole? Single(int layer, TensorRoleKind kind) =>
-        Roles.FirstOrDefault(r => r.LayerIndex == layer && r.Kind == kind);
+        Roles.FirstOrDefault(r => r.LayerIndex == layer && r.ExpertIndex < 0 && r.Kind == kind);
 
+    public TensorRole? Norm(int layer, string slot) =>
+        Roles.FirstOrDefault(r => r.LayerIndex == layer && r.Kind == TensorRoleKind.Norm && r.Slot == slot);
 
-
-
-
-
-
-
-
-    private static bool NameHas(TensorRole r, string token) =>
-        r.Name.Contains(token, StringComparison.OrdinalIgnoreCase);
-    private static bool IsQkNorm(TensorRole r) => NameHas(r, "q_norm") || NameHas(r, "k_norm");
-    private static bool IsLatentNorm(TensorRole r) => NameHas(r, "q_a_layernorm") || NameHas(r, "kv_a_layernorm");
-    private static bool IsPostNorm(TensorRole r) => NameHas(r, "post_attention") || NameHas(r, "ffn_norm")
-                                                   || NameHas(r, "ln_2") || NameHas(r, "post_ln");
-
-    private IEnumerable<TensorRole> LayerNorms(int layer) =>
-        Roles.Where(r => r.LayerIndex == layer && r.Kind == TensorRoleKind.Norm);
-
-
-
-
-    public TensorRole? InputNorm(int layer)
+    public static ModelManifest Recognize(
+        IReadOnlyList<SafetensorsContainerParser.TensorReference> headers,
+        ModelConfigReader.Result config,
+        int? tokenizerSize,
+        string modelName)
     {
-        var norms = LayerNorms(layer).ToList();
-        var named = norms.FirstOrDefault(r => NameHas(r, "input_layernorm") || NameHas(r, "attention_norm")
-                                           || NameHas(r, "ln_1") || NameHas(r, "pre_ln"));
-        if (named is not null) return named;
-
-        var plain = norms.Where(r => !IsQkNorm(r) && !IsPostNorm(r) && !IsLatentNorm(r)).ToList();
-        return plain.Count == 1 ? plain[0] : null;
+        ArgumentNullException.ThrowIfNull(headers);
+        return Recognize(
+            headers.Select(h => new HeaderTensor(h.Name, h.Dtype, h.Shape)).ToArray(),
+            config, tokenizerSize, modelName);
     }
 
+    public static ModelManifest Recognize(
+        IReadOnlyList<HeaderTensor> tensors,
+        ModelConfigReader.Result config,
+        int? tokenizerSize,
+        string modelName)
+    {
+        ArgumentNullException.ThrowIfNull(tensors);
+        ArgumentNullException.ThrowIfNull(config);
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors, config.IntegerFields, tokenizerSize);
+        var byName = tensors.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
-    public TensorRole? PostAttnNorm(int layer) =>
-        LayerNorms(layer).FirstOrDefault(IsPostNorm) ?? InputNorm(layer);
+        var roles = new List<TensorRole>();
+        foreach (OperatorInstance op in anatomy.Operators)
+        {
+            foreach (SlotBinding slot in op.Slots)
+            {
+                if (slot.Tensor is not { } name) continue;
+                HeaderTensor t = byName[name];
+                roles.Add(new TensorRole(
+                    name, t.Shape, t.Dtype, KindOf(op, slot.Role), op.Block, op.Expert,
+                    op.Operator, slot.Role, slot.Orientation, slot.Bias));
+            }
+        }
 
+        ModelConfig cfg = config.Config;
+        int Sym(string name, int fallback) =>
+            anatomy.Symbol(name) is { } v && v <= int.MaxValue ? (int)v : fallback;
+        cfg = cfg with
+        {
+            HiddenSize = Sym("d", cfg.HiddenSize),
+            VocabSize = Sym("V", cfg.VocabSize),
+            NumLayers = Sym("L", cfg.NumLayers),
+            NumHeads = Sym("h", cfg.NumHeads),
+            NumKvHeads = Sym("h_kv", cfg.NumKvHeads),
+            HeadDim = Sym("d_h", cfg.HeadDim),
+            IntermediateSize = Sym("f", cfg.IntermediateSize),
+            NumExperts = Sym("E", cfg.NumExperts),
+        };
 
-    public TensorRole? QNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_norm"));
-    public TensorRole? KNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "k_norm"));
+        Coverage coverage = config.Coverage;
+        if (tensors.Count == 0) coverage = coverage == Coverage.Full ? Coverage.Partial : coverage;
+        else if (roles.All(r => r.Kind != TensorRoleKind.Embedding)) coverage = Coverage.Partial;
+        else if (config.Modality == Modality.Text && coverage == Coverage.Unsupported) coverage = Coverage.Partial;
 
+        return new ModelManifest
+        {
+            Config = cfg,
+            Anatomy = anatomy,
+            Roles = roles,
+            Modality = config.Modality,
+            Coverage = coverage,
+            ModelName = modelName,
+        };
+    }
 
-    public TensorRole? QaLatentNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_a_layernorm"));
-    public TensorRole? KvaLatentNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "kv_a_layernorm"));
+    private static TensorRoleKind KindOf(OperatorInstance op, string role)
+    {
+        bool expert = op.Scope == "expert" || op.Family == "experts";
+        return (op.Family, role) switch
+        {
+            ("vocabulary", "embedding") => TensorRoleKind.Embedding,
+            ("vocabulary", "unembedding") => TensorRoleKind.LmHead,
+            ("position", _) => TensorRoleKind.PositionEmbedding,
+            ("segment", _) => TensorRoleKind.SegmentEmbedding,
+            ("model-norm", _) or ("block-norm", _) => TensorRoleKind.Norm,
+            ("attention", "q") => TensorRoleKind.AttnQ,
+            ("attention", "k") => TensorRoleKind.AttnK,
+            ("attention", "v") => TensorRoleKind.AttnV,
+            ("attention", "o") => TensorRoleKind.AttnO,
+            ("attention", "qkv") => TensorRoleKind.AttnQkv,
+            ("attention", "q-norm") or ("attention", "k-norm") or ("attention", "kv-norm") => TensorRoleKind.Norm,
+            ("mlp", "gate") or ("experts", "gate") => expert ? TensorRoleKind.MoeExpertGate : TensorRoleKind.MlpGate,
+            ("mlp", "up") or ("experts", "up") => expert ? TensorRoleKind.MoeExpertUp : TensorRoleKind.MlpUp,
+            ("mlp", "down") or ("experts", "down") => expert ? TensorRoleKind.MoeExpertDown : TensorRoleKind.MlpDown,
+            ("mlp", "gate-up") => TensorRoleKind.MlpGateUp,
+            ("router", _) => TensorRoleKind.MoeRouter,
+            ("low-rank", "down") => TensorRoleKind.LowRankDown,
+            ("low-rank", "up") => TensorRoleKind.LowRankUp,
+            _ => TensorRoleKind.Unknown,
+        };
+    }
 }

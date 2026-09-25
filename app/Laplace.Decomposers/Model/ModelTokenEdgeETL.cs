@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class ModelTokenEdgeETL
 {
-    internal const int AnalyzerVersion = 9;
+    internal const int AnalyzerVersion = 10;
     private const string DerivationFamily = "model-circuit-decomposition";
     private const int PlacementWitnesses = 64;
 
@@ -18,6 +18,13 @@ public sealed class ModelTokenEdgeETL
         ModelDecomposer.AttendsTypeId,
         ModelDecomposer.OvRelatesTypeId,
         ModelDecomposer.CompletesToTypeId,
+    ];
+
+    private static readonly HashSet<Hash128> SymmetricRelations =
+    [
+        .. new[] { "SIMILAR_TO", "ATTENDS", "OV_RELATES", "COMPLETES_TO" }
+            .Where(name => RelationTypeRegistry.Resolve(name).Symmetry == RelationTypeRegistry.Symmetry.Symmetric)
+            .Select(RelationTypeRegistry.RelationTypeId),
     ];
 
     public static int TestimonyWidthPerCircuit => 0;
@@ -37,22 +44,24 @@ public sealed class ModelTokenEdgeETL
     private readonly ModelManifest _manifest;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _source;
+    private readonly string _sourceName;
     private readonly ILogger _log;
     private readonly int _pageSize =
         IngestSizing.ResolveForSource(IngestSourceProfile.Default).CommitRows;
-    private readonly Dictionary<Hash128, CircuitCandidatePage> _firstPages = new();
 
     internal long PeakNativeResidentBytes { get; private set; }
 
     public ModelTokenEdgeETL(
         string modelDir, ModelManifest manifest,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        Hash128 sourceId, ILogger? log = null)
+        Hash128 sourceId, string sourceName, ILogger? log = null)
     {
         _modelDir = modelDir ?? throw new ArgumentNullException(nameof(modelDir));
         _manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
         _tokens = tokens ?? throw new ArgumentNullException(nameof(tokens));
         _source = sourceId;
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        _sourceName = sourceName;
         _log = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
     }
 
@@ -97,18 +106,7 @@ public sealed class ModelTokenEdgeETL
                 placements.Add(token.EntityId,
                     [token.ContentX, token.ContentY, token.ContentZ, token.ContentM]);
         }
-        if (entities.Count == 0) yield break;
-
-        _firstPages.Clear();
-        foreach (Hash128 typeId in CircuitRelationTypeIds)
-        {
-            _firstPages[typeId] = reader is null
-                ? new CircuitCandidatePage(
-                    Array.Empty<CircuitRelation>(), null, null)
-                : await reader.ReadCircuitCandidatesAsync(
-                    entities, typeId, null, null, _pageSize, ct)
-                    .ConfigureAwait(false);
-        }
+        if (entities.Count < 2) yield break;
 
         SourceEntityIdConventions.ModelContentSnapshot snapshot =
             SourceEntityIdConventions.OpenModelContentSnapshot(_modelDir)
@@ -150,28 +148,27 @@ public sealed class ModelTokenEdgeETL
                     ApplyEnvelope = snapshotOwner.Retain()
                 };
 
-                if (reader is not null && _firstPages[typeId].Rows.Count > 0)
+                foreach (SubstrateChange change in EmitSignificantClaims(
+                             typeId, descriptor, observation.CircuitId,
+                             entities, commitEpoch, ct))
                 {
-                    await foreach (SubstrateChange change in
-                        EmitCircuitClaimsAsync(
-                            typeId, descriptor, observation.CircuitId,
-                            entities, rowByEntity, reader, commitEpoch, ct))
+                    claimReceipts += change.Attestations.Length;
+                    yield return change with
                     {
-                        claimReceipts += change.Attestations.Length;
-                        yield return change with
-                        {
-                            ApplyEnvelope = snapshotOwner.Retain()
-                        };
-                    }
+                        ApplyEnvelope = snapshotOwner.Retain()
+                    };
                 }
             }
             PeakNativeResidentBytes = Math.Max(
                 PeakNativeResidentBytes, circuits.PeakNativeResidentBytes);
         }
+        foreach (string skipped in circuits.Skipped)
+            _log.LogWarning("phase=model-circuits: {Skipped}", skipped);
 
         _log.LogInformation(
-            "phase=model-circuits: forms={Forms:N0} typed_claim_receipts={Claims:N0} canonical_entities={Entities:N0} raw_weight_bytes_retained=0",
-            circuitForms, claimReceipts, entities.Count);
+            "phase=model-circuits: forms={Forms:N0} significant_claims={Claims:N0} canonical_entities={Entities:N0} skipped={Skipped:N0} raw_weight_bytes_retained=0",
+            circuitForms, claimReceipts, entities.Count, circuits.Skipped.Count);
+        await Task.CompletedTask;
     }
 
     private readonly record struct CircuitObservation(
@@ -225,8 +222,8 @@ public sealed class ModelTokenEdgeETL
             .SetCommitEpoch(commitEpoch);
 
         OrderedCompositionResult circuit = ModelCoordinates.StageCircuit(
-            builder, descriptor.Plane, descriptor.Layer, descriptor.Head,
-            _source, observedAt);
+            builder, _source, _sourceName,
+            descriptor.Plane, descriptor.Layer, descriptor.Head, observedAt);
 
         builder.AddPhysicality(new PhysicalityRow(
             Id: PhysicalityId.Compute(
@@ -248,79 +245,66 @@ public sealed class ModelTokenEdgeETL
         return new CircuitObservation(circuit.Id, builder.Build());
     }
 
-    private async IAsyncEnumerable<SubstrateChange> EmitCircuitClaimsAsync(
+    /// <summary>
+    /// The circuit's pair evidence under its declared significance contract
+    /// (native <c>bilinear_contraction_significant_pairs</c>): every ordered pair of
+    /// distinct canonical entities is tested against the subject's own score
+    /// distribution in this circuit, and only pairs at z >= sqrt(2 ln N) are
+    /// written. Every written pair confirms, graded by its departure; a low or
+    /// negative score is absence of evidence and is never written as refutation.
+    /// Whether another source already holds the pair does not matter: the
+    /// model's evidence stands on its own witness.
+    /// </summary>
+    private IEnumerable<SubstrateChange> EmitSignificantClaims(
         Hash128 typeId,
         ModelCircuitDescriptor descriptor,
         Hash128 circuitId,
         IReadOnlyList<Hash128> vocabulary,
-        IReadOnlyDictionary<Hash128, int> rowByEntity,
-        ISubstrateReader reader,
         int commitEpoch,
-        [EnumeratorCancellation] CancellationToken ct)
+        CancellationToken ct)
     {
-        CircuitCandidatePage page = _firstPages[typeId];
-        Hash128? afterSubject = null;
-        Hash128? afterObject = null;
         double sourceTrust = SourceTrust.AiModelProbe;
-
-        while (page.Rows.Count > 0)
+        int capacity = Math.Max(_pageSize, vocabulary.Count - 1);
+        // A symmetric relation's claim is one unordered cell; its family is the
+        // unordered pairs, tested once each.
+        bool symmetric = SymmetricRelations.Contains(typeId) && descriptor.Contraction.SharedFactors;
+        int row = 0;
+        while (row < vocabulary.Count)
         {
             ct.ThrowIfCancellationRequested();
-            var rows = new int[page.Rows.Count];
-            var cols = new int[page.Rows.Count];
-            for (int i = 0; i < page.Rows.Count; i++)
+            SignificantPairPage page = descriptor.Contraction.SignificantPairs(row, capacity, symmetric);
+            if (page.NextRow <= row)
+                throw new InvalidDataException("native circuit significance did not advance");
+            if (page.Rows.Length > 0)
             {
-                CircuitRelation candidate = page.Rows[i];
-                if (candidate.TypeId != typeId)
-                    throw new InvalidDataException(
-                        "candidate reader returned a relation outside the requested typed claim space");
-                if (!rowByEntity.TryGetValue(candidate.Subject, out rows[i])
-                    || !rowByEntity.TryGetValue(candidate.Object, out cols[i]))
-                    throw new InvalidDataException(
-                        "candidate reader returned an endpoint outside the selected canonical vocabulary");
+                using var builder = new SubstrateChangeBuilder(
+                        _source,
+                        $"model/claim/{descriptor.Plane}/L{descriptor.Layer}/H{descriptor.Head}/{row}",
+                        entityCapacity: 0, physicalityCapacity: 0,
+                        attestationCapacity: page.Rows.Length)
+                    .DeclareSourcePrior(sourceTrust)
+                    .SetCommitEpoch(commitEpoch)
+                    .SetInputUnitsConsumed(page.Rows.Length);
+                for (int i = 0; i < page.Rows.Length; i++)
+                {
+                    Hash128 subject = vocabulary[page.Rows[i]];
+                    Hash128 obj = vocabulary[page.Cols[i]];
+                    AttestationRow receipt = NativeAttestation.CategoricalResolvedOutcome(
+                        subject, typeId, obj, _source, circuitId, sourceTrust,
+                        AttestationOutcome.Confirm);
+                    receipt = receipt with
+                    {
+                        QualifierMask = receipt.QualifierMask | CalculationSources.Qualifier,
+                    };
+                    builder.AddAttestation(receipt);
+                    builder.AddEphemeralFold(new EphemeralFoldInput(
+                        receipt.Id,
+                        CalculationReceipt(descriptor.ContextId, typeId, subject, obj),
+                        page.ScoresFp1e9[i]));
+                }
+                yield return builder.Build();
             }
-
-            (long[] scores, short[] outcomes) =
-                descriptor.Contraction.Score(rows, cols);
-            using var builder = new SubstrateChangeBuilder(
-                    _source,
-                    $"model/claim/{descriptor.Plane}/L{descriptor.Layer}/H{descriptor.Head}/{afterSubject}/{afterObject}",
-                    entityCapacity: 0, physicalityCapacity: 0,
-                    attestationCapacity: page.Rows.Count)
-                .DeclareSourcePrior(sourceTrust)
-                .SetCommitEpoch(commitEpoch)
-                .SetInputUnitsConsumed(page.Rows.Count);
-
-            for (int i = 0; i < page.Rows.Count; i++)
-            {
-                CircuitRelation candidate = page.Rows[i];
-                var outcome = (AttestationOutcome)outcomes[i];
-                AttestationRow receipt =
-                    NativeAttestation.CategoricalResolvedOutcome(
-                        candidate.Subject, typeId, candidate.Object,
-                        _source, circuitId, sourceTrust, outcome);
-                builder.AddAttestation(receipt);
-                builder.AddEphemeralFold(new EphemeralFoldInput(
-                    receipt.Id,
-                    CalculationReceipt(
-                        descriptor.ContextId, typeId,
-                        candidate.Subject, candidate.Object),
-                    scores[i]));
-            }
-            yield return builder.Build();
-
-            if (page.NextSubject is not { } nextSubject
-                || page.NextObject is not { } nextObject)
-                yield break;
-            if (afterSubject == nextSubject && afterObject == nextObject)
-                throw new InvalidDataException(
-                    "candidate keyset reader did not advance");
-            afterSubject = nextSubject;
-            afterObject = nextObject;
-            page = await reader.ReadCircuitCandidatesAsync(
-                vocabulary, typeId,
-                afterSubject, afterObject, _pageSize, ct)
-                .ConfigureAwait(false);
+            row = page.NextRow;
         }
     }
 

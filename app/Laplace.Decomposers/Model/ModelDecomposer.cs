@@ -58,12 +58,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public static readonly Hash128 HasNumKvHeadsTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_KV_HEADS");
     public static readonly Hash128 HasIntermSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_INTERMEDIATE_SIZE");
     public static readonly Hash128 HasVocabSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
-    public static readonly Hash128 IsATypeId = RelationTypeRegistry.RelationTypeId("IS_A");
-
-    private static readonly Hash128 LlamaArchitectureId =
-        SubstrateCanonicalIds.OfVersioned("entity", "Architecture_Llama");
-
-    private const string LlamaArchitectureCanonical = "substrate/entity/Architecture_Llama/v1";
 
     public static readonly Hash128 ModelLayerTypeId = EntityTypeRegistry.ModelLayer;
 
@@ -89,11 +83,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     private readonly string _sourceName;
     private readonly bool? _persistEvidence;
 
-    // Canonical names of recipes actually DEPOSITED this run (the synthesized
-    // laplace.recipe differs from the raw config.json canonicalization) — the
-    // readback registration must name the deposited entities, not a re-parse.
-    private readonly List<string> _depositedRecipeNames = [];
-
     public ModelDecomposer(string modelDir, bool? persistEvidence = null)
     {
         _modelDir = modelDir ?? throw new ArgumentNullException(nameof(modelDir));
@@ -112,30 +101,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-    public override IReadOnlyCollection<string> CanonicalNamesForReadback
-    {
-        get
-        {
-            string configPath = Path.Combine(_modelDir, "config.json");
-            if (!File.Exists(configPath)) return _depositedRecipeNames.ToArray();
-            LlamaRecipeExtractor.RecipeInfo r;
-            try { r = LlamaRecipeExtractor.Parse(configPath); }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Trace.TraceWarning(
-                    $"ModelDecomposer: config parse failed for readback: {ex.Message}");
-                return _depositedRecipeNames.ToArray();
-            }
-            return new[]
-            {
-                LlamaArchitectureCanonical,
-                System.Text.Encoding.UTF8.GetString(r.CanonicalJson),
-                r.HiddenSize.ToString(), r.NumLayers.ToString(), r.NumHeads.ToString(),
-                r.NumKvHeads.ToString(), r.IntermediateSize.ToString(), r.VocabSize.ToString(),
-            }.Concat(_depositedRecipeNames).Distinct(StringComparer.Ordinal).ToArray();
-        }
-    }
-
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterManifestAsync(
             context, new ModelRuntimeManifest(Source, SourceName), ct: ct);
@@ -151,78 +116,62 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
 
 
+        // Recognition reads the header shapes, the config and the tokenizer's id
+        // space only, before anything is written: an architecture the templates do
+        // not cover is reported as unrecognized structure, never failed mid-run.
         var cfgResult = ModelConfigReader.Read(configPath);
-        ModelManifest manifest;
-        try
+        int? tokenizerIds = null;
+        if (File.Exists(tokenizerPath))
         {
-            var headers = SafetensorsContainerParser.ParseModel(_modelDir);
-            manifest = TensorRoleClassifier.Build(headers, cfgResult, _sourceName);
+            try { tokenizerIds = LlamaTokenizerParser.IdSpace(File.ReadAllBytes(tokenizerPath)); }
+            catch (Exception ex) { log.LogWarning("phase=manifest: tokenizer id space unreadable ({Msg})", ex.Message); }
         }
+        IReadOnlyList<SafetensorsContainerParser.TensorReference> headers;
+        try { headers = SafetensorsContainerParser.ParseModel(_modelDir); }
         catch (Exception ex)
         {
-            log.LogWarning("phase=manifest: tensor headers unavailable ({Msg}); recipe-only path", ex.Message);
-            manifest = new ModelManifest
-            {
-                Config = cfgResult.Config,
-                Roles = Array.Empty<TensorRole>(),
-                Modality = cfgResult.Modality,
-                Coverage = cfgResult.Coverage == Coverage.Full ? Coverage.Partial : cfgResult.Coverage,
-                ModelName = _sourceName,
-            };
+            log.LogWarning("phase=manifest: tensor headers unavailable ({Msg})", ex.Message);
+            headers = Array.Empty<SafetensorsContainerParser.TensorReference>();
         }
-        log.LogInformation("phase=manifest: model_type={Mt} modality={Mod} coverage={Cov} layers={L} roles={R} "
-            + "(moe={Moe}, mla={Mla})", manifest.Config.ModelType, manifest.Modality, manifest.Coverage,
-            manifest.LayerCount, manifest.Roles.Count, manifest.Config.IsMoe, manifest.Config.IsMla);
-
-
+        ModelManifest manifest = ModelManifest.Recognize(headers, cfgResult, tokenizerIds, _sourceName);
+        ModelAnatomy anatomy = manifest.Anatomy;
+        log.LogInformation(
+            "phase=manifest: tensors={Tensors} operators={Operators} ambiguous_slots={Ambiguous} unrecognized={Unrecognized} conflicts={Conflicts} modality={Mod} coverage={Cov} "
+            + "d={D} V={V} L={L} h={H} h_kv={Hkv} d_h={Dh} f={F}",
+            anatomy.TensorCount, anatomy.Operators.Count,
+            anatomy.Operators.Sum(o => o.Slots.Count(s => s.IsAmbiguous)),
+            anatomy.Unrecognized.Count, anatomy.Conflicts.Count, manifest.Modality, manifest.Coverage,
+            anatomy.Symbol("d"), anatomy.Symbol("V"), anatomy.Symbol("L"), anatomy.Symbol("h"),
+            anatomy.Symbol("h_kv"), anatomy.Symbol("d_h"), anatomy.Symbol("f"));
+        foreach (HeaderTensor t in anatomy.Unrecognized)
+            log.LogInformation("phase=manifest: unrecognized tensor {Name} [{Shape}]", t.Name, string.Join(",", t.Shape));
+        foreach (string conflict in anatomy.Conflicts)
+            log.LogWarning("phase=manifest: {Conflict}", conflict);
 
         // Model ingest is one source-decomposition pass. Checkpoint/tokenizer/
-        // recipe structure is admitted normally; numeric tensor payloads are only
+        // config structure is admitted normally; numeric tensor payloads are only
         // transient operands used to derive source-scoped circuit physicalities
         // and typed evidence. No prompt execution or raw-weight persistence occurs.
         bool recorderRun = ModelTokenEdgeETL.ResolvePlanesMode() == "structure";
 
-        if (recorderRun)
+        if (recorderRun && headers.Count > 0)
         {
-            await foreach (var batch in RunPhaseAsync(new LegacyRecipePhase(this, configPath, log), context, options, ct))
-                yield return batch;
-
-            await foreach (var batch in RunPhaseAsync(new SynthRecipePhase(this, manifest, log), context, options, ct))
-                yield return batch;
-
-            // Ordered safetensors header structure is the checkpoint provenance.
-            // Recipe-only models (no weight blobs) skip this source body.
-            SubstrateChange? checkpointChange = null;
-            try
-            {
-                var tensors = SafetensorsContainerParser.ParseModel(_modelDir);
-                if (tensors.Count > 0)
-                {
-                    var cb = new SubstrateChangeBuilder(_source, "checkpoint/byte-ranges", null,
-                        entityCapacity: tensors.Count + 1, physicalityCapacity: 0,
-                        attestationCapacity: 2 * tensors.Count)
-                        .DeclareSourcePrior(Abstractions.SourceTrust.AiModelProbe);
-                    var root = ModelCheckpoint.StageCheckpoint(cb, tensors, _source);
-                    checkpointChange = cb.Build();
-                    log.LogInformation("phase=checkpoint: {Tensors} tensor byte-ranges deposited, root={Root}",
-                        tensors.Count, Convert.ToHexString(root.ToBytes()).ToLowerInvariant()[..16]);
-                }
-            }
-            catch (Exception ex)
-            {
-                log.LogWarning("phase=checkpoint: byte-range deposit skipped ({Msg})", ex.Message);
-            }
-            if (checkpointChange is not null)
-                yield return checkpointChange;
-
-            // Numerical checkpoint values remain transient. The circuit phase
-            // below retains ranked canonical token paths and governed evidence,
-            // never the original tensor payload or a second model runtime.
+            // Ordered safetensors header structure is the checkpoint provenance, and
+            // the config's declared dimensions are structured facts about it.
+            var cb = new SubstrateChangeBuilder(_source, "checkpoint/structure", null,
+                    entityCapacity: headers.Count + 8, physicalityCapacity: 0,
+                    attestationCapacity: 8)
+                .DeclareSourcePrior(Abstractions.SourceTrust.AiModelProbe);
+            Hash128 root = ModelCheckpoint.StageCheckpoint(cb, headers, _source);
+            int facts = StageConfigFacts(cb, root, cfgResult.IntegerFields);
+            yield return cb.Build();
+            log.LogInformation("phase=checkpoint: {Tensors} tensor headers and {Facts} config facts deposited, root={Root}",
+                headers.Count, facts, Convert.ToHexString(root.ToBytes()).ToLowerInvariant()[..16]);
         }
 
         if (manifest.Coverage == Coverage.Unsupported)
         {
-            log.LogWarning("phase=ingest: model '{Name}' unsupported; recipe scalars deposited, no circuit decrypt",
+            log.LogWarning("phase=ingest: model '{Name}' unsupported; header structure and config facts deposited, no circuits",
                 _sourceName);
             yield break;
         }
@@ -233,8 +182,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             yield break;
         }
 
-        byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
-        var tokEntityId = Hash128.Blake3(tokBytes);
         phaseSw.Restart();
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         log.LogInformation("phase=vocab parsed: {Count} tokens ({Ms} ms)",
@@ -244,12 +191,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
         if (recorderRun)
         {
-            await foreach (var batch in RunPhaseAsync(new TokenizerEntityPhase(this, tokEntityId), context, options, ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return batch;
-            }
-
             phaseSw.Restart();
             int vocabBatches = 0;
             await foreach (var batch in RunPhaseAsync(new VocabPhase(this, tokens, batchSz), context, options, ct))
@@ -273,16 +214,19 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
                 merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-            int mapsBatches = 0;
-            await foreach (var batch in RunPhaseAsync(
-                               new MapsToPhase(this, tokens, tokEntityId, batchSz), context, options, ct))
+            var vb = new SubstrateChangeBuilder(_source, "tokenizer/vocabulary", null,
+                    entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: 0)
+                .DeclareSourcePrior(Abstractions.SourceTrust.AiModelProbe);
+            if (LlamaTokenizerParser.StageVocabulary(vb, tokens, _source) is { } vocabularyId)
             {
-                ct.ThrowIfCancellationRequested();
-                yield return batch;
-                mapsBatches++;
+                yield return vb.Build();
+                log.LogInformation("phase=tokenizer-vocabulary: {Count} pieces ordered by model-local id, vocabulary={Id}",
+                    tokens.Count, Convert.ToHexString(vocabularyId.ToBytes()).ToLowerInvariant()[..16]);
             }
-            log.LogInformation("phase=maps-to emitted: {Batches} batches ({Ms} ms)",
-                mapsBatches, phaseSw.ElapsedMilliseconds);
+            else
+            {
+                log.LogWarning("phase=tokenizer-vocabulary: token ids are not dense; model-local ids are not retained as ordinals");
+            }
         }
         else
         {
@@ -299,7 +243,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
         if (recorderRun)
         {
-            var contraction = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log);
+            var contraction = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, _sourceName, log);
             await foreach (var change in contraction.EmitAsync(1, context.Reader, options, ct))
             {
                 ct.ThrowIfCancellationRequested();
@@ -341,16 +285,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     {
         string configPath = Path.Combine(_modelDir, "config.json");
         if (!File.Exists(configPath)) return 0;
-        LlamaRecipeExtractor.RecipeInfo r;
-        try { r = LlamaRecipeExtractor.Parse(configPath); }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                $"ModelDecomposer: config parse failed for unit estimate: {ex.Message}");
-            return 0;
-        }
-
-        long distinctVocab = r.VocabSize;
+        long distinctVocab = ModelConfigReader.Read(configPath).Config.VocabSize;
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
         if (File.Exists(tokenizerPath))
         {
@@ -415,119 +350,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
                 options);
     }
 
-    private sealed class LegacyRecipePhase : ModelComposePhase<LlamaRecipeExtractor.RecipeInfo>
-    {
-        private readonly string _configPath;
-        private readonly ILogger _log;
-        private LlamaRecipeExtractor.RecipeInfo? _recipe;
-        private bool _parsed;
-
-        public LegacyRecipePhase(ModelDecomposer owner, string configPath, ILogger log) : base(owner, 1)
-        {
-            _configPath = configPath;
-            _log = log;
-        }
-
-        protected override string PhaseLabel => "recipe/config.json";
-
-        protected override void Compose(LlamaRecipeExtractor.RecipeInfo rec, SubstrateChangeBuilder b) =>
-            LlamaRecipeExtractor.StageLegacyRecipe(
-                b, rec, SourceId, ModelRecipeTypeId,
-                HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
-                HasIntermSizeTypeId, HasVocabSizeTypeId, IsATypeId, LlamaArchitectureId);
-
-        protected override async IAsyncEnumerable<LlamaRecipeExtractor.RecipeInfo> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            if (!_parsed)
-            {
-                _parsed = true;
-                try { _recipe = LlamaRecipeExtractor.Parse(_configPath); }
-                catch (Exception ex)
-                {
-                    _log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
-                    yield break;
-                }
-            }
-            if (_recipe is not null)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return _recipe;
-            }
-            await Task.CompletedTask;
-        }
-    }
-
-    private sealed class SynthRecipePhase : ModelComposePhase<RecipeExtractor.RecipeInfo>
-    {
-        private readonly ModelManifest _manifest;
-        private readonly ILogger _log;
-        private RecipeExtractor.RecipeInfo? _recipe;
-        private bool _synthesized;
-
-        public SynthRecipePhase(ModelDecomposer owner, ModelManifest manifest, ILogger log) : base(owner, 1)
-        {
-            _manifest = manifest;
-            _log = log;
-        }
-
-        protected override string PhaseLabel => "recipe/laplace.recipe";
-
-        protected override void Compose(RecipeExtractor.RecipeInfo rec, SubstrateChangeBuilder b) =>
-            RecipeExtractor.StageRecipe(b, rec, SourceId, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId);
-
-        protected override async IAsyncEnumerable<RecipeExtractor.RecipeInfo> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            if (!_synthesized)
-            {
-                _synthesized = true;
-                try
-                {
-                    _recipe = RecipeSynthesizer.Synthesize(_manifest);
-                    Owner._depositedRecipeNames.Add(RecipeExtractor.CanonicalName(_recipe));
-                    _log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited",
-                        _recipe.NumLayers);
-                }
-                catch (Exception ex)
-                {
-                    _log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
-                    yield break;
-                }
-            }
-            if (_recipe is not null)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return _recipe;
-            }
-            await Task.CompletedTask;
-        }
-    }
-
-    private sealed class TokenizerEntityPhase : ModelComposePhase<Hash128>
-    {
-        private readonly Hash128 _tokEntityId;
-
-        public TokenizerEntityPhase(ModelDecomposer owner, Hash128 tokEntityId) : base(owner, 1)
-            => _tokEntityId = tokEntityId;
-
-        protected override string PhaseLabel => "tokenizer/entity";
-
-        protected override void Compose(Hash128 id, SubstrateChangeBuilder b) =>
-            b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId);
-
-        protected override async IAsyncEnumerable<Hash128> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return _tokEntityId;
-            await Task.CompletedTask;
-        }
-    }
-
     private sealed class VocabPhase : ModelComposePhase<LlamaTokenizerParser.TokenRecord>
     {
         private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
@@ -570,32 +392,33 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         }
     }
 
-    private sealed class MapsToPhase : ModelComposePhase<LlamaTokenizerParser.TokenMapsToRecord>
+    // The config's declared dimensions, as the model witness states them about its
+    // checkpoint structure. Values are canonical scalar content; the config file is
+    // not minted as a recipe entity of its own.
+    private static readonly (string Key, Hash128 Relation)[] ConfigFacts =
+    [
+        ("hidden_size", HasHiddenSizeTypeId),
+        ("num_hidden_layers", HasNumLayersTypeId),
+        ("num_attention_heads", HasNumHeadsTypeId),
+        ("num_key_value_heads", HasNumKvHeadsTypeId),
+        ("intermediate_size", HasIntermSizeTypeId),
+        ("vocab_size", HasVocabSizeTypeId),
+    ];
+
+    private int StageConfigFacts(
+        SubstrateChangeBuilder b, Hash128 checkpoint, IReadOnlyDictionary<string, long> config)
     {
-        private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
-        private readonly Hash128 _tokEntityId;
-
-        public MapsToPhase(
-            ModelDecomposer owner,
-            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-            Hash128 tokEntityId,
-            int batch) : base(owner, batch)
+        int written = 0;
+        foreach ((string key, Hash128 relation) in ConfigFacts)
         {
-            _tokens = tokens;
-            _tokEntityId = tokEntityId;
+            if (!config.TryGetValue(key, out long value)) continue;
+            Hash128 valueId = ContentEmitter.Emit(
+                    b, System.Text.Encoding.UTF8.GetBytes(value.ToString(System.Globalization.CultureInfo.InvariantCulture)), _source)
+                ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                checkpoint, relation, valueId, _source, null, 1.0));
+            written++;
         }
-
-        protected override string PhaseLabel => "tokenizer/maps-to";
-
-        protected override void Compose(LlamaTokenizerParser.TokenMapsToRecord rec, SubstrateChangeBuilder b) =>
-            LlamaTokenizerParser.StageMapsToRecord(b, rec, SourceId);
-
-        protected override async IAsyncEnumerable<LlamaTokenizerParser.TokenMapsToRecord> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            await foreach (var rec in LlamaTokenizerParser.EnumerateMapsToRecordsAsync(_tokens, _tokEntityId, ct))
-                yield return rec;
-        }
+        return written;
     }
 }

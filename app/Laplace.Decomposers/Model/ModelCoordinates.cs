@@ -68,27 +68,44 @@ public static class ModelCoordinates
         return parts.ToArray();
     }
 
-    public static Hash128 CircuitId(string plane, int layer, int head)
+    /// <summary>
+    /// The model witness as the first constituent of every circuit it owns. The
+    /// witness entity is declared with the placement of its name content, so the
+    /// circuit composes over a real coordinate. Two checkpoints' "layer 3 head 5"
+    /// are therefore different circuits: a structural address is source-scoped,
+    /// never a cross-model identity (INVENTIONS #55, spec 09).
+    /// </summary>
+    public static OrderedCompositionComponent WitnessComponent(Hash128 witness, string witnessName)
+    {
+        OrderedCompositionComponent name = TextComponent(witnessName);
+        return new OrderedCompositionComponent(
+            witness, EntityTier.Word, name.CoordX, name.CoordY, name.CoordZ, name.CoordM);
+    }
+
+    public static Hash128 CircuitId(
+        Hash128 witness, string witnessName, string plane, int layer, int head)
     {
         string[] path = CircuitPath(plane, layer, head);
-        var components = new OrderedCompositionComponent[path.Length];
-        for (int i = 0; i < path.Length; i++) components[i] = TextComponent(path[i]);
+        var components = new OrderedCompositionComponent[path.Length + 1];
+        components[0] = WitnessComponent(witness, witnessName);
+        for (int i = 0; i < path.Length; i++) components[i + 1] = TextComponent(path[i]);
         return OrderedComposition.ComposeBatch(
             [new OrderedCompositionRequest(
                 components, CircuitTypeId, default, 0)])[0].Id;
     }
 
     public static OrderedCompositionResult StageCircuit(
-        SubstrateChangeBuilder builder, string plane, int layer, int head,
-        Hash128 sourceId, long observedAtUnixUs = 0)
+        SubstrateChangeBuilder builder, Hash128 witness, string witnessName,
+        string plane, int layer, int head, long observedAtUnixUs = 0)
     {
         ArgumentNullException.ThrowIfNull(builder);
         string[] path = CircuitPath(plane, layer, head);
-        var components = new OrderedCompositionComponent[path.Length];
+        var components = new OrderedCompositionComponent[path.Length + 1];
+        components[0] = WitnessComponent(witness, witnessName);
         for (int i = 0; i < path.Length; i++)
-            components[i] = StageTextComponent(builder, path[i], sourceId);
+            components[i + 1] = StageTextComponent(builder, path[i], witness);
         var request = new OrderedCompositionRequest(
-            components, CircuitTypeId, sourceId,
+            components, CircuitTypeId, witness,
             observedAtUnixUs == 0 ? IngestClock.NowUnixUs() : observedAtUnixUs);
         var result = new OrderedCompositionResult[1];
         OrderedComposition.StageBatch(builder.ContentStage, [request], result);

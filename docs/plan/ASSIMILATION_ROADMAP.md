@@ -178,14 +178,19 @@ The contract is `MODEL_INGESTION_DESIGN.md`, `INVENTION.md` §8, §14 and §15, 
 - **E6. Reading.** The model's evidence participates in the Laplace forward program like any other witness. Source-scoped A, B and pooled A+B are inspection scopes.
 - **E7. Export through Mold-a-Model** (spec 12), validated as spec 09 requires.
 
-**Existing model code** (`app/Laplace.Decomposers/Model`, audited 2026-09-25): the maths is native, no model is prompted, weights are not retained, and every relation is governed. Its defects:
-- **Circuit identity omits the model**, so two models' L3H5 collide.
-- **Pair claims only re-score pairs already in consensus**, so a fresh database gets no model knowledge.
-- **REFUTE comes from the sign of a raw dot product.**
+**Existing model code** (`app/Laplace.Decomposers/Model`, audited 2026-09-25): the maths is native, no model is prompted, weights are not retained, and every relation is governed.
+
+Landed in the first E slice:
+- **E2:** `engine/manifest/model_operators.toml` declares the operator templates (vocabulary projection, position and segment embeddings, norms, GQA self-attention, fused QKV in either orientation, latent attention, gated, fused-gated and plain MLP, router, stacked experts, low-rank factor pairs). `ModelOperatorRecognizer` binds d by axis frequency, V by the tokenizer, L by path repetition, the rest from config, and a feed-forward width per instance; names only break symmetries between equal shapes, undecided slots are ambiguous and unclaimed tensors are unrecognized. `ArchitectureProfile` and `TensorRoleClassifier` are gone. TinyLlama, Phi-2, MiniLM, Qwen2.5, Qwen3-MoE and DeepSeek-V2-Lite (MLA + MoE + shared experts) recognize with nothing left over.
+- **E5 identity:** a circuit is the ordered composition [model witness, plane, layer, n, head, m].
+- **E5 claims:** each circuit writes its own significant pairs under a declared per-subject null (z against the subject's own score distribution, kept iff z ≥ √(2 ln N)); nothing below significance is written, and nothing is refuted. `consensus.circuit_candidates` is dropped.
+- **E3:** the tokenizer vocabulary is one ordered composition whose trajectory ordinal is the model-local id; control pieces decode to their surface; the config enters as facts on the checkpoint structure. The `Blake3` recipe and tokenizer entities and `OfCanonical` special tokens are gone.
+
+Still open:
 - **The FFN stage is a full nonlinear per-token probe in double precision.**
-- **Norms, RoPE, MoE, MLA and LoRA are unhandled.**
-- **Bookkeeping ids:** `Blake3` recipe and tokenizer entities, `OfCanonical` special tokens.
-- **Model-local token ids and occurrences are lost.**
+- **Norm gains, RoPE, fused QKV, latent attention, experts and low-rank pairs are recognized but feed no circuit.**
+- **The two-model corroboration lanes** (`ModelSimilarityCorroborationETL`, `ModelJointCorroborationETL`) still read outcomes from a score's sign.
+- **Model-local occurrences** beyond the vocabulary ordinal (merges as a trajectory, not `MERGES_WITH` testimony).
 
 Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034.
 

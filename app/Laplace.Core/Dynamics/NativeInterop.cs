@@ -103,6 +103,12 @@ public static partial class NativeInterop
         float* down, float* downBias, nuint intermediate, int activation,
         IntPtr* context, double* arenaRms, nuint* residentBytes);
 
+    [LibraryImport(Library, EntryPoint = "bilinear_contraction_significant_pairs")]
+    public static unsafe partial int BilinearContractionSignificantPairs(
+        IntPtr context, nuint rowBegin, int symmetric,
+        int* outRows, int* outCols, long* outScoresFp1e9, double* outZ,
+        nuint capacity, nuint* outCount, nuint* outRowEnd, double* outThreshold);
+
     [LibraryImport(Library, EntryPoint = "bilinear_contraction_free")]
     public static partial void BilinearContractionFree(IntPtr context);
 

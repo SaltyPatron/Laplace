@@ -973,20 +973,21 @@ internal static partial class IngestCommands
 
         if (decomposer.LayerOrder == 10)
         {
-            // Lane-true model validation (Issue 53b): a model's source id is a CONTENT
-            // hash (never source_id(name)), and the recorder/analyzer emit
-            // TOKEN_MAPS_TO/MERGES_WITH/APPEARS_IN + per-circuit Projection
-            // trajectories — not the retired tensor-role relations.
+            // A model's witness is the content hash of its snapshot. It deposits
+            // MERGES_WITH, per-circuit Projection trajectories, and the graded pair
+            // evidence its circuits' significance contract admits; model-local token
+            // ids are ordinals of the vocabulary trajectory, not attestations.
             byte[] srcId = decomposer.SourceId.ToBytes();
             Task<long> Rel(string rel) =>
                 NpgsqlIngestOps.EvidenceCountForRelationAndSourceIdAsync(conn, rel, srcId);
-            long maps = await Rel("TOKEN_MAPS_TO");
             long merges = await Rel("MERGES_WITH");
             long occ = await Rel("APPEARS_IN");
             long structure = await Rel("CONTAINS") + await Rel("PRECEDES");
+            long evidence = await Rel("SIMILAR_TO") + await Rel("ATTENDS")
+                            + await Rel("OV_RELATES") + await Rel("COMPLETES_TO");
             long circuits = await NpgsqlIngestOps.ModelCircuitTrajectoryCountAsync(conn);
             Console.WriteLine(
-                $"  check model deposition: maps_to={maps:N0} merges={merges:N0} "
+                $"  check model deposition: circuit_evidence={evidence:N0} merges={merges:N0} "
                 + $"appears_in={occ:N0} structure={structure:N0} circuit_trajectories={circuits:N0} "
                 + "(source = content hash, trust=AIModelProbe)");
             return;
