@@ -8,6 +8,8 @@ The inventor's statement of it: enough ordinary corpus ingested — WordNet, doc
 
 What sets this apart, in the inventor's words: everyone else asks 10 models, gets 10 answers, and judges them with an 11th. Laplace ingests the 10 as witnesses and asks once. The one asked is the 10 and more, and it gives one answer: their consensus with every other source, each claim carrying its standing and its witnesses.
 
+The inventor's image is the Construct in *The Matrix*: Laplace assimilates the knowledge, and Mold-a-Model exports it as a package for a target, for example the model for a C-3PO. Knowledge packages: #1708, #1425.
+
 ---
 
 ## 0. Where things stand
