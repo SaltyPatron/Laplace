@@ -3,6 +3,6 @@
 -- substrate entities; readers that need the relation roster enumerate this.
 CREATE OR REPLACE FUNCTION laplace.relation_registry()
     RETURNS TABLE(highway_bit smallint, type_id bytea, canonical text, band smallint,
-                  rank real, symmetric boolean, family_root bytea, parent bytea)
+                  rank real, is_symmetric boolean, family_root bytea, parent bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_relation_registry'
     LANGUAGE C STABLE PARALLEL SAFE ROWS 256;
