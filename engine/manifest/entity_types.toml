@@ -1,0 +1,372 @@
+# Governed entity types. A type is a filter code on an entity row; it is never an
+# entity, never testimony and never seeded into the substrate. The id of a type is
+# its registry code; the name here is only the label the registry realizes.
+
+[[type]]
+canonical = "Agent_Model"
+
+[[type]]
+canonical = "Agent_Session_Watermark"
+
+[[type]]
+canonical = "Agent_Tool"
+
+[[type]]
+canonical = "Architecture"
+
+[[type]]
+canonical = "Atomic_Marker"
+
+[[type]]
+canonical = "Atomic_Split"
+
+[[type]]
+canonical = "Byte"
+
+[[type]]
+canonical = "CILI_Concept"
+
+[[type]]
+canonical = "CILI_Instance"
+
+[[type]]
+canonical = "Channel"
+
+[[type]]
+canonical = "CharacterEncoding"
+
+[[type]]
+canonical = "Chess_AnalysisMarker"
+
+[[type]]
+canonical = "Chess_BookLine"
+
+[[type]]
+canonical = "Chess_Eval"
+
+[[type]]
+canonical = "Chess_Event"
+
+[[type]]
+canonical = "Chess_Game"
+
+[[type]]
+canonical = "Chess_Player"
+
+[[type]]
+canonical = "Chess_Playing"
+
+[[type]]
+canonical = "Chess_Position"
+
+[[type]]
+canonical = "Chess_Result"
+
+[[type]]
+canonical = "Chess_Substructure"
+
+[[type]]
+canonical = "CodeConcept"
+
+[[type]]
+canonical = "Codepoint"
+
+[[type]]
+canonical = "Collection"
+
+[[type]]
+canonical = "Conversation_Message"
+
+[[type]]
+canonical = "Conversation_Session"
+
+[[type]]
+canonical = "Conversation_Turn"
+
+[[type]]
+canonical = "Document"
+
+[[type]]
+canonical = "ESO_Class"
+
+[[type]]
+canonical = "ESO_Role"
+
+[[type]]
+canonical = "Frame"
+
+[[type]]
+canonical = "FrameNet_Annotation"
+
+[[type]]
+canonical = "FrameNet_Annotation_Occurrence"
+
+[[type]]
+canonical = "FrameNet_Coreness"
+
+[[type]]
+canonical = "FrameNet_FE"
+
+[[type]]
+canonical = "FrameNet_Frame"
+
+[[type]]
+canonical = "FrameNet_LU"
+
+[[type]]
+canonical = "Grapheme"
+
+[[type]]
+canonical = "ILI"
+
+[[type]]
+canonical = "ISO639Code"
+
+[[type]]
+canonical = "Image"
+
+[[type]]
+canonical = "Language"
+
+[[type]]
+canonical = "LanguageVariant"
+
+[[type]]
+canonical = "LexicalEntry"
+
+[[type]]
+canonical = "MCR_Domain"
+
+[[type]]
+canonical = "MCR_Lexname"
+
+[[type]]
+canonical = "MCR_SUMO"
+
+[[type]]
+canonical = "MCR_Top_Ontology"
+
+[[type]]
+canonical = "Model_AnalysisMarker"
+
+[[type]]
+canonical = "Model_AnalysisPending"
+
+[[type]]
+canonical = "Model_Axis"
+
+[[type]]
+canonical = "Model_Checkpoint"
+
+[[type]]
+canonical = "Model_Circuit"
+
+[[type]]
+canonical = "Model_Layer"
+
+[[type]]
+canonical = "Model_Plane"
+
+[[type]]
+canonical = "Model_Recipe"
+
+[[type]]
+canonical = "Model_Tensor"
+
+[[type]]
+canonical = "Model_TensorPath"
+
+[[type]]
+canonical = "Model_Tokenizer"
+
+[[type]]
+canonical = "Ngram"
+
+[[type]]
+canonical = "Number"
+
+[[type]]
+canonical = "OMW_Lexical_Entry"
+
+[[type]]
+canonical = "OMW_Lexicon"
+
+[[type]]
+canonical = "OMW_Package"
+
+[[type]]
+canonical = "OMW_Syntactic_Behaviour"
+
+[[type]]
+canonical = "OnsetSegment"
+
+[[type]]
+canonical = "OpenSubtitles_Alignment"
+
+[[type]]
+canonical = "OpenSubtitles_Sequence"
+
+[[type]]
+canonical = "Ordinal"
+
+[[type]]
+canonical = "OrdinalContext"
+
+[[type]]
+canonical = "POS"
+
+[[type]]
+canonical = "Patch"
+
+[[type]]
+canonical = "Phrase"
+
+[[type]]
+canonical = "Pixel"
+
+[[type]]
+canonical = "PredicateMatrix_Annotation_Value"
+
+[[type]]
+canonical = "PredicateMatrix_Predicate"
+
+[[type]]
+canonical = "PredicateMatrix_Role"
+
+[[type]]
+canonical = "PropBank_Role"
+
+[[type]]
+canonical = "PropBank_Roleset"
+
+[[type]]
+canonical = "Range"
+
+[[type]]
+canonical = "Recipe_Subject"
+
+[[type]]
+canonical = "Recipe_Value"
+
+[[type]]
+canonical = "Region"
+
+[[type]]
+canonical = "RelationType"
+
+[[type]]
+canonical = "RepoRoot"
+
+[[type]]
+canonical = "Requires"
+
+[[type]]
+canonical = "Sample"
+
+[[type]]
+canonical = "Scalar"
+
+[[type]]
+canonical = "Sentence"
+
+[[type]]
+canonical = "Source"
+
+[[type]]
+canonical = "SourceFile"
+
+[[type]]
+canonical = "Source_Reference"
+
+[[type]]
+canonical = "Source_Version"
+
+[[type]]
+canonical = "SyntacticBehaviour"
+
+[[type]]
+canonical = "TabularColumn"
+
+[[type]]
+canonical = "TabularOutcome"
+
+[[type]]
+canonical = "TabularValue"
+
+[[type]]
+canonical = "Tatoeba_Sentence"
+
+[[type]]
+canonical = "Text"
+
+[[type]]
+canonical = "Tool_Invocation"
+
+[[type]]
+canonical = "Track"
+
+[[type]]
+canonical = "Type"
+
+[[type]]
+canonical = "UD_Annotation_Marker"
+
+[[type]]
+canonical = "UD_Annotation_Value"
+
+[[type]]
+canonical = "UD_Feature"
+
+[[type]]
+canonical = "UD_Parse"
+
+[[type]]
+canonical = "UD_Parse_Occurrence"
+
+[[type]]
+canonical = "UD_Token_Ref"
+
+[[type]]
+canonical = "UD_XPOS"
+
+[[type]]
+canonical = "UcdClassifier"
+
+[[type]]
+canonical = "Utf8Role"
+
+[[type]]
+canonical = "VerbNet_Class"
+
+[[type]]
+canonical = "VerbNet_Member"
+
+[[type]]
+canonical = "VerbNet_Predicate"
+
+[[type]]
+canonical = "VerbNet_Role"
+
+[[type]]
+canonical = "Video"
+
+[[type]]
+canonical = "Wikidata_Item"
+
+[[type]]
+canonical = "Wiktionary_Sense"
+
+[[type]]
+canonical = "Window"
+
+[[type]]
+canonical = "Word"
+
+[[type]]
+canonical = "WordNetSynset"
+
+[[type]]
+canonical = "WordNet_Sense"
+
+[[type]]
+canonical = "WordNet_Synset"

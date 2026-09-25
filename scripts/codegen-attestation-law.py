@@ -977,6 +977,98 @@ _RANK_BANDS = [
 ]
 
 
+def emit_entity_type_law(path: Path) -> None:
+    """Governed entity types -> entity_type_law.h/.c (label + membership table)."""
+    names = re.findall(r'^canonical\s*=\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.M)
+    if len(names) != len(set(names)):
+        raise SystemExit("entity_types.toml declares a type twice")
+    _write_text_if_changed(OUT_CORE / "include/laplace/core/entity_type_law.h",
+        "#pragma once\n"
+        "\n"
+        "#include <stddef.h>\n"
+        "\n"
+        '#include "laplace/core/hash128.h"\n'
+        "\n"
+        "#ifdef __cplusplus\n"
+        'extern "C" {\n'
+        "#endif\n"
+        "\n"
+        "extern const char* const laplace_entity_type_canonical[];\n"
+        "extern const size_t laplace_entity_type_count;\n"
+        "\n"
+        "/* 0 with *out_canonical set when type_id is a governed entity type, -1 otherwise. */\n"
+        "int laplace_entity_type_lookup(const hash128_t* type_id, const char** out_canonical);\n"
+        "/* 0 with *out_type_id set when the name is governed, -1 otherwise. */\n"
+        "int laplace_entity_type_id(const char* canonical, hash128_t* out_type_id);\n"
+        "\n"
+        "#ifdef __cplusplus\n"
+        "}\n"
+        "#endif\n")
+    lines = [
+        '#include "laplace/core/entity_type_law.h"',
+        "",
+        "#include <string.h>",
+        "",
+        "const char* const laplace_entity_type_canonical[] = {",
+    ]
+    lines += [f'    "{n}",' for n in names]
+    lines += [
+        "};",
+        f"const size_t laplace_entity_type_count = {len(names)};",
+        "",
+        f"static hash128_t k_entity_type_ids[{len(names)}];",
+        "",
+        "#ifdef _WIN32",
+        "#include <windows.h>",
+        "static volatile LONG g_state = 0;",
+        "static int try_begin(void) { return InterlockedCompareExchange(&g_state, 1, 0) == 0; }",
+        "static void mark_ready(void) { InterlockedExchange(&g_state, 2); }",
+        "static int ready(void) { return InterlockedCompareExchange(&g_state, 2, 2) == 2; }",
+        "#else",
+        "static volatile int g_state = 0;",
+        "static int try_begin(void) { int e = 0; return __atomic_compare_exchange_n(&g_state, &e, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE); }",
+        "static void mark_ready(void) { __atomic_store_n(&g_state, 2, __ATOMIC_RELEASE); }",
+        "static int ready(void) { return __atomic_load_n(&g_state, __ATOMIC_ACQUIRE) == 2; }",
+        "#endif",
+        "",
+        "/* A type code is the blake3 of its governed label: an opaque registry key, not content. */",
+        "static void ensure_ids(void) {",
+        "    if (ready()) return;",
+        "    if (try_begin()) {",
+        "        for (size_t i = 0; i < laplace_entity_type_count; ++i)",
+        "            hash128_blake3((const uint8_t*)laplace_entity_type_canonical[i],",
+        "                           strlen(laplace_entity_type_canonical[i]), &k_entity_type_ids[i]);",
+        "        mark_ready();",
+        "        return;",
+        "    }",
+        "    while (!ready()) { }",
+        "}",
+        "",
+        "int laplace_entity_type_lookup(const hash128_t* type_id, const char** out_canonical) {",
+        "    if (!type_id) return -1;",
+        "    ensure_ids();",
+        "    for (size_t i = 0; i < laplace_entity_type_count; ++i)",
+        "        if (k_entity_type_ids[i].hi == type_id->hi && k_entity_type_ids[i].lo == type_id->lo) {",
+        "            if (out_canonical) *out_canonical = laplace_entity_type_canonical[i];",
+        "            return 0;",
+        "        }",
+        "    return -1;",
+        "}",
+        "",
+        "int laplace_entity_type_id(const char* canonical, hash128_t* out_type_id) {",
+        "    if (!canonical || !out_type_id) return -1;",
+        "    ensure_ids();",
+        "    for (size_t i = 0; i < laplace_entity_type_count; ++i)",
+        "        if (strcmp(laplace_entity_type_canonical[i], canonical) == 0) {",
+        "            *out_type_id = k_entity_type_ids[i];",
+        "            return 0;",
+        "        }",
+        "    return -1;",
+        "}",
+    ]
+    _write_text_if_changed(OUT_CORE / "src/generated/entity_type_law.c", "\n".join(lines) + "\n")
+
+
 def _rank_to_band(rank_key: str) -> int:
     try:
         return _RANK_BANDS.index(rank_key)
@@ -1148,6 +1240,7 @@ def main() -> int:
     pos = parse_simple_toml(MANIFEST / "pos_tags.toml")
     emit_relation_law(rel)
     emit_pos_law(pos)
+    emit_entity_type_law(MANIFEST / "entity_types.toml")
     emit_highway_perfcache(rel, bin_out_dir)
     if CHECK_MODE:
         if DRIFT:

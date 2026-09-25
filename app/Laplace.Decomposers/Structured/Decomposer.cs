@@ -181,10 +181,9 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         string[] typeNames = TypesFor(_recipe);
-        BootstrapIntentBuilder boot = await SourceVocabularyBootstrap.RegisterAsync(
+        await SourceVocabularyBootstrap.RegisterAsync(
             context, SourceId, SourceName, TrustClassId, typeNames, DeclaredRelations, ct: ct)
             .ConfigureAwait(false);
-        _canonicalNames = boot.CanonicalNames;
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -465,9 +464,8 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
             .Concat(SingleArtifactRecipeDecomposer.RelationsFor(null)).Distinct(StringComparer.Ordinal).ToArray();
         string[] types = recipes.SelectMany(SingleArtifactRecipeDecomposer.TypesFor)
             .Concat(SingleArtifactRecipeDecomposer.TypesFor(null)).Distinct(StringComparer.Ordinal).ToArray();
-        BootstrapIntentBuilder bootstrap = await SourceVocabularyBootstrap.RegisterAsync(
+        await SourceVocabularyBootstrap.RegisterAsync(
             context, SourceId, SourceName, TrustClassId, types, _relations, ct: ct).ConfigureAwait(false);
-        _canonicalNames = bootstrap.CanonicalNames;
 
         foreach (IngestArtifact artifact in resolved.Graph.Artifacts)
         {

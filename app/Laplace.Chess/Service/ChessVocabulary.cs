@@ -15,9 +15,9 @@ public static class ChessVocabulary
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source("ChessSelfPlay");
     public static readonly Hash128 PositionType = EntityTypeRegistry.Id("Chess_Position");
     public static readonly Hash128 SubstructureType = EntityTypeRegistry.Id("Chess_Substructure");
-    public static readonly Hash128 MoveType = EntityTypeRegistry.Id("MOVE");
+    public static readonly Hash128 MoveType = RelationTypeRegistry.RelationTypeId("MOVE");
 
-    public static readonly Hash128 OutcomeType = EntityTypeRegistry.Id("OUTCOME");
+    public static readonly Hash128 OutcomeType = RelationTypeRegistry.RelationTypeId("OUTCOME");
 
     public static readonly Hash128 OutcomeObject = EntityTypeRegistry.Id("Chess_Result");
 
@@ -51,20 +51,20 @@ public static class ChessVocabulary
 
 
     public static readonly Hash128 PlayerType = EntityTypeRegistry.Id("Chess_Player");
-    public static readonly Hash128 PlayedByType = EntityTypeRegistry.Id("PLAYED_BY");
-    public static readonly Hash128 HasRatingType = EntityTypeRegistry.Id("HAS_RATING");
+    public static readonly Hash128 PlayedByType = RelationTypeRegistry.RelationTypeId("PLAYED_BY");
+    public static readonly Hash128 HasRatingType = RelationTypeRegistry.RelationTypeId("HAS_RATING");
     // The manifest's tail keeps the two chess-specific family roots in stable order. Reuse
     // that governed spelling instead of adding a second C# vocabulary literal; the ISA g3
     // ratchet is shrink-only by design.
-    public static readonly Hash128 CorrespondsToType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^2]);
-    public static readonly Hash128 ExternalIdType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^4]);
-    public static readonly Hash128 FeatureType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^3]);
+    public static readonly Hash128 CorrespondsToType = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.Relations[^2]);
+    public static readonly Hash128 ExternalIdType = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.Relations[^4]);
+    public static readonly Hash128 FeatureType = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.Relations[^3]);
 
 
 
 
-    public static readonly Hash128 OpeningNameType = EntityTypeRegistry.Id("OPENING_NAME");
-    public static readonly Hash128 EcoCodeType = EntityTypeRegistry.Id("HAS_ECO");
+    public static readonly Hash128 OpeningNameType = RelationTypeRegistry.RelationTypeId("OPENING_NAME");
+    public static readonly Hash128 EcoCodeType = RelationTypeRegistry.RelationTypeId("HAS_ECO");
 
 
 
@@ -77,11 +77,11 @@ public static class ChessVocabulary
     // Chess_Event = the tournament / named event (many games).
     public static readonly Hash128 EventType = EntityTypeRegistry.Id("Chess_Event");
     public static readonly Hash128 PlayingType = EntityTypeRegistry.Id("Chess_Playing");
-    public static readonly Hash128 PlaysLineType = EntityTypeRegistry.Id("PLAYS_LINE");
-    public static readonly Hash128 HasSetupType = EntityTypeRegistry.Id("HAS_SETUP");
+    public static readonly Hash128 PlaysLineType = RelationTypeRegistry.RelationTypeId("PLAYS_LINE");
+    public static readonly Hash128 HasSetupType = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
     public static readonly Hash128 AnalysisVersionMetaTypeId =
         SubstrateCanonicalIds.OfVersioned("type", "HasAnalysisVersion");
-    public static readonly Hash128 AnalyzedAtType = EntityTypeRegistry.Id("ANALYZED_AT");
+    public static readonly Hash128 AnalyzedAtType = RelationTypeRegistry.RelationTypeId("ANALYZED_AT");
     public static readonly Hash128 AnalysisMarkerType = EntityTypeRegistry.Id("Chess_AnalysisMarker");
     public static readonly Hash128 AnalysisSourceId = SubstrateCanonicalIds.Source("ChessAnalysis");
     public static readonly Hash128 AnalysisTrustClass = TrustClass("DerivedCalculation");
@@ -91,29 +91,29 @@ public static class ChessVocabulary
 
     public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
         => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
-    public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
-    public static readonly Hash128 HasBlackType = EntityTypeRegistry.Id("HAS_BLACK");
-    public static readonly Hash128 HasEventType = EntityTypeRegistry.Id("HAS_EVENT");
-    public static readonly Hash128 OnDateType = EntityTypeRegistry.Id("ON_DATE");
-    public static readonly Hash128 HasTimeControlType = EntityTypeRegistry.Id("HAS_TIME_CONTROL");
-    public static readonly Hash128 HasTcClassType = EntityTypeRegistry.Id("HAS_TC_CLASS");
-    public static readonly Hash128 HasTerminationType = EntityTypeRegistry.Id("HAS_TERMINATION");
-    public static readonly Hash128 HasResultType = EntityTypeRegistry.Id("HAS_RESULT");
-    public static readonly Hash128 HasEvalType = EntityTypeRegistry.Id("HAS_EVAL");
+    public static readonly Hash128 HasWhiteType = RelationTypeRegistry.RelationTypeId("HAS_WHITE");
+    public static readonly Hash128 HasBlackType = RelationTypeRegistry.RelationTypeId("HAS_BLACK");
+    public static readonly Hash128 HasEventType = RelationTypeRegistry.RelationTypeId("HAS_EVENT");
+    public static readonly Hash128 OnDateType = RelationTypeRegistry.RelationTypeId("ON_DATE");
+    public static readonly Hash128 HasTimeControlType = RelationTypeRegistry.RelationTypeId("HAS_TIME_CONTROL");
+    public static readonly Hash128 HasTcClassType = RelationTypeRegistry.RelationTypeId("HAS_TC_CLASS");
+    public static readonly Hash128 HasTerminationType = RelationTypeRegistry.RelationTypeId("HAS_TERMINATION");
+    public static readonly Hash128 HasResultType = RelationTypeRegistry.RelationTypeId("HAS_RESULT");
+    public static readonly Hash128 HasEvalType = RelationTypeRegistry.RelationTypeId("HAS_EVAL");
     public static readonly Hash128 HasEvalObject = EntityTypeRegistry.Id("Chess_Eval");
-    public static readonly Hash128 MoveQualityType = EntityTypeRegistry.Id("MOVE_QUALITY");
-    public static readonly Hash128 HasWdlType = EntityTypeRegistry.Id("HAS_WDL");
-    public static readonly Hash128 HasDtzType = EntityTypeRegistry.Id("HAS_DTZ");
-    public static readonly Hash128 HasThinkClassType = EntityTypeRegistry.Id("HAS_THINK_CLASS");
-    public static readonly Hash128 GameHasOpeningType = EntityTypeRegistry.Id("GAME_HAS_OPENING");
-    public static readonly Hash128 GameHasEcoType = EntityTypeRegistry.Id("GAME_HAS_ECO");
-    public static readonly Hash128 GameHasMotifType = EntityTypeRegistry.Id("GAME_HAS_MOTIF");
+    public static readonly Hash128 MoveQualityType = RelationTypeRegistry.RelationTypeId("MOVE_QUALITY");
+    public static readonly Hash128 HasWdlType = RelationTypeRegistry.RelationTypeId("HAS_WDL");
+    public static readonly Hash128 HasDtzType = RelationTypeRegistry.RelationTypeId("HAS_DTZ");
+    public static readonly Hash128 HasThinkClassType = RelationTypeRegistry.RelationTypeId("HAS_THINK_CLASS");
+    public static readonly Hash128 GameHasOpeningType = RelationTypeRegistry.RelationTypeId("GAME_HAS_OPENING");
+    public static readonly Hash128 GameHasEcoType = RelationTypeRegistry.RelationTypeId("GAME_HAS_ECO");
+    public static readonly Hash128 GameHasMotifType = RelationTypeRegistry.RelationTypeId("GAME_HAS_MOTIF");
     public static readonly Hash128 BookLineType = EntityTypeRegistry.Id("Chess_BookLine");
     public static Hash128 BookLineMarkerId(Hash128 bookTitleContentId, Hash128 lineId)
         => Hash128.OfCanonical($"chess/bookline-marker/{bookTitleContentId}/{lineId}");
-    public static readonly Hash128 ExplainsType = EntityTypeRegistry.Id("EXPLAINS");
-    public static readonly Hash128 IsExampleOfType = EntityTypeRegistry.Id("IS_EXAMPLE_OF");
-    public static readonly Hash128 DefinesType = EntityTypeRegistry.Id("HAS_DEFINITION");
+    public static readonly Hash128 ExplainsType = RelationTypeRegistry.RelationTypeId("EXPLAINS");
+    public static readonly Hash128 IsExampleOfType = RelationTypeRegistry.RelationTypeId("IS_EXAMPLE_OF");
+    public static readonly Hash128 DefinesType = RelationTypeRegistry.RelationTypeId("HAS_DEFINITION");
 
     public static Hash128 PgnEventId(string @event, string site, string date)
         => Hash128.OfCanonical($"chess/event/{@event}|{site}|{date}");
@@ -242,7 +242,6 @@ public static class ChessVocabulary
                          ChessSeedManifest.Relations))
                 boot.AddRelationType(r);
             builders[i] = boot;
-            names.UnionWith(boot.CanonicalNames);
         }
 
         var present = new bool[unique.Count];

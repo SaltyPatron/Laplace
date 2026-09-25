@@ -1,0 +1,6 @@
+-- The governed entity types, from the compiled entity-type law. A type is a filter
+-- code on entity rows; readers that label or enumerate types read this.
+CREATE OR REPLACE FUNCTION laplace.entity_type_registry()
+    RETURNS TABLE(type_id bytea, canonical text)
+    AS 'MODULE_PATHNAME', 'pg_laplace_entity_type_registry'
+    LANGUAGE C IMMUTABLE PARALLEL SAFE ROWS 128;

@@ -49,6 +49,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/unicode_seed.h
     include/laplace/core/relation_law.h
     include/laplace/core/pos_law.h
+    include/laplace/core/entity_type_law.h
     include/laplace/core/highway_manifest.h
     include/laplace/core/highway_table.h
     include/laplace/core/attestation_engine.h
@@ -112,6 +113,7 @@ set(LAPLACE_CORE_SOURCES
     src/unicode_seed.cpp
     src/generated/relation_law.c
     src/generated/pos_law.c
+    src/generated/entity_type_law.c
     src/highway_table.c
     src/attestation_engine.c
 )
@@ -128,9 +130,11 @@ set(LAPLACE_CODEGEN_SCRIPT "${_laplace_codegen_root}/scripts/codegen-attestation
 set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/relation_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/pos_law.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/entity_type_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/highway_manifest.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/relation_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/pos_law.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/entity_type_law.c
     ${LAPLACE_HIGHWAY_BIN}
 )
 # The generated source/SQL files are also configure inputs. Making one of those
@@ -146,7 +150,8 @@ set(LAPLACE_CODEGEN_STAMP
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${LAPLACE_CODEGEN_SCRIPT}"
     "${_laplace_codegen_root}/engine/manifest/relation_types.toml"
-    "${_laplace_codegen_root}/engine/manifest/pos_tags.toml")
+    "${_laplace_codegen_root}/engine/manifest/pos_tags.toml"
+    "${_laplace_codegen_root}/engine/manifest/entity_types.toml")
 execute_process(
     COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${LAPLACE_CODEGEN_SCRIPT}"
             "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
@@ -166,6 +171,7 @@ add_custom_command(
     DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
             ${_laplace_codegen_root}/engine/manifest/relation_types.toml
             ${_laplace_codegen_root}/engine/manifest/pos_tags.toml
+            ${_laplace_codegen_root}/engine/manifest/entity_types.toml
     COMMENT "Codegen attestation law + highway perfcache from manifest TOML"
     VERBATIM
 )

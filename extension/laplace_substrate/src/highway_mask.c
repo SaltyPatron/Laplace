@@ -17,6 +17,7 @@
 #include "spi_nested.h"
 
 #include "laplace/core/highway_table.h"
+#include "laplace/core/entity_type_law.h"
 
 #include "perfcache_native.h"
 #include "entity_mask_write.h"
@@ -918,6 +919,34 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
     if (highway_table_relation_by_hash(&type_id, &bit_pos, &rank, &band) != 0)
         PG_RETURN_NULL();
     PG_RETURN_INT32((int32) band);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_entity_type_registry);
+
+/*
+ * laplace.entity_type_registry(): the governed entity types from the compiled
+ * entity-type law. A type is a filter code on entity rows, not an entity; its
+ * label is the registry's.
+ */
+Datum
+pg_laplace_entity_type_registry(PG_FUNCTION_ARGS)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+
+    InitMaterializedSRF(fcinfo, 0);
+    for (size_t i = 0; i < laplace_entity_type_count; i++)
+    {
+        hash128_t type_id;
+        Datum     values[2];
+        bool      nulls[2] = {false, false};
+
+        if (laplace_entity_type_id(laplace_entity_type_canonical[i], &type_id) != 0)
+            continue;
+        values[0] = hash128_to_datum(&type_id);
+        values[1] = CStringGetTextDatum(laplace_entity_type_canonical[i]);
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+    }
+    return (Datum) 0;
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_relation_registry);

@@ -16,7 +16,7 @@ public sealed class BootstrapIntentBuilder
     public static readonly Hash128 SourceTypeId = EntityTypeRegistry.Id("Source");
     public static readonly Hash128 TypeMetaTypeId = EntityTypeRegistry.Id("Type");
     public static readonly Hash128 RelationTypeMetaTypeId = EntityTypeRegistry.Id("RelationType");
-    public static readonly Hash128 HasTrustClassTypeId = EntityTypeRegistry.Id("HAS_TRUST_CLASS");
+    public static readonly Hash128 HasTrustClassTypeId = RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS");
 
     public BootstrapIntentBuilder(Hash128 sourceId, string sourceName, Hash128 trustClassId)
     {
@@ -48,14 +48,11 @@ public sealed class BootstrapIntentBuilder
 
 
 
-    public IReadOnlyCollection<string> CanonicalNames => _canonicalNames;
-    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
     public Hash128 AddType(string canonicalTypeName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(canonicalTypeName);
         var id = EntityTypeRegistry.Id(canonicalTypeName);
-        _canonicalNames.Add(canonicalTypeName);
         // type_id is structural metadata on an entity row. The registry key is not
         // itself content and must not be materialized as a fake Entity/Physicality.
         // Semantic category endpoints are ordinary content entities witnessed by
@@ -66,7 +63,6 @@ public sealed class BootstrapIntentBuilder
     public Hash128 AddRelationType(string canonicalRelationTypeName)
     {
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
-        _canonicalNames.Add(r.Canonical);
         // Relation keys belong to the native relation/operator registry and highway
         // perfcache. They are not content entities and receive no physicality.
         return r.Id;
@@ -98,14 +94,6 @@ public sealed class BootstrapIntentBuilder
 
 
         PosReference.SeedCanonical(_inner, _sourceId);
-        // The intent that mints type/relation entities owns their readback names too.
-        // Carry the complete SET to the writer so registration cannot be forgotten by a
-        // new ingest entry point or repeated separately after every bootstrap operation.
-        return _inner.Build() with
-        {
-            CanonicalNames = _canonicalNames
-                .OrderBy(static name => name, StringComparer.Ordinal)
-                .ToImmutableArray(),
-        };
+        return _inner.Build();
     }
 }

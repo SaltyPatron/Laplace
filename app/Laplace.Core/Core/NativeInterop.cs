@@ -790,6 +790,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_relation_type_id", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int RelationTypeIdNative(string canonicalName, Hash128* outTypeId);
 
+    [LibraryImport(Library, EntryPoint = "laplace_entity_type_id", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int EntityTypeIdNative(string canonicalName, Hash128* outTypeId);
+
     [LibraryImport(Library, EntryPoint = "laplace_relation_manifest_count")]
     internal static partial nuint RelationManifestCount();
 

@@ -23,8 +23,8 @@ public sealed class ChessPlayerRatingTests
 
     private static readonly Hash128 Alice = ChessVocabulary.PlayerId("Alice");
     private static readonly Hash128 Bob = ChessVocabulary.PlayerId("Bob");
-    private static readonly Hash128 Outcome = EntityTypeRegistry.Id("OUTCOME");
-    private static readonly Hash128 PlayedBy = EntityTypeRegistry.Id("PLAYED_BY");
+    private static readonly Hash128 Outcome = RelationTypeRegistry.RelationTypeId("OUTCOME");
+    private static readonly Hash128 PlayedBy = RelationTypeRegistry.RelationTypeId("PLAYED_BY");
 
     private static SubstrateChange Compose(string pgn)
     {

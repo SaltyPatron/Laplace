@@ -6,6 +6,8 @@ BEGIN ATOMIC
     SELECT COALESCE(
         -- A relation type is a registry bit; its label is the registry's.
         (SELECT r.canonical FROM @extschema@.relation_registry() r WHERE r.type_id = p_id),
+        -- An entity type is a registry code; its label is the registry's.
+        (SELECT t.canonical FROM @extschema@.entity_type_registry() t WHERE t.type_id = p_id),
         (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
         -- Perfcache-backed: authoritative for a valid tier-0 codepoint on its own
         -- (a hash128 match against the reverse index *is* the proof), independent

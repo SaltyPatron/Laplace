@@ -97,11 +97,9 @@ public static class SourceVocabularyBootstrap
         {
             // A decomposer can orchestrate more than one independent witness source
             // (SemLink + PredicateMatrix). The CLI only knows the outer decomposer, so
-            // every manifest registered through this boundary must contribute its own
-            // source key to canonical readback as well as its types and relations.
+            // every manifest registered through this boundary contributes its own source
+            // key to canonical readback. Types and relations are labelled by the registry.
             readbackNames.TryAdd(SubstrateCanonicalKeys.Source(sourceName), 0);
-            foreach (var n in boot.CanonicalNames)
-                readbackNames.TryAdd(n, 0);
         }
         return boot;
     }

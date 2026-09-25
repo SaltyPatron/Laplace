@@ -14,6 +14,7 @@ BEGIN ATOMIC
     )
     SELECT COALESCE(array_agg(
                COALESCE(r.canonical,
+                        t.canonical,
                         n.name,
                         chr(realize.codepoint_for_id(i.id)),
                         b.names[i.ord],
@@ -22,5 +23,6 @@ BEGIN ATOMIC
     FROM inp i
     CROSS JOIN batches b
     LEFT JOIN laplace.relation_registry() r ON r.type_id = i.id
+    LEFT JOIN laplace.entity_type_registry() t ON t.type_id = i.id
     LEFT JOIN laplace.canonical_names n ON n.id = i.id;
 END;

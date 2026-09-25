@@ -71,7 +71,7 @@ public class ConversationContentIdTests
         var changes = ConversationContent.BuildTenantBootstrapChanges(scope);
         Assert.Equal(3, changes.Length);
 
-        var trustClassType = EntityTypeRegistry.Id("HAS_TRUST_CLASS");
+        var trustClassType = RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS");
         Assert.Contains(changes[0].Attestations, a =>
             a.TypeId == trustClassType && a.SubjectId == scope.PromptSource);
         Assert.Contains(changes[1].Attestations, a =>
@@ -85,7 +85,7 @@ public class ConversationContentIdTests
             Assert.Contains(changes[0].Entities, e => e.Id == relId && e.TypeId == relationMeta);
         }
 
-        var attribution = EntityTypeRegistry.Id("HAS_ATTRIBUTION");
+        var attribution = RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTION");
         var subjects = changes[2].Attestations
             .Where(a => a.TypeId == attribution).Select(a => a.SubjectId).ToArray();
         Assert.Contains(scope.PromptSource, subjects);

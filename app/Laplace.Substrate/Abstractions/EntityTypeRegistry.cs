@@ -5,7 +5,21 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class EntityTypeRegistry
 {
-    public static Hash128 Id(string canonicalName) => HighwayPerfcache.NodeHash(canonicalName);
+    // An entity type is a governed registry code (engine/manifest/entity_types.toml),
+    // never an entity. An undeclared type name is a defect at its call site.
+    public static Hash128 Id(string canonicalName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(canonicalName);
+        unsafe
+        {
+            Hash128 id;
+            if (NativeInterop.EntityTypeIdNative(canonicalName, &id) != 0)
+                throw new ArgumentException(
+                    $"entity type '{canonicalName}' is not declared in engine/manifest/entity_types.toml",
+                    nameof(canonicalName));
+            return id;
+        }
+    }
 
     public static readonly Hash128 Architecture = Id("Architecture");
     public static readonly Hash128 AtomicMarker = Id("Atomic_Marker");
