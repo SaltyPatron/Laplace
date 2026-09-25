@@ -18,6 +18,7 @@
 
 #include "laplace/core/highway_table.h"
 #include "laplace/core/entity_type_law.h"
+#include "laplace/core/attestation_engine.h"
 
 #include "perfcache_native.h"
 #include "entity_mask_write.h"
@@ -981,6 +982,79 @@ pg_laplace_entity_type_registry(PG_FUNCTION_ARGS)
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
     }
     return (Datum) 0;
+}
+
+/*
+ * A type id's display label: the governed relation or entity-type registry's label,
+ * read natively (HAS_PART -> "has part"). A type is a registry code, never content to
+ * render; an id neither registry declares has no label (NULL).
+ */
+static text *
+type_label_text(Datum id_datum)
+{
+    hash128_t   id = datum_to_hash128(id_datum);
+    const char *canonical = laplace_relation_canonical_for_type_id(&id);
+    size_t      n;
+    char       *label;
+
+    if (canonical == NULL && laplace_entity_type_lookup(&id, &canonical) != 0)
+        canonical = NULL;
+    if (canonical == NULL)
+        return NULL;
+    n = strlen(canonical);
+    label = palloc(n + 1);
+    for (size_t i = 0; i < n; i++)
+    {
+        char c = canonical[i];
+
+        label[i] = c == '_' ? ' ' : (c >= 'A' && c <= 'Z') ? (char) (c - 'A' + 'a') : c;
+    }
+    label[n] = '\0';
+    return cstring_to_text(label);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_type_label);
+
+Datum
+pg_laplace_type_label(PG_FUNCTION_ARGS)
+{
+    text *label = type_label_text(PG_GETARG_DATUM(0));
+
+    if (label == NULL)
+        PG_RETURN_NULL();
+    PG_RETURN_TEXT_P(label);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_type_label_batch);
+
+/* (ids bytea[]) -> text[]: labels in input order; NULL for undeclared ids. */
+Datum
+pg_laplace_type_label_batch(PG_FUNCTION_ARGS)
+{
+    ArrayType *ids = PG_GETARG_ARRAYTYPE_P(0);
+    Datum     *elems;
+    bool      *elem_nulls;
+    int        n;
+    Datum     *labels;
+    bool      *label_nulls;
+    int        dims[1];
+    int        lbs[1] = {1};
+
+    deconstruct_array(ids, BYTEAOID, -1, false, TYPALIGN_INT, &elems, &elem_nulls, &n);
+    labels = palloc(sizeof(Datum) * (n > 0 ? n : 1));
+    label_nulls = palloc(sizeof(bool) * (n > 0 ? n : 1));
+    for (int i = 0; i < n; i++)
+    {
+        text *label = elem_nulls[i] ? NULL : type_label_text(elems[i]);
+
+        label_nulls[i] = label == NULL;
+        labels[i] = label == NULL ? (Datum) 0 : PointerGetDatum(label);
+    }
+    dims[0] = n;
+    if (n == 0)
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
+    PG_RETURN_ARRAYTYPE_P(construct_md_array(labels, label_nulls, 1, dims, lbs,
+                                             TEXTOID, -1, false, TYPALIGN_INT));
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_relation_registry);
