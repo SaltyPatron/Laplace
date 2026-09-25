@@ -96,7 +96,10 @@ public sealed record SourceRecipeField(
     // A governed vocabulary the value resolves through ("pos/wordnet": WordNet ss_type
     // n -> NOUN per engine/manifest/pos_tags.toml). A value the vocabulary does not map
     // stays the source's own value.
-    string? Vocabulary = null);
+    string? Vocabulary = null,
+    // Claims of this field accumulate across the artifact by identity and are staged
+    // once at its end as graded games: "dogs HAS_POS NOUN @eng" observed n times.
+    bool Aggregate = false);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -191,7 +194,23 @@ public sealed record SourceRecipeProviderRoute(
     string? RangeRelationName = null,
     string? RangeStartField = null,
     string? RangeEndField = null,
-    bool InheritParentAttributes = false);
+    bool InheritParentAttributes = false,
+    SourceParseStructure? ParseStructure = null);
+
+/// <summary>
+/// A grouped delimited record (a CoNLL-U sentence) lowered to its trunk's parse
+/// physicality: the token forms in order, each vertex carrying governed codes (UPOS
+/// index, universal deprel code, head ordinal) in its metadata rather than one
+/// testimony row per token occurrence.
+/// </summary>
+public sealed record SourceParseStructure(
+    string TrunkField,
+    string IdColumn,
+    string FormColumn,
+    string UposColumn,
+    string HeadColumn,
+    string DeprelColumn,
+    string UposVocabulary = "pos/upos");
 
 public enum SourceArtifactDisposition
 {

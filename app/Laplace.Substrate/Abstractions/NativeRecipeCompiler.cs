@@ -53,8 +53,10 @@ public static class NativeRecipeCompiler
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
         bool identityTables = recipe.IdentityTables.Count != 0 || recipe.AttributeVocabularies.Count != 0
+            || recipe.ProviderRoutes.Any(static r => r.ParseStructure is not null)
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
-                || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null);
+                || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
+                || f.Aggregate);
         uint version = identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -173,6 +175,7 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.ObservationOf);
                 WriteText(writer, field.ScoreOf);
                 WriteText(writer, field.Vocabulary);
+                writer.Write(field.Aggregate ? 1u : 0u);
             }
         }
 
@@ -258,7 +261,24 @@ public static class NativeRecipeCompiler
                 if (version >= Rcp5)
                     writer.Write(route.InheritParentAttributes ? 1u : 0u);
             }
-            if (version >= Rcp7) WriteText(writer, subject.IdentityTable);
+            if (version >= Rcp7)
+            {
+                WriteText(writer, subject.IdentityTable);
+                SourceParseStructure? parse = route.ParseStructure;
+                writer.Write(parse is null ? 0u : 1u);
+                if (parse is not null)
+                {
+                    if (recipe.DelimitedSyntax is not { IsGrouped: true })
+                        throw new InvalidDataException($"Route '{route.RecordName}' declares a parse structure without grouped delimited syntax.");
+                    WriteText(writer, parse.TrunkField);
+                    WriteText(writer, parse.IdColumn);
+                    WriteText(writer, parse.FormColumn);
+                    WriteText(writer, parse.UposColumn);
+                    WriteText(writer, parse.HeadColumn);
+                    WriteText(writer, parse.DeprelColumn);
+                    WriteText(writer, parse.UposVocabulary);
+                }
+            }
         }
 
         if (version >= Rcp7)

@@ -52,6 +52,35 @@ typedef struct {
 #define LAPLACE_VFLAG_FCOUNT_MASK   0x7ULL
 #define LAPLACE_FACTOR_VALUES_PER_VERTEX 6u
 
+// PARSE vertex class: one syntactic occurrence in a sentence's parse structure.
+// Bit 47 with bits 0, 6 and 7 clear (a parse vertex never carries an atom index: a
+// single-codepoint token is referenced by id). Payload bits 8-34 carry governed codes:
+// UPOS index + 1 (8-12, 0 = none), universal deprel code (13-18, deprel_law), head
+// ordinal (19-34, 0 = root). Bits 1-5 keep the constituent's tier.
+#define LAPLACE_VFLAG_PARSE              (1ULL << 47)
+#define LAPLACE_VFLAG_PARSE_UPOS_SHIFT   8u
+#define LAPLACE_VFLAG_PARSE_UPOS_MASK    0x1FULL
+#define LAPLACE_VFLAG_PARSE_DEPREL_SHIFT 13u
+#define LAPLACE_VFLAG_PARSE_DEPREL_MASK  0x3FULL
+#define LAPLACE_VFLAG_PARSE_HEAD_SHIFT   19u
+#define LAPLACE_VFLAG_PARSE_HEAD_MASK    0xFFFFULL
+
+static inline uint64_t laplace_parse_vertex_flags(uint8_t tier, uint8_t upos1, uint8_t deprel,
+                                                  uint16_t head) {
+    return ((uint64_t)(tier & LAPLACE_VFLAG_TIER_MASK) << LAPLACE_VFLAG_TIER_SHIFT)
+         | LAPLACE_VFLAG_PARSE
+         | ((uint64_t)(upos1 & LAPLACE_VFLAG_PARSE_UPOS_MASK) << LAPLACE_VFLAG_PARSE_UPOS_SHIFT)
+         | ((uint64_t)(deprel & LAPLACE_VFLAG_PARSE_DEPREL_MASK) << LAPLACE_VFLAG_PARSE_DEPREL_SHIFT)
+         | ((uint64_t)head << LAPLACE_VFLAG_PARSE_HEAD_SHIFT);
+}
+static inline int laplace_vflag_is_parse(uint64_t flags) {
+    return (flags & LAPLACE_VFLAG_PARSE) != 0
+        && (flags & (LAPLACE_VFLAG_HAS_ATOM | LAPLACE_VFLAG_TESTIMONY | LAPLACE_VFLAG_FACTOR)) == 0;
+}
+static inline uint8_t laplace_vflag_parse_upos1(uint64_t f) { return (uint8_t)((f >> LAPLACE_VFLAG_PARSE_UPOS_SHIFT) & LAPLACE_VFLAG_PARSE_UPOS_MASK); }
+static inline uint8_t laplace_vflag_parse_deprel(uint64_t f) { return (uint8_t)((f >> LAPLACE_VFLAG_PARSE_DEPREL_SHIFT) & LAPLACE_VFLAG_PARSE_DEPREL_MASK); }
+static inline uint16_t laplace_vflag_parse_head(uint64_t f) { return (uint16_t)((f >> LAPLACE_VFLAG_PARSE_HEAD_SHIFT) & LAPLACE_VFLAG_PARSE_HEAD_MASK); }
+
 static inline uint64_t laplace_vertex_flags(uint8_t tier, int has_atom, uint32_t atom) {
     uint64_t f = ((uint64_t)(tier & LAPLACE_VFLAG_TIER_MASK)) << LAPLACE_VFLAG_TIER_SHIFT;
     if (has_atom) {

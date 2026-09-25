@@ -1297,6 +1297,44 @@ def emit_language_law(path: Path) -> None:
               "size_t laplace_language_count(void) { return sizeof(k_languages)/sizeof(k_languages[0]); }"]
     _write_text_if_changed(OUT_CORE / "src/generated/language_law.c", "\n".join(lines) + "\n")
 
+
+def emit_deprel_law(path: Path) -> None:
+    """UD universal relations (engine/manifest/deprels.toml): a deprel label resolves to
+    its universal relation's stable 1-based code; the subtype after ':' is the
+    treebank's refinement of it. 0 = not a universal relation."""
+    import re as _re
+    body = path.read_text(encoding="utf-8")
+    m = _re.search(r"universal\s*=\s*\[(.*?)\]", body, _re.S)
+    if not m:
+        raise SystemExit("deprels.toml: no [ud] universal list")
+    labels = _re.findall(r'"([a-z]+)"', m.group(1))
+    if len(labels) != len(set(labels)) or len(labels) > 63:
+        raise SystemExit("deprels.toml: duplicate labels or more than 63 relations")
+    _write_text_if_changed(OUT_CORE / "include/laplace/core/deprel_law.h",
+        "#pragma once\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+        "/* A UD deprel label (\"nsubj:pass\") -> its universal relation's code (1..N);\n"
+        " * 0 when the universal part is not declared. */\n"
+        "int laplace_deprel_code(const char* label);\n"
+        "/* The universal relation label of a code, NULL when undeclared. */\n"
+        "const char* laplace_deprel_label(int code);\n"
+        "int laplace_deprel_count(void);\n\n#ifdef __cplusplus\n}\n#endif\n")
+    lines = ['#include "laplace/core/deprel_law.h"', "", "#include <string.h>", "",
+             "static const char* k_deprels[] = {"]
+    lines += [f'    "{l}",' for l in labels]
+    lines += ["};", "",
+              "int laplace_deprel_code(const char* label) {",
+              "    if (!label) return 0;",
+              "    size_t n = strcspn(label, \":\");",
+              "    for (int i = 0; i < (int)(sizeof(k_deprels)/sizeof(k_deprels[0])); ++i)",
+              "        if (strlen(k_deprels[i]) == n && strncmp(k_deprels[i], label, n) == 0) return i + 1;",
+              "    return 0;",
+              "}", "",
+              "const char* laplace_deprel_label(int code) {",
+              "    return code >= 1 && code <= (int)(sizeof(k_deprels)/sizeof(k_deprels[0])) ? k_deprels[code - 1] : NULL;",
+              "}", "",
+              "int laplace_deprel_count(void) { return (int)(sizeof(k_deprels)/sizeof(k_deprels[0])); }"]
+    _write_text_if_changed(OUT_CORE / "src/generated/deprel_law.c", "\n".join(lines) + "\n")
+
 def main() -> int:
     global CHECK_MODE
     CHECK_MODE = "--check" in sys.argv[1:]
@@ -1315,6 +1353,7 @@ def main() -> int:
     emit_pos_law(pos)
     emit_entity_type_law(MANIFEST / "entity_types.toml")
     emit_language_law(MANIFEST / "languages.tsv")
+    emit_deprel_law(MANIFEST / "deprels.toml")
     emit_highway_perfcache(rel, bin_out_dir)
     if CHECK_MODE:
         if DRIFT:

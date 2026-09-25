@@ -10,6 +10,8 @@
 #include "laplace/core/relation_law.h"
 #include "laplace/core/pos_law.h"
 #include "laplace/core/language_law.h"
+#include "laplace/core/deprel_law.h"
+#include "laplace/core/mantissa.h"
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
@@ -69,6 +71,7 @@ struct field_rule {
     std::unordered_map<std::string, std::string> aliases;
     std::string identity_table, object_literal, context_literal, observation_of, score_of;
     struct vocabulary_rule { int kind = 0; int tagset = -1; } vocabulary;  // 1 pos/<tagset>, 2 lang/iso639
+    bool aggregate = false;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -89,6 +92,13 @@ struct route_rule {
     std::vector<std::string> structures;
     bool inherit_parent_attributes = false;
     std::string identity_table;
+    // A grouped record lowered to its trunk's parse physicality (column positions).
+    struct parse_rule {
+        bool on = false;
+        std::string trunk;
+        size_t id = 0, form = 0, upos = 0, head = 0, deprel = 0;
+        int upos_tagset = -1;
+    } parse;
 };
 struct node {
     std::string name, ns;
@@ -493,12 +503,72 @@ struct laplace_recipe_stream {
         }
     }
     std::unordered_map<std::string, size_t> last_fact;
+    // Aggregated claims: identical (subject, relation, object, context, outcome) facts
+    // across the artifact become one graded game series staged at the end.
+    std::unordered_map<std::string, fact> aggregates;
+    void aggregate_facts(size_t from) {
+        for (size_t i = from; i < facts.size(); ++i) {
+            fact f = facts[i];
+            if (!f.has_subject) { f.subject = subject; f.has_subject = true; }
+            std::string key(reinterpret_cast<const char*>(&f.subject), sizeof(f.subject));
+            key.append(reinterpret_cast<const char*>(&f.relation), sizeof(f.relation));
+            key.append(reinterpret_cast<const char*>(&f.object), sizeof(f.object));
+            key.append(reinterpret_cast<const char*>(&f.context), sizeof(f.context));
+            key.push_back(static_cast<char>((f.has_object ? 1 : 0) | (f.has_context ? 2 : 0) | (f.confirm ? 4 : 0)));
+            auto [it, fresh] = aggregates.emplace(std::move(key), f);
+            if (!fresh) it->second.games += f.games;
+        }
+        facts.resize(from);
+    }
+    // A sentence's parse: its token forms in order, each vertex carrying governed
+    // codes (UPOS index, universal deprel code, head ordinal) in its metadata.
+    void lower_parse(intent_stage_t* stage, const route_rule& route, const node& record) {
+        const auto& p = route.parse;
+        const auto trunk = record.attributes.find(p.trunk);
+        if (trunk == record.attributes.end() || trunk->second.empty() || !record.group) return;
+        const content_form sentence = compose_content(stage, trunk->second);
+        const size_t width = std::max({p.id, p.form, p.upos, p.head, p.deprel}) + 1;
+        std::vector<hash128_t> ids;
+        std::vector<uint64_t> flags;
+        for (const auto& line : *record.group) {
+            if (line.size() < width) continue;
+            const std::string& id = line[p.id];
+            if (id.empty() || id.find_first_not_of("0123456789") != std::string::npos) continue;
+            const std::string& form = line[p.form];
+            if (form.empty() || form == "_") continue;
+            const content_form token = compose_content(stage, form);
+            const char* canonical = nullptr;
+            int index = -1;
+            const uint8_t upos1 = laplace_pos_resolve_canonical(line[p.upos].c_str(),
+                static_cast<laplace_pos_tagset_t>(p.upos_tagset), &canonical, &index) == 0 && index >= 0
+                ? static_cast<uint8_t>(index + 1) : 0;
+            const uint8_t deprel = static_cast<uint8_t>(laplace_deprel_code(line[p.deprel].c_str()));
+            uint16_t head = 0xFFFF;
+            const std::string& h = line[p.head];
+            if (!h.empty() && h.size() <= 5 && h.find_first_not_of("0123456789") == std::string::npos) {
+                const unsigned long v = std::stoul(h);
+                if (v < 0xFFFF) head = static_cast<uint16_t>(v);
+            }
+            ids.push_back(token.id);
+            flags.push_back(laplace_parse_vertex_flags(token.tier, upos1, deprel, head));
+        }
+        if (ids.empty()) return;
+        std::vector<double> trajectory(ids.size() * 4);
+        check(trajectory_build_flagged(ids.data(), flags.data(), ids.size(), trajectory.data()), "parse trajectory");
+        hash128_t physicality;
+        laplace_physicality_id_compute(sentence.id, 8, &physicality);
+        check(intent_stage_add_physicality(stage, &physicality, &sentence.id, 8, sentence.coord,
+            &sentence.hilbert, trajectory.data(), static_cast<uint32_t>(ids.size()),
+            static_cast<int32_t>(ids.size()), 1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US), "parse physicality");
+    }
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
         const size_t before = facts.size();
         try {
             lower_field(stage, path, raw, subject_binding, attributes);
-            if (facts.size() > before) last_fact[path] = facts.size() - 1;
+            const auto rule = fields.find(path);
+            if (rule != fields.end() && rule->second.aggregate) aggregate_facts(before);
+            else if (facts.size() > before) last_fact[path] = facts.size() - 1;
         }
         catch (const std::runtime_error& e) {
             throw std::runtime_error("field " + path + " in " + record_context + ": " + e.what());
@@ -795,6 +865,7 @@ struct laplace_recipe_stream {
         }
         if (has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
         for (const auto& child : record.children) lower_child(stage, route, child, child.name);
+        if (route.parse.on) lower_parse(stage, route, record);
         scope_attributes = nullptr;
         active = true;
     }
@@ -913,6 +984,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 f.observation_of = r.text(); f.score_of = r.text();
                 const std::string vocabulary = r.text();
                 if (!vocabulary.empty()) f.vocabulary = parse_vocabulary(vocabulary, f.path);
+                const uint32_t aggregate = r.number();
+                if (aggregate > 1) throw std::runtime_error("invalid aggregate instruction at " + f.path);
+                f.aggregate = aggregate != 0;
             }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
@@ -961,7 +1035,28 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     route.inherit_parent_attributes = inherit != 0;
                 }
             }
-            if (rcp7) route.identity_table = r.text();
+            if (rcp7) {
+                route.identity_table = r.text();
+                const uint32_t parse = r.number();
+                if (parse > 1) throw std::runtime_error("invalid parse-structure instruction");
+                if (parse) {
+                    if (!s->delimited) throw std::runtime_error("parse structure requires grouped delimited syntax");
+                    const auto& columns = s->delimited->config.columns;
+                    auto position = [&](const std::string& name) {
+                        const auto at = std::find(columns.begin(), columns.end(), name);
+                        if (at == columns.end()) throw std::runtime_error("parse structure names undeclared column " + name);
+                        return static_cast<size_t>(at - columns.begin());
+                    };
+                    route.parse.on = true;
+                    route.parse.trunk = r.text();
+                    route.parse.id = position(r.text()); route.parse.form = position(r.text());
+                    route.parse.upos = position(r.text()); route.parse.head = position(r.text());
+                    route.parse.deprel = position(r.text());
+                    const auto vocab = parse_vocabulary(r.text(), "parse structure");
+                    if (vocab.kind != 1) throw std::runtime_error("parse structure UPOS vocabulary must be pos/<tagset>");
+                    route.parse.upos_tagset = vocab.tagset;
+                }
+            }
             if (route.kind > 3 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
                 (!route.range_first.empty() && (route.kind == 0 || !nonzero(route.range_relation))))
                 throw std::runtime_error("invalid record route instruction");
@@ -1297,6 +1392,25 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
     size_t maximum_bytes, intent_stage_t** out, uint64_t* completed) {
     if (!s || s->failed || !out || !completed || !maximum_rows || !maximum_bytes) return -1;
     *out = nullptr; *completed = 0;
+    if (s->pending.empty() && !s->ready && !s->active && s->final && !s->aggregates.empty()) {
+        try {
+            stage_ptr stage(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
+            if (!stage) throw std::bad_alloc();
+            size_t width = 0;
+            if (intent_stage_tuple_payload_bound(0, 0, 0, 1, &width) != 0)
+                throw std::runtime_error("invalid testimony payload bound");
+            const size_t capacity = std::max<size_t>(1, std::min(maximum_rows,
+                (maximum_bytes - intent_stage_memory_bytes(stage.get())) / width / 4));
+            size_t emitted = 0;
+            for (auto it = s->aggregates.begin(); it != s->aggregates.end() && emitted < capacity; ++emitted) {
+                s->attest(stage.get(), it->second.subject, it->second);
+                it = s->aggregates.erase(it);
+            }
+            *out = stage.release();
+            return 1;
+        } catch (const std::exception& e) { return fail_stream(s, e.what()); }
+        catch (...) { return fail_stream(s, "unknown native recipe failure"); }
+    }
     if (s->pending.empty() && !s->ready) return 0;
     try {
         stage_ptr empty(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
