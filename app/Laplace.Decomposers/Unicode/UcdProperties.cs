@@ -50,8 +50,9 @@ internal sealed class UcdProperties
     public static readonly Mask256 PrimaryName = ClaimQualifiers.Of("name", "primary");
     public static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
 
+    // Character metadata, not ConceptNet's semantic HasProperty (see relation_types.toml).
     public static readonly Hash128 RelTypeHasProperty =
-        RelationTypeRegistry.RelationTypeId("HAS_PROPERTY");
+        RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
     public static readonly Hash128 RelTypeUsesScriptExtension =
         RelationTypeRegistry.RelationTypeId("USES_SCRIPT_EXTENSION");
 

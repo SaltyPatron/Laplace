@@ -17,7 +17,7 @@
       "propertyName": "type",
       "valueKind": "Enumerated",
       "disposition": "Testimony",
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectNamespace": "unicode/emoji_sequence_type",
       "contextLiteral": "Emoji_Sequence_Type"
     },

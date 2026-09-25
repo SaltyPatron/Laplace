@@ -591,6 +591,20 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VALENCE_PATTERN"
 
+# HAS_CHARACTER_PROPERTY: a character's value of a standards-defined property (UCD,
+# DUCET collation elements, confusable and emoji sequence types). The property is named
+# by the value's property-scoped identity (unicode/property_value/<Property>), so one
+# relation serves every property. It is standards metadata, not a semantic attribute:
+# WordNet's attribute (hot -> temperature) and ConceptNet's HasProperty keep
+# HAS_ATTRIBUTE / HAS_PROPERTY, and character metadata no longer shares their salience.
+[[relation]]
+canonical = "HAS_CHARACTER_PROPERTY"
+bit = 228
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CHARACTER_PROPERTY"
+
 [[relation]]
 canonical = "HAS_GENERAL_CATEGORY"
 bit = 74

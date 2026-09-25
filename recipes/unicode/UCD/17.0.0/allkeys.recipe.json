@@ -17,7 +17,7 @@
       "propertyName": "elements",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Collation_Element"
     },
     {
@@ -25,7 +25,7 @@
       "propertyName": "kind",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Collation_Directive"
     },
     {

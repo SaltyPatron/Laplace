@@ -28,7 +28,7 @@
       "propertyName": "status",
       "valueKind": "Enumerated",
       "disposition": "Testimony",
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectNamespace": "unicode/confusable_status",
       "contextLiteral": "Confusable_Status"
     }

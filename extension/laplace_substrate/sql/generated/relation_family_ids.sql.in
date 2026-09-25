@@ -63,6 +63,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'HAS_CACHE_CREATE_TOKENS' THEN ARRAY[laplace.relation_type_id('HAS_CACHE_CREATE_TOKENS')]
         WHEN 'HAS_CACHE_READ_TOKENS' THEN ARRAY[laplace.relation_type_id('HAS_CACHE_READ_TOKENS')]
         WHEN 'HAS_CASE_MAPPING' THEN ARRAY[laplace.relation_type_id('HAS_CASE_MAPPING')]
+        WHEN 'HAS_CHARACTER_PROPERTY' THEN ARRAY[laplace.relation_type_id('HAS_CHARACTER_PROPERTY')]
         WHEN 'HAS_CITATION' THEN ARRAY[laplace.relation_type_id('HAS_CITATION')]
         WHEN 'HAS_CLOCK' THEN ARRAY[laplace.relation_type_id('HAS_CLOCK'), laplace.relation_type_id('HAS_THINK_CLASS')]
         WHEN 'HAS_COMBINING_CLASS' THEN ARRAY[laplace.relation_type_id('HAS_COMBINING_CLASS')]

@@ -17,7 +17,7 @@
       "propertyName": "old",
       "valueKind": "CodepointSequence",
       "disposition": "Reference, Testimony",
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "referenceCodec": "UnicodeCodepointSequence",
       "sequenceSeparator": " ",
       "contextLiteral": "Normalization_Corrections_Original"

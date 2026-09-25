@@ -15,7 +15,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Block_First"
     },
     {
@@ -29,7 +29,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Block_Last"
     },
     {
@@ -56,7 +56,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "CJK_Radical_Ideograph"
     },
     {
@@ -70,7 +70,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "CJK_Radical_Number"
     },
     {
@@ -84,7 +84,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "CJK_Radical"
     },
     {
@@ -98,7 +98,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Do_Not_Emit_Reason"
     },
     {
@@ -112,7 +112,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Do_Not_Emit_Source"
     },
     {
@@ -126,7 +126,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Do_Not_Emit_Replacement"
     },
     {
@@ -140,7 +140,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Named_Sequence"
     },
     {
@@ -169,7 +169,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "ASCII_Hex_Digit"
     },
     {
@@ -185,7 +185,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Alphabetic"
     },
     {
@@ -201,7 +201,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Bidi_Control"
     },
     {
@@ -217,7 +217,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Bidi_Mirrored"
     },
     {
@@ -233,7 +233,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Composition_Exclusion"
     },
     {
@@ -249,7 +249,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Case_Ignorable"
     },
     {
@@ -265,7 +265,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Changes_When_Casefolded"
     },
     {
@@ -281,7 +281,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Changes_When_Casemapped"
     },
     {
@@ -297,7 +297,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Changes_When_NFKC_Casefolded"
     },
     {
@@ -313,7 +313,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Changes_When_Lowercased"
     },
     {
@@ -329,7 +329,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Changes_When_Titlecased"
     },
     {
@@ -345,7 +345,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Changes_When_Uppercased"
     },
     {
@@ -361,7 +361,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Cased"
     },
     {
@@ -377,7 +377,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Full_Composition_Exclusion"
     },
     {
@@ -393,7 +393,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Default_Ignorable_Code_Point"
     },
     {
@@ -409,7 +409,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Dash"
     },
     {
@@ -425,7 +425,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Deprecated"
     },
     {
@@ -441,7 +441,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Diacritic"
     },
     {
@@ -551,7 +551,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Extender"
     },
     {
@@ -581,7 +581,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Grapheme_Cluster_Break"
     },
     {
@@ -597,7 +597,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Grapheme_Base"
     },
     {
@@ -613,7 +613,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Grapheme_Extend"
     },
     {
@@ -629,7 +629,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Hex_Digit"
     },
     {
@@ -645,7 +645,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "ID_Continue"
     },
     {
@@ -661,7 +661,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "ID_Start"
     },
     {
@@ -677,7 +677,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "IDS_Binary_Operator"
     },
     {
@@ -693,7 +693,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "IDS_Trinary_Operator"
     },
     {
@@ -709,7 +709,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "IDS_Unary_Operator"
     },
     {
@@ -725,7 +725,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "ID_Compat_Math_Continue"
     },
     {
@@ -741,7 +741,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "ID_Compat_Math_Start"
     },
     {
@@ -757,7 +757,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Ideographic"
     },
     {
@@ -771,7 +771,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Indic_Conjunct_Break"
     },
     {
@@ -785,7 +785,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Indic_Positional_Category"
     },
     {
@@ -799,7 +799,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Indic_Syllabic_Category"
     },
     {
@@ -831,7 +831,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Join_Control"
     },
     {
@@ -847,7 +847,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Logical_Order_Exception"
     },
     {
@@ -863,7 +863,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Lowercase"
     },
     {
@@ -879,7 +879,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Modifier_Combining_Mark"
     },
     {
@@ -895,7 +895,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Math"
     },
     {
@@ -911,7 +911,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Noncharacter_Code_Point"
     },
     {
@@ -925,7 +925,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "NFC_Quick_Check"
     },
     {
@@ -939,7 +939,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "NFD_Quick_Check"
     },
     {
@@ -971,7 +971,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "NFKC_Quick_Check"
     },
     {
@@ -1003,7 +1003,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "NFKD_Quick_Check"
     },
     {
@@ -1019,7 +1019,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_Alphabetic"
     },
     {
@@ -1035,7 +1035,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_Default_Ignorable_Code_Point"
     },
     {
@@ -1051,7 +1051,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_Grapheme_Extend"
     },
     {
@@ -1067,7 +1067,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_ID_Continue"
     },
     {
@@ -1083,7 +1083,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_ID_Start"
     },
     {
@@ -1099,7 +1099,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_Lowercase"
     },
     {
@@ -1115,7 +1115,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_Math"
     },
     {
@@ -1131,7 +1131,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Other_Uppercase"
     },
     {
@@ -1147,7 +1147,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Prepended_Concatenation_Mark"
     },
     {
@@ -1163,7 +1163,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Pattern_Syntax"
     },
     {
@@ -1179,7 +1179,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Pattern_White_Space"
     },
     {
@@ -1195,7 +1195,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Quotation_Mark"
     },
     {
@@ -1211,7 +1211,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Regional_Indicator"
     },
     {
@@ -1227,7 +1227,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Radical"
     },
     {
@@ -1241,7 +1241,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Sentence_Break"
     },
     {
@@ -1257,7 +1257,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Soft_Dotted"
     },
     {
@@ -1273,7 +1273,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Sentence_Terminal"
     },
     {
@@ -1289,7 +1289,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Terminal_Punctuation"
     },
     {
@@ -1305,7 +1305,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Unified_Ideograph"
     },
     {
@@ -1321,7 +1321,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Uppercase"
     },
     {
@@ -1337,7 +1337,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "Variation_Selector"
     },
     {
@@ -1351,7 +1351,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Word_Break"
     },
     {
@@ -1367,7 +1367,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "White_Space"
     },
     {
@@ -1383,7 +1383,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "XID_Continue"
     },
     {
@@ -1399,7 +1399,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "XID_Start"
     },
     {
@@ -1465,7 +1465,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Bidi_Paired_Bracket"
     },
     {
@@ -1479,7 +1479,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Bidi_Paired_Bracket_Type"
     },
     {
@@ -1523,7 +1523,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "cp"
     },
     {
@@ -1571,7 +1571,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "first-cp"
     },
     {
@@ -1598,7 +1598,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Hangul_Syllable_Type"
     },
     {
@@ -1612,7 +1612,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Joining_Group"
     },
     {
@@ -1653,7 +1653,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kAlternateTotalStrokes"
     },
     {
@@ -1667,7 +1667,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kBigFive"
     },
     {
@@ -1681,7 +1681,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCCCII"
     },
     {
@@ -1695,7 +1695,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCNS1986"
     },
     {
@@ -1709,7 +1709,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCNS1992"
     },
     {
@@ -1723,7 +1723,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCangjie"
     },
     {
@@ -1751,7 +1751,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCheungBauer"
     },
     {
@@ -1765,7 +1765,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCheungBauerIndex"
     },
     {
@@ -1779,7 +1779,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCihaiT"
     },
     {
@@ -1807,7 +1807,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kCowles"
     },
     {
@@ -1821,7 +1821,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kDaeJaweon"
     },
     {
@@ -1848,7 +1848,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEACC"
     },
     {
@@ -1862,7 +1862,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_AltSeq"
     },
     {
@@ -1876,7 +1876,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_Cat"
     },
     {
@@ -1890,7 +1890,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_Core"
     },
     {
@@ -1904,7 +1904,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_Desc"
     },
     {
@@ -1918,7 +1918,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_FVal"
     },
     {
@@ -1932,7 +1932,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_Func"
     },
     {
@@ -1946,7 +1946,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_HG"
     },
     {
@@ -1960,7 +1960,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_IFAO"
     },
     {
@@ -1974,7 +1974,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_JSesh"
     },
     {
@@ -1990,7 +1990,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "kEH_NoMirror"
     },
     {
@@ -2006,7 +2006,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_PROPERTY",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "objectLiteral": "kEH_NoRotate"
     },
     {
@@ -2020,7 +2020,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kEH_UniK"
     },
     {
@@ -2048,7 +2048,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kFenn"
     },
     {
@@ -2062,7 +2062,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kFennIndex"
     },
     {
@@ -2076,7 +2076,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kFourCornerCode"
     },
     {
@@ -2090,7 +2090,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGB0"
     },
     {
@@ -2104,7 +2104,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGB1"
     },
     {
@@ -2118,7 +2118,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGB3"
     },
     {
@@ -2132,7 +2132,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGB5"
     },
     {
@@ -2146,7 +2146,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGB8"
     },
     {
@@ -2160,7 +2160,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGSR"
     },
     {
@@ -2174,7 +2174,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kGradeLevel"
     },
     {
@@ -2188,7 +2188,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kHDZRadBreak"
     },
     {
@@ -2202,7 +2202,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kHKGlyph"
     },
     {
@@ -2216,7 +2216,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kHanYu"
     },
     {
@@ -2272,7 +2272,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIBMJapan"
     },
     {
@@ -2286,7 +2286,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIICore"
     },
     {
@@ -2300,7 +2300,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRGDaeJaweon"
     },
     {
@@ -2314,7 +2314,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRGHanyuDaZidian"
     },
     {
@@ -2328,7 +2328,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRGKangXi"
     },
     {
@@ -2342,7 +2342,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_GSource"
     },
     {
@@ -2356,7 +2356,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_HSource"
     },
     {
@@ -2370,7 +2370,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_JSource"
     },
     {
@@ -2384,7 +2384,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_KPSource"
     },
     {
@@ -2398,7 +2398,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_KSource"
     },
     {
@@ -2412,7 +2412,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_MSource"
     },
     {
@@ -2426,7 +2426,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_SSource"
     },
     {
@@ -2440,7 +2440,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_TSource"
     },
     {
@@ -2454,7 +2454,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_UKSource"
     },
     {
@@ -2468,7 +2468,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_USource"
     },
     {
@@ -2482,7 +2482,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kIRG_VSource"
     },
     {
@@ -2496,7 +2496,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kJIS0213"
     },
     {
@@ -2552,7 +2552,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kJinmeiyoKanji"
     },
     {
@@ -2566,7 +2566,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kJis0"
     },
     {
@@ -2580,7 +2580,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kJis1"
     },
     {
@@ -2594,7 +2594,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kJoyoKanji"
     },
     {
@@ -2608,7 +2608,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kKangXi"
     },
     {
@@ -2622,7 +2622,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kKarlgren"
     },
     {
@@ -2650,7 +2650,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kKoreanEducationHanja"
     },
     {
@@ -2664,7 +2664,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kKoreanName"
     },
     {
@@ -2678,7 +2678,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kLau"
     },
     {
@@ -2692,7 +2692,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kMainlandTelegraph"
     },
     {
@@ -2720,7 +2720,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kMatthews"
     },
     {
@@ -2734,7 +2734,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kMeyerWempe"
     },
     {
@@ -2748,7 +2748,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kMojiJoho"
     },
     {
@@ -2762,7 +2762,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kMorohashi"
     },
     {
@@ -2776,7 +2776,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kNSHU_DubenSrc"
     },
     {
@@ -2790,7 +2790,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kNSHU_Reading"
     },
     {
@@ -2804,7 +2804,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kNelson"
     },
     {
@@ -2832,7 +2832,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kPhonetic"
     },
     {
@@ -2860,7 +2860,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kPseudoGB1"
     },
     {
@@ -2874,7 +2874,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kRSAdobe_Japan1_6"
     },
     {
@@ -2888,7 +2888,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kRSUnicode"
     },
     {
@@ -2902,7 +2902,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kSBGY"
     },
     {
@@ -2916,7 +2916,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kSMSZD2003Index"
     },
     {
@@ -3000,7 +3000,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kStrange"
     },
     {
@@ -3014,7 +3014,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kTGH"
     },
     {
@@ -3042,7 +3042,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kTGT_MergedSrc"
     },
     {
@@ -3056,7 +3056,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kTGT_RSUnicode"
     },
     {
@@ -3070,7 +3070,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kTaiwanTelegraph"
     },
     {
@@ -3112,7 +3112,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kTotalStrokes"
     },
     {
@@ -3140,7 +3140,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kUnihanCore2020"
     },
     {
@@ -3196,7 +3196,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "kXerox"
     },
     {
@@ -3252,7 +3252,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "last-cp"
     },
     {
@@ -3484,7 +3484,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Vertical_Orientation"
     },
     {
@@ -3522,7 +3522,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Standardized_Variant"
     },
     {
@@ -3536,7 +3536,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Standardized_Variant_Description"
     },
     {
@@ -3550,7 +3550,7 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "HAS_CHARACTER_PROPERTY",
       "contextLiteral": "Standardized_Variant_Condition"
     }
   ],
