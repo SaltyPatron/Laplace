@@ -89,6 +89,7 @@ typedef struct
 typedef struct
 {
     NodeState *node;
+    int64 shared;          /* rows naming the candidate as object, bounded */
     int covered;
     double salience;
     int hops;
@@ -147,6 +148,40 @@ relation_salience(const hash128_t *type)
 {
     const laplace_relation_def_t *def = NULL;
     return laplace_relation_lookup(type, &def) == 0 && def != NULL ? def->rank : 0.0;
+}
+
+/* Meeting specificity: how many cells name the candidate as their object, read
+ * with a bound. A hub every entry is an instance of ("Concept") is shared by
+ * everything; an answer such as Paris is shared by few. Ordering only. */
+#define RESPOND_SHARING_WINDOW 64
+#define RESPOND_SHARING_CAP 4096
+
+typedef struct
+{
+    hash128_t id;
+    int64 count;
+} SharingEntry;
+
+static void
+receive_sharing(const LaplaceConsensusRow *row, void *context)
+{
+    SharingEntry *entry = hash_search((HTAB *) context, &row->object, HASH_FIND, NULL);
+    if (entry) entry->count++;
+}
+
+static bool
+sharing_cutoff(const LaplaceConsensusRow *row, void *context)
+{
+    SharingEntry *entry = hash_search((HTAB *) context, &row->object, HASH_FIND, NULL);
+    return entry && entry->count >= RESPOND_SHARING_CAP;
+}
+
+static int
+shared_order(const void *left, const void *right)
+{
+    const Ranked *a = left, *b = right;
+    if (a->shared != b->shared) return a->shared < b->shared ? -1 : 1;
+    return 0;
 }
 
 static int
@@ -427,7 +462,7 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
         hash_seq_init(&seq, nodes);
         while ((node = hash_seq_search(&seq)) != NULL)
         {
-            Ranked rk = {node, 0, 0.0, 0, 0};
+            Ranked rk = {node, 0, 0, 0.0, 0, 0};
             bool first = true;
             if (node->is_key != 0) continue;
             for (int t = 0; t < n_terms; ++t)
@@ -451,6 +486,53 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
             if (rk.covered > 0) ranked[m++] = rk;
         }
         qsort(ranked, m, sizeof(Ranked), ranked_order);
+        /* Within the leading coverage group, the least shared meeting first. */
+        if (m > 1)
+        {
+            int group = 0;
+            while (group < m && group < RESPOND_SHARING_WINDOW &&
+                   ranked[group].covered == ranked[0].covered)
+                ++group;
+            if (group > 1)
+            {
+                HASHCTL sctl = {0};
+                HTAB *sharing;
+                hash128_t *ids = palloc(sizeof(hash128_t) * group);
+                sctl.keysize = sizeof(hash128_t);
+                sctl.entrysize = sizeof(SharingEntry);
+                sctl.hcxt = CurrentMemoryContext;
+                sharing = hash_create("respond sharing", group * 2, &sctl,
+                                      HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+                for (int g = 0; g < group; ++g)
+                {
+                    bool found;
+                    SharingEntry *entry = hash_search(sharing, &ranked[g].node->id, HASH_ENTER, &found);
+                    entry->count = 0;
+                    ids[g] = ranked[g].node->id;
+                }
+                laplace_consensus_scan_ranked(NULL, id_array(ids, group), NULL, false,
+                                              receive_sharing, sharing_cutoff, sharing, NULL);
+                for (int g = 0; g < group; ++g)
+                {
+                    SharingEntry *entry = hash_search(sharing, &ranked[g].node->id, HASH_FIND, NULL);
+                    ranked[g].shared = entry ? entry->count : RESPOND_SHARING_CAP;
+                }
+                /* Stable: insertion sort keeps the salience/hops order within ties. */
+                for (int g = 1; g < group; ++g)
+                {
+                    Ranked held = ranked[g];
+                    int j = g - 1;
+                    while (j >= 0 && shared_order(&ranked[j], &held) > 0)
+                    {
+                        ranked[j + 1] = ranked[j];
+                        --j;
+                    }
+                    ranked[j + 1] = held;
+                }
+                hash_destroy(sharing);
+                pfree(ids);
+            }
+        }
         if (m > 0 && ranked[0].covered < needed && n_terms > 1)
             needed = ranked[0].covered;
         for (long x = 0, emitted = 0; x < m && emitted < limit; ++x)
