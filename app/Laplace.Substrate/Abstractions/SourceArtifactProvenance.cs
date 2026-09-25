@@ -4,12 +4,8 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Semantic identity and provenance for one admitted source artifact.
-///
-/// The artifact is an opaque source reference, not generic user/document content. Its exact
-/// byte fingerprint participates in identity; local path/mtime/size remain journal facts.
-/// Source-format parsers attach their emitted changes to <see cref="ArtifactId"/> while the
-/// source's recipe supplies the actual semantic claims.
+/// Journal identity for one admitted source artifact: completion and resume key on it.
+/// It is never staged as content or testimony; the source's recipe supplies the claims.
 /// </summary>
 public readonly record struct SourceArtifactIdentity(
     Hash128 ArtifactId,
@@ -38,6 +34,11 @@ public static class SourceArtifactProvenance
             Merkle(source, artifactName));
     }
 
+    /// <summary>
+    /// The artifact's journal binding. An artifact occurrence (path, digest, media type,
+    /// the decomposer that read it) is provenance for completion and resume, not content
+    /// and not a claim: nothing is staged, the change only carries the artifact binding.
+    /// </summary>
     public static SubstrateChange BuildChange(
         IngestArtifact artifact,
         Hash128 sourceId,
@@ -46,92 +47,10 @@ public static class SourceArtifactProvenance
         IReadOnlyList<Hash128>? requires = null)
     {
         SourceArtifactIdentity identity = Resolve(artifact, exactFingerprint);
-        double trust = SourceTrust.ForClass(trustClassId);
-
         var builder = new SubstrateChangeBuilder(
             sourceId, $"artifact-provenance/{artifact.FileLabel}", null,
-            entityCapacity: 12, physicalityCapacity: 0, attestationCapacity: 16)
-            .DeclareSourcePrior(sourceId, trust);
-
-        OrderedCompositionComponent sourceComponent =
-            ContentEmitter.StageComponent(builder, artifact.Source, sourceId)
-            ?? throw new InvalidOperationException("artifact source could not be composed");
-        OrderedCompositionComponent releaseComponent =
-            ContentEmitter.StageComponent(builder, artifact.Release, sourceId)
-            ?? throw new InvalidOperationException("artifact release could not be composed");
-        OrderedCompositionComponent artifactComponent =
-            ContentEmitter.StageComponent(builder, artifact.Artifact, sourceId)
-            ?? throw new InvalidOperationException("artifact name could not be composed");
-        string exact = exactFingerprint is { } fingerprint
-            ? fingerprint.ToString()
-            : !string.IsNullOrWhiteSpace(artifact.Sha256)
-                ? artifact.Sha256.Trim().ToLowerInvariant()
-                : artifact.Id;
-        OrderedCompositionComponent fingerprintComponent =
-            ContentEmitter.StageComponent(builder, exact, sourceId)
-            ?? throw new InvalidOperationException("artifact fingerprint could not be composed");
-
-        Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[3];
-        OrderedComposition.StageBatch(
-            builder.ContentStage,
-            [
-                new OrderedCompositionRequest(
-                    [sourceComponent, releaseComponent],
-                    EntityTypeRegistry.SourceVersion, sourceId, 0),
-                new OrderedCompositionRequest(
-                    [sourceComponent, artifactComponent],
-                    EntityTypeRegistry.SourceReference, sourceId, 0),
-                new OrderedCompositionRequest(
-                    [sourceComponent, releaseComponent, artifactComponent, fingerprintComponent],
-                    EntityTypeRegistry.SourceReference, sourceId, 0),
-            ],
-            composed);
-
-        if (composed[0].Id != identity.ReleaseId
-            || composed[1].Id != identity.RoleId
-            || composed[2].Id != identity.ArtifactId)
-            throw new InvalidOperationException("source artifact identity changed during composition");
-
-        builder.AddAttestation(NativeAttestation.Categorical(
-            identity.ArtifactId, "HAS_VERSION", identity.ReleaseId, sourceId, trust));
-
-        if (requires is not null)
-            foreach (Hash128 dependency in requires.Distinct())
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    identity.ArtifactId, "REQUIRES", dependency, sourceId, trust));
-
-        EmitText("HAS_SOURCE_URL", artifact.UpstreamUrl);
-        EmitText("HAS_LICENSE", artifact.License);
-        EmitText("HAS_CITATION", artifact.Citation);
-
-        EmitProperty("sha256", artifact.Sha256);
-        EmitProperty("upstream-checksum", artifact.UpstreamChecksum);
-        EmitProperty("media-type", artifact.MediaType);
-        EmitProperty("annotation-origin", artifact.AnnotationOrigin);
-        EmitProperty("language", artifact.Language);
-        EmitProperty("split", artifact.Split);
-
-        SubstrateChange change = builder.Build();
-        return Bind(change, identity.ArtifactId);
-
-        void EmitText(string relation, string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return;
-            if (ContentEmitter.Emit(builder, value, sourceId) is not { } root) return;
-            builder.AddAttestation(NativeAttestation.Categorical(
-                identity.ArtifactId, relation, root, sourceId, trust));
-        }
-
-        void EmitProperty(string name, string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return;
-            Hash128 key = ContentEmitter.Emit(builder, name, sourceId)
-                ?? throw new InvalidOperationException(
-                    $"source artifact property name could not be composed: {name}");
-            if (ContentEmitter.Emit(builder, value, sourceId) is not { } root) return;
-            builder.AddAttestation(NativeAttestation.Categorical(
-                identity.ArtifactId, "HAS_PROPERTY", root, sourceId, trust, contextId: key));
-        }
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0);
+        return Bind(builder.Build(), identity.ArtifactId);
     }
 
     private static Hash128 Root(string value) =>
@@ -148,6 +67,7 @@ public static class SourceArtifactProvenance
         return Merkle(Root(sourceName), Root(release), Root(recipeName));
     }
 
+    /// <summary>The recipe execution's journal binding; nothing is staged (see BuildChange).</summary>
     public static SubstrateChange BuildRecipeChange(
         string sourceName,
         string release,
@@ -158,40 +78,9 @@ public static class SourceArtifactProvenance
     {
         if (requires.Count == 0)
             throw new ArgumentException("a source recipe must declare at least one input artifact", nameof(requires));
-        double trust = SourceTrust.ForClass(trustClassId);
-        Hash128 recipeId = RecipeId(sourceName, release, recipeName, requires);
-        Hash128 roleId = Merkle(Root(sourceName), Root(recipeName));
         var builder = new SubstrateChangeBuilder(
             sourceId, $"source-recipe/{sourceName}/{recipeName}", null,
-            entityCapacity: 12, physicalityCapacity: 0,
-            attestationCapacity: 4 + requires.Count)
-            .DeclareSourcePrior(sourceId, trust);
-        OrderedCompositionComponent sourceComponent =
-            ContentEmitter.StageComponent(builder, sourceName, sourceId)
-            ?? throw new InvalidOperationException("recipe source could not be composed");
-        OrderedCompositionComponent releaseComponent =
-            ContentEmitter.StageComponent(builder, release, sourceId)
-            ?? throw new InvalidOperationException("recipe release could not be composed");
-        OrderedCompositionComponent nameComponent =
-            ContentEmitter.StageComponent(builder, recipeName, sourceId)
-            ?? throw new InvalidOperationException("recipe name could not be composed");
-        Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[2];
-        OrderedComposition.StageBatch(
-            builder.ContentStage,
-            [
-                new OrderedCompositionRequest(
-                    [sourceComponent, releaseComponent, nameComponent],
-                    EntityTypeRegistry.SourceReference, sourceId, 0),
-                new OrderedCompositionRequest(
-                    [sourceComponent, nameComponent],
-                    EntityTypeRegistry.SourceReference, sourceId, 0),
-            ],
-            composed);
-        if (composed[0].Id != recipeId || composed[1].Id != roleId)
-            throw new InvalidOperationException("source recipe identity changed during composition");
-        foreach (Hash128 dependency in requires.Distinct())
-            builder.AddAttestation(NativeAttestation.Categorical(
-                recipeId, "REQUIRES", dependency, sourceId, trust));
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0);
         return builder.Build() with { CountsAsUnit = false };
     }
 

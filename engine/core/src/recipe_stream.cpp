@@ -432,80 +432,6 @@ struct laplace_recipe_stream {
         return result.id;
     }
 
-    static laplace_ordered_component_t component(const content_form& form) {
-        laplace_ordered_component_t c{};
-        c.id = form.id;
-        std::memcpy(c.coord, form.coord, sizeof(c.coord));
-        c.tier = form.tier;
-        c.atom = form.atom;
-        c.has_atom = form.tier == 0 ? 1 : 0;
-        return c;
-    }
-    // A source record is content: the ordered composition of its values. Each
-    // value is composed by the universal ladder; the record's trajectory lists
-    // those value ids in source order, so fields are read from containment.
-    content_form compose_ordered(intent_stage_t* stage, const std::vector<laplace_ordered_component_t>& parts) {
-        if (parts.empty()) throw std::runtime_error("empty source record");
-        uint8_t tier = 0;
-        for (const auto& p : parts) tier = std::max(tier, p.tier);
-        laplace_ordered_composition_request_t request{
-            parts.data(), parts.size(),
-            laplace_content_tier_type_id(static_cast<uint8_t>(parts.size() == 1 ? tier : tier + 1)),
-            witness, INTENT_STAGE_PG_EPOCH_UNIX_US};
-        laplace_ordered_composition_result_t result{};
-        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "record composition");
-        if (intent_stage_allocation_failed(stage))
-            throw std::runtime_error("record staging exceeded the admitted byte envelope");
-        content_form out{};
-        out.id = result.id;
-        std::memcpy(out.coord, result.coord, sizeof(out.coord));
-        out.hilbert = result.hilbert;
-        out.tier = result.tier;
-        if (parts.size() == 1) { out.atom = parts[0].atom; }
-        return out;
-    }
-    bool compose_values(intent_stage_t* stage, const std::vector<std::string>& values, content_form* out) {
-        std::vector<laplace_ordered_component_t> parts;
-        parts.reserve(values.size());
-        for (const auto& v : values)
-            if (!v.empty()) parts.push_back(component(compose_content(stage, v)));
-        if (parts.empty()) return false;
-        *out = compose_ordered(stage, parts);
-        return true;
-    }
-    bool compose_element(intent_stage_t* stage, const node& element, content_form* out) {
-        std::vector<laplace_ordered_component_t> parts;
-        parts.push_back(component(compose_content(stage, element.name)));
-        for (const auto& a : element.own) {
-            content_form pair;
-            if (compose_values(stage, {a.first, a.second}, &pair)) parts.push_back(component(pair));
-        }
-        for (const auto& child : element.children) {
-            content_form composed;
-            if (compose_element(stage, child, &composed)) parts.push_back(component(composed));
-        }
-        if (has_text(element.text)) parts.push_back(component(compose_content(stage, element.text)));
-        *out = compose_ordered(stage, parts);
-        return true;
-    }
-    void compose_record(intent_stage_t* stage, const node& record) {
-        content_form ignored;
-        if (delimited) {
-            compose_values(stage, record.cells, &ignored);
-            if (record.group) {
-                std::vector<laplace_ordered_component_t> lines;
-                lines.reserve(record.group->size());
-                for (const auto& line : *record.group) {
-                    content_form composed;
-                    if (compose_values(stage, line, &composed)) lines.push_back(component(composed));
-                }
-                if (!lines.empty()) compose_ordered(stage, lines);
-            }
-            return;
-        }
-        compose_element(stage, record, &ignored);
-    }
-
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
         try { lower_field(stage, path, raw, subject_binding, attributes); }
@@ -730,8 +656,10 @@ struct laplace_recipe_stream {
         record_context = record.name + " [" + (identity.empty()
             ? route.first + "=" + record.get(route.first) + ", " + route.last + "=" + record.get(route.last)
             : route.identity + "=" + identity.substr(0, 160) + (identity.size() > 160 ? "..." : "")) + "]";
+        // A curated source record is packaging: its claims and declared content fields
+        // are lowered below; the record's own syntax (element name, attribute pairs,
+        // delimited cells) is never recorded as content.
         if (record.ns != route.ns) throw std::runtime_error("record namespace mismatch: " + record.name);
-        compose_record(stage, record);
         range = route.kind == 0;
         membership = false; record_facts_done = false; fact_offset = 0;
         if (range) {
