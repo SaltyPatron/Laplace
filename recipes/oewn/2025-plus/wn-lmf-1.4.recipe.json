@@ -1,0 +1,132 @@
+{
+  "authority": "OEWN",
+  "release": "2025+",
+  "provider": "laplace/native-streaming-xml-recipe/v1",
+  "syntax": "WN-LMF/1.4",
+  "identityTables": [
+    { "name": "concept", "recordName": "Synset", "keyPath": "@id", "valuePath": "@ili", "absentValues": ["in"] },
+    { "name": "lexeme", "recordName": "LexicalEntry", "keyPath": "Sense/@id", "valuePath": "Lemma/@writtenForm" },
+    { "name": "frame", "recordName": "SyntacticBehaviour", "keyPath": "@id", "valuePath": "@subcategorizationFrame" }
+  ],
+  "fields": [
+    { "syntaxPath": "Lexicon/@id", "propertyName": "lexicon", "valueKind": "Identity", "disposition": "Identity" },
+    { "syntaxPath": "Lexicon/@label", "propertyName": "label", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_NAME" },
+    { "syntaxPath": "Lexicon/@language", "propertyName": "language", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_LANGUAGE" },
+    { "syntaxPath": "Lexicon/@email", "propertyName": "email", "valueKind": "Text", "disposition": "Content" },
+    { "syntaxPath": "Lexicon/@license", "propertyName": "license", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_LICENSE" },
+    { "syntaxPath": "Lexicon/@version", "propertyName": "version", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_VERSION" },
+    { "syntaxPath": "Lexicon/@url", "propertyName": "url", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_SOURCE_URL" },
+    { "syntaxPath": "Lexicon/@citation", "propertyName": "citation", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_CITATION" },
+
+    { "syntaxPath": "Requires/@id", "propertyName": "requiringLexicon", "valueKind": "Identity", "disposition": "Identity" },
+    { "syntaxPath": "Requires/@ref", "propertyName": "requires", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "REQUIRES", "contextField": "version" },
+    { "syntaxPath": "Requires/@version", "propertyName": "requiresVersion", "valueKind": "Text", "disposition": "Excluded" },
+    { "syntaxPath": "Requires/@label", "propertyName": "inheritedLabel", "valueKind": "Text", "disposition": "Excluded" },
+    { "syntaxPath": "Requires/@language", "propertyName": "inheritedLanguage", "valueKind": "Text", "disposition": "Excluded" },
+    { "syntaxPath": "Requires/@email", "propertyName": "inheritedEmail", "valueKind": "Text", "disposition": "Excluded" },
+    { "syntaxPath": "Requires/@license", "propertyName": "inheritedLicense", "valueKind": "Text", "disposition": "Excluded" },
+    { "syntaxPath": "Requires/@url", "propertyName": "inheritedUrl", "valueKind": "Text", "disposition": "Excluded" },
+    { "syntaxPath": "Requires/@citation", "propertyName": "inheritedCitation", "valueKind": "Text", "disposition": "Excluded" },
+
+    { "syntaxPath": "LexicalEntry/@id", "propertyName": "entryId", "valueKind": "Identity", "disposition": "Packaging" },
+    { "syntaxPath": "LexicalEntry/@index", "propertyName": "index", "valueKind": "Text", "disposition": "Content" },
+    { "syntaxPath": "Lemma/@writtenForm", "propertyName": "lemma", "valueKind": "Text", "disposition": "Content" },
+    { "syntaxPath": "Lemma/@partOfSpeech", "propertyName": "partOfSpeech", "valueKind": "Enumerated", "disposition": "Testimony", "relationName": "HAS_POS" },
+    { "syntaxPath": "Lemma/@script", "propertyName": "script", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_SCRIPT" },
+    { "syntaxPath": "Form/@writtenForm", "propertyName": "form", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "FORM_OF", "subjectMode": "Value" },
+    { "syntaxPath": "Form/@id", "propertyName": "formId", "valueKind": "Identity", "disposition": "Packaging" },
+    { "syntaxPath": "Form/@script", "propertyName": "formScript", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_SCRIPT" },
+    { "syntaxPath": "Tag", "propertyName": "tag", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_FEATURE", "contextField": "category" },
+    { "syntaxPath": "Tag/@category", "propertyName": "tagCategory", "valueKind": "Enumerated", "disposition": "Excluded" },
+    { "syntaxPath": "Pronunciation", "propertyName": "pronunciation", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "TRANSCRIBES_AS", "contextField": "variety" },
+    { "syntaxPath": "Pronunciation/@variety", "propertyName": "pronunciationVariety", "valueKind": "Text", "disposition": "Excluded" },
+
+    { "syntaxPath": "Sense/@id", "propertyName": "senseId", "valueKind": "Identity", "disposition": "Packaging" },
+    { "syntaxPath": "Sense/@synset", "propertyName": "sense", "valueKind": "Identity", "disposition": "Testimony", "relationName": "HAS_SENSE", "identityTable": "concept" },
+    { "syntaxPath": "Sense/@n", "propertyName": "senseOrder", "valueKind": "Integer", "disposition": "Packaging" },
+    { "syntaxPath": "Sense/@dc:identifier", "propertyName": "senseKey", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "CORRESPONDS_TO" },
+    { "syntaxPath": "Sense/@lexicalized", "propertyName": "senseLexicalized", "valueKind": "Boolean", "disposition": "Testimony", "relationName": "IS_LEXICALIZED", "defaultValue": "true", "omitDefaultTestimony": true },
+    { "syntaxPath": "Sense/@adjposition", "propertyName": "adjposition", "valueKind": "Enumerated", "disposition": "Testimony", "relationName": "HAS_FEATURE" },
+    { "syntaxPath": "Sense/@subcat", "propertyName": "subcat", "valueKind": "Identity", "disposition": "Testimony", "relationName": "HAS_VERB_FRAME", "sequenceSeparator": " ", "identityTable": "frame" },
+    { "syntaxPath": "SenseRelation/@target", "propertyName": "senseRelationTarget", "valueKind": "Identity", "disposition": "Testimony", "relationField": "relType>dc:type", "relationResolver": "Surface", "identityTable": "lexeme" },
+    { "syntaxPath": "SenseRelation/@relType", "propertyName": "senseRelationType", "valueKind": "Enumerated", "disposition": "Excluded" },
+    { "syntaxPath": "SenseRelation/@dc:type", "propertyName": "senseRelationRefinement", "valueKind": "Enumerated", "disposition": "Excluded" },
+    { "syntaxPath": "Count", "propertyName": "count", "valueKind": "Integer", "disposition": "Testimony", "relationName": "HAS_SENSE_FREQUENCY" },
+    { "syntaxPath": "Example", "propertyName": "example", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_EXAMPLE", "contextField": "dc:source" },
+    { "syntaxPath": "Example/@dc:source", "propertyName": "exampleSource", "valueKind": "Text", "disposition": "Excluded" },
+
+    { "syntaxPath": "Synset/@id", "propertyName": "synsetId", "valueKind": "Identity", "disposition": "Identity" },
+    { "syntaxPath": "Synset/@ili", "propertyName": "ili", "valueKind": "Identity", "disposition": "Packaging" },
+    { "syntaxPath": "Synset/@partOfSpeech", "propertyName": "synsetPartOfSpeech", "valueKind": "Enumerated", "disposition": "Testimony", "relationName": "HAS_POS" },
+    { "syntaxPath": "Synset/@lexicalized", "propertyName": "synsetLexicalized", "valueKind": "Boolean", "disposition": "Testimony", "relationName": "IS_LEXICALIZED", "defaultValue": "true", "omitDefaultTestimony": true },
+    { "syntaxPath": "Synset/@members", "propertyName": "members", "valueKind": "Identity", "disposition": "Packaging" },
+    { "syntaxPath": "Synset/@lexfile", "propertyName": "lexfile", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_LEX_CATEGORY" },
+    { "syntaxPath": "Synset/@dc:identifier", "propertyName": "synsetKey", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_SYNSET_KEY" },
+    { "syntaxPath": "Synset/@dc:source", "propertyName": "synsetSource", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_ATTRIBUTION" },
+    { "syntaxPath": "Definition", "propertyName": "definition", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_DEFINITION" },
+    { "syntaxPath": "ILIDefinition", "propertyName": "iliDefinition", "valueKind": "Text", "disposition": "Content, Testimony", "relationName": "HAS_DEFINITION" },
+    { "syntaxPath": "SynsetRelation/@target", "propertyName": "synsetRelationTarget", "valueKind": "Identity", "disposition": "Testimony", "relationField": "relType>dc:type", "relationResolver": "Surface", "identityTable": "concept" },
+    { "syntaxPath": "SynsetRelation/@relType", "propertyName": "synsetRelationType", "valueKind": "Enumerated", "disposition": "Excluded" },
+    { "syntaxPath": "SynsetRelation/@dc:type", "propertyName": "synsetRelationRefinement", "valueKind": "Enumerated", "disposition": "Excluded" },
+
+    { "syntaxPath": "SyntacticBehaviour/@id", "propertyName": "frameId", "valueKind": "Identity", "disposition": "Packaging" },
+    { "syntaxPath": "SyntacticBehaviour/@subcategorizationFrame", "propertyName": "frame", "valueKind": "Text", "disposition": "Identity, Content" },
+    { "syntaxPath": "SyntacticBehaviour/@senses", "propertyName": "frameSenses", "valueKind": "Identity", "disposition": "Testimony", "relationName": "HAS_VERB_FRAME", "subjectMode": "Value", "sequenceSeparator": " ", "identityTable": "lexeme" }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "Lexicon",
+      "namespaceUri": "",
+      "fieldPrefix": "Lexicon",
+      "subject": { "kind": "ContentField", "identityField": "id" },
+      "structurePaths": []
+    },
+    {
+      "recordName": "Requires",
+      "namespaceUri": "",
+      "fieldPrefix": "Requires",
+      "subject": { "kind": "ContentField", "identityField": "id" },
+      "structurePaths": [],
+      "inheritParentAttributes": true
+    },
+    {
+      "recordName": "LexicalEntry",
+      "namespaceUri": "",
+      "fieldPrefix": "LexicalEntry",
+      "subject": { "kind": "ContentField", "identityField": "Lemma/@writtenForm", "entityType": "LexicalEntry" },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "Lemma": "Lemma",
+        "Lemma/Tag": "Tag",
+        "Lemma/Pronunciation": "Pronunciation",
+        "Form": "Form",
+        "Form/Tag": "Tag",
+        "Form/Pronunciation": "Pronunciation",
+        "Sense": "Sense",
+        "Sense/SenseRelation": "SenseRelation",
+        "Sense/Example": "Example",
+        "Sense/Count": "Count"
+      }
+    },
+    {
+      "recordName": "Synset",
+      "namespaceUri": "",
+      "fieldPrefix": "Synset",
+      "subject": { "kind": "ContentField", "identityField": "id", "entityType": "WordNetSynset", "identityTable": "concept" },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "Definition": "Definition",
+        "ILIDefinition": "ILIDefinition",
+        "SynsetRelation": "SynsetRelation",
+        "Example": "Example"
+      }
+    },
+    {
+      "recordName": "SyntacticBehaviour",
+      "namespaceUri": "",
+      "fieldPrefix": "SyntacticBehaviour",
+      "subject": { "kind": "ContentField", "identityField": "subcategorizationFrame", "entityType": "SyntacticBehaviour" },
+      "structurePaths": []
+    }
+  ]
+}

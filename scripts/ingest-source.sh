@@ -6,7 +6,7 @@ path="${2:-}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
 FLOOR=(unicode iso639 operational cili)
-KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
+KNOWLEDGE=(wordnet oewn omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 USAGE=(tatoeba opensubtitles)
 
 if [[ -z "$source" ]]; then
@@ -213,7 +213,7 @@ case "$source" in
         require_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|operational|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
+    unicode|iso639|operational|cili|document|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         require_cli
         if [[ "$source" == document && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"

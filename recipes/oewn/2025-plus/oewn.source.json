@@ -1,0 +1,22 @@
+{
+  "authority": "OEWN",
+  "release": "2025+",
+  "sourceName": "OEWN",
+  "trust": 1,
+  "trustClass": "StructuredCorpus",
+  "layerOrder": 1,
+  "selected": true,
+  "root": "/vault/Data/.refresh-20260903/OpenEnglishWordNet-2025-plus",
+  "aliases": ["oewn"],
+  "artifacts": [
+    {
+      "selector": "english-wordnet-2025-plus.xml.gz",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "WN-LMF/1.4",
+      "recipePath": "wn-lmf-1.4.recipe.json",
+      "recordDepth": 2
+    }
+  ]
+}

@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: omw
-        options: [omw, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles]
+        options: [omw, oewn, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles]
       language_scope:
         description: "Language scope for multilingual sources"
         type: choice
