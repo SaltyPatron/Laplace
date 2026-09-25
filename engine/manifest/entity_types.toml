@@ -1,6 +1,6 @@
-# Governed entity types. A type is a filter code on an entity row; it is never an
-# entity, never testimony and never seeded into the substrate. The id of a type is
-# its registry code; the name here is only the label the registry realizes.
+# Governed entity types. A type is a filter on entity rows: never testimony and never
+# seeded into the substrate. A type's id is the content id of its single-word label,
+# the same entity that text is anywhere else.
 
 [[type]]
 canonical = "Agent_Model"

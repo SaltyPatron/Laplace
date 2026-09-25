@@ -1,4 +1,5 @@
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/entity_type_law.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -32,11 +33,11 @@ hash128_t laplace_content_tier_type_id(uint8_t tier) {
     int slot = tier <= 3 ? tier : 4;
 
     if (!ready) {
-        hash128_blake3_str("Codepoint", &cache[0]);
-        hash128_blake3_str("Grapheme", &cache[1]);
-        hash128_blake3_str("Word", &cache[2]);
-        hash128_blake3_str("Sentence", &cache[3]);
-        hash128_blake3_str("Document", &cache[4]);
+        (void)laplace_entity_type_id("Codepoint", &cache[0]);
+        (void)laplace_entity_type_id("Grapheme", &cache[1]);
+        (void)laplace_entity_type_id("Word", &cache[2]);
+        (void)laplace_entity_type_id("Sentence", &cache[3]);
+        (void)laplace_entity_type_id("Document", &cache[4]);
         ready = 1;
     }
     return cache[slot];

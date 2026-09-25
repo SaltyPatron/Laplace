@@ -1,4 +1,5 @@
 #include "laplace/core/grammar_compose.h"
+#include "laplace/core/entity_type_law.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -114,7 +115,7 @@ static int push_entity(laplace_compose_result_t* r, const source_node_t* n) {
     /* An AST composition is generic source text structure. Its floor is
      * placement, never an implicit Sentence/Document category. `Text` is the
      * registered generic type (EntityTypeRegistry.Text = blake3("Text")). */
-    hash128_blake3_str("Text", &e->type_id);
+    (void)laplace_entity_type_id("Text", &e->type_id);
     return 0;
 }
 

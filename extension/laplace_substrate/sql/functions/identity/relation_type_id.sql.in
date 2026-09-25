@@ -1,7 +1,5 @@
--- BEGIN ATOMIC: GH #764.
 -- Identity helper: stays in the extension schema (no identity purpose schema).
+-- A relation's id is the content id of its label, from the native relation law.
 CREATE OR REPLACE FUNCTION laplace.relation_type_id(p_name text) RETURNS bytea
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
-BEGIN ATOMIC
-    SELECT realize.canonical_id(p_name);
-END;
+    AS 'MODULE_PATHNAME', 'pg_laplace_relation_type_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

@@ -1,4 +1,5 @@
 #include "laplace/core/recipe_stream.h"
+#include "laplace/core/entity_type_law.h"
 #include "laplace/core/xml_stream.h"
 #include "laplace/core/utf8.h"
 #include "laplace/core/codepoint_table.h"
@@ -336,7 +337,7 @@ struct laplace_recipe_stream {
         }
 
         hash128_t range_type;
-        hash128_blake3_str("Range", &range_type);
+        (void)laplace_entity_type_id("Range", &range_type);
         laplace_ordered_composition_request_t request{
             components, 2, range_type, witness, INTENT_STAGE_PG_EPOCH_UNIX_US
         };
@@ -478,8 +479,6 @@ struct laplace_recipe_stream {
             throw std::runtime_error("field disposition has no executable lowering");
         }
         auto emit_fact = [&](const fact& value) { if (emitted_testimony) facts.push_back(value); };
-        hash128_t relation_type; hash128_blake3_str("RelationType", &relation_type);
-        if (emitted_testimony) (void)relation_type;
         // Relation family/parentage is governed by the native relation manifest,
         // not reified as content entities or source testimony here.
         fact f; f.relation = rule.relation; f.rank = rule.rank; f.explicit_rank = true;
@@ -495,7 +494,6 @@ struct laplace_recipe_stream {
             emit_fact(f); return;
         }
         if (emitted_testimony && nonzero(rule.lexical_relation)) {
-            (void)relation_type;
             fact lexical = f; lexical.relation = rule.lexical_relation; lexical.explicit_rank = false;
             lexical.object = content(stage, raw); lexical.has_object = true; emit_fact(lexical);
         }

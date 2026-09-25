@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/entity_type_law.h"
 #include "laplace/core/audio_decomposer.h"
 #include "laplace/core/image_decomposer.h"
 #include "laplace/core/modality_witness.h"
@@ -120,31 +121,31 @@ TEST(ImageDecomposer, TypeIdsMatchLadderTiers) {
     hash128_t got, expect;
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 0);
-    hash128_blake3_str("Codepoint", &expect);
+    (void)laplace_entity_type_id("Codepoint", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 1);
-    hash128_blake3_str("Number", &expect);
+    (void)laplace_entity_type_id("Number", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 2);
-    hash128_blake3_str("Channel", &expect);
+    (void)laplace_entity_type_id("Channel", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 3);
-    hash128_blake3_str("Pixel", &expect);
+    (void)laplace_entity_type_id("Pixel", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 4);
-    hash128_blake3_str("Patch", &expect);
+    (void)laplace_entity_type_id("Patch", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 5);
-    hash128_blake3_str("Region", &expect);
+    (void)laplace_entity_type_id("Region", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 6);
-    hash128_blake3_str("Image", &expect);
+    (void)laplace_entity_type_id("Image", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
 }
 

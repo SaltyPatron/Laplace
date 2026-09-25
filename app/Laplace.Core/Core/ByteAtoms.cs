@@ -7,7 +7,19 @@ public static class ByteAtoms
     public const byte First = 0x80;
     public const int Count = 128;
 
-    public static readonly Hash128 TypeId = Hash128.Blake3("Byte"u8);
+    public static readonly Hash128 TypeId = EntityTypeId("Byte");
+
+    // The governed entity type's id: the content id of its single-word label.
+    private static Hash128 EntityTypeId(string label)
+    {
+        unsafe
+        {
+            Hash128 id;
+            if (NativeInterop.EntityTypeIdNative(label, &id) != 0)
+                throw new InvalidOperationException($"entity type '{label}' is not declared");
+            return id;
+        }
+    }
 
     private static readonly Hash128[] Ids = new Hash128[Count];
     private static readonly double[] Coords = new double[Count * 4];

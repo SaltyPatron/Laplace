@@ -1,4 +1,5 @@
 #include "laplace/core/modality_witness.h"
+#include "laplace/core/entity_type_law.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -78,25 +79,25 @@ hash128_t laplace_modality_tier_type_id(laplace_modality_t modality, uint8_t tie
 
     if (modality == LAPLACE_MODALITY_IMAGE) {
         if (!image_ready) {
-            hash128_blake3_str("Codepoint", &image_cache[0]);
-            hash128_blake3_str("Number", &image_cache[1]);
-            hash128_blake3_str("Channel", &image_cache[2]);
-            hash128_blake3_str("Pixel", &image_cache[3]);
-            hash128_blake3_str("Patch", &image_cache[4]);
-            hash128_blake3_str("Region", &image_cache[5]);
-            hash128_blake3_str("Image", &image_cache[6]);
+            (void)laplace_entity_type_id("Codepoint", &image_cache[0]);
+            (void)laplace_entity_type_id("Number", &image_cache[1]);
+            (void)laplace_entity_type_id("Channel", &image_cache[2]);
+            (void)laplace_entity_type_id("Pixel", &image_cache[3]);
+            (void)laplace_entity_type_id("Patch", &image_cache[4]);
+            (void)laplace_entity_type_id("Region", &image_cache[5]);
+            (void)laplace_entity_type_id("Image", &image_cache[6]);
             image_ready = 1;
         }
         return image_cache[tier <= 5 ? tier : 6];
     }
     if (modality == LAPLACE_MODALITY_AUDIO) {
         if (!audio_ready) {
-            hash128_blake3_str("Codepoint", &audio_cache[0]);
-            hash128_blake3_str("Sample", &audio_cache[1]);
-            hash128_blake3_str("Window", &audio_cache[2]);
-            hash128_blake3_str("OnsetSegment", &audio_cache[3]);
-            hash128_blake3_str("Phrase", &audio_cache[4]);
-            hash128_blake3_str("Track", &audio_cache[5]);
+            (void)laplace_entity_type_id("Codepoint", &audio_cache[0]);
+            (void)laplace_entity_type_id("Sample", &audio_cache[1]);
+            (void)laplace_entity_type_id("Window", &audio_cache[2]);
+            (void)laplace_entity_type_id("OnsetSegment", &audio_cache[3]);
+            (void)laplace_entity_type_id("Phrase", &audio_cache[4]);
+            (void)laplace_entity_type_id("Track", &audio_cache[5]);
             audio_ready = 1;
         }
         return audio_cache[tier <= 4 ? tier : 5];

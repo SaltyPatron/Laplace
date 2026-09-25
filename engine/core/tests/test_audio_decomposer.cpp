@@ -4,6 +4,7 @@
 
 extern "C" {
 #include "laplace/core/audio_decomposer.h"
+#include "laplace/core/entity_type_law.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/modality_atoms.h"
 #include "laplace/core/modality_witness.h"
@@ -106,19 +107,19 @@ TEST(AudioDecomposer, ComposeDeterministicAndLengthSensitive) {
 TEST(AudioDecomposer, TypeIdsMatchCodepointFloorLadder) {
     hash128_t cp = laplace_modality_tier_type_id(LAPLACE_MODALITY_AUDIO, 0);
     hash128_t expect;
-    hash128_blake3_str("Codepoint", &expect);
+    (void)laplace_entity_type_id("Codepoint", &expect);
     EXPECT_EQ(hash128_compare(&cp, &expect), 0);
 
     hash128_t sample = laplace_modality_tier_type_id(LAPLACE_MODALITY_AUDIO, 1);
-    hash128_blake3_str("Sample", &expect);
+    (void)laplace_entity_type_id("Sample", &expect);
     EXPECT_EQ(hash128_compare(&sample, &expect), 0);
 
     hash128_t window = laplace_modality_tier_type_id(LAPLACE_MODALITY_AUDIO, 2);
-    hash128_blake3_str("Window", &expect);
+    (void)laplace_entity_type_id("Window", &expect);
     EXPECT_EQ(hash128_compare(&window, &expect), 0);
 
     hash128_t track = laplace_modality_tier_type_id(LAPLACE_MODALITY_AUDIO, 5);
-    hash128_blake3_str("Track", &expect);
+    (void)laplace_entity_type_id("Track", &expect);
     EXPECT_EQ(hash128_compare(&track, &expect), 0);
 }
 

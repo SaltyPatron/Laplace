@@ -344,6 +344,9 @@ int laplace_relation_resolve_ucd_property(
 
 
 def emit_relation_law(rel: dict) -> None:
+    bad = [r["canonical"] for r in rel["relation"] if not re.fullmatch(r"[A-Za-z0-9_]+", r["canonical"])]
+    if bad:
+        raise SystemExit(f"relation labels must be single words [A-Za-z0-9_]+: {bad}")
     relations = rel["relation"]
     aliases = rel["alias"]
     ranks = rel["ranks"]
@@ -432,6 +435,7 @@ int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* 
         "#include <string.h>",
         "",
         "#include \"laplace/core/hash128.h\"",
+        "#include \"laplace/core/content_witness_batch.h\"",
         "",
         "static const laplace_relation_def_t k_relations[] = {",
     ]
@@ -484,10 +488,12 @@ static int cmp_str(const char* a, const char* b) {{
 
 static int type_id_from_canonical(const char* canonical_name, hash128_t* out_type_id) {{
     if (!canonical_name || !out_type_id) return -1;
-    /* Content-addressed: entity hash = blake3(canonical_name_utf8_bytes).
-     * Must match highway_table.c type_id_for_canonical and EntityTypeRegistry.Id() in C#. */
-    hash128_blake3((const uint8_t*)canonical_name, strlen(canonical_name), out_type_id);
-    return 0;
+    /* A relation's id is the content id of its label: the same entity that text is
+     * anywhere else. Governed labels are single words ([A-Za-z0-9_]+); a dynamic label
+     * with other characters composes through the loaded Tier-0 content spine. */
+    size_t len = strlen(canonical_name);
+    if (hash128_label_content_id(canonical_name, len, out_type_id) == 0) return 0;
+    return laplace_content_root_id((const uint8_t*)canonical_name, len, out_type_id) == 0 ? 0 : -1;
 }}
 
 static hash128_t k_relation_type_id_cache[{len(canon_names)}];
@@ -982,6 +988,9 @@ def emit_entity_type_law(path: Path) -> None:
     names = re.findall(r'^canonical\s*=\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.M)
     if len(names) != len(set(names)):
         raise SystemExit("entity_types.toml declares a type twice")
+    bad = [n for n in names if not re.fullmatch(r"[A-Za-z0-9_]+", n)]
+    if bad:
+        raise SystemExit(f"entity type labels must be single words [A-Za-z0-9_]+: {bad}")
     _write_text_if_changed(OUT_CORE / "include/laplace/core/entity_type_law.h",
         "#pragma once\n"
         "\n"
@@ -1031,13 +1040,13 @@ def emit_entity_type_law(path: Path) -> None:
         "static int ready(void) { return __atomic_load_n(&g_state, __ATOMIC_ACQUIRE) == 2; }",
         "#endif",
         "",
-        "/* A type code is the blake3 of its governed label: an opaque registry key, not content. */",
+        "/* A type's id is the content id of its governed single-word label. */",
         "static void ensure_ids(void) {",
         "    if (ready()) return;",
         "    if (try_begin()) {",
         "        for (size_t i = 0; i < laplace_entity_type_count; ++i)",
-        "            hash128_blake3((const uint8_t*)laplace_entity_type_canonical[i],",
-        "                           strlen(laplace_entity_type_canonical[i]), &k_entity_type_ids[i]);",
+        "            hash128_label_content_id(laplace_entity_type_canonical[i],",
+        "                                     strlen(laplace_entity_type_canonical[i]), &k_entity_type_ids[i]);",
         "        mark_ready();",
         "        return;",
         "    }",

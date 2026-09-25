@@ -24,6 +24,12 @@ typedef int (*hash128_run_reader_t)(void* context, hash128_t* child, size_t* run
 int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,
                         void* context, hash128_t* out);
 
+/* Content id of a single-word identifier label ([A-Za-z0-9_]+): one Unicode word whose
+ * graphemes are single codepoints, so its composition is the ordered codepoint ids and a
+ * one-character label is that codepoint. Equal to the content spine's id for the same
+ * text. Returns 0, or -1 when the label is empty or has any other character. */
+int hash128_label_content_id(const char* label, size_t len, hash128_t* out);
+
 int  hash128_compare(const hash128_t* a, const hash128_t* b);
 int  hash128_equals(const hash128_t* a, const hash128_t* b);
 void hash128_zero(hash128_t* out);

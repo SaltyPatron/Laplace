@@ -1,7 +1,5 @@
--- BEGIN ATOMIC: GH #764.
 -- Identity helper: stays in the extension schema (no identity purpose schema).
+-- A governed entity type's id, from the native entity-type law.
 CREATE OR REPLACE FUNCTION laplace.entity_type_id(p_name text) RETURNS bytea
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
-BEGIN ATOMIC
-    SELECT realize.canonical_id(p_name);
-END;
+    AS 'MODULE_PATHNAME', 'pg_laplace_entity_type_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

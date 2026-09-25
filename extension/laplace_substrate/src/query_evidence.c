@@ -698,7 +698,7 @@ bind_calculation_source_classes(QueryEvidenceState *state, MemoryContext work)
     /* HAS_TRUST_CLASS is a canonical spine relation but intentionally is not
      * governed by the generated relation-law table. Its durable identity is the
      * same canonical hash used by bootstrap and managed ingestion. */
-    hash128_blake3_str("HAS_TRUST_CLASS", &classify.relation);
+    (void)laplace_relation_type_id("HAS_TRUST_CLASS", &classify.relation);
     hash128_blake3_str("substrate/trust_class/DerivedCalculation/v1",
                        &classify.trust_class);
     classify.sources = state->calculation_sources;

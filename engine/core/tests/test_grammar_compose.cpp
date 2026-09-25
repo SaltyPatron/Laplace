@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "laplace/core/grammar_registry.h"
+#include "laplace/core/entity_type_law.h"
 #include "laplace/core/grammar_decomposer.h"
 #include "laplace/core/grammar_compose.h"
 #include "laplace/core/content_witness_batch.h"
@@ -182,7 +183,7 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         std::unique_ptr<laplace_ast_t, decltype(&laplace_ast_free)> ast_owner(ast, laplace_ast_free);
         hash128_t source_id{}, type_meta{};
         hash128_blake3_str("test/grammar-probe-forms", &source_id);
-        hash128_blake3_str("Type", &type_meta);
+        (void)laplace_entity_type_id("Type", &type_meta);
 
         laplace_compose_result_t* full = nullptr;
         ASSERT_EQ(laplace_grammar_compose(bytes, length, ast, fixture.modality,
@@ -293,7 +294,7 @@ TEST(GrammarCompose, EscapedJsonStringsConvergeThroughNativeComposition) {
     ASSERT_NE(recipe, nullptr);
     hash128_t source{}, type{};
     hash128_blake3_str("test/json-complete-string", &source);
-    hash128_blake3_str("Type", &type);
+    (void)laplace_entity_type_id("Type", &type);
 
     for (const auto& fixture : cases) {
         SCOPED_TRACE(fixture.escaped);
@@ -1059,7 +1060,7 @@ TEST(GrammarSourceCompose, DeepSourceFloorsRoundTripPastLegacyFiveBitTier) {
     EXPECT_EQ(root_tier, (uint8_t)(max_child_tier + 1));
 
     hash128_t text_type;
-    hash128_blake3_str("Text", &text_type);
+    (void)laplace_entity_type_id("Text", &text_type);
     for (size_t i = 0; i < laplace_compose_entity_count(result); ++i) {
         laplace_compose_entity_t entity{};
         ASSERT_EQ(laplace_compose_get_entity(result, i, &entity), 0);

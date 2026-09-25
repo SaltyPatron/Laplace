@@ -12,21 +12,6 @@ public static unsafe class HighwayPerfcache
     // flag is published AFTER a successful load inside the gate.
     private static volatile bool _loaded;
 
-    public static Hash128 NodeHash(ReadOnlySpan<byte> utf8) => Hash128.Blake3(utf8);
-
-    public static Hash128 NodeHash(string name)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(name);
-        int maxBytes = Encoding.UTF8.GetMaxByteCount(name.Length);
-        if (maxBytes <= 256)
-        {
-            Span<byte> buf = stackalloc byte[maxBytes];
-            int n = Encoding.UTF8.GetBytes(name, buf);
-            return Hash128.Blake3(buf.Slice(0, n));
-        }
-        return Hash128.Blake3(Encoding.UTF8.GetBytes(name));
-    }
-
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);

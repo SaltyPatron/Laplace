@@ -84,8 +84,10 @@ static void hw_unmap(const uint8_t* base, size_t len) {
 
 #endif
 
+/* A governed relation's id is the content id of its canonical label. */
 static void type_id_for_canonical(const char* name, uint8_t name_len, hash128_t* out) {
-    hash128_blake3((const uint8_t*)name, (size_t)name_len, out);
+    if (hash128_label_content_id(name, (size_t)name_len, out) != 0)
+        hash128_zero(out);
 }
 
 void highway_table_unload(void) {

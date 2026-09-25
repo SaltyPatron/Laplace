@@ -921,6 +921,40 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
     PG_RETURN_INT32((int32) band);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_relation_type_id);
+
+/* (name text) -> bytea: the content id of a relation label, from the native relation
+ * law. A dynamic label that is not a single word composes through the Tier-0 spine. */
+Datum
+pg_laplace_relation_type_id(PG_FUNCTION_ARGS)
+{
+    char     *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    hash128_t type_id;
+
+    (void) laplace_perfcache_ready();
+    if (laplace_relation_type_id(name, &type_id) < 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("relation_type_id: '%s' has no content identity", name)));
+    PG_RETURN_DATUM(hash128_to_datum(&type_id));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_entity_type_id);
+
+/* (name text) -> bytea: the governed entity type's id; an undeclared type is an error. */
+Datum
+pg_laplace_entity_type_id(PG_FUNCTION_ARGS)
+{
+    char     *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    hash128_t type_id;
+
+    if (laplace_entity_type_id(name, &type_id) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("entity_type_id: '%s' is not declared in engine/manifest/entity_types.toml", name)));
+    PG_RETURN_DATUM(hash128_to_datum(&type_id));
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_entity_type_registry);
 
 /*
