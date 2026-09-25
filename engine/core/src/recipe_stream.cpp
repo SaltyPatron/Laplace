@@ -90,7 +90,16 @@ struct node {
     std::vector<std::string> cells;
     std::vector<std::pair<std::string, std::string>> own;
     std::shared_ptr<const std::vector<std::vector<std::string>>> group;
+    // "Child/@attr" reads a child element's attribute (a WN-LMF entry is named by its
+    // Lemma's writtenForm, not by its packaging id).
     std::string get(const std::string& key) const {
+        const size_t at = key.find("/@");
+        if (at != std::string::npos) {
+            const std::string child = key.substr(0, at);
+            for (const auto& c : children)
+                if (c.name == child) return c.get(key.substr(at + 2));
+            return "";
+        }
         auto i = attributes.find(key); return i == attributes.end() ? "" : i->second;
     }
 };
