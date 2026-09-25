@@ -18,8 +18,8 @@ DROP FUNCTION IF EXISTS laplace.substrate_health();
 DO $upgrade_shape$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('laplace.substrate_health(boolean)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(ok boolean, fake_tier_bands bigint, identity_violations bigint, bootstrap_entities bigint, deep_checked boolean)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_deep','ok','fake_tier_bands','identity_violations','bootstrap_entities','deep_checked']::text[])) THEN
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(ok boolean, fake_tier_bands bigint, identity_violations bigint, entities bigint, surface_present boolean, registry_relations bigint, deep_checked boolean)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_deep','ok','fake_tier_bands','identity_violations','entities','surface_present','registry_relations','deep_checked']::text[])) THEN
         DROP FUNCTION laplace.substrate_health(boolean);
     END IF;
 END $upgrade_shape$;
@@ -29,7 +29,9 @@ RETURNS TABLE(
     ok boolean,
     fake_tier_bands bigint,
     identity_violations bigint,
-    bootstrap_entities bigint,
+    entities bigint,
+    surface_present boolean,
+    registry_relations bigint,
     deep_checked boolean
 )
 LANGUAGE sql
@@ -45,22 +47,28 @@ BEGIN ATOMIC
             CASE WHEN p_deep
                  THEN (SELECT count(*) FROM laplace.identity_law_violations())
             END AS identity_violations,
-            (SELECT count(*) FROM laplace.entities) AS bootstrap_entities,
+            (SELECT count(*) FROM laplace.entities) AS entities,
+            -- The Tier-0 surface is admitted content: a codepoint entity has a
+            -- physicality. Without it nothing composes and no read can answer.
             EXISTS (
-                SELECT 1 FROM laplace.entities
-                WHERE id = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
-            ) AS canonical_source_present
+                SELECT 1 FROM laplace.physicalities
+                WHERE entity_id = public.laplace_hash128_blake3('A'::bytea)
+            ) AS surface_present,
+            (SELECT count(*) FROM laplace.relation_registry()) AS registry_relations
     )
     SELECT
         -- A NULL identity_violations must never read as "clean": IS NOT DISTINCT FROM 0
         -- would do exactly that. Unchecked contributes nothing to ok, and deep_checked
         -- tells the caller the verdict is partial.
         (s.fake_tier_bands = 0
-         AND s.canonical_source_present
+         AND s.surface_present
+         AND s.registry_relations > 0
          AND (NOT p_deep OR s.identity_violations = 0)) AS ok,
         s.fake_tier_bands,
         s.identity_violations,
-        s.bootstrap_entities,
+        s.entities,
+        s.surface_present,
+        s.registry_relations,
         p_deep AS deep_checked
     FROM scans s;
 END;

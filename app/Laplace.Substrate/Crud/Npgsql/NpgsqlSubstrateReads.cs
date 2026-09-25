@@ -2222,7 +2222,9 @@ public static partial class NpgsqlSubstrateReads
                                  -- That is unattested collapsed into attested-false, in the one
                                  -- query that reports substrate integrity.
                                  ('deep_checked', h.deep_checked::text),
-                                 ('bootstrap_entities', h.bootstrap_entities::text)) x(metric, value)
+                                 ('entities', h.entities::text),
+                                 ('surface_present', h.surface_present::text),
+                                 ('registry_relations', h.registry_relations::text)) x(metric, value)
             """,
             // GetString on a NULL column THROWS. identity_violations is null by design when
             // deep_checked is false, so `laplace health` did not report a skipped deep check

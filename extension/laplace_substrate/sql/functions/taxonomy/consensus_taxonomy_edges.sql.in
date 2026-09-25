@@ -18,8 +18,5 @@ BEGIN ATOMIC
     WHERE c.subject_id = p_subject
       AND c.type_id = ANY (p_types)
       AND c.object_id IS NOT NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM laplace.entities et
-          WHERE et.id = c.object_id
-            AND et.type_id = laplace.entity_type_id('RelationType'));
+      AND c.object_id NOT IN (SELECT r.type_id FROM laplace.relation_registry() r);
 END;

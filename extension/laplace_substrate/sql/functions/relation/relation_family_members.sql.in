@@ -4,8 +4,8 @@
 -- with `consensus.relation_type_in_family(c.type_id, 'X')` per row could never use the
 -- (subject_id, type_id) indexes; joining against this set makes the same
 -- predicate sargable. Membership truth stays with the C check — this just
--- applies it over the RelationType entity roster (hundreds of rows) instead
--- of per consensus row (millions).
+-- applies it over the relation registry (at most 256 rows) instead of per
+-- consensus row (millions).
 --
 -- STATIC members only, exactly like relation_type_in_family. Callers that
 -- also want dynamic children (IS_A -> family root) keep using
@@ -18,10 +18,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_members(p_family text)
     RETURNS TABLE(id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT et.id
-    FROM laplace.entities et
-    WHERE EXISTS (
-          SELECT 1 FROM laplace.entities i
-          WHERE i.id = et.id AND i.type_id = laplace.entity_type_id('RelationType'))
-      AND consensus.relation_type_in_family(et.id, p_family);
+    SELECT r.type_id
+    FROM laplace.relation_registry() r
+    WHERE consensus.relation_type_in_family(r.type_id, p_family);
 END;

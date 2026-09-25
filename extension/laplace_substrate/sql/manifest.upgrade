@@ -3,6 +3,7 @@ schema/purpose_schemas.sql.in
 schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
 functions/planner/array_length_rows_support.sql.in
+functions/relation/relation_registry.sql.in
 schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
@@ -227,8 +228,6 @@ functions/converse/correlate.sql.in
 functions/converse/drop_recompiled_prompt_programs.sql.in
 generated/relation_family_ids.sql.in
 generated/relation_set_ids.sql.in
-generated/seed_relation_types.sql.in
-generated/seed_pos.sql.in
 functions/cascade/astar_path.sql.in
 functions/cascade/cascade.sql.in
 functions/structural/word_curve.sql.in
@@ -491,3 +490,4 @@ functions/mu/drop_retired_foundry_weight_knobs.sql.in
 schema/retire_interpretation_tables.sql.in
 views/v_entities_highway.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
+schema/retire_bootstrap_vocabulary.sql.in

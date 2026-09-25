@@ -2,29 +2,17 @@
 -- present in that mask.  Highway membership is a property of the relation
 -- vocabulary/perfcache, not of an entity's accumulated incident-edge mask.
 --
--- Static governed relations resolve directly.  Dynamic relation types (FEAT_*,
--- DEP_*, ...) inherit their family root's bit through the governed upward set,
--- exactly as the
--- deposit path does.  This examines the small RelationType roster once and
--- returns ids that large consensus reads can use with = ANY(...).
+-- The registry roster (at most 256 rows) is examined once and returns ids that
+-- large consensus reads can use with = ANY(...).
 CREATE OR REPLACE FUNCTION consensus.relation_mask_types(p_mask bytea)
     RETURNS bytea[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
     WITH wanted(bits) AS (
         SELECT consensus.highway_mask_bits(p_mask)
-    ), resolved AS (
-        SELECT DISTINCT et.id
-        FROM laplace.entities et
-        LEFT JOIN laplace.consensus fam
-          ON fam.subject_id = et.id
-         AND fam.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
-        CROSS JOIN wanted w
-        WHERE EXISTS (
-              SELECT 1 FROM laplace.entities i
-              WHERE i.id = et.id AND i.type_id = laplace.entity_type_id('RelationType'))
-          AND COALESCE(consensus.relation_highway_bit(et.id),
-                       consensus.relation_highway_bit(fam.object_id)) = ANY (w.bits)
     )
-    SELECT COALESCE(array_agg(id), '{}'::bytea[]) FROM resolved;
+    SELECT COALESCE(array_agg(r.type_id ORDER BY r.highway_bit), '{}'::bytea[])
+    FROM laplace.relation_registry() r
+    CROSS JOIN wanted w
+    WHERE r.highway_bit = ANY (w.bits);
 END;

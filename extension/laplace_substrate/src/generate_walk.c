@@ -131,9 +131,7 @@ ensure_edge_plan(void)
  * WHERE object_id IS NOT NULL exists on every partition.
  */
 static const char *WALK_BATCH_QUERY =
-    "SELECT e.idx, e.neighbor, EXISTS (SELECT 1 "
-    "FROM laplace.entities i WHERE i.id=eo.id "
-    "AND i.type_id=laplace.entity_type_id('RelationType')), "
+    "SELECT e.idx, e.neighbor, false, "
     "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask, "
     "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.physicality_tableoid, "
@@ -163,9 +161,7 @@ static const char *WALK_BATCH_QUERY =
  * conditionally in the fetch loop, so this plan's narrower tuple descriptor is
  * the only difference the caller sees. */
 static const char *WALK_BATCH_QUERY_NOGEO =
-    "SELECT e.idx, e.neighbor, EXISTS (SELECT 1 "
-    "FROM laplace.entities i WHERE i.id=eo.id "
-    "AND i.type_id=laplace.entity_type_id('RelationType')), "
+    "SELECT e.idx, e.neighbor, false, "
     "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask "
     "FROM ( "
@@ -730,7 +726,15 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
                 raw[r].idx         = DatumGetInt64(SPI_getbinval(tup, td, 1, &isnull));
                 raw[r].object      = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
-                raw[r].object_is_relation_type = DatumGetBool(SPI_getbinval(tup, td, 3, &isnull));
+                /* A relation type is a registry bit, not an entity row: ask the
+                 * compiled relation law instead of scanning entities per edge. */
+                {
+                    const laplace_relation_def_t *rel_def = NULL;
+                    hash128_t object_id = datum_to_hash128(raw[r].object);
+
+                    raw[r].object_is_relation_type =
+                        laplace_relation_lookup(&object_id, &rel_def) == 0 && rel_def != NULL;
+                }
                 raw[r].rel_type    = copy_bytea_datum(SPI_getbinval(tup, td, 4, &isnull));
                 raw[r].rating      = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
                 raw[r].rd          = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));

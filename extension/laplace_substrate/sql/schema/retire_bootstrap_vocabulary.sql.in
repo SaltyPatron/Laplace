@@ -1,0 +1,65 @@
+-- Extension update. Earlier versions inserted registry vocabulary (types, physicality
+-- types, trust classes, a source key and sixteen relation keys) as entity rows with no
+-- physicality, plus one attestation between them. None of it is content; relations are
+-- registry bits and the rest are registry codes. Remove exactly those rows.
+WITH vocabulary(id) AS (
+    SELECT public.laplace_hash128_blake3(convert_to(v.name, 'UTF8'))
+    FROM (VALUES
+        ('Type'),
+        ('RelationType'),
+        ('PhysicalityType'),
+        ('Source'),
+        ('substrate/source/SubstrateCanonical/v1'),
+        ('substrate/physicality_type/CONTENT/v1'),
+        ('substrate/physicality_type/BUILDING_BLOCK/v1'),
+        ('substrate/physicality_type/PROJECTION/v1'),
+        ('substrate/physicality_type/PROJECTION_OUTPUT/v1'),
+        ('Codepoint'),
+        ('Grapheme'),
+        ('Word'),
+        ('Sentence'),
+        ('Document'),
+        ('substrate/trust_class/SubstrateMandate/v1'),
+        ('substrate/trust_class/StandardsDerived/v1'),
+        ('substrate/trust_class/AcademicCurated/v1'),
+        ('substrate/trust_class/AcademicCuratedWithUserInput/v1'),
+        ('substrate/trust_class/StructuredCorpus/v1'),
+        ('substrate/trust_class/UserCuratedResource/v1'),
+        ('substrate/trust_class/AIModelProbe/v1'),
+        ('substrate/trust_class/AppDerived/v1'),
+        ('substrate/trust_class/UserPromptContent/v1'),
+        ('substrate/trust_class/ResponseContent/v1'),
+        ('substrate/trust_class/AdversarialUntrusted/v1'),
+        ('IS_A'),
+        ('HAS_PART'),
+        ('CO_OCCURS_WITH'),
+        ('FOLLOWS'),
+        ('PRECEDES'),
+        ('OCCURS_IN_CONTEXT'),
+        ('HAS_LANGUAGE'),
+        ('IS_TRANSLATION_OF'),
+        ('DEPICTS'),
+        ('CAPTIONS'),
+        ('TRANSCRIBES_AS'),
+        ('IS_LOSSY_ENCODING_OF'),
+        ('HAS_VARIANT_OF'),
+        ('IS_REPLACED_BY'),
+        ('HAS_TRUST_CLASS'),
+        ('IS_ALIAS_OF')
+    ) AS v(name)
+), dropped_evidence AS (
+    DELETE FROM laplace.attestations a
+    USING vocabulary s, vocabulary t
+    WHERE a.subject_id = s.id AND a.type_id = t.id
+    RETURNING a.subject_id, a.type_id, a.object_id
+), dropped_consensus AS (
+    DELETE FROM laplace.consensus c
+    USING dropped_evidence d
+    WHERE c.subject_id = d.subject_id AND c.type_id = d.type_id
+      AND c.object_id IS NOT DISTINCT FROM d.object_id
+    RETURNING 1
+)
+DELETE FROM laplace.entities e
+USING vocabulary v
+WHERE e.id = v.id
+  AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = e.id);

@@ -920,6 +920,61 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
     PG_RETURN_INT32((int32) band);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_relation_registry);
+
+/*
+ * laplace.relation_registry(): the governed relation registry, one row per
+ * assigned highway bit, read from the compiled relation law and the highway
+ * perfcache. Relations are registry bits, not substrate entities, so readers
+ * that need "every relation type" enumerate this instead of scanning entities.
+ */
+Datum
+pg_laplace_relation_registry(PG_FUNCTION_ARGS)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+
+    require_highway_table("laplace.relation_registry");
+    InitMaterializedSRF(fcinfo, 0);
+
+    for (int bit = 0; bit < 256; bit++)
+    {
+        const char                   *canonical = NULL;
+        float                         rank;
+        uint8_t                       band;
+        hash128_t                     type_id;
+        hash128_t                     family_id;
+        hash128_t                     parent_id;
+        const laplace_relation_def_t *def = NULL;
+        Datum                         values[8];
+        bool                          nulls[8] = {false};
+
+        if (highway_table_relation_by_bit((uint8_t) bit, &canonical, &rank, &band) != 0)
+            continue;
+        if (laplace_relation_type_id(canonical, &type_id) < 0 ||
+            laplace_relation_lookup(&type_id, &def) != 0 || def == NULL)
+            continue;
+
+        values[0] = Int16GetDatum((int16) bit);
+        values[1] = hash128_to_datum(&type_id);
+        values[2] = CStringGetTextDatum(canonical);
+        values[3] = Int16GetDatum((int16) band);
+        values[4] = Float4GetDatum(rank);
+        values[5] = BoolGetDatum(def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC);
+        nulls[6] = !(def->family_root_idx >= 0 &&
+                     laplace_relation_type_id(laplace_relation_table[def->family_root_idx].canonical,
+                                              &family_id) >= 0);
+        if (!nulls[6])
+            values[6] = hash128_to_datum(&family_id);
+        nulls[7] = !(def->parent_idx >= 0 &&
+                     laplace_relation_type_id(laplace_relation_table[def->parent_idx].canonical,
+                                              &parent_id) >= 0);
+        if (!nulls[7])
+            values[7] = hash128_to_datum(&parent_id);
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+    }
+    return (Datum) 0;
+}
+
 /*
  * consensus.band_edges(band, min_eff_mu, limit): every unrefuted consensus
  * edge whose relation type belongs to the given salience band, strongest

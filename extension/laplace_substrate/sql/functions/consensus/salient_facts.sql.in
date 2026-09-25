@@ -9,8 +9,7 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
 BEGIN ATOMIC
 
     WITH reltypes AS MATERIALIZED (
-        SELECT id FROM laplace.entities
-        WHERE type_id = laplace.entity_type_id('RelationType')
+        SELECT r.type_id AS id FROM laplace.relation_registry() r
     ), feat_dynamic AS MATERIALIZED (
         -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
         -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
@@ -39,7 +38,7 @@ BEGIN ATOMIC
               -- InitPlan, bound BEFORE the scan, so type_id can prune the LIST
               -- partitions at run time. The semi-join form leaves the partition key a
               -- per-row comparison and prunes nothing. Semantics are identical --
-              -- reltypes is a data read (every RelationType entity), so it stays a
+              -- reltypes is the relation registry roster, so it stays a
               -- subquery; only the binding changes.
               AND c.type_id = ANY (ARRAY(SELECT id FROM reltypes))
               AND c.type_id <> ALL (consensus.relation_family_ids('HAS_POS'))

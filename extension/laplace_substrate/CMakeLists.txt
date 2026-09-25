@@ -101,10 +101,6 @@ list(SORT _ext_version_inputs)
 set(_ext_codegen_script "${PROJECT_SOURCE_DIR}/scripts/codegen-attestation-law.py")
 set(_ext_relation_manifest "${PROJECT_SOURCE_DIR}/engine/manifest/relation_types.toml")
 set(_ext_pos_manifest "${PROJECT_SOURCE_DIR}/engine/manifest/pos_tags.toml")
-set(_ext_generated_relation_seed
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/seed_relation_types.sql.in")
-set(_ext_generated_pos_seed
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/seed_pos.sql.in")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     ${_ext_version_inputs}
     "${_ext_codegen_script}"
@@ -115,13 +111,7 @@ file(SHA256 "${_ext_relation_manifest}" _ext_relation_manifest_hash)
 file(SHA256 "${_ext_pos_manifest}" _ext_pos_manifest_hash)
 set(_ext_sql_hashes "")
 foreach(_f ${_ext_version_inputs})
-    if(_f STREQUAL _ext_generated_relation_seed)
-        string(SHA256 _fh
-            "generated=seed_relation_types;generator=${_ext_codegen_hash};manifest=${_ext_relation_manifest_hash}")
-    elseif(_f STREQUAL _ext_generated_pos_seed)
-        string(SHA256 _fh
-            "generated=seed_pos;generator=${_ext_codegen_hash};manifest=${_ext_pos_manifest_hash}")
-    elseif(EXISTS "${_f}")
+    if(EXISTS "${_f}")
         file(SHA256 "${_f}" _fh)
     else()
         message(FATAL_ERROR "Manifest-listed SQL input is missing: ${_f}")

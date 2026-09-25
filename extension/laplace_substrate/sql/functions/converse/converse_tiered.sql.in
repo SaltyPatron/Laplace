@@ -151,12 +151,9 @@ BEGIN
         CROSS JOIN LATERAL generation.trajectory_unpacked_points(p.id) tp
         JOIN laplace.consensus sc ON sc.subject_id = tp.entity_id
         JOIN (
-            SELECT e.id
-            FROM laplace.entities e
-            WHERE EXISTS (
-                  SELECT 1 FROM laplace.entities i
-                  WHERE i.id = e.id AND i.type_id = laplace.entity_type_id('RelationType'))
-              AND consensus.relation_in_family(e.id, 'HAS_SENSE')
+            SELECT r.type_id AS id
+            FROM laplace.relation_registry() r
+            WHERE consensus.relation_in_family(r.type_id, 'HAS_SENSE')
         ) fam ON fam.id = sc.type_id
         WHERE tp.ctier = 2
         ORDER BY p.id, tp.entity_id, consensus.eff_mu(sc.rating, sc.rd) DESC, sc.object_id

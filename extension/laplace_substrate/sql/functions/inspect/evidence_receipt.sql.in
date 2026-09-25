@@ -39,9 +39,7 @@ BEGIN ATOMIC
                sum(a.observation_count) AS obs
         FROM generation.observation_bindings(ARRAY[p_id], NULL, NULL, 1) a
         WHERE a.object_id IS NOT NULL
-          AND EXISTS (
-              SELECT 1 FROM laplace.entities et
-              WHERE et.id = a.type_id AND et.type_id = laplace.entity_type_id('RelationType'))
+          AND a.type_id IN (SELECT r.type_id FROM laplace.relation_registry() r)
           AND a.type_id <> ALL (consensus.relation_family_ids('HAS_POS'))
           AND a.type_id <> ALL (consensus.relation_family_ids('HAS_FEATURE'))
           AND a.type_id NOT IN (SELECT id FROM feat_dynamic)
@@ -64,9 +62,7 @@ BEGIN ATOMIC
           AND a.type_id NOT IN (
                 laplace.relation_type_id('CO_OCCURS_WITH'),
                 laplace.relation_type_id('OCCURS_IN_CONTEXT'))
-          AND NOT EXISTS (
-              SELECT 1 FROM laplace.entities et
-              WHERE et.id = a.object_id AND et.type_id = laplace.entity_type_id('RelationType'))
+          AND a.object_id NOT IN (SELECT r.type_id FROM laplace.relation_registry() r)
           AND NOT (
               a.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
               AND a.object_id = p_id)

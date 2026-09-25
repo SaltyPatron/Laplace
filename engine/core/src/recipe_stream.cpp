@@ -1076,7 +1076,7 @@ struct tuple_batch {
             std::unordered_set<std::string> local;
             size_t offset = 0;
             while (offset < size) {
-                // Entity tuples are (id, tier, type_id); physicality tuples carry ten columns.
+                // Entity rows are (id, tier, type_id); physicality rows carry ten columns.
                 const size_t length = tuple_size(bytes + offset, size - offset, i == 1 ? 10 : 3);
                 std::string key(reinterpret_cast<const char*>(bytes + offset), length);
                 if (canonical_rows[i].find(key) == canonical_rows[i].end() &&

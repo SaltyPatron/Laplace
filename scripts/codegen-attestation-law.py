@@ -35,7 +35,6 @@ def _write_if_changed(path: Path, data: bytes) -> None:
 def _write_text_if_changed(path: Path, text: str) -> None:
     _write_if_changed(path, text.encode("utf-8"))
 
-OUT_SEED_FRAG = ROOT / "extension/laplace_substrate/sql/generated/seed_relation_types.sql.in"
 OUT_FAMILY_FRAG = ROOT / "extension/laplace_substrate/sql/generated/relation_family_ids.sql.in"
 OUT_SET_FRAG = ROOT / "extension/laplace_substrate/sql/generated/relation_set_ids.sql.in"
 
@@ -720,22 +719,6 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     )
 
     
-    seed_names = sorted({n for n in canon_names})
-    for a in aliases:
-        seed_names.append(a['surface'])
-    seed_names = sorted(set(seed_names))
-    sql_lines = [
-        "INSERT INTO laplace.canonical_names (id, name)",
-        "SELECT realize.canonical_id(v.name), v.name",
-        "FROM (VALUES",
-    ]
-    for i, n in enumerate(seed_names):
-        comma = "," if i < len(seed_names) - 1 else ""
-        sql_lines.append(f"    ('{n}'){comma}")
-    sql_lines.append(") AS v(name)")
-    sql_lines.append("ON CONFLICT (id) DO NOTHING;")
-    OUT_SEED_FRAG.parent.mkdir(parents=True, exist_ok=True)
-    _write_text_if_changed(OUT_SEED_FRAG, "\n".join(sql_lines) + "\n")
 
     # FOLDABLE FAMILY MEMBERSHIP. consensus.relation_family_members() derives a family
     # by SCANNING laplace.entities for all RelationType rows and testing each with the
@@ -974,18 +957,6 @@ def emit_pos_law(pos: dict) -> None:
     _write_text_if_changed(OUT_CORE / "src/generated/pos_law.c", "\n".join(lines) + "\n")
 
     
-    pos_seeds = [f"substrate/pos/{u}/v1" for u in upos_list]
-    pos_frag = OUT_SEED_FRAG.parent / "seed_pos.sql.in"
-    sql = [
-        "INSERT INTO laplace.canonical_names (id, name)",
-        "SELECT realize.canonical_id(v.name), v.name",
-        "FROM (VALUES",
-    ]
-    for i, n in enumerate(pos_seeds):
-        sql.append(f"    ('{n}')" + ("," if i < len(pos_seeds) - 1 else ""))
-    sql.append(") AS v(name)")
-    sql.append("ON CONFLICT (id) DO NOTHING;")
-    _write_text_if_changed(pos_frag, "\n".join(sql) + "\n")
 
 
 _HIGHWAY_MAGIC = 0x5957484C
