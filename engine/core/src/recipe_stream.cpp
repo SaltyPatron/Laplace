@@ -881,6 +881,13 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
     catch (const std::exception& e) { if (s) { s->failed = true; try { s->error = e.what(); } catch (...) {} *out = s.release(); } return -2; }
     catch (...) { return -3; }
 }
+// A namespaced attribute is addressed by the source's own qualified name ("dc:type").
+static std::string attribute_key(const laplace_xml_event_t& e) {
+    if (!e.namespace_uri || !*e.namespace_uri) return e.name;
+    if (!e.prefix || !*e.prefix)
+        throw std::runtime_error("namespaced attribute has no prefix: " + std::string(e.name));
+    return std::string(e.prefix) + ":" + e.name;
+}
 extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint8_t* bytes, size_t n, int final) {
     if (!s || s->failed || s->final || !s->pending.empty() || s->active || s->ready) return -1;
     try {
@@ -909,12 +916,11 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                     s->parent_scope_active = true;
                     s->child_inherited = false;
                 } else if (e.kind == 4 && s->parent_scope_active) {
-                    if (e.namespace_uri && *e.namespace_uri)
-                        throw std::runtime_error("recipe has no namespaced parent attribute disposition");
+                    const std::string key = attribute_key(e);
                     if (!s->parent_scope.attributes.emplace(
-                            e.name, std::string(e.value, e.value_len)).second)
+                            key, std::string(e.value, e.value_len)).second)
                         throw std::runtime_error("duplicate parent record attribute");
-                    s->parent_scope.own.emplace_back(e.name, std::string(e.value, e.value_len));
+                    s->parent_scope.own.emplace_back(key, std::string(e.value, e.value_len));
                 } else if (e.kind == 2) {
                     if (s->parent_scope_active) {
                         auto route = s->routes.find(s->parent_scope.name);
@@ -964,11 +970,10 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
             if (e.kind == 1) s->stack.push_back(node{e.name,e.namespace_uri ? e.namespace_uri : "",{}, {}});
             else if (e.kind == 4) {
                 if (s->stack.empty()) throw std::runtime_error("attribute outside record");
-                if (e.namespace_uri && *e.namespace_uri)
-                    throw std::runtime_error("recipe has no namespaced attribute disposition");
-                if (!s->stack.back().attributes.emplace(e.name,std::string(e.value,e.value_len)).second)
+                const std::string key = attribute_key(e);
+                if (!s->stack.back().attributes.emplace(key,std::string(e.value,e.value_len)).second)
                     throw std::runtime_error("duplicate record attribute");
-                s->stack.back().own.emplace_back(e.name, std::string(e.value, e.value_len));
+                s->stack.back().own.emplace_back(key, std::string(e.value, e.value_len));
             } else if (e.kind == 2) {
                 if (s->stack.empty()) throw std::runtime_error("unbalanced record");
                 node done = std::move(s->stack.back()); s->stack.pop_back();
