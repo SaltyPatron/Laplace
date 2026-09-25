@@ -54,27 +54,28 @@
       ]
     },
     "iso639": {
-      "decomposer": "ISO639Decomposer",
+      "decomposer": "ISO639",
       "layer": 1,
       "prerequisites": [
         "unicode"
       ],
       "consensus_gates": [
         {
-          "relation": "HAS_ISO639_2_CODE",
-          "min": 1,
-          "fallback": "source_evidence",
-          "fallback_relations": [
-            "HAS_ISO639_1_CODE",
-            "HAS_ISO639_2_CODE",
-            "HAS_ISO639_3_CODE"
-          ],
-          "fallback_min": 1
+          "relation": "HAS_EXTERNAL_ID",
+          "min": 1
         },
         {
-          "relation": "USES_SCRIPT",
+          "relation": "HAS_LANGUAGE_SCOPE",
+          "min": 1
+        },
+        {
+          "relation": "MEMBER_OF_MACROLANGUAGE",
           "min": 1
         }
+      ],
+      "witness": [
+        "ISO 639-3",
+        "20260415"
       ]
     },
     "operational": {

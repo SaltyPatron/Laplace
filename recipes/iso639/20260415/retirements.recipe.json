@@ -1,0 +1,87 @@
+{
+  "authority": "ISO 639-3",
+  "release": "20260415",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "ISO 639-3/retirements",
+  "fields": [
+    {
+      "syntaxPath": "record/@Id",
+      "propertyName": "id",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@Ref_Name",
+      "propertyName": "referenceName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/reference"
+      ]
+    },
+    {
+      "syntaxPath": "record/@Ret_Reason",
+      "propertyName": "reason",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@Change_To",
+      "propertyName": "changeTo",
+      "valueKind": "Identity",
+      "disposition": "Testimony",
+      "relationName": "SUPERSEDED_BY",
+      "qualifierFamily": "retirement",
+      "qualifierField": "Ret_Reason"
+    },
+    {
+      "syntaxPath": "record/@Ret_Remedy",
+      "propertyName": "remedy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@Effective",
+      "propertyName": "effective",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "Id"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "Id",
+      "Ref_Name",
+      "Ret_Reason",
+      "Change_To",
+      "Ret_Remedy",
+      "Effective"
+    ],
+    "separator": "\t",
+    "commentPrefix": "",
+    "trimFields": true,
+    "minimumColumns": 1,
+    "allowTrailingEmptyColumn": true,
+    "headerLines": 1
+  },
+  "valueAliases": {
+    "reason\u0000C": "change",
+    "reason\u0000D": "duplicate",
+    "reason\u0000N": "non-existent",
+    "reason\u0000S": "split",
+    "reason\u0000M": "merge"
+  }
+}

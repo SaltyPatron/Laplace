@@ -1,0 +1,59 @@
+{
+  "authority": "ISO 639-3",
+  "release": "20260415",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "ISO 639-3/macrolanguages",
+  "fields": [
+    {
+      "syntaxPath": "record/@M_Id",
+      "propertyName": "macrolanguage",
+      "valueKind": "Identity",
+      "disposition": "Testimony",
+      "relationName": "MEMBER_OF_MACROLANGUAGE",
+      "qualifierFamily": "membership",
+      "qualifierField": "I_Status"
+    },
+    {
+      "syntaxPath": "record/@I_Id",
+      "propertyName": "individual",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@I_Status",
+      "propertyName": "memberStatus",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "I_Id"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "M_Id",
+      "I_Id",
+      "I_Status"
+    ],
+    "separator": "\t",
+    "commentPrefix": "",
+    "trimFields": true,
+    "minimumColumns": 1,
+    "allowTrailingEmptyColumn": true,
+    "headerLines": 1
+  },
+  "valueAliases": {
+    "memberStatus\u0000A": "active",
+    "memberStatus\u0000R": "retired"
+  }
+}

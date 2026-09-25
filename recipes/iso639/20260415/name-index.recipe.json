@@ -1,0 +1,62 @@
+{
+  "authority": "ISO 639-3",
+  "release": "20260415",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "ISO 639-3/name-index",
+  "fields": [
+    {
+      "syntaxPath": "record/@Id",
+      "propertyName": "id",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@Print_Name",
+      "propertyName": "printName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/print"
+      ],
+      "aggregate": true
+    },
+    {
+      "syntaxPath": "record/@Inverted_Name",
+      "propertyName": "invertedName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/inverted"
+      ],
+      "aggregate": true
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "Id"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "Id",
+      "Print_Name",
+      "Inverted_Name"
+    ],
+    "separator": "\t",
+    "commentPrefix": "",
+    "trimFields": true,
+    "minimumColumns": 1,
+    "allowTrailingEmptyColumn": true,
+    "headerLines": 1
+  }
+}

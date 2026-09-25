@@ -1,0 +1,125 @@
+{
+  "authority": "ISO 639-3",
+  "release": "20260415",
+  "sourceName": "ISO639",
+  "trust": 1,
+  "trustClass": "StandardsDerived",
+  "layerOrder": 1,
+  "selected": true,
+  "root": "/vault/Data/ISO639",
+  "aliases": [
+    "iso639"
+  ],
+  "artifacts": [
+    {
+      "selector": "iso-639-3_Code_Tables_20260415/iso-639-3_Code_Tables_20260415/iso-639-3.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "ISO 639-3/code-table",
+      "recipePath": "code-table.recipe.json"
+    },
+    {
+      "selector": "iso-639-3_Code_Tables_20260415/iso-639-3_Code_Tables_20260415/iso-639-3-macrolanguages.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "ISO 639-3/macrolanguages",
+      "recipePath": "macrolanguages.recipe.json"
+    },
+    {
+      "selector": "iso-639-3_Code_Tables_20260415/iso-639-3_Code_Tables_20260415/iso-639-3_Name_Index.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "ISO 639-3/name-index",
+      "recipePath": "name-index.recipe.json"
+    },
+    {
+      "selector": "iso-639-3_Code_Tables_20260415/iso-639-3_Code_Tables_20260415/iso-639-3_Retirements.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "ISO 639-3/retirements",
+      "recipePath": "retirements.recipe.json"
+    },
+    {
+      "selector": "iso-639-3.tab",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Byte-identical copy of the 20260415 code table."
+    },
+    {
+      "selector": "iso-639-3-macrolanguages.tab",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Byte-identical copy of the 20260415 macrolanguage table."
+    },
+    {
+      "selector": "iso-639-3_Name_Index.tab",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Byte-identical copy of the 20260415 name index."
+    },
+    {
+      "selector": "iso-639-3_Retirements.tab",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Byte-identical copy of the 20260415 retirements table."
+    },
+    {
+      "selector": "iso-639-3_Code_Tables_20260415.zip",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Compressed release of the admitted 20260415 code tables."
+    },
+    {
+      "selector": "checkpoint.bin",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "A Laplace ingest checkpoint, not source data."
+    },
+    {
+      "selector": "ISO-639-2_utf-8.txt",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "ISO 639-2 codes and English/French names; its codes are the 639-3 table's Part2b/Part2t columns. Its French names need their own witness recipe."
+    },
+    {
+      "selector": "iana/language-subtag-registry.txt",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "IANA subtag registry; it supplies BCP-47 aliases to the governed language manifest (scripts/refresh-language-manifest.py), not claims of this witness."
+    },
+    {
+      "selector": "cldr/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "CLDR supplemental data; its language aliases feed the governed language manifest. Its own claims belong to a Unicode CLDR witness."
+    },
+    {
+      "selector": "loc/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Library of Congress ISO 639-1/2/5 serializations; a separate witness, not the SIL 639-3 tables."
+    },
+    {
+      "selector": "sil/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "SIL change-request pages (HTML); editorial history, not the code tables."
+    },
+    {
+      "selector": "iso639-5.atom10.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "ISO 639-5 feed; language families belong to a 639-5 witness."
+    },
+    {
+      "selector": "iso639-5.rss20.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "ISO 639-5 feed; language families belong to a 639-5 witness."
+    }
+  ]
+}
