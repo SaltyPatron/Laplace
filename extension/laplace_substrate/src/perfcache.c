@@ -28,6 +28,7 @@
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/highway_table.h"
+#include "laplace/core/vocabulary_table.h"
 #include "laplace/core/perfcache_format.h"
 
 #include "perfcache_native.h"
@@ -35,6 +36,7 @@
 static char *perfcache_path = NULL;
 static char *highway_perfcache_path = NULL;
 static char *chess_position_perfcache_path = NULL;
+static char *vocabulary_perfcache_path = NULL;
 static int native_mkl_threads = 1;
 
 void
@@ -64,6 +66,16 @@ laplace_substrate_perfcache_init(void)
         "Tier-1 piece×square vocab + catalog tier-2 positions (GH #822). "
         "Empty disables chess floor lookups; compose falls back to t0 recomputation.",
         &chess_position_perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.vocabulary_perfcache_path",
+        "Path to the governed vocabulary blob (laplace_vocabulary_perfcache.bin).",
+        "UPOS, UD relations and subtypes, features and feature values as content records "
+        "with their governed codes. Empty disables vocabulary reads; they error until configured.",
+        &vocabulary_perfcache_path,
         "",
         PGC_SIGHUP,
         0,
@@ -126,6 +138,28 @@ laplace_highway_ready(void)
                         highway_perfcache_path),
                  errhint("Fix laplace_substrate.highway_perfcache_path or redeploy the "
                          "blob (install-extensions.cmd stages it).")));
+    return true;
+}
+
+bool
+laplace_vocabulary_ready(void)
+{
+    int rc;
+
+    if (vocabulary_table_is_loaded())
+        return true;
+    if (vocabulary_perfcache_path == NULL || vocabulary_perfcache_path[0] == '\0')
+        return false;
+
+    rc = vocabulary_table_load(vocabulary_perfcache_path);
+    if (rc != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                 errmsg("laplace_substrate: failed to load vocabulary perfcache \"%s\" (rc=%d)",
+                        vocabulary_perfcache_path, rc),
+                 errdetail("rc -1: open/stat/mmap failure; -2: bad magic/version; -3: layout; "
+                           "-4: body checksum mismatch; -5: a vocabulary's codes are not 1..N."),
+                 errhint("Fix laplace_substrate.vocabulary_perfcache_path or redeploy the blob.")));
     return true;
 }
 
@@ -211,6 +245,16 @@ laplace_substrate_perfcache_prewarm(void)
             ereport(WARNING,
                     (errmsg("laplace_substrate: highway prewarm failed (\"%s\"); "
                             "backends fall back to lazy load", highway_perfcache_path)));
+    }
+
+    if (vocabulary_perfcache_path != NULL && vocabulary_perfcache_path[0] != '\0')
+    {
+        rc = vocabulary_table_load(vocabulary_perfcache_path);
+        if (rc != 0)
+            ereport(WARNING,
+                    (errmsg("laplace_substrate: vocabulary perfcache prewarm failed "
+                            "(rc=%d, \"%s\"); backends fall back to lazy load",
+                            rc, vocabulary_perfcache_path)));
     }
 
     if (chess_position_perfcache_path != NULL && chess_position_perfcache_path[0] != '\0')

@@ -902,18 +902,20 @@ SQL
 
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
-  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" bin hwbin chessbin transition preload newval
+  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" bin hwbin vocabbin chessbin transition preload newval
   bin=$(find "$dir" -name 'laplace_t0_perfcache*.bin' | sort -V | tail -1)
   hwbin=$(find "$dir" -name 'laplace_highway_perfcache*.bin' | sort -V | tail -1)
+  vocabbin=$(find "$dir" -name 'laplace_vocabulary_perfcache*.bin' | sort -V | tail -1)
   chessbin=$(find "$dir" -name 'laplace_chess_position_perfcache*.bin' | sort -V | tail -1)
   transition=$(find "$dir" -name 'laplace_chess_transition_perfcache*.bin' | sort -V | tail -1)
-  [[ -n "$bin" && -n "$hwbin" && -n "$chessbin" && -n "$transition" ]] || {
+  [[ -n "$bin" && -n "$hwbin" && -n "$vocabbin" && -n "$chessbin" && -n "$transition" ]] || {
     echo "::error::installed perfcache set incomplete" >&2; return 1;
   }
   psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
     -c "LOAD 'laplace_substrate'" \
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
     -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '$hwbin'" \
+    -c "ALTER SYSTEM SET laplace_substrate.vocabulary_perfcache_path = '$vocabbin'" \
     -c "ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '$chessbin'" \
     -c "SELECT pg_reload_conf()"
   preload=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SHOW shared_preload_libraries")

@@ -31,6 +31,7 @@ MODULES = {
 ROMS = {
     "laplace_substrate.perfcache_path": "laplace_t0_perfcache.bin",
     "laplace_substrate.highway_perfcache_path": "laplace_highway_perfcache.bin",
+    "laplace_substrate.vocabulary_perfcache_path": "laplace_vocabulary_perfcache.bin",
     "laplace_substrate.chess_position_perfcache_path": "laplace_chess_position_perfcache.bin",
 }
 SQL = """
@@ -56,6 +57,7 @@ SELECT json_build_object(
  'running_ingests',(SELECT count(*) FROM laplace.ingest_run_journal WHERE status='running'),
  'roms',(SELECT json_object_agg(name,setting) FROM pg_settings
      WHERE name IN ('laplace_substrate.perfcache_path','laplace_substrate.highway_perfcache_path',
+                   'laplace_substrate.vocabulary_perfcache_path',
                    'laplace_substrate.chess_position_perfcache_path')),
  'extension_functions',(SELECT md5(string_agg(pg_get_functiondef(p.oid),E'\\n' ORDER BY p.oid))
      FROM pg_proc p JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass

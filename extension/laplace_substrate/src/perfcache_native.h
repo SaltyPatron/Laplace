@@ -24,6 +24,9 @@ bool laplace_perfcache_ready(void);
 
 bool laplace_highway_ready(void);
 
+/* The governed vocabulary ROM (laplace_vocabulary_perfcache.bin). */
+bool laplace_vocabulary_ready(void);
+
 /* GH #822 — chess position_id → coord floor (laplace_chess_position_perfcache.bin). */
 bool laplace_chess_position_ready(void);
 

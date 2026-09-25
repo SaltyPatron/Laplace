@@ -1,0 +1,19 @@
+-- The governed vocabularies (UPOS, UD relations and subtypes, features, feature values),
+-- served from the vocabulary perfcache. A value is content: `id` is the content id of its
+-- text, and a feature value's id is the composition [feature, value]. `code` is its
+-- append-only code in that vocabulary (its OR-mask bit, its parse-vertex code). One entity
+-- may hold a code in several vocabularies. Nothing here reads or seeds entity rows.
+CREATE OR REPLACE FUNCTION laplace.vocabulary_ready()
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_vocabulary_ready'
+    LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION laplace.vocabulary(p_vocabulary text)
+    RETURNS TABLE(code integer, label text, id bytea, parent_code integer)
+    AS 'MODULE_PATHNAME', 'pg_laplace_vocabulary'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE ROWS 300;
+
+CREATE OR REPLACE FUNCTION laplace.vocabulary_code(p_vocabulary text, p_id bytea)
+    RETURNS integer
+    AS 'MODULE_PATHNAME', 'pg_laplace_vocabulary_code'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;

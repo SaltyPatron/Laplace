@@ -16,6 +16,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/chess_position_table.h
     include/laplace/core/modality_number_perfcache_format.h
     include/laplace/core/modality_number_table.h
+    include/laplace/core/vocabulary_perfcache_format.h
+    include/laplace/core/vocabulary_table.h
     include/laplace/core/astar.h
     include/laplace/core/trajectory.h
     include/laplace/core/tier_tree.h
@@ -85,6 +87,7 @@ set(LAPLACE_CORE_SOURCES
     src/codepoint_table.c
     src/chess_position_table.c
     src/modality_number_table.c
+    src/vocabulary_table.c
     src/astar.cpp
     src/trajectory.c
     src/tier_tree.c
@@ -511,6 +514,38 @@ add_custom_target(laplace_modality_number_perfcache
 install(FILES ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}
     DESTINATION share/laplace
     RENAME "laplace_modality_number_perfcache.bin"
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+)
+
+# Governed vocabulary ROM: UPOS, universal relations and their subtypes, features and
+# feature values (engine/manifest/vocabulary, generated from their authorities), each
+# composed from T0 by the same kernels a recipe uses. Spec 33 / compositional law.
+add_subdirectory(tools/vocabulary_tables_emit)
+set(LAPLACE_VOCABULARY_PERFCACHE_BIN
+    "${LAPLACE_PERFCACHE_DIR}/laplace_vocabulary_perfcache.bin"
+    CACHE FILEPATH "Built governed vocabulary blob" FORCE)
+set(_laplace_vocabulary_manifest "${_laplace_codegen_root}/engine/manifest/vocabulary")
+add_custom_command(
+    OUTPUT ${LAPLACE_VOCABULARY_PERFCACHE_BIN}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+    COMMAND $<TARGET_FILE:laplace_vocabulary_tables_emit>
+            --t0       ${LAPLACE_PERFCACHE_BIN}
+            --manifest ${_laplace_vocabulary_manifest}
+            --output   ${LAPLACE_VOCABULARY_PERFCACHE_BIN}
+    DEPENDS ${LAPLACE_PERFCACHE_BIN} $<TARGET_FILE:laplace_vocabulary_tables_emit>
+            ${_laplace_vocabulary_manifest}/upos.tsv
+            ${_laplace_vocabulary_manifest}/deprel.tsv
+            ${_laplace_vocabulary_manifest}/deprel_subtype.tsv
+            ${_laplace_vocabulary_manifest}/feature.tsv
+            ${_laplace_vocabulary_manifest}/feature_value.tsv
+    COMMENT "Emitting governed vocabulary blob"
+    VERBATIM
+)
+add_custom_target(laplace_vocabulary_perfcache
+    DEPENDS ${LAPLACE_VOCABULARY_PERFCACHE_BIN})
+install(FILES ${LAPLACE_VOCABULARY_PERFCACHE_BIN}
+    DESTINATION share/laplace
+    RENAME "laplace_vocabulary_perfcache.bin"
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 

@@ -15,6 +15,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_score.cpp
     test_codepoint_table.cpp
     test_modality_number_table.cpp
+    test_vocabulary_table.cpp
     test_astar.cpp
     test_trajectory.cpp
     test_tier_tree.cpp
@@ -53,6 +54,8 @@ add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DI
 add_compile_definitions(LAPLACE_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_PERFCACHE_BIN}")
 add_compile_definitions(
     LAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}")
+add_compile_definitions(
+    LAPLACE_VOCABULARY_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_VOCABULARY_PERFCACHE_BIN}")
 
 # Committed Syzygy fixture tables (KQvK/KRvK, ~14 KB) for the probe kernel.
 add_compile_definitions(
@@ -84,7 +87,8 @@ target_link_libraries(laplace_task_shape_tests PRIVATE laplace_core)
 add_test(NAME laplace_task_shape_tests COMMAND laplace_task_shape_tests)
 add_dependencies(laplace_core_tests laplace_task_shape_tests)
 
-add_dependencies(laplace_core_tests laplace_t0_perfcache laplace_modality_number_perfcache)
+add_dependencies(laplace_core_tests laplace_t0_perfcache laplace_modality_number_perfcache
+    laplace_vocabulary_perfcache)
 
 target_link_libraries(laplace_core_tests
     PRIVATE laplace_core GTest::gtest_main

@@ -109,4 +109,29 @@ else
   fi
 fi
 
+vocab="$PREFIX/share/laplace/laplace_vocabulary_perfcache.bin"
+if [[ ! -f "$vocab" ]]; then
+  echo "::error::vocabulary perfcache blob is missing under $PREFIX/share/laplace" >&2
+  failed=1
+else
+  magic="$(od -An -t x4 -N 8 "$vocab" | awk '{print $1, $2}')"
+  # LVCP little-endian 0x5043564c, version 1
+  if [[ "$magic" != "5043564c 00000001" ]]; then
+    echo "::error::vocabulary perfcache $vocab is not format v1 LVCP (got $magic)" >&2
+    failed=1
+  elif command -v psql >/dev/null 2>&1; then
+    # The serving process maps the blob, and its record for NOUN is the content id the
+    # database composes for the same text.
+    served="$(psql -d "${PGDATABASE:-laplace}" -Atqc \
+      "SELECT laplace.vocabulary_ready() AND EXISTS (SELECT 1 FROM laplace.vocabulary('upos') v
+         WHERE v.label = 'NOUN' AND v.id = laplace.content_id('NOUN'))" 2>&1 || true)"
+    if [[ "$served" != "t" ]]; then
+      echo "::error::PostgreSQL does not serve the vocabulary perfcache ($served)" >&2
+      failed=1
+    else
+      printf 'PASS: vocabulary perfcache is LVCP v1 and served (%s)\n' "$vocab"
+    fi
+  fi
+fi
+
 exit "$failed"

@@ -91,7 +91,7 @@ class RuntimeGuardTests(unittest.TestCase):
             guard.digest(self.prefix / "lib/liblaplace_core.so"),
         )
         state = self.snapshot()
-        self.assertEqual(12, len(state["artifacts"]))
+        self.assertEqual(13, len(state["artifacts"]))
         self.assertEqual(3, state["format"])
         self.assertEqual(guard.build_identity(self.root, self.prefix), state["build"])
         self.assertNotIn("native_fingerprint", state)
