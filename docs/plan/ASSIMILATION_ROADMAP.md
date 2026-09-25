@@ -1,6 +1,6 @@
 # Assimilation roadmap — corrections recorded 2026-09-25
 
-This note records what the inventor stated and corrected during the 2026-09-25 working session. It also records what the session built and every correction still open. The inventor's words outrank this note, and `docs/INVENTION.md` remains the machine. Where this note conflicts with an older plan document, this note records the newer statement of the inventor. Each workstream below has a GitHub issue under the epic "Assimilation roadmap".
+This note records what the inventor stated and corrected during the 2026-09-25 working session. It also records what the session built and every correction still open. The inventor's words outrank this note, and `docs/INVENTION.md` remains the machine. Where this note conflicts with an older plan document, this note records the newer statement of the inventor. Each workstream below has a GitHub issue under epic #1725.
 
 ## Finish line
 
@@ -71,6 +71,8 @@ The session's work was almost all on the input side: the recipe engine, governed
 
 ### A. Standing math
 
+Issue: #1715
+
 - **Every recipe seed ran at trust 1.** This is fixed by trust from class (above). A full reseed is required.
 - **`witness_weight = rank × trust` drives both the opponent rating and the RD** (`engine/core/src/attestation_engine.c`, `laplace_attestation_witness_phi` / `_opponent_rating`). Certainty and salience are therefore one number. For example, a Unicode `HAS_SCRIPT` fact (0.95 × 0.08) plays as a weak *and uncertain* witness (rating 1229, RD 326), when it is certain and merely low-salience.
 - **Relation rank is a read-time salience weight** (`relation_types.toml` `[ranks]`, "recalibrated for semantic salience (recall)"). It is baked into write-time standing.
@@ -80,11 +82,15 @@ The session's work was almost all on the input side: the recipe engine, governed
 
 ### B. Consensus keeps the query's context
 
+Issue: #1716
+
 - **Consensus cells are `(subject, relation, object)` with context folded away.** Language, sense and qualifiers therefore collapse at fold. English "chat" and French "chat" merge, and "which ISO code" disappears. V cannot be conditioned by Q from consensus.
 - **Target:** the cell identity or a companion structure preserves the context dimension the forward pass conditions on. Qualifier masks OR-fold into the cell.
 - Related: #1052, #1401.
 
 ### C. ETL ownership and order of operations
+
+Issue: #1717
 
 Measured and read in code:
 
@@ -105,6 +111,8 @@ Measured and read in code:
 Related: #1714, #1292, #964, #952, #1409, #967.
 
 ### D. Format decomposers + recipes (dependency injection)
+
+Issue: #1718
 
 **Two parallel stacks do the same job:**
 1. The grammar stack (`GrammarDecomposer`, `StructuredGrammarIngest`, `GrammarRowComposer`, `IGrammarWitness`). Its vendored tree-sitter grammars already include JSON, CSV, TSV, **Turtle**, XML and Markdown (`engine/core/grammars/CMakeLists.txt`), plus a homegrown PGN grammar. Its semantics are hand-written C# per source (`WiktionaryGrammarWitness`, `SemLinkGrammarWitness`).
@@ -135,6 +143,8 @@ Related: #1714, #1292, #964, #952, #1409, #967.
 Related: #1045, #1177, #1153, #1403, #1713.
 
 ### E. Model ingestion — TinyLlama first
+
+Issue: #1719
 
 **Target checkpoint:** `/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0`. It is `LlamaForCausalLM` in bf16: 22 layers, d = 2048, 32 query heads, 4 KV heads, head_dim 64, SwiGLU 5632, vocab 32000, untied `lm_head`, RoPE θ 10000, RMSNorm. It has 201 tensors.
 
@@ -204,6 +214,8 @@ Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034. Export: `docs/specs/12
 
 ### F. The native forward pass over curated knowledge (read path)
 
+Issue: #1720
+
 - **`functions/converse/forward_pass.sql.in`** (`converse.bindings`, `key_facts`, `couple`, `terms_language`) does its heavy lifting in SQL. It moves to native code with SQL orchestrating.
 - **Still hand-rolled:** about 27 word→sense readers, 61 id renderers, 130 consensus-by-subject readers and 124 C# inline reads.
 - **Realization (O) is English/Bulgarian templates** (`chat_scaffold`). `prompt_coherence.c` matches prompt words against English relation labels.
@@ -215,6 +227,8 @@ Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034. Export: `docs/specs/12
 - Related: #1401, #1478, #1018, #1099, #1016, #1178, #1047.
 
 ### G. Fake machinery still to remove
+
+Issue: #1721
 
 - `SubstrateCanonicalIds.Source(name)` `blake3` source ids for every legacy decomposer and every chess source
 - chess marker entities (`AnalysisMarkerId`)
@@ -231,6 +245,8 @@ Related: #1038, #1049, #1052.
 
 ### H. Sources onto recipes
 
+Issue: #1722
+
 - **Done:** Unicode, ISO 639-3, CILI, OEWN, OMW.
 - **UD** has a recipe but has never been seeded.
 - **Still legacy:** WordNet 3.0 (to retire in favour of omw-en + CILI), Wiktionary, ConceptNet, VerbNet, PropBank, FrameNet, SemLink, VerbAtlas, FrameBase, ATOMIC, Tatoeba, OpenSubtitles.
@@ -245,6 +261,8 @@ Related: #1713, #1471, #1057, #1180.
 
 ### I. Vocabulary governance
 
+Issue: #1723
+
 - **The relation manifest still carries the variants the qualifier law replaces:** `HAS_ISO639_*_CODE`, `HAS_UPPERCASE_MAPPING` and siblings, `HAS_NAME_ALIAS`, and others. Legacy decomposers and gates still use them.
 - **The highway has about 30 bits left.**
 - **Entity OR-masks (the POS mask and its sisters) are not built.**
@@ -252,6 +270,8 @@ Related: #1713, #1471, #1057, #1180.
 - Related: #1133, #1712.
 
 ### J. Process
+
+Issue: #1724
 
 - **Before a push:** run `cookbook materialize` for every changed recipe (it runs the same native code the seed runs), and replay changed SQL in manifest order inside `BEGIN … ROLLBACK` on the live database. Five pipeline failures in this session would have been caught locally: a reserved column name, nested window functions, undeclared entity types, a missing gate entry, and an undeclared qualifier.
 - **Before reporting a result:** look at the substrate (entity census by type and tier, `/explore`), not only claim counts.
