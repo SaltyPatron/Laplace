@@ -2195,6 +2195,13 @@ members = [
   "IN_VERB_GROUP_WITH", "HAS_ATTRIBUTE",
 ]
 
+# A term's bindings to keys: the attestation that says this word, in this language,
+# answers to that identifier (dog HAS_SENSE i46360 @en). Readers resolve K through
+# this set; the facts belong to the key, never to the word.
+[[set]]
+name = "KEY_BINDING"
+members = ["HAS_SENSE"]
+
 [[set]]
 name = "PATH_UPWARD"
 members = ["IS_A", "IS_INSTANCE_OF"]

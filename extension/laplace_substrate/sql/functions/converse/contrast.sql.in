@@ -1,6 +1,50 @@
-DROP FUNCTION IF EXISTS laplace.contrast(bytea, bytea, bytea, int);
+-- converse.contrast(x, y, lang, k): the tale of the tape. The two terms couple first
+-- (converse.couple): the facts compared are those of the keys that respond to each
+-- other, not every sense of each word. holder is x-only / both / y-only.
 CREATE OR REPLACE FUNCTION converse.contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
-                                    p_limit int DEFAULT 80)
+        p_limit int DEFAULT 60)
     RETURNS TABLE(holder text, type text, fact text, mu numeric)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_contrast';
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH lang AS (
+        SELECT COALESCE(p_lang, converse.terms_language(ARRAY[p_x, p_y])) AS l
+    ), pair AS (
+        -- The strongest coupling through keys (senses), else each term's dominant key.
+        SELECT COALESCE(
+                 (SELECT c.x_key FROM lang, converse.couple(p_x, p_y, lang.l, 64) c
+                   WHERE c.x_key <> p_x ORDER BY c.weight DESC LIMIT 1),
+                 (SELECT b.key FROM lang, converse.bindings(ARRAY[p_x], lang.l) b WHERE b.rank = 1),
+                 p_x) AS xk,
+               COALESCE(
+                 (SELECT c.y_key FROM lang, converse.couple(p_x, p_y, lang.l, 64) c
+                   WHERE c.y_key <> p_y ORDER BY c.weight DESC LIMIT 1),
+                 (SELECT b.key FROM lang, converse.bindings(ARRAY[p_y], lang.l) b WHERE b.rank = 1),
+                 p_y) AS yk
+    ), xf AS (
+        SELECT f.type_id, f.object_id, f.eff_mu FROM pair, converse.key_facts(ARRAY[pair.xk], 64) f
+    ), yf AS (
+        SELECT f.type_id, f.object_id, f.eff_mu FROM pair, converse.key_facts(ARRAY[pair.yk], 64) f
+    ), tape AS MATERIALIZED (
+        SELECT CASE WHEN xf.type_id IS NULL THEN 'y-only'
+                    WHEN yf.type_id IS NULL THEN 'x-only' ELSE 'both' END AS holder,
+               COALESCE(xf.type_id, yf.type_id) AS type_id,
+               COALESCE(xf.object_id, yf.object_id) AS object_id,
+               GREATEST(xf.eff_mu, yf.eff_mu) AS mu
+        FROM xf FULL JOIN yf ON yf.type_id = xf.type_id AND yf.object_id = xf.object_id
+    ), ordered AS (
+        SELECT t.*, row_number() OVER (ORDER BY (t.holder = 'both') DESC, t.mu DESC NULLS LAST,
+                                                t.type_id, t.object_id) AS ord
+        FROM tape t
+        ORDER BY 5
+        LIMIT GREATEST(p_limit, 0)
+    ), labels AS (
+        SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord), (SELECT l FROM lang)) AS l,
+               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
+        FROM ordered o
+    )
+    SELECT o.holder, COALESCE(labels.types[o.ord], 'Unrealized relation'),
+           COALESCE(NULLIF(labels.l[o.ord], ''), 'Entity · ' || left(encode(o.object_id, 'hex'), 12)),
+           o.mu
+    FROM ordered o, labels
+    ORDER BY o.ord;
+END;

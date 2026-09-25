@@ -1,111 +1,34 @@
+-- consensus.salient_facts(word, lang, k): what is witnessed about a word, read through
+-- the forward-pass primitives. A fact belongs to the key it was stated about, so the
+-- word's facts are its own plus those of its dominant binding (usage, then standing,
+-- in the query's language) -- never every sense's facts poured into one list.
+-- Objects are realized in the query's language (the terms' binding language when the
+-- caller states none).
 DROP FUNCTION IF EXISTS laplace.salient_facts(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
--- No SET search_path — blocks inlining, costs the consensus index path. The
--- workaround below (fencing relation_in_family ONCE because its own SET clause
--- makes it uninlinable) is the same defect one level down. GH #860.
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-
-    WITH reltypes AS MATERIALIZED (
-        SELECT r.type_id AS id FROM laplace.relation_registry() r
-    ), feat_dynamic AS MATERIALIZED (
-        -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
-        -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
-        -- Fenced ONCE here: the SQL wrapper consensus.relation_in_family() carries a SET
-        -- search_path clause, so the planner can never inline it and its EXISTS
-        -- probe would run per candidate row. (relation_type_in_family below is the
-        -- C IMMUTABLE static check — cheap per row, unaffected.) Same truth table:
-        -- static family via the C check, dynamic membership via this set.
-        SELECT c.subject_id AS id FROM laplace.consensus c
-        WHERE c.type_id = laplace.relation_type_id('IS_A')
-          AND c.object_id = laplace.relation_type_id('HAS_FEATURE')
-    ), lang AS (
-        -- Resolved ONCE, not per candidate row. When p_lang is supplied COALESCE
-        -- short-circuits and converse.word_language() is never evaluated.
-        SELECT COALESCE(p_lang, converse.word_language(p_word)) AS l
-    ), subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
-    ), top AS (
-        SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
-        FROM subj s CROSS JOIN LATERAL (
-            SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
-            FROM laplace.v_consensus_unrefuted c
-            LEFT JOIN reltypes obj_rt ON obj_rt.id = c.object_id
-            WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
-              -- = ANY(ARRAY(SELECT ...)), not IN (SELECT ...): the array form is an
-              -- InitPlan, bound BEFORE the scan, so type_id can prune the LIST
-              -- partitions at run time. The semi-join form leaves the partition key a
-              -- per-row comparison and prunes nothing. Semantics are identical --
-              -- reltypes is the relation registry roster, so it stays a
-              -- subquery; only the binding changes.
-              AND c.type_id = ANY (ARRAY(SELECT id FROM reltypes))
-              AND c.type_id <> ALL (consensus.relation_family_ids('HAS_POS'))
-              AND c.type_id <> ALL (consensus.relation_family_ids('HAS_FEATURE'))
-              AND c.type_id NOT IN (SELECT id FROM feat_dynamic)
-              AND -- The exclusion set is DECLARED: engine/manifest/relation_types.toml [[set]]
-          -- NON_SALIENT_STRUCTURAL. It was a byte-identical 16-name NOT IN list here AND
-          -- in the sibling function -- one judgement about what is not a content fact,
-          -- kept in two files with nothing holding them in step. `<> ALL` matches the two
-          -- family exclusions above and is exactly equivalent to NOT IN here: type_id is
-          -- NOT NULL on both laplace.consensus and laplace.attestations (catalog-verified).
-          c.type_id <> ALL (consensus.relation_set_ids('NON_SALIENT_STRUCTURAL'))
-          -- UNDECLARED VOCABULARY, kept inline deliberately: CO_OCCURS_WITH and
-          -- OCCURS_IN_CONTEXT are in neither the manifest's canonicals nor its
-          -- aliases, though both exist as live RelationType entities. Codegen
-          -- REFUSES a set naming them (an undeclared member would emit NULL and
-          -- silently match nothing), and inventing a bit/rank/symmetry for them
-          -- is an operator decision. Row counts are deliberately NOT cited as the reason
-          -- either way: spec 36's CORRECTION 2026-07-25 retracts exactly that move for this
-          -- family of relations ("a low PRECEDES count is not a status signal -- do not cite
-          -- it"), because sequence lives in the trajectory and these are views of it.
-          AND c.type_id NOT IN (
-                laplace.relation_type_id('CO_OCCURS_WITH'),
-                laplace.relation_type_id('OCCURS_IN_CONTEXT'))
-              AND obj_rt.id IS NULL
-            ORDER BY consensus.eff_mu(c.rating, c.rd) DESC,
-                     c.type_id, c.object_id
-            LIMIT GREATEST(p_limit, 0)
-        ) cc
-    ), ranked AS (
-        -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
-        -- shape ran realize.realize() + type_label over EVERY row of `top` (dog: 413
-        -- rows across 10 subjects) only to ORDER/LIMIT to p_limit afterwards --
-        -- ~1.5ms/realize.render x 413 dominated the call (~575ms warm on real data).
-        -- Ranking needs only the consensus.eff_mu already in `top`, so it runs first over
-        -- everything. Labeling is total below: an unrenderable entity/relation
-        -- receives a deterministic hash label instead of making a ranked fact
-        -- disappear. Therefore the exact p_limit head is sufficient; the old
-        -- `3x + 8` pool was neither a correctness proof nor a caller contract.
-        SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
-               consensus.eff_mu(t.rating, t.rd) AS sort_mu
-        FROM top t
-        ORDER BY consensus.eff_mu(t.rating, t.rd) DESC,
-                 t.type_id, t.object_id
+    WITH lang AS (
+        SELECT COALESCE(p_lang, converse.terms_language(ARRAY[p_word])) AS l
+    ), keys AS (
+        SELECT p_word AS key
+        UNION
+        SELECT b.key FROM lang, converse.bindings(ARRAY[p_word], lang.l) b WHERE b.rank = 1
+    ), f AS MATERIALIZED (
+        SELECT kf.*, row_number() OVER (ORDER BY kf.eff_mu DESC, kf.type_id, kf.object_id) AS ord
+        FROM converse.key_facts(ARRAY(SELECT key FROM keys), GREATEST(p_limit, 0)) kf
+        ORDER BY kf.eff_mu DESC, kf.type_id, kf.object_id
         LIMIT GREATEST(p_limit, 0)
-    )
-    , ordered AS (
-        SELECT r.*, row_number() OVER (ORDER BY r.sort_mu DESC) AS ord
-        FROM ranked r
     ), labels AS (
-        -- ONE realize_batch over the ranked pool (was: scalar realize per row).
-        SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
-                             (SELECT l FROM lang)) AS l,
-               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
-        FROM ordered o
+        SELECT realize.batch(array_agg(f.object_id ORDER BY f.ord), (SELECT l FROM lang)) AS l,
+               lexical.type_label_batch(array_agg(f.type_id ORDER BY f.ord)) AS types
+        FROM f
     )
-    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT COALESCE(NULLIF(labels.types[o.ord], ''),
-                        consensus.relation_canonical(o.type_id),
-                        'Unrealized relation') AS type,
-               COALESCE(NULLIF(labels.l[o.ord], ''),
-                        'Entity · ' || left(encode(o.object_id,'hex'),12)) AS fact,
-               consensus.eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
-               o.sort_mu
-        FROM ordered o, labels
-    ) d
-    ORDER BY d.sort_mu DESC
-    LIMIT GREATEST(p_limit, 0)
-;
+    SELECT COALESCE(NULLIF(labels.types[f.ord], ''), 'Unrealized relation'),
+           COALESCE(NULLIF(labels.l[f.ord], ''), 'Entity · ' || left(encode(f.object_id, 'hex'), 12)),
+           f.eff_mu, f.witnesses
+    FROM f, labels
+    ORDER BY f.ord;
 END;
