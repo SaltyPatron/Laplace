@@ -525,7 +525,6 @@ set_target_properties(laplace_core PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
     OUTPUT_NAME laplace_core
-    PUBLIC_HEADER "${LAPLACE_CORE_HEADERS}"
 )
 
 target_include_directories(laplace_core
@@ -560,7 +559,6 @@ set_target_properties(laplace_syzygy PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
     OUTPUT_NAME laplace_syzygy
-    PUBLIC_HEADER "include/laplace/core/syzygy.h"
 )
 install(TARGETS laplace_syzygy
     LIBRARY
@@ -569,9 +567,6 @@ install(TARGETS laplace_syzygy
     RUNTIME
         DESTINATION lib
         PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
-    PUBLIC_HEADER
-        DESTINATION include/laplace/core
-        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
 if(BUILD_TESTING)
@@ -582,9 +577,6 @@ install(TARGETS laplace_core
     LIBRARY
         DESTINATION lib
         PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
-    PUBLIC_HEADER
-        DESTINATION include/laplace/core
-        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
 # Ship the linker PDB alongside the DLL so a deployed native crash symbolizes.
