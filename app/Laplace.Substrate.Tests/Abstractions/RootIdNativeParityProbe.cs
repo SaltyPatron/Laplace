@@ -59,14 +59,11 @@ public sealed class RootIdNativeParityProbe
     [Fact]
     public void Ghost_Is_WordNet_SsType_Misrouted_Through_UposResolver()
     {
-        var misrouted = Laplace.Decomposers.Abstractions.NativeAttestation.ResolvePos(
-            "n", Laplace.Decomposers.Abstractions.PosReference.PosTagset.Upos, out bool probationary);
-        var lawful = Laplace.Decomposers.Abstractions.NativeAttestation.ResolvePos(
-            "n", Laplace.Decomposers.Abstractions.PosReference.PosTagset.WordNet, out bool lawfulProbationary);
-        Assert.Equal("1217D71BEBFC827E4D5FCA1EFB41B0B1", Convert.ToHexString(misrouted.ToBytes()));
-        Assert.True(probationary);
-        Assert.False(lawfulProbationary);
-        Assert.NotEqual(Convert.ToHexString(misrouted.ToBytes()), Convert.ToHexString(lawful.ToBytes()));
+        // "n" is WordNet's ss_type code: unmapped in UPOS, NOUN through the WordNet tagset.
+        Assert.Null(Laplace.Decomposers.Abstractions.NativeAttestation.ResolvePosCanonical(
+            "n", Laplace.Decomposers.Abstractions.PosReference.PosTagset.Upos));
+        Assert.Equal("NOUN", Laplace.Decomposers.Abstractions.NativeAttestation.ResolvePosCanonical(
+            "n", Laplace.Decomposers.Abstractions.PosReference.PosTagset.WordNet));
 
 
         foreach (var (ssType, upos) in new[] { ("n", "NOUN"), ("v", "VERB"), ("a", "ADJ"), ("s", "ADJ"), ("r", "ADV") })

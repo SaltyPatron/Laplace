@@ -213,17 +213,23 @@ public static class NativeAttestation
         Hash128 sourceId, Hash128? contextId)
         => CategoricalResolved(subject, typeId, obj, sourceId, contextId, 1.0).Id;
 
-    public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset) =>
-        ResolvePos(tag, tagset, out _);
-
-
-
-
-
-
-
-    public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset, out bool probationary) =>
-        ResolvePosNative(tag, (int)tagset, out probationary);
+    /// <summary>
+    /// The governed UPOS label a source tag resolves to through its declared tagset
+    /// (engine/manifest/pos_tags.toml), or null when the tagset does not map it: an
+    /// unmapped tag is the source's own value, never a guessed UPOS.
+    /// </summary>
+    public static string? ResolvePosCanonical(string tag, PosReference.PosTagset tagset)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        unsafe
+        {
+            byte* canonical = null;
+            int index;
+            int rc = NativeInterop.PosResolveCanonical(tag, (int)tagset, &canonical, &index);
+            if (rc < 0) throw new InvalidOperationException($"pos resolve failed: {tag}");
+            return rc == 0 ? System.Runtime.InteropServices.Marshal.PtrToStringUTF8((IntPtr)canonical) : null;
+        }
+    }
 
 
     public static AttestationRow PosXpos(
@@ -424,18 +430,6 @@ public static class NativeAttestation
                 &staged);
             if (rc != 0) throw new InvalidOperationException($"attestation build failed: {rc}");
             return ToRow(staged);
-        }
-    }
-
-    private static Hash128 ResolvePosNative(string tag, int tagset, out bool probationary)
-    {
-        unsafe
-        {
-            Hash128 id;
-            int rc = NativeInterop.PosResolveEntity(tag, tagset, &id);
-            if (rc < 0) throw new InvalidOperationException($"pos resolve failed: {tag}");
-            probationary = rc == 1;
-            return id;
         }
     }
 

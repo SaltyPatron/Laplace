@@ -92,7 +92,11 @@ public sealed record SourceRecipeField(
     // observed: games on that attestation, not a claim of its own.
     string? ObservationOf = null,
     // This value in [0,1] is the named sibling claim's score (a draw is 0.5).
-    string? ScoreOf = null);
+    string? ScoreOf = null,
+    // A governed vocabulary the value resolves through ("pos/wordnet": WordNet ss_type
+    // n -> NOUN per engine/manifest/pos_tags.toml). A value the vocabulary does not map
+    // stays the source's own value.
+    string? Vocabulary = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode

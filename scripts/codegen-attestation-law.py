@@ -846,16 +846,21 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
 
 
 def emit_pos_law(pos: dict) -> None:
+    """UPOS is a governed vocabulary: a tag from a declared tagset resolves to its
+    canonical UPOS label (and that label's stable index, the POS mask bit). A POS
+    value's identity is the content id of its label, like relation and entity-type
+    labels; an unmapped tag is the source's own value and stays unresolved."""
     upos_list = pos["upos"].get("canonical", [])
-    
     tagsets: dict = pos["tagsets"]
+    if len(upos_list) > 64:
+        raise SystemExit("pos law: more than 64 UPOS values cannot fit the POS mask")
 
     enum_lines = ["    LAPLACE_POS_TAGSET_UPOS       = 0,"]
     for i, name in enumerate(tagsets, start=1):
         enum_lines.append(f"    LAPLACE_POS_TAGSET_{name.upper():<10} = {i},")
 
     header = OUT_CORE / "include/laplace/core/pos_law.h"
-    _write_text_if_changed(header, 
+    _write_text_if_changed(header,
         "#pragma once\n"
         "\n"
         '#include "laplace/core/hash128.h"\n'
@@ -868,6 +873,13 @@ def emit_pos_law(pos: dict) -> None:
         + "\n".join(enum_lines) + "\n"
         "} laplace_pos_tagset_t;\n"
         "\n"
+        "/* 0: tag resolves to canonical UPOS *out_canonical at stable index *out_index\n"
+        " * (the POS mask bit); 1: unmapped (the source's own value); -1: invalid. */\n"
+        "int laplace_pos_resolve_canonical(const char* tag, laplace_pos_tagset_t tagset,\n"
+        "                                  const char** out_canonical, int* out_index);\n"
+        "/* A declared tagset by name (\"upos\", \"wordnet\", ...); -1 when undeclared. */\n"
+        "int laplace_pos_tagset_from_name(const char* name);\n"
+        "/* The content id of the resolved UPOS label; an unmapped tag is not resolved (1). */\n"
         "int laplace_pos_resolve_entity(const char* tag, laplace_pos_tagset_t tagset, hash128_t* out_entity_id);\n"
         "const char* const* laplace_pos_upos_canonical(size_t* out_count);\n"
         "\n"
@@ -879,7 +891,6 @@ def emit_pos_law(pos: dict) -> None:
     lines = [
         '#include "laplace/core/pos_law.h"',
         "",
-        "#include <stdio.h>",
         "#include <string.h>",
         "",
         '#include "laplace/core/hash128.h"',
@@ -901,19 +912,11 @@ def emit_pos_law(pos: dict) -> None:
     lines.append("    return *a == 0 && *b == 0;")
     lines.append("}")
     lines.append("")
-    lines.append("static void hash_canonical(const char* s, hash128_t* out) {")
-    lines.append("    hash128_blake3((const uint8_t*)s, strlen(s), out);")
-    lines.append("}")
-    lines.append("")
     lines.append("static int upos_index(const char* tag) {")
     lines.append("    for (size_t i = 0; i < sizeof(k_upos)/sizeof(k_upos[0]); ++i) {")
     lines.append("        if (strcmp(k_upos[i], tag) == 0) return (int)i;")
     lines.append("    }")
     lines.append("    return -1;")
-    lines.append("}")
-    lines.append("")
-    lines.append("static const char* resolve_upos_canonical(const char* tag) {")
-    lines.append("    return upos_index(tag) >= 0 ? tag : NULL;")
     lines.append("}")
     lines.append("")
     lines.append("typedef struct { const char* key; const char* canon; } tag_map_t;")
@@ -931,28 +934,35 @@ def emit_pos_law(pos: dict) -> None:
         lines.append("    return NULL;")
         lines.append("}")
     lines.append("")
-    lines.append("int laplace_pos_resolve_entity(const char* tag, laplace_pos_tagset_t tagset, hash128_t* out_entity_id) {")
-    lines.append("    if (!tag || !out_entity_id) return -1;")
+    lines.append("int laplace_pos_resolve_canonical(const char* tag, laplace_pos_tagset_t tagset,")
+    lines.append("                                  const char** out_canonical, int* out_index) {")
+    lines.append("    if (!tag || !out_canonical) return -1;")
     lines.append("    const char* canon = NULL;")
-    lines.append("    const char* ns = NULL;")
     lines.append("    switch (tagset) {")
-    lines.append('        case LAPLACE_POS_TAGSET_UPOS: canon = resolve_upos_canonical(tag); ns = "upos"; break;')
+    lines.append("        case LAPLACE_POS_TAGSET_UPOS: canon = upos_index(tag) >= 0 ? tag : NULL; break;")
     for name in tagsets:
-        lines.append(f'        case LAPLACE_POS_TAGSET_{name.upper()}: canon = resolve_{name}(tag); ns = "{name}"; break;')
+        lines.append(f"        case LAPLACE_POS_TAGSET_{name.upper()}: canon = resolve_{name}(tag); break;")
     lines.append("        default: return -1;")
     lines.append("    }")
-    lines.append("    if (canon) {")
-    lines.append("        char path[64];")
-    lines.append('        int n = snprintf(path, sizeof(path), "substrate/pos/%s/v1", canon);')
-    lines.append("        if (n <= 0 || (size_t)n >= sizeof(path)) return -1;")
-    lines.append("        hash_canonical(path, out_entity_id);")
-    lines.append("        return 0;")
-    lines.append("    }")
-    lines.append("    char path[128];")
-    lines.append('    int n = snprintf(path, sizeof(path), "substrate/pos/probationary/%s/%s/v1", ns, tag);')
-    lines.append("    if (n <= 0 || (size_t)n >= sizeof(path)) return -1;")
-    lines.append("    hash_canonical(path, out_entity_id);")
-    lines.append("    return 1;")
+    lines.append("    *out_canonical = canon;")
+    lines.append("    if (out_index) *out_index = canon ? upos_index(canon) : -1;")
+    lines.append("    return canon ? 0 : 1;")
+    lines.append("}")
+    lines.append("")
+    lines.append("int laplace_pos_tagset_from_name(const char* name) {")
+    lines.append("    if (!name) return -1;")
+    lines.append('    if (str_ieq(name, "upos")) return LAPLACE_POS_TAGSET_UPOS;')
+    for name in tagsets:
+        lines.append(f'    if (str_ieq(name, "{name}")) return LAPLACE_POS_TAGSET_{name.upper()};')
+    lines.append("    return -1;")
+    lines.append("}")
+    lines.append("")
+    lines.append("int laplace_pos_resolve_entity(const char* tag, laplace_pos_tagset_t tagset, hash128_t* out_entity_id) {")
+    lines.append("    if (!out_entity_id) return -1;")
+    lines.append("    const char* canon = NULL;")
+    lines.append("    const int rc = laplace_pos_resolve_canonical(tag, tagset, &canon, NULL);")
+    lines.append("    if (rc != 0) return rc;")
+    lines.append("    return hash128_label_content_id(canon, strlen(canon), out_entity_id) == 0 ? 0 : -1;")
     lines.append("}")
     lines.append("")
     lines.append("const char* const* laplace_pos_upos_canonical(size_t* out_count) {")

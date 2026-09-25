@@ -50,8 +50,7 @@ public static class VocabularyNames
         ConcurrentDictionary<string, byte>? names, string tag, PosReference.PosTagset tagset)
     {
         if (names is null) return;
-        NativeAttestation.ResolvePos(tag, tagset, out bool probationary);
-        TrackProbationaryPos(names, tag, tagset, probationary);
+        TrackProbationaryPos(names, tag, tagset, NativeAttestation.ResolvePosCanonical(tag, tagset) is null);
     }
 
     /// <summary>Overload for callers that already resolved the tag (no second native resolve).</summary>

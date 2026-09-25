@@ -987,8 +987,8 @@ public static unsafe partial class NativeInterop
         long nowUnixUs,
         AttestationStagedNative* outStaged);
 
-    [LibraryImport(Library, EntryPoint = "laplace_pos_resolve_entity", StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int PosResolveEntity(string tag, int tagset, Hash128* outEntityId);
+    [LibraryImport(Library, EntryPoint = "laplace_pos_resolve_canonical", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int PosResolveCanonical(string tag, int tagset, byte** outCanonical, int* outIndex);
 
     [LibraryImport(Library, EntryPoint = "laplace_pos_upos_canonical")]
     internal static partial byte** PosUposCanonical(nuint* outCount);

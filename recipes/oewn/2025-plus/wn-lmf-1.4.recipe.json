@@ -161,7 +161,8 @@
       "valueKind": "Enumerated",
       "disposition": "Testimony",
       "relationName": "HAS_POS",
-      "contextField": "language"
+      "contextField": "language",
+      "vocabulary": "pos/wordnet"
     },
     {
       "syntaxPath": "Lemma/@script",
@@ -338,7 +339,8 @@
       "valueKind": "Enumerated",
       "disposition": "Testimony",
       "relationName": "HAS_POS",
-      "contextField": "language"
+      "contextField": "language",
+      "vocabulary": "pos/wordnet"
     },
     {
       "syntaxPath": "Synset/@lexicalized",

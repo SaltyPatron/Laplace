@@ -905,7 +905,7 @@ int laplace_attestation_pos_upos(
     int64_t          observation_count) {
     if (!stage || !subject || !upos_tag || !source) return -1;
     hash128_t pos_id;
-    if (laplace_pos_resolve_entity(upos_tag, LAPLACE_POS_TAGSET_UPOS, &pos_id) < 0) return -1;
+    if (laplace_pos_resolve_entity(upos_tag, LAPLACE_POS_TAGSET_UPOS, &pos_id) != 0) return -1;
     return laplace_attestation_categorical_add(
         stage, "HAS_UPOS", subject, &pos_id, 0, source, context, context_is_null,
         trust_weight, 1, observation_count);

@@ -7,7 +7,9 @@
   "layerOrder": 1,
   "selected": true,
   "root": "/vault/Data/.refresh-20260903/OMW-2.0",
-  "aliases": ["omw"],
+  "aliases": [
+    "omw"
+  ],
   "artifacts": [
     {
       "selector": "omw-2.0.tar.xz",
@@ -35,6 +37,24 @@
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Per-lexicon release note. Not lexical testimony."
+    },
+    {
+      "selector": "extracted/omw-2.0/*/LICENSE",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "The lexicon's license text (HTML). Its license is claimed natively from the lexicon header (Lexicon/@license -> HAS_LICENSE); no HTML provider records the text yet."
+    },
+    {
+      "selector": "extracted/omw-2.0/*/citation.bib",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "The lexicon's BibTeX citation. Its citation is claimed natively from the lexicon header (Lexicon/@citation -> HAS_CITATION); no BibTeX provider records the entry yet."
+    },
+    {
+      "selector": "index.toml",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Catalog restating each lexicon header's label, language, license and release URL, which the lexicons themselves state."
     }
   ]
 }

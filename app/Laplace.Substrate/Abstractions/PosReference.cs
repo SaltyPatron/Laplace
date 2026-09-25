@@ -25,15 +25,8 @@ public static class PosReference
 
     public static readonly string[] Canonical = ReadCanonicalFromNative();
 
-    // Native POS resolution remains the standards/tagset mapping oracle. Its
-    // historical path-hashed ids are not entity identity: POS endpoints in the
-    // substrate are the same ordinary composed content entities used everywhere
-    // else. This map recovers the canonical UPOS spelling from the legacy native
-    // resolver without persisting that resolver's private id namespace.
-    private static readonly IReadOnlyDictionary<Hash128, string> CanonicalByLegacyId =
-        Canonical.ToDictionary(
-            static name => NativeAttestation.ResolvePos(name, PosTagset.Upos),
-            static name => name);
+    // The native POS law is the governed tagset mapping; a POS endpoint is the
+    // ordinary content entity of its canonical UPOS label.
 
 
     private static unsafe string[] ReadCanonicalFromNative()
@@ -69,8 +62,9 @@ public static class PosReference
     private static string ResolveContent(string sourceTag, PosTagset tagset, out bool probationary)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceTag);
-        Hash128 legacy = NativeAttestation.ResolvePos(sourceTag, tagset, out probationary);
-        if (!probationary && CanonicalByLegacyId.TryGetValue(legacy, out string? canonical))
+        string? canonical = NativeAttestation.ResolvePosCanonical(sourceTag, tagset);
+        probationary = canonical is null;
+        if (canonical is not null)
             return canonical;
         // Unknown/probationary labels remain exact observed content. Do not case-fold
         // or namespace-salt them: "NN", "nn", "Nn" are distinct fragments unless

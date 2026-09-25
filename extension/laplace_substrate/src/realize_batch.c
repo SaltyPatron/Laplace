@@ -43,6 +43,7 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "perfcache_native.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_realize_batch);
 PG_FUNCTION_INFO_V1(pg_laplace_resolve_name_batch);
@@ -685,6 +686,26 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
         /* arm 0: LEXICALIZATION -- a concept renders as the words expressing it. */
         label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
+
+        /* A codepoint is its own glyph (perfcache), never its UCD name. */
+        if (label == NULL)
+        {
+            uint32_t cp;
+
+            if (laplace_perfcache_codepoint_for_id((const uint8_t *) VARDATA_ANY(DatumGetByteaPP(in_elems[i])), &cp)
+                && cp != 0 && (cp < 0xD800 || cp > 0xDFFF))
+            {
+                char   buf[5];
+                int    nb = 0;
+
+                if (cp < 0x80) buf[nb++] = (char) cp;
+                else if (cp < 0x800) { buf[nb++] = (char) (0xC0 | (cp >> 6)); buf[nb++] = (char) (0x80 | (cp & 0x3F)); }
+                else if (cp < 0x10000) { buf[nb++] = (char) (0xE0 | (cp >> 12)); buf[nb++] = (char) (0x80 | ((cp >> 6) & 0x3F)); buf[nb++] = (char) (0x80 | (cp & 0x3F)); }
+                else { buf[nb++] = (char) (0xF0 | (cp >> 18)); buf[nb++] = (char) (0x80 | ((cp >> 12) & 0x3F)); buf[nb++] = (char) (0x80 | ((cp >> 6) & 0x3F)); buf[nb++] = (char) (0x80 | (cp & 0x3F)); }
+                buf[nb] = '\0';
+                label = pstrdup(buf);
+            }
+        }
 
         /* arm 1: SELF RENDER, NULLIF '' -- CONTENT BEFORE NAME.
          *

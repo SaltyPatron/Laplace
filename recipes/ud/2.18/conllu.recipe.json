@@ -4,46 +4,136 @@
   "provider": "laplace/native-streaming-delimited-recipe/v1",
   "syntax": "CoNLL-U",
   "fields": [
-    { "syntaxPath": "token/@group:text", "propertyName": "text", "valueKind": "Text",
-      "disposition": "Content", "groupOnce": true },
-    { "syntaxPath": "token/@language", "propertyName": "language", "valueKind": "Text",
-      "disposition": "Testimony", "relationName": "HAS_LANGUAGE", "objectEntityType": "",
-      "subjectMode": "Trunk", "trunkField": "group:text", "groupOnce": true },
-    { "syntaxPath": "token/@id", "propertyName": "id", "valueKind": "Text", "disposition": "Excluded" },
-    { "syntaxPath": "token/@form", "propertyName": "form", "valueKind": "Text",
-      "disposition": "Identity, Content" },
-    { "syntaxPath": "token/@lemma", "propertyName": "lemma", "valueKind": "Text",
-      "disposition": "Testimony", "relationName": "IS_LEMMA_OF", "objectEntityType": "",
-      "absentSentinel": "_", "subjectMode": "Value", "omitWhenEqualsSubject": true,
-      "contextField": "group:text" },
-    { "syntaxPath": "token/@upos", "propertyName": "upos", "valueKind": "Text",
-      "disposition": "Testimony", "relationName": "HAS_POS", "objectEntityType": "",
-      "absentSentinel": "_", "contextField": "group:text" },
-    { "syntaxPath": "token/@xpos", "propertyName": "xpos", "valueKind": "Text",
-      "disposition": "Testimony", "relationName": "HAS_XPOS", "objectEntityType": "",
-      "absentSentinel": "_", "contextField": "group:text" },
-    { "syntaxPath": "token/@feats", "propertyName": "feats", "valueKind": "Text",
-      "disposition": "Testimony", "objectEntityType": "", "absentSentinel": "_",
-      "pairMode": "RelationKeyObjectValue", "relationResolver": "Feature",
-      "sequenceSeparator": "|", "pairValueSeparator": "=", "contextField": "group:text" },
-    { "syntaxPath": "token/@head", "propertyName": "head", "valueKind": "Text",
-      "disposition": "Testimony", "objectEntityType": "", "absentSentinel": "_",
-      "subjectMode": "Value", "relationField": "deprel", "relationResolver": "Deprel",
-      "trunkField": "group:text", "contextField": "group:text" },
-    { "syntaxPath": "token/@deprel", "propertyName": "deprel", "valueKind": "Text", "disposition": "Excluded" },
-    { "syntaxPath": "token/@deps", "propertyName": "deps", "valueKind": "Text",
-      "disposition": "Testimony", "objectEntityType": "", "absentSentinel": "_",
-      "pairMode": "SubjectReferenceRelationValue", "relationResolver": "EnhancedDeprel",
-      "trunkField": "group:text", "contextField": "group:text" },
-    { "syntaxPath": "token/@misc", "propertyName": "misc", "valueKind": "Text", "disposition": "Excluded" },
-    { "syntaxPath": "token/@group:first", "propertyName": "groupFirst", "valueKind": "Text", "disposition": "Excluded" }
+    {
+      "syntaxPath": "token/@group:text",
+      "propertyName": "text",
+      "valueKind": "Text",
+      "disposition": "Content",
+      "groupOnce": true
+    },
+    {
+      "syntaxPath": "token/@language",
+      "propertyName": "language",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_LANGUAGE",
+      "objectEntityType": "",
+      "subjectMode": "Trunk",
+      "trunkField": "group:text",
+      "groupOnce": true
+    },
+    {
+      "syntaxPath": "token/@id",
+      "propertyName": "id",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "token/@form",
+      "propertyName": "form",
+      "valueKind": "Text",
+      "disposition": "Identity, Content"
+    },
+    {
+      "syntaxPath": "token/@lemma",
+      "propertyName": "lemma",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "IS_LEMMA_OF",
+      "objectEntityType": "",
+      "absentSentinel": "_",
+      "subjectMode": "Value",
+      "omitWhenEqualsSubject": true,
+      "contextField": "group:text"
+    },
+    {
+      "syntaxPath": "token/@upos",
+      "propertyName": "upos",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "objectEntityType": "",
+      "absentSentinel": "_",
+      "contextField": "group:text",
+      "vocabulary": "pos/upos"
+    },
+    {
+      "syntaxPath": "token/@xpos",
+      "propertyName": "xpos",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_XPOS",
+      "objectEntityType": "",
+      "absentSentinel": "_",
+      "contextField": "group:text"
+    },
+    {
+      "syntaxPath": "token/@feats",
+      "propertyName": "feats",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "objectEntityType": "",
+      "absentSentinel": "_",
+      "pairMode": "RelationKeyObjectValue",
+      "relationResolver": "Feature",
+      "sequenceSeparator": "|",
+      "pairValueSeparator": "=",
+      "contextField": "group:text"
+    },
+    {
+      "syntaxPath": "token/@head",
+      "propertyName": "head",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "objectEntityType": "",
+      "absentSentinel": "_",
+      "subjectMode": "Value",
+      "relationField": "deprel",
+      "relationResolver": "Deprel",
+      "trunkField": "group:text",
+      "contextField": "group:text"
+    },
+    {
+      "syntaxPath": "token/@deprel",
+      "propertyName": "deprel",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "token/@deps",
+      "propertyName": "deps",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "objectEntityType": "",
+      "absentSentinel": "_",
+      "pairMode": "SubjectReferenceRelationValue",
+      "relationResolver": "EnhancedDeprel",
+      "trunkField": "group:text",
+      "contextField": "group:text"
+    },
+    {
+      "syntaxPath": "token/@misc",
+      "propertyName": "misc",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "token/@group:first",
+      "propertyName": "groupFirst",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
   ],
   "providerRoutes": [
     {
       "recordName": "token",
       "namespaceUri": "",
       "fieldPrefix": "token",
-      "subject": { "kind": "ContentField", "identityField": "form", "entityType": "" },
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "form",
+        "entityType": ""
+      },
       "structurePaths": []
     }
   ],
@@ -52,15 +142,37 @@
     "separator": "\t",
     "commentPrefix": "#",
     "trimFields": false,
-    "columns": ["id", "form", "lemma", "upos", "xpos", "feats", "head", "deprel", "deps", "misc"],
+    "columns": [
+      "id",
+      "form",
+      "lemma",
+      "upos",
+      "xpos",
+      "feats",
+      "head",
+      "deprel",
+      "deps",
+      "misc"
+    ],
     "groupBlankLines": true,
     "groupAttributeSeparator": "=",
     "skipKeyColumn": "id",
     "skipKeyCharacters": "-.",
     "references": [
-      { "column": "head", "keyColumn": "id", "targetColumn": "form", "rootValue": "0" },
-      { "column": "deps", "keyColumn": "id", "targetColumn": "form", "rootValue": "0",
-        "pairSeparator": "|", "pairValueSeparator": ":" }
+      {
+        "column": "head",
+        "keyColumn": "id",
+        "targetColumn": "form",
+        "rootValue": "0"
+      },
+      {
+        "column": "deps",
+        "keyColumn": "id",
+        "targetColumn": "form",
+        "rootValue": "0",
+        "pairSeparator": "|",
+        "pairValueSeparator": ":"
+      }
     ]
   }
 }

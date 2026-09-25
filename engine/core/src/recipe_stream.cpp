@@ -8,6 +8,7 @@
 #include "laplace/core/ordered_composition.h"
 #include "laplace/core/trajectory.h"
 #include "laplace/core/relation_law.h"
+#include "laplace/core/pos_law.h"
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
@@ -66,6 +67,7 @@ struct field_rule {
     double rank;
     std::unordered_map<std::string, std::string> aliases;
     std::string identity_table, object_literal, context_literal, observation_of, score_of;
+    int pos_tagset = -1;   // "pos/<tagset>" vocabulary: values resolve to canonical UPOS
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -444,6 +446,14 @@ struct laplace_recipe_stream {
         return result.id;
     }
 
+    // A governed vocabulary maps the source's value to its canonical label; an
+    // unmapped value is the source's own and stays as written.
+    static std::string governed(const field_rule& rule, const std::string& value) {
+        if (rule.pos_tagset < 0) return value;
+        const char* canonical = nullptr;
+        return laplace_pos_resolve_canonical(value.c_str(), static_cast<laplace_pos_tagset_t>(rule.pos_tagset),
+                                             &canonical, nullptr) == 0 && canonical ? std::string(canonical) : value;
+    }
     // "a|b": the first declared context the element carries, else its record carries
     // (a WN-LMF sense inherits its lexicon's language). None leaves the claim unqualified.
     const std::map<std::string, std::string>* scope_attributes = nullptr;
@@ -581,13 +591,14 @@ struct laplace_recipe_stream {
             return;
         }
         else if (rule.kind == 8 || rule.kind == 9) {
-            f.object = content(stage, identify(rule.identity_table, raw));
+            f.object = content(stage, governed(rule, identify(rule.identity_table, raw)));
         }
         else {
             auto values = rule.kind == 3 || (rule.kind == 0 && !rule.separator.empty())
                 ? split(raw, rule.separator) : std::vector<std::string>{raw};
             for (auto value : values) {
                 value = identify(rule.identity_table, value);
+                value = governed(rule, value);
                 auto alias = rule.aliases.find(alias_key(value)); if (alias != rule.aliases.end()) value = alias->second;
                 f.object = classifier(stage, value); emit_fact(f);
             }
@@ -880,6 +891,12 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             if (rcp7) {
                 f.identity_table = r.text(); f.object_literal = r.text(); f.context_literal = r.text();
                 f.observation_of = r.text(); f.score_of = r.text();
+                const std::string vocabulary = r.text();
+                if (!vocabulary.empty()) {
+                    if (vocabulary.rfind("pos/", 0) != 0
+                        || (f.pos_tagset = laplace_pos_tagset_from_name(vocabulary.c_str() + 4)) < 0)
+                        throw std::runtime_error("undeclared vocabulary " + vocabulary + " at " + f.path);
+                }
             }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
