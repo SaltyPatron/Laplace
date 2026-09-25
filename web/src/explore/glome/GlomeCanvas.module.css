@@ -53,6 +53,39 @@
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-viz-bg, #0a2638) 60%, transparent);
   }
 
+  .viewControls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.9rem;
+    margin: 0 0 0.45rem;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+  }
+
+  .viewControls label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .viewHint {
+    font-size: 0.72rem;
+  }
+
+  .pointLabel {
+    display: inline-block;
+    transform: translate(0.35rem, -50%);
+    padding: 0.05rem 0.2rem;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--color-viz-bg, #0a2638) 78%, transparent);
+    color: var(--color-viz-text, var(--color-text-primary));
+    font-size: 0.66rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
   .tooltip {
     background: var(--color-bg-panel);
     color: var(--color-text-primary);

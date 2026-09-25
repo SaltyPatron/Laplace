@@ -251,6 +251,9 @@ function buildNodeVisuals(
   return visuals;
 }
 
+/** Label height as a fraction of the viewport height. */
+const LABEL_SCREEN_HEIGHT = 0.034;
+
 function labelSprite(
   text: string,
   color: string,
@@ -279,11 +282,16 @@ function labelSprite(
 
   const texture = new CanvasTexture(canvas);
   texture.minFilter = LinearFilter;
-  const material = new SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  // Labels keep one on-screen size at every zoom (sizeAttenuation off, scale in
+  // viewport units). A world-sized label grows with the camera, so in the dense belief
+  // cluster every name stacked into one unreadable pile; now zooming in separates them.
+  const material = new SpriteMaterial({
+    map: texture, transparent: true, depthWrite: false, sizeAttenuation: false,
+  });
   materials.add(material);
   const sprite = new Sprite(material);
-  const scale = 0.22;
-  sprite.scale.set(canvas.width * scale, canvas.height * scale, 1);
+  sprite.center.set(0.5, 0);
+  sprite.scale.set(LABEL_SCREEN_HEIGHT * (canvas.width / canvas.height), LABEL_SCREEN_HEIGHT, 1);
   cache.set(key, sprite);
   return sprite.clone() as Sprite;
 }

@@ -26,7 +26,14 @@ export interface GlomeNode {
   kind?: 'primary' | 'constituent' | 'neighbor' | 'walk' | 'peer';
   /** Optional paint override (Packed ordinal ramp). */
   color?: string;
+  /** Compositional altitude, when the caller knows it. */
+  tier?: number;
+  /** Id of the node this one is a child of in the Merkle DAG, when the caller knows it. */
+  parentId?: string;
 }
+
+/** What point color encodes. Color is a metric, never a decoration. */
+export type GlomeColorBy = 'kind' | 'tier' | 'depth' | 'ordinal';
 
 interface GlomePalette {
   background: string;
@@ -59,6 +66,19 @@ function glomePalette(shared: VisualizationPalette): GlomePalette {
 }
 
 const SHELL = 0.85;
+const CAMERA_START = 2.2;
+/** Labels appear once no more than this many points are in view... */
+const LABEL_VIEW_LIMIT = 160;
+/** ...and then only the ones nearest the center of the view. */
+const LABEL_MAX = 24;
+
+/** A metric in [0,1] on the shared steel → signal → error ramp. */
+function metricColor(t: number, palette: GlomePalette): string {
+  const x = Math.max(0, Math.min(1, t));
+  return x < 0.5
+    ? lerpColor(palette.primary, palette.walk, x * 2)
+    : lerpColor(palette.walk, palette.neighbor, (x - 0.5) * 2);
+}
 
 /** Packed: hash-XYZ on a display shell. M is paint, not an axis. */
 export function packedDisplayPos(n: GlomeNode): [number, number, number] {
@@ -231,6 +251,9 @@ function GlomeScene({
   palette,
   revision,
   onSelectOrdinal,
+  colorBy,
+  edges,
+  showLabels,
 }: {
   nodes: GlomeNode[];
   trajectory: [number, number, number][];
@@ -242,9 +265,18 @@ function GlomeScene({
   palette: GlomePalette;
   revision: string;
   onSelectOrdinal?: (ordinal: number | null) => void;
+  colorBy: GlomeColorBy;
+  edges: [number, number, number][];
+  showLabels: boolean;
 }) {
   const [hover, setHover] = useState<GlomeNode | null>(null);
+  const [labelled, setLabelled] = useState<number[]>([]);
   const invalidate = useThree((s) => s.invalidate);
+  const positions = useMemo(
+    () => nodes.map((n) => project(n, projection, xmAngle, zmAngle)),
+    [nodes, projection, xmAngle, zmAngle],
+  );
+  const baseRadii = useRef<number[]>([]);
   const instanceMesh = useMemo(() => {
     // Per-sphere color is the instanceColor attribute that setColorAt() creates
     // before the first render; Three enables USE_INSTANCING_COLOR from it. The
@@ -258,6 +290,9 @@ function GlomeScene({
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, nodes.length));
     const transform = new THREE.Object3D();
     const color = new THREE.Color();
+    const maxTier = Math.max(1, ...nodes.map((n) => n.tier ?? 0));
+    const maxOrdinal = Math.max(1, ...nodes.map((n) => n.ordinal ?? 0));
+    const radii: number[] = new Array(nodes.length);
     const densityScale =
       nodes.length <= 8 ? 2.8
         : nodes.length <= 24 ? 2.2
@@ -267,25 +302,33 @@ function GlomeScene({
 
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
-      const [x, y, z] = project(n, projection, xmAngle, zmAngle);
+      const [x, y, z] = positions[i];
       const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
       const runScale = Math.min(0.009, Math.log2(Math.max(1, n.runLength ?? 1)) * 0.0015);
       const evidenceScale = n.evidenceRows && n.evidenceRows > 0
         ? 1 + Math.min(0.55, Math.log2(n.evidenceRows + 1) * 0.045)
         : 1;
       const radius = (ordHit ? 0.036 : 0.016 + runScale) * densityScale * evidenceScale;
+      radii[i] = radius;
 
       transform.position.set(x, y, z);
       transform.scale.setScalar(radius);
       transform.updateMatrix();
       mesh.setMatrixAt(i, transform.matrix);
 
+      const metric =
+        colorBy === 'tier' && n.tier != null ? n.tier / maxTier
+          : colorBy === 'depth' && Number.isFinite(n.radius) ? Math.max(0, Math.min(1, n.radius))
+            : colorBy === 'ordinal' && n.ordinal != null ? n.ordinal / maxOrdinal
+              : null;
       color.set(
         n.color
-          ?? (n.kind === 'walk' ? palette.walk
-            : n.kind === 'neighbor' ? palette.neighbor
-              : n.kind === 'constituent' ? palette.constituent
-                : ordHit || highlightIds.has(n.id) ? palette.highlight : palette.primary),
+          ?? (ordHit || highlightIds.has(n.id) ? palette.highlight
+            : metric != null ? metricColor(metric, palette)
+              : n.kind === 'walk' ? palette.walk
+                : n.kind === 'neighbor' ? palette.neighbor
+                  : n.kind === 'constituent' ? palette.constituent
+                    : palette.primary),
       );
       mesh.setColorAt(i, color);
     }
@@ -293,8 +336,49 @@ function GlomeScene({
     mesh.count = nodes.length;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    baseRadii.current = radii;
     return mesh;
-  }, [nodes, projection, xmAngle, zmAngle, highlightIds, highlightOrdinal, palette]);
+  }, [nodes, positions, highlightIds, highlightOrdinal, palette, colorBy]);
+
+  // Zooming must separate points, not magnify the tangle: point size stays constant
+  // on screen, so diving into a dense region resolves its structure. The same pass
+  // chooses which points to label once few enough are in view.
+  const lastScale = useRef(1);
+  const lastView = useRef('');
+  const scratch = useMemo(() => ({ t: new THREE.Object3D(), v: new THREE.Vector3() }), []);
+  useFrame(({ camera, controls }) => {
+    const target = (controls as unknown as { target?: THREE.Vector3 } | null)?.target;
+    const distance = target ? camera.position.distanceTo(target) : camera.position.length();
+    const scale = Math.max(0.0005, distance / CAMERA_START);
+    if (Math.abs(scale - lastScale.current) / lastScale.current > 0.02) {
+      lastScale.current = scale;
+      for (let i = 0; i < positions.length; i++) {
+        scratch.t.position.set(...positions[i]);
+        scratch.t.scale.setScalar((baseRadii.current[i] ?? 0.016) * scale);
+        scratch.t.updateMatrix();
+        instanceMesh.setMatrixAt(i, scratch.t.matrix);
+      }
+      instanceMesh.instanceMatrix.needsUpdate = true;
+      invalidate();
+    }
+    if (!showLabels) {
+      if (labelled.length) setLabelled([]);
+      return;
+    }
+    const view = camera.matrixWorld.elements.map((e) => e.toFixed(4)).join(',');
+    if (view === lastView.current) return;
+    lastView.current = view;
+    const inView: { i: number; d: number }[] = [];
+    for (let i = 0; i < positions.length; i++) {
+      scratch.v.set(...positions[i]).project(camera);
+      if (scratch.v.z < -1 || scratch.v.z > 1 || Math.abs(scratch.v.x) > 1 || Math.abs(scratch.v.y) > 1) continue;
+      inView.push({ i, d: Math.hypot(scratch.v.x, scratch.v.y) });
+    }
+    const next = inView.length <= LABEL_VIEW_LIMIT
+      ? inView.sort((a, b) => a.d - b.d).slice(0, LABEL_MAX).map((x) => x.i).sort((a, b) => a - b)
+      : [];
+    if (next.join(',') !== labelled.join(',')) setLabelled(next);
+  });
 
   useEffect(() => {
     invalidate();
@@ -325,15 +409,30 @@ function GlomeScene({
           onSelectOrdinal?.(n?.ordinal ?? null);
         }}
       />
+      {edges.length > 1 ? (
+        <Line
+          points={edges}
+          segments
+          color={palette.placementLine}
+          lineWidth={0.8}
+          transparent
+          opacity={0.38}
+        />
+      ) : null}
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
           color={projection === 'packed' || projection === 'carrier' ? palette.packedLine : palette.placementLine}
-          lineWidth={1.25}
+          lineWidth={1}
           transparent
-          opacity={0.82}
+          opacity={0.6}
         />
       ) : null}
+      {labelled.map((i) => (
+        <Html key={nodes[i].id} position={positions[i]} zIndexRange={[2, 0]}>
+          <span className={styles.pointLabel}>{nodes[i].label}</span>
+        </Html>
+      ))}
       {([
         [[1, 0, 0], '+X'], [[-1, 0, 0], '−X'],
         [[0, 1, 0], '+Y'], [[0, -1, 0], '−Y'],
@@ -373,7 +472,7 @@ function GlomeScene({
           </div>
         </Html>
       ) : null}
-      <OrbitControls enablePan enableZoom makeDefault />
+      <OrbitControls enablePan enableZoom zoomToCursor minDistance={0.0005} maxDistance={8} zoomSpeed={1.4} makeDefault />
     </>
   );
 }
@@ -433,6 +532,11 @@ export function GlomeCanvas({
 }) {
   const baseReady = useDeferredWebGlMount(nodes.length > 0);
   const [staggerReady, setStaggerReady] = useState(staggerMs <= 0);
+  const hasTier = nodes.some((n) => n.tier != null);
+  const hasParents = nodes.some((n) => n.parentId != null);
+  const [colorBy, setColorBy] = useState<GlomeColorBy>(hasTier ? 'tier' : 'kind');
+  const [showEdges, setShowEdges] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
   const [xmDegrees, setXmDegrees] = useState(35);
   const [zmDegrees, setZmDegrees] = useState(25);
   const xmAngle = xmDegrees * Math.PI / 180;
@@ -451,19 +555,34 @@ export function GlomeCanvas({
   }, [baseReady, staggerMs]);
   const webGlReady = baseReady && staggerReady;
 
+  // In a Merkle DAG the structure is each node's parent, so a known parent draws a
+  // composition edge; only a caller without parents gets the constituent curve.
+  const edges = useMemo(() => {
+    if (!hasParents || !showEdges) return [] as [number, number, number][];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const out: [number, number, number][] = [];
+    for (const n of nodes) {
+      const parent = n.parentId ? byId.get(n.parentId) : undefined;
+      if (!parent) continue;
+      out.push(project(parent, projection, xmAngle, zmAngle), project(n, projection, xmAngle, zmAngle));
+    }
+    return out;
+  }, [nodes, hasParents, showEdges, projection, xmAngle, zmAngle]);
+
   const trajectory = useMemo(() => {
     if (trajectoryPoints) return trajectoryPoints;
+    if (hasParents || !showEdges) return [] as [number, number, number][];
     return nodes
       .filter((n) => n.kind === 'constituent')
       .slice()
       .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
       .map((n) => project(n, projection, xmAngle, zmAngle));
-  }, [nodes, trajectoryPoints, projection, xmAngle, zmAngle]);
+  }, [nodes, trajectoryPoints, hasParents, showEdges, projection, xmAngle, zmAngle]);
 
   const highlights = useMemo(() => new Set(highlightIds), [highlightIds]);
   const revision = useMemo(
-    () => `${projection}:${xmDegrees}:${zmDegrees}:${palette.background}:${palette.primary}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
-    [nodes, projection, xmDegrees, zmDegrees, palette, highlightOrdinal],
+    () => `${projection}:${xmDegrees}:${zmDegrees}:${palette.background}:${palette.primary}:${nodes.length}:${highlightOrdinal}:${colorBy}:${showEdges}:${showLabels}:${nodes.map((n) => n.id).join(',')}`,
+    [nodes, projection, xmDegrees, zmDegrees, palette, highlightOrdinal, colorBy, showEdges, showLabels],
   );
 
   if (nodes.length === 0) {
@@ -472,6 +591,20 @@ export function GlomeCanvas({
 
   return (
     <div className={fill ? `${styles.root} ${styles.rootFill}` : styles.root}>
+      <div className={styles.viewControls}>
+        <label>
+          <span>Color</span>
+          <select value={colorBy} onChange={(event) => setColorBy(event.target.value as GlomeColorBy)}>
+            <option value="kind">role</option>
+            {hasTier ? <option value="tier">tier</option> : null}
+            <option value="depth">r₄ depth</option>
+            <option value="ordinal">ordinal</option>
+          </select>
+        </label>
+        <label><input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} /> {hasParents ? 'composition edges' : 'curve'}</label>
+        <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} /> labels when zoomed</label>
+        <span className={styles.viewHint}>Scroll zooms toward the cursor; points keep their screen size.</span>
+      </div>
       {projection === 'placement' ? (
         <div className={styles.rotationControls}>
           <label className={styles.rotationControl}>
@@ -505,7 +638,7 @@ export function GlomeCanvas({
           <Canvas
             frameloop="demand"
             dpr={[1, 1.5]}
-            camera={{ position: [0, 0, 2.2], fov: 50 }}
+            camera={{ position: [0, 0, CAMERA_START], fov: 50, near: 0.00005, far: 50 }}
             gl={{
               antialias: true,
               powerPreference: 'default',
@@ -525,6 +658,9 @@ export function GlomeCanvas({
                 palette={palette}
                 revision={revision}
                 onSelectOrdinal={onSelectOrdinal}
+                colorBy={colorBy}
+                edges={edges}
+                showLabels={showLabels}
               />
             </Suspense>
           </Canvas>

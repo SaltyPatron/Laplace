@@ -133,6 +133,8 @@ Issue: #1718
 1. The grammar stack (`GrammarDecomposer`, `StructuredGrammarIngest`, `GrammarRowComposer`, `IGrammarWitness`). Its vendored tree-sitter grammars already include JSON, CSV, TSV, **Turtle**, XML and Markdown (`engine/core/grammars/CMakeLists.txt`), plus a homegrown PGN grammar. Its semantics are hand-written C# per source (`WiktionaryGrammarWitness`, `SemLinkGrammarWitness`).
 2. The recipe engine (`engine/core/src/recipe_stream.cpp`). It has its own XML, delimited and Turtle readers and declarative semantics. `recipe_turtle.hpp` is a hand-written reader for a format the engine already parses.
 
+**The substrate is a Merkle DAG AST (inventor).** Content-addressed composition is one persistent, typed, universal abstract syntax tree (Laplace-Refactor constitution: "one persistent typed universal AST whose content-addressed composition is a Merkle DAG"). That is part of why tree-sitter is exploited: its grammars supply AST structure for many formats and languages, and its nodes converge into the same canonical tier/trajectory compositions (`INVENTION.md` §3). A streaming standards reader remains the right provider where a huge shallow file (Wiktextract, FrameBase, UCD XML) needs no materialized tree.
+
 **Target:**
 - One format-decomposer interface. Each implementation turns bytes into structure (nodes or records with fields and positions) and exposes that structure as the file's content physicality. It is registered by format id and injected. It is a streaming reader where files are huge (Wiktextract, FrameBase, UCD XML).
 - A generic content decomposer over any format.

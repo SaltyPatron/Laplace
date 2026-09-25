@@ -80,7 +80,7 @@ function realizedToGlomeNode(
   };
 }
 
-function nodeToGlomeNode(node: StorageProofNodeRow, selected: boolean): GlomeNode {
+function nodeToGlomeNode(node: StorageProofNodeRow, selected: boolean, parentId?: string): GlomeNode {
   return {
     id: node.id_hex,
     label: node.label || node.id_hex,
@@ -91,6 +91,8 @@ function nodeToGlomeNode(node: StorageProofNodeRow, selected: boolean): GlomeNod
     radius: node.radius,
     ordinal: node.ordinal,
     kind: selected ? 'primary' : node.tier === 0 ? 'constituent' : 'walk',
+    tier: node.tier,
+    parentId,
   };
 }
 
@@ -477,8 +479,12 @@ export function StorageProofView() {
   }, [proof, byOrdinal, direction]);
 
   const placementNodes = useMemo(
-    () => (proof?.nodes ?? []).map((node) => nodeToGlomeNode(node, node.ordinal === selectedOrdinal)),
-    [proof, selectedOrdinal],
+    () => (proof?.nodes ?? []).map((node) => nodeToGlomeNode(
+      node,
+      node.ordinal === selectedOrdinal,
+      node.parent_ordinal != null ? byOrdinal.get(node.parent_ordinal)?.id_hex : undefined,
+    )),
+    [proof, selectedOrdinal, byOrdinal],
   );
   const carrierNodes = useMemo(
     () => (selected?.packed_vertices ?? []).map(packedToCarrierNode),
