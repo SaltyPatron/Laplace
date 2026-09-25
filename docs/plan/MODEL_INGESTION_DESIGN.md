@@ -1,6 +1,5 @@
 # Model ingestion — current design contract
 
-> **Superseded in part (2026-09-25).** The inventor stated that a checkpoint's parameters are ETL'd into Laplace records above the model's own detected floor. That lets the Laplace forward pass run the model's computation from SQL through indexed, filtered lookups. Numeric values are therefore not transient operands, and §1's "numeric values … transient decode/calculation operands" no longer holds. Operator roles are recognized by shape, not by tensor-name tables. See [`ASSIMILATION_ROADMAP.md`](ASSIMILATION_ROADMAP.md) §1 laws 12–14 and workstream E.
 
 This document defines how conventional checkpoints enter Laplace. It supersedes the 2026-08 audit-era reduction that said a checkpoint was “not content,” that all useful model information was reducible to token-pair votes, and that model ingestion should be described through the pre-COUPLE forward-pass sequence.
 

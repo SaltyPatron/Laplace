@@ -14,15 +14,16 @@ The inventor's image is the Construct in *The Matrix*: Laplace assimilates the k
 
 ## 0. Where things stand
 
-The goal is a generative pre-trained transformer rebuilt on the substrate. The forward pass works as follows:
+The inventor describes the work as reinventing the generative pre-trained transformer. The invention does not rebuild a transformer. It obtains what conventional models buy with dense parameter computation from explicit reusable structure, sparse indexed response, uncertainty-bearing evidence and native execution (`INVENTION.md` §20: "The claim is not 'a faster transformer'").
 
-- **Q** is the query plus its context, such as the language.
-- **K** is the keys bound to tokens.
-- **QK** is query-relative coupling.
-- **V** is facts with Glicko-2 standing, read as a distribution. It is never a hard 0/1, and the empty set is an honest answer.
-- **O** is realization in the query's language.
-- Indexed O(log n) + O(k) lookups and A* paths replace O(n²) attention.
-- Every step must be auditable.
+The Laplace forward pass is the program `RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE → PROPOSE → STEER → SELECT → REALIZE → WITNESS` (spec 36, spec 37). The transformer roles correspond only functionally (`INVENTION.md` §8, INVENTIONS #71):
+
+- **Q** is the active admitted observation, its discourse bindings and its open obligations.
+- **K** is the indexed typed addresses and planes able to respond.
+- **QK** is COUPLE: the typed, query-relative response field. It is not one relevance score.
+- **V** is the responding physicalities, facts, evidence and calculations, with standing as rating, deviation, volatility and witness count. It is not one opaque confidence or a normalized distribution.
+- **O** is the receipted fold into updated bindings, orientation, frontier and obligations. Rendering a surface is REALIZE, a separate stage.
+- A*, walks and geometry are operators inside the program, not the cognition itself (INVENTIONS #69).
 
 The session's work was almost all on the input side: the recipe engine, governed vocabularies, and six sources moved onto recipes. **The forward pass has not been run end to end on a coherent database.** Every seed so far had a defect in its standing inputs: all recipe sources were admitted at trust 1. No read (capital(France), fire/ice, dog vs chien) has been verified since the claim model changed.
 
@@ -35,16 +36,16 @@ The session's work was almost all on the input side: the recipe engine, governed
 3. **Normalize to Laplace standards at ingest.** Things that mean the same attest the same, just as the same content has the same hash. Examples: WordNet `n` becomes NOUN, and every language code becomes ISO 639-3. Justify each mapping by a governed authority. Never normalize through synonym attestations, never record raw codes, never fabricate records.
 4. **Governed vocabularies are perfcache ROM registries with stable bits.** This covers relations, POS, deprels, languages, entity types, qualifiers and trust classes. They are never seeded as rows.
 5. **One relation per meaning.** Variants are multi-select qualifier flags on the attestation mask (`engine/manifest/qualifiers.toml`), which is the sister of the entity highway mask. For example, `eng HAS_EXTERNAL_ID eng {iso639-2b, iso639-2t, iso639-3}` is one claim.
-6. **Identifiers are keys, not nodes.** An ILI, an ISO code or a synset key is bound to content by an attestation that also carries the language: `dog —HAS_SENSE→ i46360 @eng`. Keys are the K of the forward pass.
+6. **An external identifier is not a node to render (inventor).** An ILI is not dog's label; it is an identifier bound to content by a witnessed claim. In the ingest law an opaque external identity is a typed reference (`INGEST_BOUNDARY_AND_RECIPE_LAW.md`). *Correction:* earlier versions of this note called identifiers "the K of the forward pass". That was the session's paraphrase, not the invention; K is every indexed typed address and plane able to respond.
 7. **Entities carry OR-masks for filtering.** For example, dog's POS mask is NOUN|VERB. The actual score is a consensus query. A mask miss is never authoritative absence.
 8. **Trust is how trustworthy the witness is.** A standards body ranks above an academic curation, which ranks above a user-curated wiki, which ranks above subtitles. Trust enters the standing of every claim the witness makes. The governed trust class is the only statement of trust.
 9. **Truths cluster, lies scatter.** High-trust, densely connected witnesses outweigh scattered low-trust ones.
 10. **Ownership.** Native C/C++ does the heavy lifting with SIMD/AVX/VNNI, TBB, MKL, Eigen and Spectra. C# and SQL orchestrate. An order of operations that round-trips data through the database is a defect.
 11. **Format is generic and semantics are per source.** A standardized format (XML, TSV/CSV, JSON/JSONL, RDF Turtle, CoNLL-U, PGN, safetensors, Parquet) has one decomposer. That decomposer ingests any file of the format as ordinary digital content. A curated source's recipe names its format, receives that decomposer by injection, and adds only the semantic layer: claims, vocabularies, qualifiers and witness.
-12. **A model is ingested as records, not blobs, and never by prompting.** A checkpoint's parameters are ETL'd into Laplace records, so the Laplace forward pass (SQL-orchestrated, native-executed) can run the model's computation. It runs through indexed, filtered lookups instead of brute force, and every value is addressable by model, tensor, layer, head, row and column. The model's learned relations, such as king–queen, become graded attestations under the model witness. They then aggregate with every other source, and that is how Laplace assimilates knowledge and capability.
-13. **Record only what is above the model's floor.** Laplace does not record everything (the lottery ticket hypothesis). The floor is detected from the model's own statistics, not set by a constant noise floor or a top-k.
+12. **A model is ingested as Laplace records, never as blobs and never by prompting.** Tensor values are transient calculation operands. The durable product is canonical structure, source-scoped circuit physicalities and trajectories, and graded evidence: the model's learned relations, such as king–queen, as attestations under the model witness (`INVENTION.md` §8 and §15, INVENTIONS #53 and #54, spec 09 storage law). Layer, head and expert are source-scoped structural coordinates of that evidence (INVENTIONS #58). The model's evidence aggregates with every other source's and is read through the Laplace forward program. Laplace does not replay the model's computation over retained weights (INVENTIONS, product identity: "not a GPU replay of retained weights").
+13. **Record only what carries information (inventor: the lottery ticket).** Store irreducible admitted information once, and do not persist world-all-pairs (INVENTIONS #102; model design §4). Which derived evidence is significant is decided by a declared calculation contract over the model's own statistics (INVENTIONS #106), not by a constant floor or a top-k.
 14. **Shape narrows what a tensor is; the name is a convention, not a specification.** Operator roles (attention, convolution, MLP, diffusion blocks, embeddings) are recognized structurally. Names, config and weight statistics are further evidence.
-15. **Software is reversible: what can be ingested can be exported (Mold-a-Model, `docs/specs/12_Mold_A_Model_Synthesis_Map.txt`).** Model records must carry enough to construct a target model back out through the declared export mapping (Foundry). The pooled construction is one consensus program over every model witness and every other source. It is not a merge of compatible tensors or N answers judged by an N+1th model (spec 12, round-table law).
+15. **What is ingested can be exported (Mold-a-Model, spec 12).** Export is a recipe over current standing, geometry and selected operators: a filtered snapshot ("I know kung fu"), not a copy of an ingested checkpoint and not bit-perfect reconstruction (`INVENTION.md` §15; AGENTS.md). A pooled construction is one consensus program over every witness. It is not a tensor merge and not N answers judged by an N+1th (spec 12, round-table law). An export is validated by loading in an external runtime and passing held-out semantic and source-ablation tests (spec 09), not by comparing it with the ingested checkpoint.
 16. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
 
 ---
@@ -152,69 +153,29 @@ Issue: #1719
 
 **Target checkpoint:** `/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0`. It is `LlamaForCausalLM` in bf16: 22 layers, d = 2048, 32 query heads, 4 KV heads, head_dim 64, SwiGLU 5632, vocab 32000, untied `lm_head`, RoPE θ 10000, RMSNorm. It has 201 tensors.
 
-**E1. The safetensors format decomposer.** The header is an 8-byte length, a JSON map (tensor name → dtype, shape, byte offsets) and a raw buffer. The decomposer is native and memory-mapped, with native dtype decoding. It does not use GGUF/AWQ, which are lossy.
+The contract is `MODEL_INGESTION_DESIGN.md`, `INVENTION.md` §8, §14 and §15, INVENTIONS #53–#58, and spec 09.
 
-**E2. Operator recognition by shape.** The name is a hint; the shape is the constraint. Operator templates are declared in a governed manifest: slots with shape constraints over the symbols *d, V, h, h_kv, d_h, f, E, r, C, k*. Recognition works as follows:
-1. Find *d* (the dimension present in every block), V (equal to the tokenizer size) and the block repetition from dimension statistics.
-2. Solve the template constraints.
-3. Take the symbols the shapes leave open from config.
-4. Break slot symmetries (Q vs O, K vs V, gate vs up) with name hints and weight statistics.
-5. Keep unresolved assignments ambiguous, with scores on each option.
+- **E1. safetensors provider.** A native, memory-mapped container reader whose values are decoded in bulk as transient operands (see D).
+- **E2. Source-role recognition by shape.** The name is a hint (INVENTIONS #99: tensor names are contextual realizations). Shape constrains the role. Roles are source-scoped coordinates, not native ontology (INVENTIONS #58). This replaces `ArchitectureProfile` (four hardcoded families) and `TensorRoleClassifier`. TinyLlama's dimension frequency is 2048×245, 5632×66, 256×44 and 32000×2.
+- **E3. Tokenizer.** Decodable pieces resolve to shared canonical content. Model-local pieces and ids remain source-local references and occurrences. BPE fragments never become words (design §3).
+- **E4. Significance as a declared calculation.** Which circuit evidence carries information is a calculation contract over the model's own statistics (INVENTIONS #106), for example a spectral bulk-versus-signal test. It is not a constant floor or a top-k. No world-all-pairs is persisted (INVENTIONS #102).
+- **E5. Durable records.**
+  - Source-scoped circuit entities and physicality trajectories, with the model in their identity.
+  - Graded evidence between canonical entities, under the model witness, with refutation never inferred from a dot-product sign (design §6).
+  - No raw values in any form (#1344).
+- **E6. Reading.** The model's evidence participates in the Laplace forward program like any other witness. Source-scoped A, B and pooled A+B are inspection scopes.
+- **E7. Export through Mold-a-Model** (spec 12), validated as spec 09 requires.
 
-Templates cover the following (TinyLlama's dimension frequency is 2048×245, 5632×66, 256×44, 32000×2):
-- embedding and unembedding `[V, d]`
-- norm gains `[d]`
-- self-attention with GQA, including fused QKV in either orientation
-- cross-attention, where K/V read a width different from Q
-- gated and plain MLPs
-- MoE: E MLP groups plus a router `[E, d]`
-- low-rank factors: MLA, LoRA
-- convolutions (`[out, in, kh, kw]`, depthwise, pointwise)
-- diffusion UNet blocks
-- DiT and ViT patch embeddings and adaLN modulation
-- audio conv1d front ends
-- learned positions
-
-This replaces `ArchitectureProfile` (four hardcoded families; anything else throws mid-run) and `TensorRoleClassifier`.
-
-**E3. Tokenizer.** The vocabulary and merges become content on the text ladder. Each token id is a key bound to that content under the model witness, and the id is kept (it is lost today).
-
-**E4. The floor, from the model's own statistics.** There is no constant and no top-k.
-- **Per matrix and per head slice:** compare the singular-value spectrum against the Marchenko–Pastur bulk (Martin & Mahoney; WeightWatcher). The signal rank comes from the Gavish–Donoho optimal hard threshold `ω(β) · median(σ)`. The computation is a native MKL SVD.
-- **Per token pair in a circuit:** compute a significance against the matrix's own bulk noise. Record a claim only if its game would move standing by more than its own uncertainty. A chance-level claim plays as a draw at maximum RD and carries no information.
-- **Per model:** the recorded subnetwork is measured against the dense model on held-out text (perplexity). This is the lottery-ticket check.
-  - One caveat: LLM spectra are heavy-tailed, so a low-rank cut alone can cost more than sparse pruning (SparseGPT and Wanda reach about 50% one-shot).
-  - A layer whose cut costs perplexity had its floor set too high. Its power-law exponent says why.
-
-**E5. Records.**
-- Each matrix's signal components (token and feature loadings) are recorded as trajectories under the model witness, plus the sparse residual weights that stay significant.
-- A value's address is `[model witness, tensor, row, col]`. The FACTOR vertex class already carries 6 float32 per vertex, and bf16 would carry 12.
-- Circuit claims:
-  - QK `W_Eᵀ W_Qᵀ W_K W_E`, OV `W_U W_O W_V W_E` and the direct path `W_U W_E` (Elhage et al.)
-  - MLP key and value neurons (Geva et al.)
-  - projections of any parameter into vocabulary space (Dar et al.)
-  - expert routing
-- These are attestations between tokens under the model witness, with the circuit (tensor role, layer, head, neuron or expert) as context and the circuit kind as a qualifier. They are written whether or not another source already holds the pair.
-
-**E6. The native forward pass over the records.**
-- **Kernels:** AVX-512 BF16/VNNI dot products, TBB over heads, MKL.
-- **Filtered, not brute force:** only the heads and neurons a token engages (Deja Vu: more than 80% of heads and 95% of MLP parameters are inactive per token), and top candidates at the output layer through an index rather than all 32,000 rows.
-- **Acceptance:** Laplace's TinyLlama matches the dense model within the model's own noise on held-out text.
-
-**E7. The round trip through Mold-a-Model.** Export TinyLlama back out of its Laplace records through the spec 12 mapping (Foundry) as safetensors. Run the export in a conventional runtime and compare it with the original on held-out text. Then export a pooled model built from several model witnesses plus the curated corpus. This proves the ingest kept what matters and that export is the inverse.
-
-**Existing model code** (`app/Laplace.Decomposers/Model`, about 5,300 lines, audited 2026-09-25): the maths is native (MKL), no model is prompted, and every relation is governed. Its defects:
-- **Weights are discarded after scoring**, so no forward pass is possible. `MODEL_INGESTION_DESIGN.md` §1 "numeric values … transient operands" is superseded by E5.
-- **Circuit identity omits the model** (`ModelCoordinates.cs`: `model-circuit/<plane>/layer/N/head/M`), so two models' L3H5 collide.
-- **Pair claims only re-score pairs already in consensus** (`ModelTokenEdgeETL.cs:251-325`), so a fresh database gets no model knowledge.
-- **Each circuit's trajectory is the entire vocabulary**, ranked by one token's norm.
+**Existing model code** (`app/Laplace.Decomposers/Model`, audited 2026-09-25): the maths is native, no model is prompted, weights are not retained, and every relation is governed. Its defects:
+- **Circuit identity omits the model**, so two models' L3H5 collide.
+- **Pair claims only re-score pairs already in consensus**, so a fresh database gets no model knowledge.
 - **REFUTE comes from the sign of a raw dot product.**
 - **The FFN stage is a full nonlinear per-token probe in double precision.**
 - **Norms, RoPE, MoE, MLA and LoRA are unhandled.**
-- **Bookkeeping ids:** `Blake3` recipe and tokenizer entities, `OfCanonical` special tokens and contexts.
-- **Tokens lose their ids** and collapse when they normalize alike.
+- **Bookkeeping ids:** `Blake3` recipe and tokenizer entities, `OfCanonical` special tokens.
+- **Model-local token ids and occurrences are lost.**
 
-Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034. Export: `docs/specs/12_Mold_A_Model_Synthesis_Map.txt`, `docs/specs/09_Substrate_LM_Synthesis.txt`.
+Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034.
 
 ### F. The native forward pass over curated knowledge (read path)
 
@@ -224,7 +185,8 @@ Issue: #1720
 - **Still hand-rolled:** about 27 word→sense readers, 61 id renderers, 130 consensus-by-subject readers and 124 C# inline reads.
 - **Realization (O) is English/Bulgarian templates** (`chat_scaffold`). `prompt_coherence.c` matches prompt words against English relation labels.
 - **Attestation endpoints do not name a tier.** The tier says which physicality of an entity is meant.
-- **Acceptance:** on one coherent seed, these reads return standing distributions, realized in the query's language, with an auditable path:
+- **The session's own primitives flatten typed state.** `converse.couple` reduces coupling to one weight (a `1/ln(2 + count)` specificity). `converse.key_facts` normalizes standing into a share, which behaves like a softmax. Both violate spec 36 COUPLE and `INVENTION.md` §19 ("typed state stays typed"). They are rebuilt as typed responses.
+- **Acceptance:** on one coherent seed, these reads return typed standing (rating, deviation, volatility, witnesses), realized in the query's language, with an auditable path:
   - capital(France) → Paris
   - fire/ice and elephant/electricity contrasts
   - dog vs chien
