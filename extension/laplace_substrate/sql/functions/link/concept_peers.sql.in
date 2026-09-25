@@ -27,11 +27,10 @@ BEGIN ATOMIC
         WHERE c.type_id IN (laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('EVOKES_FRAME'))
           AND c.object_id IS NOT NULL
         UNION
-        SELECT DISTINCT so.object_id
+        SELECT DISTINCT hs.object_id
         FROM self s
-        JOIN laplace.v_consensus_unrefuted hs ON hs.subject_id = s.id AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
-        JOIN laplace.v_consensus_unrefuted so ON so.subject_id = hs.object_id
-                         AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
+        JOIN laplace.v_consensus_unrefuted hs ON hs.subject_id = s.id
+                         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
     ),
     -- Set-based member expansion: one reverse-edge join per bridge kind over
     -- ALL anchors at once (consensus_object_type_btree — every join here is
@@ -46,10 +45,8 @@ BEGIN ATOMIC
                           AND c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
         UNION ALL
         SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd)
-        FROM anchors a JOIN laplace.v_consensus_unrefuted so ON so.object_id = a.anchor
-                          AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
-                       JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = so.subject_id
-                          AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        FROM anchors a JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = a.anchor
+                          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
         UNION ALL
         SELECT COALESCE(n.object_id, c.subject_id), 'frame'::text,
                consensus.eff_mu_display(c.rating, c.rd)

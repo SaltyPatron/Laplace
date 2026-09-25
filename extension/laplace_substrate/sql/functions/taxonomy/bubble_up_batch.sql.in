@@ -77,20 +77,16 @@ family_out AS (
     WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
 ),
 resolved AS (
-    /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
+    /* the term's binding to a key (word HAS_SENSE key): the key is the concept */
     SELECT fo.term,
            fo.target_id AS sense_id,
-           COALESCE(ss.object_id, fo.target_id) AS synset_id,
+           fo.target_id AS synset_id,
            fo.via_relation,
            fo.base_eff_mu,
-           (fo.witnesses + COALESCE(ss.witness_count, 0))::bigint AS witnesses,
+           fo.witnesses,
            fo.rating,
            fo.rd
     FROM family_out fo
-    LEFT JOIN laplace.consensus ss
-      ON ss.subject_id = fo.target_id
-     AND ss.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-     AND consensus.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
     WHERE fo.via_relation = 'HAS_SENSE'
 
     UNION ALL
@@ -100,14 +96,6 @@ resolved AS (
            fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
     FROM family_out fo
     WHERE fo.via_relation = 'IS_SYNONYM_OF'
-
-    UNION ALL
-
-    /* rare: lemma --IS_SENSE_OF--> synset */
-    SELECT fo.term, fo.target_id, fo.target_id, fo.via_relation,
-           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
-    FROM family_out fo
-    WHERE fo.via_relation = 'IS_SENSE_OF'
 ),
 -- An explicitly empty context lets an owning caller perform language election
 -- after receiving the complete candidate field. NULL retains automatic language

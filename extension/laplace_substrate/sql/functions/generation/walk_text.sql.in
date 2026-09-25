@@ -116,24 +116,7 @@ BEGIN
         CROSS JOIN allowed a
         WHERE c.type_id = laplace.relation_type_id('HAS_SENSE')
           AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
-        UNION ALL
-        SELECT r.concept_id, r.root_id, hs.subject_id,
-               'HAS_SENSE→IS_SENSE_OF'::text,
-               LEAST(consensus.eff_mu_display(hs.rating, hs.rd),
-                     consensus.eff_mu_display(so.rating, so.rd)),
-               GREATEST(hs.rd, so.rd)::numeric / 1000000000::numeric,
-               LEAST(hs.witness_count, so.witness_count),
-               r.bridge_relation, r.bridge_score, r.bridge_rd, r.bridge_witnesses
-        FROM roots r
-        JOIN laplace.v_consensus_unrefuted so
-          ON so.object_id = r.root_id
-         AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
-        JOIN laplace.v_consensus_unrefuted hs
-          ON hs.object_id = so.subject_id
-         AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
-        CROSS JOIN allowed a
-        WHERE p_bands IS NULL
-           OR (so.type_id = ANY(a.ids) AND hs.type_id = ANY(a.ids))
+
         UNION ALL
         SELECT r.concept_id, r.root_id, COALESCE(n.object_id, c.subject_id),
                'EVOKES_FRAME'::text,

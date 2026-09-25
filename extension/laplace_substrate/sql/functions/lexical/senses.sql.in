@@ -1,5 +1,5 @@
--- senses: HAS_SENSE-family read (R2). Prefer bubble_up for top-k + domain;
--- this keeps the classic (sense, synset, consensus.eff_mu, witnesses) shape for lexical.define().
+-- senses: the K read (converse.bindings) in the classic (sense, synset, eff_mu,
+-- witnesses) shape lexical.define() and the other readers consume.
 -- No SET search_path and no STRICT so it inlines into callers (both block
 -- inlining; #617). NULL-safety is preserved without STRICT: taxonomy.bubble_up(NULL)
 -- yields zero rows (lexical_peers is STRICT -> NULL array -> empty unnest).
@@ -8,13 +8,17 @@
 DROP FUNCTION IF EXISTS laplace.senses(bytea);
 -- One election for a set of distinct terms. Scalar callers delegate here;
 -- stream callers bind the whole term set before entering the taxonomy cascade.
+-- A term's senses are its bindings to keys (converse.bindings): the key is the concept
+-- a source says the word expresses, ranked by the binding's language (the terms'
+-- language), usage and standing. sense_id and synset_id are the key.
 CREATE OR REPLACE FUNCTION lexical.senses_batch(p_words bytea[])
     RETURNS TABLE(term bytea, sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT b.term, b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
-    FROM taxonomy.bubble_up_batch(p_words, NULL::bytea[], 64) b
-    ORDER BY b.term, b.witnesses DESC, b.score DESC;
+    SELECT b.term, b.key, b.key, b.eff_mu, b.witnesses
+    FROM converse.bindings(p_words, converse.terms_language(p_words)) b
+    WHERE b.rank <= 64
+    ORDER BY b.term, b.rank;
 END;
 
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)

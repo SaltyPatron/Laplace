@@ -78,12 +78,11 @@ BEGIN ATOMIC
         WHERE b.synset_id IS NOT NULL
     ),
     cand AS MATERIALIZED (
-        SELECT s.sense_id, COALESCE(ss.object_id, s.sense_id) AS synset_id,
+        -- A sense is the word's binding to a key: the key is the concept.
+        SELECT s.sense_id, s.sense_id AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
-               COALESCE(ss.witness_count, 0) AS w2
+               0::bigint AS w2
         FROM @extschema@.v_word_senses s
-        LEFT JOIN @extschema@.consensus ss ON ss.subject_id = s.sense_id
-                         AND ss.type_id = @extschema@.relation_type_id('IS_SENSE_OF')
         WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     candidate_nodes AS (

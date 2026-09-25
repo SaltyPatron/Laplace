@@ -7,7 +7,7 @@ BEGIN ATOMIC
     -- Every entity linked to an anchor (a synset/ILI concept or a FrameNet
     -- frame), pivoting only on ids. Three content-addressed bridge kinds:
     --   synonym : member --IS_SYNONYM_OF--> synset
-    --   sense   : member --HAS_SENSE--> sense --IS_SENSE_OF--> synset
+    --   sense   : member --HAS_SENSE--> concept (the member's binding to the key)
     --   frame   : member --EVOKES_FRAME--> frame
     -- Because the pivot is the anchor id, membership crosses language and
     -- surface for free (an English and a French lemma on the same ILI-seeded
@@ -18,10 +18,8 @@ BEGIN ATOMIC
     WHERE c.object_id = p_concept AND c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
     UNION ALL
     SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd), hs.witness_count
-    FROM laplace.v_consensus_unrefuted so
-    JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = so.subject_id
-                     AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
-    WHERE so.object_id = p_concept AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
+    FROM laplace.v_consensus_unrefuted hs
+    WHERE hs.object_id = p_concept AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
     UNION ALL
     -- A source-owned lexical member (for example VerbNet_Member) carries
     -- EVOKES_FRAME at its natural grain and exposes its surface through

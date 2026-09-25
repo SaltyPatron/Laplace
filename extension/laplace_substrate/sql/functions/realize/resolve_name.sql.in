@@ -102,20 +102,17 @@ BEGIN ATOMIC
                   AND nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME')
                                         || consensus.relation_family_ids('HAS_NAME_ALIAS'))
                 UNION ALL
-                -- synset lemma: word --[HAS_SENSE family]--> sense
-                --                    --[IS_SENSE_OF -> HAS_SENSE]--> p_id
+                -- lexicalization: the words bound to the key (word HAS_SENSE p_id),
+                -- the binding attested in the requested language first
                 SELECT hs.subject_id AS name_id,
                        false AS prim,
-                       (lang.object_id IS NOT NULL) AS lp,
+                       EXISTS (SELECT 1 FROM laplace.attestations a
+                               WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id
+                                 AND a.object_id = hs.object_id AND a.context_id = p_lang) AS lp,
                        consensus.eff_mu(hs.rating, hs.rd) AS mu
-                FROM laplace.v_consensus_unrefuted io
-                JOIN laplace.consensus hs ON hs.object_id = io.subject_id
-                     AND hs.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-                LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id
-                     AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-                     AND lang.object_id = p_lang
-                WHERE io.object_id = p_id
-                  AND io.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+                FROM laplace.v_consensus_unrefuted hs
+                WHERE hs.object_id = p_id
+                  AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
             ),
             -- RANK FIRST, THEN RENDER. The ordering keys are all fold-side, so the
             -- winner is decided in id space and only the survivors are realized.

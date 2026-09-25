@@ -20,19 +20,12 @@ BEGIN ATOMIC
         GROUP BY s.synset_id
     ),
     members AS (
-        -- Exact WordNet membership: lemma -> sense -> synset. The data-file shortcut
-        -- was removed because it duplicated the index.sense observation and erased the
-        -- lexical-sense identity. HAS_SENSE-family matching keeps aliases governed.
+        -- The key's members: every word a source binds to it (word HAS_SENSE key).
         SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
         FROM syn
-        JOIN laplace.consensus so
-          ON so.object_id = syn.id
-         AND so.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-         AND consensus.relation_canonical(so.type_id) = 'IS_SENSE_OF'
         JOIN laplace.consensus hs
-          ON hs.object_id = so.subject_id
-         AND hs.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-         AND consensus.relation_canonical(hs.type_id) = 'HAS_SENSE'
+          ON hs.object_id = syn.id
+         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
         UNION ALL
         -- OMW and other resources without a source sense key may still make a direct
         -- lexical membership assertion. Keep that distinct source shape readable.
