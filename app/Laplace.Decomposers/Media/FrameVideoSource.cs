@@ -11,7 +11,7 @@ public readonly struct FrameVideoSource : ISeedSource
     public static string SourceName => "FrameVideoDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_FRAME", "PRECEDES_IN_TIME", "HAS_REGION", "HAS_PATCH"];

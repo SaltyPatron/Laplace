@@ -34,8 +34,6 @@ public sealed class SubstrateCanonicalIdsTests
     [Fact]
     public void KeyShapesAreExact()
     {
-        Assert.Equal("substrate/trust_class/AcademicCurated/v1",
-            SubstrateCanonicalKeys.TrustClass("AcademicCurated"));
         Assert.Equal("substrate/pos/probationary/framenet/IDIO/v1",
             SubstrateCanonicalKeys.PosProbationary("framenet", "IDIO"));
         Assert.Equal("substrate/test/reg/a", SubstrateCanonicalKeys.Of("test", "reg", "a"));
@@ -49,8 +47,6 @@ public sealed class SubstrateCanonicalIdsTests
     {
         Assert.NotEqual(SubstrateCanonicalIds.Source("WordNetDecomposer"),
                         SubstrateCanonicalIds.Source("WordnetDecomposer"));
-        Assert.NotEqual(SubstrateCanonicalIds.Source("WordNetDecomposer"),
-                        SubstrateCanonicalIds.TrustClass("WordNetDecomposer"));
     }
 
     [Theory]

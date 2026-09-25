@@ -98,7 +98,7 @@ public static class ChessSyzygy
     public static readonly Hash128 TrustClassId = ChessVocabulary.SyzygyTrustClass;
 
     /// <summary>Witness weight of the oracle's testimony (the StandardsDerived trust band).</summary>
-    public const double Weight = TC.StandardsDerived;
+    public static readonly double Weight = TC.StandardsDerived;
 
     /// <summary>Versioned per-POSITION marker — each board state is probed/deposited once.</summary>
     public static Hash128 MarkerId(Hash128 positionId, int version)

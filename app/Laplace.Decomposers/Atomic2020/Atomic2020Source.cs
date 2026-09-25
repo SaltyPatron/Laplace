@@ -11,7 +11,7 @@ public readonly struct Atomic2020Source : ISeedSource
     public static string SourceName => "Atomic2020Decomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     // Spelled once: the assertion and the denial that refutes it share one relation.
 

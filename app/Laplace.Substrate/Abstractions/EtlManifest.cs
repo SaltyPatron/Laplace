@@ -6,10 +6,9 @@ namespace Laplace.Decomposers.Abstractions;
 public static class EtlManifest
 {
     private static Hash128 Src(string name) => Hash128.OfCanonical($"substrate/source/{name}/v1");
-    private static Hash128 TrustClass(string cls) => Hash128.OfCanonical($"substrate/trust_class/{cls}/v1");
 
     private static EtlSource Row(
-        string name, string decomposerName, int layer, string trustClass, double trust,
+        string name, string decomposerName, int layer, string trustClass,
         string dataKey, EtlModality modality, EdgeRule[]? edges = null,
         AnchorResolver anchor = AnchorResolver.None, string? glob = null,
         string[]? bootstrapRelations = null, bool acceptCommentRows = true,
@@ -19,8 +18,8 @@ public static class EtlManifest
             Name: decomposerName,
             SourceId: Src(decomposerName),
             Layer: layer,
-            TrustClassId: TrustClass(trustClass),
-            Trust: trust,
+            TrustClassId: TrustClassRegistry.Id(trustClass),
+            Trust: TC.ForClassName(trustClass),
             DataKey: dataKey,
             Modality: modality,
             NodeEdgeMap: edges ?? Array.Empty<EdgeRule>(),
@@ -55,9 +54,9 @@ public static class EtlManifest
 
 
 
-            ["unicode"] = Row("unicode", "UnicodeDecomposer", 0, "StandardsDerived", TC.StandardsDerived,
+            ["unicode"] = Row("unicode", "UnicodeDecomposer", 0, "StandardsDerived",
                 "unicode", new EtlModality("ucd", GrammarReady: false)),
-            ["iso639"] = Row("iso639", "ISO639Decomposer", 1, "StandardsDerived", TC.StandardsDerived,
+            ["iso639"] = Row("iso639", "ISO639Decomposer", 1, "StandardsDerived",
                 "iso639", new EtlModality("tsv", GrammarReady: false)),
 
 
@@ -67,43 +66,43 @@ public static class EtlManifest
             // source/parser metadata only; executable declarative ingestion lives
             // in SourceGenerationRecipe.
 
-            ["tatoeba"] = Row("tatoeba", "TatoebaDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["tatoeba"] = Row("tatoeba", "TatoebaDecomposer", 2, "StructuredCorpus",
                 "tatoeba", new EtlModality("tsv", Glob: "*.csv", RecordFraming: GrammarRecordFraming.Line),
                 bootstrapRelations: TatoebaBootstrap, hasDedicatedDecomposer: true),
 
 
-            ["wiktionary"] = Row("wiktionary", "WiktionaryDecomposer", 2, "AcademicCuratedUserInput", TC.AcademicCuratedUserInput,
+            ["wiktionary"] = Row("wiktionary", "WiktionaryDecomposer", 2, "AcademicCuratedWithUserInput",
                 "wiktionary", new EtlModality("json", Glob: "*.json*", RecordFraming: GrammarRecordFraming.Line),
                 bootstrapRelations: WiktionaryBootstrap, hasDedicatedDecomposer: true),
 
 
-            ["ud"] = Row("ud", "UDDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
+            ["ud"] = Row("ud", "UDDecomposer", 2, "AcademicCurated",
                 "ud", new EtlModality("conllu", Glob: "*.conllu", GrammarReady: false),
                 bootstrapRelations: UdBootstrap),
 
 
-            ["opensubtitles"] = Row("opensubtitles", "OpenSubtitlesDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["opensubtitles"] = Row("opensubtitles", "OpenSubtitlesDecomposer", 2, "StructuredCorpus",
                 "opensubtitles", new EtlModality("tsv", GrammarReady: false),
                 bootstrapRelations: new[] { "IS_TRANSLATION_OF", "HAS_LANGUAGE" }),
 
 
 
-            ["code"] = Row("code", "CodeDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["code"] = Row("code", "CodeDecomposer", 2, "StructuredCorpus",
                 "code", new EtlModality("code", GrammarReady: false)),
-            ["repo"] = Row("repo", "RepoDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["repo"] = Row("repo", "RepoDecomposer", 2, "StructuredCorpus",
                 "repo", new EtlModality("code", GrammarReady: false)),
-            ["tabular"] = Row("tabular", "TabularDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["tabular"] = Row("tabular", "TabularDecomposer", 2, "StructuredCorpus",
                 "tabular", new EtlModality("csv", GrammarReady: false, RecordFraming: GrammarRecordFraming.Line)),
-            ["tiny-codes"] = Row("tiny-codes", "TinyCodesDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["tiny-codes"] = Row("tiny-codes", "TinyCodesDecomposer", 2, "StructuredCorpus",
                 "tiny-codes", new EtlModality("json", GrammarReady: false)),
-            ["stack"] = Row("stack", "StackDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["stack"] = Row("stack", "StackDecomposer", 2, "StructuredCorpus",
                 "stack", new EtlModality("code", GrammarReady: false)),
-            ["document"] = Row("document", "DocumentDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
+            ["document"] = Row("document", "DocumentDecomposer", 2, "StructuredCorpus",
                 "document", new EtlModality("text", GrammarReady: false)),
 
 
 
-            ["omw"] = Row("omw", "OMWDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
+            ["omw"] = Row("omw", "OMWDecomposer", 3, "AcademicCurated",
                 "omw", new EtlModality("tsv", Glob: "*.tab", RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset, acceptCommentRows: false,
                 bootstrapRelations: OmwBootstrap, requireIliMap: true, hasDedicatedDecomposer: true),
@@ -114,38 +113,38 @@ public static class EtlManifest
             // construction and each asserts it implicitly. CILI and MapNet are NOT scoped —
             // an ILI concept and a cross-resource mapping are language-neutral, and
             // stamping them English would attest something the source does not say.
-            ["wordnet"] = Row("wordnet", "WordNetDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
+            ["wordnet"] = Row("wordnet", "WordNetDecomposer", 2, "AcademicCurated",
                 "wordnet", new EtlModality("wndb", GrammarReady: false), anchor: AnchorResolver.IliSynset,
                 languageScope: "eng"),
 
 
-            ["cili"] = Row("cili", "CILIDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
+            ["cili"] = Row("cili", "CILIDecomposer", 2, "AcademicCurated",
                 "cili", new EtlModality("turtle", Glob: "*.ttl", GrammarReady: false),
                 anchor: AnchorResolver.IliSynset),
 
 
-            ["framenet"] = Row("framenet", "FrameNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
+            ["framenet"] = Row("framenet", "FrameNetDecomposer", 3, "AcademicCurated",
                 "framenet", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
                 anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
-            ["propbank"] = Row("propbank", "PropBankDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
+            ["propbank"] = Row("propbank", "PropBankDecomposer", 2, "AcademicCurated",
                 "propbank", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
                 anchor: AnchorResolver.SenseKey, languageScope: "eng"),
-            ["verbnet"] = Row("verbnet", "VerbNetDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
+            ["verbnet"] = Row("verbnet", "VerbNetDecomposer", 2, "AcademicCurated",
                 "verbnet", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
                 anchor: AnchorResolver.SenseKey, languageScope: "eng"),
 
 
-            ["semlink"] = Row("semlink", "SemLinkDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
+            ["semlink"] = Row("semlink", "SemLinkDecomposer", 3, "AcademicCurated",
                 "semlink", new EtlModality("json", Glob: "*.json", GrammarReady: false),
                 anchor: AnchorResolver.IliSynset, languageScope: "eng"),
-            ["mapnet"] = Row("mapnet", "MapNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
+            ["mapnet"] = Row("mapnet", "MapNetDecomposer", 3, "AcademicCurated",
                 "mapnet", new EtlModality("tsv", Glob: "*.tsv", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset),
-            ["wordframenet"] = Row("wordframenet", "WordFrameNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
+            ["wordframenet"] = Row("wordframenet", "WordFrameNetDecomposer", 3, "AcademicCurated",
                 "wordframenet", new EtlModality("text", GrammarReady: false),
                 anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
-            ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
+            ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated",
                 "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset),

@@ -63,3 +63,8 @@ DELETE FROM laplace.entities e
 USING vocabulary v
 WHERE e.id = v.id
   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = e.id);
+
+-- Trust classes are the native trust-class law (engine/manifest/trust_classes.toml),
+-- identified by the content id of their label. Their retired key strings name nothing.
+DELETE FROM laplace.canonical_names
+WHERE name ~ '^substrate/trust_class/[A-Za-z]+/v1$';

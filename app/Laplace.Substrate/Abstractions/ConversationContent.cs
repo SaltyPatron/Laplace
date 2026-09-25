@@ -87,10 +87,10 @@ public static class ConversationContent
     {
         var promptBoot = new BootstrapIntentBuilder(
             scope.PromptSource, scope.PromptSourceName,
-            SubstrateCanonicalIds.TrustClass("UserPromptContent"));
+            TrustClassRegistry.Id("UserPromptContent"));
         var responseBoot = new BootstrapIntentBuilder(
             scope.ResponseSource, scope.ResponseSourceName,
-            SubstrateCanonicalIds.TrustClass("ResponseContent"));
+            TrustClassRegistry.Id("ResponseContent"));
         foreach (var boot in new[] { promptBoot, responseBoot })
         {
             boot.AddType("Conversation_Session");

@@ -17,7 +17,7 @@ namespace Laplace.Decomposers.Wiktionary;
 /// </summary>
 internal static class WiktionaryEmit
 {
-    private const double Trust = TC.AcademicCuratedUserInput;
+    private static readonly double Trust = TC.AcademicCuratedUserInput;
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     /// <summary>

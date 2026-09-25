@@ -12,7 +12,7 @@ public readonly struct UnicodeSource : ISeedSource
     public static string SourceName => "UnicodeDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StandardsDerived");
+        TrustClassRegistry.Id("StandardsDerived");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

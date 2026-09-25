@@ -65,7 +65,7 @@ public static class WorkEntity
                     || emittedAuthor != identity.AuthorId))
                 throw new InvalidOperationException("WorkEntity.Emit: author staging changed identity");
 
-            const double trust = SourceTrust.StructuredCorpus;
+            double trust = SourceTrust.StructuredCorpus;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 fileId, DocumentSource.Resolve(DocumentRelation.Expresses).Id,
                 identity.WorkId, fileId, null, trust));

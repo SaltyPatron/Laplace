@@ -186,7 +186,7 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     public string SourceName => _options.SourceName;
     public int LayerOrder => _options.LayerOrder;
     public bool PerFileCompletion => true;
-    public Hash128 TrustClassId => SubstrateCanonicalIds.TrustClass(_options.TrustClass);
+    public Hash128 TrustClassId => TrustClassRegistry.Id(_options.TrustClass);
     public IReadOnlyList<string> DeclaredRelations { get; }
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
@@ -431,7 +431,7 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
     public override Hash128 SourceId => _recipe.SourceId;
     public override string SourceName => _recipe.SourceName;
     public override int LayerOrder => _recipe.LayerOrder;
-    public override Hash128 TrustClassId => SubstrateCanonicalIds.TrustClass(_recipe.TrustClass);
+    public override Hash128 TrustClassId => TrustClassRegistry.Id(_recipe.TrustClass);
     public bool PerFileCompletion => true;
 
     /// <summary>

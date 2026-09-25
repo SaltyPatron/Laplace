@@ -11,7 +11,7 @@ public readonly struct UDSource : ISeedSource
     public static string SourceName => "UDDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_LANGUAGE", "IS_A", "HAS_PARSE", "CONTAINS",

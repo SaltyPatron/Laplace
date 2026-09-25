@@ -11,7 +11,7 @@ public class BootstrapIntentBuilderTests
     private static readonly Hash128 SourceId =
         SubstrateCanonicalIds.Source("UnicodeDecomposer");
     private static readonly Hash128 TrustClassId =
-        SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+        TrustClassRegistry.Id("SubstrateMandate");
 
     private static Hash128 TypeHash(string name) =>
         Hash128.Blake3(Encoding.UTF8.GetBytes(name));
@@ -111,7 +111,7 @@ public class BootstrapIntentBuilderTests
 public class BootstrapIntentBuilderAliasTests
 {
     private static readonly Hash128 TrustClassId =
-        SubstrateCanonicalIds.TrustClass("AIModelProbe");
+        TrustClassRegistry.Id("AIModelProbe");
 
     // A content-hash source (an AI model) must register its own name so realize.render()/
     // realize.label() stop showing raw hex and seed-step verify can resolve name → id

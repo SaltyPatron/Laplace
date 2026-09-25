@@ -99,7 +99,7 @@ public sealed class SubstrateApplyEnvelopeTests
         public string SourceName => "ApplyEnvelope";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public Task InitializeAsync(
             IDecomposerContext context, CancellationToken ct = default) => Task.CompletedTask;

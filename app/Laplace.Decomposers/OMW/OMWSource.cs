@@ -27,7 +27,7 @@ public readonly struct OMWSource : ISeedSource
     public static Hash128 SourceId { get; } = SubstrateCanonicalIds.Source("OMWDecomposer");
     public static string SourceName => "OMWDecomposer";
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     // Single declaration and lookup roster: call sites resolve indexed ids from here.
     public static IReadOnlyList<string> Relations { get; } =

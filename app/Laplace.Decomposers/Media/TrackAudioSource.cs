@@ -12,7 +12,7 @@ public readonly struct TrackAudioSource : ISeedSource
     public static string SourceName => "TrackAudioDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_SPECTRAL_PEAK", "HAS_ONSET_SEGMENT"];

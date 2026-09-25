@@ -51,11 +51,12 @@ public sealed class UdSentenceEmitContext
         ConcurrentDictionary<string, byte> canonicalNames,
         UdSentenceEmitContext ctx,
         Hash128 sourceId,
-        double witnessWeight = SourceTrust.AcademicCurated,
+        double? witnessWeight = null,
         Hash128? sourceFileContext = null)
     {
+        double declaredWitnessWeight = witnessWeight ?? SourceTrust.AcademicCurated;
         Hash128 admittedLang = LanguageReference.Emit(
-            b, langCode, sourceId, witnessWeight);
+            b, langCode, sourceId, declaredWitnessWeight);
         if (admittedLang != langId)
             throw new InvalidOperationException(
                 $"UD language identity diverged from shared content admission: {langCode}");
@@ -65,14 +66,14 @@ public sealed class UdSentenceEmitContext
         string xposScope = XposIdentityScope(langCode, fileLabel);
         Hash128 parseId = UdParseStructure.Emit(
             b, s, langId, xposScope, fileLabel, seenEntBatch,
-            seenSourceDeclarations, canonicalNames, ctx, sourceId, witnessWeight, sourceFileContext);
+            seenSourceDeclarations, canonicalNames, ctx, sourceId, declaredWitnessWeight, sourceFileContext);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             sentenceRoot ?? parseId,
             UDSource.HasLanguageTypeId,
             langId,
             sourceId,
             sourceFileContext,
-            witnessWeight));
+            declaredWitnessWeight));
     }
 
     internal static string XposIdentityScope(string langCode, string fileLabel)

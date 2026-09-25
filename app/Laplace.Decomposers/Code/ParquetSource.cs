@@ -18,7 +18,7 @@ public readonly struct ParquetSource : ISeedSource
     public static string SourceName => "ParquetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["IS_VALUE_IN", "IS_INSTANCE_OF"];

@@ -13,7 +13,7 @@ namespace Laplace.Decomposers.Model;
 public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     public static readonly Hash128 TrustClass =
-        SubstrateCanonicalIds.TrustClass("AIModelProbe");
+        TrustClassRegistry.Id("AIModelProbe");
 
     public static (Hash128 Id, string Name) SourceForModel(string modelDir)
     {

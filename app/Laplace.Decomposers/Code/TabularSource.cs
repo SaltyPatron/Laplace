@@ -11,7 +11,7 @@ public readonly struct TabularSource : ISeedSource
     public static string SourceName => "TabularDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["PREDICTS", "IS_VALUE_IN", "IS_INSTANCE_OF"];

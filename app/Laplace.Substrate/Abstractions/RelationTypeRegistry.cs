@@ -200,7 +200,7 @@ public static class RelationTypeRegistry
                                    ISet<Hash128> seenEntitiesThisBatch,
                                    ConcurrentIdSet seenAttestationsThisRun,
                                    ConcurrentDictionary<string, byte>? readbackNames = null,
-                                   double witnessWeight = SourceTrust.AcademicCurated,
+                                   double? witnessWeight = null,
                                    Hash128? contextId = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -219,7 +219,7 @@ public static class RelationTypeRegistry
                                   ISet<Hash128> seenEntitiesThisBatch,
                                   ConcurrentIdSet seenAttestationsThisRun,
                                   ConcurrentDictionary<string, byte>? readbackNames = null,
-                                  double witnessWeight = SourceTrust.AcademicCurated,
+                                  double? witnessWeight = null,
                                   Hash128? contextId = null)
     {
         int colon = deprel.IndexOf(':');
@@ -231,7 +231,7 @@ public static class RelationTypeRegistry
                                           ISet<Hash128> seenEntitiesThisBatch,
                                           ConcurrentIdSet seenAttestationsThisRun,
                                           ConcurrentDictionary<string, byte>? readbackNames = null,
-                                          double witnessWeight = SourceTrust.AcademicCurated,
+                                          double? witnessWeight = null,
                                           Hash128? contextId = null)
     {
         int colon = deprel.IndexOf(':');

@@ -75,7 +75,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         public string SourceName => "DeferredContentSynthetic";
         public int LayerOrder => 2;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.CompletedTask;

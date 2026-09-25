@@ -23,7 +23,7 @@ public readonly struct DocumentSource : ISeedSource
     public static string SourceName => "DocumentDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CONTAINS", "EXPRESSES", "HAS_TITLE", "AUTHORED_BY"];

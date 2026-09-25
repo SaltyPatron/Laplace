@@ -23,7 +23,7 @@ BEGIN ATOMIC
                             regexp_replace(
                                 regexp_replace(
                                     regexp_replace(realize.render(p_id),
-                                        '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
+                                        '^substrate/(?:type|relation|source|entity)/(.*)/v1$', '\1'),
                                     '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
                                 '^source/file/(.+)/v1$', '\1'),
                             '^repo:(.+)/v1$', '\1'),

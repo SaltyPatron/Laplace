@@ -8,7 +8,7 @@ public readonly struct OperationalSource : ISeedSource
 {
     public static Hash128 SourceId { get; } = SubstrateCanonicalIds.Source("OperationalDecomposer");
     public static string SourceName => "OperationalDecomposer";
-    public static Hash128 TrustClass { get; } = SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+    public static Hash128 TrustClass { get; } = TrustClassRegistry.Id("SubstrateMandate");
     public static IReadOnlyList<string> Relations { get; } =
         ["CONTAINS", "DEFINES", "CALLS", "REFERENCES", "HAS_INPUT", "IS_EXAMPLE_OF",
          "HAS_LANGUAGE", "IS_A", "HAS_PARSE"];

@@ -34,7 +34,7 @@ public static class ChessVocabulary
     public static readonly Hash128 ChessComProfileSourceId = SubstrateCanonicalIds.Source("ChessComPlayerProfile");
     public static readonly Hash128 FideProfileSourceId = SubstrateCanonicalIds.Source("FidePlayerProfile");
 
-    private static Hash128 TrustClass(string cls) => Hash128.OfCanonical($"substrate/trust_class/{cls}/v1");
+    private static Hash128 TrustClass(string cls) => TrustClassRegistry.Id(cls);
 
 
 
@@ -153,13 +153,14 @@ public static class ChessVocabulary
 
     public static Hash128 EmitPlayer(
         SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
-        double witnessWeight = SourceTrust.AcademicCurated)
+        double? witnessWeight = null)
     {
+        double declaredWitnessWeight = witnessWeight ?? SourceTrust.AcademicCurated;
         b.AddEntity(playerId, EntityTier.Word, PlayerType);
         if (ContentEmitter.Emit(b, name, sourceId) is { } nameId)
         {
             b.AddAttestation(NativeAttestation.Categorical(
-                playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, witnessWeight));
+                playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, declaredWitnessWeight));
 
             AppendPlayerPhysicality(b, playerId, name, sourceId, nameId);
         }
@@ -201,7 +202,7 @@ public static class ChessVocabulary
             ObservedAtUnixUs: IngestClock.NowUnixUs()));
     }
 
-    public const double Trust = SourceTrust.StructuredCorpus;
+    public static readonly double Trust = SourceTrust.StructuredCorpus;
 
     public readonly record struct BootstrapSource(
         Hash128 SourceId, string SourceName, Hash128 TrustClassId);

@@ -11,7 +11,7 @@ public readonly struct SemLinkSource : ISeedSource
     public static string SourceName => "SemLinkDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         [
@@ -54,7 +54,7 @@ public readonly struct PredicateMatrixSource : ISeedSource
     public static string SourceName => "PredicateMatrixDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         [
@@ -108,7 +108,7 @@ public readonly struct MapNetSource : ISeedSource
     public static string SourceName => "MapNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO"];
@@ -129,7 +129,7 @@ public readonly struct WordFrameNetSource : ISeedSource
     public static string SourceName => "WordFrameNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO"];

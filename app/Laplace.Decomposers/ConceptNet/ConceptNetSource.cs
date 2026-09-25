@@ -11,7 +11,7 @@ public readonly struct ConceptNetSource : ISeedSource
     public static string SourceName => "ConceptNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("UserCuratedResource");
+        TrustClassRegistry.Id("UserCuratedResource");
 
     /// <summary>ConceptNet /r/ name → substrate relation canonical.</summary>
     // Spelled once each: the positive mapping and the Not* denial that refutes it must

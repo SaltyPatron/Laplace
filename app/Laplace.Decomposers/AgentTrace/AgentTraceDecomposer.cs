@@ -44,7 +44,7 @@ public sealed class AgentTraceDecomposer
             var scope = AgentTraceEmitter.ProviderScope.Resolve(provider);
             var toolBoot = new BootstrapIntentBuilder(
                 scope.ToolSource, $"ToolResult@{provider}",
-                SubstrateCanonicalIds.TrustClass("ToolResultContent"));
+                TrustClassRegistry.Id("ToolResultContent"));
             foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(
                          [AgentRelations.Surface(AgentRelation.AppearsIn)]))
                 toolBoot.AddRelationType(r);

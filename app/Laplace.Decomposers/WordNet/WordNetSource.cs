@@ -11,7 +11,7 @@ public readonly struct WordNetSource : ISeedSource
     public static string SourceName => "WordNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StandardsDerived");
+        TrustClassRegistry.Id("StandardsDerived");
 
     public static readonly Dictionary<string, string> PointerTypes = new()
     {

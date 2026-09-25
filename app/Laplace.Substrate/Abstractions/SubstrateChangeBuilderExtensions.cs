@@ -20,12 +20,13 @@ public static class SubstrateChangeBuilderExtensions
         byte[] content,
         string relationName,
         Hash128 sourceId,
-        double sourceTrust = SourceTrust.AcademicCurated)
+        double? sourceTrust = null)
     {
+        double declaredSourceTrust = sourceTrust ?? SourceTrust.AcademicCurated;
         var targetId = ContentEmitter.Emit(builder, content, sourceId);
         if (targetId is null) return null;
         builder.AddAttestation(NativeAttestation.Categorical(
-            subjectId, relationName, targetId.Value, sourceId, null, sourceTrust));
+            subjectId, relationName, targetId.Value, sourceId, null, declaredSourceTrust));
         return targetId;
     }
 
@@ -35,12 +36,13 @@ public static class SubstrateChangeBuilderExtensions
         string content,
         string relationName,
         Hash128 sourceId,
-        double sourceTrust = SourceTrust.AcademicCurated)
+        double? sourceTrust = null)
     {
+        double declaredSourceTrust = sourceTrust ?? SourceTrust.AcademicCurated;
         var targetId = ContentEmitter.Emit(builder, content, sourceId);
         if (targetId is null) return null;
         builder.AddAttestation(NativeAttestation.Categorical(
-            subjectId, relationName, targetId.Value, sourceId, null, sourceTrust));
+            subjectId, relationName, targetId.Value, sourceId, null, declaredSourceTrust));
         return targetId;
     }
 
@@ -52,11 +54,12 @@ public static class SubstrateChangeBuilderExtensions
         Hash128 metaTypeId,
         Hash128 sourceId,
         ISet<Hash128> seen,
-        double sourceTrust = SourceTrust.AcademicCurated)
+        double? sourceTrust = null)
     {
-        var targetId = HighwayNodeEmitter.Emit(builder, targetNodeName, metaTypeId, sourceId, sourceTrust, seen);
+        double declaredSourceTrust = sourceTrust ?? SourceTrust.AcademicCurated;
+        var targetId = HighwayNodeEmitter.Emit(builder, targetNodeName, metaTypeId, sourceId, declaredSourceTrust, seen);
         builder.AddAttestation(NativeAttestation.Categorical(
-            subjectId, relationName, targetId, sourceId, null, sourceTrust));
+            subjectId, relationName, targetId, sourceId, null, declaredSourceTrust));
         return targetId;
     }
 }

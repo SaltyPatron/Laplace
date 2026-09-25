@@ -23,8 +23,8 @@ internal sealed class MachineCostWitnessService(SubstrateClient substrate)
     private const string WitnessSchema = "laplace.machine-cost-witness/v1";
 
     private static readonly Hash128 Source = SubstrateCanonicalIds.Source(AnalyzerName);
-    private static readonly Hash128 TrustClass = SubstrateCanonicalIds.TrustClass("AppDerived");
-    private const double Trust = SourceTrust.AppDerived;
+    private static readonly Hash128 TrustClass = TrustClassRegistry.Id("AppDerived");
+    private static readonly double Trust = SourceTrust.AppDerived;
 
     private static readonly JsonSerializerOptions CanonicalJson = new(JsonSerializerDefaults.Web)
     {
