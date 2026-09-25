@@ -84,18 +84,6 @@ internal sealed class UcdProperties
     private readonly (uint S, uint E, string N)[] _joiningTypeRanges;
     private readonly (uint S, uint E, string N)[] _numericTypeRanges;
 
-    public readonly Dictionary<string, Hash128> CategoryEntityIds;
-    public readonly Dictionary<string, Hash128> ScriptEntityIds;
-    public readonly Dictionary<string, Hash128> BlockEntityIds;
-    public readonly Dictionary<string, Hash128> BidiClassEntityIds;
-    public readonly Dictionary<string, Hash128> AgeEntityIds;
-    public readonly Dictionary<string, Hash128> EmojiPropEntityIds;
-    public readonly Dictionary<string, Hash128> NumericEntityIds;
-    public readonly Dictionary<string, Hash128> LineBreakEntityIds;
-    public readonly Dictionary<string, Hash128> EastAsianWidthEntityIds;
-    public readonly Dictionary<string, Hash128> JoiningTypeEntityIds;
-    public readonly Dictionary<string, Hash128> NumericTypeEntityIds;
-    public readonly Dictionary<string, Hash128> NormalizationFormEntityIds;
 
     /// <summary>
     /// Normalization quick-check, the ONLY UCD property that states a negative.
@@ -164,39 +152,8 @@ internal sealed class UcdProperties
         _joiningTypeRanges = joiningTypeRanges;
         _numericTypeRanges = numericTypeRanges;
 
-        CategoryEntityIds = BuildEntityIds(generalCategory.Where(x => x != null).Distinct()!,
-                                           "unicode/category/{0}/v1");
-        ScriptEntityIds = BuildEntityIds(scriptRanges.Select(r => r.N).Distinct(),
-                                           "unicode/script/{0}/v1");
-        BlockEntityIds = BuildEntityIds(blockRanges.Select(r => r.N).Distinct(),
-                                           "unicode/block/{0}/v1");
-        BidiClassEntityIds = BuildEntityIds(bidiClass.Where(x => x != null).Distinct()!,
-                                           "unicode/bidi_class/{0}/v1");
-        AgeEntityIds = BuildEntityIds(ageRanges.Select(r => r.N).Distinct(),
-                                           "unicode/age/{0}/v1");
-        EmojiPropEntityIds = BuildEntityIds(EmojiPropNames,
-                                           "unicode/emoji/{0}/v1");
-        NumericEntityIds = new Dictionary<string, Hash128>(StringComparer.Ordinal);
-        LineBreakEntityIds = BuildEntityIds(lineBreakRanges.Select(r => r.N).Distinct(),
-                                           "unicode/line_break/{0}/v1");
-        EastAsianWidthEntityIds = BuildEntityIds(eaWidthRanges.Select(r => r.N).Distinct(),
-                                           "unicode/east_asian_width/{0}/v1");
-        JoiningTypeEntityIds = BuildEntityIds(joiningTypeRanges.Select(r => r.N).Distinct(),
-                                           "unicode/joining_type/{0}/v1");
-        NumericTypeEntityIds = BuildEntityIds(numericTypeRanges.Select(r => r.N).Distinct(),
-                                           "unicode/numeric_type/{0}/v1");
-        NormalizationFormEntityIds = BuildEntityIds(NormalizationForms,
-                                           "unicode/normalization_form/{0}/v1");
     }
 
-    private static Dictionary<string, Hash128> BuildEntityIds(
-        IEnumerable<string> names, string fmtTemplate)
-    {
-        var d = new Dictionary<string, Hash128>(StringComparer.Ordinal);
-        foreach (var n in names)
-            d[n] = Hash128.OfCanonical(string.Format(fmtTemplate, n));
-        return d;
-    }
 
     public string? ScriptForCodepoint(uint cp) => RangeLookup(_scriptRanges, cp);
     public string? BlockForCodepoint(uint cp) => RangeLookup(_blockRanges, cp);
@@ -220,32 +177,6 @@ internal sealed class UcdProperties
         return null;
     }
 
-    public IEnumerable<EntityRow> ClassificationEntities(Hash128 sourceId)
-    {
-        var typeId = EntityTypeRegistry.UcdClassifier;
-        foreach (var (_, id) in CategoryEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in ScriptEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in BlockEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in BidiClassEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in AgeEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in EmojiPropEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in LineBreakEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in EastAsianWidthEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in JoiningTypeEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in NumericTypeEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-        foreach (var (_, id) in NormalizationFormEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId);
-    }
 
     public static UcdProperties Load(string ucdDir)
     {

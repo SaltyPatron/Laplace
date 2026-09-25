@@ -128,17 +128,7 @@ FROM (VALUES
     ('substrate/iso639/type/H/v1'),
     ('substrate/iso639/type/C/v1'),
     ('substrate/iso639/type/S/v1'),
-    ('Byte'),
-    ('substrate/utf8/continuation/v1'), ('substrate/utf8/lead2/v1'),
-    ('substrate/utf8/lead3/v1'), ('substrate/utf8/lead4/v1'),
-    ('substrate/utf8/invalid/v1'),
-    ('substrate/encoding/ISO-8859-1/v1'), ('substrate/encoding/windows-1252/v1'),
-    ('unicode/emoji/Emoji/v1'),
-    ('unicode/emoji/Emoji_Presentation/v1'),
-    ('unicode/emoji/Emoji_Modifier/v1'),
-    ('unicode/emoji/Emoji_Modifier_Base/v1'),
-    ('unicode/emoji/Emoji_Component/v1'),
-    ('unicode/emoji/Extended_Pictographic/v1')
+    ('Byte')
 ) AS v(name)
 WHERE NOT EXISTS (
     SELECT 1

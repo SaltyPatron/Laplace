@@ -26,7 +26,6 @@ public sealed class UnicodeDecomposer
 
     private readonly string? _ucdxmlZip;
     private readonly string? _ducet;
-    private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
     private readonly ConcurrentIdSet _ucdPropertyTypes = new();
     private readonly ConcurrentIdSet _ucdPropertyDeclarations = new();
     private readonly LaplaceCookbook _cookbook = LaplaceCookbook.Shared;
@@ -45,14 +44,6 @@ public sealed class UnicodeDecomposer
         // Source vocabulary bootstrap is metadata-only. Physical source files are not
         // opened until their claimed RunPhaseAsync worker begins.
         return Task.CompletedTask;
-    }
-
-    public override IReadOnlyCollection<string> CanonicalNamesForReadback
-    {
-        get
-        {
-            return _canonicalNames.ToArray();
-        }
     }
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
@@ -636,7 +627,6 @@ public sealed class UnicodeDecomposer
         Hash128 id = ContentEmitter.Emit(builder, content, Source)
             ?? throw new InvalidOperationException(
                 $"Unicode classifier content could not be admitted: {content}");
-        _canonicalNames.Add(content);
         return id;
     }
 
@@ -672,7 +662,6 @@ public sealed class UnicodeDecomposer
             ?? canonicalPropertyName;
         RelationTypeRegistry.RelationTypeResolution relation =
             RelationTypeRegistry.ResolveUcdProperty(canonicalPropertyName);
-        _canonicalNames.Add(relation.Canonical);
         _ucdPropertyTypes.Add(relation.Id);
         // Relation identity/family is governed by the native relation registry.
         // Do not materialize the operator key as content or duplicate its parentage
@@ -1389,34 +1378,21 @@ public sealed class UnicodeDecomposer
             }
         }
 
+        // Encoding names and UTF-8 byte roles are content; their ids are the content
+        // roots of their spellings, the same entities those words are anywhere else.
+        private static readonly string[] Encodings = { "ISO-8859-1", "windows-1252" };
+        private static readonly string[] Utf8Roles = { "continuation", "lead2", "lead3", "lead4", "invalid" };
+
+        private static Hash128 NamedContent(string text) =>
+            ContentEmitter.RootId(text)
+            ?? throw new InvalidOperationException($"byte catalog name could not be composed: {text}");
+
         private static void EmitByteCatalog(SubstrateChangeBuilder builder)
         {
-            Hash128 encodingType = EntityTypeRegistry.CharacterEncoding;
-            Hash128 roleType = EntityTypeRegistry.Utf8Role;
-            PlaceGoverned(
-                builder,
-                SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1"),
-                encodingType,
-                SubstrateCanonicalKeys.OfVersioned("encoding", "ISO-8859-1"));
-            PlaceGoverned(
-                builder,
-                SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252"),
-                encodingType,
-                SubstrateCanonicalKeys.OfVersioned("encoding", "windows-1252"));
-            foreach (string role in new[] { "continuation", "lead2", "lead3", "lead4", "invalid" })
-            {
-                string key = SubstrateCanonicalKeys.OfVersioned("utf8", role);
-                PlaceGoverned(builder, Hash128.OfCanonical(key), roleType, key);
-            }
+            foreach (string name in Encodings.Concat(Utf8Roles))
+                if (ContentEmitter.Emit(builder, name, Source) is null)
+                    throw new InvalidOperationException($"byte catalog name could not be admitted: {name}");
         }
-
-        // A governed catalog key is not the Merkle of its spelling. The content
-        // spine places that spelling; the key itself still needs a physicality
-        // or source closure refuses the floor.
-        private static void PlaceGoverned(
-            SubstrateChangeBuilder builder, Hash128 id, Hash128 typeId, string key)
-            => CanonicalNamedIdentity.Declare(
-                builder, id, EntityTier.Word, typeId, key, Source);
 
         private static void EmitByte(SubstrateChangeBuilder builder, byte value)
         {
@@ -1440,12 +1416,12 @@ public sealed class UnicodeDecomposer
                 SourceDim: null,
                 ObservedAtUnixUs: 0));
 
-            Hash128 roleId = Hash128.OfCanonical($"substrate/utf8/{ByteAtoms.Utf8Role(value)}/v1");
+            Hash128 roleId = NamedContent(ByteAtoms.Utf8Role(value));
             builder.AddAttestation(NativeAttestation.Categorical(
                 byteId, "HAS_UTF8_ROLE", roleId, Source, TC.StandardsDerived));
 
-            Hash128 latin1 = SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1");
-            Hash128 cp1252 = SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252");
+            Hash128 latin1 = NamedContent(Encodings[0]);
+            Hash128 cp1252 = NamedContent(Encodings[1]);
             builder.AddAttestation(NativeAttestation.Categorical(
                 byteId, "DECODES_TO", CodepointId(value), Source,
                 TC.StandardsDerived, contextId: latin1));
