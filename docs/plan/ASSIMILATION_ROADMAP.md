@@ -42,7 +42,8 @@ The session's work was almost all on the input side: the recipe engine, governed
 12. **A model is ingested as records, not blobs, and never by prompting.** A checkpoint's parameters are ETL'd into Laplace records, so the Laplace forward pass (SQL-orchestrated, native-executed) can run the model's computation. It runs through indexed, filtered lookups instead of brute force, and every value is addressable by model, tensor, layer, head, row and column. The model's learned relations, such as king–queen, become graded attestations under the model witness. They then aggregate with every other source, and that is how Laplace assimilates knowledge and capability.
 13. **Record only what is above the model's floor.** Laplace does not record everything (the lottery ticket hypothesis). The floor is detected from the model's own statistics, not set by a constant noise floor or a top-k.
 14. **Shape narrows what a tensor is; the name is a convention, not a specification.** Operator roles (attention, convolution, MLP, diffusion blocks, embeddings) are recognized structurally. Names, config and weight statistics are further evidence.
-15. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
+15. **Software is reversible: what can be ingested can be exported (Mold-a-Model, `docs/specs/12_Mold_A_Model_Synthesis_Map.txt`).** Model records must carry enough to construct a target model back out through the declared export mapping (Foundry). The pooled construction is one consensus program over every model witness and every other source. It is not a merge of compatible tensors or N answers judged by an N+1th model (spec 12, round-table law).
+16. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
 
 ---
 
@@ -184,6 +185,8 @@ This replaces `ArchitectureProfile` (four hardcoded families; anything else thro
 - **Filtered, not brute force:** only the heads and neurons a token engages (Deja Vu: more than 80% of heads and 95% of MLP parameters are inactive per token), and top candidates at the output layer through an index rather than all 32,000 rows.
 - **Acceptance:** Laplace's TinyLlama matches the dense model within the model's own noise on held-out text.
 
+**E7. The round trip through Mold-a-Model.** Export TinyLlama back out of its Laplace records through the spec 12 mapping (Foundry) as safetensors. Run the export in a conventional runtime and compare it with the original on held-out text. Then export a pooled model built from several model witnesses plus the curated corpus. This proves the ingest kept what matters and that export is the inverse.
+
 **Existing model code** (`app/Laplace.Decomposers/Model`, about 5,300 lines, audited 2026-09-25): the maths is native (MKL), no model is prompted, and every relation is governed. Its defects:
 - **Weights are discarded after scoring**, so no forward pass is possible. `MODEL_INGESTION_DESIGN.md` §1 "numeric values … transient operands" is superseded by E5.
 - **Circuit identity omits the model** (`ModelCoordinates.cs`: `model-circuit/<plane>/layer/N/head/M`), so two models' L3H5 collide.
@@ -195,7 +198,7 @@ This replaces `ArchitectureProfile` (four hardcoded families; anything else thro
 - **Bookkeeping ids:** `Blake3` recipe and tokenizer entities, `OfCanonical` special tokens and contexts.
 - **Tokens lose their ids** and collapse when they normalize alike.
 
-Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034.
+Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034. Export: `docs/specs/12_Mold_A_Model_Synthesis_Map.txt`, `docs/specs/09_Substrate_LM_Synthesis.txt`.
 
 ### F. The native forward pass over curated knowledge (read path)
 
