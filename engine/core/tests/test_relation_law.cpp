@@ -33,6 +33,40 @@ TEST(LaplaceRelationLaw, HasUposResolvesToHasPos) {
     EXPECT_TRUE(hash128_equals(&upos, &pos));
 }
 
+// One relation per meaning: a retired variant relation keeps its type id for reading
+// admitted evidence, but nothing may emit it.
+TEST(LaplaceRelationLaw, RetiredRelationFailsClosedForEmission) {
+    hash128_t id;
+    EXPECT_EQ(LAPLACE_REL_RETIRED, laplace_relation_resolve("HAS_NAME_ALIAS", &id));
+    EXPECT_EQ(LAPLACE_REL_RETIRED, laplace_relation_resolve("HAS_UPPERCASE_MAPPING", &id));
+    EXPECT_EQ(LAPLACE_REL_RETIRED, laplace_relation_resolve("HAS_ISO639_1_CODE", &id));
+
+    hash128_t retired, successor;
+    ASSERT_EQ(0, laplace_relation_type_id("HAS_NAME_ALIAS", &retired));
+    ASSERT_EQ(0, laplace_relation_type_id("HAS_NAME", &successor));
+    const char* name = nullptr;
+    EXPECT_EQ(1, laplace_relation_retired(&retired, &name));
+    ASSERT_NE(nullptr, name);
+    EXPECT_STREQ("HAS_NAME", name);
+    EXPECT_EQ(0, laplace_relation_retired(&successor, nullptr));
+
+    hash128_t subject = hash_path("retired/subject");
+    hash128_t object = hash_path("retired/object");
+    hash128_t source = hash_path("retired/source");
+    laplace_attestation_staged_t staged{};
+    EXPECT_EQ(LAPLACE_REL_RETIRED, laplace_attestation_resolved_build(
+        &subject, &retired, &object, 0, &source, nullptr, 1, 1.0, 1, 1, 0, &staged));
+    EXPECT_EQ(0, laplace_attestation_resolved_build(
+        &subject, &successor, &object, 0, &source, nullptr, 1, 1.0, 1, 1, 0, &staged));
+
+    intent_stage_t* stage = intent_stage_new(1);
+    ASSERT_NE(nullptr, stage);
+    EXPECT_EQ(LAPLACE_REL_RETIRED, intent_stage_add_attestation(
+        stage, &staged.id, &subject, &retired, &object, &source, nullptr,
+        2, 0, 1, 0, 0, 0, nullptr));
+    intent_stage_free(stage);
+}
+
 TEST(LaplaceAttestationEngine, CodepointRangeRelationBatchStagesCartesianAssertions) {
     intent_stage_t* stage = intent_stage_new(8);
     ASSERT_NE(nullptr, stage);

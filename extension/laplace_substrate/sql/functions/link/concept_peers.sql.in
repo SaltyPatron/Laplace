@@ -19,7 +19,7 @@ BEGIN ATOMIC
         FROM self s
         JOIN laplace.v_consensus_unrefuted n
           ON n.object_id = s.id
-         AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+         AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
     ),
     anchors AS (
         SELECT DISTINCT c.object_id AS anchor
@@ -53,7 +53,7 @@ BEGIN ATOMIC
         FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
                           AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
         LEFT JOIN laplace.v_consensus_unrefuted n ON n.subject_id = c.subject_id
-                          AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+                          AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu

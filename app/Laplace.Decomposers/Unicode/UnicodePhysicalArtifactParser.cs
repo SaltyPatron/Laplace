@@ -14,8 +14,10 @@ internal static class UnicodePhysicalArtifactParser
         string GeneralCategory,
         byte CombiningClass,
         string BidiClass,
-        uint[]? CanonicalDecomposition,
-        uint[]? CompatibilityDecomposition,
+        uint[]? Decomposition,
+        // The Decomposition_Type long name (qualifiers.toml family "decomposition"):
+        // "Canonical" for an untagged mapping, otherwise the <tag>'s value ("Font", ...).
+        string? DecompositionType,
         string? NumericValue,
         uint UppercaseMapping,
         uint LowercaseMapping,
@@ -28,7 +30,7 @@ internal static class UnicodePhysicalArtifactParser
         bool CountsSourceRow = true);
 
     internal readonly record struct MirrorRow(uint Codepoint, uint Mirror);
-    internal readonly record struct AliasRow(uint Codepoint, string Alias);
+    internal readonly record struct AliasRow(uint Codepoint, string Alias, string Type);
     internal readonly record struct ConfusableRow(uint Codepoint, string Target);
     internal readonly record struct NormalizationRow(
         uint Codepoint,
@@ -156,15 +158,21 @@ internal static class UnicodePhysicalArtifactParser
             _ = byte.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out byte cc);
             string bidi = fields[4];
 
-            uint[]? canonical = null;
-            uint[]? compatibility = null;
+            uint[]? decomposed = null;
+            string? decompositionType = null;
             string decomposition = fields[5];
             if (decomposition.Length > 0)
             {
-                bool compat = decomposition[0] == '<';
-                if (compat)
+                string type = "Canonical";
+                if (decomposition[0] == '<')
                 {
                     int close = decomposition.IndexOf('>');
+                    // <noBreak> -> Nobreak, <compat> -> Compat: the tag is the
+                    // Decomposition_Type long name in lower camel case.
+                    string tag = close > 1 ? decomposition[1..close] : string.Empty;
+                    type = tag.Length > 0
+                        ? char.ToUpperInvariant(tag[0]) + tag[1..].ToLowerInvariant()
+                        : "Compat";
                     decomposition = close >= 0 ? decomposition[(close + 1)..] : string.Empty;
                 }
                 var targets = new List<uint>(2);
@@ -174,8 +182,8 @@ internal static class UnicodePhysicalArtifactParser
                         targets.Add(target);
                 if (targets.Count > 0)
                 {
-                    if (compat) compatibility = targets.ToArray();
-                    else canonical = targets.ToArray();
+                    decomposed = targets.ToArray();
+                    decompositionType = type;
                 }
             }
 
@@ -185,7 +193,7 @@ internal static class UnicodePhysicalArtifactParser
             uint title = ParseHexOrZero(fields[14]);
             yield return new UnicodeDataRow(
                 cp, name, category, cc, bidi,
-                canonical, compatibility, numeric, upper, lower, title);
+                decomposed, decompositionType, numeric, upper, lower, title);
         }
     }
 
@@ -678,7 +686,8 @@ internal static class UnicodePhysicalArtifactParser
                 || cp > 0x10FFFFu)
                 continue;
             string alias = fields[1].Trim();
-            if (alias.Length > 0) yield return new AliasRow(cp, alias);
+            string type = fields.Length > 2 ? fields[2].Trim() : string.Empty;
+            if (alias.Length > 0) yield return new AliasRow(cp, alias, type);
         }
     }
 

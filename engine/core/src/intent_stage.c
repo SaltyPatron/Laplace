@@ -1,6 +1,7 @@
 #include "laplace/core/intent_stage.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/relation_law.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -38,7 +39,7 @@ static const char* const kPhysicalityColumns =
 static const char* const kAttestationColumns =
     "id, subject_id, type_id, object_id, source_id, context_id, "
     "outcome, last_observed_at, observation_count, "
-    "sum_score_fp1e9, opponent_rd_fp1e9, opponent_rating_fp1e9, fold_replayable, highway_mask";
+    "sum_score_fp1e9, opponent_rd_fp1e9, opponent_rating_fp1e9, fold_replayable, qualifier_mask";
 
 #define ENTITY_COL_COUNT       3
 #define PHYSICALITY_COL_COUNT 10
@@ -543,10 +544,12 @@ int intent_stage_add_attestation_mode(
     int64_t          opponent_rd_fp1e9,
     int64_t          opponent_rating_fp1e9,
     uint8_t          fold_replayable,
-    const uint8_t*   highway_mask) {
+    const uint8_t*   qualifier_mask) {
     if (!stage || !id || !subject_id || !type_id || !source_id) return -1;
     if (observation_count < 0) return -1;
     if (outcome < 0 || outcome > 2) return -1;
+    /* A retired relation's meaning is its successor plus the claim's qualifiers. */
+    if (laplace_relation_retired(type_id, NULL)) return LAPLACE_REL_RETIRED;
     byte_buf_t* b = &stage->attestations;
 
     if (buf_append_be16(b, ATTESTATION_COL_COUNT) != 0) return -1;
@@ -571,8 +574,8 @@ int intent_stage_add_attestation_mode(
     if (buf_append_field_int8(b, opponent_rd_fp1e9) != 0) return -1;
     if (buf_append_field_int8(b, opponent_rating_fp1e9) != 0) return -1;
     if (buf_append_field_bool(b, fold_replayable) != 0) return -1;
-    if (highway_mask) {
-        if (buf_append_field_bytes(b, highway_mask, 32) != 0) return -1;
+    if (qualifier_mask) {
+        if (buf_append_field_bytes(b, qualifier_mask, 32) != 0) return -1;
     } else {
         if (buf_append_field_null(b) != 0) return -1;
     }
@@ -585,11 +588,11 @@ int intent_stage_add_attestation(
     const hash128_t* type_id, const hash128_t* object_id, const hash128_t* source_id,
     const hash128_t* context_id, int16_t outcome, int64_t last_observed_at_unix_us,
     int64_t observation_count, int64_t sum_score_fp1e9, int64_t opponent_rd_fp1e9,
-    int64_t opponent_rating_fp1e9, const uint8_t* highway_mask) {
+    int64_t opponent_rating_fp1e9, const uint8_t* qualifier_mask) {
     return intent_stage_add_attestation_mode(
         stage, id, subject_id, type_id, object_id, source_id, context_id, outcome,
         last_observed_at_unix_us, observation_count, sum_score_fp1e9,
-        opponent_rd_fp1e9, opponent_rating_fp1e9, 1, highway_mask);
+        opponent_rd_fp1e9, opponent_rating_fp1e9, 1, qualifier_mask);
 }
 
 static uint32_t be32_at(const uint8_t* p) {

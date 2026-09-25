@@ -109,7 +109,7 @@ CEILINGS = {
     # 191 -> 180 (2026-08-20): #1258 retired the SQL per-ply projection. The
     # chess_game_plies body is now two DROP statements, so its 11 relation-name
     # literals are gone rather than allowlisted. Shrink-only, as the law requires.
-    "g3_sql_vocabulary_literalism": 175,
+    "g3_sql_vocabulary_literalism": 173,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -128,7 +128,7 @@ CEILINGS = {
     # named is now the line/playing trajectory. Lowered by exactly the 7 cleaned.
     # Shared grammar examples, including complete prompt/response observations,
     # resolve the relation once instead of repeating it at each staging site.
-    "g3_csharp_vocabulary_literalism": 446,
+    "g3_csharp_vocabulary_literalism": 429,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
@@ -317,7 +317,7 @@ G8_BAND_LITERAL = re.compile(
 # standing in for identity in the middle of the pipeline. That is simultaneously
 # three defects: the language dependence that breaks omni-glottal behaviour, the
 # identity contamination (the substrate already carries the case bridge as rated
-# tier-0 evidence, K --HAS_LOWERCASE_MAPPING--> k, read by word_case_variants();
+# tier-0 evidence, K --HAS_CASE_MAPPING {lower}--> k, read by word_case_variants();
 # locale folding fabricates that link unrated and unprovenanced, and is
 # locale-dependent besides — Turkish dotless i), and a per-row STABLE call.
 #
@@ -372,7 +372,7 @@ G13_STRING_OP_ON_SURFACE = re.compile(
 # route on a value that changes with the locale of the machine reading it.
 #
 # The substrate already holds the correct primitive: case is witnessed at tier 0
-# as rated evidence (K --HAS_LOWERCASE_MAPPING--> k, 1,488 lc / 1,505 uc /
+# as rated evidence (K --HAS_CASE_MAPPING {lower}--> k, 1,488 lc / 1,505 uc /
 # 1,509 tc cells) and `word_case_variants()` reads it. That path is provenanced,
 # language-correct, and returns the empty set for 犬 — which is the truth.
 # `lower()` fabricates the same link unrated, unprovenanced, and Latin-only.

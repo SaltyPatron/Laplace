@@ -128,7 +128,7 @@ BEGIN
         JOIN laplace.v_consensus_unrefuted c ON c.object_id = r.root_id
         LEFT JOIN laplace.v_consensus_unrefuted n
           ON n.subject_id = c.subject_id
-         AND n.type_id = ANY(consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+         AND n.type_id = ANY(consensus.relation_set_ids('NAME_EDGE'))
         CROSS JOIN allowed a
         WHERE c.type_id = laplace.relation_type_id('EVOKES_FRAME')
           AND (p_bands IS NULL OR c.type_id = ANY(a.ids))

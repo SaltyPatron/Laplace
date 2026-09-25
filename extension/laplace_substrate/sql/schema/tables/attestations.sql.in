@@ -4,8 +4,12 @@
 -- never depends on which relations exist. Leaf count is declared once here;
 -- native routing reads it from the partition descriptor.
 --
--- The highway_mask column stays because the native intent-stage tuple layout
--- emits it (IntentStage.CopyColumnList).
+-- qualifier_mask carries the claim's governed qualifiers (engine/manifest/
+-- qualifiers.toml): multi-select variant flags such as identifier/iso639-1 or
+-- mapping/upper, so one relation per meaning holds every variant as one claim.
+-- It is the sister of an entity's highway_mask, never a copy of the relation's
+-- highway bit; the native intent-stage tuple layout writes it
+-- (IntentStage.CopyColumnList).
 --
 -- PK includes the partition key; no FKs (see consensus.sql.in).
 -- Additive witness fields must also migrate existing evidence in place.
@@ -48,7 +52,7 @@ CREATE TABLE IF NOT EXISTS attestations (
     -- their continuous native score was consumed atomically at ingest and is
     -- deliberately unrecoverable.  Refold/evict must exclude these rows.
     fold_replayable    boolean       NOT NULL DEFAULT true,
-    highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
+    qualifier_mask    bytea         CHECK (qualifier_mask IS NULL OR octet_length(qualifier_mask) = 32),
     PRIMARY KEY (id, type_id, subject_id)
 ) PARTITION BY HASH (subject_id);
 

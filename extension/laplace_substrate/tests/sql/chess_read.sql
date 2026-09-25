@@ -533,7 +533,7 @@ BEGIN
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: a line nobody played returned % rows', n; END IF;
 
     -- chess_players_by_initial: Tal browsable under 'T' via a name whose trajectory's
-    -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
+    -- first constituent IS the codepoint, bound to him by a HAS_NAME cell -- and
     -- the same display-scale law on the rating columns.
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
         (cap_t, 0, type_t), (tname, 0, type_t),
@@ -546,11 +546,11 @@ BEGIN
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
-        (public.laplace_hash128_blake3('t2/c_alias'), tal, laplace.relation_type_id('HAS_NAME_ALIAS'),
+        (public.laplace_hash128_blake3('t2/c_alias'), tal, laplace.relation_type_id('HAS_NAME'),
             tname, 1500000000000, 50000000000, 60000000, 1, now()),
         (public.laplace_hash128_blake3('t2/c_primary_name'), botv, laplace.relation_type_id('HAS_NAME'),
             tname, 1500000000000, 50000000000, 60000000, 1, now()),
-        (public.laplace_hash128_blake3('t2/c_profile_alias'), profile_only, laplace.relation_type_id('HAS_NAME_ALIAS'),
+        (public.laplace_hash128_blake3('t2/c_profile_alias'), profile_only, laplace.relation_type_id('HAS_NAME'),
             tname, 1500000000000, 50000000000, 60000000, 1, now());
 
     SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu

@@ -15,7 +15,7 @@ CREATE OR REPLACE FUNCTION converse.attention(p_word bytea, p_k int DEFAULT 12)
                                 laplace.relation_type_id('PRECEDES'), laplace.relation_type_id('FOLLOWS'),
                                 laplace.relation_type_id('HAS_POS'), laplace.relation_type_id('HAS_XPOS'),
                                 laplace.relation_type_id('HAS_FEATURE'), laplace.relation_type_id('HAS_LEX_CATEGORY'),
-                                laplace.relation_type_id('HAS_NAME_ALIAS'), laplace.relation_type_id('IS_LEMMA_OF'),
+                                laplace.relation_type_id('HAS_NAME'), laplace.relation_type_id('IS_LEMMA_OF'),
                                 laplace.relation_type_id('HAS_LANGUAGE_SCOPE'), laplace.relation_type_id('HAS_LANGUAGE_TYPE'))
         UNION ALL
         SELECT sm.member, laplace.relation_type_id('IS_SYNONYM_OF'), sm.mu

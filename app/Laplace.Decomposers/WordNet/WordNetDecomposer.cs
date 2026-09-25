@@ -22,6 +22,11 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         EtlManifest.TryGet("wordnet", out var _wnRow) ? _wnRow.LanguageScopeId : null;
     public static readonly Hash128 TrustClass = WordNetSource.TrustClass;
 
+    // A sense's lemma is one of its names: HAS_NAME qualified name/alias.
+    private static readonly Hash128 RelTypeHasName =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasName)));
+    private static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
+
     private static Dictionary<string, string> PointerTypes => WordNetSource.PointerTypes;
 
     private static readonly string[] Lexnames =
@@ -376,8 +381,9 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             magnitude: s.WitnessedMagnitude, arenaScale: 1.0));
         b.AddAttestation(NativeAttestation.Categorical(
             senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, TC.StandardsDerived));
-        b.AddAttestation(NativeAttestation.Categorical(
-            senseId.Value, "HAS_NAME_ALIAS", lemmaId.Value, Source, TC.StandardsDerived));
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            senseId.Value, RelTypeHasName, lemmaId.Value, Source, null, TC.StandardsDerived)
+            with { QualifierMask = AliasName });
         PosReference.Attest(b, senseId.Value, s.Pos.ToString(),
             PosReference.PosTagset.WordNet, Source, null, TC.StandardsDerived,
             _vocabularyNames);

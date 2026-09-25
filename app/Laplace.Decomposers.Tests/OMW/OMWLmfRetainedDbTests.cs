@@ -111,7 +111,7 @@ public sealed class OMWLmfRetainedDbTests
         Hash128 definitionId = ContentEmitter.RootId(definition)!.Value;
         Hash128 lexicalized = ContentEmitter.RootId("false")!.Value;
 
-        await AssertEdgeAsync(dataSource, entry, OmwRelation.HasNameAlias, lemma);
+        await AssertEdgeAsync(dataSource, entry, OmwRelation.HasName, lemma);
         await AssertEdgeAsync(dataSource, entry, OmwRelation.HasSense, sense);
         await AssertEdgeAsync(dataSource, sense, OmwRelation.IsSenseOf, synset);
         await AssertEdgeAsync(dataSource, synset, OmwRelation.HasMember, sense);

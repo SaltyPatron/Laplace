@@ -9,6 +9,8 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "laplace/core/qualifier_law.h"
+#include "laplace/core/sql_catalog.h"
 
 #include <string.h>
 
@@ -23,8 +25,9 @@
  *
  * OUTPUT-IDENTICAL BY DELEGATION. Every semantic decision is still made by the
  * exact same function the SQL used:
- *   - case-map selection: one batched DISTINCT ON (subject, type) ... ORDER BY
- *     subject, type, consensus.eff_mu(rating, rd) DESC over v_consensus_unrefuted -- the
+ *   - case-map selection: one batched DISTINCT ON (subject, case) ... ORDER BY
+ *     subject, case, consensus.eff_mu(rating, rd) DESC over HAS_CASE_MAPPING cells of
+ *     v_consensus_unrefuted, the case being the testimony's mapping qualifier -- the
  *     same view, same eff_mu ordering, same "highest eff_mu wins, NULL/absent
  *     object => no mapping" semantics as grapheme_case_target's LIMIT 1;
  *   - grapheme rendering: realize.render_text (depth 32), identical to the
@@ -110,6 +113,70 @@ render_lookup(HTAB *r, const char *key16)
 
 	return found ? e->text : NULL;
 }
+/*
+ * One relation per meaning: a grapheme's case mappings are HAS_CASE_MAPPING cells,
+ * and which case a target is (mapping/lower, upper, title) is the qualifier of the
+ * testimony behind the cell (engine/manifest/qualifiers.toml). Fills cm with the
+ * eff_mu winner per (grapheme, slot); a slot with no witnessed target stays 0.
+ */
+static void
+fetch_case_mappings(HTAB *cm, Datum *subjects, int n_subjects, const char *caller)
+{
+	static const char *cm_values[CM_SLOTS] = { "lower", "upper", "title" };
+	Datum      bits[CM_SLOTS];
+	ArrayType *subject_array;
+	ArrayType *bit_array;
+	Oid        at[2] = { BYTEAARRAYOID, INT4ARRAYOID };
+	Datum      av[2];
+	int        rc;
+
+	for (int s = 0; s < CM_SLOTS; s++)
+	{
+		int bit = laplace_qualifier_bit("mapping", cm_values[s]);
+
+		if (bit < 0)
+			elog(ERROR, "%s: undeclared qualifier mapping/%s", caller, cm_values[s]);
+		bits[s] = Int32GetDatum(bit);
+	}
+	subject_array = construct_array(subjects, n_subjects, BYTEAOID, -1, false, TYPALIGN_INT);
+	bit_array = construct_array(bits, CM_SLOTS, INT4OID, 4, true, TYPALIGN_INT);
+	av[0] = PointerGetDatum(subject_array);
+	av[1] = PointerGetDatum(bit_array);
+
+	rc = SPI_execute_with_args(laplace_sql_query_text("lexical.case_mappings"),
+							   2, at, av, NULL, true, 0);
+	if (rc != SPI_OK_SELECT)
+		elog(ERROR, "%s: case-map fetch failed: %s", caller, SPI_result_code_string(rc));
+
+	for (uint64 rr = 0; rr < SPI_processed; rr++)
+	{
+		HeapTuple     tup = SPI_tuptable->vals[rr];
+		TupleDesc     td = SPI_tuptable->tupdesc;
+		bool          isnull;
+		char          skey[16];
+		Datum         subject = SPI_getbinval(tup, td, 1, &isnull);
+		Datum         slot_datum;
+		int           slot;
+		bool          found;
+		CaseMapEntry *entry;
+		Datum         obj;
+
+		if (isnull || !datum_key16(subject, skey))
+			continue;
+		slot_datum = SPI_getbinval(tup, td, 2, &isnull);
+		if (isnull)
+			continue;
+		slot = DatumGetInt32(slot_datum) - 1;
+		if (slot < 0 || slot >= CM_SLOTS)
+			continue;
+		entry = (CaseMapEntry *) hash_search(cm, skey, HASH_ENTER, &found);
+		obj = SPI_getbinval(tup, td, 3, &isnull);
+		if (!found)
+			memset(entry->obj, 0, sizeof(entry->obj));
+		entry->obj[slot] = isnull ? (Datum) 0 : copy_bytea_datum(obj);
+	}
+}
+
 
 /*
  * The per-grapheme base string for a map slot, matching
@@ -256,8 +323,6 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 	Datum        *subj = NULL;			/* distinct grapheme ids */
 	int           n_subj = 0;
 
-	Datum         type_datum[CM_SLOTS];
-	char          type_key[CM_SLOTS][16];
 
 	HASHCTL       ctl;
 	HTAB         *cm;					/* grapheme -> CaseMapEntry */
@@ -350,90 +415,13 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		PG_RETURN_ARRAYTYPE_P(result);
 	}
 
-	/* --- 2. Resolve the three case-map relation type ids natively (they are
-	 * manifest constants; the previous SQL round trip re-resolved them per
-	 * call — rel_type_id is the zero-SPI path define_fast already uses). --- */
-	{
-		static const char *cm_names[CM_SLOTS] = {
-			"HAS_LOWERCASE_MAPPING",
-			"HAS_UPPERCASE_MAPPING",
-			"HAS_TITLECASE_MAPPING",
-		};
-
-		for (int s = 0; s < CM_SLOTS; s++)
-		{
-			hash128_t id = rel_type_id(cm_names[s]);
-			Datum     d  = hash128_to_datum(&id);
-
-			if (!datum_key16(d, type_key[s]))
-				elog(ERROR, "word_case_variants: null case-map relation type id");
-			type_datum[s] = d;
-		}
-	}
-
-	/* --- 3. ONE batched case-map fetch, eff_mu winner per (grapheme, map). --- */
+	/* --- 2. ONE batched case-map fetch, eff_mu winner per (grapheme, map). --- */
 	memset(&ctl, 0, sizeof(ctl));
 	ctl.keysize = 16;
 	ctl.entrysize = sizeof(CaseMapEntry);
 	cm = hash_create("word_case_variants casemap", 64, &ctl, HASH_ELEM | HASH_BLOBS);
 
-	{
-		ArrayType *subj_arr = construct_array(subj, n_subj, BYTEAOID, -1, false,
-											  TYPALIGN_INT);
-		ArrayType *type_arr = construct_array(type_datum, CM_SLOTS, BYTEAOID, -1,
-											  false, TYPALIGN_INT);
-		Oid        at[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-		Datum      av[2] = { PointerGetDatum(subj_arr), PointerGetDatum(type_arr) };
-
-		rc = SPI_execute_with_args(
-			"SELECT DISTINCT ON (c.subject_id, c.type_id) "
-			"       c.subject_id, c.type_id, c.object_id "
-			"FROM laplace.v_consensus_unrefuted c "
-			"WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
-			"ORDER BY c.subject_id, c.type_id, consensus.eff_mu(c.rating, c.rd) DESC",
-			2, at, av, NULL, true, 0);
-		if (rc != SPI_OK_SELECT)
-			elog(ERROR, "word_case_variants: case-map fetch failed: %s",
-				 SPI_result_code_string(rc));
-
-		for (uint64 rr = 0; rr < SPI_processed; rr++)
-		{
-			HeapTuple tup = SPI_tuptable->vals[rr];
-			TupleDesc td = SPI_tuptable->tupdesc;
-			bool      isnull;
-			Datum     subject = SPI_getbinval(tup, td, 1, &isnull);
-			char      skey[16];
-			char      tkey[16];
-			Datum     tdat;
-			int       slot = -1;
-
-			if (isnull || !datum_key16(subject, skey))
-				continue;
-			tdat = SPI_getbinval(tup, td, 2, &isnull);
-			if (isnull || !datum_key16(tdat, tkey))
-				continue;
-			for (int s = 0; s < CM_SLOTS; s++)
-				if (memcmp(tkey, type_key[s], 16) == 0)
-				{
-					slot = s;
-					break;
-				}
-			if (slot < 0)
-				continue;
-
-			{
-				bool          found;
-				CaseMapEntry *ce = (CaseMapEntry *) hash_search(cm, skey, HASH_ENTER,
-															   &found);
-				Datum         obj = SPI_getbinval(tup, td, 3, &isnull);
-
-				if (!found)
-					memset(ce->obj, 0, sizeof(ce->obj));
-				/* NULL object => no mapping (grapheme_case_target => NULL). */
-				ce->obj[slot] = isnull ? (Datum) 0 : copy_bytea_datum(obj);
-			}
-		}
-	}
+	fetch_case_mappings(cm, subj, n_subj, "word_case_variants");
 
 	/* --- 4. ONE batched render of every id any surface can need. --- */
 	memset(&ctl, 0, sizeof(ctl));
@@ -685,8 +673,6 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 	HTAB            *word_lookup;
 	HTAB            *cm;
 	HTAB            *rmap;
-	Datum            type_datum[CM_SLOTS];
-	char             type_key[CM_SLOTS][16];
 	bool             need_finish = false;
 	int              rc;
 	int              total_graphemes = 0;
@@ -789,24 +775,7 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 		}
 	}
 
-	/* Resolve the mapping types once, then every distinct grapheme mapping in
-	 * one partition-prunable statement. */
-	{
-		static const char *cm_names[CM_SLOTS] = {
-			"HAS_LOWERCASE_MAPPING", "HAS_UPPERCASE_MAPPING",
-			"HAS_TITLECASE_MAPPING"
-		};
-		for (int s = 0; s < CM_SLOTS; s++)
-		{
-			hash128_t id = rel_type_id(cm_names[s]);
-			Datum     d = hash128_to_datum(&id);
-
-			if (!datum_key16(d, type_key[s]))
-				elog(ERROR, "word_case_variants_batch: null case-map relation id");
-			type_datum[s] = d;
-		}
-	}
-
+	/* Every distinct grapheme mapping in one statement. */
 	memset(&ctl, 0, sizeof(ctl));
 	ctl.keysize = 16;
 	ctl.entrysize = sizeof(CaseMapEntry);
@@ -835,57 +804,7 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 	}
 
 	if (n_grapheme_ids > 0)
-	{
-		ArrayType *subject_array = construct_array(grapheme_ids, n_grapheme_ids,
-											 BYTEAOID, -1, false, TYPALIGN_INT);
-		ArrayType *type_array = construct_array(type_datum, CM_SLOTS, BYTEAOID,
-										  -1, false, TYPALIGN_INT);
-		Oid        at[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-		Datum      av[2] = { PointerGetDatum(subject_array),
-							 PointerGetDatum(type_array) };
-
-		rc = SPI_execute_with_args(
-			"SELECT DISTINCT ON (c.subject_id, c.type_id) "
-			"       c.subject_id, c.type_id, c.object_id "
-			"FROM laplace.v_consensus_unrefuted c "
-			"WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
-			"ORDER BY c.subject_id, c.type_id, consensus.eff_mu(c.rating, c.rd) DESC",
-			2, at, av, NULL, true, 0);
-		if (rc != SPI_OK_SELECT)
-			elog(ERROR, "word_case_variants_batch: case-map fetch failed: %s",
-				 SPI_result_code_string(rc));
-
-		for (uint64 rr = 0; rr < SPI_processed; rr++)
-		{
-			HeapTuple tup = SPI_tuptable->vals[rr];
-			TupleDesc td = SPI_tuptable->tupdesc;
-			bool      isnull;
-			char      skey[16], tkey[16];
-			Datum     sd = SPI_getbinval(tup, td, 1, &isnull);
-			Datum     tdv;
-			int       slot = -1;
-
-			if (isnull || !datum_key16(sd, skey))
-				continue;
-			tdv = SPI_getbinval(tup, td, 2, &isnull);
-			if (isnull || !datum_key16(tdv, tkey))
-				continue;
-			for (int s = 0; s < CM_SLOTS; s++)
-				if (memcmp(tkey, type_key[s], 16) == 0)
-					slot = s;
-			if (slot >= 0)
-			{
-				bool          found;
-				CaseMapEntry *entry = (CaseMapEntry *) hash_search(cm, skey,
-														   HASH_ENTER, &found);
-				Datum         obj = SPI_getbinval(tup, td, 3, &isnull);
-
-				if (!found)
-					memset(entry->obj, 0, sizeof(entry->obj));
-				entry->obj[slot] = isnull ? (Datum) 0 : copy_bytea_datum(obj);
-			}
-		}
-	}
+		fetch_case_mappings(cm, grapheme_ids, n_grapheme_ids, "word_case_variants_batch");
 
 	/* Render every word, grapheme and mapped target once, position aligned. */
 	memset(&ctl, 0, sizeof(ctl));

@@ -47,7 +47,7 @@ public sealed class ChessPlayerPhysicalityTests
             Trajectory.Constituents(placement.TrajectoryXyzm!));
         Assert.Equal(2, change.Attestations.Count(a =>
             a.SubjectId == playerId
-            && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")));
+            && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME")));
     }
 
     [Fact]

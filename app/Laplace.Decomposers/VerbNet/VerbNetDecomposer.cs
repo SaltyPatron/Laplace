@@ -108,8 +108,9 @@ public sealed class VerbNetDecomposer
             if (memberId is null) continue;
 
             b.AddAttestation(NativeAttestation.CategoricalResolved(
-                memberId.Value, VerbNetSource.HasNameAliasTypeId, lemmaId.Value,
-                Source, null, TC.AcademicCurated));
+                memberId.Value, VerbNetSource.HasNameTypeId, lemmaId.Value,
+                Source, null, TC.AcademicCurated)
+                with { QualifierMask = VerbNetSource.AliasName });
             b.AddAttestation(NativeAttestation.Categorical(
                 memberId.Value, "MEMBER_OF_VERBNET_CLASS", classEntity, Source, TC.AcademicCurated));
 
@@ -173,8 +174,9 @@ public sealed class VerbNetDecomposer
                 classEntity, VerbNetSource.HasThematicRoleTypeId, roleId.Value,
                 Source, null, TC.AcademicCurated));
             b.AddAttestation(NativeAttestation.CategoricalResolved(
-                roleId.Value, VerbNetSource.HasNameAliasTypeId, roleLabelId.Value,
-                Source, null, TC.AcademicCurated));
+                roleId.Value, VerbNetSource.HasNameTypeId, roleLabelId.Value,
+                Source, null, TC.AcademicCurated)
+                with { QualifierMask = VerbNetSource.PrimaryName });
         }
 
         int frameOrdinal = -1;
@@ -274,8 +276,9 @@ public sealed class VerbNetDecomposer
                             classEntity, VerbNetSource.EntailsTypeId, predicateId,
                             Source, null, TC.AcademicCurated, confirm: !negated));
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        predicateId, VerbNetSource.HasNameAliasTypeId, predLabelId,
-                        Source, null, TC.AcademicCurated));
+                        predicateId, VerbNetSource.HasNameTypeId, predLabelId,
+                        Source, null, TC.AcademicCurated)
+                        with { QualifierMask = VerbNetSource.PrimaryName });
                     foreach (string roleVal in roleValues)
                     {
                         var roleId = RoleAnchor.Declare(

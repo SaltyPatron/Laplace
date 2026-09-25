@@ -16,7 +16,7 @@ public readonly struct FrameNetSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
     [
         "EVOKES_FRAME", "HAS_FRAME_ELEMENT", "REQUIRES", "EXCLUDES",
-        "HAS_VALENCE_PATTERN", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_FEATURE",
+        "HAS_VALENCE_PATTERN", "HAS_DEFINITION", "HAS_NAME", "HAS_FEATURE",
         "HAS_POS", "HAS_EXAMPLE",
         "FRAME_USES", "PERSPECTIVE_ON", "INHERITS_FROM", "CAUSATIVE_OF",
         "INCHOATIVE_OF", "PRECEDES", "ALSO_SEE", "IS_A", "HAS_SUBEVENT", "RELATED_TO", "HAS_PARSE",
@@ -32,8 +32,11 @@ public readonly struct FrameNetSource : ISeedSource
         RelationTypeRegistry.RelationTypeId(Relations[3]);
     internal static readonly Hash128 HasDefinitionTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[5]);
-    internal static readonly Hash128 HasNameAliasTypeId =
+    internal static readonly Hash128 HasNameTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[6]);
+    // A frame element's name as FrameNet defines it is the element's primary name.
+    internal static readonly Mask256 PrimaryName =
+        Laplace.SubstrateCRUD.ClaimQualifiers.Of("name", "primary");
     internal static readonly Hash128 HasFeatureTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[7]);
 

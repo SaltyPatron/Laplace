@@ -184,7 +184,7 @@ internal static class LegacyBootstrapVerifier
         for (int i = 0; i < rows.Count; i++)
         {
             // Keep this decoder pinned to intent_stage.c::kAttestationColumns.
-            // fold_replayable was inserted before highway_mask when the native
+            // fold_replayable was inserted before qualifier_mask when the native
             // stage widened from 13 to 14 columns; treating field 13 as the mask
             // makes every legacy-reconciliation path fail before it can compare
             // the staged evidence with the installed evidence.
@@ -206,85 +206,7 @@ internal static class LegacyBootstrapVerifier
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            WITH expected_rows AS (
-              SELECT * FROM unnest(
-                $1::bytea[], $2::bytea[], $3::bytea[], $4::bytea[], $5::boolean[],
-                $6::bytea[], $7::bytea[], $8::boolean[], $9::smallint[], $10::bigint[],
-                $11::bigint[], $12::bigint[], $13::bigint[], $14::boolean[],
-                $15::bytea[], $16::boolean[])
-              AS x(id, subject_id, type_id, object_value, object_null, source_id,
-                   context_value, context_null, outcome, games, score_sum,
-                   opponent_rd, opponent_rating, fold_replayable, highway_mask, mask_null)
-            ), expected AS (
-              SELECT id, subject_id, type_id,
-                     CASE WHEN object_null THEN NULL ELSE object_value END object_id,
-                     source_id,
-                     CASE WHEN context_null THEN NULL ELSE context_value END context_id,
-                     outcome, sum(games)::bigint games, sum(score_sum)::bigint score_sum,
-                     opponent_rd, opponent_rating, fold_replayable,
-                     CASE WHEN mask_null THEN NULL ELSE highway_mask END highway_mask
-              FROM expected_rows
-              GROUP BY id, subject_id, type_id, object_value, object_null, source_id,
-                       context_value, context_null, outcome, opponent_rd, opponent_rating,
-                       fold_replayable, highway_mask, mask_null
-            ), matched AS (
-              SELECT expected.*,
-                     stored.observation_count stored_games,
-                     stored.sum_score_fp1e9 stored_sum,
-                     CASE WHEN expected.games > 0
-                            AND stored.observation_count % expected.games = 0
-                          THEN stored.observation_count / expected.games ELSE 0 END multiplier
-              FROM expected
-              JOIN laplace.attestations stored
-                ON stored.id = expected.id
-               AND stored.subject_id = expected.subject_id
-               AND stored.type_id = expected.type_id
-               AND stored.object_id IS NOT DISTINCT FROM expected.object_id
-               AND stored.source_id = expected.source_id
-               AND stored.context_id IS NOT DISTINCT FROM expected.context_id
-               AND stored.outcome = expected.outcome
-               AND stored.opponent_rd_fp1e9 = expected.opponent_rd
-               AND stored.opponent_rating_fp1e9 = expected.opponent_rating
-               AND stored.fold_replayable = expected.fold_replayable
-               AND stored.highway_mask IS NOT DISTINCT FROM expected.highway_mask
-            ), cells AS (
-              SELECT DISTINCT subject_id, type_id, object_id FROM expected
-            ), evidence_totals AS (
-              SELECT cells.subject_id, cells.type_id, cells.object_id,
-                     sum(a.observation_count)::bigint games, max(a.last_observed_at) last_at
-              FROM cells
-              JOIN laplace.attestations a
-                ON a.subject_id = cells.subject_id AND a.type_id = cells.type_id
-               AND a.object_id IS NOT DISTINCT FROM cells.object_id
-              GROUP BY cells.subject_id, cells.type_id, cells.object_id
-            ), consensus_parity AS (
-              SELECT count(*) count, bool_and(c.witness_count = e.games
-                                               AND c.last_observed_at = e.last_at) ok
-              FROM evidence_totals e
-              JOIN laplace.consensus c
-                ON c.subject_id = e.subject_id AND c.type_id = e.type_id
-               AND c.object_id IS NOT DISTINCT FROM e.object_id
-            )
-            SELECT (SELECT count(*) FROM matched) = (SELECT count(*) FROM expected)
-               AND (SELECT bool_and(outcome = 2 AND multiplier >= 1
-                         AND stored_sum::numeric * games = score_sum::numeric * stored_games)
-                    FROM matched)
-               AND (SELECT min(multiplier) = max(multiplier) FROM matched)
-               AND (SELECT count = (SELECT count(*) FROM cells) AND ok FROM consensus_parity)
-               AND NOT EXISTS (
-                    SELECT 1
-                    FROM laplace.attestations historical
-                    WHERE historical.source_id IN (SELECT DISTINCT source_id FROM expected)
-                      AND NOT EXISTS (
-                          SELECT 1 FROM expected WHERE expected.id = historical.id)
-                      AND EXISTS (
-                          SELECT 1
-                          FROM expected
-                          WHERE expected.subject_id = historical.subject_id
-                            AND expected.type_id = historical.type_id
-                            AND expected.object_id IS NOT DISTINCT FROM historical.object_id))
-            """;
+        command.CommandText = SqlCatalog.Get("legacy.bootstrap_evidence_parity").Text;
         Add(command, Cast<byte[]>(columns[0]), NpgsqlDbType.Array | NpgsqlDbType.Bytea);
         Add(command, Cast<byte[]>(columns[1]), NpgsqlDbType.Array | NpgsqlDbType.Bytea);
         Add(command, Cast<byte[]>(columns[2]), NpgsqlDbType.Array | NpgsqlDbType.Bytea);

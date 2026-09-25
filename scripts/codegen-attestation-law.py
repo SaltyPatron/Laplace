@@ -355,12 +355,26 @@ def emit_relation_law(rel: dict) -> None:
     canon_names = sorted({r["canonical"] for r in relations})
     name_to_idx = {n: i for i, n in enumerate(canon_names)}
 
-    
+    # RETIRED RELATIONS. One relation per meaning: a per-variant relation
+    # (HAS_NAME_ALIAS, HAS_UPPERCASE_MAPPING, HAS_ISO639_1_CODE, ...) is replaced by its
+    # successor plus the claim's qualifiers (qualifiers.toml). Highway bits are
+    # append-only, so the retired entry stays declared and keeps its bit and type id for
+    # reading what was already admitted; resolving it for emission fails closed.
+    retired = {r["canonical"]: r["retired"] for r in relations if r.get("retired")}
+    for name, successor in sorted(retired.items()):
+        if successor not in name_to_idx:
+            raise SystemExit(f"relation {name} is retired to {successor}, which is not declared")
+        if successor in retired:
+            raise SystemExit(f"relation {name} is retired to {successor}, which is itself retired")
+
     alias_entries = []
     for a in sorted(aliases, key=lambda x: x["surface"]):
         canon = a["canonical"]
         if canon not in name_to_idx:
             continue
+        if canon in retired:
+            raise SystemExit(f"alias {a['surface']} resolves to retired relation {canon}; "
+                             f"point it at {retired[canon]}")
         alias_entries.append((a["surface"], name_to_idx[canon], a["flip"]))
 
     header = OUT_CORE / "include/laplace/core/relation_law.h"
@@ -381,6 +395,11 @@ typedef enum {
     LAPLACE_REL_SYMMETRY_SYMMETRIC   = 1,
 } laplace_rel_symmetry_t;
 
+/* A retired relation keeps its bit and type id so admitted evidence stays readable;
+ * resolving it for emission returns this code. Its meaning is carried by the
+ * successor relation plus the claim's qualifiers. */
+#define LAPLACE_REL_RETIRED (-3)
+
 typedef struct {
     const char*     canonical;
     hash128_t       type_id;
@@ -389,6 +408,7 @@ typedef struct {
     int16_t         parent_idx;
     int16_t         family_root_idx;
     uint8_t         flip;
+    int16_t         successor_idx;   /* -1 live; otherwise the relation that replaced it */
 } laplace_relation_def_t;
 
 typedef struct {
@@ -409,6 +429,9 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
                                      uint8_t* out_flip, hash128_t* out_parent_id);
 int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def_t** out_def);
 int laplace_relation_in_family(const hash128_t* type_id, const char* family_root, int* out);
+/* 1 when type_id names a retired manifest relation (out_successor, when given, receives
+ * its successor's canonical name); 0 when it is live or not a manifest relation. */
+int laplace_relation_retired(const hash128_t* type_id, const char** out_successor);
 
 int laplace_relation_resolve_deprel(const char* deprel, hash128_t* out_type_id,
                                     double* out_rank, laplace_rel_symmetry_t* out_symmetry,
@@ -450,8 +473,9 @@ int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* 
         fr_idx = str(name_to_idx[fr]) if fr in name_to_idx else str(name_to_idx[name])
         rank_key = r["rank"]
         rank_val = ranks.get(rank_key, 0.09)
+        succ_idx = str(name_to_idx[retired[name]]) if name in retired else "-1"
         lines.append(
-            f'    {{ "{name}", {{0}}, {rank_val}, {sym}, {parent_idx}, {fr_idx}, 0 }},'
+            f'    {{ "{name}", {{0}}, {rank_val}, {sym}, {parent_idx}, {fr_idx}, 0, {succ_idx} }},'
         )
 
     lines.append("};")
@@ -651,6 +675,7 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
         return 1;
     }}
     const laplace_relation_def_t* def = &laplace_relation_table[idx];
+    if (def->successor_idx >= 0) return LAPLACE_REL_RETIRED;
     if (table_entry_type_id((size_t)idx, out_type_id) != 0) return -1;
     if (out_rank) *out_rank = def->rank;
     if (out_symmetry) *out_symmetry = def->symmetry;
@@ -678,6 +703,16 @@ int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def
         b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
     }}
     return -1;
+}}
+
+int laplace_relation_retired(const hash128_t* type_id, const char** out_successor) {{
+    const laplace_relation_def_t* def = NULL;
+    if (out_successor) *out_successor = NULL;
+    if (!type_id || laplace_relation_lookup(type_id, &def) != 0 || !def
+        || def->successor_idx < 0)
+        return 0;
+    if (out_successor) *out_successor = laplace_relation_table[def->successor_idx].canonical;
+    return 1;
 }}
 
 static int family_contains(int16_t idx, int16_t root_idx) {{
@@ -802,7 +837,9 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     # Aliases count as declared vocabulary: an [[alias]] surface resolves to a canonical
     # relation, so naming one in a set is not drift. FOLLOWS reached this check as an
     # alias and was rejected -- the validator was wrong, not the call site.
-    known = set(canon_names) | {a.get("surface") for a in rel.get("alias", []) if a.get("surface")}
+    retired_names = {r["canonical"] for r in relations if r.get("retired")}
+    known = (set(canon_names) - retired_names) \
+        | {a.get("surface") for a in rel.get("alias", []) if a.get("surface")}
     set_members: dict[str, list[str]] = {}
     for s in sets:
         nm = s.get("name")
@@ -814,6 +851,10 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         # FAIL, never emit an empty arm. An unknown name silently yields NULL from the
         # CASE, and `type_id = ANY (NULL)` matches nothing — a traversal that quietly
         # returns no rows instead of erroring. Typos must stop the build.
+        stale = sorted(m for m in members if m in retired_names)
+        if stale:
+            raise SystemExit(
+                f"codegen: set '{nm}' names retired relations: " + ", ".join(stale))
         unknown = [m for m in members if m not in known]
         if unknown:
             raise SystemExit(

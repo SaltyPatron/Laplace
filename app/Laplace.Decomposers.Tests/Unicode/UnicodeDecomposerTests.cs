@@ -148,12 +148,7 @@ public sealed class UnicodeDecomposerTests
 
         bool sawCodepointEntity = false;
         bool sawMappingAttestation = false;
-        HashSet<Hash128> mappingTypes =
-        [
-            UcdProperties.RelTypeHasUppercaseMapping,
-            UcdProperties.RelTypeHasLowercaseMapping,
-            UcdProperties.RelTypeHasTitlecaseMapping,
-        ];
+        HashSet<Hash128> mappingTypes = [UcdProperties.RelTypeHasCaseMapping];
 
         await foreach (var change in dec.DecomposeAsync(ctx, opts))
         {

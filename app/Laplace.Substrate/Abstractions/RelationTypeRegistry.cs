@@ -22,6 +22,10 @@ public static class RelationTypeRegistry
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> FeatureCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> UcdPropertyCache = new(StringComparer.Ordinal);
 
+    // LAPLACE_REL_RETIRED (relation_law.h): a retired relation keeps its bit and type id
+    // for reading admitted evidence, but surface resolution for emission fails closed.
+    private const int RetiredRelation = -3;
+
     public static Hash128 RelationTypeId(string canonicalName)
     {
         ArgumentException.ThrowIfNullOrEmpty(canonicalName);
@@ -47,7 +51,11 @@ public static class RelationTypeRegistry
             double rank;
             byte flip;
             int symmetry;
-            NativeInterop.RelationResolveSurface(name, &typeId, &rank, &symmetry, &flip, &parentId);
+            int rc = NativeInterop.RelationResolveSurface(name, &typeId, &rank, &symmetry, &flip, &parentId);
+            if (rc == RetiredRelation)
+                throw new InvalidOperationException(
+                    $"Relation {name} is retired: emit its successor with the claim's qualifiers "
+                    + "(engine/manifest/relation_types.toml, qualifiers.toml).");
 
             string canonical = Marshal.PtrToStringUTF8(NativeInterop.RelationCanonicalForTypeId(&typeId)) ?? name;
             Hash128? parent = parentId.Equals(Hash128.Zero) ? null : parentId;
@@ -174,13 +182,15 @@ public static class RelationTypeRegistry
         }
     }
 
+    /// <summary>The live manifest relations; a retired relation (its meaning carried by a
+    /// successor plus qualifiers) is not emittable vocabulary.</summary>
     public static IEnumerable<RelationTypeResolution> AllCanonical()
     {
         nuint n = NativeInterop.RelationManifestCount();
         for (nuint i = 0; i < n; i++)
         {
             var ptr = NativeInterop.RelationManifestCanonical(i);
-            if (ptr == IntPtr.Zero) continue;
+            if (ptr == IntPtr.Zero || NativeInterop.RelationManifestSuccessor(i) != IntPtr.Zero) continue;
             var name = Marshal.PtrToStringUTF8(ptr);
             if (name is null) continue;
             yield return Resolve(name);

@@ -3,7 +3,7 @@
 SQL_QUERY("browse.names", "bytea[]",
     "SELECT subject_id, object_id, rating, rd, witness_count FROM laplace.consensus "
     "WHERE object_id = ANY($1) AND type_id = ANY("
-    "consensus.relation_family_ids('HAS_NAME') || consensus.relation_family_ids('HAS_NAME_ALIAS'))")
+    "consensus.relation_family_ids('HAS_NAME'))")
 SQL_QUERY("entity.facets", "bytea[]",
     "SELECT id, tier, type_id FROM laplace.entities WHERE id = ANY($1)")
 SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
@@ -100,8 +100,8 @@ SQL_QUERY("chess.search_exact", "text[],bytea,bytea,bytea",
     "JOIN laplace.entities e ON e.id=chess.player_id(q.value) AND e.type_id=$2 "
     "JOIN laplace.consensus n ON n.subject_id=e.id AND n.witness_count>0 "
     "WHERE length(q.value)>0 AND ((n.type_id=$3 AND n.object_id=$4) OR "
-    "(n.type_id=ANY(consensus.relation_family_ids('HAS_NAME') || "
-    "consensus.relation_family_ids('HAS_NAME_ALIAS')) AND n.object_id IS NOT NULL)) "
+    "(n.type_id=ANY(consensus.relation_family_ids('HAS_NAME'))"
+    " AND n.object_id IS NOT NULL)) "
     "ORDER BY q.ord LIMIT 1")
 SQL_QUERY("chess.search_standings", "bytea[],bytea,bytea,bytea",
     "SELECT DISTINCT e.id,c.witness_count,c.rating,c.rd FROM laplace.entities e "
@@ -110,8 +110,8 @@ SQL_QUERY("chess.search_standings", "bytea[],bytea,bytea,bytea",
 SQL_QUERY("chess.search_named_players", "text[]",
     "SELECT DISTINCT n.subject_id FROM structural.text_containers($1) t "
     "JOIN laplace.consensus n ON n.object_id=t.entity_id "
-    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME') || "
-    "consensus.relation_family_ids('HAS_NAME_ALIAS')) AND n.witness_count>0")
+    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME'))"
+    " AND n.witness_count>0")
 SQL_QUERY("chess.search_page", "text[],int4,int4,text,text,bool",
     "SELECT encode(player_id,'hex'),name,games,rating,rd,eff_mu "
     "FROM chess.player_search_candidates($1,$2,$3,$4,$5,$6)")
@@ -119,8 +119,8 @@ SQL_QUERY("chess.roster_unrated", "bytea,bytea,bytea,int8",
     "SELECT DISTINCT e.id FROM laplace.consensus n "
     "JOIN laplace.entities e ON e.id=n.subject_id AND e.type_id=$1 "
     "LEFT JOIN laplace.consensus c ON c.subject_id=e.id AND c.type_id=$2 AND c.object_id=$3 "
-    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME') || "
-    "consensus.relation_family_ids('HAS_NAME_ALIAS')) AND n.object_id IS NOT NULL "
+    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME'))"
+    " AND n.object_id IS NOT NULL "
     "AND n.witness_count>0 AND c.id IS NULL ORDER BY e.id LIMIT $4")
 SQL_QUERY("chess.roster_strength_asc", "bytea,bytea,bytea,int8",
     "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
@@ -264,7 +264,7 @@ SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT context_id FROM laplace.attestations "
     "WHERE subject_id=ANY($1) AND context_id IS NOT NULL")
 SQL_QUERY("evidence.observation_bindings", "bytea[],bytea[],bytea[],int4",
-    "SELECT id,subject_id,type_id,object_id,source_id,context_id,outcome,observation_count,highway_mask "
+    "SELECT id,subject_id,type_id,object_id,source_id,context_id,outcome,observation_count,qualifier_mask "
     "FROM laplace.attestations WHERE "
     "((($4 & 1)<>0 AND subject_id=ANY($1)) OR (($4 & 2)<>0 AND object_id=ANY($1))) "
     "AND ($2 IS NULL OR source_id=ANY($2)) AND ($3 IS NULL OR type_id=ANY($3))")
@@ -274,7 +274,7 @@ SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",
     "AND ($3 IS NULL OR source_id=ANY($3)) AND ($4 IS NULL OR context_id=$4)")
 SQL_QUERY("evidence.observation_cells", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,"
-    "a.outcome,a.observation_count,a.highway_mask "
+    "a.outcome,a.observation_count,a.qualifier_mask "
     "FROM unnest($1,$2,$3) AS c(subject_id,type_id,object_id) "
     "JOIN laplace.attestations a ON a.subject_id=c.subject_id "
     "AND a.type_id=c.type_id AND a.object_id=c.object_id "
@@ -555,3 +555,84 @@ SQL_QUERY("consensus.evidence_rows_typed", "bytea[],bytea[]",
     " FROM requested b JOIN laplace.attestations a "
     " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id IS NULL "
     " WHERE b.o IS NULL ORDER BY 1,3,2")
+/* Every name of an entity is one relation, HAS_NAME; which name a claim states
+ * (primary, alias, ...) is its qualifier. Candidates in the requested language first. */
+SQL_QUERY("realize.name_candidates", "bytea[],bytea",
+    "SELECT nm.subject_id,nm.object_id,(lang.object_id IS NOT NULL) AS lp,"
+    "consensus.eff_mu(nm.rating,nm.rd) AS mu "
+    "FROM laplace.v_consensus_unrefuted nm "
+    "LEFT JOIN laplace.consensus lang ON lang.subject_id=nm.object_id "
+    "AND lang.type_id=laplace.relation_type_id('HAS_LANGUAGE') AND lang.object_id=$2 "
+    "WHERE nm.subject_id=ANY($1) AND nm.type_id=laplace.relation_type_id('HAS_NAME') "
+    "ORDER BY nm.subject_id,lp DESC,mu DESC,nm.object_id")
+/* Staged evidence equals installed evidence (legacy bootstrap reconciliation): every
+ * staged row is stored with the same witness fields and qualifiers, its cell's
+ * consensus folds exactly that evidence, and the staged sources hold no other row
+ * for those cells. */
+SQL_QUERY("legacy.bootstrap_evidence_parity",
+    "bytea[],bytea[],bytea[],bytea[],bool[],bytea[],bytea[],bool[],int2[],int8[],int8[],int8[],int8[],bool[],bytea[],bool[]",
+    "WITH expected_rows AS (SELECT * FROM unnest("
+    "$1::bytea[],$2::bytea[],$3::bytea[],$4::bytea[],$5::boolean[],"
+    "$6::bytea[],$7::bytea[],$8::boolean[],$9::smallint[],$10::bigint[],"
+    "$11::bigint[],$12::bigint[],$13::bigint[],$14::boolean[],$15::bytea[],$16::boolean[]) "
+    "AS x(id,subject_id,type_id,object_value,object_null,source_id,context_value,context_null,"
+    "outcome,games,score_sum,opponent_rd,opponent_rating,fold_replayable,qualifier_mask,mask_null)), "
+    "expected AS (SELECT id,subject_id,type_id,"
+    "CASE WHEN object_null THEN NULL ELSE object_value END object_id,source_id,"
+    "CASE WHEN context_null THEN NULL ELSE context_value END context_id,"
+    "outcome,sum(games)::bigint games,sum(score_sum)::bigint score_sum,"
+    "opponent_rd,opponent_rating,fold_replayable,"
+    "CASE WHEN mask_null THEN NULL ELSE qualifier_mask END qualifier_mask "
+    "FROM expected_rows GROUP BY id,subject_id,type_id,object_value,object_null,source_id,"
+    "context_value,context_null,outcome,opponent_rd,opponent_rating,fold_replayable,"
+    "qualifier_mask,mask_null), "
+    "matched AS (SELECT expected.*,stored.observation_count stored_games,"
+    "stored.sum_score_fp1e9 stored_sum,"
+    "CASE WHEN expected.games>0 AND stored.observation_count%expected.games=0 "
+    "THEN stored.observation_count/expected.games ELSE 0 END multiplier "
+    "FROM expected JOIN laplace.attestations stored "
+    "ON stored.id=expected.id AND stored.subject_id=expected.subject_id "
+    "AND stored.type_id=expected.type_id "
+    "AND stored.object_id IS NOT DISTINCT FROM expected.object_id "
+    "AND stored.source_id=expected.source_id "
+    "AND stored.context_id IS NOT DISTINCT FROM expected.context_id "
+    "AND stored.outcome=expected.outcome AND stored.opponent_rd_fp1e9=expected.opponent_rd "
+    "AND stored.opponent_rating_fp1e9=expected.opponent_rating "
+    "AND stored.fold_replayable=expected.fold_replayable "
+    "AND stored.qualifier_mask IS NOT DISTINCT FROM expected.qualifier_mask), "
+    "cells AS (SELECT DISTINCT subject_id,type_id,object_id FROM expected), "
+    "evidence_totals AS (SELECT cells.subject_id,cells.type_id,cells.object_id,"
+    "sum(a.observation_count)::bigint games,max(a.last_observed_at) last_at "
+    "FROM cells JOIN laplace.attestations a "
+    "ON a.subject_id=cells.subject_id AND a.type_id=cells.type_id "
+    "AND a.object_id IS NOT DISTINCT FROM cells.object_id "
+    "GROUP BY cells.subject_id,cells.type_id,cells.object_id), "
+    "consensus_parity AS (SELECT count(*) count,"
+    "bool_and(c.witness_count=e.games AND c.last_observed_at=e.last_at) ok "
+    "FROM evidence_totals e JOIN laplace.consensus c "
+    "ON c.subject_id=e.subject_id AND c.type_id=e.type_id "
+    "AND c.object_id IS NOT DISTINCT FROM e.object_id) "
+    "SELECT (SELECT count(*) FROM matched)=(SELECT count(*) FROM expected) "
+    "AND (SELECT bool_and(outcome=2 AND multiplier>=1 "
+    "AND stored_sum::numeric*games=score_sum::numeric*stored_games) FROM matched) "
+    "AND (SELECT min(multiplier)=max(multiplier) FROM matched) "
+    "AND (SELECT count=(SELECT count(*) FROM cells) AND ok FROM consensus_parity) "
+    "AND NOT EXISTS (SELECT 1 FROM laplace.attestations historical "
+    "WHERE historical.source_id IN (SELECT DISTINCT source_id FROM expected) "
+    "AND NOT EXISTS (SELECT 1 FROM expected WHERE expected.id=historical.id) "
+    "AND EXISTS (SELECT 1 FROM expected WHERE expected.subject_id=historical.subject_id "
+    "AND expected.type_id=historical.type_id "
+    "AND expected.object_id IS NOT DISTINCT FROM historical.object_id))")
+/* A grapheme's case mappings: one relation, HAS_CASE_MAPPING; which case a target is
+ * is the qualifier bit ($2, one per slot, in slot order) of the testimony behind the
+ * cell. The eff_mu winner per (grapheme, slot); slot is 1-based. */
+SQL_QUERY("lexical.case_mappings", "bytea[],int4[]",
+    "SELECT DISTINCT ON (c.subject_id,q.slot) c.subject_id,q.slot::int4,c.object_id "
+    "FROM laplace.v_consensus_unrefuted c "
+    "CROSS JOIN unnest($2::int4[]) WITH ORDINALITY AS q(bit,slot) "
+    "WHERE c.subject_id=ANY($1) AND c.type_id=laplace.relation_type_id('HAS_CASE_MAPPING') "
+    "AND EXISTS (SELECT 1 FROM laplace.attestations a "
+    "WHERE a.subject_id=c.subject_id AND a.type_id=c.type_id "
+    "AND a.object_id IS NOT DISTINCT FROM c.object_id AND a.qualifier_mask IS NOT NULL "
+    "AND get_bit(a.qualifier_mask,q.bit)=1) "
+    "ORDER BY c.subject_id,q.slot,consensus.eff_mu(c.rating,c.rd) DESC")

@@ -53,7 +53,7 @@ BEGIN
     -- primary sort key was lower(realize.realize(x.syn)) = x.surface -- case-folding used
     -- as an identity test. "King" and "king" are different content and therefore
     -- different ids, and the substrate already attests the link both ways
-    -- (K --HAS_LOWERCASE_MAPPING--> k, k --HAS_UPPERCASE_MAPPING--> K, resolved
+    -- (K --HAS_CASE_MAPPING {lower}--> k, k --HAS_CASE_MAPPING {upper}--> K, resolved
     -- natively by word_case_variants); lower() discards those edges to re-derive a
     -- worse answer in string space, per row. The rest of that block was two renders
     -- per candidate, a char_length tiebreak, a 29.6s correlated band-mass count and

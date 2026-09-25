@@ -18,7 +18,7 @@ BEGIN ATOMIC
         SELECT n.subject_id
         FROM laplace.consensus n
         WHERE n.object_id = p_id
-          AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+          AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
     ), sense_rows AS MATERIALIZED (
         SELECT s.synset_id AS id, s.eff_mu, s.witnesses,
                row_number() OVER (ORDER BY s.eff_mu DESC NULLS LAST, s.synset_id) AS ord

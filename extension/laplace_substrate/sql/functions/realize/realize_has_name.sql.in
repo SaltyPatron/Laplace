@@ -17,15 +17,15 @@ BEGIN ATOMIC
     WITH ranked AS MATERIALIZED (
         SELECT nm.object_id AS id,
                row_number() OVER (ORDER BY (lang.object_id IS NOT NULL) DESC,
-                        (nm.type_id = laplace.relation_type_id('HAS_NAME')) DESC,
                         consensus.eff_mu(nm.rating, nm.rd) DESC, nm.object_id) AS rn
         FROM laplace.v_consensus_unrefuted nm
         LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id
           AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
           AND lang.object_id = p_lang
+        -- Every name is one relation; which name it is (primary, alias, ...) is the
+        -- claim's qualifier (qualifiers.toml family "name").
         WHERE nm.subject_id = p_id
-          AND nm.type_id IN (laplace.relation_type_id('HAS_NAME'),
-                             laplace.relation_type_id('HAS_NAME_ALIAS'))
+          AND nm.type_id = laplace.relation_type_id('HAS_NAME')
     ),
     lbl AS MATERIALIZED (
         SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s

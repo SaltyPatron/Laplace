@@ -9,8 +9,19 @@ namespace Laplace.Decomposers.ISO;
 public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
     public static readonly Hash128 Source = ISOSource.SourceId;
-    private const string NameAliasRelation = "HAS_NAME_ALIAS";
     private const string LanguageTypeRelation = "HAS_LANGUAGE_TYPE";
+
+    // One relation per meaning: which code scheme an identifier belongs to and which
+    // name a name is are the claim's qualifiers (qualifiers.toml).
+    private static readonly Hash128 RelTypeHasExternalId =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasExternalId)));
+    private static readonly Hash128 RelTypeHasName =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasName)));
+    private static readonly Mask256 Iso6391 = ClaimQualifiers.Of("identifier", "iso639-1");
+    private static readonly Mask256 Iso6392B = ClaimQualifiers.Of("identifier", "iso639-2b");
+    private static readonly Mask256 Iso6392T = ClaimQualifiers.Of("identifier", "iso639-2t");
+    private static readonly Mask256 ReferenceName = ClaimQualifiers.Of("name", "reference");
+    private static readonly Mask256 PrintName = ClaimQualifiers.Of("name", "print");
 
     public static readonly Hash128 TrustClass = ISOSource.TrustClass;
 
@@ -18,8 +29,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
     private static readonly Hash128 Iso639CodeTypeId = EntityTypeRegistry.Iso639Code;
     private static readonly Hash128 RelTypeIsLanguageCode =
         RelationTypeRegistry.RelationTypeId("IS_LANGUAGE_CODE");
-    private static readonly Hash128 RelTypeHasIso6391Code =
-        RelationTypeRegistry.RelationTypeId("HAS_ISO639_1_CODE");
     private static readonly Hash128 RelTypeUsesScript =
         RelationTypeRegistry.RelationTypeId("USES_SCRIPT");
     private static readonly Hash128 RelTypeMemberOfMacrolanguage =
@@ -104,19 +113,24 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             var iso1Id = ContentEmitter.Emit(b, iso1, Source)
                 ?? throw new InvalidOperationException($"ISO 639-1 code could not be composed: {iso1}");
             b.AddAttestation(NativeAttestation.CategoricalResolved(
-                langId, RelTypeHasIso6391Code, iso1Id, Source, null,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                langId, RelTypeHasExternalId, iso1Id, Source, null, TC.StandardsDerived)
+                with { QualifierMask = Iso6391 });
         }
 
-        foreach (var (p2, rel) in new[] { (rec.Part2b, "HAS_ISO639_2B_CODE"), (rec.Part2t, "HAS_ISO639_2T_CODE") })
+        // One claim per distinct ISO 639-2 code, qualified by the scheme(s) it serves.
+        string part2b = rec.Part2b.Trim().ToLowerInvariant();
+        string part2t = rec.Part2t.Trim().ToLowerInvariant();
+        foreach (var (iso2, scheme) in part2b == part2t
+                     ? new[] { (part2b, Iso6392B | Iso6392T) }
+                     : new[] { (part2b, Iso6392B), (part2t, Iso6392T) })
         {
-            if (p2.Length == 0) continue;
-            string iso2 = p2.Trim().ToLowerInvariant();
+            if (iso2.Length == 0) continue;
             _codeNames.Add(iso2);
             var iso2Id = ContentEmitter.Emit(b, iso2, Source)
                 ?? throw new InvalidOperationException($"ISO 639-2 code could not be composed: {iso2}");
-            b.AddAttestation(NativeAttestation.Categorical(
-                langId, rel, iso2Id, Source, TC.StandardsDerived));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                langId, RelTypeHasExternalId, iso2Id, Source, null, TC.StandardsDerived)
+                with { QualifierMask = scheme });
         }
         if (rec.Scope.Length > 0)
         {
@@ -138,8 +152,9 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         {
             var nameId = ContentEmitter.Emit(b, rec.RefName, Source);
             if (nameId is { } nid)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    langId, NameAliasRelation, nid, Source, TC.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    langId, RelTypeHasName, nid, Source, null, TC.StandardsDerived)
+                    with { QualifierMask = ReferenceName });
         }
     }
 
@@ -522,28 +537,39 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
                 ? LanguageReference.EmitResolvedCode(b, languageCode, Source, TC.StandardsDerived)
                 : null;
 
-            StageCode(rec.Bibliographic, "HAS_ISO639_2B_CODE");
-            StageCode(rec.Terminological, "HAS_ISO639_2T_CODE");
-
-            void StageCode(string code, string relation)
+            // One claim per distinct code: a code that is both the bibliographic and the
+            // terminologic code is "lang HAS_EXTERNAL_ID code {iso639-2b, iso639-2t}".
+            string bibliographic = rec.Bibliographic.ToLowerInvariant();
+            string terminologic = rec.Terminological.ToLowerInvariant();
+            if (bibliographic == terminologic)
+                StageCode(bibliographic, Iso6392B | Iso6392T);
+            else
             {
-                if (code.Length != 3) return;
-                string canonical = code.ToLowerInvariant();
+                StageCode(bibliographic, Iso6392B);
+                StageCode(terminologic, Iso6392T);
+            }
+
+            void StageCode(string canonical, Mask256 scheme)
+            {
+                if (canonical.Length != 3) return;
                 Owner._codeNames.Add(canonical);
                 Hash128 codeId = ContentEmitter.Emit(b, canonical, Source)
                     ?? throw new InvalidOperationException($"ISO 639-2 code could not be composed: {canonical}");
 
                 if (ContentEmitter.Emit(b, rec.English, Source) is { } english)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        codeId, NameAliasRelation, english, Source, TC.StandardsDerived));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        codeId, RelTypeHasName, english, Source, null, TC.StandardsDerived)
+                        with { QualifierMask = ReferenceName });
                 if (ContentEmitter.Emit(b, rec.French, Source) is { } french)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        codeId, NameAliasRelation, french, Source, TC.StandardsDerived));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        codeId, RelTypeHasName, french, Source, null, TC.StandardsDerived)
+                        with { QualifierMask = ReferenceName });
 
                 if (languageId is { } lid)
                 {
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        lid, relation, codeId, Source, TC.StandardsDerived));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        lid, RelTypeHasExternalId, codeId, Source, null, TC.StandardsDerived)
+                        with { QualifierMask = scheme });
                 }
             }
         }
@@ -582,8 +608,9 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         {
             var lid = LanguageReference.EmitResolvedCode(b, rec.Id, Source, TC.StandardsDerived);
             if (ContentEmitter.Emit(b, rec.PrintName, Source) is { } nid)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    lid, NameAliasRelation, nid, Source, TC.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    lid, RelTypeHasName, nid, Source, null, TC.StandardsDerived)
+                    with { QualifierMask = PrintName });
         }
         protected override async IAsyncEnumerable<(string Id, string PrintName)> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,

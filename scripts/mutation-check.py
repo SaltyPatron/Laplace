@@ -130,8 +130,8 @@ MUTATIONS = [
            "HAS_ISO639_2B_CODE, HAS_ISO639_2T_CODE and SUPERSEDED_BY without declaring any "
            "of them.",
     file="app/Laplace.Decomposers/Unicode/UnicodeSource.cs",
-    before='        "HAS_BLOCK", "HAS_UPPERCASE_MAPPING", "HAS_LOWERCASE_MAPPING",',
-    after='        "HAS_UPPERCASE_MAPPING", "HAS_LOWERCASE_MAPPING",',
+    before='        "HAS_BLOCK", "HAS_CASE_MAPPING", "DECOMPOSES_TO",',
+    after='        "HAS_CASE_MAPPING", "DECOMPOSES_TO",',
     project="Laplace.Substrate.Tests",
     filter="FullyQualifiedName~Rule8DeclaredCovers",
   ),

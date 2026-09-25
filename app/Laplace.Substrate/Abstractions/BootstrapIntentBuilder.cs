@@ -47,15 +47,20 @@ public sealed class BootstrapIntentBuilder
             _inner, sourceId, EntityTier.Word, SourceTypeId, sourceName, sourceId);
 
         // The source names ITSELF, by the same law AddType uses for type nodes:
-        // HAS_NAME_ALIAS → the name's content root. Canonical-string sources are
+        // HAS_NAME {name/primary} → the name's content root. Canonical-string sources are
         // unaffected on the read side (realize.render() prefers canonical_names); content-
         // hash sources (models) stop rendering as raw hex, and name → source-id
         // resolution becomes a consensus lookup (seed-step verify depends on it).
         if (ContentEmitter.Emit(_inner, sourceName, sourceId) is { } sourceNameId)
-            _inner.AddAttestation(NativeAttestation.Categorical(
-                sourceId, "HAS_NAME_ALIAS", sourceNameId, sourceId, null,
-                SourceTrust.SubstrateMandate));
+            _inner.AddAttestation(NativeAttestation.CategoricalResolved(
+                sourceId, RelTypeHasName, sourceNameId, sourceId, null,
+                SourceTrust.SubstrateMandate)
+                with { QualifierMask = PrimaryName });
     }
+
+    private static readonly Hash128 RelTypeHasName =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasName)));
+    private static readonly Mask256 PrimaryName = ClaimQualifiers.Of("name", "primary");
 
 
 

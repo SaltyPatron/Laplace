@@ -240,7 +240,8 @@ Related: #1713, #1471, #1057, #1180.
 
 Issue: #1723
 
-- **The relation manifest still carries the variants the qualifier law replaces:** `HAS_ISO639_*_CODE`, `HAS_UPPERCASE_MAPPING` and siblings, `HAS_NAME_ALIAS`, and others. Legacy decomposers and gates still use them.
+- **The variant relations are retired.** `HAS_ISO639_*_CODE`, `HAS_UPPERCASE_MAPPING` and siblings, `HAS_NAME_ALIAS`, and `CANONICAL_`/`COMPATIBILITY_DECOMPOSES_TO` carry `retired = "<successor>"` in the manifest. They keep their bits and type ids, so evidence already admitted under them stays readable, but emitting one fails closed (`LAPLACE_REL_RETIRED`). Every emitter writes the successor relation plus qualifiers, and the attestation column is now `qualifier_mask`.
+- **Qualifier-aware reads are thin.** Consensus has no qualifiers, so a reader that needs one variant (the case mapping) probes the attestations behind the cell. Primary-versus-alias name preference is lost until qualifiers reach consensus.
 - **The highway has about 30 bits left.**
 - **Entity OR-masks (the POS mask and its sisters) are not built.**
 - **Qualifiers never reach consensus** (see B).

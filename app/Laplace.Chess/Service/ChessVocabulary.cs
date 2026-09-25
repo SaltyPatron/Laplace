@@ -151,6 +151,12 @@ public static class ChessVocabulary
         PlayerId("Laplace-guided-edge"),
     ];
 
+    // A player's name as a source wrote it is one of the player's names: HAS_NAME
+    // qualified name/alias (one relation per meaning, qualifiers.toml).
+    private static readonly Hash128 RelTypeHasName =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasName)));
+    private static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
+
     public static Hash128 EmitPlayer(
         SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
         double? witnessWeight = null)
@@ -159,8 +165,9 @@ public static class ChessVocabulary
         b.AddEntity(playerId, EntityTier.Word, PlayerType);
         if (ContentEmitter.Emit(b, name, sourceId) is { } nameId)
         {
-            b.AddAttestation(NativeAttestation.Categorical(
-                playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, declaredWitnessWeight));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                playerId, RelTypeHasName, nameId, sourceId, null, declaredWitnessWeight)
+                with { QualifierMask = AliasName });
 
             AppendPlayerPhysicality(b, playerId, name, sourceId, nameId);
         }

@@ -23,7 +23,7 @@ public readonly struct WiktionarySource : ISeedSource
         "INHERITED_FROM", "ETYMOLOGICALLY_RELATED_TO", "DERIVED_FROM",
         "FORM_OF", "HAS_FEATURE", "MANNER_OF",
         // Source-owned lexical and sense relations.
-        "HAS_LANGUAGE", "CORRESPONDS_TO", "HAS_SENSE", "IS_SENSE_OF", "HAS_NAME_ALIAS",
+        "HAS_LANGUAGE", "CORRESPONDS_TO", "HAS_SENSE", "IS_SENSE_OF", "HAS_NAME",
     ];
 
     internal static readonly Hash128 CorrespondsToTypeId =
@@ -34,8 +34,11 @@ public readonly struct WiktionarySource : ISeedSource
         RelationTypeRegistry.RelationTypeId(Relations[27]);
     internal static readonly Hash128 IsSenseOfTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[28]);
-    internal static readonly Hash128 HasNameAliasTypeId =
+    internal static readonly Hash128 HasNameTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[29]);
+    // A sense's headword is one of its names: HAS_NAME qualified name/alias.
+    internal static readonly Mask256 AliasName =
+        Laplace.SubstrateCRUD.ClaimQualifiers.Of("name", "alias");
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["Wiktionary_Sense", "Wikidata_Item"];

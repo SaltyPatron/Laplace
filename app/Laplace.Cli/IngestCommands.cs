@@ -1009,9 +1009,8 @@ internal static partial class IngestCommands
                 }
             case "ISO639Decomposer":
                 {
-                    long langs = await RelationEvidence("HAS_ISO639_3_CODE", srcKey)
-                               + await RelationEvidence("HAS_ISO639_1_CODE", srcKey)
-                               + await RelationEvidence("HAS_ISO639_2_CODE", srcKey);
+                    // Every ISO 639 code is one relation; the scheme is the claim's qualifier.
+                    long langs = await RelationEvidence(ISOSource.CodeRelation, srcKey);
                     Console.WriteLine($"  check languages: {langs:N0} ISO code attestations");
                     break;
                 }
@@ -1055,7 +1054,7 @@ internal static partial class IngestCommands
                 break;
             case "CILIDecomposer":
                 Console.WriteLine($"  check cili: HAS_DEFINITION={await RelationEvidence("HAS_DEFINITION", srcKey):N0} "
-                                + $"HAS_NAME_ALIAS={await RelationEvidence("HAS_NAME_ALIAS", srcKey):N0} "
+                                + $"{CILISource.Relations[2]}={await RelationEvidence(CILISource.Relations[2], srcKey):N0} "
                                 + $"IS_TYPED_AS={await RelationEvidence("IS_TYPED_AS", srcKey):N0}");
                 break;
             case "FrameNetDecomposer":

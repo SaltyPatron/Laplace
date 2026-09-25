@@ -135,7 +135,7 @@ internal static class OMWLmfEmitter
     private static void EmitLexicon(SubstrateChangeBuilder b, OmwLmfLexicon lexicon)
     {
         Hash128 id = Lexicon(b, lexicon.Id);
-        AttestContent(b, id, OmwRelation.HasNameAlias, lexicon.Label);
+        AttestContent(b, id, OmwRelation.HasName, lexicon.Label, qualifiers: PrimaryName);
         AttestContent(b, id, OmwRelation.HasVersion, lexicon.Version);
         AttestContent(b, id, OmwRelation.HasLicense, lexicon.License);
         AttestContent(b, id, OmwRelation.HasSourceUrl, lexicon.Url);
@@ -163,14 +163,15 @@ internal static class OMWLmfEmitter
         Hash128? lemma = EmitContent(b, entry.Lemma);
         if (lemma is { } lemmaId)
         {
-            Attest(b, entryId, OmwRelation.HasNameAlias, lemmaId, Language(b, entry.LanguageCode));
+            Attest(b, entryId, OmwRelation.HasName, lemmaId, Language(b, entry.LanguageCode),
+                qualifiers: AliasName);
             AttestLanguage(b, lemmaId, entry.LanguageCode);
             if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
                 PosReference.Attest(
                     b, lemmaId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
                     OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
         }
-        AttestContent(b, entryId, OmwRelation.HasNameAlias, entry.Index);
+        AttestContent(b, entryId, OmwRelation.HasName, entry.Index, qualifiers: AliasName);
         AttestContent(b, entryId, OmwRelation.HasFeature, entry.LemmaType);
         AttestLanguage(b, entryId, entry.LanguageCode);
         if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
@@ -206,7 +207,8 @@ internal static class OMWLmfEmitter
                 Attest(b, entryId, OmwRelation.HasSense, senseId, Language(b, entry.LanguageCode));
             Attest(b, senseId, OmwRelation.IsSenseOf, synsetId, Language(b, entry.LanguageCode));
             if (lemma is { } nameId)
-                Attest(b, senseId, OmwRelation.HasNameAlias, nameId, Language(b, entry.LanguageCode));
+                Attest(b, senseId, OmwRelation.HasName, nameId, Language(b, entry.LanguageCode),
+                    qualifiers: AliasName);
             AttestLanguage(b, senseId, entry.LanguageCode);
             if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
                 PosReference.Attest(
@@ -240,7 +242,8 @@ internal static class OMWLmfEmitter
                 b, synsetId, synset.PartOfSpeech, PosReference.PosTagset.WordNet,
                 OMWDecomposer.Source, Language(b, synset.LanguageCode), TC.AcademicCurated);
         AttestContent(b, synsetId, OmwRelation.HasLexCategory, synset.Lexfile);
-        AttestContent(b, synsetId, OmwRelation.HasNameAlias, synset.Identifier);
+        // The synset's dc:identifier is an identifier bound to the synset, not a name.
+        AttestContent(b, synsetId, OmwRelation.HasExternalId, synset.Identifier);
         AttestContent(b, synsetId, OmwRelation.HasFeature, synset.Lexicalized);
 
         if (!string.IsNullOrWhiteSpace(synset.Ili)
@@ -266,7 +269,7 @@ internal static class OMWLmfEmitter
     {
         if (string.IsNullOrWhiteSpace(behaviour.Id)) return;
         Hash128 id = Behaviour(b, behaviour.Lexicon, behaviour.Id);
-        AttestContent(b, id, OmwRelation.HasNameAlias, behaviour.Frame, behaviour.LanguageCode);
+        AttestContent(b, id, OmwRelation.HasName, behaviour.Frame, behaviour.LanguageCode, PrimaryName);
     }
 
     private static void EmitSidecar(SubstrateChangeBuilder b, OmwLmfSidecar sidecar)
@@ -331,12 +334,17 @@ internal static class OMWLmfEmitter
         Hash128 subject,
         OmwRelation relation,
         string value,
-        string? language = null)
+        string? language = null,
+        Mask256 qualifiers = default)
     {
         if (EmitContent(b, value) is not { } contentId) return;
         Attest(b, subject, relation, contentId,
-            language is null ? null : Language(b, language));
+            language is null ? null : Language(b, language), qualifiers: qualifiers);
     }
+
+    // Which name a HAS_NAME claim states is its qualifier (qualifiers.toml family "name").
+    private static readonly Mask256 PrimaryName = ClaimQualifiers.Of("name", "primary");
+    private static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
 
     private static void Attest(
         SubstrateChangeBuilder b,
@@ -344,16 +352,18 @@ internal static class OMWLmfEmitter
         OmwRelation relation,
         Hash128 obj,
         Hash128? context = null,
-        double? magnitude = null)
+        double? magnitude = null,
+        Mask256 qualifiers = default)
     {
         var resolved = OMWSource.Resolve(relation);
         Hash128 typeId = resolved.Id;
         if (resolved.Flip) (subject, obj) = (obj, subject);
-        b.AddAttestation(magnitude is { } value
+        b.AddAttestation((magnitude is { } value
             ? NativeAttestation.ResolvedScored(
                 subject, typeId, obj, OMWDecomposer.Source, context,
                 TC.AcademicCurated, value, arenaScale: 1.0)
             : NativeAttestation.CategoricalResolved(
-                subject, typeId, obj, OMWDecomposer.Source, context, TC.AcademicCurated));
+                subject, typeId, obj, OMWDecomposer.Source, context, TC.AcademicCurated))
+            with { QualifierMask = qualifiers });
     }
 }

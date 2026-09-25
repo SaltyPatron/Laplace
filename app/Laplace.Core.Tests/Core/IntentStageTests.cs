@@ -107,11 +107,11 @@ public class IntentStageTests
     }
 
     [Fact]
-    public void AddAttestation_DefaultHighwayMaskEmits32ZeroBytesNotNull()
+    public void AddAttestation_DefaultQualifierMaskEmits32ZeroBytesNotNull()
     {
         // Regression test for the IsZero-vs-unset bug: a caller that doesn't pass
-        // highwayMask (or passes an explicitly all-zero Mask256) gets Mask256.Zero,
-        // which is a legitimately meaningful 32-byte mask (no relation bands
+        // qualifierMask (or passes an explicitly all-zero Mask256) gets Mask256.Zero,
+        // which is a legitimately meaningful 32-byte mask (no qualifiers
         // matched), not "no mask was computed." Before the fix, AddAttestation's
         // `mask.IsZero ? null : ...` collapsed both cases to a NULL column write.
         using var s = IntentStage.New(1);
@@ -123,8 +123,8 @@ public class IntentStageTests
 
         string[] columns = IntentStage.CopyColumnList(IntentStageTable.Attestations)
             .Split(", ");
-        int highwayMaskIndex = Array.IndexOf(columns, "highway_mask");
-        Assert.True(highwayMaskIndex >= 0, "highway_mask column not found in CopyColumnList");
+        int qualifierMaskIndex = Array.IndexOf(columns, "qualifier_mask");
+        Assert.True(qualifierMaskIndex >= 0, "qualifier_mask column not found in CopyColumnList");
 
         var bytes = s.EmitCopyBinary(IntentStageTable.Attestations);
         int pos = 11 + 8; // signature + flags(4) + extension(4)
@@ -135,7 +135,7 @@ public class IntentStageTests
         {
             uint len = ReadBe32(bytes.AsSpan(pos, 4));
             pos += 4;
-            if (i == highwayMaskIndex)
+            if (i == qualifierMaskIndex)
             {
                 Assert.Equal(32u, len); // NOT unchecked((uint)-1) -- must not be NULL
                 for (int b = 0; b < 32; b++)
@@ -145,7 +145,7 @@ public class IntentStageTests
             if (len != unchecked((uint)-1))
                 pos += (int)len;
         }
-        Assert.Fail("did not reach highway_mask field");
+        Assert.Fail("did not reach qualifier_mask field");
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public class IntentStageTests
 
         Assert.Equal(rating,
             BinaryPrimitives.ReadInt64BigEndian(AttestationField(stage, "opponent_rating_fp1e9")));
-        Assert.Equal(new byte[32], AttestationField(stage, "highway_mask"));
+        Assert.Equal(new byte[32], AttestationField(stage, "qualifier_mask"));
     }
 
     private static byte[] AttestationField(IntentStage stage, string name)

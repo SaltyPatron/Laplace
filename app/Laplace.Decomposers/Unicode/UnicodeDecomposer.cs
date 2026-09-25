@@ -1502,7 +1502,8 @@ public sealed class UnicodeDecomposer
                 && ContentEmitter.Emit(builder, name, Source) is { } nameId)
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
                     entityId, UcdProperties.RelTypeHasName, nameId,
-                    Source, null, structural));
+                    Source, null, structural)
+                    with { QualifierMask = UcdProperties.PrimaryName });
 
             if (row.GeneralCategory.Length > 0)
             {
@@ -1542,35 +1543,47 @@ public sealed class UnicodeDecomposer
                     Source, null, RelationTypeRank.ScalarValued * TC.StandardsDerived));
             }
 
-            if (row.UppercaseMapping != 0)
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasUppercaseMapping,
-                    CodepointId(row.UppercaseMapping), Source, null, structural));
-            if (row.LowercaseMapping != 0)
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasLowercaseMapping,
-                    CodepointId(row.LowercaseMapping), Source, null, structural));
-            if (row.TitlecaseMapping != 0)
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasTitlecaseMapping,
-                    CodepointId(row.TitlecaseMapping), Source, null, structural));
+            EmitCaseMappings(builder, entityId, row, structural);
 
-            EmitDecomposition(
-                builder, entityId, row.CanonicalDecomposition,
-                UcdProperties.RelTypeCanonDecomposesTo, structural);
-            EmitDecomposition(
-                builder, entityId, row.CompatibilityDecomposition,
-                UcdProperties.RelTypeCompatDecomposesTo, structural);
+            if (row.Decomposition is { Length: > 0 } decomposition && row.DecompositionType is { } dt)
+                EmitDecomposition(
+                    builder, entityId, decomposition,
+                    ClaimQualifiers.Of("decomposition", dt), structural);
+        }
+
+        // UnicodeData.txt fields 12-14 are the simple case mappings. One relation,
+        // HAS_CASE_MAPPING; which case(s) the target is are the claim's qualifiers, so a
+        // target that is both the uppercase and the titlecase mapping is one claim.
+        private static void EmitCaseMappings(
+            SubstrateChangeBuilder builder,
+            Hash128 subject,
+            in UnicodePhysicalArtifactParser.UnicodeDataRow row,
+            double weight)
+        {
+            ReadOnlySpan<uint> targets = [row.UppercaseMapping, row.LowercaseMapping, row.TitlecaseMapping];
+            ReadOnlySpan<Mask256> cases =
+                [UcdProperties.UpperMapping, UcdProperties.LowerMapping, UcdProperties.TitleMapping];
+            for (int i = 0; i < targets.Length; ++i)
+            {
+                uint target = targets[i];
+                if (target == 0 || targets[..i].Contains(target)) continue;
+                Mask256 qualifiers = UcdProperties.SimpleMapping;
+                for (int j = i; j < targets.Length; ++j)
+                    if (targets[j] == target) qualifiers |= cases[j];
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    subject, UcdProperties.RelTypeHasCaseMapping,
+                    CodepointId(target), Source, null, weight)
+                    with { QualifierMask = qualifiers });
+            }
         }
 
         private static void EmitDecomposition(
             SubstrateChangeBuilder builder,
             Hash128 subject,
-            uint[]? decomposition,
-            Hash128 relation,
+            uint[] decomposition,
+            Mask256 decompositionType,
             double weight)
         {
-            if (decomposition is null || decomposition.Length == 0) return;
             EnsureOrdinalContexts(builder);
             for (int index = 0; index < decomposition.Length; ++index)
             {
@@ -1578,8 +1591,9 @@ public sealed class UnicodeDecomposer
                     ? UcdProperties.OrdinalCtx0
                     : UcdProperties.OrdinalCtx1;
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    subject, relation, CodepointId(decomposition[index]),
-                    Source, context, weight));
+                    subject, UcdProperties.RelTypeDecomposesTo, CodepointId(decomposition[index]),
+                    Source, context, weight)
+                    with { QualifierMask = decompositionType });
             }
         }
 
@@ -2090,9 +2104,10 @@ public sealed class UnicodeDecomposer
             Hash128? aliasId = ContentEmitter.Emit(builder, row.Alias, Source);
             if (aliasId is null) return;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                property.Id, RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
+                property.Id, UcdProperties.RelTypeHasName,
                 aliasId.Value, Source, contextId: null,
-                witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived)
+                with { QualifierMask = UcdProperties.AliasName });
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyAliasRow>
@@ -2133,8 +2148,9 @@ public sealed class UnicodeDecomposer
                     property.Id, RelationTypeRegistry.RelationTypeId("HAS_MEMBER"),
                     valueId, Source, null, weight));
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                valueId, RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
-                aliasId.Value, Source, contextId: null, witnessWeight: weight));
+                valueId, UcdProperties.RelTypeHasName,
+                aliasId.Value, Source, contextId: null, witnessWeight: weight)
+                with { QualifierMask = UcdProperties.AliasName });
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
@@ -2549,10 +2565,15 @@ public sealed class UnicodeDecomposer
             SubstrateChangeBuilder builder)
         {
             if (ContentEmitter.Emit(builder, row.Alias, Source) is not { } aliasId) return;
+            // NameAliases.txt's type (correction, control, alternate, figment,
+            // abbreviation) is a name qualifier alongside name/alias.
+            Mask256 qualifiers = UcdProperties.AliasName;
+            if (row.Type.Length > 0) qualifiers |= ClaimQualifiers.Of("name", row.Type);
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasNameAlias,
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasName,
                 aliasId, Source, null,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived)
+                with { QualifierMask = qualifiers });
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.AliasRow>

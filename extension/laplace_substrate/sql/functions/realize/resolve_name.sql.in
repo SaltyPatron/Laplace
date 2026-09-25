@@ -10,16 +10,15 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
 BEGIN ATOMIC
     -- The one referentially-correct name primitive. Three call sites (label,
     -- realize.render, realize) used to each resolve a name a different way and disagree:
-    -- label saw only HAS_NAME_ALIAS, realize.render saw canonical->codepoint->ALIAS,
-    -- realize walked the synset lemma. None consulted HAS_NAME (the PRIMARY,
+    -- label saw only alias names, realize.render saw canonical->codepoint->alias,
+    -- realize walked the synset lemma. None consulted the primary name (the
     -- authoritative name), none took a domain context, and every one ended in a
     -- context-blind `ORDER BY consensus.eff_mu DESC LIMIT 1` global-popularity argmax whose
     -- final fallback fabricated hex styled as a label. This unifies all three:
     --
-    --   * NAME edges consulted as families -- HAS_NAME (primary, preferred) and
-    --     HAS_NAME_ALIAS, unioned via consensus.relation_type_in_family() so members roll in
-    --     without editing this site. They are distinct family roots (there is no
-    --     single "name" root), so both are consulted.
+    --   * NAME edges consulted as a family -- HAS_NAME, one relation per meaning: which
+    --     name a claim states (primary, alias, abbreviation, ...) is its qualifier
+    --     (qualifiers.toml), and family members roll in without editing this site.
     --   * the synset-lemma path, walked via the HAS_SENSE family_root (IS_SENSE_OF
     --     and IS_SYNONYM_OF roll up to HAS_SENSE) rather than one hardcoded edge --
     --     the same rollup taxonomy.bubble_up() and the sense-selection walks already use.
@@ -89,7 +88,8 @@ BEGIN ATOMIC
             -- batch path already does exactly that (generate_walk.c fetch_constituents_
             -- closure with n_roots), it was simply never reached from here.
             cand AS MATERIALIZED (
-                -- HAS_NAME (primary) + HAS_NAME_ALIAS, as families.
+                -- HAS_NAME, as a family: every name of the entity (primary, alias, ...,
+                -- the claim's qualifiers) is one relation.
                 SELECT nm.object_id AS name_id,
                        nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME')) AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
@@ -99,8 +99,7 @@ BEGIN ATOMIC
                      AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
                      AND lang.object_id = p_lang
                 WHERE nm.subject_id = p_id
-                  AND nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME')
-                                        || consensus.relation_family_ids('HAS_NAME_ALIAS'))
+                  AND nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME'))
                 UNION ALL
                 -- lexicalization: the words bound to the key (word HAS_SENSE p_id),
                 -- the binding attested in the requested language first

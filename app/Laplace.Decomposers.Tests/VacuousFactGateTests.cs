@@ -95,7 +95,7 @@ public sealed class VacuousFactGateTests
         relations = relations[..relations.IndexOf("];", StringComparison.Ordinal)];
 
         Assert.DoesNotContain("\"HAS_DEFINITION\"", relations);
-        Assert.Contains("\"HAS_NAME_ALIAS\"", relations);
+        Assert.Contains("\"HAS_NAME\"", relations);
 
         var dec = File.ReadAllText(Path.Combine(
             root!, "app", "Laplace.Decomposers", "ISO", "ISODecomposer.cs"));

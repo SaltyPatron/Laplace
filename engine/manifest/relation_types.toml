@@ -18,6 +18,13 @@ scalar_valued = 0.12
 standards_structural = 0.08
 probationary = 0.05
 
+# RETIRED relations. One relation per meaning: a variant is a qualifier flag on the claim
+# (qualifiers.toml), not a relation of its own. `retired = "SUCCESSOR"` marks a relation
+# whose meaning moved to SUCCESSOR plus qualifiers. Bits are append-only, so a retired
+# relation keeps its bit and type id (evidence already admitted under it stays readable),
+# but resolving it for emission fails closed (LAPLACE_REL_RETIRED), and no alias or set
+# may name it.
+
 [[relation]]
 canonical = "ADJACENT_TO_PIXEL"
 bit = 0
@@ -153,6 +160,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "CANONICAL_DECOMPOSES_TO"
+retired = "DECOMPOSES_TO"
 bit = 7
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -201,6 +209,7 @@ family_root = "CAUSES_DESIRE"
 
 [[relation]]
 canonical = "COMPATIBILITY_DECOMPOSES_TO"
+retired = "DECOMPOSES_TO"
 bit = 13
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -592,6 +601,7 @@ family_root = "HAS_GENERAL_CATEGORY"
 
 [[relation]]
 canonical = "HAS_ISO639_1_CODE"
+retired = "HAS_EXTERNAL_ID"
 bit = 77
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -600,6 +610,7 @@ family_root = "HAS_ISO639_1_CODE"
 
 [[relation]]
 canonical = "HAS_ISO639_2_CODE"
+retired = "HAS_EXTERNAL_ID"
 bit = 80
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -640,6 +651,7 @@ family_root = "HAS_SUBEVENT"
 
 [[relation]]
 canonical = "HAS_LOWERCASE_MAPPING"
+retired = "HAS_CASE_MAPPING"
 bit = 89
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -664,6 +676,7 @@ family_root = "HAS_MIRROR"
 
 [[relation]]
 canonical = "HAS_NAME_ALIAS"
+retired = "HAS_NAME"
 bit = 94
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -776,6 +789,7 @@ family_root = "HAS_THEMATIC_ROLE"
 
 [[relation]]
 canonical = "HAS_TITLECASE_MAPPING"
+retired = "HAS_CASE_MAPPING"
 bit = 123
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -824,6 +838,7 @@ family_root = "DECOMPOSES_TO"
 
 [[relation]]
 canonical = "HAS_UPPERCASE_MAPPING"
+retired = "HAS_CASE_MAPPING"
 bit = 124
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1401,8 +1416,9 @@ parent = "CORRESPONDS_TO"
 family_root = "CORRESPONDS_TO"
 
 [[relation]]
-# ISO 639-2 bibliographic code (ger, fre) — distinct channel from the terminologic code.
+# Retired: an ISO 639-2 bibliographic code (ger, fre) is HAS_EXTERNAL_ID {identifier/iso639-2b}.
 canonical = "HAS_ISO639_2B_CODE"
+retired = "HAS_EXTERNAL_ID"
 bit = 78
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1410,8 +1426,9 @@ parent = null
 family_root = "HAS_ISO639_2B_CODE"
 
 [[relation]]
-# ISO 639-2 terminologic code (deu, fra) — distinct channel from the bibliographic code.
+# Retired: an ISO 639-2 terminologic code (deu, fra) is HAS_EXTERNAL_ID {identifier/iso639-2t}.
 canonical = "HAS_ISO639_2T_CODE"
+retired = "HAS_EXTERNAL_ID"
 bit = 79
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1428,8 +1445,9 @@ parent = null
 family_root = "SUPERSEDED_BY"
 
 [[relation]]
-# Unicode character's official name (UnicodeData.txt field 1), e.g. U+0041 -> "LATIN CAPITAL LETTER A".
-# The authoritative human identifier for a codepoint; distinct from HAS_NAME_ALIAS (corrections/abbrevs).
+# A name of an entity: a codepoint's official name (U+0041 -> "LATIN CAPITAL LETTER A"), a
+# lexical entry's lemma, a player's alias. Which name it is (primary, alias, abbreviation,
+# correction, ...) is the claim's qualifier (qualifiers.toml family "name").
 canonical = "HAS_NAME"
 bit = 93
 rank = "standards_structural"
@@ -2228,10 +2246,10 @@ members = ["IS_A", "IS_INSTANCE_OF"]
 
 # Source-owned lexical entries expose their reusable content surface through this
 # exact structural edge. Readers use the governed set instead of redeclaring the
-# relation vocabulary independently at each alias traversal.
+# relation vocabulary independently at each name traversal.
 [[set]]
-name = "NAME_ALIAS_EDGE"
-members = ["HAS_NAME_ALIAS"]
+name = "NAME_EDGE"
+members = ["HAS_NAME"]
 
 # Chess identity/profile reads share these exact governed relation rosters. Keeping
 # them here lets codegen emit foldable ids so profile volume never requires a broad
@@ -2242,7 +2260,7 @@ members = ["CORRESPONDS_TO"]
 
 [[set]]
 name = "CHESS_PROFILE_FACTS"
-members = ["HAS_EXTERNAL_ID", "HAS_NAME_ALIAS", "HAS_FEATURE", "HAS_RATING"]
+members = ["HAS_EXTERNAL_ID", "HAS_NAME", "HAS_FEATURE", "HAS_RATING"]
 
 # PATH_TRAVERSABLE = PATH_UPWARD u PATH_LATERAL. converse.astar_path hand-listed exactly
 # these 13 as its default p_types, the same vocabulary consensus.relate_path listed in its
@@ -2280,7 +2298,7 @@ members = [
   "HAS_SENSE", "IS_SENSE_OF", "HAS_LANGUAGE", "PRECEDES", "FOLLOWS",
   "HAS_LEX_CATEGORY", "HAS_VERB_FRAME",
   "IS_LEMMA_OF", "IS_TRANSLATION_OF", "HAS_EXAMPLE", "EVOKES_FRAME",
-  "HAS_SYNSET_KEY", "IS_TYPED_AS", "HAS_NAME_ALIAS",
+  "HAS_SYNSET_KEY", "IS_TYPED_AS", "HAS_NAME",
 ]
 
 # WN-LMF (Global WordNet Association) relType vocabulary: <SynsetRelation relType=R

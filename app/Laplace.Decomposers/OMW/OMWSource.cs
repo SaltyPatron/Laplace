@@ -6,14 +6,14 @@ namespace Laplace.Decomposers.OMW;
 internal enum OmwRelation
 {
     HasDefinition, HasExample, IsSynonymOf, HasLanguage, HasPos, IsTypedAs,
-    HasNameAlias, HasVersion, HasLicense, HasSourceUrl, HasCitation, HasAttribution,
+    HasName, HasVersion, HasLicense, HasSourceUrl, HasCitation, HasAttribution,
     Contains, Requires, FormOf, HasSense, IsSenseOf, HasSenseFrequency, HasFeature,
     CorrespondsTo, HasVerbFrame, HasLexCategory, HasMember, HasProperty, IsAntonymOf,
     HasHypernym, IsInstanceOf, HasHyponym, HasInstance, IsMemberOf, IsSubstanceOf,
     IsPartOf, HasSubstance, HasPart, HasAttribute, DerivationallyRelated,
     HasDomainTopic, IsDomainTopicMember, HasDomainRegion, IsDomainRegionMember,
     Entails, Causes, AlsoSee, IsSimilarTo, IsParticipleOf, PertainsTo,
-    HasDomainUsage, IsDomainUsageMember,
+    HasDomainUsage, IsDomainUsageMember, HasExternalId,
 }
 
 public readonly struct OMWSource : ISeedSource
@@ -33,7 +33,7 @@ public readonly struct OMWSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
     [
         "HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS",
-        "HAS_NAME_ALIAS", "HAS_VERSION", "HAS_LICENSE", "HAS_SOURCE_URL",
+        "HAS_NAME", "HAS_VERSION", "HAS_LICENSE", "HAS_SOURCE_URL",
         "HAS_CITATION", "HAS_ATTRIBUTION", "CONTAINS", "REQUIRES", "FORM_OF", "HAS_SENSE",
         "IS_SENSE_OF", "HAS_SENSE_FREQUENCY", "HAS_FEATURE", "CORRESPONDS_TO",
         "HAS_VERB_FRAME", "HAS_LEX_CATEGORY", "HAS_MEMBER", "HAS_PROPERTY", "IS_ANTONYM_OF",
@@ -42,7 +42,7 @@ public readonly struct OMWSource : ISeedSource
         "DERIVATIONALLY_RELATED", "HAS_DOMAIN_TOPIC", "IS_DOMAIN_TOPIC_MEMBER",
         "HAS_DOMAIN_REGION", "IS_DOMAIN_REGION_MEMBER", "ENTAILS", "CAUSES", "ALSO_SEE",
         "IS_SIMILAR_TO", "IS_PARTICIPLE_OF", "PERTAINS_TO",
-        "HAS_DOMAIN_USAGE", "IS_DOMAIN_USAGE_MEMBER",
+        "HAS_DOMAIN_USAGE", "IS_DOMAIN_USAGE_MEMBER", "HAS_EXTERNAL_ID",
     ];
 
     private static readonly RelationTypeRegistry.RelationTypeResolution[] Resolutions =

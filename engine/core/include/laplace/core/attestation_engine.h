@@ -58,6 +58,8 @@ int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* 
 
 size_t      laplace_relation_manifest_count(void);
 const char* laplace_relation_manifest_canonical(size_t idx);
+/* The canonical name that replaced a retired manifest relation; NULL when it is live. */
+const char* laplace_relation_manifest_successor(size_t idx);
 const char* laplace_relation_canonical_for_type_id(const hash128_t* type_id);
 
 int laplace_attestation_orient(

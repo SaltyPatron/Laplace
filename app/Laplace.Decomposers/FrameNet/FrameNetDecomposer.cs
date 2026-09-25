@@ -448,8 +448,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                 frameId, FrameNetSource.HasFrameElementTypeId, feRoleId.Value,
                 Source, null, TC.AcademicCurated));
             b.AddAttestation(NativeAttestation.CategoricalResolved(
-                feRoleId.Value, FrameNetSource.HasNameAliasTypeId, feNameId.Value,
-                Source, null, TC.AcademicCurated));
+                feRoleId.Value, FrameNetSource.HasNameTypeId, feNameId.Value,
+                Source, null, TC.AcademicCurated)
+                with { QualifierMask = FrameNetSource.PrimaryName });
             if (coreCtx is { } coreness)
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     feRoleId.Value, FrameNetSource.HasFeatureTypeId, coreness,

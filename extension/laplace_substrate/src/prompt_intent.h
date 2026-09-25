@@ -222,7 +222,7 @@ static inline bool
 laplace_prompt_binding_channel(const LaplaceQueryChannel *channel)
 {
     static const char *families[] = {
-        "HAS_NAME", "HAS_NAME_ALIAS", "HAS_SENSE", "IS_LEMMA_OF", "EVOKES_FRAME"
+        "HAS_NAME", "HAS_SENSE", "IS_LEMMA_OF", "EVOKES_FRAME"
     };
     int member = 0;
     if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0))

@@ -93,7 +93,7 @@ DECLARE
     other_context bytea := public.laplace_hash128_blake3('test/operational-memory/other-lesson');
     causes_id bytea := laplace.relation_type_id('CAUSES');
     defines_id bytea := laplace.relation_type_id('HAS_DEFINITION');
-    names_id bytea := laplace.relation_type_id('HAS_NAME_ALIAS');
+    names_id bytea := laplace.relation_type_id('HAS_NAME');
     related_id bytea := laplace.relation_type_id('RELATED_TO');
     calls_id bytea := laplace.relation_type_id('CALLS');
     input_id bytea := laplace.relation_type_id('HAS_INPUT');

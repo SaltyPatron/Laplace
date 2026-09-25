@@ -1,6 +1,6 @@
 -- An entity renders as itself: a type id as its registry label, a concept as the words
 -- a source says express it, content as its own reconstruction (a codepoint, or the text its trajectory composes). A name a source
--- claims (HAS_NAME / HAS_NAME_ALIAS) is a realization used only when the entity's
+-- claims (HAS_NAME, whichever name its qualifiers say) is a realization used only when the entity's
 -- content does not reconstruct as text; it never replaces the content.
 CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE

@@ -25,8 +25,8 @@ BEGIN
     -- CASE-VARIANT ASYMMETRY, resolved through the ATTESTED case surface.
     -- 'ALL' may carry no HAS_POS witness while 'all' does. They are different
     -- content and therefore different ids -- that is the identity law, not a
-    -- defect -- and the substrate already holds the link: HAS_UPPERCASE_MAPPING /
-    -- HAS_LOWERCASE_MAPPING / HAS_TITLECASE_MAPPING are governed in
+    -- defect -- and the substrate already holds the link: HAS_CASE_MAPPING, its
+    -- upper/lower/title qualifiers governed in qualifiers.toml and
     -- relation_types.toml, witnessed per codepoint from UnicodeData.txt fields
     -- 12/13/14, and composed to word grain natively and batched by
     -- lexical.word_case_variants(src/lexical_case.c), which also gates on entity_exists.

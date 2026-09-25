@@ -7,6 +7,7 @@ schema/tables/entities.sql.in
 schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
 schema/tables/attestation_witness_columns.sql.in
+schema/tables/attestation_qualifier_mask.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 schema/tables/ingest_file_journal.sql.in

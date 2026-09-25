@@ -15,16 +15,10 @@ internal sealed class UcdProperties
     public static readonly Hash128 RelTypeHasCombiningClass = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
     public static readonly Hash128 RelTypeHasScript = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
     public static readonly Hash128 RelTypeHasBlock = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
-    public static readonly Hash128 RelTypeHasUppercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_UPPERCASE_MAPPING");
-    public static readonly Hash128 RelTypeHasLowercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_LOWERCASE_MAPPING");
-    public static readonly Hash128 RelTypeHasTitlecaseMapping = RelationTypeRegistry.RelationTypeId("HAS_TITLECASE_MAPPING");
-    public static readonly Hash128 RelTypeCanonDecomposesTo = RelationTypeRegistry.RelationTypeId("CANONICAL_DECOMPOSES_TO");
-    public static readonly Hash128 RelTypeCompatDecomposesTo = RelationTypeRegistry.RelationTypeId("COMPATIBILITY_DECOMPOSES_TO");
     public static readonly Hash128 RelTypeHasNumericValue = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
     public static readonly Hash128 RelTypeHasBidiClass = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
     public static readonly Hash128 RelTypeHasMirror = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
     public static readonly Hash128 RelTypeHasAge = RelationTypeRegistry.RelationTypeId("HAS_AGE");
-    public static readonly Hash128 RelTypeHasNameAlias = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
     public static readonly Hash128 RelTypeConfusableWith = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
     public static readonly Hash128 RelTypeHasEmojiProperty = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
     public static readonly Hash128 RelTypeHasName = RelationTypeRegistry.RelationTypeId("HAS_NAME");
@@ -39,6 +33,22 @@ internal sealed class UcdProperties
     public static readonly Hash128 RelTypeHasNormalizationForm =
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeHasNormalizationForm)));
+
+    // One relation per meaning: which case a mapping is, which Decomposition_Type a
+    // decomposition is, and which name a name is are the claim's qualifiers
+    // (qualifiers.toml), not relations of their own.
+    public static readonly Hash128 RelTypeHasCaseMapping =
+        RelationTypeRegistry.RelationTypeId(
+            RelationSymbol.CanonicalFromField(nameof(RelTypeHasCaseMapping)));
+    public static readonly Hash128 RelTypeDecomposesTo =
+        RelationTypeRegistry.RelationTypeId(
+            RelationSymbol.CanonicalFromField(nameof(RelTypeDecomposesTo)));
+    public static readonly Mask256 UpperMapping = ClaimQualifiers.Of("mapping", "upper");
+    public static readonly Mask256 LowerMapping = ClaimQualifiers.Of("mapping", "lower");
+    public static readonly Mask256 TitleMapping = ClaimQualifiers.Of("mapping", "title");
+    public static readonly Mask256 SimpleMapping = ClaimQualifiers.Of("mapping", "simple");
+    public static readonly Mask256 PrimaryName = ClaimQualifiers.Of("name", "primary");
+    public static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
 
     public static readonly Hash128 RelTypeHasProperty =
         RelationTypeRegistry.RelationTypeId("HAS_PROPERTY");

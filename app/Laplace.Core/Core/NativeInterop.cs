@@ -319,7 +319,7 @@ public static unsafe partial class NativeInterop
         short outcome,
         long lastObservedAtUnixUs, long observationCount,
         long sumScoreFp1e9, long opponentRdFp1e9, long opponentRatingFp1e9,
-        byte* highwayMask);
+        byte* qualifierMask);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_emit_copy_binary")]
     internal static partial nuint IntentStageEmitCopyBinary(
@@ -798,6 +798,9 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_relation_manifest_canonical")]
     internal static partial IntPtr RelationManifestCanonical(nuint idx);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_manifest_successor")]
+    internal static partial IntPtr RelationManifestSuccessor(nuint idx);
 
     [LibraryImport(Library, EntryPoint = "laplace_relation_canonical_for_type_id")]
     internal static partial IntPtr RelationCanonicalForTypeId(Hash128* typeId);

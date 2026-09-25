@@ -46,7 +46,7 @@ route_nodes AS MATERIALIZED (
     FROM variants v
     JOIN laplace.consensus n
      ON n.object_id = v.variant_id
-     AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+     AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
 ),
 route_evidence AS MATERIALIZED (
     SELECT v.word_id,

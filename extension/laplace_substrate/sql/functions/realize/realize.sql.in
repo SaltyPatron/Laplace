@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     -- realize.resolve_name() is the single, referentially-correct name primitive: it
-    -- folds the former realize._has_name(HAS_NAME primary + HAS_NAME_ALIAS) and
+    -- folds the former realize._has_name(HAS_NAME, every name) and
     -- _realize_synset_lemma into one family-aware, abstaining resolver. It replaces
     -- the two separate arms this function used to run (synset-lemma first, HAS_NAME
     -- buried after translation); now the authoritative NAME wins ahead of a

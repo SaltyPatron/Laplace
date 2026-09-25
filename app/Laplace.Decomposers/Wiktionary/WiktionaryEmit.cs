@@ -186,7 +186,10 @@ internal static class WiktionaryEmit
                     continue;
 
                 AttestResolved(b, wordId, WiktionarySource.HasSenseTypeId, senseId, langCtx);
-                AttestResolved(b, senseId, WiktionarySource.HasNameAliasTypeId, wordId, langCtx);
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    senseId, WiktionarySource.HasNameTypeId, wordId,
+                    WiktionaryDecomposer.Source, langCtx, Trust)
+                    with { QualifierMask = WiktionarySource.AliasName });
                 if (langCtx is { } langId)
                     AttestResolved(b, senseId, WiktionarySource.HasLanguageTypeId, langId, null);
                 WalkSense(b, senseId, s, isVerb, langCtx, roots, coords);

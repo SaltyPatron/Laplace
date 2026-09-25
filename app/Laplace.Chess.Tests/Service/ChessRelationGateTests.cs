@@ -72,7 +72,7 @@ public sealed class ChessRelationGateTests
         ChessAnalyze.DeriveFromParsed(b, parsed);
         var change = b.SetInputUnitsConsumed(1).Build();
 
-        var alias = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
+        var alias = RelationTypeRegistry.RelationTypeId("HAS_NAME");
         Assert.Contains(change.Attestations, a => a.TypeId == alias);
         var thinkClasses = new[] { "rushed", "normal", "deep" }
             .Select(ContentEmitter.RootId)

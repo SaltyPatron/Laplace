@@ -91,7 +91,7 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
             && a.SubjectId == memberId!.Value && a.ObjectId == classId.Value);
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME")
             && a.SubjectId == memberId.Value && a.ObjectId == lendId!.Value);
         Assert.DoesNotContain(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
@@ -242,7 +242,7 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE")
             && a.SubjectId == classId && a.ObjectId == agentRole && a.ContextId is null);
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME")
             && a.SubjectId == agentRole && a.ObjectId == agentLabel);
         Assert.DoesNotContain(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE")
@@ -280,7 +280,7 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("ENTAILS")
             && a.SubjectId == classId && a.ObjectId == predicate);
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME")
             && a.SubjectId == predicate && a.ObjectId == causeLabel);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE")

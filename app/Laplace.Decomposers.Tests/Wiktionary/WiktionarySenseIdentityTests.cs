@@ -40,8 +40,8 @@ public sealed class WiktionarySenseIdentityTests
             WiktionarySource.HasSenseTypeId);
         Assert.Equal(RelationTypeRegistry.RelationTypeId("IS_SENSE_OF"),
             WiktionarySource.IsSenseOfTypeId);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
-            WiktionarySource.HasNameAliasTypeId);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_NAME"),
+            WiktionarySource.HasNameTypeId);
     }
 
     [Fact]

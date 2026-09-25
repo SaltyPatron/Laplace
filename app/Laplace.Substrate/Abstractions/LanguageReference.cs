@@ -8,7 +8,8 @@ namespace Laplace.Decomposers.Abstractions;
 /// <summary>
 /// A language tag is content: the entity of a tag is the content id of the tag exactly
 /// as the source wrote it. "en", "eng" and "English" are three entities; ISO 639 testimony
-/// (HAS_ISO639_1_CODE, NAME_ALIAS, ...) relates them, and traversal follows that testimony.
+/// (HAS_EXTERNAL_ID {identifier/iso639-1}, HAS_NAME, ...) relates them, and traversal follows
+/// that testimony.
 /// No code is rewritten into another code here.
 /// </summary>
 public static class LanguageReference

@@ -18,7 +18,7 @@ internal readonly record struct StagedRowRef(int Blob, long Offset, int Length);
 /// id, a physicality's entity reference, and an attestation's merge inputs
 /// (last_observed_at, observation_count). Layout comes from intent_stage.c's
 /// column lists; nullable fields (object_id, context_id,
-/// trajectory, highway_mask, ...) are length -1 and skipped like any other.
+/// trajectory, qualifier_mask, ...) are length -1 and skipped like any other.
 /// </summary>
 internal static class CopyTupleParser
 {
@@ -308,7 +308,7 @@ internal static class CopyTupleParser
                 bool objectNull = true, contextNull = true;
                 short outcome = 0;
                 long opponentRd = 0, opponentRating = 0;
-                Mask256 highwayMask = default;
+                Mask256 qualifierMask = default;
                 long ts = 0, games = 0, sumScore = 0;
                 bool foldReplayable = true;
                 long countValOff = -1, sumValOff = -1;
@@ -356,7 +356,7 @@ internal static class CopyTupleParser
                             {
                                 if (valLen != 32) throw new InvalidOperationException("invalid attestation mask width");
                                 var bytes = new ReadOnlySpan<byte>(p + valOff, 32);
-                                highwayMask = new Mask256(
+                                qualifierMask = new Mask256(
                                     BinaryPrimitives.ReadUInt64LittleEndian(bytes),
                                     BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]),
                                     BinaryPrimitives.ReadUInt64LittleEndian(bytes[16..]),
@@ -393,7 +393,7 @@ internal static class CopyTupleParser
                     decoded.Add(new AttestationRow(id, subjectId, typeId,
                         objectNull ? null : objectId, sourceId, contextNull ? null : contextId,
                         (AttestationOutcome)outcome, checked(ts + IntentStage.PgEpochUnixUs),
-                        games, 0, opponentRd, opponentRating, sumScore, highwayMask, foldReplayable));
+                        games, 0, opponentRd, opponentRating, sumScore, qualifierMask, foldReplayable));
                 }
             }
         }

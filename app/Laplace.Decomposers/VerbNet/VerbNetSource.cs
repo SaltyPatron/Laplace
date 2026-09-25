@@ -16,7 +16,7 @@ public readonly struct VerbNetSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
     [
         "IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE", "HAS_SEMANTIC_ROLE",
-        "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME_ALIAS",
+        "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME",
         "ENTAILS",
     ];
 
@@ -24,8 +24,14 @@ public readonly struct VerbNetSource : ISeedSource
         RelationTypeRegistry.RelationTypeId(Relations[2]);
     internal static readonly Hash128 HasSemanticRoleTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[3]);
-    internal static readonly Hash128 HasNameAliasTypeId =
+    internal static readonly Hash128 HasNameTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[8]);
+    // Which name a HAS_NAME claim states is its qualifier: a role's or predicate's label
+    // as VerbNet defines it is its primary name; a member's lemma is one of its names.
+    internal static readonly Mask256 PrimaryName =
+        Laplace.SubstrateCRUD.ClaimQualifiers.Of("name", "primary");
+    internal static readonly Mask256 AliasName =
+        Laplace.SubstrateCRUD.ClaimQualifiers.Of("name", "alias");
     internal static readonly Hash128 CorrespondsToTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[6]);
     internal static readonly Hash128 EntailsTypeId =

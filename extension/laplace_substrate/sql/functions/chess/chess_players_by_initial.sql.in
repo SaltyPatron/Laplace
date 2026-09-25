@@ -30,15 +30,12 @@ BEGIN ATOMIC
           AND (public.laplace_trajectory_constituent_ids(w.trajectory))[1] = ANY (t.cps)
     ),
     players AS MATERIALIZED (
-        -- Primary names and aliases are both names. Restricting this to
-        -- HAS_NAME_ALIAS hid players whose PGN supplied a primary name (including
-        -- Karpov and Fischer) even though the normal label resolver showed them.
+        -- Primary names and aliases are both names: one relation, HAS_NAME, whose
+        -- qualifiers say which name a claim states.
         SELECT DISTINCT c.subject_id AS player
         FROM laplace.consensus c
         JOIN name_ids n ON n.name_id = c.object_id
-        WHERE c.type_id = ANY (
-            consensus.relation_family_ids('HAS_NAME')
-            || consensus.relation_family_ids('HAS_NAME_ALIAS'))
+        WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_NAME'))
     ),
     rated AS MATERIALIZED (
         SELECT p.player,

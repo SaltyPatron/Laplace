@@ -21,8 +21,8 @@
 --
 --   1. lower(realize.realize(x.syn, p_lang)) = x.surface -- CASE-FOLDING AS A HACK.
 --      "King" and "king" are DIFFERENT CONTENT, so different ids, and the substrate
---      already attests the link both ways: K --HAS_LOWERCASE_MAPPING--> k and
---      k --HAS_UPPERCASE_MAPPING--> K, governed in relation_types.toml, resolved
+--      already attests the link both ways: K --HAS_CASE_MAPPING {lower}--> k and
+--      k --HAS_CASE_MAPPING {upper}--> K, governed in relation_types.toml, resolved
 --      natively and batched by lexical.word_case_variants(src/lexical_case.c). Calling
 --      lower() throws those attested edges away and re-derives a worse answer in
 --      string space -- the identity law inverted, at a per-row cost.

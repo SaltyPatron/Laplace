@@ -44,6 +44,7 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "perfcache_native.h"
+#include "laplace/core/sql_catalog.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_realize_batch);
 PG_FUNCTION_INFO_V1(pg_laplace_resolve_name_batch);
@@ -57,19 +58,7 @@ static SPIPlanPtr plan_translation = NULL;
 static SPIPlanPtr plan_defines = NULL;
 static SPIPlanPtr plan_render = NULL;
 
-static const char *Q_HAS_NAME =
-    "SELECT nm.subject_id, nm.object_id,"
-    "       (lang.object_id IS NOT NULL) AS lp,"
-    "       (nm.type_id = laplace.relation_type_id('HAS_NAME')) AS prim,"
-    "       consensus.eff_mu(nm.rating, nm.rd) AS mu"
-    " FROM laplace.v_consensus_unrefuted nm"
-    " LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id"
-    "   AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')"
-    "   AND lang.object_id = $2"
-    " WHERE nm.subject_id = ANY($1)"
-    "   AND nm.type_id IN (laplace.relation_type_id('HAS_NAME'),"
-    "                      laplace.relation_type_id('HAS_NAME_ALIAS'))"
-    " ORDER BY nm.subject_id, lp DESC, prim DESC, mu DESC, nm.object_id";
+/* Names: realize.name_candidates (sql_catalog.def), one relation HAS_NAME. */
 
 /* Lexicalization: a concept is realized in language by the words a source says
  * express it (word HAS_SENSE concept), strongest first, the requested language first. */
@@ -119,7 +108,7 @@ ensure_name_plans(void)
     Oid two[2] = { BYTEAARRAYOID, BYTEAOID };
     Oid one[1] = { BYTEAARRAYOID };
 
-    ensure_plan(&plan_has_name, Q_HAS_NAME, 2, two);
+    ensure_plan(&plan_has_name, laplace_sql_query_text("realize.name_candidates"), 2, two);
     ensure_plan(&plan_synset_lemma, Q_SYNSET_LEMMA, 2, two);
     ensure_plan(&plan_render, Q_RENDER, 1, one);
 }

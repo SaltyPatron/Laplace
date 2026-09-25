@@ -232,7 +232,7 @@ exit /b 3
 
 rem A model's source id is a content hash over its config+weights (ModelDecomposer
 rem .SourceForModel), so it cannot be recomputed here. The deposit registers the
-rem source's name via HAS_NAME_ALIAS (BootstrapIntentBuilder), so verification
+rem source's name via HAS_NAME (BootstrapIntentBuilder), so verification
 rem resolves name -> source id(s) through consensus and sums their evidence.
 :verify_model_step
 set "STEP_SOURCE="
@@ -243,7 +243,7 @@ if not defined STEP_SOURCE (
   exit /b 3
 )
 set "STEP_EVIDENCE="
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT COALESCE(SUM(ops.evidence_count(NULL, c.subject_id)), 0) FROM laplace.consensus c WHERE c.type_id = laplace.relation_type_id('HAS_NAME_ALIAS') AND c.object_id = laplace.word_id('%STEP_SOURCE%');"`) do set "STEP_EVIDENCE=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT COALESCE(SUM(ops.evidence_count(NULL, c.subject_id)), 0) FROM laplace.consensus c WHERE c.type_id = laplace.relation_type_id('HAS_NAME') AND c.object_id = laplace.word_id('%STEP_SOURCE%');"`) do set "STEP_EVIDENCE=%%v"
 if not defined STEP_EVIDENCE goto verify_fail
 if "%STEP_EVIDENCE%"=="0" goto verify_fail
 echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====

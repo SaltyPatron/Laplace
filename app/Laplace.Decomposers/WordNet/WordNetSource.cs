@@ -62,7 +62,7 @@ public readonly struct WordNetSource : ISeedSource
         {
             "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
             "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
-            "HAS_NAME_ALIAS", "MANNER_OF",
+            "HAS_NAME", "MANNER_OF",
         };
         foreach (string name in DeclaredRelations)
             set.Add(name);

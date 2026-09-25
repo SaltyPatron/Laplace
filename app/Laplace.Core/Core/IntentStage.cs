@@ -180,7 +180,7 @@ public sealed partial class IntentStage : SafeHandle
         long observationCount,
         long sumScoreFp1e9,
         long opponentRdFp1e9,
-        Mask256 highwayMask = default,
+        Mask256 qualifierMask = default,
         long opponentRatingFp1e9 = 1_500_000_000_000L)
     {
         ThrowIfDisposed();
@@ -192,7 +192,7 @@ public sealed partial class IntentStage : SafeHandle
             Hash128 ctx = contextId ?? default;
             Hash128* objPtr = objectId is null ? null : &obj;
             Hash128* ctxPtr = contextId is null ? null : &ctx;
-            Mask256 mask = highwayMask;
+            Mask256 mask = qualifierMask;
             byte* maskPtr = (byte*)&mask;
             int rc = NativeInterop.IntentStageAddAttestation(
                 handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,

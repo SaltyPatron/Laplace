@@ -178,7 +178,7 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
                 .Select(static field => field.RelationParent!))
             .Concat((recipe?.ProviderRoutes ?? []).Where(static route => route.RangeRelationName is not null || route.RangeRelationProperty is not null)
                 .Select(static route => route.RangeRelationName ?? route.RangeRelationProperty!))
-            .Concat(["HAS_PROPERTY", "HAS_VERSION", "HAS_NAME_ALIAS",
+            .Concat(["HAS_PROPERTY", "HAS_VERSION", "HAS_NAME",
                 "IS_A", "CONTAINS", "REQUIRES", "HAS_SOURCE_URL", "HAS_LICENSE", "HAS_CITATION"])
             .Distinct(StringComparer.Ordinal).ToArray();
 

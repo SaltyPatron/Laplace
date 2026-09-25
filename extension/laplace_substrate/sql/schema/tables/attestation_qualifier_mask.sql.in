@@ -1,0 +1,24 @@
+-- An attestation's mask is its claim qualifiers (engine/manifest/qualifiers.toml),
+-- not a highway: an installed table created before the rename still calls the
+-- column highway_mask. RENAME recurses to every partition and keeps the stored
+-- bits in place; once qualifier_mask exists this step does nothing.
+DO $$
+DECLARE
+    rel constant regclass := (current_schema() || '.attestations')::regclass;
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_attribute
+               WHERE attrelid = rel AND attname = 'highway_mask' AND NOT attisdropped)
+       AND NOT EXISTS (SELECT 1 FROM pg_attribute
+                       WHERE attrelid = rel AND attname = 'qualifier_mask' AND NOT attisdropped)
+    THEN
+        ALTER TABLE attestations RENAME COLUMN highway_mask TO qualifier_mask;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint
+               WHERE conrelid = rel AND conname = 'attestations_highway_mask_check')
+       AND NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conrelid = rel AND conname = 'attestations_qualifier_mask_check')
+    THEN
+        ALTER TABLE attestations
+            RENAME CONSTRAINT attestations_highway_mask_check TO attestations_qualifier_mask_check;
+    END IF;
+END $$;

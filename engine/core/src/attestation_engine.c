@@ -233,6 +233,12 @@ const char* laplace_relation_manifest_canonical(size_t idx) {
     return laplace_relation_table[idx].canonical;
 }
 
+const char* laplace_relation_manifest_successor(size_t idx) {
+    if (idx >= laplace_relation_table_count) return NULL;
+    int16_t successor = laplace_relation_table[idx].successor_idx;
+    return successor < 0 ? NULL : laplace_relation_table[successor].canonical;
+}
+
 const char* laplace_relation_canonical_for_type_id(const hash128_t* type_id) {
     const laplace_relation_def_t* def = NULL;
     if (!type_id) return NULL;
@@ -374,6 +380,8 @@ static int attestation_resolved_finish(
     int64_t sum_score_fp1e9,
     uint8_t is_aggregated,
     laplace_attestation_staged_t* out) {
+    /* A retired relation's meaning is its successor plus the claim's qualifiers. */
+    if (laplace_relation_retired(&type_id, NULL)) return LAPLACE_REL_RETIRED;
     out->subject_id = subj;
     out->type_id = type_id;
     out->object_id = obj;
