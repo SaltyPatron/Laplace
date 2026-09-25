@@ -46,7 +46,8 @@ The session's work was almost all on the input side: the recipe engine, governed
 13. **Record only what carries information (inventor: the lottery ticket).** Store irreducible admitted information once, and do not persist world-all-pairs (INVENTIONS #102; model design §4). Which derived evidence is significant is decided by a declared calculation contract over the model's own statistics (INVENTIONS #106), not by a constant floor or a top-k.
 14. **Shape narrows what a tensor is; the name is a convention, not a specification.** Operator roles (attention, convolution, MLP, diffusion blocks, embeddings) are recognized structurally. Names, config and weight statistics are further evidence.
 15. **What is ingested can be exported (Mold-a-Model, spec 12).** Export is a recipe over current standing, geometry and selected operators: a filtered snapshot ("I know kung fu"), not a copy of an ingested checkpoint and not bit-perfect reconstruction (`INVENTION.md` §15; AGENTS.md). A pooled construction is one consensus program over every witness. It is not a tensor merge and not N answers judged by an N+1th (spec 12, round-table law). An export is validated by loading in an external runtime and passing held-out semantic and source-ablation tests (spec 09), not by comparing it with the ingested checkpoint.
-16. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
+16. **A leaf spring is not a watch (inventor).** Remove any component of a watch and it stops working, and Laplace is no different. Identity, physicality and trajectory, witnessed bindings, governed vocabularies, typed standing, the forward program, realization, native execution and export work only together. A component's own measure (claim counts, a passing primitive, a green seed) is not progress on the machine. Substituting a conventional part for a component breaks the whole. Work is accepted as vertical slices through every component, read live.
+17. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
 
 ---
 
@@ -246,7 +247,16 @@ Issue: #1724
 
 ---
 
-## 4. Decisions for the inventor
+## 4. Next acceptance slice
+
+One coherent reseed on the corrected trust priors: Unicode, ISO 639-3, CILI, OEWN and OMW. Then live reads through the whole forward program, each with its trace:
+- **Translation traversal:** "dog" → its English binding → i46360 → the German binding → "Hund". Also "minute", whose sense ORIENT resolves from the observation.
+- capital(France)
+- fire/ice
+
+A component of that slice that fails is fixed in place. It is not replaced by a stand-in.
+
+## 5. Decisions for the inventor
 
 1. ~~Relation rank~~: decided, read-time only (see A).
 3. **Wiktionary sense keys** when no Wikidata id exists. See H.
