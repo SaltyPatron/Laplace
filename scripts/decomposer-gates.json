@@ -14,6 +14,7 @@
     "cili",
     "document",
     "wordnet",
+    "oewn",
     "omw",
     "verbnet",
     "propbank",
@@ -140,20 +141,23 @@
         "Source_Reference"
       ]
     },
-    "omw": {
-      "decomposer": "OMWDecomposer",
-      "layer": 3,
-      "prerequisites": [
-        "wordnet"
-      ],
+    "oewn": {
+      "decomposer": "OEWN",
+      "layer": 1,
+      "prerequisites": [],
       "consensus_gates": [
-        {
-          "relation": "HAS_LANGUAGE",
-          "min": 1
-        }
-      ],
-      "physicality_types": [
-        "WordNet_Sense"
+        { "relation": "HAS_SENSE", "min": 1 },
+        { "relation": "HAS_POS", "min": 1 },
+        { "relation": "IS_A", "min": 1 }
+      ]
+    },
+    "omw": {
+      "decomposer": "OMW",
+      "layer": 1,
+      "prerequisites": [],
+      "consensus_gates": [
+        { "relation": "HAS_SENSE", "min": 1 },
+        { "relation": "HAS_POS", "min": 1 }
       ]
     },
     "verbnet": {
