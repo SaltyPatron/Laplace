@@ -47,9 +47,12 @@ public sealed class RecipeSyntaxProviderRegistry
             : throw new NotSupportedException($"No executable syntax provider is registered for '{provider}'.");
 
     public static RecipeSyntaxProviderRegistry CreateDefault() => new RecipeSyntaxProviderRegistry()
-        .Register("laplace/native-streaming-xml-recipe/v1", static binding => new NativeXmlExecutor(binding, false))
-        .Register("native-xml", static binding => new NativeXmlExecutor(binding, false))
-        .Register("laplace/native-streaming-delimited-recipe/v1", static binding => new NativeXmlExecutor(binding, true));
+        .Register("laplace/native-streaming-xml-recipe/v1", static binding => new NativeXmlExecutor(binding, NativeSyntax.Xml))
+        .Register("native-xml", static binding => new NativeXmlExecutor(binding, NativeSyntax.Xml))
+        .Register("laplace/native-streaming-delimited-recipe/v1", static binding => new NativeXmlExecutor(binding, NativeSyntax.Delimited))
+        .Register("laplace/native-streaming-turtle-recipe/v1", static binding => new NativeXmlExecutor(binding, NativeSyntax.Turtle));
+
+    private enum NativeSyntax { Xml, Delimited, Turtle }
 
     private sealed class NativeXmlExecutor : IRecipeSyntaxExecutor
     {
@@ -57,14 +60,21 @@ public sealed class RecipeSyntaxProviderRegistry
         private readonly SemanticSourceRecipe _recipe;
         private readonly int _recordDepth;
         private readonly IReadOnlyList<(string Name, System.Text.RegularExpressions.Regex Pattern)> _pathConstants = [];
-        internal NativeXmlExecutor(RecipeProviderBinding binding, bool delimited)
+        internal NativeXmlExecutor(RecipeProviderBinding binding, NativeSyntax syntax)
         {
             SemanticSourceRecipe recipe = binding.Recipe
                 ?? throw new InvalidDataException("The native syntax provider requires a semantic recipe.");
-            if ((recipe.DelimitedSyntax is not null) != delimited)
+            NativeSyntax declared = recipe.DelimitedSyntax is not null ? NativeSyntax.Delimited
+                : recipe.TurtleSyntax is not null ? NativeSyntax.Turtle : NativeSyntax.Xml;
+            if (declared != syntax)
                 throw new InvalidDataException("The selected syntax provider does not match the semantic recipe's syntax configuration.");
-            string expected = delimited ? "laplace/native-streaming-delimited-recipe/v1"
-                : "laplace/native-streaming-xml-recipe/v1";
+            bool delimited = syntax == NativeSyntax.Delimited;
+            string expected = syntax switch
+            {
+                NativeSyntax.Delimited => "laplace/native-streaming-delimited-recipe/v1",
+                NativeSyntax.Turtle => "laplace/native-streaming-turtle-recipe/v1",
+                _ => "laplace/native-streaming-xml-recipe/v1",
+            };
             if (!string.Equals(recipe.Provider, expected, StringComparison.Ordinal))
                 throw new InvalidDataException($"The selected syntax provider requires recipe provider '{expected}', received '{recipe.Provider}'.");
             _recipe = recipe;

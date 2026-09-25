@@ -88,25 +88,28 @@
       "consensus_gates": []
     },
     "cili": {
-      "decomposer": "CILIDecomposer",
-      "layer": 2,
+      "decomposer": "CILI",
+      "layer": 1,
       "prerequisites": [
-        "iso639"
+        "unicode"
       ],
       "consensus_gates": [
+        {
+          "relation": "HAS_EXTERNAL_ID",
+          "min": 1
+        },
         {
           "relation": "HAS_DEFINITION",
           "min": 1
         },
         {
-          "relation": "IS_TYPED_AS",
+          "relation": "IS_INSTANCE_OF",
           "min": 1
         }
       ],
-      "physicality_types": [
-        "WordNet_Synset",
-        "Source_Reference",
-        "Source_Version"
+      "witness": [
+        "CILI",
+        "a895d7ecb18019dda3443f98901e59d81ce8722b"
       ]
     },
     "document": {

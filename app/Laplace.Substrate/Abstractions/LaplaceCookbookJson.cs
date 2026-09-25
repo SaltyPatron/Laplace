@@ -19,7 +19,8 @@ public sealed record LaplaceRecipeDocument(
     IReadOnlyList<SourceRecipeArtifact>? Artifacts = null,
     SourceDelimitedSyntax? DelimitedSyntax = null,
     IReadOnlyList<SourceIdentityTable>? IdentityTables = null,
-    IReadOnlyDictionary<string, string>? AttributeVocabularies = null);
+    IReadOnlyDictionary<string, string>? AttributeVocabularies = null,
+    SourceTurtleSyntax? TurtleSyntax = null);
 
 public static class LaplaceCookbookJson
 {
@@ -45,7 +46,8 @@ public static class LaplaceCookbookJson
             document.Artifacts,
             document.DelimitedSyntax,
             document.IdentityTables,
-            document.AttributeVocabularies);
+            document.AttributeVocabularies,
+            document.TurtleSyntax);
         cookbook.Register(recipe);
         return recipe;
     }
@@ -75,7 +77,8 @@ public static class LaplaceCookbookJson
             recipe.Artifacts,
             recipe.DelimitedSyntax,
             recipe.IdentityTables.Count == 0 ? null : recipe.IdentityTables,
-            recipe.AttributeVocabularies.Count == 0 ? null : recipe.AttributeVocabularies);
+            recipe.AttributeVocabularies.Count == 0 ? null : recipe.AttributeVocabularies,
+            recipe.TurtleSyntax);
         JsonSerializer.Serialize(destination, document, Options);
     }
 

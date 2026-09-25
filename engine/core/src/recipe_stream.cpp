@@ -14,6 +14,7 @@
 #include "laplace/core/mantissa.h"
 #include "laplace/core/qualifier_law.h"
 #include "recipe_delimited.hpp"
+#include "recipe_turtle.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -274,6 +275,7 @@ struct laplace_recipe_stream {
     std::vector<node> prescan_stack;
     bool prescanned = false;
     std::unique_ptr<recipe_delimited_stream> delimited;
+    std::unique_ptr<recipe_turtle_stream> turtle;
     hash128_t witness{};
     double trust = 0;
     int depth = 2;
@@ -955,14 +957,21 @@ struct laplace_recipe_stream {
         facts.clear();
         last_fact.clear();
         scope_attributes = &record.attributes;
+        // A score or observation count grades a sibling claim, so the record's claims
+        // lower first whatever order the source's attributes sort in.
+        for (const bool grading : {false, true})
         for (const auto& a : record.attributes) {
             // Group comment lines vary by corpus (sent_id, newdoc, translit, genre...).
             // Only those the recipe declares are lowered; the rest are packaging.
-            if (a.first.rfind("group:", 0) == 0 && fields.find(route.prefix + "/@" + a.first) == fields.end())
+            const std::string path = route.prefix + "/@" + a.first;
+            const auto rule = fields.find(path);
+            if (a.first.rfind("group:", 0) == 0 && rule == fields.end())
+                continue;
+            if ((rule != fields.end() && (!rule->second.observation_of.empty() || !rule->second.score_of.empty())) != grading)
                 continue;
             const bool bound = a.first == route.identity || a.first == route.first || a.first == route.last ||
                 a.first == route.range_first || a.first == route.range_last;
-            field(stage, route.prefix + "/@" + a.first, a.second, bound, record.attributes);
+            field(stage, path, a.second, bound, record.attributes);
         }
         if (has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
         for (const auto& child : record.children) lower_child(stage, route, child, child.name);
@@ -1004,7 +1013,15 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         uint32_t provider_kind = 0;
         if (rcp2_or_later) {
             provider_kind = r.number();
-            if (provider_kind > 1) throw std::runtime_error("unsupported recipe syntax provider");
+            if (provider_kind > 2 || (provider_kind == 2 && !rcp7))
+                throw std::runtime_error("unsupported recipe syntax provider");
+            if (provider_kind == 2) {
+                recipe_turtle_config config;
+                config.record_name = r.text(); config.namespace_uri = r.text();
+                const uint32_t excluded = r.number();
+                for (uint32_t k = 0; k < excluded; ++k) config.exclude_types.push_back(r.text());
+                s->turtle = std::make_unique<recipe_turtle_stream>(std::move(config));
+            }
             if (provider_kind == 1) {
                 recipe_delimited_config config;
                 config.record_name = r.text(); config.namespace_uri = r.text();
@@ -1261,17 +1278,17 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
         return -1;
     }
     try {
-        if (s->delimited) {
-            s->delimited->feed(bytes, n, final != 0,
-                [&](const std::string& name, const std::string& ns,
-                    std::map<std::string, std::string>&& attributes,
-                    recipe_delimited_structure&& structure) {
-                    for (auto& a : attributes) a.second = s->attribute_value(a.first, std::move(a.second));
-                    node n{name, ns, std::move(attributes), {}};
-                    n.cells = std::move(structure.cells);
-                    n.group = std::move(structure.group);
-                    s->pending.push_back(std::move(n));
-                });
+        auto record = [&](const std::string& name, const std::string& ns,
+            std::map<std::string, std::string>&& attributes, recipe_delimited_structure&& structure) {
+            for (auto& a : attributes) a.second = s->attribute_value(a.first, std::move(a.second));
+            node n{name, ns, std::move(attributes), {}};
+            n.cells = std::move(structure.cells);
+            n.group = std::move(structure.group);
+            s->pending.push_back(std::move(n));
+        };
+        if (s->delimited || s->turtle) {
+            if (s->delimited) s->delimited->feed(bytes, n, final != 0, record);
+            else s->turtle->feed(bytes, n, final != 0, record);
             s->final = final != 0;
             return 0;
         }

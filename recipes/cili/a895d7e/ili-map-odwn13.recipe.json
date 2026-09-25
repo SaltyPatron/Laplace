@@ -1,0 +1,53 @@
+{
+  "authority": "CILI",
+  "release": "a895d7ecb18019dda3443f98901e59d81ce8722b",
+  "provider": "laplace/native-streaming-turtle-recipe/v1",
+  "syntax": "CILI/ili-map-odwn13.ttl",
+  "fields": [
+    {
+      "syntaxPath": "record/@about",
+      "propertyName": "ili",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@about#ns",
+      "propertyName": "iliNamespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@owl:sameAs",
+      "propertyName": "odwn13",
+      "valueKind": "Identity",
+      "disposition": "Testimony",
+      "relationName": "HAS_EXTERNAL_ID",
+      "qualifiers": [
+        "identifier/odwn13-synset"
+      ],
+      "sequenceSeparator": "\u001e"
+    },
+    {
+      "syntaxPath": "record/@owl:sameAs#ns",
+      "propertyName": "odwn13Namespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "resource",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "about"
+      },
+      "structurePaths": []
+    }
+  ],
+  "turtleSyntax": {
+    "recordName": "resource",
+    "namespaceUri": ""
+  }
+}

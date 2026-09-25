@@ -52,7 +52,7 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static field => field.SubjectMode != SourceSubjectMode.Record
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
-        bool identityTables = recipe.IdentityTables.Count != 0 || recipe.AttributeVocabularies.Count != 0
+        bool identityTables = recipe.TurtleSyntax is not null || recipe.IdentityTables.Count != 0 || recipe.AttributeVocabularies.Count != 0
             || recipe.DelimitedSyntax is { HeaderLines: > 0 }
             || recipe.ProviderRoutes.Any(static r => r.ParseStructure is not null || r.WitnessFields is { Count: > 0 })
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
@@ -63,7 +63,15 @@ public static class NativeRecipeCompiler
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
         writer.Write((uint)recordDepth);
-        if (hasExtendedHeader) writer.Write(recipe.DelimitedSyntax is null ? 0u : 1u);
+        if (hasExtendedHeader) writer.Write(recipe.DelimitedSyntax is not null ? 1u : recipe.TurtleSyntax is not null ? 2u : 0u);
+        if (recipe.TurtleSyntax is { } turtle)
+        {
+            WriteText(writer, turtle.RecordName);
+            WriteText(writer, turtle.NamespaceUri);
+            var excluded = turtle.ExcludeTypes ?? [];
+            writer.Write(checked((uint)excluded.Count));
+            foreach (string type in excluded) WriteText(writer, type);
+        }
         if (recipe.DelimitedSyntax is { } syntax)
         {
             WriteText(writer, syntax.RecordName);

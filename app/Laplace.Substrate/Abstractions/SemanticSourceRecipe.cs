@@ -273,6 +273,16 @@ public sealed record SourceDelimitedSyntax(
     public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
 }
 
+/// <summary>RDF 1.1 Turtle syntax: one record per statement subject. Attributes are the
+/// subject ("about"), rdf:type ("a") and each predicate by its compact name, with
+/// "#ns", "#lang" and "#type" companions; field meanings remain ordinary recipe rules.</summary>
+public sealed record SourceTurtleSyntax(
+    string RecordName = "resource",
+    string NamespaceUri = "",
+    // rdf:type IRIs whose resources describe the file itself (a vocabulary header,
+    // class declarations): declared packaging, never records.
+    IReadOnlyList<string>? ExcludeTypes = null);
+
 /// <summary>
 /// Versioned, deterministic semantic recipe.  It is independent of batching,
 /// concurrency and storage tuning: those change execution, not what an assertion means.
@@ -299,13 +309,18 @@ public sealed class SemanticSourceRecipe
         IEnumerable<SourceRecipeArtifact>? artifacts = null,
         SourceDelimitedSyntax? delimitedSyntax = null,
         IEnumerable<SourceIdentityTable>? identityTables = null,
-        IReadOnlyDictionary<string, string>? attributeVocabularies = null)
+        IReadOnlyDictionary<string, string>? attributeVocabularies = null,
+        SourceTurtleSyntax? turtleSyntax = null)
     {
         Authority = Required(authority, nameof(authority));
         Release = Required(release, nameof(release));
         Provider = Required(provider, nameof(provider));
         Syntax = Required(syntax, nameof(syntax));
         DelimitedSyntax = delimitedSyntax;
+        TurtleSyntax = turtleSyntax;
+        if (delimitedSyntax is not null && turtleSyntax is not null)
+            throw new ArgumentException("A recipe declares one concrete syntax.", nameof(turtleSyntax));
+        if (turtleSyntax is { } turtle) Required(turtle.RecordName, nameof(turtleSyntax));
         if (delimitedSyntax is { } delimited)
         {
             Required(delimited.RecordName, nameof(delimitedSyntax));
@@ -429,13 +444,14 @@ public sealed class SemanticSourceRecipe
     /// with per-artifact record constants).</summary>
     public SemanticSourceRecipe WithDelimitedSyntax(SourceDelimitedSyntax syntax) =>
         new(Authority, Release, Provider, Syntax, Fields, Structures, ValueAliases,
-            ProviderRoutes, Artifacts, syntax, IdentityTables, AttributeVocabularies);
+            ProviderRoutes, Artifacts, syntax, IdentityTables, AttributeVocabularies, TurtleSyntax);
 
     public string Authority { get; }
     public string Release { get; }
     public string Provider { get; }
     public string Syntax { get; }
     public SourceDelimitedSyntax? DelimitedSyntax { get; }
+    public SourceTurtleSyntax? TurtleSyntax { get; }
     public IReadOnlyList<SourceRecipeField> Fields => _fieldList;
     public IReadOnlyList<SourceRecipeStructure> Structures { get; }
     public IReadOnlyDictionary<string, string> ValueAliases => _valueAliases;

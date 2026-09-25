@@ -1,0 +1,202 @@
+{
+  "authority": "CILI",
+  "release": "a895d7ecb18019dda3443f98901e59d81ce8722b",
+  "sourceName": "CILI",
+  "trust": 1,
+  "trustClass": "StandardsDerived",
+  "layerOrder": 1,
+  "selected": true,
+  "root": "/vault/Data/.refresh-20260903/CILI",
+  "aliases": [
+    "cili"
+  ],
+  "artifacts": [
+    {
+      "selector": "extracted/ili.ttl",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-turtle-recipe/v1",
+      "syntax": "CILI/ili.ttl",
+      "recipePath": "ili.recipe.json"
+    },
+    {
+      "selector": "extracted/ili-map-pwn30.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "CILI/ili-map.tab",
+      "recipePath": "ili-map.recipe.json",
+      "configuration": {
+        "constants": {
+          "version": {
+            "pathPattern": "ili-map-(pwn\\d+)\\.tab$"
+          }
+        }
+      }
+    },
+    {
+      "selector": "extracted/ili-map-pwn31.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "CILI/ili-map.tab",
+      "recipePath": "ili-map.recipe.json",
+      "configuration": {
+        "constants": {
+          "version": {
+            "pathPattern": "ili-map-(pwn\\d+)\\.tab$"
+          }
+        }
+      }
+    },
+    {
+      "selector": "extracted/older-wn-mappings/ili-map-pwn*.tab",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "CILI/ili-map.tab",
+      "recipePath": "ili-map.recipe.json",
+      "configuration": {
+        "constants": {
+          "version": {
+            "pathPattern": "ili-map-(pwn\\d+)\\.tab$"
+          }
+        }
+      }
+    },
+    {
+      "selector": "extracted/ili-map-odwn13.ttl",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-turtle-recipe/v1",
+      "syntax": "CILI/ili-map-odwn13.ttl",
+      "recipePath": "ili-map-odwn13.recipe.json"
+    },
+    {
+      "selector": "extracted/ili-map.ttl",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "RDF serialization of ili-map-pwn30.tab."
+    },
+    {
+      "selector": "extracted/ili-map-wn30.ttl",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "RDF serialization of ili-map-pwn30.tab."
+    },
+    {
+      "selector": "extracted/ili-map-wn31.ttl",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "RDF serialization of ili-map-pwn31.tab under wordnet-rdf 3.1 synset ids."
+    },
+    {
+      "selector": "cili-a895d7ecb18019dda3443f98901e59d81ce8722b.tar.gz",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Archive of the extracted repository at this commit."
+    },
+    {
+      "selector": "cili-current-a895d7ecb18019dda3443f98901e59d81ce8722b.tar.gz",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Archive of the extracted repository at this commit."
+    },
+    {
+      "selector": "cili-current-*.commit.tsv",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Fetch record naming the commit this generation is; integrity metadata, not claims."
+    },
+    {
+      "selector": "cili-current-*.sha256",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Archive digest; integrity metadata, not claims."
+    },
+    {
+      "selector": "extracted/changes-in-wn31.csv",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Summary of the 3.0 to 3.1 differences that the pwn30 and pwn31 maps state as bindings."
+    },
+    {
+      "selector": "extracted/sense-mappings/*.tab",
+      "disposition": "unsupported-with-why-not",
+      "required": false,
+      "reason": "Per-release WordNet sense key to synset offset tables (UPC TALP). They bind a sense key to a synset of that release, not to an ILI; lowered with the WordNet sense-key consumers (VerbNet, SemLink, PropBank)."
+    },
+    {
+      "selector": "extracted/sense-mappings/Makefile",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Build scripts and notes for the sense-key tables."
+    },
+    {
+      "selector": "extracted/sense-mappings/*.py",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Build scripts and notes for the sense-key tables."
+    },
+    {
+      "selector": "extracted/sense-mappings/Readme.md",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Build scripts and notes for the sense-key tables."
+    },
+    {
+      "selector": "extracted/older-wn-mappings/LICENSE",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "License of the TALP mappings."
+    },
+    {
+      "selector": "extracted/older-wn-mappings/README.md",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Documentation of the TALP mapping format."
+    },
+    {
+      "selector": "extracted/ontology.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "OWL definition of the ILI status vocabulary, whose statements ili.ttl carries."
+    },
+    {
+      "selector": "extracted/*.md",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository documentation."
+    },
+    {
+      "selector": "extracted/LICENSE",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "License (CC BY 4.0)."
+    },
+    {
+      "selector": "extracted/*.py",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository tooling."
+    },
+    {
+      "selector": "extracted/requirements.txt",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository tooling."
+    },
+    {
+      "selector": "extracted/.gitignore",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository tooling."
+    },
+    {
+      "selector": "extracted/.github/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository CI configuration."
+    }
+  ]
+}

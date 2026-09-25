@@ -1,0 +1,114 @@
+{
+  "authority": "CILI",
+  "release": "a895d7ecb18019dda3443f98901e59d81ce8722b",
+  "provider": "laplace/native-streaming-turtle-recipe/v1",
+  "syntax": "CILI/ili.ttl",
+  "fields": [
+    {
+      "syntaxPath": "record/@about",
+      "propertyName": "ili",
+      "valueKind": "Identity",
+      "disposition": "Identity, Testimony",
+      "relationName": "HAS_EXTERNAL_ID",
+      "qualifiers": [
+        "identifier/ili"
+      ]
+    },
+    {
+      "syntaxPath": "record/@about#ns",
+      "propertyName": "iliNamespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@a",
+      "propertyName": "kind",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "IS_INSTANCE_OF"
+    },
+    {
+      "syntaxPath": "record/@a#ns",
+      "propertyName": "kindNamespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@skos:definition",
+      "propertyName": "definition",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_DEFINITION",
+      "contextField": "skos:definition#lang"
+    },
+    {
+      "syntaxPath": "record/@skos:definition#lang",
+      "propertyName": "definitionLanguage",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@dc:source",
+      "propertyName": "pwn30",
+      "valueKind": "Identity",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@dc:source#ns",
+      "propertyName": "pwn30Namespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@ili:status",
+      "propertyName": "status",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "ILI_Status"
+    },
+    {
+      "syntaxPath": "record/@ili:status#ns",
+      "propertyName": "statusNamespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@ili:supersededBy",
+      "propertyName": "supersededBy",
+      "valueKind": "Identity",
+      "disposition": "Testimony",
+      "relationName": "SUPERSEDED_BY",
+      "sequenceSeparator": "\u001e"
+    },
+    {
+      "syntaxPath": "record/@ili:supersededBy#ns",
+      "propertyName": "supersededByNamespace",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "resource",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "about"
+      },
+      "structurePaths": []
+    }
+  ],
+  "turtleSyntax": {
+    "recordName": "resource",
+    "namespaceUri": "",
+    "excludeTypes": [
+      "http://purl.org/vocommons/voaf#Vocabulary",
+      "http://www.w3.org/2002/07/owl#Class"
+    ]
+  },
+  "attributeVocabularies": {
+    "skos:definition#lang": "lang/iso639"
+  }
+}
