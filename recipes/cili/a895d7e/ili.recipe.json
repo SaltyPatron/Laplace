@@ -24,8 +24,7 @@
       "syntaxPath": "record/@a",
       "propertyName": "kind",
       "valueKind": "Enumerated",
-      "disposition": "Testimony",
-      "relationName": "IS_INSTANCE_OF"
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "record/@a#ns",
