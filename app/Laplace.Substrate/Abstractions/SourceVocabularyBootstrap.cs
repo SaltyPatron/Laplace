@@ -82,9 +82,10 @@ public static class SourceVocabularyBootstrap
         IEnumerable<string>? typeNodeNames = null,
         IEnumerable<string>? relationNodeNames = null,
         ConcurrentDictionary<string, byte>? readbackNames = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        (string Authority, string Release)? witness = null)
     {
-        var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId);
+        var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId, witness);
         if (typeNodeNames is not null)
             foreach (var n in typeNodeNames) boot.AddType(n);
         if (relationNodeNames is not null)

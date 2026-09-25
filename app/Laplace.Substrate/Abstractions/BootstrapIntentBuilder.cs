@@ -19,6 +19,13 @@ public sealed class BootstrapIntentBuilder
     public static readonly Hash128 HasTrustClassTypeId = RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS");
 
     public BootstrapIntentBuilder(Hash128 sourceId, string sourceName, Hash128 trustClassId)
+        : this(sourceId, sourceName, trustClassId, witness: null) { }
+
+    /// <param name="witness">A source generation's self-description: the source is the
+    /// content composition [authority, release] (<see cref="SourceWitness"/>), staged as
+    /// ordinary content instead of a named identity.</param>
+    public BootstrapIntentBuilder(Hash128 sourceId, string sourceName, Hash128 trustClassId,
+        (string Authority, string Release)? witness)
     {
         _sourceId = sourceId;
         _sourceName = sourceName ?? throw new ArgumentNullException(nameof(sourceName));
@@ -29,6 +36,13 @@ public sealed class BootstrapIntentBuilder
             sourceId, $"bootstrap/{sourceName}", parentIntentId: null)
             .DeclareSourcePrior(SourceTrust.SubstrateMandate);
 
+        if (witness is { } w)
+        {
+            if (SourceWitness.Stage(_inner, w.Authority, w.Release) != sourceId)
+                throw new InvalidOperationException(
+                    $"source {sourceName} is not the witness [{w.Authority}, {w.Release}]");
+            return;
+        }
         CanonicalNamedIdentity.Declare(
             _inner, sourceId, EntityTier.Word, SourceTypeId, sourceName, sourceId);
 

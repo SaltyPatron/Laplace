@@ -39,11 +39,18 @@
           "relation": "HAS_SCRIPT",
           "min": 1
         },
-        { "relation": "HAS_GENERAL_CATEGORY", "min": 1 },
+        {
+          "relation": "HAS_GENERAL_CATEGORY",
+          "min": 1
+        },
         {
           "relation": "CONFUSABLE_WITH",
           "min": 1
         }
+      ],
+      "witness": [
+        "Unicode/UCD",
+        "17.0.0"
       ]
     },
     "iso639": {
@@ -146,9 +153,22 @@
       "layer": 1,
       "prerequisites": [],
       "consensus_gates": [
-        { "relation": "HAS_SENSE", "min": 1 },
-        { "relation": "HAS_POS", "min": 1 },
-        { "relation": "IS_A", "min": 1 }
+        {
+          "relation": "HAS_SENSE",
+          "min": 1
+        },
+        {
+          "relation": "HAS_POS",
+          "min": 1
+        },
+        {
+          "relation": "IS_A",
+          "min": 1
+        }
+      ],
+      "witness": [
+        "OEWN",
+        "2025+"
       ]
     },
     "omw": {
@@ -156,8 +176,18 @@
       "layer": 1,
       "prerequisites": [],
       "consensus_gates": [
-        { "relation": "HAS_SENSE", "min": 1 },
-        { "relation": "HAS_POS", "min": 1 }
+        {
+          "relation": "HAS_SENSE",
+          "min": 1
+        },
+        {
+          "relation": "HAS_POS",
+          "min": 1
+        }
+      ],
+      "witness": [
+        "OMW",
+        "2.0"
       ]
     },
     "verbnet": {
@@ -326,6 +356,10 @@
           "max": 0,
           "family": true
         }
+      ],
+      "witness": [
+        "UD",
+        "2.18"
       ]
     },
     "wiktionary": {

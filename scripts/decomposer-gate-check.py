@@ -50,6 +50,10 @@ def check_source(
         raise SystemExit(f"unknown source '{source}' — not in decomposer-gates.json")
 
     decomposer = src["decomposer"]
+    # A source generation is the witness [authority, release]; legacy decomposers keep
+    # their named source id until they move onto recipes.
+    source_sql = (f"laplace.witness_id('{src['witness'][0]}', '{src['witness'][1]}')"
+                  if src.get("witness") else f"laplace.source_id('{decomposer}')")
     layer = src["layer"]
     results: list[dict] = []
     ok = True
@@ -83,7 +87,7 @@ def check_source(
         att = int(
             psql(
                 dbname,
-                f"SELECT ops.evidence_count(p_source => laplace.source_id('{decomposer}'));",
+                f"SELECT ops.evidence_count(p_source => {source_sql});",
                 host=host,
                 user=user,
             )
@@ -100,7 +104,7 @@ def check_source(
                     dbname,
                     "SELECT COALESCE(sum(ops.evidence_count("
                     "p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || l || '/v1'), "
-                    f"p_source => laplace.source_id('{decomposer}'))), 0) FROM generate_series(0, 8) l;",
+                    f"p_source => {source_sql})), 0) FROM generate_series(0, 8) l;",
                     host=host,
                     user=user,
                 )
@@ -148,7 +152,7 @@ def check_source(
                     dbname,
                     "SELECT count(*) FROM laplace.entities e "
                     "WHERE EXISTS (SELECT 1 FROM laplace.attestations a "
-                    f"  WHERE a.source_id = laplace.source_id('{decomposer}') "
+                    f"  WHERE a.source_id = {source_sql} "
                     "  AND a.subject_id = e.id) "
                     f"AND e.type_id = laplace.entity_type_id('{marker_type}');",
                     host=host,
@@ -172,7 +176,7 @@ def check_source(
                 # Attribute "content physicalities present for this decomposer" via its attestations.
                 f"SELECT EXISTS(SELECT 1 FROM laplace.physicalities p "
                 f"JOIN laplace.attestations a ON a.subject_id = p.entity_id "
-                f"WHERE a.source_id = laplace.source_id('{decomposer}') AND p.type = 1 LIMIT 1);",
+                f"WHERE a.source_id = {source_sql} AND p.type = 1 LIMIT 1);",
                 host=host,
                 user=user,
             ).lower() in ("t", "true")
@@ -185,7 +189,7 @@ def check_source(
                 dbname,
                 "SELECT ops.evidence_count("
                 f"p_type => realize.canonical_id('substrate/type/HasLayerCompleted/{layer}/v1'), "
-                f"p_source => laplace.source_id('{decomposer}')) > 0;",
+                f"p_source => {source_sql}) > 0;",
                 host=host,
                 user=user,
             ).lower() in ("t", "true")
@@ -202,11 +206,11 @@ def check_source(
             row = psql(
                 dbname,
                 "WITH touched AS MATERIALIZED ("
-                f" SELECT subject_id AS entity_id FROM laplace.attestations WHERE source_id=laplace.source_id('{decomposer}')"
+                f" SELECT subject_id AS entity_id FROM laplace.attestations WHERE source_id={source_sql}"
                 " UNION SELECT object_id FROM laplace.attestations"
-                f" WHERE source_id=laplace.source_id('{decomposer}') AND object_id IS NOT NULL"
+                f" WHERE source_id={source_sql} AND object_id IS NOT NULL"
                 " UNION SELECT context_id FROM laplace.attestations"
-                f" WHERE source_id=laplace.source_id('{decomposer}') AND context_id IS NOT NULL"
+                f" WHERE source_id={source_sql} AND context_id IS NOT NULL"
                 "), governed AS MATERIALIZED ("
                 " SELECT DISTINCT e.id AS entity_id FROM laplace.entities e"
                 " JOIN touched t ON t.entity_id=e.id"
@@ -251,7 +255,7 @@ def check_source(
                         dbname,
                         "SELECT ops.evidence_count("
                         f"p_type => laplace.relation_type_id('{rel}'), "
-                        f"p_source => laplace.source_id('{decomposer}'));",
+                        f"p_source => {source_sql});",
                         host=host,
                         user=user,
                     )
@@ -294,7 +298,7 @@ def check_source(
                             dbname,
                             "SELECT ops.evidence_count("
                             f"p_type => laplace.relation_type_id('{alt}'), "
-                            f"p_source => laplace.source_id('{decomposer}'));",
+                            f"p_source => {source_sql});",
                             host=host,
                             user=user,
                         )

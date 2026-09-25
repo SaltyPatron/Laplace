@@ -280,11 +280,11 @@ jobs:
             local key="$1"
             local path="${2:-}"
             local src_name
-            src_name=$(python3 -c 'import json,sys; entry=json.load(open("scripts/decomposer-gates.json"))["sources"].get(sys.argv[1]); print(entry["decomposer"] if entry else "")' "$key")
+            src_name=$(python3 -c 'import json,sys; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(sys.argv[1]); print("" if not e else (f"laplace.witness_id(%r, %r)" % tuple(e["witness"]) if e.get("witness") else f"laplace.source_id(%r)" % e["decomposer"]))' "$key")
             local before after
             if [[ -n "$src_name" ]]; then
               before=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
-                "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));" | xargs)
+                "SELECT ops.evidence_count(p_source => $src_name);" | xargs)
             else
               before=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
                 "SELECT count(*) FROM laplace.attestations;" | xargs)
@@ -292,7 +292,7 @@ jobs:
             ingest_one "$key" "$path"
             if [[ -n "$src_name" ]]; then
               after=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
-                "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));" | xargs)
+                "SELECT ops.evidence_count(p_source => $src_name);" | xargs)
             else
               after=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
                 "SELECT count(*) FROM laplace.attestations;" | xargs)

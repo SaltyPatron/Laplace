@@ -536,7 +536,11 @@
         "kind": "ContentField",
         "identityField": "id"
       },
-      "structurePaths": []
+      "structurePaths": [],
+      "witnessFields": [
+        "id",
+        "version"
+      ]
     },
     {
       "recordName": "Requires",

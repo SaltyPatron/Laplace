@@ -195,7 +195,11 @@ public sealed record SourceRecipeProviderRoute(
     string? RangeStartField = null,
     string? RangeEndField = null,
     bool InheritParentAttributes = false,
-    SourceParseStructure? ParseStructure = null);
+    SourceParseStructure? ParseStructure = null,
+    // This record states its own witness: the content composition of these fields
+    // ([id, version] of a WN-LMF Lexicon). Claims of the record and of every record
+    // within its scope are that witness's observations.
+    IReadOnlyList<string>? WitnessFields = null);
 
 /// <summary>
 /// A grouped delimited record (a CoNLL-U sentence) lowered to its trunk's parse

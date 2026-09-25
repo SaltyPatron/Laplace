@@ -77,7 +77,8 @@ public class SourceGenerationRecipe
         string authority = Required(root, "authority"), release = Required(root, "release");
         string sourceName = Required(root, "sourceName");
         string? sourceHex = Optional(root, "sourceId");
-        Hash128 sourceId = sourceHex is null ? SubstrateCanonicalIds.Source(sourceName)
+        // The source is the witness of its observations: [authority, release] as content.
+        Hash128 sourceId = sourceHex is null ? SourceWitness.Id(authority, release)
             : ParseId(sourceHex);
         double trust = root.TryGetProperty("trust", out var weight) ? weight.GetDouble() : 1;
         if (!double.IsFinite(trust) || trust is < 0 or > 1)

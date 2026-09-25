@@ -484,8 +484,12 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
             .Concat(SingleArtifactRecipeDecomposer.RelationsFor(null)).Distinct(StringComparer.Ordinal).ToArray();
         string[] types = recipes.SelectMany(SingleArtifactRecipeDecomposer.TypesFor)
             .Concat(SingleArtifactRecipeDecomposer.TypesFor(null)).Distinct(StringComparer.Ordinal).ToArray();
+        // A generation without an explicit source id is its own witness [authority, release].
+        (string, string)? witness = SourceId == SourceWitness.Id(_recipe.Authority, _recipe.Release)
+            ? (_recipe.Authority, _recipe.Release) : null;
         await SourceVocabularyBootstrap.RegisterAsync(
-            context, SourceId, SourceName, TrustClassId, types, _relations, ct: ct).ConfigureAwait(false);
+            context, SourceId, SourceName, TrustClassId, types, _relations, ct: ct, witness: witness)
+            .ConfigureAwait(false);
 
         foreach (IngestArtifact artifact in resolved.Graph.Artifacts)
         {

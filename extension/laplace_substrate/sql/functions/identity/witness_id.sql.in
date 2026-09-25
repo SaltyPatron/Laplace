@@ -1,0 +1,8 @@
+-- A source generation is the witness of its observations; its id is the content
+-- composition of its self-description [authority, release] (SourceWitness in C#).
+CREATE OR REPLACE FUNCTION laplace.witness_id(p_authority text, p_release text) RETURNS bytea
+    LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT public.laplace_hash128_merkle(0::smallint,
+        ARRAY[laplace.word_id(p_authority), laplace.word_id(p_release)]);
+END;

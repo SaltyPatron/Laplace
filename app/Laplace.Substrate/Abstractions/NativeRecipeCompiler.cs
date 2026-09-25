@@ -53,7 +53,7 @@ public static class NativeRecipeCompiler
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
         bool identityTables = recipe.IdentityTables.Count != 0 || recipe.AttributeVocabularies.Count != 0
-            || recipe.ProviderRoutes.Any(static r => r.ParseStructure is not null)
+            || recipe.ProviderRoutes.Any(static r => r.ParseStructure is not null || r.WitnessFields is { Count: > 0 })
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate);
@@ -278,6 +278,8 @@ public static class NativeRecipeCompiler
                     WriteText(writer, parse.DeprelColumn);
                     WriteText(writer, parse.UposVocabulary);
                 }
+                writer.Write(checked((uint)(route.WitnessFields?.Count ?? 0)));
+                foreach (string field in route.WitnessFields ?? []) WriteText(writer, field);
             }
         }
 

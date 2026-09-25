@@ -99,6 +99,7 @@ struct route_rule {
         size_t id = 0, form = 0, upos = 0, head = 0, deprel = 0;
         int upos_tagset = -1;
     } parse;
+    std::vector<std::string> witness_fields;
 };
 struct node {
     std::string name, ns;
@@ -112,6 +113,9 @@ struct node {
     std::vector<std::string> cells;
     std::vector<std::pair<std::string, std::string>> own;
     std::shared_ptr<const std::vector<std::vector<std::string>>> group;
+    // The self-description of the witness whose observations this record carries
+    // (a WN-LMF Lexicon's [id, version]); empty = the generation's witness.
+    std::vector<std::string> witness_parts;
     // "Child/@attr" reads a child element's attribute (a WN-LMF entry is named by its
     // Lemma's writtenForm, not by its packaging id).
     std::string get(const std::string& key) const {
@@ -133,6 +137,8 @@ struct fact {
     bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
     bool has_subject = false;
     double rank = 1;
+    hash128_t source{};           // the witness of this observation
+    bool has_source = false;
     // A claim is a Glicko-2 game series: games observed, each scored in [0,1]
     // (win 1, draw 0.5, loss 0). A binary claim is one game at 1 or 0.
     int64_t games = 1;
@@ -253,6 +259,7 @@ static size_t rows(const intent_stage_t* s) {
 
 struct laplace_recipe_stream {
     laplace_xml_stream_t* parser = nullptr;
+    hash128_t current_witness{};   // the witness of the record being lowered
     laplace_xml_stream_t* prescan_parser = nullptr;
     std::vector<identity_table_rule> table_rules;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> tables;
@@ -284,6 +291,18 @@ struct laplace_recipe_stream {
     std::unordered_map<std::string, content_form> content_cache;
     size_t content_cache_bytes = 0, content_cache_limit = 0, content_cache_entries = 0;
 
+    // The current parent scope's witness self-description, when its route declares one.
+    std::vector<std::string> scope_witness() const {
+        const auto route = routes.find(parent_scope.name);
+        if (route == routes.end() || route->second.witness_fields.empty()) return {};
+        std::vector<std::string> parts;
+        for (const auto& field : route->second.witness_fields) {
+            const std::string value = parent_scope.get(field);
+            if (value.empty()) return {};
+            parts.push_back(value);
+        }
+        return parts;
+    }
     ~laplace_recipe_stream() { laplace_xml_stream_free(parser); laplace_xml_stream_free(prescan_parser); }
     // A reference names what the source says its id denotes; an unlisted id is a
     // dangling source reference, never silently kept as packaging.
@@ -364,15 +383,16 @@ struct laplace_recipe_stream {
         const laplace_relation_def_t* definition = nullptr;
         double weight = laplace_relation_lookup(&f.relation, &definition) == 0 && definition
             ? trust : trust * f.rank;
+        const hash128_t* observer = f.has_source ? &f.source : &current_witness;
         if (f.games > 1 || f.score >= 0) {
             const double score = f.score >= 0 ? f.score : (f.confirm ? 1.0 : 0.0);
             const int64_t sum = static_cast<int64_t>(std::llround(score * 1e9)) * f.games;
-            check(laplace_attestation_aggregated_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
-                f.has_object ? 0 : 1, &witness, f.has_context ? &f.context : nullptr,
+        check(laplace_attestation_aggregated_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
+                f.has_object ? 0 : 1, observer, f.has_context ? &f.context : nullptr,
                 f.has_context ? 0 : 1, weight, f.games, sum, 0, &row), "graded testimony");
         } else
         check(laplace_attestation_resolved_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
-            f.has_object ? 0 : 1, &witness, f.has_context ? &f.context : nullptr,
+            f.has_object ? 0 : 1, observer, f.has_context ? &f.context : nullptr,
             f.has_context ? 0 : 1, weight, f.confirm ? 1 : 0, 1, 0, &row), "testimony");
         if (f.explicit_rank) {
             // The compiled field rank includes any explicit recipe override.
@@ -510,7 +530,9 @@ struct laplace_recipe_stream {
         for (size_t i = from; i < facts.size(); ++i) {
             fact f = facts[i];
             if (!f.has_subject) { f.subject = subject; f.has_subject = true; }
+            if (!f.has_source) { f.source = current_witness; f.has_source = true; }
             std::string key(reinterpret_cast<const char*>(&f.subject), sizeof(f.subject));
+            key.append(reinterpret_cast<const char*>(&f.source), sizeof(f.source));
             key.append(reinterpret_cast<const char*>(&f.relation), sizeof(f.relation));
             key.append(reinterpret_cast<const char*>(&f.object), sizeof(f.object));
             key.append(reinterpret_cast<const char*>(&f.context), sizeof(f.context));
@@ -519,6 +541,26 @@ struct laplace_recipe_stream {
             if (!fresh) it->second.games += f.games;
         }
         facts.resize(from);
+    }
+    // A record's own witness: the content composition of its self-description.
+    hash128_t stage_witness(intent_stage_t* stage, const std::vector<std::string>& parts) {
+        std::vector<laplace_ordered_component_t> components;
+        for (const auto& part : parts) {
+            const content_form form = compose_content(stage, part);
+            laplace_ordered_component_t c{};
+            c.id = form.id;
+            std::memcpy(c.coord, form.coord, sizeof(c.coord));
+            c.tier = form.tier; c.atom = form.atom; c.has_atom = form.tier == 0 ? 1 : 0;
+            components.push_back(c);
+        }
+        if (components.size() == 1) return components[0].id;
+        hash128_t version_type;
+        (void)laplace_entity_type_id("Source_Version", &version_type);
+        laplace_ordered_composition_request_t request{
+            components.data(), components.size(), version_type, witness, INTENT_STAGE_PG_EPOCH_UNIX_US};
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "witness composition");
+        return result.id;
     }
     // A sentence's parse: its token forms in order, each vertex carrying governed
     // codes (UPOS index, universal deprel code, head ordinal) in its metadata.
@@ -815,6 +857,7 @@ struct laplace_recipe_stream {
         // are lowered below; the record's own syntax (element name, attribute pairs,
         // delimited cells) is never recorded as content.
         if (record.ns != route.ns) throw std::runtime_error("record namespace mismatch: " + record.name);
+        current_witness = record.witness_parts.empty() ? witness : stage_witness(stage, record.witness_parts);
         range = route.kind == 0;
         membership = false; record_facts_done = false; fact_offset = 0;
         if (range) {
@@ -889,7 +932,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
     *out = nullptr;
     std::unique_ptr<laplace_recipe_stream> s;
     try {
-        s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->trust = trust;
+        s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->current_witness = *witness; s->trust = trust;
         image_reader r{program,n};
         const uint32_t version = r.number();
         // "RCPn": the generation digit is the high byte; each generation extends the last.
@@ -1056,6 +1099,8 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     if (vocab.kind != 1) throw std::runtime_error("parse structure UPOS vocabulary must be pos/<tagset>");
                     route.parse.upos_tagset = vocab.tagset;
                 }
+                const uint32_t witness_fields = r.number();
+                for (uint32_t k = 0; k < witness_fields; ++k) route.witness_fields.push_back(r.text());
             }
             if (route.kind > 3 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
                 (!route.range_first.empty() && (route.kind == 0 || !nonzero(route.range_relation))))
@@ -1212,6 +1257,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                                     s->pending.push_back(std::move(projected));
                                 }
                             } else if (!(s->child_inherited && !explicit_subject)) {
+                                s->parent_scope.witness_parts = s->scope_witness();
                                 s->pending.push_back(std::move(s->parent_scope));
                             }
                         }
@@ -1262,6 +1308,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                             done.attributes.try_emplace(a.first, a.second);
                         s->child_inherited = true;
                     }
+                    if (s->parent_scope_active) done.witness_parts = s->scope_witness();
                     s->pending.push_back(std::move(done));
                 } else s->stack.back().children.push_back(std::move(done));
             } else if (e.kind == 3) {
