@@ -990,6 +990,15 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_qualifier_bit", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int QualifierBit(string family, string value);
 
+    [LibraryImport(Library, EntryPoint = "laplace_trust_class_id", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int TrustClassIdNative(string name, Hash128* outId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_trust_class_prior")]
+    internal static partial int TrustClassPriorNative(Hash128* id, double* outPrior);
+
+    [LibraryImport(Library, EntryPoint = "laplace_trust_class_prior_by_name", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int TrustClassPriorByNameNative(string name, double* outPrior);
+
     [LibraryImport(Library, EntryPoint = "laplace_pos_resolve_canonical", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int PosResolveCanonical(string tag, int tagset, byte** outCanonical, int* outIndex);
 

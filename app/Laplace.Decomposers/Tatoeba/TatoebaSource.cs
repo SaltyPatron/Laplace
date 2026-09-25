@@ -11,7 +11,7 @@ public readonly struct TatoebaSource : ISeedSource
     public static string SourceName => "TatoebaDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["IS_TRANSLATION_OF", "HAS_LANGUAGE"];

@@ -23,49 +23,33 @@ public static class RelationTypeRank
     public const double Probationary = 0.05;
 }
 
+/// <summary>
+/// Witness priors read from the governed trust-class law (engine/manifest/trust_classes.toml).
+/// The class is the only statement of a witness's trust; each name below is the prior of
+/// the class it reads.
+/// </summary>
 public static class SourceTrust
 {
-    public const double SubstrateMandate = 1.00;
-    public const double StandardsDerived = 0.95;
-    public const double AcademicCurated = 0.85;
-    public const double AcademicCuratedUserInput = 0.78;
-    public const double StructuredCorpus = 0.70;
-    public const double UserCuratedResource = 0.60;
-    public const double AiModelProbe = 0.50;
-    public const double AppDerived = 0.40;
-    public const double UserPrompt = 0.30;
-    public const double Response = 0.20;
-    public const double Adversarial = 0.00;
+    public static readonly double SubstrateMandate = ForClassName("SubstrateMandate");
+    public static readonly double StandardsDerived = ForClassName("StandardsDerived");
+    public static readonly double AcademicCurated = ForClassName("AcademicCurated");
+    public static readonly double AcademicCuratedUserInput = ForClassName("AcademicCuratedWithUserInput");
+    public static readonly double StructuredCorpus = ForClassName("StructuredCorpus");
+    public static readonly double UserCuratedResource = ForClassName("UserCuratedResource");
+    public static readonly double AiModelProbe = ForClassName("AIModelProbe");
+    public static readonly double AppDerived = ForClassName("AppDerived");
+    public static readonly double UserPrompt = ForClassName("UserPromptContent");
+    public static readonly double Response = ForClassName("ResponseContent");
+    public static readonly double Adversarial = ForClassName("AdversarialUntrusted");
 
     /// <summary>
-    /// Resolve the numeric witness prior from the governed trust-class identity.
-    /// Unknown classes fail closed; source code must not silently inherit a user/default prior.
+    /// The witness prior of a governed trust class. Undeclared classes fail closed; source
+    /// code never silently inherits a user/default prior.
     /// </summary>
-    public static double ForClass(Laplace.Engine.Core.Hash128 trustClassId)
-    {
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("SubstrateMandate"))
-            return SubstrateMandate;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("StandardsDerived"))
-            return StandardsDerived;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AcademicCurated"))
-            return AcademicCurated;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AcademicCuratedUserInput"))
-            return AcademicCuratedUserInput;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("StructuredCorpus"))
-            return StructuredCorpus;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("UserCuratedResource"))
-            return UserCuratedResource;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AiModelProbe"))
-            return AiModelProbe;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AppDerived"))
-            return AppDerived;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("UserPrompt"))
-            return UserPrompt;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("Response"))
-            return Response;
-        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("Adversarial"))
-            return Adversarial;
-        throw new InvalidOperationException(
-            $"No governed witness prior is registered for trust class {trustClassId}.");
-    }
+    public static double ForClass(Laplace.Engine.Core.Hash128 trustClassId) =>
+        Laplace.Engine.Core.TrustClassRegistry.Prior(trustClassId);
+
+    /// <summary>The witness prior of a governed trust class, by its label.</summary>
+    public static double ForClassName(string trustClass) =>
+        Laplace.Engine.Core.TrustClassRegistry.Prior(trustClass);
 }

@@ -11,7 +11,7 @@ public readonly struct OpenSubtitlesSource : ISeedSource
     public static string SourceName => "OpenSubtitlesDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         [EtlSource.LanguageScopeRelation];

@@ -16,7 +16,7 @@ public static class ResponseContent
     public static readonly Hash128 Source =
         SubstrateCanonicalIds.Source("Response");
     public static readonly Hash128 TrustClass =
-        SubstrateCanonicalIds.TrustClass("ResponseContent");
+        TrustClassRegistry.Id("ResponseContent");
 
     public static double WitnessWeight =>
         RelationTypeRank.Associative * SourceTrust.Response;

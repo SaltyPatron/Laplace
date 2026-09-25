@@ -11,7 +11,7 @@ public readonly struct RgbaImageSource : ISeedSource
     public static string SourceName => "RgbaImageDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_REGION", "HAS_PATCH", "IS_PIXEL_OF", "ADJACENT_TO_PIXEL", "DEPICTS", "CAPTIONS"];

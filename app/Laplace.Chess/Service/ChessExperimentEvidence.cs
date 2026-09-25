@@ -18,7 +18,7 @@ internal sealed record ChessExperimentEvidence(string ExperimentId, string PgnEv
     private static class Canonicals
     {
         internal static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
-        internal static readonly Hash128 TrustClassId = SubstrateCanonicalIds.TrustClass("AppDerived");
+        internal static readonly Hash128 TrustClassId = TrustClassRegistry.Id("AppDerived");
         internal static readonly Hash128 ReceiptMetaTypeId = SubstrateCanonicalIds.OfVersioned("type", "HasExperimentReceipt");
     }
 

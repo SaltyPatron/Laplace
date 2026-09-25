@@ -114,7 +114,7 @@ public sealed class AmbientManifestIsolationTests
         public Hash128 SourceId => Source;
         public string SourceName => "AmbientManifestTest";
         public int LayerOrder => 0;
-        public Hash128 TrustClassId => SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        public Hash128 TrustClassId => TrustClassRegistry.Id("StructuredCorpus");
 
         public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
             Task.CompletedTask;

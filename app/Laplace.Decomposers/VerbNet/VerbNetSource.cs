@@ -11,7 +11,7 @@ public readonly struct VerbNetSource : ISeedSource
     public static string SourceName => "VerbNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

@@ -11,7 +11,7 @@ public readonly struct CILISource : ISeedSource
     public static string SourceName => "CILIDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["IS_TYPED_AS", "HAS_DEFINITION", "HAS_SYNSET_KEY"];

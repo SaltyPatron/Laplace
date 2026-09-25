@@ -11,7 +11,7 @@ public readonly struct CodeSource : ISeedSource
     public static string SourceName => "CodeDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CALLS", "DEFINES", "REFERENCES"];

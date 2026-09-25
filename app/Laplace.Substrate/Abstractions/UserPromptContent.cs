@@ -13,7 +13,7 @@ public static class UserPromptContent
     public static readonly Hash128 Source =
         SubstrateCanonicalIds.Source("UserPrompt");
     public static readonly Hash128 TrustClass =
-        SubstrateCanonicalIds.TrustClass("UserPromptContent");
+        TrustClassRegistry.Id("UserPromptContent");
 
     public static double WitnessWeight =>
         RelationTypeRank.Associative * SourceTrust.UserPrompt;

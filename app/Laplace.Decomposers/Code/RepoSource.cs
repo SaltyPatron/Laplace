@@ -11,7 +11,7 @@ public readonly struct RepoSource : ISeedSource
     public static string SourceName => "RepoDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
+        TrustClassRegistry.Id("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CONTAINS", "CALLS", "DEFINES", "REFERENCES", "HAS_EXAMPLE", "HAS_DEFINITION"];

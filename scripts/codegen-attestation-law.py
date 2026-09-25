@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Codegen attestation law: manifest TOML -> relation_law.c/h, pos_law.c/h, seed SQL, highway perfcache."""
+"""Codegen attestation law: manifest TOML -> relation, POS, entity-type, language, deprel,
+qualifier and trust-class laws (.c/.h), seed SQL, highway perfcache."""
 from __future__ import annotations
 
 import hashlib
@@ -1369,6 +1370,144 @@ def emit_qualifier_law(path: Path) -> None:
               "}"]
     _write_text_if_changed(OUT_CORE / "src/generated/qualifier_law.c", "\n".join(lines) + "\n")
 
+
+def emit_trust_class_law(path: Path) -> None:
+    """Governed witness trust classes (engine/manifest/trust_classes.toml): a class's id is
+    the content id of its single-word label; its prior in [0,1] seeds the standing of
+    every claim a witness of that class makes."""
+    body = path.read_text(encoding="utf-8")
+    rows = []
+    for block in body.split("[[class]]")[1:]:
+        name = re.search(r'^name\s*=\s*"([^"]+)"', block, re.M)
+        prior = re.search(r"^prior\s*=\s*([0-9.]+)\s*$", block, re.M)
+        desc = re.search(r'^description\s*=\s*"([^"]+)"', block, re.M)
+        if not name or not prior or not desc:
+            raise SystemExit("trust_classes.toml: every class needs name, prior and description")
+        value = float(prior.group(1))
+        if not re.fullmatch(r"[A-Za-z0-9_]+", name.group(1)):
+            raise SystemExit(f"trust_classes.toml: class labels are single words: {name.group(1)}")
+        if not 0.0 <= value <= 1.0:
+            raise SystemExit(f"trust_classes.toml: {name.group(1)} prior {value} is outside [0,1]")
+        rows.append((name.group(1), prior.group(1)))
+    names = [n for n, _ in rows]
+    if not rows or len(names) != len(set(names)):
+        raise SystemExit("trust_classes.toml declares no class, or a class twice")
+    _write_text_if_changed(OUT_CORE / "include/laplace/core/trust_class_law.h",
+        "#pragma once\n"
+        "\n"
+        "#include <stddef.h>\n"
+        "\n"
+        '#include "laplace/core/hash128.h"\n'
+        "\n"
+        "#ifdef __cplusplus\n"
+        'extern "C" {\n'
+        "#endif\n"
+        "\n"
+        "extern const char* const laplace_trust_class_canonical[];\n"
+        "extern const double laplace_trust_class_priors[];\n"
+        "extern const size_t laplace_trust_class_count;\n"
+        "\n"
+        "/* 0 with *out_id set (the content id of the class label) when the class is\n"
+        " * governed, -1 otherwise. */\n"
+        "int laplace_trust_class_id(const char* name, hash128_t* out_id);\n"
+        "/* 0 with *out_prior set when id is a governed trust class, -1 otherwise. */\n"
+        "int laplace_trust_class_prior(const hash128_t* id, double* out_prior);\n"
+        "/* 0 with *out_prior set when the class name is governed, -1 otherwise. */\n"
+        "int laplace_trust_class_prior_by_name(const char* name, double* out_prior);\n"
+        "/* 0 with *out_name set when id is a governed trust class, -1 otherwise. */\n"
+        "int laplace_trust_class_lookup(const hash128_t* id, const char** out_name);\n"
+        "\n"
+        "#ifdef __cplusplus\n"
+        "}\n"
+        "#endif\n")
+    lines = [
+        '#include "laplace/core/trust_class_law.h"',
+        "",
+        "#include <string.h>",
+        "",
+        "const char* const laplace_trust_class_canonical[] = {",
+    ]
+    lines += [f'    "{n}",' for n, _ in rows]
+    lines += ["};", "", "const double laplace_trust_class_priors[] = {"]
+    lines += [f"    {p}," for _, p in rows]
+    lines += [
+        "};",
+        f"const size_t laplace_trust_class_count = {len(rows)};",
+        "",
+        f"static hash128_t k_trust_class_ids[{len(rows)}];",
+        "",
+        "#ifdef _WIN32",
+        "#include <windows.h>",
+        "static volatile LONG g_state = 0;",
+        "static int try_begin(void) { return InterlockedCompareExchange(&g_state, 1, 0) == 0; }",
+        "static void mark_ready(void) { InterlockedExchange(&g_state, 2); }",
+        "static int ready(void) { return InterlockedCompareExchange(&g_state, 2, 2) == 2; }",
+        "#else",
+        "static volatile int g_state = 0;",
+        "static int try_begin(void) { int e = 0; return __atomic_compare_exchange_n(&g_state, &e, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE); }",
+        "static void mark_ready(void) { __atomic_store_n(&g_state, 2, __ATOMIC_RELEASE); }",
+        "static int ready(void) { return __atomic_load_n(&g_state, __ATOMIC_ACQUIRE) == 2; }",
+        "#endif",
+        "",
+        "/* A class's id is the content id of its governed single-word label. */",
+        "static void ensure_ids(void) {",
+        "    if (ready()) return;",
+        "    if (try_begin()) {",
+        "        for (size_t i = 0; i < laplace_trust_class_count; ++i)",
+        "            hash128_label_content_id(laplace_trust_class_canonical[i],",
+        "                                     strlen(laplace_trust_class_canonical[i]), &k_trust_class_ids[i]);",
+        "        mark_ready();",
+        "        return;",
+        "    }",
+        "    while (!ready()) { }",
+        "}",
+        "",
+        "static int index_of_name(const char* name) {",
+        "    if (!name) return -1;",
+        "    for (size_t i = 0; i < laplace_trust_class_count; ++i)",
+        "        if (strcmp(laplace_trust_class_canonical[i], name) == 0) return (int)i;",
+        "    return -1;",
+        "}",
+        "",
+        "static int index_of_id(const hash128_t* id) {",
+        "    if (!id) return -1;",
+        "    ensure_ids();",
+        "    for (size_t i = 0; i < laplace_trust_class_count; ++i)",
+        "        if (k_trust_class_ids[i].hi == id->hi && k_trust_class_ids[i].lo == id->lo) return (int)i;",
+        "    return -1;",
+        "}",
+        "",
+        "int laplace_trust_class_id(const char* name, hash128_t* out_id) {",
+        "    int i = index_of_name(name);",
+        "    if (i < 0 || !out_id) return -1;",
+        "    ensure_ids();",
+        "    *out_id = k_trust_class_ids[i];",
+        "    return 0;",
+        "}",
+        "",
+        "int laplace_trust_class_prior(const hash128_t* id, double* out_prior) {",
+        "    int i = index_of_id(id);",
+        "    if (i < 0 || !out_prior) return -1;",
+        "    *out_prior = laplace_trust_class_priors[i];",
+        "    return 0;",
+        "}",
+        "",
+        "int laplace_trust_class_prior_by_name(const char* name, double* out_prior) {",
+        "    int i = index_of_name(name);",
+        "    if (i < 0 || !out_prior) return -1;",
+        "    *out_prior = laplace_trust_class_priors[i];",
+        "    return 0;",
+        "}",
+        "",
+        "int laplace_trust_class_lookup(const hash128_t* id, const char** out_name) {",
+        "    int i = index_of_id(id);",
+        "    if (i < 0) return -1;",
+        "    if (out_name) *out_name = laplace_trust_class_canonical[i];",
+        "    return 0;",
+        "}",
+    ]
+    _write_text_if_changed(OUT_CORE / "src/generated/trust_class_law.c", "\n".join(lines) + "\n")
+
 def main() -> int:
     global CHECK_MODE
     CHECK_MODE = "--check" in sys.argv[1:]
@@ -1389,6 +1528,7 @@ def main() -> int:
     emit_language_law(MANIFEST / "languages.tsv")
     emit_deprel_law(MANIFEST / "deprels.toml")
     emit_qualifier_law(MANIFEST / "qualifiers.toml")
+    emit_trust_class_law(MANIFEST / "trust_classes.toml")
     emit_highway_perfcache(rel, bin_out_dir)
     if CHECK_MODE:
         if DRIFT:

@@ -84,8 +84,7 @@ public class SourceGenerationRecipe
         // academic curation above a user-curated wiki above subtitles), whose prior seeds
         // the standing of every claim it makes. The class is the only statement of trust.
         string trustClass = Required(root, "trustClass");
-        double trust = Laplace.Decomposers.Abstractions.SourceTrust.ForClass(
-            SubstrateCanonicalIds.TrustClass(trustClass));
+        double trust = Laplace.Decomposers.Abstractions.SourceTrust.ForClassName(trustClass);
         int layer = root.TryGetProperty("layerOrder", out var layerValue) ? layerValue.GetInt32() : 0;
         if (layer is < 0 or > Laplace.Ingestion.LayerCompletion.MaxMarkedLayer)
             throw new InvalidDataException("Source generation layer is outside the supported completion range.");

@@ -11,7 +11,7 @@ public readonly struct ISOSource : ISeedSource
     public static string SourceName => "ISO639Decomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("StandardsDerived");
+        TrustClassRegistry.Id("StandardsDerived");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

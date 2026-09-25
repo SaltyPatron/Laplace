@@ -56,7 +56,7 @@ public static class UserArtifactContent
         var boot = new BootstrapIntentBuilder(
             scope.Source,
             scope.SourceName,
-            SubstrateCanonicalIds.TrustClass("UserPromptContent"));
+            TrustClassRegistry.Id("UserPromptContent"));
         boot.AddType("SourceFile");
         boot.AddType("Document");
         foreach (var relation in SourceVocabularyBootstrap.ExpandRelationsWithFamily(DeclaredRelations))

@@ -11,7 +11,7 @@ public readonly struct FrameNetSource : ISeedSource
     public static string SourceName => "FrameNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCurated");
+        TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

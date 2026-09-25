@@ -44,7 +44,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticTest";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -323,7 +323,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticPhased";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -394,7 +394,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticMultiFile";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -481,7 +481,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticOverlap";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {

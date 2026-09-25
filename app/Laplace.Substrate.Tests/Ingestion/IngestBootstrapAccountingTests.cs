@@ -157,7 +157,7 @@ public sealed class IngestBootstrapAccountingTests
         public Hash128 SourceId => Source;
         public string SourceName => "BootstrapAccounting";
         public int LayerOrder => 0;
-        public Hash128 TrustClassId => SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+        public Hash128 TrustClassId => TrustClassRegistry.Id("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {

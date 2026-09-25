@@ -69,9 +69,10 @@ public static class UdParseStructure
         ConcurrentDictionary<string, byte> canonicalNames,
         UdSentenceEmitContext content,
         Hash128 sourceId,
-        double witnessWeight = SourceTrust.AcademicCurated,
+        double? witnessWeight = null,
         Hash128? sourceFileContext = null)
     {
+        double declaredWitnessWeight = witnessWeight ?? SourceTrust.AcademicCurated;
         Hash128 sentenceId = sentence.TextUtf8 is { Length: > 0 }
             ? content.RootFor(sentence.TextUtf8) ?? None
             : None;
@@ -97,10 +98,10 @@ public static class UdParseStructure
 
             Hash128 lemmaId = content.RootFor(token.LemmaUtf8) ?? formId;
             Hash128 uposId = ResolveUpos(
-                builder, token.Upos, sourceId, canonicalNames, witnessWeight);
+                builder, token.Upos, sourceId, canonicalNames, declaredWitnessWeight);
             Hash128 xposId = ResolveXpos(
                 builder, token.Xpos, languageCode, uposId, sourceId,
-                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
+                seenSourceDeclarations, canonicalNames, declaredWitnessWeight, sourceFileContext);
 
             flat.Add(refId);
             flat.Add(formId);
@@ -110,7 +111,7 @@ public static class UdParseStructure
 
             var features = ResolveFeatures(
                 builder, token.Feats, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
+                seenSourceDeclarations, canonicalNames, declaredWitnessWeight, sourceFileContext);
             foreach ((Hash128 relationId, Hash128 valueId) in features)
             {
                 flat.Add(relationId);
@@ -128,13 +129,13 @@ public static class UdParseStructure
             };
             Hash128 deprelId = ResolveDeprel(
                 builder, token.Deprel, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames, enhanced: false, witnessWeight, sourceFileContext);
+                seenSourceDeclarations, canonicalNames, enhanced: false, declaredWitnessWeight, sourceFileContext);
             flat.Add(headRefId);
             flat.Add(deprelId);
 
             var enhanced = ResolveEnhanced(
                 builder, token.Deps, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
+                seenSourceDeclarations, canonicalNames, declaredWitnessWeight, sourceFileContext);
             foreach ((Hash128 enhancedHead, Hash128 enhancedRelation) in enhanced)
             {
                 flat.Add(enhancedHead);
@@ -142,7 +143,7 @@ public static class UdParseStructure
             }
             flat.Add(EnhancedEnd);
 
-            var misc = ResolveMisc(builder, token.Misc, content, sourceId, canonicalNames, witnessWeight);
+            var misc = ResolveMisc(builder, token.Misc, content, sourceId, canonicalNames, declaredWitnessWeight);
             foreach ((Hash128 keyId, Hash128 valueId) in misc)
             {
                 flat.Add(keyId);
@@ -162,7 +163,7 @@ public static class UdParseStructure
             flat.Add(DeclareTokenRef(builder, mwt.End.ToString(), sourceId, canonicalNames));
             flat.Add(formId);
             foreach ((Hash128 keyId, Hash128 valueId) in
-                     ResolveMisc(builder, mwt.Misc, content, sourceId, canonicalNames, witnessWeight))
+                     ResolveMisc(builder, mwt.Misc, content, sourceId, canonicalNames, declaredWitnessWeight))
             {
                 flat.Add(keyId);
                 flat.Add(valueId);
@@ -212,10 +213,10 @@ public static class UdParseStructure
             parseId,
             sourceId,
             occurrenceId,
-            witnessWeight));
+            declaredWitnessWeight));
         if (sourceFileContext is { } fileContext)
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                fileContext, UDSource.ContainsTypeId, occurrenceId, sourceId, fileContext, witnessWeight));
+                fileContext, UDSource.ContainsTypeId, occurrenceId, sourceId, fileContext, declaredWitnessWeight));
 
         // The same exact parse supplies its explicit typed annotations to the
         // common attestation/consensus machine. One native call retains source
@@ -223,7 +224,7 @@ public static class UdParseStructure
         // rebuilding ordinal/adjacency facts already present in the trajectory.
         NativeUdWitness.Project(
             builder, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(flat),
-            sourceId, occurrenceId, MiscKeyId("Lang"), witnessWeight);
+            sourceId, occurrenceId, MiscKeyId("Lang"), declaredWitnessWeight);
         return parseId;
     }
 

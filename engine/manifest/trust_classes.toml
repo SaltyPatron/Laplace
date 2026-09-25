@@ -1,0 +1,78 @@
+# Governed witness trust classes: how trustworthy a witness is. A standards body ranks
+# above an academic curation, which ranks above a user-curated wiki, which ranks above
+# subtitles. A witness's class is the only statement of its trust, and the class's prior
+# in [0,1] seeds the standing of every claim that witness makes.
+#
+# A class's id is the content id of its single-word label (as relation and entity-type
+# ids are); it is never an entity row and never blake3 of a key string. Classes are
+# append-only: a class's label and meaning never change once declared.
+
+[[class]]
+name = "SubstrateMandate"
+prior = 1.00
+description = "The substrate's own mandated structure: the governed laws themselves and operational records."
+
+[[class]]
+name = "StandardsDerived"
+prior = 0.95
+description = "A standards body's published data: Unicode, ISO 639, FIDE, endgame tablebases, a toolchain's specified behaviour."
+
+[[class]]
+name = "AcademicCurated"
+prior = 0.85
+description = "An academic curation: OEWN, OMW, CILI, UD, FrameNet, VerbNet, PropBank, SemLink, opening theory."
+
+[[class]]
+name = "AcademicCuratedWithUserInput"
+prior = 0.78
+description = "An academic curation that admits public contribution under editorial review."
+
+[[class]]
+name = "StructuredCorpus"
+prior = 0.70
+description = "A structured corpus observed as recorded: game collections, code, tabular data, parallel text, media."
+
+[[class]]
+name = "UserCuratedResource"
+prior = 0.60
+description = "A resource curated by its user community without academic review, such as ConceptNet."
+
+[[class]]
+name = "AIModelProbe"
+prior = 0.50
+description = "A conventional model consumed as a witness: its checkpoint's circuits and probed outputs."
+
+[[class]]
+name = "AppDerived"
+prior = 0.40
+description = "Evidence an application of this machine derives from its own operation: code runs, measured cost, experiments."
+
+[[class]]
+name = "UserPromptContent"
+prior = 0.30
+description = "Content a user supplies in a prompt or artifact."
+
+[[class]]
+name = "ResponseContent"
+prior = 0.20
+description = "Content this machine realizes in its own responses and self-play."
+
+[[class]]
+name = "AdversarialUntrusted"
+prior = 0.00
+description = "A witness known to be adversarial; its testimony carries no prior weight."
+
+[[class]]
+name = "DerivedCalculation"
+prior = 0.70
+description = "Deterministic calculation over recorded games (engine evaluation, outcome tallies); prior as its chess sources declare it (StructuredCorpus)."
+
+[[class]]
+name = "AgentTranscript"
+prior = 0.40
+description = "The agent-trace lane's record of sessions, turns and tool calls; prior as its emitter declares it (AppDerived)."
+
+[[class]]
+name = "ToolResultContent"
+prior = 0.40
+description = "Output returned by a tool an agent invoked; prior as its emitter declares it (AppDerived)."

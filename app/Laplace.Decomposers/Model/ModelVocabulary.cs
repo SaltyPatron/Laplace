@@ -7,7 +7,7 @@ namespace Laplace.Decomposers.Model;
 public static class ModelVocabulary
 {
     public static readonly Hash128 TrustClass =
-        SubstrateCanonicalIds.TrustClass("AIModelProbe");
+        TrustClassRegistry.Id("AIModelProbe");
 
     public static readonly IReadOnlyList<string> TypeNodeNames =
     [

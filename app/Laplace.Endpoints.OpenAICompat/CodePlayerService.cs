@@ -10,13 +10,13 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
 {
     private static readonly Hash128 CodePlayerSource = SubstrateCanonicalIds.Source("CodePlayer");
     private static readonly Hash128 ToolchainSource = SubstrateCanonicalIds.Source("ToolchainWitness");
-    private static readonly Hash128 CodePlayerTrustClass = SubstrateCanonicalIds.TrustClass("AppDerived");
-    private static readonly Hash128 ToolchainTrustClass = SubstrateCanonicalIds.TrustClass("StandardsDerived");
+    private static readonly Hash128 CodePlayerTrustClass = TrustClassRegistry.Id("AppDerived");
+    private static readonly Hash128 ToolchainTrustClass = TrustClassRegistry.Id("StandardsDerived");
     private static readonly Hash128 DefinesRelation = RelationTypeRegistry.RelationTypeId("DEFINES");
     private static readonly IComparer<Hash128> Hash128Bytewise =
         Comparer<Hash128>.Create(static (left, right) => left.CompareToBytewise(right));
-    private const double CodePlayerTrust = SourceTrust.AppDerived;
-    private const double ToolchainTrust = SourceTrust.StandardsDerived;
+    private static readonly double CodePlayerTrust = SourceTrust.AppDerived;
+    private static readonly double ToolchainTrust = SourceTrust.StandardsDerived;
     private const int DefaultAttempts = 4;
     private const int MaxAttempts = 8;
     private const int MaxCandidateBytes = 2 * 1024 * 1024;

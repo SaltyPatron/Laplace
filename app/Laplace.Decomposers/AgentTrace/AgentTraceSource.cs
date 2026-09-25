@@ -19,7 +19,7 @@ public readonly struct AgentTraceSource : ISeedSource
     public static string SourceName => "AgentTraceDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AgentTranscript");
+        TrustClassRegistry.Id("AgentTranscript");
 
     /// <summary>
     /// Every relation the lane emits under ANY of its sources (the HAS_POS law).

@@ -115,7 +115,7 @@ public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IA
         public string SourceName => "EmptyYieldTest";
         public int LayerOrder => 2;
         public Hash128 TrustClassId =>
-            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
+            TrustClassRegistry.Id("SubstrateMandate");
 
         public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.CompletedTask;

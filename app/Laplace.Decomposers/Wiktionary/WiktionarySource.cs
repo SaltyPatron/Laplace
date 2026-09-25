@@ -11,7 +11,7 @@ public readonly struct WiktionarySource : ISeedSource
     public static string SourceName => "WiktionaryDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        SubstrateCanonicalIds.TrustClass("AcademicCuratedWithUserInput");
+        TrustClassRegistry.Id("AcademicCuratedWithUserInput");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

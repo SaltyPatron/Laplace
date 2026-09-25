@@ -25,9 +25,6 @@ public static class SubstrateCanonicalKeys
     /// <summary>Key for a decomposer/source identity — mirrors SQL <c>source_id(name)</c>.</summary>
     public static string Source(string name) => Versioned("source", name);
 
-    /// <summary>Key for a witness trust class (AcademicCurated, StructuredCorpus, ...).</summary>
-    public static string TrustClass(string name) => Versioned("trust_class", name);
-
     /// <summary>Key for a probationary POS tag minted under a named tagset.</summary>
     public static string PosProbationary(string tagset, string tag)
     {
@@ -89,8 +86,6 @@ public static class SubstrateCanonicalKeys
 public static class SubstrateCanonicalIds
 {
     public static Hash128 Source(string name) => Hash128.OfCanonical(SubstrateCanonicalKeys.Source(name));
-
-    public static Hash128 TrustClass(string name) => Hash128.OfCanonical(SubstrateCanonicalKeys.TrustClass(name));
 
     public static Hash128 PosProbationary(string tagset, string tag) =>
         Hash128.OfCanonical(SubstrateCanonicalKeys.PosProbationary(tagset, tag));

@@ -88,7 +88,7 @@ Issue: #1715
 - **`witness_weight = rank × trust` drives both the opponent rating and the RD** (`engine/core/src/attestation_engine.c`, `laplace_attestation_witness_phi` / `_opponent_rating`). Certainty and salience are therefore one number. For example, a Unicode `HAS_SCRIPT` fact (0.95 × 0.08) plays as a weak *and uncertain* witness (rating 1229, RD 326), when it is certain and merely low-salience.
 - **Relation rank is a read-time salience weight** (`relation_types.toml` `[ranks]`, "recalibrated for semantic salience (recall)"). It is baked into write-time standing.
 - **Decided (inventor, 2026-09-25):** a claim is "this source says X is (or is not) Y": the witness, the outcome and the games. Its standing comes from the witness's trust. Relation rank (synonymy vs homonymy vs stop-word glue) is salience and applies at reading, in QK coupling. "Hot is not cold" is a refutation of hot IS cold, and "hot is antonymous with cold" is a confirmation of antonymy; neither gains or loses certainty from its relation's salience. Done: every native builder and the recipe stream use the witness's trust alone.
-- **Trust classes are `blake3("substrate/trust_class/X/v1")` strings resolved by an if-chain** (`SourceTrust.ForClass`). Chess uses classes the chain does not know (`UserPromptContent`, `ResponseContent`). **Target:** a governed trust-class registry (manifest + codegen), like the other laws.
+- **Done: trust classes are a governed registry.** `engine/manifest/trust_classes.toml` declares every class with its prior; codegen emits `trust_class_law` (id = content id of the class label). `SourceTrust.ForClass` / `ForClassName` and every `SourceTrust` prior read it; undeclared classes fail closed. The `blake3("substrate/trust_class/X/v1")` keys and the if-chain are gone.
 - Related: #1303, #1321, #1015.
 
 ### B. ~~Consensus keeps the query's context~~ (withdrawn)
@@ -214,7 +214,6 @@ Issue: #1721
 - the `'language:eng'` and `operation/what_is/v1` SQL literals
 - `ByteAtoms` as a second tier-0 alphabet
 - `converse.session_topics`
-- the trust-class `blake3` keys (see A)
 - the `CalculationSources` static registry added in this session: a hidden global populated by a module initializer, to be replaced by a governed declaration
 
 Related: #1038, #1049, #1052.
