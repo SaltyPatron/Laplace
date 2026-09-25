@@ -15,13 +15,14 @@ BEGIN ATOMIC
     -- here would turn "unrenderable" into "no name".
     WITH ranked AS MATERIALIZED (
         -- The words a source says express the concept: word HAS_SENSE concept.
+        -- The language is the binding's (the attestation context), not the word's.
         SELECT hs.subject_id AS id,
-               row_number() OVER (ORDER BY (lang.object_id IS NOT NULL) DESC,
+               row_number() OVER (ORDER BY EXISTS (
+                            SELECT 1 FROM laplace.attestations a
+                            WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id
+                              AND a.object_id = hs.object_id AND a.context_id = p_lang) DESC,
                         consensus.eff_mu(hs.rating, hs.rd) DESC, hs.subject_id) AS rn
         FROM laplace.v_consensus_unrefuted hs
-        LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id
-          AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-          AND lang.object_id = p_lang
         WHERE hs.object_id = p_id
           AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
     ),

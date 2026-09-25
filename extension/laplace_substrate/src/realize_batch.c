@@ -74,12 +74,14 @@ static const char *Q_HAS_NAME =
  * express it (word HAS_SENSE concept), strongest first, the requested language first. */
 static const char *Q_SYNSET_LEMMA =
     "SELECT hs.object_id, hs.subject_id,"
-    "       (lang.object_id IS NOT NULL) AS lp,"
+    /* The language is the binding's, not the word's: a source attests
+     * `chat HAS_SENSE <cat> @fr` and `chat HAS_SENSE <talk> @en`. One probe of
+     * attestations_relation_btree (subject, type, object) per candidate. */
+    "       EXISTS (SELECT 1 FROM laplace.attestations a"
+    "               WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id"
+    "                 AND a.object_id = hs.object_id AND a.context_id = $2) AS lp,"
     "       consensus.eff_mu(hs.rating, hs.rd) AS mu"
     " FROM laplace.v_consensus_unrefuted hs"
-    " LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id"
-    "   AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')"
-    "   AND lang.object_id = $2"
     " WHERE hs.object_id = ANY($1)"
     "   AND hs.type_id = laplace.relation_type_id('HAS_SENSE')"
     " ORDER BY hs.object_id, lp DESC, mu DESC, hs.subject_id";
