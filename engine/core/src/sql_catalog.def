@@ -47,6 +47,8 @@ SQL_QUERY("browse.page", "bytea[],bytea,int4,int4,int4",
     "FROM consensus.browse_named_entities($1,$2,$3,$4,$5)")
 SQL_QUERY("display.labels", "bytea[]",
     "SELECT encode(d.id, 'hex'), d.label, d.tier FROM realize.display_label_batch($1) d")
+SQL_QUERY("containers.bound_surfaces", "bytea,bytea",
+    "SELECT subject_id FROM laplace.consensus WHERE object_id=$1 AND type_id=$2")
 SQL_QUERY("containers.page", "bytea,int4,int4",
     "SELECT entity_id, tier, type_id, hops FROM structural.containers_of($1,$2,$3)")
 SQL_QUERY("types.labels", "bytea[]",

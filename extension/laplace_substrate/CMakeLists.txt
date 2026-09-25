@@ -208,6 +208,15 @@ else()
         laplace_core
         laplace_dynamics
     )
+    # PostgreSQL preloads this module before the execution library: an engine
+    # symbol it references but its linked libraries do not define stops the
+    # server from starting. Fail the build instead (2026-09-25: containers_of
+    # called the execution library's consensus scan).
+    add_custom_command(TARGET ${EXT_NAME} POST_BUILD
+        COMMAND bash "${PROJECT_SOURCE_DIR}/scripts/check-preloaded-module-symbols.sh"
+            "$<TARGET_FILE:${EXT_NAME}>"
+            "$<TARGET_FILE:laplace_core>" "$<TARGET_FILE:laplace_dynamics>"
+        VERBATIM)
 endif()
 
 add_library(laplace_execution MODULE ${EXT_EXECUTION_SOURCES})

@@ -7,7 +7,6 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "content_membership_read.h"
-#include "consensus_scan.h"
 #include "laplace/core/relation_law.h"
 
 /* Native breadth-first containment. One indexed set probe per frontier, then
@@ -26,27 +25,21 @@ static SPIPlanPtr facets_plan;
 
 /* An identifier (an ILI key) is contained by nothing: text contains the words
  * bound to it. Its containers are therefore read through its bindings, the same
- * way display realizes an identifier through them. */
-typedef struct {
-    HTAB *seen;
-    Datum *ids;
-    int count, capacity;
-} BoundSurfaces;
+ * way display realizes an identifier through them. This module reads them with
+ * one catalog query (it does not link the execution library's consensus scan). */
+static SPIPlanPtr bindings_plan;
 
-static void
-receive_bound_surface(const LaplaceConsensusRow *row, void *context)
+static SPIPlanPtr
+bindings_query(void)
 {
-    BoundSurfaces *bound = context;
-    bool found;
-    ContainerSeen *entry = hash_search(bound->seen, &row->subject, HASH_ENTER, &found);
-    if (found) return;
-    entry->ordinal = -1;
-    if (bound->count == bound->capacity) {
-        bound->capacity = bound->capacity ? bound->capacity * 2 : 16;
-        bound->ids = bound->ids ? repalloc(bound->ids, bound->capacity * sizeof(Datum))
-                                : palloc(bound->capacity * sizeof(Datum));
+    if (bindings_plan == NULL) {
+        Oid types[] = {BYTEAOID, BYTEAOID};
+        bindings_plan = SPI_prepare_cursor(laplace_sql_query_text("containers.bound_surfaces"),
+                                           2, types, CURSOR_OPT_GENERIC_PLAN);
+        if (bindings_plan == NULL || SPI_keepplan(bindings_plan) != 0)
+            elog(ERROR, "containers_of: cannot prepare the bound-surface read");
     }
-    bound->ids[bound->count++] = hash128_to_datum(&row->subject);
+    return bindings_plan;
 }
 
 static SPIPlanPtr
@@ -78,18 +71,31 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
     HTAB *seen = hash_create("containers selected", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
     hash128_t root = datum_to_hash128(PG_GETARG_DATUM(0));
     ContainerSeen *entry = hash_search(seen, &root, HASH_ENTER, NULL); entry->ordinal = -1;
-    BoundSurfaces bound = {seen, NULL, 0, 0};
+    int start_count = 0, start_capacity = 16;
+    Datum *start = palloc(start_capacity * sizeof(Datum));
+    start[start_count++] = hash128_to_datum(&root);
     hash128_t has_sense;
-    bound.capacity = 16;
-    bound.ids = palloc(bound.capacity * sizeof(Datum));
-    bound.ids[bound.count++] = hash128_to_datum(&root);
     if (laplace_relation_type_id("HAS_SENSE", &has_sense) == 0) {
-        Datum key = hash128_to_datum(&root), type = hash128_to_datum(&has_sense);
-        ArrayType *objects = construct_array(&key, 1, BYTEAOID, -1, false, TYPALIGN_INT);
-        ArrayType *types = construct_array(&type, 1, BYTEAOID, -1, false, TYPALIGN_INT);
-        laplace_consensus_scan(NULL, objects, types, receive_bound_surface, &bound, NULL);
+        Datum args[] = {hash128_to_datum(&root), hash128_to_datum(&has_sense)};
+        if (SPI_execute_plan(bindings_query(), args, NULL, true, 0) != SPI_OK_SELECT)
+            elog(ERROR, "containers_of: bound-surface read failed");
+        for (uint64 i = 0; i < SPI_processed; ++i) {
+            bool isnull, found;
+            Datum value = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull);
+            if (isnull) continue;
+            hash128_t surface = datum_to_hash128(value);
+            ContainerSeen *mark = hash_search(seen, &surface, HASH_ENTER, &found);
+            if (found) continue;
+            mark->ordinal = -1;
+            if (start_count == start_capacity) {
+                start_capacity *= 2;
+                start = repalloc(start, start_capacity * sizeof(Datum));
+            }
+            start[start_count++] = hash128_to_datum(&surface);
+        }
+        SPI_freetuptable(SPI_tuptable);
     }
-    ArrayType *frontier = construct_array(bound.ids, bound.count, BYTEAOID, -1, false, TYPALIGN_INT);
+    ArrayType *frontier = construct_array(start, start_count, BYTEAOID, -1, false, TYPALIGN_INT);
     ContainerHit *hits = NULL; Size count = 0, capacity = 0;
     for (int hop = 1; hop <= hops && count < (Size)limit; ++hop) {
         CHECK_FOR_INTERRUPTS();
