@@ -127,6 +127,8 @@ public enum SourcePairMode
     RelationKeyObjectValue = 1,
     /// <summary>Resolved reference items: the referenced row is the subject, the value names the relation.</summary>
     SubjectReferenceRelationValue = 2,
+    /// <summary>Items "key&lt;separator&gt;value": the object is the ordered composition [key, value] under the field's relation.</summary>
+    KeyValueComposition = 3,
 }
 
 /// <summary>The relation vocabulary a source label resolves through.</summary>
@@ -206,7 +208,21 @@ public sealed record SourceRecipeProviderRoute(
     // This record states its own witness: the content composition of these fields
     // ([id, version] of a WN-LMF Lexicon). Claims of the record and of every record
     // within its scope are that witness's observations.
-    IReadOnlyList<string>? WitnessFields = null);
+    IReadOnlyList<string>? WitnessFields = null,
+    // Nested elements that are their own subjects (RCP8): each is the ordered
+    // composition [record subject, content(identity attribute)].
+    IReadOnlyList<SourceChildSubject>? ChildSubjects = null);
+
+/// <summary>
+/// A nested element that is its own subject: a FrameNet frame element is the
+/// composition [frame, element name]. Its fields and descendants are claims about it;
+/// ParentRelation, when declared, links the record's subject to it.
+/// </summary>
+public sealed record SourceChildSubject(
+    string ChildPath,
+    string IdentityField,
+    string? ParentRelation = null,
+    string EntityType = "Recipe_Subject");
 
 /// <summary>
 /// A grouped delimited record (a CoNLL-U sentence) lowered to its trunk's parse

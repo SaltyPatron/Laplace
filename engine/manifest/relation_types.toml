@@ -2453,3 +2453,70 @@ flip = false
 surface = "is_exemplified_by"
 canonical = "HAS_DOMAIN_USAGE"
 flip = true
+
+# FrameNet frame-to-frame relation types (frRelation.xml / frame/*.xml frameRelation@type).
+
+[[alias]]
+surface = "Inherits from"
+canonical = "INHERITS_FROM"
+flip = false
+
+[[alias]]
+surface = "Is Inherited by"
+canonical = "INHERITS_FROM"
+flip = true
+
+[[alias]]
+surface = "Uses"
+canonical = "FRAME_USES"
+flip = false
+
+[[alias]]
+surface = "Is Used by"
+canonical = "FRAME_USES"
+flip = true
+
+[[alias]]
+surface = "Perspective on"
+canonical = "PERSPECTIVE_ON"
+flip = false
+
+[[alias]]
+surface = "Is Perspectivized in"
+canonical = "PERSPECTIVE_ON"
+flip = true
+
+[[alias]]
+surface = "Has Subframe(s)"
+canonical = "HAS_SUBEVENT"
+flip = false
+
+[[alias]]
+surface = "Subframe of"
+canonical = "HAS_SUBEVENT"
+flip = true
+
+[[alias]]
+surface = "Is Causative of"
+canonical = "CAUSATIVE_OF"
+flip = false
+
+[[alias]]
+surface = "Is Inchoative of"
+canonical = "INCHOATIVE_OF"
+flip = false
+
+[[alias]]
+surface = "Precedes"
+canonical = "PRECEDES"
+flip = false
+
+[[alias]]
+surface = "Is Preceded by"
+canonical = "PRECEDES"
+flip = true
+
+[[alias]]
+surface = "See also"
+canonical = "ALSO_SEE"
+flip = false

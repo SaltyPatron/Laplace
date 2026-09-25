@@ -18,6 +18,7 @@ public static class NativeRecipeCompiler
     private const uint Rcp6 = 0x36504352u;
     // Rcp7: Rcp6 plus the source's identity tables and the fields/subjects resolved through them.
     private const uint Rcp7 = 0x37504352u;
+    private const uint Rcp8 = 0x38504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -58,7 +59,8 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
-        uint version = identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
+        bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 });
+        uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
@@ -125,7 +127,11 @@ public static class NativeRecipeCompiler
                 throw new InvalidDataException($"Unknown native recipe opcode at '{field.SyntaxPath}'.");
 
             bool testimony = field.Disposition.HasFlag(SourceFieldDisposition.Testimony);
-            bool dynamicRelation = field.PairMode != SourcePairMode.None || field.RelationField is not null;
+            // A key-value composition keeps the field's one governed relation; only the
+            // relation-naming pair modes and relation fields resolve per item.
+            bool dynamicRelation = (field.PairMode != SourcePairMode.None
+                    && field.PairMode != SourcePairMode.KeyValueComposition)
+                || field.RelationField is not null;
             var relation = testimony && !dynamicRelation
                 ? RelationTypeRegistry.Resolve(field.RelationName ?? field.PropertyName)
                 : default;
@@ -294,6 +300,21 @@ public static class NativeRecipeCompiler
                 }
                 writer.Write(checked((uint)(route.WitnessFields?.Count ?? 0)));
                 foreach (string field in route.WitnessFields ?? []) WriteText(writer, field);
+            }
+            if (version >= Rcp8)
+            {
+                writer.Write(checked((uint)(route.ChildSubjects?.Count ?? 0)));
+                foreach (SourceChildSubject child in route.ChildSubjects ?? [])
+                {
+                    if (route.ChildFieldPrefixes is not { } prefixes || !prefixes.ContainsKey(child.ChildPath))
+                        throw new InvalidDataException(
+                            $"Route '{route.RecordName}' child subject '{child.ChildPath}' has no child field prefix.");
+                    WriteText(writer, child.ChildPath);
+                    WriteText(writer, child.IdentityField);
+                    WriteHash(writer, child.ParentRelation is null
+                        ? Hash128.Zero : RelationTypeRegistry.Resolve(child.ParentRelation).Id);
+                    WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
+                }
             }
         }
 

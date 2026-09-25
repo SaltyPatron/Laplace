@@ -63,24 +63,21 @@
       "syntaxPath": "token/@xpos",
       "propertyName": "xpos",
       "valueKind": "Text",
-      "disposition": "Testimony",
-      "relationName": "HAS_XPOS",
-      "objectEntityType": "",
-      "absentSentinel": "_",
-      "contextField": "language",
-      "aggregate": true
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "token/@feats",
       "propertyName": "feats",
       "valueKind": "EnumeratedSequence",
       "disposition": "Testimony",
-      "objectEntityType": "",
+      "objectEntityType": "Morphological_Feature",
       "absentSentinel": "_",
       "sequenceSeparator": "|",
       "contextField": "language",
       "relationName": "HAS_FEATURE",
-      "aggregate": true
+      "aggregate": true,
+      "pairMode": "KeyValueComposition",
+      "pairValueSeparator": "="
     },
     {
       "syntaxPath": "token/@head",

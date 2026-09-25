@@ -13,6 +13,7 @@
 #include "laplace/core/mantissa.h"
 #include "laplace/core/qualifier_law.h"
 #include "recipe_provider.hpp"
+#include "laplace/core/xml_stream.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -60,7 +61,9 @@ struct field_rule {
     // is the subject and the record subject the object; 2 the group trunk is the
     // subject. pair_mode: 0 single value; 1 items "key\x1fvalue" with the key as
     // relation and the value as object; 2 items "reference\x1fvalue" with the
-    // referenced row as subject and the value as relation.
+    // referenced row as subject and the value as relation; 3 items "key=value" whose
+    // object is the ordered composition [key, value] under the field's relation
+    // (a UD feature "Number=Plur" is the composition [Number, Plur], never a string).
     std::string relation_field, trunk_field, pair_value_separator;
     uint32_t subject_mode = 0, pair_mode = 0, relation_resolver = 0;
     bool omit_equal_subject = false, group_once = false;
@@ -105,6 +108,14 @@ struct route_rule {
         int upos_tagset = -1;
     } parse;
     std::vector<std::string> witness_fields;
+    // A nested element that is its own subject (RCP8): the ordered composition
+    // [record subject, content(child identity attribute)], typed, optionally linked
+    // from the parent by a governed relation (a frame HAS_FRAME_ELEMENT its FE).
+    struct child_subject_rule {
+        std::string identity;
+        hash128_t relation{}, entity_type{};
+    };
+    std::unordered_map<std::string, child_subject_rule> child_subjects;
 };
 using node = recipe_node;
 struct ordinal_span {
@@ -265,6 +276,8 @@ struct laplace_recipe_stream {
     stage_ptr ready{nullptr, intent_stage_free};
     uint64_t ready_completed = 0;
     hash128_t subject{};
+    content_form subject_form{};     // the record subject's content, when it is content
+    bool subject_form_known = false;
     std::vector<fact> facts;
     std::unordered_map<std::string, content_form> content_cache;
     size_t content_cache_bytes = 0, content_cache_limit = 0, content_cache_entries = 0;
@@ -348,6 +361,50 @@ struct laplace_recipe_stream {
     }
     hash128_t content(intent_stage_t* stage, const std::string& text) {
         return compose_content(stage, text).id;
+    }
+    // The ordered composition [key, value] of two content parts, composed and staged
+    // by the native ordered-composition kernel (identity, placement, trajectory).
+    hash128_t compose_pair(intent_stage_t* stage, const field_rule& rule,
+        const std::string& key, const std::string& value) {
+        const content_form a = compose_content(stage, key), b = compose_content(stage, value);
+        laplace_ordered_component_t parts[2]{};
+        parts[0].id = a.id; std::memcpy(parts[0].coord, a.coord, sizeof(parts[0].coord));
+        parts[0].tier = a.tier; parts[0].atom = a.atom; parts[0].has_atom = a.tier == 0;
+        parts[1].id = b.id; std::memcpy(parts[1].coord, b.coord, sizeof(parts[1].coord));
+        parts[1].tier = b.tier; parts[1].atom = b.atom; parts[1].has_atom = b.tier == 0;
+        laplace_ordered_composition_request_t request{};
+        request.components = parts; request.component_count = 2;
+        request.type_id = rule.entity_type; request.source_id = current_witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "pair composition");
+        return result.id;
+    }
+    // The character data of an embedded XML fragment, in order, whitespace-collapsed.
+    // A value that is not well-formed markup is its own text.
+    static std::string markup_text(const std::string& raw) {
+        if (raw.find('<') == std::string::npos) return raw;
+        laplace_xml_stream_t* parser = nullptr;
+        if (laplace_xml_stream_new(&parser) != 0 || !parser) return raw;
+        const std::string wrapped = "<r>" + raw + "</r>";
+        const laplace_xml_event_t* events = nullptr; size_t count = 0;
+        std::string text;
+        const bool ok = laplace_xml_stream_feed(parser, reinterpret_cast<const uint8_t*>(wrapped.data()),
+            wrapped.size(), 1, &events, &count) == 0;
+        if (ok)
+            for (size_t i = 0; i < count; ++i)
+                if (events[i].kind == 3) text.append(events[i].value, events[i].value_len);
+        laplace_xml_stream_free(parser);
+        if (!ok) return raw;
+        std::string collapsed;
+        bool space = false;
+        for (char c : text) {
+            const bool ws = c == ' ' || c == '\t' || c == '\r' || c == '\n';
+            if (ws) { space = !collapsed.empty(); continue; }
+            if (space) { collapsed.push_back(' '); space = false; }
+            collapsed.push_back(c);
+        }
+        return collapsed.empty() ? raw : collapsed;
     }
     // A classifier value is content; its class follows from the claim that uses it.
     hash128_t classifier(intent_stage_t* stage, const std::string& value) {
@@ -740,8 +797,14 @@ struct laplace_recipe_stream {
             }
             return;
         }
-        else if (rule.kind == 8 || rule.kind == 9) {
+        else if (rule.kind == 8) {
             f.object = content(stage, governed(rule, identify(rule.identity_table, raw)));
+        }
+        else if (rule.kind == 9) {
+            // Structured text carries its own markup (FrameNet's <def-root>, <fen>,
+            // <ex>): it is XML read by the same XML reader, and its knowledge text is
+            // the markup's character data, never the tags.
+            f.object = content(stage, markup_text(raw));
         }
         else {
             auto values = rule.kind == 3 || (rule.kind == 0 && !rule.separator.empty())
@@ -825,7 +888,10 @@ struct laplace_recipe_stream {
                     throw std::runtime_error("malformed pair item: " + item);
                 const std::string left = item.substr(0, split_at), right = item.substr(split_at + skip);
                 double rank = rule.rank; bool flip = false;
-                if (rule.pair_mode == 1) {
+                if (rule.pair_mode == 3) {
+                    grouped_fact(rule, subject, rule.relation, compose_pair(stage, rule, left, right),
+                                 rank, flip, context_value, stage);
+                } else if (rule.pair_mode == 1) {
                     const hash128_t relation = resolve_relation(rule, left, &rank, &flip);
                     grouped_fact(rule, subject, relation, content(stage, right), rank, flip, context_value, stage);
                 } else {
@@ -877,7 +943,7 @@ struct laplace_recipe_stream {
         if (record.ns != route.ns) throw std::runtime_error("record namespace mismatch: " + record.name);
         current_witness = record.witness_parts.empty() ? witness : stage_witness(stage, record.witness_parts);
         range = route.kind == 0;
-        membership = false; record_facts_done = false; fact_offset = 0;
+        membership = false; record_facts_done = false; fact_offset = 0; subject_form_known = false;
         if (range) {
             std::string single = record.get(route.identity);
             cursor = point(single.empty() ? record.get(route.first) : single);
@@ -891,7 +957,11 @@ struct laplace_recipe_stream {
             subject = interval_subject(stage, first, last);
         } else if (route.kind == 1) {
             const std::string value = record.get(route.identity);
-            if (route.subject_codec == 0) subject = content(stage, identify(route.identity_table, value));
+            if (route.subject_codec == 0) {
+                subject_form = compose_content(stage, identify(route.identity_table, value));
+                subject = subject_form.id;
+                subject_form_known = true;
+            }
             else if (route.subject_codec == 2)
                 subject = content(stage, sequence_text(value, route.separator));
             else if (route.subject_codec == 1) {
@@ -937,17 +1007,72 @@ struct laplace_recipe_stream {
         scope_attributes = nullptr;
         active = true;
     }
+    // The child is its own subject: [record subject, its identity content], composed
+    // by the native ordered-composition kernel. Its fields and descendants are claims
+    // about it; the parent links to it through the declared relation.
+    void lower_child_subject(intent_stage_t* stage, const route_rule& route, const node& child,
+        const std::string& path, const std::string& prefix, const route_rule::child_subject_rule& rule,
+        const std::map<std::string, std::string>* ancestors) {
+        const std::string key = child.get(rule.identity);
+        if (key.empty()) throw std::runtime_error("child subject has no identity value: " + path);
+        if (!subject_form_known)
+            throw std::runtime_error("child subjects compose over a content subject: " + path);
+        const content_form label = compose_content(stage, key);
+        laplace_ordered_component_t parts[2]{};
+        parts[0].id = subject_form.id; std::memcpy(parts[0].coord, subject_form.coord, sizeof(parts[0].coord));
+        parts[0].tier = subject_form.tier; parts[0].atom = subject_form.atom; parts[0].has_atom = subject_form.tier == 0;
+        parts[1].id = label.id; std::memcpy(parts[1].coord, label.coord, sizeof(parts[1].coord));
+        parts[1].tier = label.tier; parts[1].atom = label.atom; parts[1].has_atom = label.tier == 0;
+        laplace_ordered_composition_request_t request{};
+        request.components = parts; request.component_count = 2;
+        request.type_id = rule.entity_type; request.source_id = current_witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "child subject composition");
+        const hash128_t child_id = result.id;
+        if (nonzero(rule.relation)) {
+            fact f;
+            f.relation = rule.relation; f.object = child_id; f.has_object = true;
+            facts.push_back(f);
+        }
+        const size_t first = facts.size();
+        const auto seen = with_ancestors(child, ancestors);
+        for (const auto& a : child.attributes) {
+            if (a.first == rule.identity) continue;
+            field(stage, prefix + "/@" + a.first, a.second, false, seen);
+        }
+        if (recipe_has_text(child.text)) field(stage, prefix, child.text, false, seen);
+        for (const auto& grandchild : child.children)
+            lower_child(stage, route, grandchild, path + "/" + grandchild.name, &seen);
+        for (size_t k = first; k < facts.size(); ++k)
+            if (!facts[k].has_subject) { facts[k].subject = child_id; facts[k].has_subject = true; }
+    }
     // Nested elements lower against the record's subject under the prefix the route
     // declares for their path ("Sense", "Sense/SenseRelation").
-    void lower_child(intent_stage_t* stage, const route_rule& route, const node& child, const std::string& path) {
+    // A nested element sees its ancestors' attributes (its own win): a FrameNet
+    // relatedFrame's relation type is its enclosing frameRelation's @type.
+    static std::map<std::string, std::string> with_ancestors(
+        const node& child, const std::map<std::string, std::string>* ancestors) {
+        std::map<std::string, std::string> merged = child.attributes;
+        if (ancestors) for (const auto& a : *ancestors) merged.try_emplace(a.first, a.second);
+        return merged;
+    }
+    void lower_child(intent_stage_t* stage, const route_rule& route, const node& child, const std::string& path,
+        const std::map<std::string, std::string>* ancestors = nullptr) {
         auto prefix = route.children.find(path);
         if (prefix == route.children.end()) throw std::runtime_error("recipe has no child disposition: " + path);
         if (child.ns != route.ns) throw std::runtime_error("unaccounted nested structure: " + path);
+        const auto own = route.child_subjects.find(path);
+        if (own != route.child_subjects.end()) {
+            lower_child_subject(stage, route, child, path, prefix->second, own->second, ancestors);
+            return;
+        }
+        const auto seen = with_ancestors(child, ancestors);
         for (const auto& a : child.attributes)
-            field(stage, prefix->second + "/@" + a.first, a.second, false, child.attributes);
-        if (recipe_has_text(child.text)) field(stage, prefix->second, child.text, false, child.attributes);
+            field(stage, prefix->second + "/@" + a.first, a.second, false, seen);
+        if (recipe_has_text(child.text)) field(stage, prefix->second, child.text, false, seen);
         for (const auto& grandchild : child.children)
-            lower_child(stage, route, grandchild, path + "/" + grandchild.name);
+            lower_child(stage, route, grandchild, path + "/" + grandchild.name, &seen);
     }
 };
 
@@ -962,9 +1087,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         const uint32_t version = r.number();
         // "RCPn": the generation digit is the high byte; each generation extends the last.
         const int generation = int(version >> 24) - '0';
-        if ((version & 0x00ffffffu) != 0x00504352u || generation < 1 || generation > 7)
+        if ((version & 0x00ffffffu) != 0x00504352u || generation < 1 || generation > 8)
             throw std::runtime_error("unsupported recipe instruction version");
-        const bool rcp6 = generation >= 6, rcp7 = generation >= 7;
+        const bool rcp6 = generation >= 6, rcp7 = generation >= 7, rcp8 = generation >= 8;
         const bool rcp2_or_later = generation >= 2;
         s->depth = int(r.number());
         if (s->depth < 0 || s->depth > 128) throw std::runtime_error("invalid record depth");
@@ -1052,10 +1177,10 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 f.subject_mode = r.number(); f.pair_mode = r.number(); f.relation_resolver = r.number();
                 f.relation_field = r.text(); f.trunk_field = r.text(); f.pair_value_separator = r.text();
                 const uint32_t omit_equal = r.number(), once = r.number();
-                if (f.subject_mode > 2 || f.pair_mode > 2 || f.relation_resolver > 4 || omit_equal > 1 || once > 1)
+                if (f.subject_mode > 2 || f.pair_mode > 3 || f.relation_resolver > 4 || omit_equal > 1 || once > 1)
                     throw std::runtime_error("invalid grouped-field instruction at " + f.path);
                 f.omit_equal_subject = omit_equal != 0; f.group_once = once != 0;
-                if ((f.pair_mode != 0 || !f.relation_field.empty()) && f.relation_resolver == 0)
+                if (((f.pair_mode != 0 && f.pair_mode != 3) || !f.relation_field.empty()) && f.relation_resolver == 0)
                     throw std::runtime_error("dynamic relation requires a declared resolver at " + f.path);
             }
             if (rcp7) {
@@ -1148,6 +1273,20 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 }
                 const uint32_t witness_fields = r.number();
                 for (uint32_t k = 0; k < witness_fields; ++k) route.witness_fields.push_back(r.text());
+            }
+            if (rcp8) {
+                const uint32_t child_subjects = r.number();
+                for (uint32_t k = 0; k < child_subjects; ++k) {
+                    auto path = r.text();
+                    route_rule::child_subject_rule rule;
+                    rule.identity = r.text();
+                    rule.relation = r.hash();
+                    rule.entity_type = r.hash();
+                    if (path.empty() || rule.identity.empty() || !route.children.count(path))
+                        throw std::runtime_error("child subject names no declared child path");
+                    if (!route.child_subjects.emplace(std::move(path), std::move(rule)).second)
+                        throw std::runtime_error("duplicate child subject instruction");
+                }
             }
             if (route.kind > 3 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
                 (!route.range_first.empty() && (route.kind == 0 || !nonzero(route.range_relation))))

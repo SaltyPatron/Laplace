@@ -122,6 +122,11 @@ canonical = "FrameNet_Valence_Unit"
 [[type]]
 canonical = "FrameNet_Valence_Pattern"
 
+# A morphological feature value: the ordered composition [feature, value], for
+# example [Number, Plur] (Universal Dependencies FEATS).
+[[type]]
+canonical = "Morphological_Feature"
+
 [[type]]
 canonical = "Grapheme"
 
