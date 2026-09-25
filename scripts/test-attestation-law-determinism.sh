@@ -8,9 +8,11 @@ outs=(
   engine/core/src/generated/pos_law.c
   engine/core/include/laplace/core/relation_law.h
   engine/core/include/laplace/core/pos_law.h
+  engine/core/src/generated/deprel_law.c
+  engine/core/include/laplace/core/deprel_law.h
   engine/core/include/laplace/core/highway_manifest.h
-  extension/laplace_substrate/sql/generated/seed_relation_types.sql.in
-  extension/laplace_substrate/sql/generated/seed_pos.sql.in
+  extension/laplace_substrate/sql/generated/relation_family_ids.sql.in
+  extension/laplace_substrate/sql/generated/relation_set_ids.sql.in
 )
 python3 scripts/codegen-attestation-law.py
 for f in "${outs[@]}"; do

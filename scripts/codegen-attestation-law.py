@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Codegen attestation law: manifest TOML -> relation, POS, entity-type, language, deprel,
-qualifier and trust-class laws (.c/.h), seed SQL, highway perfcache."""
+"""Codegen attestation law: manifests -> relation, POS, entity-type, language, deprel,
+qualifier and trust-class laws (.c/.h), seed SQL, highway perfcache. The POS and deprel
+vocabularies are generated from their authorities (scripts/refresh-vocabulary-manifest.py)."""
 from __future__ import annotations
 
 import hashlib
@@ -887,13 +888,36 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
 
 
 
-def emit_pos_law(pos: dict) -> None:
+def read_vocabulary(name: str) -> list[list[str]]:
+    """A generated vocabulary table (engine/manifest/vocabulary/<name>.tsv, derived from
+    its authority by scripts/refresh-vocabulary-manifest.py): data rows without the
+    provenance comments and the column header."""
+    lines = [l for l in (MANIFEST / "vocabulary" / f"{name}.tsv").read_text(encoding="utf-8").splitlines()
+             if l and not l.startswith("#")]
+    return [l.split("\t") for l in lines[1:]]
+
+
+def dense_labels(rows: list[list[str]], what: str) -> list[str]:
+    """Labels ordered by their append-only code, which must run 1..N without holes."""
+    by_code = sorted((int(r[0]), r[1]) for r in rows)
+    if [c for c, _ in by_code] != list(range(1, len(by_code) + 1)):
+        raise SystemExit(f"{what}: codes must run 1..N")
+    return [l for _, l in by_code]
+
+
+def emit_pos_law() -> None:
     """UPOS is a governed vocabulary: a tag from a declared tagset resolves to its
     canonical UPOS label (and that label's stable index, the POS mask bit). A POS
     value's identity is the content id of its label, like relation and entity-type
-    labels; an unmapped tag is the source's own value and stays unresolved."""
-    upos_list = pos["upos"].get("canonical", [])
-    tagsets: dict = pos["tagsets"]
+    labels; an unmapped tag is the source's own value and stays unresolved.
+    The tags come from UD (vocabulary/upos.tsv); each source tagset's codes come from
+    that source's own declaration (vocabulary/pos_alias.tsv)."""
+    upos_list = dense_labels(read_vocabulary("upos"), "upos")
+    tagsets: dict = {}
+    for tagset, code, upos in read_vocabulary("pos_alias"):
+        mapping = tagsets.setdefault(tagset, {})
+        if upos:
+            mapping[code] = upos
     if len(upos_list) > 64:
         raise SystemExit("pos law: more than 64 UPOS values cannot fit the POS mask")
 
@@ -1340,18 +1364,17 @@ def emit_language_law(path: Path) -> None:
     _write_text_if_changed(OUT_CORE / "src/generated/language_law.c", "\n".join(lines) + "\n")
 
 
-def emit_deprel_law(path: Path) -> None:
-    """UD universal relations (engine/manifest/deprels.toml): a deprel label resolves to
-    its universal relation's stable 1-based code; the subtype after ':' is the
-    treebank's refinement of it. 0 = not a universal relation."""
-    import re as _re
-    body = path.read_text(encoding="utf-8")
-    m = _re.search(r"universal\s*=\s*\[(.*?)\]", body, _re.S)
-    if not m:
-        raise SystemExit("deprels.toml: no [ud] universal list")
-    labels = _re.findall(r'"([a-z]+)"', m.group(1))
-    if len(labels) != len(set(labels)) or len(labels) > 63:
-        raise SystemExit("deprels.toml: duplicate labels or more than 63 relations")
+def emit_deprel_law() -> None:
+    """UD relations (vocabulary/deprel.tsv, vocabulary/deprel_subtype.tsv, derived from
+    the UD validator data). A label is a composition: "nsubj:pass" is the universal
+    relation nsubj (code 1..N, 0 = undeclared) plus the subtype pass (code 1..M,
+    0 = no subtype, -1 = undeclared)."""
+    labels = dense_labels(read_vocabulary("deprel"), "deprel")
+    subtypes = dense_labels(read_vocabulary("deprel_subtype"), "deprel_subtype")
+    if len(labels) > 63:
+        raise SystemExit("deprel: more than 63 universal relations cannot fit the parse vertex")
+    if len(subtypes) > 4095:
+        raise SystemExit("deprel_subtype: more than 4095 subtypes cannot fit the parse vertex")
     _write_text_if_changed(OUT_CORE / "include/laplace/core/deprel_law.h",
         "#pragma once\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
         "/* A UD deprel label (\"nsubj:pass\") -> its universal relation's code (1..N);\n"
@@ -1359,10 +1382,17 @@ def emit_deprel_law(path: Path) -> None:
         "int laplace_deprel_code(const char* label);\n"
         "/* The universal relation label of a code, NULL when undeclared. */\n"
         "const char* laplace_deprel_label(int code);\n"
-        "int laplace_deprel_count(void);\n\n#ifdef __cplusplus\n}\n#endif\n")
+        "int laplace_deprel_count(void);\n"
+        "/* The subtype of a label (\"pass\" in \"nsubj:pass\") -> its code (1..M); 0 when\n"
+        " * the label has no subtype, -1 when the subtype is not declared. */\n"
+        "int laplace_deprel_subtype_code(const char* label);\n"
+        "const char* laplace_deprel_subtype_label(int code);\n"
+        "int laplace_deprel_subtype_count(void);\n\n#ifdef __cplusplus\n}\n#endif\n")
     lines = ['#include "laplace/core/deprel_law.h"', "", "#include <string.h>", "",
              "static const char* k_deprels[] = {"]
     lines += [f'    "{l}",' for l in labels]
+    lines += ["};", "", "static const char* k_subtypes[] = {"]
+    lines += [f'    "{l}",' for l in subtypes]
     lines += ["};", "",
               "int laplace_deprel_code(const char* label) {",
               "    if (!label) return 0;",
@@ -1374,7 +1404,19 @@ def emit_deprel_law(path: Path) -> None:
               "const char* laplace_deprel_label(int code) {",
               "    return code >= 1 && code <= (int)(sizeof(k_deprels)/sizeof(k_deprels[0])) ? k_deprels[code - 1] : NULL;",
               "}", "",
-              "int laplace_deprel_count(void) { return (int)(sizeof(k_deprels)/sizeof(k_deprels[0])); }"]
+              "int laplace_deprel_count(void) { return (int)(sizeof(k_deprels)/sizeof(k_deprels[0])); }", "",
+              "int laplace_deprel_subtype_code(const char* label) {",
+              "    if (!label) return 0;",
+              "    const char* colon = strchr(label, ':');",
+              "    if (!colon || colon[1] == 0) return 0;",
+              "    for (int i = 0; i < (int)(sizeof(k_subtypes)/sizeof(k_subtypes[0])); ++i)",
+              "        if (strcmp(k_subtypes[i], colon + 1) == 0) return i + 1;",
+              "    return -1;",
+              "}", "",
+              "const char* laplace_deprel_subtype_label(int code) {",
+              "    return code >= 1 && code <= (int)(sizeof(k_subtypes)/sizeof(k_subtypes[0])) ? k_subtypes[code - 1] : NULL;",
+              "}", "",
+              "int laplace_deprel_subtype_count(void) { return (int)(sizeof(k_subtypes)/sizeof(k_subtypes[0])); }"]
     _write_text_if_changed(OUT_CORE / "src/generated/deprel_law.c", "\n".join(lines) + "\n")
 
 
@@ -1643,12 +1685,11 @@ def main() -> int:
             break
 
     rel = parse_simple_toml(MANIFEST / "relation_types.toml")
-    pos = parse_simple_toml(MANIFEST / "pos_tags.toml")
     emit_relation_law(rel)
-    emit_pos_law(pos)
+    emit_pos_law()
     emit_entity_type_law(MANIFEST / "entity_types.toml")
     emit_language_law(MANIFEST / "languages.tsv")
-    emit_deprel_law(MANIFEST / "deprels.toml")
+    emit_deprel_law()
     emit_qualifier_law(MANIFEST / "qualifiers.toml")
     emit_trust_class_law(MANIFEST / "trust_classes.toml")
     emit_firmware_law(MANIFEST / "firmware.toml")

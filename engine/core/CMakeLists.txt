@@ -172,10 +172,12 @@ set(LAPLACE_CODEGEN_STAMP
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${LAPLACE_CODEGEN_SCRIPT}"
     "${_laplace_codegen_root}/engine/manifest/relation_types.toml"
-    "${_laplace_codegen_root}/engine/manifest/pos_tags.toml"
+    "${_laplace_codegen_root}/engine/manifest/vocabulary/upos.tsv"
+    "${_laplace_codegen_root}/engine/manifest/vocabulary/pos_alias.tsv"
     "${_laplace_codegen_root}/engine/manifest/entity_types.toml"
     "${_laplace_codegen_root}/engine/manifest/languages.tsv"
-    "${_laplace_codegen_root}/engine/manifest/deprels.toml"
+    "${_laplace_codegen_root}/engine/manifest/vocabulary/deprel.tsv"
+    "${_laplace_codegen_root}/engine/manifest/vocabulary/deprel_subtype.tsv"
     "${_laplace_codegen_root}/engine/manifest/qualifiers.toml"
     "${_laplace_codegen_root}/engine/manifest/trust_classes.toml"
     "${_laplace_codegen_root}/engine/manifest/firmware.toml")
@@ -197,10 +199,12 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E touch "${LAPLACE_CODEGEN_STAMP}"
     DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
             ${_laplace_codegen_root}/engine/manifest/relation_types.toml
-            ${_laplace_codegen_root}/engine/manifest/pos_tags.toml
+            ${_laplace_codegen_root}/engine/manifest/vocabulary/upos.tsv
+            ${_laplace_codegen_root}/engine/manifest/vocabulary/pos_alias.tsv
             ${_laplace_codegen_root}/engine/manifest/entity_types.toml
             ${_laplace_codegen_root}/engine/manifest/languages.tsv
-            ${_laplace_codegen_root}/engine/manifest/deprels.toml
+            ${_laplace_codegen_root}/engine/manifest/vocabulary/deprel.tsv
+            ${_laplace_codegen_root}/engine/manifest/vocabulary/deprel_subtype.tsv
             ${_laplace_codegen_root}/engine/manifest/qualifiers.toml
             ${_laplace_codegen_root}/engine/manifest/trust_classes.toml
             ${_laplace_codegen_root}/engine/manifest/firmware.toml

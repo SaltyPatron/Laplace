@@ -1267,10 +1267,11 @@ TEST(PhysicalityDescriptorStage, ShapeAndPayloadBoundsUseActualOrdinaryTupleFram
     intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &e);
     const auto* physicalities = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &p);
     intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &a);
-    EXPECT_EQ(e, 68u);
+    // An entity tuple is three fields (id, tier, type_id): 2 + (4+16) + (4+2) + (4+16).
+    EXPECT_EQ(e, 48u);
     EXPECT_EQ(a, 229u);
     EXPECT_EQ(p, (153u + 158u + 162u) + 3u * 32u);
-    EXPECT_EQ(tuple_bound, 68u + 3u * 162u + 3u * 32u + 229u);
+    EXPECT_EQ(tuple_bound, 48u + 3u * 162u + 3u * 32u + 229u);
     EXPECT_LE(e + p + a, tuple_bound);
     size_t unchanged = 987u;
     EXPECT_EQ(intent_stage_tuple_payload_bound(SIZE_MAX, 0u, 0u, 0u, &unchanged), -2);

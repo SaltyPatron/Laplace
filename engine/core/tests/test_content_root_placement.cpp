@@ -238,9 +238,12 @@ TEST(LaplaceContentObservations, ExistingRootRetainsSourcesAndFormsWithoutDuplic
     const uint8_t* entity_bytes = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &size);
     std::vector<Field> fields;
     ASSERT_TRUE(next_row(entity_bytes, size, offset, fields));
-    ASSERT_EQ(4u, fields.size());
-    ASSERT_EQ(16, fields[3].length);
-    EXPECT_EQ(0, std::memcmp(fields[3].bytes, &source_a, 16));
+    // An entity row is its identity alone (id, tier, type): sources witness it through
+    // attestations, never through a column on the entity.
+    ASSERT_EQ(3u, fields.size());
+    ASSERT_EQ(16, fields[0].length);
+    EXPECT_EQ(0, std::memcmp(fields[0].bytes, &original, 16));
+    EXPECT_EQ(size, offset);
 
     physicality_descriptor_vocabulary_t* raw_vocabulary = nullptr;
     ASSERT_EQ(PHYSICALITY_DESCRIPTOR_OK,
@@ -335,7 +338,8 @@ TEST(LaplaceContentObservations, PresentRootDoesNotSuppressMissingDescendantsOrO
         ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &replay));
         EXPECT_TRUE(hash128_equals(&root, &replay));
         EXPECT_EQ(all_present ? 0u : 1u, intent_stage_entity_count(stage.get()));
-        EXPECT_EQ(6u, intent_stage_physicality_count(stage.get()));
+        // The replay stages the same two forms again; the apply converges them by id.
+        EXPECT_EQ(4u, intent_stage_physicality_count(stage.get()));
     }
 }
 

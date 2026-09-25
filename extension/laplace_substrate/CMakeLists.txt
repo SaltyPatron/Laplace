@@ -93,23 +93,10 @@ set(_ext_version_inputs
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
 list(REMOVE_DUPLICATES _ext_version_inputs)
 list(SORT _ext_version_inputs)
-# The extension version is content-derived at configure time. Every ordinary
-# shipped SQL input is hashed directly. Two manifest-generated seed fragments do
-# not exist yet in a pristine checkout: engine/core owns one build-time generator
-# that creates them together with the native law tables. Hash their canonical
-# generator inputs instead, unconditionally, so fresh and incremental configure
-# compute the same version and a clean checkout does not depend on stale files.
-set(_ext_codegen_script "${PROJECT_SOURCE_DIR}/scripts/codegen-attestation-law.py")
-set(_ext_relation_manifest "${PROJECT_SOURCE_DIR}/engine/manifest/relation_types.toml")
-set(_ext_pos_manifest "${PROJECT_SOURCE_DIR}/engine/manifest/pos_tags.toml")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    ${_ext_version_inputs}
-    "${_ext_codegen_script}"
-    "${_ext_relation_manifest}"
-    "${_ext_pos_manifest}")
-file(SHA256 "${_ext_codegen_script}" _ext_codegen_hash)
-file(SHA256 "${_ext_relation_manifest}" _ext_relation_manifest_hash)
-file(SHA256 "${_ext_pos_manifest}" _ext_pos_manifest_hash)
+# The extension version is content-derived at configure time: every shipped SQL input
+# is hashed as written, including the fragments engine/core's codegen writes under
+# sql/generated. engine/ is configured first and regenerates them from the manifests,
+# so a manifest change reaches this hash through the fragments it changes.
 set(_ext_sql_hashes "")
 foreach(_f ${_ext_version_inputs})
     if(EXISTS "${_f}")

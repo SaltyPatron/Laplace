@@ -637,7 +637,7 @@ struct laplace_recipe_stream {
         return result.id;
     }
     // A sentence's parse: its token forms in order, each vertex carrying governed
-    // codes (UPOS index, universal deprel code, head ordinal) in its metadata.
+    // codes (UPOS index, universal deprel code and subtype, head ordinal) in its metadata.
     void lower_parse(intent_stage_t* stage, const route_rule& route, const node& record) {
         const auto& p = route.parse;
         const auto trunk = record.attributes.find(p.trunk);
@@ -659,6 +659,8 @@ struct laplace_recipe_stream {
                 static_cast<laplace_pos_tagset_t>(p.upos_tagset), &canonical, &index) == 0 && index >= 0
                 ? static_cast<uint8_t>(index + 1) : 0;
             const uint8_t deprel = static_cast<uint8_t>(laplace_deprel_code(line[p.deprel].c_str()));
+            const int subtype_code = laplace_deprel_subtype_code(line[p.deprel].c_str());
+            const uint16_t subtype = subtype_code > 0 ? static_cast<uint16_t>(subtype_code) : 0;
             uint16_t head = 0xFFFF;
             const std::string& h = line[p.head];
             if (!h.empty() && h.size() <= 5 && h.find_first_not_of("0123456789") == std::string::npos) {
@@ -666,7 +668,7 @@ struct laplace_recipe_stream {
                 if (v < 0xFFFF) head = static_cast<uint16_t>(v);
             }
             ids.push_back(token.id);
-            flags.push_back(laplace_parse_vertex_flags(token.tier, upos1, deprel, head));
+            flags.push_back(laplace_parse_vertex_flags(token.tier, upos1, deprel, head, subtype));
         }
         if (ids.empty()) return;
         std::vector<double> trajectory(ids.size() * 4);

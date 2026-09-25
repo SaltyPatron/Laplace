@@ -85,37 +85,12 @@ def source_version(module_pathname, execution_module):
             ordered.append(p)
     ordered.sort(key=str)
 
-    generated_relation_seed = SQL / "generated" / "seed_relation_types.sql.in"
-    generated_pos_seed = SQL / "generated" / "seed_pos.sql.in"
-    generated = {generated_relation_seed, generated_pos_seed}
-
-    codegen_hash = relation_manifest_hash = pos_manifest_hash = None
-    if any(p in generated for p in ordered):
-        codegen_hash = _sha256_file(ROOT / "scripts" / "codegen-attestation-law.py")
-        relation_manifest_hash = _sha256_file(ROOT / "engine" / "manifest" / "relation_types.toml")
-        pos_manifest_hash = _sha256_file(ROOT / "engine" / "manifest" / "pos_tags.toml")
-        if None in (codegen_hash, relation_manifest_hash, pos_manifest_hash):
-            return None
-
     acc = ""
     for p in ordered:
-        if p == generated_relation_seed:
-            canonical = (
-                "generated=seed_relation_types;"
-                f"generator={codegen_hash};manifest={relation_manifest_hash}"
-            )
-            acc += hashlib.sha256(canonical.encode()).hexdigest()
-        elif p == generated_pos_seed:
-            canonical = (
-                "generated=seed_pos;"
-                f"generator={codegen_hash};manifest={pos_manifest_hash}"
-            )
-            acc += hashlib.sha256(canonical.encode()).hexdigest()
-        else:
-            digest = _sha256_file(p)
-            if digest is None:
-                return None
-            acc += digest
+        digest = _sha256_file(p)
+        if digest is None:
+            return None
+        acc += digest
 
     acc += f"module_pathname={module_pathname};execution={execution_module}"
     return hashlib.sha256(acc.encode()).hexdigest()[:16]

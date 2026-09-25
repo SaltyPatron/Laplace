@@ -215,7 +215,7 @@ public static class NativeAttestation
 
     /// <summary>
     /// The governed UPOS label a source tag resolves to through its declared tagset
-    /// (engine/manifest/pos_tags.toml), or null when the tagset does not map it: an
+    /// (engine/manifest/vocabulary/pos_alias.tsv), or null when the tagset does not map it: an
     /// unmapped tag is the source's own value, never a guessed UPOS.
     /// </summary>
     public static string? ResolvePosCanonical(string tag, PosReference.PosTagset tagset)

@@ -10,7 +10,8 @@ $stampDir = Join-Path $Root 'build/.stamps'
 $stamp = Join-Path $stampDir 'attestation-law'
 $manifest = @(
     (Get-Item (Join-Path $Root 'engine/manifest/relation_types.toml')).LastWriteTimeUtc.Ticks
-    (Get-Item (Join-Path $Root 'engine/manifest/pos_tags.toml')).LastWriteTimeUtc.Ticks
+    (Get-Item (Join-Path $Root 'engine/manifest/vocabulary/upos.tsv')).LastWriteTimeUtc.Ticks
+    (Get-Item (Join-Path $Root 'engine/manifest/vocabulary/pos_alias.tsv')).LastWriteTimeUtc.Ticks
     (Get-Item $py).LastWriteTimeUtc.Ticks
 ) -join ':'
 

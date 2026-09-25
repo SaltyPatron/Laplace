@@ -6,6 +6,9 @@
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "laplace/core/pos_law.h"
+#include "laplace/core/deprel_law.h"
+#include "laplace/core/mantissa.h"
 
 namespace {
 
@@ -17,10 +20,10 @@ hash128_t hash_path(const char* path) {
 
 
 
+// A governed relation's id is the content id of its canonical label.
 hash128_t relation_type_id(const char* canonical_name) {
     hash128_t h;
-    hash128_blake3(reinterpret_cast<const uint8_t*>(canonical_name),
-                   std::strlen(canonical_name), &h);
+    EXPECT_EQ(0, hash128_label_content_id(canonical_name, std::strlen(canonical_name), &h));
     return h;
 }
 
@@ -129,11 +132,62 @@ TEST(LaplaceAttestationEngine, FlipHypernymCollapsesArena) {
     EXPECT_TRUE(hash128_equals(&flipped.object_id, &animal));
 }
 
+static hash128_t label_id(const char* label) {
+    hash128_t id;
+    EXPECT_EQ(0, hash128_label_content_id(label, strlen(label), &id));
+    return id;
+}
+
 TEST(LaplacePosLaw, UposCanonicalRoundTrip) {
     hash128_t id;
     ASSERT_EQ(0, laplace_pos_resolve_entity("NOUN", LAPLACE_POS_TAGSET_UPOS, &id));
-    hash128_t expected = hash_path("substrate/pos/NOUN/v1");
+    hash128_t expected = label_id("NOUN");
     EXPECT_TRUE(hash128_equals(&id, &expected));
+}
+
+TEST(LaplacePosLaw, SourceTagsetsConvergeOnUpos) {
+    const char* canonical = nullptr;
+    int index = -1;
+    ASSERT_EQ(0, laplace_pos_resolve_canonical("n", LAPLACE_POS_TAGSET_WORDNET, &canonical, &index));
+    EXPECT_STREQ("NOUN", canonical);
+    EXPECT_EQ(7, index);
+    ASSERT_EQ(0, laplace_pos_resolve_canonical("N", LAPLACE_POS_TAGSET_FRAMENET, &canonical, &index));
+    EXPECT_STREQ("NOUN", canonical);
+    ASSERT_EQ(0, laplace_pos_resolve_canonical("j", LAPLACE_POS_TAGSET_PROPBANK, &canonical, &index));
+    EXPECT_STREQ("ADJ", canonical);
+    ASSERT_EQ(0, laplace_pos_resolve_canonical("s", LAPLACE_POS_TAGSET_WORDNET, &canonical, &index));
+    EXPECT_STREQ("ADJ", canonical);
+}
+
+TEST(LaplacePosLaw, DeclaredCodesWithoutAUposNameStayTheSourcesOwn) {
+    const char* canonical = nullptr;
+    EXPECT_EQ(1, laplace_pos_resolve_canonical("conj", LAPLACE_POS_TAGSET_WIKTIONARY, &canonical, nullptr));
+    EXPECT_EQ(1, laplace_pos_resolve_canonical("IDIO", LAPLACE_POS_TAGSET_FRAMENET, &canonical, nullptr));
+    EXPECT_EQ(1, laplace_pos_resolve_canonical("l", LAPLACE_POS_TAGSET_PROPBANK, &canonical, nullptr));
+}
+
+TEST(LaplaceDeprelLaw, LabelIsUniversalRelationPlusSubtype) {
+    EXPECT_EQ(laplace_deprel_code("nsubj"), laplace_deprel_code("nsubj:pass"));
+    EXPECT_GT(laplace_deprel_code("nsubj"), 0);
+    EXPECT_EQ(0, laplace_deprel_subtype_code("nsubj"));
+    const int pass = laplace_deprel_subtype_code("nsubj:pass");
+    ASSERT_GT(pass, 0);
+    EXPECT_STREQ("pass", laplace_deprel_subtype_label(pass));
+    EXPECT_EQ(pass, laplace_deprel_subtype_code("aux:pass"));
+    EXPECT_EQ(-1, laplace_deprel_subtype_code("nsubj:no-such-subtype"));
+    EXPECT_EQ(0, laplace_deprel_code("nsubjpass"));
+}
+
+TEST(LaplaceDeprelLaw, ParseVertexKeepsEveryCode) {
+    const uint16_t subtype = (uint16_t)laplace_deprel_subtype_count();
+    const uint64_t f = laplace_parse_vertex_flags(3, 8, 27, 4, subtype);
+    EXPECT_TRUE(laplace_vflag_is_parse(f));
+    EXPECT_EQ(3, laplace_vflag_tier(f));
+    EXPECT_EQ(8, laplace_vflag_parse_upos1(f));
+    EXPECT_EQ(27, laplace_vflag_parse_deprel(f));
+    EXPECT_EQ(4, laplace_vflag_parse_head(f));
+    EXPECT_EQ(subtype, laplace_vflag_parse_subtype(f));
+    EXPECT_EQ(0xFFFu, laplace_vflag_parse_subtype(laplace_parse_vertex_flags(1, 1, 1, 0, 0xFFF)));
 }
 
 TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
@@ -192,7 +246,7 @@ TEST(LaplaceRelationLaw, UcdPropertyDynamicFamily) {
 TEST(LaplacePosLaw, WiktionaryMapsToCanonical) {
     hash128_t id;
     ASSERT_EQ(0, laplace_pos_resolve_entity("noun", LAPLACE_POS_TAGSET_WIKTIONARY, &id));
-    hash128_t expected = hash_path("substrate/pos/NOUN/v1");
+    hash128_t expected = label_id("NOUN");
     EXPECT_TRUE(hash128_equals(&id, &expected));
 }
 

@@ -67,7 +67,7 @@ class InstalledExtensionParityTests(unittest.TestCase):
         self.assertIsNone(checker.configured_execution_module("laplace_execution_not-a-hash"))
 
 
-class ConfiguredGeneratedSeedParityTests(unittest.TestCase):
+class ConfiguredGeneratedFragmentParityTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="laplace-extension-parity-")
         self.addCleanup(self.temp.cleanup)
@@ -86,12 +86,9 @@ class ConfiguredGeneratedSeedParityTests(unittest.TestCase):
             (self.root / name).mkdir(parents=True, exist_ok=True)
         self.generator = self.root / "scripts/codegen-attestation-law.py"
         shutil.copyfile(repository / "scripts/codegen-attestation-law.py", self.generator)
-        for name in ("relation_types.toml", "pos_tags.toml"):
-            shutil.copyfile(repository / "engine/manifest" / name, self.root / "engine/manifest" / name)
-        self.seeds = [self.sql / "generated" / name for name in
-                      ("seed_relation_types.sql.in", "seed_pos.sql.in")]
-        for path in self.seeds:
-            path.unlink(missing_ok=True)
+        shutil.copytree(repository / "engine/manifest", self.root / "engine/manifest", dirs_exist_ok=True)
+        self.fragments = [self.sql / "generated" / name for name in
+                          ("relation_family_ids.sql.in", "relation_set_ids.sql.in")]
 
         # Execute the actual manifest and version producer in CMake. The
         # unrelated native compilation graph is omitted; its configured
@@ -130,41 +127,35 @@ class ConfiguredGeneratedSeedParityTests(unittest.TestCase):
                                 text=True, capture_output=True, timeout=45)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_real_cmake_parity_before_and_after_real_seed_generation(self):
-        self.assertTrue(all(not path.exists() for path in self.seeds))
+    def test_generator_reproduces_the_shipped_fragments(self):
         before = self.configure_and_compare()
         self.generate()
-        self.assertTrue(all(path.stat().st_size > 0 for path in self.seeds))
-        self.assertEqual(self.configure_and_compare(), before)
-        self.seeds[0].unlink()
+        self.assertTrue(all(path.stat().st_size > 0 for path in self.fragments))
         self.assertEqual(self.configure_and_compare(), before)
 
-    def test_real_cmake_and_checker_bind_every_canonical_input(self):
+    def test_real_cmake_and_checker_bind_every_shipped_input(self):
         previous = self.configure_and_compare()
         ordinary = next(path for path in checker.manifest_files(self.sql / "manifest.install")
-                        if path not in self.seeds and path.is_file())
-        for path in (self.generator, self.root / "engine/manifest/relation_types.toml",
-                     self.root / "engine/manifest/pos_tags.toml", ordinary):
+                        if path not in self.fragments and path.is_file())
+        for path in (self.fragments[1], ordinary):
             with self.subTest(input=str(path.relative_to(self.root))):
                 with path.open("a") as stream:
-                    stream.write("\n# identity regression\n" if path.suffix in (".py", ".toml")
-                                 else "\n-- identity regression\n")
+                    stream.write("\n-- identity regression\n")
                 current = self.configure_and_compare()
                 self.assertNotEqual(current, previous)
                 previous = current
         self.execution = "laplace_execution_fedcba9876543210"
         self.assertNotEqual(self.configure_and_compare(), previous)
 
-    def test_missing_canonical_generator_input_fails_both_owners(self):
-        manifest = self.root / "engine/manifest/relation_types.toml"
-        manifest.unlink()
+    def test_missing_generated_fragment_fails_both_owners(self):
+        self.fragments[0].unlink()
         self.assertIsNone(checker.source_version("laplace_substrate", self.execution))
         result = subprocess.run(
             ["cmake", "-G", "Ninja", "-S", str(self.root), "-B", str(self.build),
              "-DFIXTURE_EXECUTION_MODULE=" + self.execution],
             text=True, capture_output=True, timeout=45)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("relation_types.toml", result.stdout + result.stderr)
+        self.assertIn("relation_family_ids.sql.in", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

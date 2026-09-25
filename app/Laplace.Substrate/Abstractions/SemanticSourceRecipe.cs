@@ -94,7 +94,7 @@ public sealed record SourceRecipeField(
     // This value in [0,1] is the named sibling claim's score (a draw is 0.5).
     string? ScoreOf = null,
     // A governed vocabulary the value resolves through ("pos/wordnet": WordNet ss_type
-    // n -> NOUN per engine/manifest/pos_tags.toml). A value the vocabulary does not map
+    // n -> NOUN per engine/manifest/vocabulary/pos_alias.tsv). A value the vocabulary does not map
     // stays the source's own value.
     string? Vocabulary = null,
     // Claims of this field accumulate across the artifact by identity and are staged
