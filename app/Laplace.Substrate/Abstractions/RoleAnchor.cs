@@ -47,6 +47,16 @@ public static class RoleAnchor
         Hash128 parentId,
         string? roleKey,
         Hash128 entityTypeId,
+        Hash128 source) =>
+        DeclareComponent(builder, kind, parentId, roleKey, entityTypeId, source)?.Id;
+
+    /// <summary>The role as a composition part: identity plus realized coordinate.</summary>
+    public static OrderedCompositionComponent? DeclareComponent(
+        SubstrateChangeBuilder builder,
+        RoleIdentityKind kind,
+        Hash128 parentId,
+        string? roleKey,
+        Hash128 entityTypeId,
         Hash128 source)
     {
         Validate(kind, parentId);
@@ -79,7 +89,7 @@ public static class RoleAnchor
             coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
             Trajectory.Build(constituents), constituents.Length,
             null, null, 0));
-        return id;
+        return new OrderedCompositionComponent(id, EntityTier.Word, coord[0], coord[1], coord[2], coord[3]);
     }
 
     public static Hash128? Emit(

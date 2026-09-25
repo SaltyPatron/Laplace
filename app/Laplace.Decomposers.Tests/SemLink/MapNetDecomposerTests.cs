@@ -39,9 +39,7 @@ public sealed class MapNetDecomposerTests
         if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectAttestationsAsync();
-        var luId = AnchorAdmission.Id(
-            SourceEntityIdConventions.FrameNetLuKey("Accoutrements", "helmet.n"),
-            EntityTypeRegistry.FrameNetLu)!.Value;
+        var luId = Laplace.Decomposers.FrameNet.FrameNetLuIngest.LexicalUnitId("Accoutrements", "helmet.n")!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n', SourceEntityIdConventions.MultiWordNetWnVersion);
         Assert.NotNull(synId);
         CorrespondsToAssert.Contains(atts, luId, synId.Value);

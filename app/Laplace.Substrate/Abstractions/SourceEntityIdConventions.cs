@@ -196,8 +196,6 @@ public static class SourceEntityIdConventions
         _ => null,
     };
 
-    public static string FrameNetLuKey(string frame, string luName) =>
-    $"{frame.Trim()}/{luName.Trim()}";
 
     public static (long Offset, char SsType)? ParseMapNetSynsetKey(string? raw)
     {

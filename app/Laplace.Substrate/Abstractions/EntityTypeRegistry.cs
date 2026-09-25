@@ -56,6 +56,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 FrameNetFe = Id("FrameNet_FE");
     public static readonly Hash128 FrameNetFrame = Id("FrameNet_Frame");
     public static readonly Hash128 FrameNetLu = Id("FrameNet_LU");
+    public static readonly Hash128 FrameNetValenceUnit = Id("FrameNet_Valence_Unit");
+    public static readonly Hash128 FrameNetValencePattern = Id("FrameNet_Valence_Pattern");
     public static readonly Hash128 Grapheme = Id("Grapheme");
     public static readonly Hash128 Image = Id("Image");
     public static readonly Hash128 Iso639Code = Id("ISO639Code");

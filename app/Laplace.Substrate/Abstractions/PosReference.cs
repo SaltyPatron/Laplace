@@ -49,6 +49,10 @@ public static class PosReference
             ?? throw new InvalidOperationException($"POS content could not be composed: {content}");
     }
 
+    /// <summary>The canonical UPOS label a source tag normalizes to (its POS entity's content).</summary>
+    public static string ResolveLabel(string sourceTag, PosTagset tagset) =>
+        ResolveContent(sourceTag, tagset, out _);
+
     public static Hash128 Resolve(string sourceTag, PosTagset tagset) =>
         Resolve(sourceTag, tagset, out _);
 

@@ -113,6 +113,15 @@ canonical = "FrameNet_Frame"
 [[type]]
 canonical = "FrameNet_LU"
 
+# A frame element realized with a grammatical function and phrase type: the
+# composition [frame element, GF, PT(, preposition)].
+[[type]]
+canonical = "FrameNet_Valence_Unit"
+
+# The ordered composition of the valence units one annotated realization combines.
+[[type]]
+canonical = "FrameNet_Valence_Pattern"
+
 [[type]]
 canonical = "Grapheme"
 

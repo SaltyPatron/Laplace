@@ -31,13 +31,16 @@ internal static class FnLuSynsetBridgeIngest
             Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(synRaw, synsetVersion);
             if (synId is null) continue;
 
-            string luKey = SourceEntityIdConventions.FrameNetLuKey(frame, luName);
-            if (AnchorAdmission.Id(luKey, LuTypeId) is null) continue;
+            string luFrame = frame, luLabel = luName;
+            if (luLabel.LastIndexOf('.') <= 0) continue;
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            yield return new CategoryCorrespondenceRecord(luKey, LuTypeId, synId.Value);
+            yield return new CategoryCorrespondenceRecord(
+                $"{luFrame} {luLabel}", LuTypeId, synId.Value,
+                DeclareSubject: (builder, source) =>
+                    FrameNet.FrameNetLuIngest.DeclareLexicalUnit(builder, luFrame, luLabel, source));
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
@@ -72,13 +75,16 @@ internal static class FnLuSynsetBridgeIngest
             if (synId is null) continue;
 
             string luName = PosSuffix(pos) is { Length: > 0 } sfx ? $"{lemma}.{sfx}" : lemma;
-            string luKey = SourceEntityIdConventions.FrameNetLuKey(currentFrame, luName);
-            if (AnchorAdmission.Id(luKey, LuTypeId) is null) continue;
+            string luFrame = currentFrame, luLabel = luName;
+            if (luLabel.LastIndexOf('.') <= 0) continue;
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            yield return new CategoryCorrespondenceRecord(luKey, LuTypeId, synId.Value);
+            yield return new CategoryCorrespondenceRecord(
+                $"{luFrame} {luLabel}", LuTypeId, synId.Value,
+                DeclareSubject: (builder, source) =>
+                    FrameNet.FrameNetLuIngest.DeclareLexicalUnit(builder, luFrame, luLabel, source));
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }

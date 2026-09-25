@@ -257,14 +257,6 @@ public class SourceEntityIdConventionsTests
     }
 
     [Fact]
-    public void FrameNetLuKey_Normalizes_Frame_And_LuName()
-    {
-        Assert.Equal("Giving/give.v", SourceEntityIdConventions.FrameNetLuKey("Giving", "give.v"));
-        Assert.Equal("Accoutrements/accoutrement.n",
-            SourceEntityIdConventions.FrameNetLuKey(" Accoutrements ", " accoutrement.n "));
-    }
-
-    [Fact]
     public void ParseMapNetSynsetKey_Parses_PosHashOffset()
     {
         Assert.Equal((57580L, 'a'), SourceEntityIdConventions.ParseMapNetSynsetKey("a#00057580"));

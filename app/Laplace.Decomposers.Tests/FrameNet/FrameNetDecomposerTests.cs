@@ -112,7 +112,7 @@ public sealed class FrameNetDecomposerTests
         Assert.Equal("Duplication", lu.FrameName);
         Assert.Equal("copy", lu.Lemma);
         Assert.Contains("make a copy", lu.Definition);
-        Assert.Contains(lu.ValencePatterns, p => p.Pattern.Contains("Creator"));
+        Assert.Contains(lu.ValencePatterns, p => p.Units.Any(u => u.FrameElement == "Creator"));
         // FrameNet states the annotated-instance count on every <pattern> as total="N"
         // (192,241 of them in framenet_v17) and it was never read: observationCount was
         // however many times the pattern STRING repeated in the XML, a structural artifact
@@ -522,7 +522,7 @@ public sealed class FrameNetDecomposerTests
         var lu = FrameNetLuIngest.ParseLu(System.Xml.Linq.XDocument.Parse(xml));
         Assert.NotNull(lu);
         var totals = lu!.ValencePatterns
-            .Where(p => p.Pattern.Contains(" + "))
+            .Where(p => p.Units.Count > 1)
             .Select(p => p.Total)
             .OrderByDescending(t => t)
             .ToList();

@@ -586,7 +586,7 @@ family_root = "HAS_FRAME_ELEMENT"
 [[relation]]
 canonical = "HAS_VALENCE_PATTERN"
 bit = 127
-rank = "partitive"
+rank = "associative"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VALENCE_PATTERN"

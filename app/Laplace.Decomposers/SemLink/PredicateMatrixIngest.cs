@@ -356,9 +356,12 @@ internal static class PredicateMatrixIngest
                 ? EmitCategory(new CategoryCorrespondenceRecord(
                     frame, FrameTypeId, predicateId.Value), builder)
                 : null;
-            if (record.FrameLu is { } frameLu)
+            // A lexical unit is FrameNet's composition [frame, lemma, UPOS], never "run.v".
+            if (record.FrameLu is { } frameLu && record.Frame is { } luFrame)
                 _ = EmitCategory(new CategoryCorrespondenceRecord(
-                    frameLu, FrameLuTypeId, predicateId.Value), builder);
+                    $"{luFrame} {frameLu}", FrameLuTypeId, predicateId.Value,
+                    DeclareSubject: (b, source) =>
+                        FrameNet.FrameNetLuIngest.DeclareLexicalUnit(b, luFrame, frameLu, source)), builder);
             Hash128? rolesetId = record.PropBankRoleset is { } roleset
                 ? EmitCategory(new CategoryCorrespondenceRecord(
                     roleset, RolesetTypeId, predicateId.Value), builder)
@@ -521,12 +524,19 @@ internal static class PredicateMatrixIngest
         private Hash128? EmitCategory(
             CategoryCorrespondenceRecord record, SubstrateChangeBuilder builder)
         {
-            Hash128? subjectId = AnchorAdmission.Id(record.SubjectKey, record.SubjectTypeId);
-            if (subjectId is null) return null;
-
-            if (_declarations.Add(subjectId.Value))
-                subjectId = AnchorAdmission.Emit(
-                    builder, record.SubjectKey, record.SubjectTypeId, _sourceId, _trust);
+            Hash128? subjectId;
+            if (record.DeclareSubject is { } declare)
+            {
+                subjectId = declare(builder, _sourceId);
+            }
+            else
+            {
+                subjectId = AnchorAdmission.Id(record.SubjectKey, record.SubjectTypeId);
+                if (subjectId is null) return null;
+                if (_declarations.Add(subjectId.Value))
+                    subjectId = AnchorAdmission.Emit(
+                        builder, record.SubjectKey, record.SubjectTypeId, _sourceId, _trust);
+            }
             if (subjectId is null) return null;
 
             var relation = NativeAttestation.Categorical(

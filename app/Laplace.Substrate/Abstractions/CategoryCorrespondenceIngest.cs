@@ -13,7 +13,10 @@ public readonly record struct CategoryCorrespondenceRecord(
     Hash128 ObjectId,
     string RelationType = "CORRESPONDS_TO",
     Hash128? ContextId = null,
-    double Magnitude = 1.0);
+    double Magnitude = 1.0,
+    // A structured subject (a composition such as a FrameNet lexical unit) declares
+    // itself; SubjectKey then only labels the record.
+    Func<SubstrateChangeBuilder, Hash128, Hash128?>? DeclareSubject = null);
 
 public sealed class CategoryCorrespondenceHandler : IIngestRecordHandler<CategoryCorrespondenceRecord>
 {
@@ -41,8 +44,9 @@ public sealed class CategoryCorrespondenceHandler : IIngestRecordHandler<Categor
 
         public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
         {
-            Hash128? subjectId = AnchorAdmission.Emit(
-                builder, record.SubjectKey, record.SubjectTypeId, sourceId, trust);
+            Hash128? subjectId = record.DeclareSubject is { } declare
+                ? declare(builder, sourceId)
+                : AnchorAdmission.Emit(builder, record.SubjectKey, record.SubjectTypeId, sourceId, trust);
             if (subjectId is null) return default;
             builder.AddAttestation(NativeAttestation.Categorical(
                 subjectId.Value, record.RelationType, record.ObjectId, sourceId, trust,

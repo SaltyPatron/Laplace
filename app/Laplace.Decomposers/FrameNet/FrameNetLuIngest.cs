@@ -55,40 +55,26 @@ public static class FrameNetLuIngest
 
         string lemma = FrameNetLemmaHelper.LemmaOf(luName);
         if (lemma.Length == 0) return null;
-        string luKey = SourceEntityIdConventions.FrameNetLuKey(frameName, luName);
 
         string definition = FrameNetLemmaHelper.CollapseWs((string?)root.Element(ns + "definition") ?? "");
 
-        var patterns = new List<ValencePatternCount>();
-
-        // FrameNet's own annotated-instance count. A valenceUnit outside a <pattern>
-        // carries no total of its own, so it enters at 1 -- the same weight it had before
-        // -- rather than borrowing a number the corpus did not give it.
+        // Every <pattern> (single-unit under FERealization, multi-unit under
+        // FEGroupRealization) is one realization FrameNet counted: total="N".
+        var patterns = new List<ValencePattern>();
         static long PatternTotal(XElement el)
             => long.TryParse((string?)el.Attribute("total"), out long t) && t > 0 ? t : 1;
-        foreach (var vu in root.Descendants(ns + "valenceUnit"))
-        {
-            string pat = ValencePattern(
-                (string?)vu.Attribute("GF") ?? "",
-                (string?)vu.Attribute("PT") ?? "",
-                (string?)vu.Attribute("FE") ?? "");
-            if (pat.Length > 0) patterns.Add(new ValencePatternCount(pat, 1));
-        }
         foreach (var patEl in root.Descendants(ns + "pattern"))
         {
-            var units = patEl.Elements(ns + "valenceUnit").ToList();
-            if (units.Count <= 1) continue;
-            var parts = new List<string>(units.Count);
-            foreach (var vu in units)
+            var units = new List<ValenceUnit>();
+            foreach (var vu in patEl.Elements(ns + "valenceUnit"))
             {
-                string pat = ValencePattern(
-                    (string?)vu.Attribute("GF") ?? "",
-                    (string?)vu.Attribute("PT") ?? "",
-                    (string?)vu.Attribute("FE") ?? "");
-                if (pat.Length > 0) parts.Add(pat);
+                string fe = ((string?)vu.Attribute("FE") ?? "").Trim();
+                if (fe.Length == 0) continue;
+                units.Add(new ValenceUnit(fe,
+                    ((string?)vu.Attribute("GF") ?? "").Trim(),
+                    ((string?)vu.Attribute("PT") ?? "").Trim()));
             }
-            if (parts.Count > 0)
-                patterns.Add(new ValencePatternCount(string.Join(" + ", parts), PatternTotal(patEl)));
+            if (units.Count > 0) patterns.Add(new ValencePattern(units, PatternTotal(patEl)));
         }
 
         var sentences = new List<LuSentence>();
@@ -119,13 +105,14 @@ public static class FrameNetLuIngest
             sentences.Add(new LuSentence(text, annotations));
         }
 
-        return new LuDocument(id, frameName, luName, luKey, lemma, pos, definition, totalAnnotated, patterns, sentences);
+        return new LuDocument(id, frameName, luName, lemma, pos, definition, totalAnnotated, patterns, sentences);
     }
 
     internal static void EmitLu(SubstrateChangeBuilder b, LuDocument lu, Hash128 source)
     {
-        Hash128? luAnchor = AnchorAdmission.Emit(
-            b, lu.LuKey, LuTypeId, source, SourceTrust.AcademicCurated);
+        // A lexical unit is the ordered composition [frame, lemma, UPOS]: the word, as
+        // the part of speech it has, evoking the frame. No joined "Frame/lemma.pos" key.
+        Hash128? luAnchor = DeclareLexicalUnit(b, lu.FrameName, lu.LuName, source);
         Hash128? frameAnchor = CategoryAnchor.Emit(b, lu.FrameName, source);
         if (luAnchor is null || frameAnchor is null) return;
         Hash128 luId = luAnchor.Value;
@@ -150,16 +137,33 @@ public static class FrameNetLuIngest
                     contextId: frameId));
         }
 
+        // A valence unit is [frame element, grammatical function, phrase type
+        // (, preposition)]; a pattern is the ordered composition of its units. Every
+        // part stays reachable: the frame element under its frame, "Ext", "NP", "in".
+        // FrameNet's total= (annotated instances realizing the pattern) is the games.
         foreach (var pattern in lu.ValencePatterns)
         {
-            var patId = ContentEmitter.Emit(b, pattern.Pattern, source);
-            if (patId is null) continue;
-            // observationCount is what the fold counts as games, so FrameNet's total= --
-            // the number of annotated instances realising this pattern -- belongs here.
-            // It replaces a count of how often the pattern string repeated in the XML.
+            var units = new List<OrderedCompositionComponent>(pattern.Units.Count);
+            foreach (var unit in pattern.Units)
+            {
+                var fe = RoleAnchor.DeclareComponent(
+                    b, RoleIdentityKind.FrameNet, frameId, unit.FrameElement,
+                    EntityTypeRegistry.FrameNetFe, source);
+                if (fe is null) continue;
+                var parts = new List<OrderedCompositionComponent> { fe.Value };
+                if (StructureComposer.Text(b, unit.GrammaticalFunction, source) is { } gf) parts.Add(gf);
+                var (phrase, preposition) = SplitPhraseType(unit.PhraseType);
+                if (StructureComposer.Text(b, phrase, source) is { } pt) parts.Add(pt);
+                if (StructureComposer.Text(b, preposition, source) is { } prep) parts.Add(prep);
+                units.Add(StructureComposer.Compose(
+                    b, EntityTypeRegistry.FrameNetValenceUnit, source, parts));
+            }
+            if (units.Count == 0) continue;
+            var patternId = StructureComposer.Compose(
+                b, EntityTypeRegistry.FrameNetValencePattern, source, units).Id;
             b.AddAttestation(NativeAttestation.Categorical(
-                luId, "HAS_VALENCE_PATTERN", patId.Value, source, SourceTrust.AcademicCurated,
-                contextId: frameId, observationCount: pattern.Total));
+                luId, "HAS_VALENCE_PATTERN", patternId, source, SourceTrust.AcademicCurated,
+                observationCount: pattern.Total));
         }
 
         foreach (var sent in lu.Sentences)
@@ -175,22 +179,19 @@ public static class FrameNetLuIngest
         }
     }
 
-    private static string ValencePattern(string gf, string pt, string fe)
+    /// <summary>"PP[in]" is the phrase type PP realized with the preposition "in".</summary>
+    private static (string Phrase, string? Preposition) SplitPhraseType(string pt)
     {
-        gf = gf.Trim();
-        pt = pt.Trim();
-        fe = fe.Trim();
-        if (fe.Length == 0) return "";
-        if (gf.Length == 0 && pt.Length == 0) return fe;
-        if (gf.Length == 0) return $"{pt}/{fe}";
-        if (pt.Length == 0) return $"{gf}/{fe}";
-        return $"{gf}/{pt}/{fe}";
+        int open = pt.IndexOf('[');
+        if (open > 0 && pt.EndsWith(']'))
+            return (pt[..open], pt[(open + 1)..^1]);
+        return (pt, null);
     }
 
     public sealed record LuDocument(
-        int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,
+        int Id, string FrameName, string LuName, string Lemma, string Pos, string Definition,
         long TotalAnnotated,
-        List<ValencePatternCount> ValencePatterns, List<LuSentence> Sentences);
+        List<ValencePattern> ValencePatterns, List<LuSentence> Sentences);
 
     /// <summary>
     /// A valence pattern and the number of annotated instances FrameNet recorded for it.
@@ -201,7 +202,43 @@ public static class FrameNetLuIngest
     /// layout, so a pattern annotated 87 times and one annotated once could enter the fold
     /// at the same strength.
     /// </summary>
-    public readonly record struct ValencePatternCount(string Pattern, long Total);
+    public readonly record struct ValencePattern(IReadOnlyList<ValenceUnit> Units, long Total);
+
+    /// <summary>A frame element as FrameNet realized it: grammatical function and phrase type.</summary>
+    public readonly record struct ValenceUnit(string FrameElement, string GrammaticalFunction, string PhraseType);
+
+    /// <summary>
+    /// The lexical unit named "lemma.pos" in a frame, declared as the ordered composition
+    /// [frame, lemma, UPOS]. Every path that references a lexical unit uses this.
+    /// </summary>
+    /// <summary>The lexical unit's identity without admitting it (same law as Declare).</summary>
+    public static Hash128? LexicalUnitId(string frameName, string luName)
+    {
+        string lemma = FrameNetLemmaHelper.LemmaOf(luName);
+        int dot = luName.LastIndexOf('.');
+        string pos = dot > 0 ? luName[(dot + 1)..].ToLowerInvariant() : "";
+        if (lemma.Length == 0 || pos.Length == 0 || string.IsNullOrWhiteSpace(frameName)) return null;
+        Hash128? frame = ContentEmitter.RootId(frameName.Trim());
+        Hash128? word = ContentEmitter.RootId(lemma.Trim());
+        Hash128? upos = ContentEmitter.RootId(PosReference.ResolveLabel(pos, PosReference.PosTagset.FrameNet));
+        if (frame is null || word is null || upos is null) return null;
+        return StructureComposer.Id([frame.Value, word.Value, upos.Value]);
+    }
+
+    public static Hash128? DeclareLexicalUnit(
+        SubstrateChangeBuilder b, string frameName, string luName, Hash128 source)
+    {
+        string lemma = FrameNetLemmaHelper.LemmaOf(luName);
+        int dot = luName.LastIndexOf('.');
+        string pos = dot > 0 ? luName[(dot + 1)..].ToLowerInvariant() : "";
+        if (lemma.Length == 0 || pos.Length == 0) return null;
+        var frame = StructureComposer.Text(b, frameName, source);
+        var word = StructureComposer.Text(b, lemma, source);
+        var upos = StructureComposer.Text(b,
+            PosReference.ResolveLabel(pos, PosReference.PosTagset.FrameNet), source);
+        if (frame is null || word is null || upos is null) return null;
+        return StructureComposer.Compose(b, LuTypeId, source, [frame.Value, word.Value, upos.Value]).Id;
+    }
 
     public sealed record LuSentence(
         string Text, IReadOnlyList<FrameNetDecomposer.FulltextAnno> Annotations)
