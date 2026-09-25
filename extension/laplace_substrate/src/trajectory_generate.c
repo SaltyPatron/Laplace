@@ -44,6 +44,7 @@ typedef struct EvidenceSummary
     LaplaceQueryChannel positive;
     LaplaceQueryChannel negative;
     int32 positive_covered_occurrences;
+    int32 positive_required_occurrences;
     int32 positive_relation_families;
     int32 negative_covered_occurrences;
     int32 negative_relation_families;
@@ -483,7 +484,8 @@ negative_channel_compare(const LaplaceQueryChannel *a,
  * field; the election tuple itself is identical. */
 static void
 cover_origins(HTAB *coverage, HTAB *origins, const LaplaceQueryChannel *channel,
-              uint8 polarity, int32 *covered)
+              uint8 polarity, int32 *covered, const Bitmapset *required,
+              int32 *required_covered)
 {
     OriginEntry *origin = hash_search(origins, &channel->anchor, HASH_FIND, NULL);
     EvidenceCoverageKey key = {0};
@@ -502,13 +504,16 @@ cover_origins(HTAB *coverage, HTAB *origins, const LaplaceQueryChannel *channel,
             if (*covered == PG_INT32_MAX)
                 elog(ERROR, "forward execution: occurrence coverage overflow");
             ++*covered;
+            if (required_covered && bms_is_member(member, required))
+                ++*required_covered;
         }
     }
 }
 
 static HTAB *
 evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
-                                 bool projection_only, HTAB *origins, MemoryContext owner)
+                                 bool projection_only, HTAB *origins,
+                                 const Bitmapset *required, MemoryContext owner)
 {
     HTAB *summaries = new_id_index(projection_only ? "forward projection evidence" :
                                    "forward query evidence", count, owner,
@@ -568,8 +573,10 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         }
         if (sign > 0.0 && isfinite(sign))
         {
-            cover_origins(coverage, origins, channel, 1,
-                          &entry->summary.positive_covered_occurrences);
+            if (walk_relation_salient(channel->relation))
+                cover_origins(coverage, origins, channel, 1,
+                          &entry->summary.positive_covered_occurrences,
+                          required, &entry->summary.positive_required_occurrences);
 
             MemSet(&relation_key, 0, sizeof(relation_key));
             relation_key.id = channel->candidate;
@@ -593,8 +600,9 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         }
         else if (sign < 0.0 && isfinite(sign))
         {
-            cover_origins(coverage, origins, channel, 2,
-                          &entry->summary.negative_covered_occurrences);
+            if (walk_relation_salient(channel->relation))
+                cover_origins(coverage, origins, channel, 2,
+                          &entry->summary.negative_covered_occurrences, NULL, NULL);
 
             MemSet(&relation_key, 0, sizeof(relation_key));
             relation_key.id = channel->candidate;
@@ -625,11 +633,12 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
 
 static HTAB *
 evidence_summaries(const LaplaceQueryState *state, bool projection_only,
-                   HTAB *origins, MemoryContext owner)
+                   HTAB *origins, const Bitmapset *required, MemoryContext owner)
 {
     int count = 0;
     const LaplaceQueryChannel *channels = laplace_query_state_channels(state, &count);
-    return evidence_summaries_from_channels(channels, count, projection_only, origins, owner);
+    return evidence_summaries_from_channels(channels, count, projection_only, origins,
+                                            required, owner);
 }
 
 static int
@@ -640,6 +649,11 @@ positive_summary_compare(const EvidenceSummary *a, const EvidenceSummary *b)
         return a->has_positive ? 1 : -1;
     if (!a->has_positive)
         return 0;
+    /* The turn's obligations come first: a candidate grounding more of the
+     * occurrences the program must satisfy outranks one that merely covers
+     * more of the observation (whitespace, function words, prior output). */
+    if (a->positive_required_occurrences != b->positive_required_occurrences)
+        return a->positive_required_occurrences > b->positive_required_occurrences ? 1 : -1;
     /* Elect against the joint query before comparing one supporting cell.
      * Previously the cell's endpoint hash could settle the comparison before
      * coverage was even inspected, so one strong isolated edge defeated a
@@ -1512,6 +1526,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     step_context = AllocSetContextCreate(walk_context, "forward query election",
                                          ALLOCSET_DEFAULT_SIZES);
     HTAB *geometry_table = geometry_summaries(intent, walk_context);
+    const Bitmapset *obligations = laplace_cognition_program_required(cognition);
 
     for (int32 step = 1; step <= steps &&
          !(intent && (intent->ambiguous || intent->budget_exhausted ||
@@ -1586,12 +1601,12 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
         /* Q->K proposal is bounded per active occurrence. It may nominate a
          * candidate, but it is not the final evidence field used to elect it. */
-        query_proposals = evidence_summaries(query_state, false, origins, step_context);
+        query_proposals = evidence_summaries(query_state, false, origins, obligations, step_context);
 
         if (input && ((intent && intent->relation_count > 0) ||
                       semantic_hop_limit < 0 || routing_hops < semantic_hop_limit))
         {
-            query_traversal_proposals = evidence_summaries(query_state, true, origins, step_context);
+            query_traversal_proposals = evidence_summaries(query_state, true, origins, obligations, step_context);
             HASH_SEQ_STATUS sequence;
             EvidenceEntry *nomination;
             hash_seq_init(&sequence, query_traversal_proposals);
@@ -1610,7 +1625,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
          * routing budget must still execute the explicitly bound operation. */
         if (output_state)
         {
-            projection_proposals = evidence_summaries(output_state, true, origins, step_context);
+            projection_proposals = evidence_summaries(output_state, true, origins, obligations, step_context);
             HASH_SEQ_STATUS sequence;
             EvidenceEntry *projection;
             hash_seq_init(&sequence, projection_proposals);
@@ -1653,9 +1668,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             laplace_query_state_candidate_evidence(query_state, candidate_ids,
                                                    &query_channel_count, NULL);
         query_evidence_table = evidence_summaries_from_channels(
-            query_channels, query_channel_count, false, origins, step_context);
+            query_channels, query_channel_count, false, origins, obligations, step_context);
         query_traversal_table = evidence_summaries_from_channels(
-            query_channels, query_channel_count, true, origins, step_context);
+            query_channels, query_channel_count, true, origins, obligations, step_context);
 
         /* Eligibility must inspect every exact typed cell. The strongest
          * unrelated relation in the evidence summary cannot hide a supported
@@ -1677,7 +1692,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             projection_channels = laplace_query_state_candidate_evidence(
                 output_state, candidate_ids, &projection_channel_count, NULL);
             projection_table = evidence_summaries_from_channels(
-                projection_channels, projection_channel_count, true, origins, step_context);
+                projection_channels, projection_channel_count, true, origins, obligations, step_context);
         }
         pfree(candidate_ids);
         if (trace)

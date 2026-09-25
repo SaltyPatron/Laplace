@@ -11,8 +11,12 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/core/attestation_engine.h"
+#include "laplace/core/codepoint_table.h"
+#include "laplace/core/tier_tree.h"
 
 #include "cognition_program.h"
+#include "consensus_scan.h"
+#include "spi_common.h"
 #include "prompt_intent.h"
 #include "walk_score.h"
 
@@ -592,6 +596,7 @@ record_semantic_channel(LaplaceCognitionProgram *program,
         return;
 
     if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
+        !walk_relation_salient(channel->relation) ||
         !semantic_channel_traversable(channel) ||
         laplace_prompt_contract_relation(&channel->relation))
         return;
@@ -675,6 +680,100 @@ program_content_origins(const LaplacePromptIntent *intent, int prompt_origin_cou
     return supported && required ? required : NULL;
 }
 
+/*
+ * With no supported parse of the whole observation, each occurrence's own
+ * evidence still separates content coordinates from structure. An occurrence
+ * whose text is all White_Space, or whose strongest witnessed universal part of
+ * speech is a function tag (the complement of the content set above), grounds
+ * nothing by itself. An occurrence with no such evidence stays required:
+ * missing evidence never erases an obligation.
+ */
+typedef struct ObservedUpos
+{
+    hash128_t form;
+    hash128_t upos;
+    __int128 conservative;
+} ObservedUpos;
+
+static void
+receive_observed_upos(const LaplaceConsensusRow *row, void *context)
+{
+    HTAB *best = context;
+    ObservedUpos *entry;
+    bool found;
+    __int128 conservative;
+    if (row->object_is_null || !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+        return;
+    conservative = (__int128) row->rating - 2 * (__int128) row->rd;
+    entry = hash_search(best, &row->subject, HASH_ENTER, &found);
+    if (!found || conservative > entry->conservative ||
+        (conservative == entry->conservative &&
+         memcmp(&row->object, &entry->upos, sizeof(hash128_t)) < 0))
+    {
+        entry->upos = row->object;
+        entry->conservative = conservative;
+    }
+}
+
+static Bitmapset *
+program_observed_content_origins(const LaplacePromptInput *input,
+                                 const Datum *context_values,
+                                 const Datum *node_values,
+                                 int prompt_origin_count,
+                                 const Bitmapset *eligible)
+{
+    const uint32 *text_off = tier_tree_text_off_array(input->tree);
+    const uint32 *text_len = tier_tree_text_len_array(input->tree);
+    size_t text_bytes = 0;
+    const uint8 *text = tier_tree_text(input->tree, &text_bytes);
+    hash128_t has_pos;
+    hash128_t *forms;
+    int form_count = 0;
+    Bitmapset *required = NULL;
+    HASHCTL ctl = {0};
+    HTAB *best;
+    int member = -1;
+
+    if (laplace_relation_type_id("HAS_POS", &has_pos) != 0)
+        return NULL;
+    forms = palloc(sizeof(hash128_t) * Max(prompt_origin_count, 1));
+    while ((member = bms_next_member(eligible, member)) >= 0)
+        forms[form_count++] = datum_to_hash128(context_values[member]);
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(ObservedUpos);
+    ctl.hcxt = CurrentMemoryContext;
+    best = hash_create("observed occurrence parts of speech", Max(form_count, 8), &ctl,
+                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    if (form_count > 0)
+    {
+        ArrayType *subjects = hash128_array_from_ids(forms, form_count);
+        ArrayType *types = hash128_array_from_ids(&has_pos, 1);
+        laplace_consensus_scan(subjects, NULL, types, receive_observed_upos, best, NULL);
+        pfree(subjects);
+        pfree(types);
+    }
+
+    member = -1;
+    while ((member = bms_next_member(eligible, member)) >= 0)
+    {
+        int32 node = DatumGetInt32(node_values[member]);
+        hash128_t form = datum_to_hash128(context_values[member]);
+        ObservedUpos *upos;
+        if (text && text_off && text_len &&
+            (size_t) text_off[node] + text_len[node] <= text_bytes &&
+            text_len[node] > 0 &&
+            laplace_text_is_all_whitespace(text + text_off[node], text_len[node]))
+            continue;
+        upos = hash_search(best, &form, HASH_FIND, NULL);
+        if (upos && !program_content_upos(&upos->upos))
+            continue;
+        required = bms_add_member(required, member);
+    }
+    hash_destroy(best);
+    pfree(forms);
+    return required;
+}
+
 LaplaceCognitionProgram *
 laplace_cognition_program_create(const LaplacePromptInput *input,
                                  int prompt_origin_count,
@@ -736,6 +835,9 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
      * closure is narrowed. Declared operations retain their exact contract. */
     if (operation_count == 0)
         content_required = program_content_origins(intent, prompt_origin_count);
+    if (operation_count == 0 && !content_required && eligible)
+        content_required = program_observed_content_origins(
+            input, context_values, node_values, prompt_origin_count, eligible);
 
     /* An explicit whole-root contract binds exact input occurrences. Lexical
      * naming paths never assign request roles or erase other obligations. */
@@ -983,6 +1085,12 @@ laplace_cognition_program_finalize(LaplaceCognitionProgram *program,
         disposition != LAPLACE_COGNITION_AMBIGUOUS)
         disposition = LAPLACE_COGNITION_EXHAUSTED;
     program->disposition = disposition;
+}
+
+const Bitmapset *
+laplace_cognition_program_required(const LaplaceCognitionProgram *program)
+{
+    return program ? program->required : NULL;
 }
 
 void

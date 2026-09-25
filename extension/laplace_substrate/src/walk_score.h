@@ -33,6 +33,22 @@ walk_relation_rank(hash128_t type_id)
 }
 
 /*
+ * Relation rank is read-time salience. Content relations (associative and
+ * above in relation_types.toml [ranks]) ground a prompt occurrence; lexical
+ * glue, scalar values and standards metadata (HAS_POS, HAS_LANGUAGE, HAS_NAME,
+ * HAS_EXTERNAL_ID...) remain retained evidence but cannot cover or satisfy an
+ * occurrence by themselves. The floor is the default firmware image's value
+ * (spec 39) and the same default converse.respond's traversal envelope uses.
+ */
+#define LAPLACE_DEFAULT_SALIENCE_FLOOR 0.3
+
+static inline bool
+walk_relation_salient(hash128_t type_id)
+{
+    return walk_relation_rank(type_id) >= LAPLACE_DEFAULT_SALIENCE_FLOOR;
+}
+
+/*
  * The signed edge weight is the folded state's Glicko expectation around
  * neutral. RD attenuates uncertain states through g(phi); witness count is
  * already represented by the folded rating/RD and is not applied again.

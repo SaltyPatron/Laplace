@@ -85,6 +85,9 @@ void laplace_cognition_program_finalize(
     LaplaceCognitionProgram *program,
     LaplaceCognitionDisposition disposition);
 
+/* The occurrences this turn must ground before it completes. */
+const Bitmapset *laplace_cognition_program_required(const LaplaceCognitionProgram *program);
+
 void laplace_cognition_program_receipt(
     const LaplaceCognitionProgram *program,
     LaplaceCognitionProgramReceipt *receipt);
