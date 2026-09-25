@@ -565,7 +565,11 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     bool    use_geometry;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("walk_branches: prompt entity must not be NULL")));
+    {
+        /* An unresolved prompt has no start node: abstain with no rows. */
+        InitMaterializedSRF(fcinfo, 0);
+        return (Datum) 0;
+    }
     prompt    = PG_GETARG_BYTEA_PP(0);
     type_null = PG_ARGISNULL(1);
     if (!type_null)
@@ -968,7 +972,11 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
     int     n_seen, seen_cap;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("walk_strongest: prompt entity must not be NULL")));
+    {
+        /* An unresolved prompt has no start node: abstain with no rows. */
+        InitMaterializedSRF(fcinfo, 0);
+        return (Datum) 0;
+    }
     prompt    = PG_GETARG_BYTEA_PP(0);
     type_null = PG_ARGISNULL(1);
     if (!type_null)
