@@ -432,7 +432,7 @@ public sealed partial class NpgsqlSubstrateWriter
         using var preparationDiagnostic = MeasureApplyPhase("native-tuples-and-merge-preparation");
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var copyTransactions = new CopyTransactionCounts();
-        var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
+        var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 3, "entities");
         var ents = CopyTupleParser.ParseEntities(entBlobs);
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
         // 14 since fold_replayable (model transient-fold receipts) — must track
