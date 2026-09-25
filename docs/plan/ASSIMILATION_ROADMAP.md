@@ -47,7 +47,8 @@ The session's work was almost all on the input side: the recipe engine, governed
 14. **Shape narrows what a tensor is; the name is a convention, not a specification.** Operator roles (attention, convolution, MLP, diffusion blocks, embeddings) are recognized structurally. Names, config and weight statistics are further evidence.
 15. **What is ingested can be exported (Mold-a-Model, spec 12).** Export is a recipe over current standing, geometry and selected operators: a filtered snapshot ("I know kung fu"), not a copy of an ingested checkpoint and not bit-perfect reconstruction (`INVENTION.md` §15; AGENTS.md). A pooled construction is one consensus program over every witness. It is not a tensor merge and not N answers judged by an N+1th (spec 12, round-table law). An export is validated by loading in an external runtime and passing held-out semantic and source-ablation tests (spec 09), not by comparing it with the ingested checkpoint.
 16. **A leaf spring is not a watch (inventor).** Remove any component of a watch and it stops working, and Laplace is no different. Identity, physicality and trajectory, witnessed bindings, governed vocabularies, typed standing, the forward program, realization, native execution and export work only together. A component's own measure (claim counts, a passing primitive, a green seed) is not progress on the machine. Substituting a conventional part for a component breaks the whole. Work is accepted as vertical slices through every component, read live.
-17. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
+17. **Personality firmware operates the tool; it is not the knowledge (inventor).** Laplace's world is a tool, like knowing that guns exist. Knowing that does not decide what anyone does with it. The inventor maps the individual steps of a conventional GPT to semantic instruction sets: the operation ISA (spec 37) and the forward program (spec 36), with the transformer-slot map as the correspondence. Personality firmware is the program over those instructions that decides observation, orientation, decision, action and generation. The Gödel engine is its OODA loop, and its own outputs are witnessed back as inputs (archived spec 15: "evaluation IS ingestion"). The same world under different firmware behaves differently. Firmware never edits the knowledge, and the knowledge never dictates the firmware. This matches knowledge/authority/compute separation and governance without epistemic erasure (CAPABILITIES.md; INVENTION.md §16).
+18. **Look at the forest.** Every defect is a system-wide pattern to fix across the substrate, decomposers and read path. Code comments or issue claims that conflict with the invention's logic are drift.
 
 ---
 
@@ -235,6 +236,25 @@ Issue: #1723
 - **Entity OR-masks (the POS mask and its sisters) are not built.**
 - **Qualifiers never reach consensus** (see B).
 - Related: #1133, #1712.
+
+### K. Personality firmware and the Gödel engine
+
+Issue: #1726
+
+- **Documented today:**
+  - the OODA loop and self-witnessing (archived spec 15);
+  - the ISA-as-processor framing (#823);
+  - the opcodes (spec 37) and the forward program (spec 36);
+  - "governance/firmware" as one term of the effective mind (CAPABILITIES.md);
+  - game firmware as rules over the same world (`docs/guides/knowledge-arena.md`).
+- **Not documented:**
+  - personality firmware as a named, content-addressed program over the ISA;
+  - which forward-program stages it parameterizes (ORIENT goals, ROUTE, STEER and SELECT policy, REALIZE voice and abstention);
+  - how firmware identity appears in every trace and receipt;
+  - how firmware is witnessed and rated like any other source, so outcomes feed back through the Gödel loop.
+- **Work:** a binding spec for personality firmware, written from the inventor's description, then implementation over the consolidated ISA (#951).
+
+Related: #823, #951, #1420, #1708.
 
 ### J. Process
 
