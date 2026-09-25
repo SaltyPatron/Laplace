@@ -41,13 +41,22 @@ BEGIN ATOMIC
     -- common-subexpression-eliminate independent scalar subqueries in one
     -- targetlist, so deriving `ok` from the scanned columns (not re-invoking
     -- the scans inside the boolean) halves the entities passes per call.
+    -- Every whole-corpus scan is deep-only: the default path reads leaf-partition
+    -- estimates and point lookups, so health stays cheap while an ingest grows the
+    -- tables. Unmeasured metrics are NULL, never 0.
     WITH scans AS (
         SELECT
-            laplace.fake_tier_band_count() AS fake_tier_bands,
+            CASE WHEN p_deep THEN laplace.fake_tier_band_count() END AS fake_tier_bands,
             CASE WHEN p_deep
                  THEN (SELECT count(*) FROM laplace.identity_law_violations())
             END AS identity_violations,
-            (SELECT count(*) FROM laplace.entities) AS entities,
+            CASE WHEN p_deep
+                 THEN (SELECT count(*) FROM laplace.entities)
+                 ELSE (SELECT COALESCE(sum(GREATEST(c.reltuples, 0)::bigint), 0)::bigint
+                       FROM pg_partition_tree('laplace.entities'::regclass) t
+                       JOIN pg_class c ON c.oid = t.relid
+                       WHERE t.isleaf)
+            END AS entities,
             -- The Tier-0 surface is admitted content: a codepoint entity has a
             -- physicality. Without it nothing composes and no read can answer.
             EXISTS (
@@ -60,10 +69,9 @@ BEGIN ATOMIC
         -- A NULL identity_violations must never read as "clean": IS NOT DISTINCT FROM 0
         -- would do exactly that. Unchecked contributes nothing to ok, and deep_checked
         -- tells the caller the verdict is partial.
-        (s.fake_tier_bands = 0
-         AND s.surface_present
+        (s.surface_present
          AND s.registry_relations > 0
-         AND (NOT p_deep OR s.identity_violations = 0)) AS ok,
+         AND (NOT p_deep OR (s.fake_tier_bands = 0 AND s.identity_violations = 0))) AS ok,
         s.fake_tier_bands,
         s.identity_violations,
         s.entities,
