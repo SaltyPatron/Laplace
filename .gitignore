@@ -408,6 +408,7 @@ venv/
 /engine/core/src/generated/deprel_law.c
 /engine/core/src/generated/qualifier_law.c
 /engine/core/src/generated/trust_class_law.c
+/engine/core/src/generated/firmware_law.c
 /engine/core/src/generated/entity_type_law.c
 /engine/core/src/generated/.attestation-law-stamp
 /engine/core/include/laplace/core/relation_law.h
@@ -416,6 +417,7 @@ venv/
 /engine/core/include/laplace/core/deprel_law.h
 /engine/core/include/laplace/core/qualifier_law.h
 /engine/core/include/laplace/core/trust_class_law.h
+/engine/core/include/laplace/core/firmware_law.h
 /engine/core/include/laplace/core/entity_type_law.h
 /engine/core/include/laplace/core/highway_manifest.h
 

@@ -60,10 +60,11 @@ BEGIN
         out := converse.answer(p_prompt, p_lang);
         IF COALESCE(btrim(out), '') = '' THEN
             SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
-            FROM converse.forward_turn(
-                p_prompt, p_session, 128, 5, 0.6, 10,
-                NULL::bigint,
-                2, 8) g;
+            FROM converse.firmware() f,
+                 converse.forward_turn(
+                     p_prompt, p_session, f.steps, f.max_stride, f.spread, f.top_k,
+                     NULL::bigint,
+                     f.semantic_hops, f.fanout) g;
         END IF;
     ELSE
 

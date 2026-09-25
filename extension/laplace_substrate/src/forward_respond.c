@@ -38,6 +38,7 @@
 #include "laplace/core/relation_law.h"
 #include "consensus_neighbors.h"
 #include "spi_common.h"
+#include "laplace/core/firmware_law.h"
 #include "cognition_program.h"
 #include "consensus_scan.h"
 #include "walk_score.h"
@@ -45,6 +46,7 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_forward_respond);
 PG_FUNCTION_INFO_V1(pg_laplace_content_terms);
+PG_FUNCTION_INFO_V1(pg_laplace_firmware);
 
 #define RESPOND_MAX_TERMS 32
 #define RESPOND_MAX_HOPS 4
@@ -153,8 +155,8 @@ relation_salience(const hash128_t *type)
 /* Meeting specificity: how many cells name the candidate as their object, read
  * with a bound. A hub every entry is an instance of ("Concept") is shared by
  * everything; an answer such as Paris is shared by few. Ordering only. */
-#define RESPOND_SHARING_WINDOW 64
-#define RESPOND_SHARING_CAP 4096
+#define RESPOND_SHARING_WINDOW (laplace_firmware_default()->sharing_window)
+#define RESPOND_SHARING_CAP (laplace_firmware_default()->sharing_cap)
 
 typedef struct
 {
@@ -206,11 +208,12 @@ id_array(hash128_t *ids, int n)
 Datum
 pg_laplace_forward_respond(PG_FUNCTION_ARGS)
 {
-    int hops = PG_ARGISNULL(1) ? 2 : PG_GETARG_INT32(1);
-    int fanout = PG_ARGISNULL(2) ? 256 : PG_GETARG_INT32(2);
-    int frontier_cap = PG_ARGISNULL(3) ? 4096 : PG_GETARG_INT32(3);
+    const laplace_firmware_image_t *firmware = laplace_firmware_default();
+    int hops = PG_ARGISNULL(1) ? firmware->meeting_hops : PG_GETARG_INT32(1);
+    int fanout = PG_ARGISNULL(2) ? firmware->meeting_fanout : PG_GETARG_INT32(2);
+    int frontier_cap = PG_ARGISNULL(3) ? firmware->meeting_frontier : PG_GETARG_INT32(3);
     int limit = PG_ARGISNULL(4) ? 24 : PG_GETARG_INT32(4);
-    double min_salience = PG_ARGISNULL(5) ? 0.3 : PG_GETARG_FLOAT8(5);
+    double min_salience = PG_ARGISNULL(5) ? firmware->salience_floor : PG_GETARG_FLOAT8(5);
     Datum *term_datums;
     bool *term_nulls;
     int n_in, n_terms = 0, n_frontier = 0;
@@ -675,4 +678,39 @@ pg_laplace_content_terms(PG_FUNCTION_ARGS)
     if (!out)
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(BYTEAOID));
     PG_RETURN_DATUM(makeArrayResult(out, CurrentMemoryContext));
+}
+
+/* converse.firmware(name): a governed firmware image's policy and content id, so SQL
+ * orchestration passes the image's values instead of literals. NULL name = default. */
+Datum
+pg_laplace_firmware(PG_FUNCTION_ARGS)
+{
+    const laplace_firmware_image_t *image = PG_ARGISNULL(0)
+        ? laplace_firmware_default()
+        : laplace_firmware_lookup(text_to_cstring(PG_GETARG_TEXT_PP(0)));
+    TupleDesc desc;
+    Datum values[15];
+    bool nulls[15] = {false};
+    hash128_t id;
+    if (!image)
+        ereport(ERROR, (errmsg("firmware: no governed image of that name")));
+    if (get_call_result_type(fcinfo, NULL, &desc) != TYPEFUNC_COMPOSITE)
+        elog(ERROR, "firmware: composite result required");
+    laplace_firmware_id(image, &id);
+    values[0] = hash128_to_datum(&id);
+    values[1] = CStringGetTextDatum(image->name);
+    values[2] = Float8GetDatum(image->salience_floor);
+    values[3] = Int32GetDatum(image->semantic_hops);
+    values[4] = Int32GetDatum(image->fanout);
+    values[5] = Int32GetDatum(image->meeting_hops);
+    values[6] = Int32GetDatum(image->meeting_fanout);
+    values[7] = Int32GetDatum(image->meeting_frontier);
+    values[8] = Int32GetDatum(image->sharing_window);
+    values[9] = Int32GetDatum(image->sharing_cap);
+    values[10] = Float8GetDatum(image->spread);
+    values[11] = Int32GetDatum(image->top_k);
+    values[12] = Int32GetDatum(image->steps);
+    values[13] = Int32GetDatum(image->max_stride);
+    values[14] = Int32GetDatum((int32) image->version);
+    PG_RETURN_DATUM(HeapTupleGetDatum(heap_form_tuple(BlessTupleDesc(desc), values, nulls)));
 }

@@ -1412,6 +1412,87 @@ def emit_qualifier_law(path: Path) -> None:
     _write_text_if_changed(OUT_CORE / "src/generated/qualifier_law.c", "\n".join(lines) + "\n")
 
 
+FIRMWARE_FIELDS = [
+    ("salience_floor", "double"), ("semantic_hops", "int"), ("fanout", "int"),
+    ("meeting_hops", "int"), ("meeting_fanout", "int"), ("meeting_frontier", "int"),
+    ("sharing_window", "int"), ("sharing_cap", "int"), ("spread", "double"),
+    ("top_k", "int"), ("steps", "int"), ("max_stride", "int"),
+]
+
+
+def emit_firmware_law(path: Path) -> None:
+    """Personality firmware images (engine/manifest/firmware.toml, spec 39). An image's id
+    is the content id of its canonical serialization, so a changed value is a different
+    firmware. The forward program and the joint meeting read their policy from an image."""
+    body = path.read_text(encoding="utf-8")
+    images = []
+    for block in body.split("[[image]]")[1:]:
+        def field(key, pattern=r'"([^"]+)"'):
+            m = re.search(rf"^{key}\s*=\s*{pattern}\s*$", block, re.M)
+            if not m:
+                raise SystemExit(f"firmware.toml: image is missing {key}")
+            return m.group(1)
+        name, klass, version = field("name"), field("class"), int(field("version", r"([0-9]+)"))
+        values = {}
+        for key, kind in FIRMWARE_FIELDS:
+            raw = field(key, r"([0-9.]+)")
+            values[key] = float(raw) if kind == "double" else int(raw)
+            if values[key] < 0:
+                raise SystemExit(f"firmware.toml: {name}.{key} is negative")
+        canonical = ";".join([f"name={name}", f"class={klass}", f"version={version}"] +
+                             [f"{k}={values[k]!r}" for k, _ in FIRMWARE_FIELDS])
+        images.append((name, klass, version, values, canonical))
+    names = [i[0] for i in images]
+    if "default" not in names or len(names) != len(set(names)):
+        raise SystemExit("firmware.toml must declare each image once, including default")
+    members = "\n".join(f"    {'double' if kind == 'double' else 'int32_t'} {key};"
+                         for key, kind in FIRMWARE_FIELDS)
+    _write_text_if_changed(OUT_CORE / "include/laplace/core/firmware_law.h",
+        "#pragma once\n\n#include <stddef.h>\n#include <stdint.h>\n\n"
+        '#include "laplace/core/hash128.h"\n\n'
+        "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+        "/* A personality firmware image (spec 39): cognition policy, never knowledge. */\n"
+        "typedef struct laplace_firmware_image {\n"
+        "    const char* name;\n    const char* image_class;\n    uint32_t version;\n"
+        f"{members}\n"
+        "    const char* canonical;   /* the serialization its id is the content id of */\n"
+        "} laplace_firmware_image_t;\n\n"
+        "extern const laplace_firmware_image_t laplace_firmware_images[];\n"
+        "extern const size_t laplace_firmware_image_count;\n\n"
+        "/* The named default image; never NULL. */\n"
+        "const laplace_firmware_image_t* laplace_firmware_default(void);\n"
+        "/* The governed image of that name, or NULL. */\n"
+        "const laplace_firmware_image_t* laplace_firmware_lookup(const char* name);\n"
+        "/* 0 with *out set to the image's content id. */\n"
+        "int laplace_firmware_id(const laplace_firmware_image_t* image, hash128_t* out);\n\n"
+        "#ifdef __cplusplus\n}\n#endif\n")
+    lines = ['#include "laplace/core/firmware_law.h"', "", "#include <string.h>", "",
+             "const laplace_firmware_image_t laplace_firmware_images[] = {"]
+    for name, klass, version, values, canonical in images:
+        vals = ", ".join(repr(values[k]) for k, _ in FIRMWARE_FIELDS)
+        lines.append(f'    {{"{name}", "{klass}", {version}u, {vals}, "{canonical}"}},')
+    lines += ["};",
+              f"const size_t laplace_firmware_image_count = {len(images)};",
+              "",
+              "const laplace_firmware_image_t* laplace_firmware_lookup(const char* name) {",
+              "    if (!name) return NULL;",
+              "    for (size_t i = 0; i < laplace_firmware_image_count; ++i)",
+              "        if (strcmp(laplace_firmware_images[i].name, name) == 0) return &laplace_firmware_images[i];",
+              "    return NULL;",
+              "}",
+              "",
+              "const laplace_firmware_image_t* laplace_firmware_default(void) {",
+              '    return laplace_firmware_lookup("default");',
+              "}",
+              "",
+              "int laplace_firmware_id(const laplace_firmware_image_t* image, hash128_t* out) {",
+              "    if (!image || !out) return -1;",
+              "    return hash128_label_content_id(image->canonical, strlen(image->canonical), out);",
+              "}",
+              ""]
+    _write_text_if_changed(OUT_CORE / "src/generated/firmware_law.c", "\n".join(lines))
+
+
 def emit_trust_class_law(path: Path) -> None:
     """Governed witness trust classes (engine/manifest/trust_classes.toml): a class's id is
     the content id of its single-word label; its prior in [0,1] seeds the standing of
@@ -1570,6 +1651,7 @@ def main() -> int:
     emit_deprel_law(MANIFEST / "deprels.toml")
     emit_qualifier_law(MANIFEST / "qualifiers.toml")
     emit_trust_class_law(MANIFEST / "trust_classes.toml")
+    emit_firmware_law(MANIFEST / "firmware.toml")
     emit_highway_perfcache(rel, bin_out_dir)
     if CHECK_MODE:
         if DRIFT:

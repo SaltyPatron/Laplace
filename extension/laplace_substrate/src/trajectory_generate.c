@@ -961,8 +961,8 @@ geometry_summary_present(const GeometrySummary *summary)
  * SHARING_CAP per cell; it orders, it is never fused into a score. The window
  * and cap are the default firmware image's values (spec 39).
  */
-#define SHARING_WINDOW 32
-#define SHARING_CAP 4096
+#define SHARING_WINDOW (laplace_firmware_default()->sharing_window)
+#define SHARING_CAP (laplace_firmware_default()->sharing_cap)
 
 typedef struct SharingKey
 {

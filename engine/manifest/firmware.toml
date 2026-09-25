@@ -1,0 +1,32 @@
+# Personality firmware images (docs/specs/39_Personality_Firmware.md).
+#
+# An image is an immutable cognition policy over the ISA: which trajectories receive
+# computation (ROUTE), how the field is steered and a constituent selected (STEER,
+# SELECT), and how much is realized (REALIZE). It never changes knowledge, truth or
+# standing; relation rank and the standing law are not firmware.
+#
+# An image's id is the content id of its canonical serialization (codegen
+# firmware_law): changing any value is a different firmware, never an edit in place.
+# `default` is today's behaviour, named as the first image.
+
+[[image]]
+name = "default"
+class = "personality"
+version = 1
+# ROUTE: relations below this rank tier are filters, not strands (associative is
+# the lowest content tier, 0.36; lexical glue 0.18 and standards metadata 0.08 fall below).
+salience_floor = 0.3
+semantic_hops = 2
+fanout = 8
+meeting_hops = 2
+meeting_fanout = 256
+meeting_frontier = 4096
+# STEER: among equally grounded candidates, the least shared meeting first.
+sharing_window = 32
+sharing_cap = 4096
+# SELECT: spread over the top_k ordinal election positions (0 selects the first).
+spread = 0.6
+top_k = 10
+# REALIZE: steps and ordinal continuation stride of an open walk.
+steps = 128
+max_stride = 5

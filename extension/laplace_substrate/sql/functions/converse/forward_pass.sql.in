@@ -217,6 +217,16 @@ BEGIN ATOMIC
     ORDER BY (cd.rating - 2 * cd.rd) DESC, d.key, d.target;
 END;
 
+-- converse.firmware(name): a governed personality firmware image (spec 39) with its
+-- content id. SQL orchestration reads policy from here, never from literals.
+CREATE OR REPLACE FUNCTION converse.firmware(p_name text DEFAULT NULL,
+    OUT firmware_id bytea, OUT name text, OUT salience_floor float8,
+    OUT semantic_hops int, OUT fanout int, OUT meeting_hops int, OUT meeting_fanout int,
+    OUT meeting_frontier int, OUT sharing_window int, OUT sharing_cap int,
+    OUT spread float8, OUT top_k int, OUT steps int, OUT max_stride int, OUT version int)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_firmware'
+    LANGUAGE C IMMUTABLE PARALLEL SAFE;
+
 -- converse.content_terms(words): the words of an observation that bind to a key and
 -- whose strongest witnessed universal part of speech is a content tag.
 CREATE OR REPLACE FUNCTION converse.content_terms(p_words bytea[])
@@ -236,7 +246,9 @@ BEGIN ATOMIC
         FROM converse.prompt_words(p_prompt) w
     ), met AS MATERIALIZED (
         SELECT r.candidate
-        FROM terms t, converse.respond(t.ids, 2, 256, 4096, 1) r
+        FROM terms t, converse.firmware() f,
+             converse.respond(t.ids, f.meeting_hops, f.meeting_fanout, f.meeting_frontier, 1,
+                              f.salience_floor) r
         WHERE cardinality(t.ids) > 0
         LIMIT 1
     )

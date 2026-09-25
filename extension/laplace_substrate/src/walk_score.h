@@ -21,6 +21,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/core/glicko2.h"
+#include "laplace/core/firmware_law.h"
 
 static inline double
 walk_relation_rank(hash128_t type_id)
@@ -37,15 +38,13 @@ walk_relation_rank(hash128_t type_id)
  * above in relation_types.toml [ranks]) ground a prompt occurrence; lexical
  * glue, scalar values and standards metadata (HAS_POS, HAS_LANGUAGE, HAS_NAME,
  * HAS_EXTERNAL_ID...) remain retained evidence but cannot cover or satisfy an
- * occurrence by themselves. The floor is the default firmware image's value
- * (spec 39) and the same default converse.respond's traversal envelope uses.
+ * occurrence by themselves. The floor is the firmware image's ROUTE policy
+ * (engine/manifest/firmware.toml, spec 39).
  */
-#define LAPLACE_DEFAULT_SALIENCE_FLOOR 0.3
-
 static inline bool
 walk_relation_salient(hash128_t type_id)
 {
-    return walk_relation_rank(type_id) >= LAPLACE_DEFAULT_SALIENCE_FLOOR;
+    return walk_relation_rank(type_id) >= laplace_firmware_default()->salience_floor;
 }
 
 /*

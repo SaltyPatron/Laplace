@@ -54,6 +54,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/deprel_law.h
     include/laplace/core/qualifier_law.h
     include/laplace/core/trust_class_law.h
+    include/laplace/core/firmware_law.h
     include/laplace/core/highway_manifest.h
     include/laplace/core/highway_table.h
     include/laplace/core/attestation_engine.h
@@ -123,6 +124,7 @@ set(LAPLACE_CORE_SOURCES
     src/generated/deprel_law.c
     src/generated/qualifier_law.c
     src/generated/trust_class_law.c
+    src/generated/firmware_law.c
     src/highway_table.c
     src/attestation_engine.c
     src/source_reduce.cpp
@@ -145,6 +147,7 @@ set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/deprel_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/qualifier_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/trust_class_law.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/firmware_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/highway_manifest.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/relation_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/pos_law.c
@@ -153,6 +156,7 @@ set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/deprel_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/qualifier_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/trust_class_law.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/firmware_law.c
     ${LAPLACE_HIGHWAY_BIN}
 )
 # The generated source/SQL files are also configure inputs. Making one of those
@@ -173,7 +177,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_laplace_codegen_root}/engine/manifest/languages.tsv"
     "${_laplace_codegen_root}/engine/manifest/deprels.toml"
     "${_laplace_codegen_root}/engine/manifest/qualifiers.toml"
-    "${_laplace_codegen_root}/engine/manifest/trust_classes.toml")
+    "${_laplace_codegen_root}/engine/manifest/trust_classes.toml"
+    "${_laplace_codegen_root}/engine/manifest/firmware.toml")
 execute_process(
     COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${LAPLACE_CODEGEN_SCRIPT}"
             "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
@@ -198,6 +203,7 @@ add_custom_command(
             ${_laplace_codegen_root}/engine/manifest/deprels.toml
             ${_laplace_codegen_root}/engine/manifest/qualifiers.toml
             ${_laplace_codegen_root}/engine/manifest/trust_classes.toml
+            ${_laplace_codegen_root}/engine/manifest/firmware.toml
     COMMENT "Codegen attestation law + highway perfcache from manifest TOML"
     VERBATIM
 )
