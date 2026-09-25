@@ -14,7 +14,7 @@ The inventor's image is the Construct in *The Matrix*: Laplace assimilates the k
 
 ## 0. Where things stand
 
-The inventor describes the work as reinventing the generative pre-trained transformer. The invention does not rebuild a transformer. It obtains what conventional models buy with dense parameter computation from explicit reusable structure, sparse indexed response, uncertainty-bearing evidence and native execution (`INVENTION.md` §20: "The claim is not 'a faster transformer'").
+Laplace is a complete reinvention of the transformer as a SQL-executed architecture over a universal persistent substrate (Laplace-Refactor `docs/product/CONSTITUTION.md` §1, written from the inventor's direct requirements). It is not a faster transformer and does not replay transformer math. It obtains what conventional models buy with dense parameter computation from explicit reusable structure, sparse indexed response, uncertainty-bearing evidence and native execution (`INVENTION.md` §8 and §20).
 
 The Laplace forward pass is the program `RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE → PROPOSE → STEER → SELECT → REALIZE → WITNESS` (spec 36, spec 37). The transformer roles correspond only functionally (`INVENTION.md` §8, INVENTIONS #71):
 
@@ -252,7 +252,19 @@ Issue: #1726
   - which forward-program stages it parameterizes (ORIENT goals, ROUTE, STEER and SELECT policy, REALIZE voice and abstention);
   - how firmware identity appears in every trace and receipt;
   - how firmware is witnessed and rated like any other source, so outcomes feed back through the Gödel loop.
-- **Work:** a binding spec for personality firmware, written from the inventor's description, then implementation over the consolidated ISA (#951).
+- **Already specified in Laplace-Refactor** (written from the inventor's direct requirements; this repository's AGENTS.md treats that repository as separate, so these are references to reconcile, not imports):
+  - `docs/product/CONSTITUTION.md` §1. Personality Firmware is versioned executable cognition policy over the shared machine. It is not a tone prompt and not another knowledge universe. It cannot acquire authority, change truth or bypass an effect envelope.
+  - `docs/product/INVENTION_MODEL.md` §12, Firmware. Firmware controls:
+    - which trajectories receive computation;
+    - how evidence is valued;
+    - how aggressively gaps are explored and contradictions sought;
+    - when uncertainty is sufficient;
+    - how results are expressed.
+
+    Personality is one class of firmware behavior. Every decision rule, parameter, tie break and trace is content-addressed and replayable. Coding firmware is a complete engineering procedure.
+  - `docs/reconstruction/07_EXECUTION_CONTROL_GODEL_OODA.md`. These stay separate concerns: operation, program/recipe, orchestration, OODA (observe → orient → decide → act → observe consequence), typed feedback lanes, and Gödel extension. Gödel extension is typed incompleteness proposing a candidate calculus, program or operator, activated only on disjoint evidence.
+  - `contracts/authority-stack.json`: `personality_firmware`, `governance_boundary`, `knowledge_boundary`, `creative_extension`. It also states that prompts, internal cognition and generated output create observation state but no semantic attestations merely by being observed. That conflicts with this repository's archived spec 15, where responses self-witness; reconcile.
+- **Work:** reconcile those documents into this repository's binding specs, then implement firmware as content-addressed data the forward program loads, over the consolidated ISA (#951).
 
 Related: #823, #951, #1420, #1708.
 
