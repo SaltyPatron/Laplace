@@ -102,6 +102,13 @@ chess_openings_path() {
   printf '%s\n' "$chess_root/lichess-openings"
 }
 
+# A down server (an installed native module that no longer loads) is repaired by
+# installing the new artifacts and restarting it; pre-install probes must not
+# refuse that delivery.
+postgres_accepting() {
+  pg_isready -q ${PGHOST:+-h "$PGHOST"} >/dev/null 2>&1
+}
+
 preloaded_so_digest() {
   local library
   for library in \
@@ -118,6 +125,11 @@ preloaded_so_digest() {
 ensure_extension_library_path() {
   local current desired desired_sql part reloaded
   local -a current_parts desired_parts
+  if ! postgres_accepting; then
+    LAPLACE_LIBRARY_PATH_DEFERRED=1
+    echo "::notice::PostgreSQL is down; dynamic_library_path is reconciled after the install restarts it"
+    return 1
+  fi
   current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path") || return 2
   [[ -n "$current" ]] || return 2
   desired_parts=("$LAPLACE_EXT_LIBDIR" '$libdir')
@@ -139,6 +151,10 @@ ensure_extension_library_path() {
 
 postgresql_restart_required() {
   local running rc
+  if ! postgres_accepting; then
+    echo "::notice::PostgreSQL is not accepting connections; the install restarts it"
+    return 0
+  fi
   running=$(psql -d postgres -U laplace_admin -tAc "SHOW server_version_num") || return 2
   if "$PYTHON" "$ROOT/scripts/postgresql-release.py" restart-needed \
        --prefix "$LAPLACE_PG_PREFIX" --server-version-num "$running"; then
@@ -187,6 +203,10 @@ restart_postgres() {
 
 preloaded_native_restart_required() {
   local observation rc
+  if ! postgres_accepting; then
+    echo "::notice::PostgreSQL is not accepting connections; the install restarts it"
+    return 0
+  fi
   mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
   observation=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/postgres-preload.XXXXXX")
   if ! psql -d postgres -U laplace_admin -qtAX -v ON_ERROR_STOP=1 -c \
@@ -705,12 +725,21 @@ phase_install() (
   postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" == 1 ]]; then
     local preload
-    preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
-    if [[ ",${preload// /}," == *",laplace_substrate,"* || ",${preload// /}," == *",laplace_geom,"* ]]; then
+    if postgres_accepting; then
+      preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
+      if [[ ",${preload// /}," == *",laplace_substrate,"* || ",${preload// /}," == *",laplace_geom,"* ]]; then
+        postgres_activation_required=1
+      fi
+    else
       postgres_activation_required=1
     fi
   fi
   phase_activate_postgres "$postgres_activation_required"
+  if [[ "${LAPLACE_LIBRARY_PATH_DEFERRED:-0}" == 1 ]]; then
+    local path_rc=0
+    ensure_extension_library_path || path_rc=$?
+    [[ "$path_rc" != 2 ]] || { echo "::error::dynamic_library_path reconciliation failed after restart" >&2; exit 2; }
+  fi
   if [[ "$api_was_active" == 1 ]]; then sudo -n systemctl start laplace-api; api_was_active=0; fi
   rm -rf "$install_stage"
   trap - EXIT

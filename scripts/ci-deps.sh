@@ -47,9 +47,16 @@ for flag in --with-lz4 --with-zstd --with-liburing; do
   [[ "$cfg" == *"$flag"* ]] || { echo "::error::PostgreSQL missing required $flag" >&2; exit 1; }
 done
 
-peer=$("$PG_PREFIX/bin/psql" -X -w -h /var/run/postgresql -U laplace_admin -d postgres -tAc \
-  "SELECT current_user || ' on ' || current_database();")
-[[ "$peer" == "laplace_admin on postgres" ]] || { echo "::error::PostgreSQL peer auth failed: $peer" >&2; exit 1; }
+# A server that is down (for example because an installed native module no longer
+# loads) is repaired by the delivery that installs the fixed module and restarts it;
+# the dependency check must not block that delivery. Peer auth is proven when it runs.
+if "$PG_PREFIX/bin/pg_isready" -q -h /var/run/postgresql; then
+  peer=$("$PG_PREFIX/bin/psql" -X -w -h /var/run/postgresql -U laplace_admin -d postgres -tAc \
+    "SELECT current_user || ' on ' || current_database();")
+  [[ "$peer" == "laplace_admin on postgres" ]] || { echo "::error::PostgreSQL peer auth failed: $peer" >&2; exit 1; }
+else
+  echo "::warning::PostgreSQL is not accepting connections; delivery installs the native artifacts and restarts it"
+fi
 
 ucd_root="${LAPLACE_UCD_PATH:-${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest}"
 ucd="$ucd_root/ucdxml/ucd.all.grouped.zip"
