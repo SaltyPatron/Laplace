@@ -327,7 +327,6 @@ functions/consensus/entity_exists.sql.in
 functions/realize/realize_synset_lemma.sql.in
 functions/realize/realize_translation.sql.in
 functions/realize/realize_has_name.sql.in
-functions/realize/realize_canonical.sql.in
 functions/realize/realize_defines.sql.in
 functions/realize/resolve_name.sql.in
 functions/readback/render.sql.in
@@ -341,6 +340,7 @@ inference/translate_to.sql.in
 inference/language_coverage.sql.in
 inference/attention.sql.in
 functions/realize/realize.sql.in
+functions/realize/realize_canonical.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/edges.sql.in
 functions/consensus/related.sql.in

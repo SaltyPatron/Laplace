@@ -37,6 +37,5 @@ BEGIN ATOMIC
         NULLIF(realize.render_text(p_id), ''),
         realize.resolve_name(p_id, p_lang),
         realize._translation(p_id, p_lang),
-        realize._canonical(p_id),
         realize._defines(p_id));
 END;

@@ -16,7 +16,8 @@ BEGIN ATOMIC
     )
     SELECT a.id, a.roles, a.refs
     FROM agg a
-    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
+    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.relation_registry() r WHERE r.type_id = a.id)
+      AND NOT EXISTS (SELECT 1 FROM @extschema@.entity_type_registry() t WHERE t.type_id = a.id)
       AND realize.codepoint_for_id(a.id) IS NULL
       AND NOT EXISTS (SELECT 1 FROM @extschema@.v_word_points w
                       WHERE w.id = a.id AND w.trajectory IS NOT NULL)
