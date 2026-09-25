@@ -802,6 +802,26 @@ symmetry = "asymmetric"
 parent = null
 family_root = "IS_LEXICALIZED"
 
+# One relation per meaning; which case and whether simple/full are the claim's
+# qualifiers (qualifiers.toml family "mapping"), not separate relations.
+[[relation]]
+canonical = "HAS_CASE_MAPPING"
+bit = 226
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CASE_MAPPING"
+
+# A character's decomposition; the UCD decomposition type (canonical, compat, font,
+# ...) is the claim's qualifier (family "decomposition").
+[[relation]]
+canonical = "DECOMPOSES_TO"
+bit = 227
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "DECOMPOSES_TO"
+
 [[relation]]
 canonical = "HAS_UPPERCASE_MAPPING"
 bit = 124

@@ -1,0 +1,41 @@
+# Governed claim qualifiers: multi-select flags carried on an attestation's 256-bit mask
+# (the sister of the entity highway mask). One relation per meaning; the qualifiers say
+# which variant(s) the source asserts: "eng HAS_EXTERNAL_ID eng {iso639-2b, iso639-2t,
+# iso639-3}" is one claim, not three relations. Each family owns 32 bits from its base;
+# values are append-only within a family (a value's bit never changes meaning).
+
+[[family]]
+name = "identifier"
+base = 0
+values = ["iso639-1", "iso639-2b", "iso639-2t", "iso639-3", "bcp47", "ili",
+          "pwn30-offset", "pwn31-offset", "wordnet-sense-key", "wordnet-synset-key"]
+
+[[family]]
+name = "name"
+base = 32
+values = ["primary", "alias", "reference", "print", "inverted", "abbreviation",
+          "correction", "control", "alternate", "figment", "unicode-1"]
+
+[[family]]
+name = "mapping"
+base = 64
+values = ["lower", "upper", "title", "fold", "simple", "full", "nfkc"]
+
+[[family]]
+name = "decomposition"
+base = 96
+values = ["can", "com", "enc", "fin", "font", "fra", "init", "iso", "med", "nar", "nb",
+          "sml", "sqr", "sub", "sup", "vert", "wide"]
+
+# ISO 639-3 retirement reasons (code table documentation: C change, D duplicate,
+# N non-existent, S split, M merge) and macrolanguage membership status (A active,
+# R retired). Recipes map the source codes to these names through value aliases.
+[[family]]
+name = "retirement"
+base = 128
+values = ["change", "duplicate", "non-existent", "split", "merge"]
+
+[[family]]
+name = "membership"
+base = 160
+values = ["active", "retired"]

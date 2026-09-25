@@ -47,6 +47,7 @@ struct recipe_delimited_config {
     std::string range_column, range_separator, range_first_field, range_last_field;
     bool trim_fields = true;
     uint32_t minimum_columns = 0; // Zero requires the complete data-column schema.
+    uint32_t header_lines = 0;    // leading lines naming the columns, not records
     bool allow_trailing_empty_column = false;
     std::vector<std::string> columns, directive_columns;
 };
@@ -74,6 +75,7 @@ class recipe_delimited_stream {
     template<class Emit> void record(std::string_view text, Emit& emit) {
         ++line_;
         if (line_ == 1 && text.size() >= 3 && text.substr(0, 3) == "\xef\xbb\xbf") text.remove_prefix(3);
+        if (line_ <= config.header_lines) return;
         if (!text.empty() && text.back() == '\r') text.remove_suffix(1);
         auto nonspace = trim(text);
         if (nonspace.empty()) {

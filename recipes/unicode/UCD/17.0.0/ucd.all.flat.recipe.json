@@ -813,8 +813,10 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NAME_ALIAS",
-      "contextLiteral": "Jamo_Short_Name"
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/abbreviation"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Join_C",
@@ -952,7 +954,11 @@
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
       "relationName": "NORMALIZES_TO",
-      "contextLiteral": "NFKC_Casefold"
+      "qualifiers": [
+        "mapping/nfkc",
+        "mapping/fold",
+        "mapping/full"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NFKC_QC",
@@ -980,7 +986,11 @@
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
       "relationName": "NORMALIZES_TO",
-      "contextLiteral": "NFKC_Simple_Casefold"
+      "qualifiers": [
+        "mapping/nfkc",
+        "mapping/fold",
+        "mapping/simple"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NFKD_QC",
@@ -1497,7 +1507,10 @@
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
       "relationName": "NORMALIZES_TO",
-      "contextLiteral": "Case_Folding"
+      "qualifiers": [
+        "mapping/fold",
+        "mapping/full"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@cp",
@@ -1524,22 +1537,15 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
-      "contextLiteral": "Decomposition_Mapping"
+      "relationName": "DECOMPOSES_TO",
+      "qualifierFamily": "decomposition",
+      "qualifierField": "dt"
     },
     {
       "syntaxPath": "repertoire/*/@dt",
       "propertyName": "Decomposition_Type",
       "valueKind": "Enumerated",
-      "disposition": "Testimony",
-      "absentSentinel": null,
-      "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Decomposition_Type",
-      "objectEntityType": "UcdClassifier",
-      "referenceCodec": "None",
-      "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
-      "contextLiteral": "Decomposition_Type"
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "repertoire/*/@ea",
@@ -3273,8 +3279,11 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_LOWERCASE_MAPPING",
-      "contextLiteral": "Lowercase_Mapping"
+      "relationName": "HAS_CASE_MAPPING",
+      "qualifiers": [
+        "mapping/lower",
+        "mapping/full"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@na",
@@ -3287,7 +3296,10 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NAME"
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/primary"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@na1",
@@ -3300,8 +3312,10 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NAME_ALIAS",
-      "contextLiteral": "Unicode_1_Name"
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/unicode-1"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@nt",
@@ -3354,7 +3368,10 @@
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
       "relationName": "NORMALIZES_TO",
-      "contextLiteral": "Simple_Case_Folding"
+      "qualifiers": [
+        "mapping/fold",
+        "mapping/simple"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@scx",
@@ -3382,8 +3399,11 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_LOWERCASE_MAPPING",
-      "contextLiteral": "Simple_Lowercase_Mapping"
+      "relationName": "HAS_CASE_MAPPING",
+      "qualifiers": [
+        "mapping/lower",
+        "mapping/simple"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@stc",
@@ -3396,8 +3416,11 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_TITLECASE_MAPPING",
-      "contextLiteral": "Simple_Titlecase_Mapping"
+      "relationName": "HAS_CASE_MAPPING",
+      "qualifiers": [
+        "mapping/title",
+        "mapping/simple"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@suc",
@@ -3410,8 +3433,11 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
-      "relationName": "HAS_UPPERCASE_MAPPING",
-      "contextLiteral": "Simple_Uppercase_Mapping"
+      "relationName": "HAS_CASE_MAPPING",
+      "qualifiers": [
+        "mapping/upper",
+        "mapping/simple"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@tc",
@@ -3424,8 +3450,11 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_TITLECASE_MAPPING",
-      "contextLiteral": "Titlecase_Mapping"
+      "relationName": "HAS_CASE_MAPPING",
+      "qualifiers": [
+        "mapping/title",
+        "mapping/full"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@uc",
@@ -3438,8 +3467,11 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
-      "relationName": "HAS_UPPERCASE_MAPPING",
-      "contextLiteral": "Uppercase_Mapping"
+      "relationName": "HAS_CASE_MAPPING",
+      "qualifiers": [
+        "mapping/upper",
+        "mapping/full"
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@vo",
@@ -3466,21 +3498,18 @@
       "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NAME_ALIAS"
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/alias"
+      ],
+      "qualifierFamily": "name",
+      "qualifierField": "type"
     },
     {
       "syntaxPath": "repertoire/*/name-alias/@type",
       "propertyName": "Name_Alias_Type",
       "valueKind": "Enumerated",
-      "disposition": "Testimony",
-      "absentSentinel": null,
-      "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Name_Alias_Type",
-      "objectEntityType": "UcdClassifier",
-      "referenceCodec": "None",
-      "preserveLexicalValue": false,
-      "relationName": "HAS_ATTRIBUTE",
-      "contextLiteral": "Name_Alias_Type"
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "standardized-variants/standardized-variant/@cps",

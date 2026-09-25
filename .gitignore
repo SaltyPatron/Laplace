@@ -406,12 +406,14 @@ venv/
 /engine/core/src/generated/pos_law.c
 /engine/core/src/generated/language_law.c
 /engine/core/src/generated/deprel_law.c
+/engine/core/src/generated/qualifier_law.c
 /engine/core/src/generated/entity_type_law.c
 /engine/core/src/generated/.attestation-law-stamp
 /engine/core/include/laplace/core/relation_law.h
 /engine/core/include/laplace/core/pos_law.h
 /engine/core/include/laplace/core/language_law.h
 /engine/core/include/laplace/core/deprel_law.h
+/engine/core/include/laplace/core/qualifier_law.h
 /engine/core/include/laplace/core/entity_type_law.h
 /engine/core/include/laplace/core/highway_manifest.h
 

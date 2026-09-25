@@ -12,6 +12,7 @@
 #include "laplace/core/language_law.h"
 #include "laplace/core/deprel_law.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/core/qualifier_law.h"
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
@@ -72,6 +73,11 @@ struct field_rule {
     std::string identity_table, object_literal, context_literal, observation_of, score_of;
     struct vocabulary_rule { int kind = 0; int tagset = -1; } vocabulary;  // 1 pos/<tagset>, 2 lang/iso639
     bool aggregate = false;
+    // Governed claim qualifiers (qualifier_law): static bits, plus one family whose value
+    // the record's qualifier_field attribute names.
+    std::array<uint8_t, 32> qualifiers{};
+    bool has_qualifiers = false;
+    std::string qualifier_family, qualifier_field;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -139,6 +145,8 @@ struct fact {
     double rank = 1;
     hash128_t source{};           // the witness of this observation
     bool has_source = false;
+    std::array<uint8_t, 32> qualifiers{};   // multi-select qualifier flags
+    bool has_qualifiers = false;
     // A claim is a Glicko-2 game series: games observed, each scored in [0,1]
     // (win 1, draw 0.5, loss 0). A binary claim is one game at 1 or 0.
     int64_t games = 1;
@@ -406,19 +414,27 @@ struct laplace_recipe_stream {
     void attest(intent_stage_t* stage, hash128_t subj, const fact& f) {
         laplace_attestation_staged_t row{};
         build_attestation(subj, f, row);
-        check(laplace_attestation_staged_batch_add(stage, &row, 1, nullptr), "testimony admission");
+        check(laplace_attestation_staged_batch_add(stage, &row, 1,
+            f.has_qualifiers ? f.qualifiers.data() : nullptr), "testimony admission");
     }
     size_t attest_facts(intent_stage_t* stage, hash128_t subj, size_t offset, size_t count) {
         constexpr size_t chunk = 256;
         laplace_attestation_staged_t staged[chunk];
+        uint8_t masks[chunk * 32];
         size_t emitted = 0;
         while (emitted < count) {
             const size_t n = std::min(chunk, count - emitted);
+            bool any = false;
             for (size_t i = 0; i < n; ++i) {
                 staged[i] = {};
-                build_attestation(subj, facts[offset + emitted + i], staged[i]);
+                const fact& f = facts[offset + emitted + i];
+                build_attestation(subj, f, staged[i]);
+                std::memcpy(masks + i * 32, f.qualifiers.data(), 32);
+                any = any || f.has_qualifiers;
             }
-            check(laplace_attestation_staged_batch_add(stage, staged, n, nullptr), "testimony admission");
+            // A mask batch writes every row's mask; rows without qualifiers carry zeros,
+            // so only batches with a qualified claim pass masks at all.
+            check(laplace_attestation_staged_batch_add(stage, staged, n, any ? masks : nullptr), "testimony admission");
             emitted += n;
         }
         return emitted;
@@ -426,25 +442,29 @@ struct laplace_recipe_stream {
     size_t attest_range_facts(intent_stage_t* stage, uint32_t first, uint32_t last) {
         constexpr size_t chunk = 256;
         laplace_attestation_staged_t staged[chunk];
+        uint8_t masks[chunk * 32];
+        bool any = false;
         size_t staged_n = 0;
         size_t emitted = 0;
         for (uint32_t cp = first;; ++cp) {
             const hash128_t subj = point_id(cp);
             for (const fact& f : facts) {
                 staged[staged_n] = {};
+                std::memcpy(masks + staged_n * 32, f.qualifiers.data(), 32);
+                any = any || f.has_qualifiers;
                 build_attestation(subj, f, staged[staged_n++]);
                 if (staged_n == chunk) {
                     check(laplace_attestation_staged_batch_add(
-                        stage, staged, staged_n, nullptr), "testimony admission");
+                        stage, staged, staged_n, any ? masks : nullptr), "testimony admission");
                     emitted += staged_n;
-                    staged_n = 0;
+                    staged_n = 0; any = false;
                 }
             }
             if (cp == last) break;
         }
         if (staged_n) {
             check(laplace_attestation_staged_batch_add(
-                stage, staged, staged_n, nullptr), "testimony admission");
+                stage, staged, staged_n, any ? masks : nullptr), "testimony admission");
             emitted += staged_n;
         }
         return emitted;
@@ -523,6 +543,39 @@ struct laplace_recipe_stream {
         }
     }
     std::unordered_map<std::string, size_t> last_fact;
+    // A dynamic qualifier reads its value from a sibling field of the same record; that
+    // field's value aliases name the governed qualifier (ISO 639-3 Ret_Reason "M" -> merge).
+    void qualify(const std::string& path, const field_rule& rule,
+        const std::map<std::string, std::string>& attributes, size_t from) {
+        std::array<uint8_t, 32> mask = rule.qualifiers;
+        bool any = rule.has_qualifiers;
+        if (!rule.qualifier_family.empty()) {
+            const std::string* value = nullptr;
+            auto hit = attributes.find(rule.qualifier_field);
+            if (hit != attributes.end()) value = &hit->second;
+            else if (scope_attributes && (hit = scope_attributes->find(rule.qualifier_field)) != scope_attributes->end())
+                value = &hit->second;
+            std::string named;
+            if (value && !value->empty()) {
+                named = *value;
+                const auto sibling = fields.find(path.substr(0, path.rfind('@') + 1) + rule.qualifier_field);
+                if (sibling != fields.end()) {
+                    const auto alias = sibling->second.aliases.find(alias_key(named));
+                    if (alias != sibling->second.aliases.end()) named = alias->second;
+                }
+                value = &named;
+                const int bit = laplace_qualifier_bit(rule.qualifier_family.c_str(), value->c_str());
+                if (bit < 0) throw std::runtime_error("undeclared " + rule.qualifier_family + " qualifier " + *value);
+                mask[static_cast<size_t>(bit) / 8] |= static_cast<uint8_t>(1u << (bit % 8));
+                any = true;
+            }
+        }
+        if (!any) return;
+        for (size_t i = from; i < facts.size(); ++i) {
+            for (size_t b = 0; b < 32; ++b) facts[i].qualifiers[b] |= mask[b];
+            facts[i].has_qualifiers = true;
+        }
+    }
     // Aggregated claims: identical (subject, relation, object, context, outcome) facts
     // across the artifact become one graded game series staged at the end.
     std::unordered_map<std::string, fact> aggregates;
@@ -538,7 +591,11 @@ struct laplace_recipe_stream {
             key.append(reinterpret_cast<const char*>(&f.context), sizeof(f.context));
             key.push_back(static_cast<char>((f.has_object ? 1 : 0) | (f.has_context ? 2 : 0) | (f.confirm ? 4 : 0)));
             auto [it, fresh] = aggregates.emplace(std::move(key), f);
-            if (!fresh) it->second.games += f.games;
+            if (!fresh) {
+                it->second.games += f.games;
+                for (size_t b = 0; b < 32; ++b) it->second.qualifiers[b] |= f.qualifiers[b];
+                it->second.has_qualifiers = it->second.has_qualifiers || f.has_qualifiers;
+            }
         }
         facts.resize(from);
     }
@@ -609,6 +666,7 @@ struct laplace_recipe_stream {
         try {
             lower_field(stage, path, raw, subject_binding, attributes);
             const auto rule = fields.find(path);
+            if (rule != fields.end() && facts.size() > before) qualify(path, rule->second, attributes, before);
             if (rule != fields.end() && rule->second.aggregate) aggregate_facts(before);
             else if (facts.size() > before) last_fact[path] = facts.size() - 1;
         }
@@ -987,6 +1045,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         if (!config.constants.emplace(std::move(key), std::move(value)).second)
                             throw std::runtime_error("duplicate record constant");
                     }
+                    if (generation >= 7) config.header_lines = r.number();
                 }
                 s->delimited = std::make_unique<recipe_delimited_stream>(std::move(config));
             }
@@ -1030,6 +1089,17 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 const uint32_t aggregate = r.number();
                 if (aggregate > 1) throw std::runtime_error("invalid aggregate instruction at " + f.path);
                 f.aggregate = aggregate != 0;
+                const uint32_t qualifiers = r.number();
+                for (uint32_t k = 0; k < qualifiers; ++k) {
+                    const std::string q = r.text();
+                    const size_t slash = q.find('/');
+                    const int bit = slash == std::string::npos ? -1
+                        : laplace_qualifier_bit(q.substr(0, slash).c_str(), q.c_str() + slash + 1);
+                    if (bit < 0) throw std::runtime_error("undeclared qualifier " + q + " at " + f.path);
+                    f.qualifiers[static_cast<size_t>(bit) / 8] |= static_cast<uint8_t>(1u << (bit % 8));
+                    f.has_qualifiers = true;
+                }
+                f.qualifier_family = r.text(); f.qualifier_field = r.text();
             }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);

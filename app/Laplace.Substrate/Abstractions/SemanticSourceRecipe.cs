@@ -99,7 +99,14 @@ public sealed record SourceRecipeField(
     string? Vocabulary = null,
     // Claims of this field accumulate across the artifact by identity and are staged
     // once at its end as graded games: "dogs HAS_POS NOUN @eng" observed n times.
-    bool Aggregate = false);
+    bool Aggregate = false,
+    // Governed qualifiers asserted by every claim of this field ("identifier/iso639-1"),
+    // multi-select flags on the attestation (engine/manifest/qualifiers.toml).
+    IReadOnlyList<string>? Qualifiers = null,
+    // A qualifier read from the record: the attribute QualifierField's value names a
+    // value of QualifierFamily (a UCD name alias's type -> name/correction).
+    string? QualifierFamily = null,
+    string? QualifierField = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -259,7 +266,9 @@ public sealed record SourceDelimitedSyntax(
     string SkipKeyColumn = "",
     string SkipKeyCharacters = "",
     IReadOnlyList<SourceDelimitedReference>? References = null,
-    IReadOnlyDictionary<string, string>? Constants = null)
+    IReadOnlyDictionary<string, string>? Constants = null,
+    // Leading lines that name the columns (a TSV header row), not records.
+    int HeaderLines = 0)
 {
     public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
 }

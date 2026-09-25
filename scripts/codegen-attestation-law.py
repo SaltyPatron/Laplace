@@ -1335,6 +1335,40 @@ def emit_deprel_law(path: Path) -> None:
               "int laplace_deprel_count(void) { return (int)(sizeof(k_deprels)/sizeof(k_deprels[0])); }"]
     _write_text_if_changed(OUT_CORE / "src/generated/deprel_law.c", "\n".join(lines) + "\n")
 
+
+def emit_qualifier_law(path: Path) -> None:
+    """Governed claim qualifiers (engine/manifest/qualifiers.toml): family/value -> bit
+    of the attestation's 256-bit qualifier mask."""
+    import re as _re
+    body = path.read_text(encoding="utf-8")
+    rows = []
+    for block in body.split("[[family]]")[1:]:
+        name = _re.search(r'name\s*=\s*"([^"]+)"', block).group(1)
+        base = int(_re.search(r"base\s*=\s*(\d+)", block).group(1))
+        values = _re.findall(r'"([^"]+)"', _re.search(r"values\s*=\s*\[(.*?)\]", block, _re.S).group(1))
+        if base % 32 or base + len(values) > 256 or len(values) > 32 or len(values) != len(set(values)):
+            raise SystemExit(f"qualifiers.toml: family {name} is out of its 32-bit range")
+        rows += [(name, v, base + i) for i, v in enumerate(values)]
+    _write_text_if_changed(OUT_CORE / "include/laplace/core/qualifier_law.h",
+        "#pragma once\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+        "/* \"family/value\" (\"identifier/iso639-1\") -> its bit in an attestation's 256-bit\n"
+        " * qualifier mask; -1 when undeclared. */\n"
+        "int laplace_qualifier_bit(const char* family, const char* value);\n\n"
+        "#ifdef __cplusplus\n}\n#endif\n")
+    lines = ['#include "laplace/core/qualifier_law.h"', "", "#include <string.h>", "",
+             "typedef struct { const char* family; const char* value; int bit; } qualifier_row_t;", "",
+             "static const qualifier_row_t k_qualifiers[] = {"]
+    lines += [f'    {{ "{f}", "{v}", {b} }},' for f, v, b in rows]
+    lines += ["};", "",
+              "int laplace_qualifier_bit(const char* family, const char* value) {",
+              "    if (!family || !value) return -1;",
+              "    for (size_t i = 0; i < sizeof(k_qualifiers)/sizeof(k_qualifiers[0]); ++i)",
+              "        if (strcmp(k_qualifiers[i].family, family) == 0 && strcmp(k_qualifiers[i].value, value) == 0)",
+              "            return k_qualifiers[i].bit;",
+              "    return -1;",
+              "}"]
+    _write_text_if_changed(OUT_CORE / "src/generated/qualifier_law.c", "\n".join(lines) + "\n")
+
 def main() -> int:
     global CHECK_MODE
     CHECK_MODE = "--check" in sys.argv[1:]
@@ -1354,6 +1388,7 @@ def main() -> int:
     emit_entity_type_law(MANIFEST / "entity_types.toml")
     emit_language_law(MANIFEST / "languages.tsv")
     emit_deprel_law(MANIFEST / "deprels.toml")
+    emit_qualifier_law(MANIFEST / "qualifiers.toml")
     emit_highway_perfcache(rel, bin_out_dir)
     if CHECK_MODE:
         if DRIFT:

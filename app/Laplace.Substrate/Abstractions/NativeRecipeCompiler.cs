@@ -53,10 +53,11 @@ public static class NativeRecipeCompiler
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
         bool identityTables = recipe.IdentityTables.Count != 0 || recipe.AttributeVocabularies.Count != 0
+            || recipe.DelimitedSyntax is { HeaderLines: > 0 }
             || recipe.ProviderRoutes.Any(static r => r.ParseStructure is not null || r.WitnessFields is { Count: > 0 })
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
-                || f.Aggregate);
+                || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
         uint version = identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -106,6 +107,7 @@ public static class NativeRecipeCompiler
                     WriteText(writer, constant.Key);
                     WriteText(writer, constant.Value);
                 }
+                if (version >= Rcp7) writer.Write(checked((uint)syntax.HeaderLines));
             }
         }
         writer.Write(checked((uint)recipe.Fields.Count));
@@ -176,6 +178,10 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.ScoreOf);
                 WriteText(writer, field.Vocabulary);
                 writer.Write(field.Aggregate ? 1u : 0u);
+                writer.Write(checked((uint)(field.Qualifiers?.Count ?? 0)));
+                foreach (string qualifier in field.Qualifiers ?? []) WriteText(writer, qualifier);
+                WriteText(writer, field.QualifierFamily);
+                WriteText(writer, field.QualifierField);
             }
         }
 
