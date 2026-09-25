@@ -278,6 +278,36 @@ struct laplace_recipe_stream {
     hash128_t subject{};
     content_form subject_form{};     // the record subject's content, when it is content
     bool subject_form_known = false;
+    // Observation structure (not testimony): each record's observed content in source
+    // order composes the record's trunk, and the records compose the file's trunk, so
+    // every lowered content has containers back to the file it was observed in.
+    bool observing = false, file_trunk_done = false;
+    std::vector<laplace_ordered_component_t> record_parts, file_parts;
+    std::unordered_set<std::string> record_seen;
+    void observe(const content_form& c) {
+        if (!observing) return;
+        const std::string key(reinterpret_cast<const char*>(&c.id), sizeof(c.id));
+        if (!record_seen.insert(key).second) return;
+        laplace_ordered_component_t part{};
+        part.id = c.id; std::memcpy(part.coord, c.coord, sizeof(part.coord));
+        part.tier = c.tier; part.atom = c.atom; part.has_atom = c.tier == 0;
+        record_parts.push_back(part);
+    }
+    laplace_ordered_component_t compose_trunk(intent_stage_t* stage,
+        const std::vector<laplace_ordered_component_t>& parts, const char* type_name) {
+        laplace_ordered_composition_request_t request{};
+        request.components = parts.data(); request.component_count = parts.size();
+        if (laplace_entity_type_id(type_name, &request.type_id) != 0)
+            throw std::runtime_error(std::string("undeclared trunk entity type ") + type_name);
+        request.source_id = witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "observation trunk");
+        laplace_ordered_component_t part{};
+        part.id = result.id; std::memcpy(part.coord, result.coord, sizeof(part.coord));
+        part.tier = result.tier;
+        return part;
+    }
     std::vector<fact> facts;
     std::unordered_map<std::string, content_form> content_cache;
     size_t content_cache_bytes = 0, content_cache_limit = 0, content_cache_entries = 0;
@@ -333,7 +363,7 @@ struct laplace_recipe_stream {
     }
     content_form compose_content(intent_stage_t* stage, const std::string& text) {
         if (text.empty()) throw std::runtime_error("empty content reference");
-        auto i = content_cache.find(text); if (i != content_cache.end()) return i->second;
+        auto i = content_cache.find(text); if (i != content_cache.end()) { observe(i->second); return i->second; }
         tier_tree_t* raw = nullptr;
         check(content_witness_source_tree_build(
             reinterpret_cast<const uint8_t*>(text.data()), text.size(), &raw), "content composition");
@@ -357,6 +387,7 @@ struct laplace_recipe_stream {
             content_cache.emplace(text, result);
             content_cache_bytes += text.size() + entry_overhead;
         }
+        observe(result);
         return result;
     }
     hash128_t content(intent_stage_t* stage, const std::string& text) {
@@ -946,6 +977,7 @@ struct laplace_recipe_stream {
         current_witness = record.witness_parts.empty() ? witness : stage_witness(stage, record.witness_parts);
         range = route.kind == 0;
         membership = false; record_facts_done = false; fact_offset = 0; subject_form_known = false;
+        record_parts.clear(); record_seen.clear(); observing = true;
         if (range) {
             std::string single = record.get(route.identity);
             cursor = point(single.empty() ? record.get(route.first) : single);
@@ -1007,6 +1039,9 @@ struct laplace_recipe_stream {
         for (const auto& child : record.children) lower_child(stage, route, child, child.name);
         if (route.parse.on) lower_parse(stage, route, record);
         scope_attributes = nullptr;
+        observing = false;
+        if (record_parts.size() == 1) file_parts.push_back(record_parts.front());
+        else if (record_parts.size() > 1) file_parts.push_back(compose_trunk(stage, record_parts, "SourceRecord"));
         active = true;
     }
     // The child is its own subject: [record subject, its identity content], composed
@@ -1574,6 +1609,19 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
     size_t maximum_bytes, intent_stage_t** out, uint64_t* completed) {
     if (!s || s->failed || !out || !completed || !maximum_rows || !maximum_bytes) return -1;
     *out = nullptr; *completed = 0;
+    if (s->pending.empty() && !s->ready && !s->active && s->final && !s->file_trunk_done
+        && !s->file_parts.empty()) {
+        try {
+            stage_ptr stage(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
+            if (!stage) throw std::bad_alloc();
+            s->file_trunk_done = true;
+            if (s->file_parts.size() > 1) s->compose_trunk(stage.get(), s->file_parts, "SourceFile");
+            s->file_parts.clear(); s->file_parts.shrink_to_fit();
+            *out = stage.release();
+            return 1;
+        } catch (const std::exception& e) { return fail_stream(s, e.what()); }
+        catch (...) { return fail_stream(s, "unknown native recipe failure"); }
+    }
     if (s->pending.empty() && !s->ready && !s->active && s->final && !s->aggregates.empty()) {
         try {
             stage_ptr stage(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
