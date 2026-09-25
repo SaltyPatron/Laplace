@@ -283,15 +283,15 @@ public interface ITrunkRootRecord
 }
 
 /// <summary>
-/// A record with an exact durable completion attestation. The owner must emit this
-/// receipt only after staging the complete source unit, in the same control transaction
-/// as its testimony and consensus. Content identity or a marker entity is insufficient.
-/// A missing receipt requires ordinary composition, even when the trunk is present.
+/// A record with an exact durable unit completion. The owner records it only after
+/// staging the complete source unit, in the same control transaction as its testimony
+/// and consensus. Content identity is insufficient. A missing completion requires
+/// ordinary composition, even when the trunk is present. Null: the record has no
+/// completion key and always composes.
 /// </summary>
 public interface IIngestCompletionRecord
 {
-    Hash128 CompletionAttestationTypeId { get; }
-    Hash128 CompletionAttestationId { get; }
+    IngestUnitCompletionKey? Completion { get; }
 }
 
 public interface IIngestRecordHandler<TRecord>
@@ -583,13 +583,13 @@ public static class IngestBatchPipeline
     }
 
     /// <summary>
-    /// Per-file resume for multi-file sources (GH #898). A source-level completion
-    /// marker writes only at run end, so a killed multi-hour seed used to restart
+    /// Per-file resume for multi-file sources (GH #898). Source layer completion is
+    /// recorded only at run end, so a killed multi-hour seed used to restart
     /// from record zero and RE-FOLD everything already applied — testimony is not
     /// idempotent, so the restart inflated witness counts on the whole applied
-    /// prefix. With this enabled, each finished file's boundary carries a
-    /// HasLayerCompleted marker on the FILE's content identity, and a restart
-    /// true-skips marker-complete files before opening them. Blast radius of a kill
+    /// prefix. With this enabled, each finished file's boundary records a unit
+    /// completion on the FILE's content identity, and a restart true-skips
+    /// completed files before opening them. Blast radius of a kill
     /// shrinks from the whole corpus to the one file that was mid-apply.
     /// </summary>
     public readonly record struct PerFileResumePlan(
@@ -687,15 +687,15 @@ public static class IngestBatchPipeline
         }
     }
 
-    /// <summary>Boundary that ALSO deposits the file's completion marker (resume-enabled lanes).</summary>
+    /// <summary>Boundary that ALSO records the file's unit completion (resume-enabled lanes).</summary>
     public static SubstrateChange BuildFileCompletion(
         Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder,
         IReadOnlyCollection<string>? canonicalNames = null)
     {
         var builder = new SubstrateChangeBuilder(
             sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
-            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0);
+        Laplace.Ingestion.LayerCompletion.RecordFile(
             builder, fileRoot, sourceId, layerOrder);
         var change = BindFileLabel(builder.Build(), fileLabel);
         return canonicalNames is { Count: > 0 }

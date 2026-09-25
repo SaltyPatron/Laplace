@@ -5,9 +5,9 @@
 -- 686-file UD ingest that dies at file 30 records "cancelled, files_done=10" and
 -- the identity of every file it applied, skipped or was mid-apply on is lost.
 -- Measured 2026-08-15 on the standing ledger: 36 run rows, 16 with files_total=0.
--- Per-file RESUME already exists (GH #898 — each finished file deposits a
--- HasLayerCompleted marker on the file's content identity and a restart true-skips
--- it), so the file boundary is already a real unit with a real identity; it simply
+-- Per-file RESUME already exists (GH #898 — each finished file records a unit
+-- completion on the file's content identity in ingest_unit_completion and a restart
+-- true-skips it), so the file boundary is already a real unit with a real identity; it simply
 -- never reached the ledger. This table is that unit, written down.
 --
 -- Ops metadata, not substrate content: rows are never folded, never walked, and

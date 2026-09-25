@@ -163,6 +163,7 @@ public sealed class ChessPositionPlayingObservationTests
                 $"Entity index {i}: expected {expected.Entities[i]}, actual {actual.Entities[i]}");
         Assert.Equal(expected.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }),
             actual.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }));
+        Assert.Equal(expected.UnitCompletions.ToArray(), actual.UnitCompletions.ToArray());
         Assert.Equal(expected.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()),
             actual.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()));
         AssertPhysicalitiesEqual(expected.Physicalities, actual.Physicalities);

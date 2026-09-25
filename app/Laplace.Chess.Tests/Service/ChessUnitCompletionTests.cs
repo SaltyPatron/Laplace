@@ -34,14 +34,15 @@ public sealed class ChessUnitCompletionTests
         var change = builder.Build();
         try
         {
-            var type = Hash128.OfCanonical($"substrate/type/HasUnitCompleted/{layer}/v1");
-            var proof = Assert.Single(change.Attestations,
-                row => row.TypeId == type && row.SourceId == owner && row.SubjectId == marker);
-            Assert.Equal(marker, proof.ObjectId);
+            // Completion is operational state beside the evidence: exactly one unit
+            // completion owned by the lane's witness, and no completion attestation.
             Hash128? context = lane == "opening-no-hit" ? new EmptyOpeningIndex().GenerationId : null;
-            Assert.Equal(context, proof.ContextId);
-            Assert.Equal(NativeAttestation.ComputeId(marker, type, marker, owner, context), proof.Id);
-            Assert.NotEqual(LayerCompletion.RelationTypeId(layer), proof.TypeId);
+            var proof = Assert.Single(change.UnitCompletions,
+                key => key.WitnessId == owner && key.UnitId == marker);
+            Assert.Equal(new IngestUnitCompletionKey(owner, marker, layer, context), proof);
+            Assert.Empty(change.LayerCompletions);
+            Assert.DoesNotContain(change.Attestations,
+                row => row.SubjectId == marker && row.ObjectId == marker);
             Assert.Contains(change.Entities,
                 row => row.Id == marker && row.TypeId == ChessVocabulary.AnalysisMarkerType);
         }
@@ -74,9 +75,7 @@ public sealed class ChessUnitCompletionTests
             var change = builder.Build();
             try
             {
-                Assert.DoesNotContain(change.Attestations,
-                    row => row.TypeId == IngestUnitCompletion.RelationTypeId(layer)
-                        && row.SourceId == owner && row.SubjectId == marker);
+                Assert.Empty(change.UnitCompletions);
                 Assert.Empty(change.Attestations);
                 Assert.Empty(change.Entities);
                 Assert.Empty(change.Physicalities);
@@ -92,7 +91,7 @@ public sealed class ChessUnitCompletionTests
         var first = Assert.Single(ChessBookDecomposer.ExtractFromText(Game, "Receipt book"));
         var second = first with { Context = "A distinct explanation of this same playing." };
         Assert.Equal(first.TrunkRootId, second.TrunkRootId);
-        Assert.NotEqual(first.CompletionAttestationId, second.CompletionAttestationId);
+        Assert.NotEqual(first.Completion, second.Completion);
 
         var compose = typeof(ChessBookDecomposer).GetMethod("Compose",
             BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -104,12 +103,12 @@ public sealed class ChessUnitCompletionTests
             var change = builder.Build();
             try
             {
-                var receipt = Assert.Single(change.Attestations,
-                    row => row.Id == record.CompletionAttestationId);
-                Assert.Equal(record.RootId, receipt.SubjectId);
-                Assert.Equal(record.RootId, receipt.ObjectId);
-                Assert.Equal(record.CompletionContextId, receipt.ContextId);
-                Assert.Equal(ChessVocabulary.BookSourceId, receipt.SourceId);
+                var receipt = Assert.Single(change.UnitCompletions,
+                    key => key.WitnessId == ChessVocabulary.BookSourceId && key.Layer == 20);
+                Assert.Equal(record.Completion, receipt);
+                Assert.Equal(record.RootId, receipt.UnitId);
+                Assert.Equal(record.CompletionContextId, receipt.Digest);
+                Assert.Equal(ChessVocabulary.BookSourceId, receipt.WitnessId);
             }
             finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
         }

@@ -15,15 +15,15 @@ public sealed class ChessAnalyzerWatermarkTests
     private sealed class FakeReader : ISubstrateReader
     {
         public readonly HashSet<Hash128> Present = new();
-        public readonly HashSet<(Hash128 Type, Hash128 Id)> Receipts = new();
+        public readonly HashSet<IngestUnitCompletionKey> Receipts = new();
         public int EntityQueries;
         public int ReceiptQueries;
-        public Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
-            Hash128 typeId, IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+        public Task<IReadOnlySet<IngestUnitCompletionKey>> CompletedUnitsAsync(
+            IReadOnlyList<IngestUnitCompletionKey> keys, CancellationToken ct = default)
         {
             ReceiptQueries++;
-            return Task.FromResult<IReadOnlySet<Hash128>>(
-                ids.Where(id => Receipts.Contains((typeId, id))).ToHashSet());
+            return Task.FromResult<IReadOnlySet<IngestUnitCompletionKey>>(
+                keys.Where(Receipts.Contains).ToHashSet());
         }
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default) => Task.FromResult(false);
@@ -44,10 +44,9 @@ public sealed class ChessAnalyzerWatermarkTests
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
-        reader.Receipts.Add((IngestUnitCompletion.RelationTypeId(21),
-            IngestUnitCompletion.AttestationId(
+        reader.Receipts.Add(IngestUnitCompletion.Key(
                 ChessVocabulary.AnalysisMarkerId(a.PlayingId, ChessAnalyze.Version),
-                ChessAnalyze.SourceId, 21)));
+                ChessAnalyze.SourceId, 21));
 
         var kept = new List<Hash128>();
         await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedEventIdsAsync(
@@ -79,10 +78,8 @@ public sealed class ChessAnalyzerWatermarkTests
         var marker = ChessVocabulary.AnalysisMarkerId(game.PlayingId, ChessAnalyze.Version);
         var reader = new FakeReader();
         reader.Present.Add(marker);
-        reader.Receipts.Add((IngestUnitCompletion.RelationTypeId(21),
-            IngestUnitCompletion.AttestationId(marker, ChessTransitions.SourceId, 21)));
-        reader.Receipts.Add((IngestUnitCompletion.RelationTypeId(22),
-            IngestUnitCompletion.AttestationId(marker, ChessAnalyze.SourceId, 22)));
+        reader.Receipts.Add(IngestUnitCompletion.Key(marker, ChessTransitions.SourceId, 21));
+        reader.Receipts.Add(IngestUnitCompletion.Key(marker, ChessAnalyze.SourceId, 22));
         var kept = new List<Hash128>();
         await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedEventIdsAsync(
                            [game.PlayingId], reader, CancellationToken.None))
@@ -98,11 +95,9 @@ public sealed class ChessAnalyzerWatermarkTests
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
         Hash128 Marker(Hash128 line) => ChessMoveOutcomes.MarkerId(line, ChessMoveOutcomes.Version);
-        reader.Receipts.Add((IngestUnitCompletion.RelationTypeId(22),
-            IngestUnitCompletion.AttestationId(Marker(a.LineId), ChessVocabulary.PgnSourceId, 22)));
+        reader.Receipts.Add(IngestUnitCompletion.Key(Marker(a.LineId), ChessVocabulary.PgnSourceId, 22));
         // An unrelated owner cannot complete the second line for these callers.
-        reader.Receipts.Add((IngestUnitCompletion.RelationTypeId(22),
-            IngestUnitCompletion.AttestationId(Marker(b.LineId), ChessAnalyze.SourceId, 22)));
+        reader.Receipts.Add(IngestUnitCompletion.Key(Marker(b.LineId), ChessAnalyze.SourceId, 22));
         var kept = new List<Hash128>();
         await foreach (var id in ChessWitnessHydrator.FilterByMarkerAsync(
                            new[] { a.LineId, b.LineId }, reader, 1, Marker, 22,

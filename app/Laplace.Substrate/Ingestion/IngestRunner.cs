@@ -639,7 +639,7 @@ public sealed class IngestRunner
         if (!options.SkipSourceCompletion
             && fullSuccessfulExtraction
             && (counters.UnitsApplied > 0 || counters.FilesSkippedComplete > 0))
-            await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
+            await _writer.ApplyAsync(LayerCompletion.Build(decomposer), ct);
 
         sw.Stop();
 

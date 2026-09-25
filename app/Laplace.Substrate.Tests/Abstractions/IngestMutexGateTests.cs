@@ -104,32 +104,12 @@ public sealed class IngestMutexGateTests
     /// <see cref="VerifySanctionedHome"/> (<c>ops.source_status()</c>), which already
     /// answers the question correctly for content-only lanes.
     ///
-    /// <para>The C# three are not three different questions — they are the same
-    /// layer-complete marker probe written three times:
-    /// <c>NpgsqlSubstrateReader.HasSourceCompletedAsync</c>,
-    /// <c>NpgsqlIngestOps.LayerMarkedCompleteAsync</c> and its generic sibling
-    /// <c>EvidenceExistsForTypeAndSourceAsync</c> all issue
-    /// <c>ops.evidence_count(p_type =&gt; realize.canonical_id('substrate/type/HasLayerCompleted/N/v1'),
-    /// p_source =&gt; …) &gt; 0</c>. <c>ensure-foundation.sh</c> and
-    /// <c>decomposer-ensure-floor.sh</c> carry that same string in shell.</para>
+    /// <para>Every entry was the same layer-completion probe counting a completion
+    /// attestation. Completion is operational state now
+    /// (<c>ops.layer_completed</c> over <c>laplace.ingest_layer_completion</c>), so the
+    /// list is empty and any new verify of this shape is a named failure.</para>
     /// </summary>
-    private static readonly HashSet<string> EvidenceVerifyAllowlist = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // C# — three spellings of the layer-complete marker probe.
-        "app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestOps.cs",         // 2x @ 23,151
-        "app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReader.cs",   // 2x @ 19,36
-        "app/Laplace.Substrate/Crud/Npgsql/NpgsqlWorkingSetApply.cs",   // 1x @ 137
-        // Shell / Python — the seed and gate lanes.
-        "scripts/audit-decomposers.sh",                                 // 1x @ 42
-        "scripts/decomposer-ensure-floor.sh",                           // 1x @ 16
-        "scripts/decomposer-gate-check.py",                             // 1x @ 184
-        "scripts/ensure-foundation.sh",                                 // 1x @ 43
-        // PowerShell / raw SQL — the operator lane.
-        "scripts/sql/substrate-audit.sql",                              // 1x @ 12
-        "scripts/win/seed-layer-check-batch.ps1",                       // 1x @ 42
-        "scripts/win/seed-layer-check.ps1",                             // 1x @ 41
-        "scripts/win/sql/chess-test-status.sql",                        // 1x @ 33
-    };
+    private static readonly HashSet<string> EvidenceVerifyAllowlist = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Ratchet ceilings, measured 2026-08-05. Compile-time consts on purpose (W6 D2):
@@ -150,11 +130,11 @@ public sealed class IngestMutexGateTests
     private const int DatabaseMutexCeiling = 3;
 
     /// <inheritdoc cref="ProcessMutexCeiling"/>
-    private const int EvidenceVerifyCeiling = 11;
+    private const int EvidenceVerifyCeiling = 0;
 
     /// <inheritdoc cref="ProcessMutexCeiling"/>
     /// <remarks>Second dimension: an allowlisted file must not GROW its verify count.</remarks>
-    private const int EvidenceVerifySiteCeiling = 13;
+    private const int EvidenceVerifySiteCeiling = 0;
 
     private static readonly string[] ScanRoots = ["app", "scripts", "extension"];
 

@@ -211,8 +211,7 @@ public sealed class ChessPlayerContextOutcomesDecomposer
 
 public sealed record ChessPlayerContextOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
-    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(25);
-    public Hash128 CompletionAttestationId =>
-        IngestUnitCompletion.AttestationId(TrunkRootId, ChessPlayerContextOutcomes.SourceId, 25);
+    public IngestUnitCompletionKey? Completion =>
+        IngestUnitCompletion.Key(TrunkRootId, ChessPlayerContextOutcomes.SourceId, 25);
     public Hash128 TrunkRootId => ChessPlayerContextOutcomes.MarkerId(Game.PlayingId);
 }

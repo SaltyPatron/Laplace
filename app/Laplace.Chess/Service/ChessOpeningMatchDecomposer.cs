@@ -230,10 +230,8 @@ public interface ChessOpeningIndexView
 public sealed record ChessOpeningMatchRecord(ChessWitnessedGame Game, Hash128? CatalogGenerationId = null)
     : ITrunkRootRecord, IIngestCompletionRecord
 {
-    public Hash128 CompletionAttestationTypeId => CatalogGenerationId.HasValue
-        ? IngestUnitCompletion.RelationTypeId(21) : default;
-    public Hash128 CompletionAttestationId => CatalogGenerationId is { } generation
-        ? IngestUnitCompletion.AttestationId(TrunkRootId, ChessVocabulary.OpeningMatchSourceId, 21, generation)
-        : default;
+    public IngestUnitCompletionKey? Completion => CatalogGenerationId is { } generation
+        ? IngestUnitCompletion.Key(TrunkRootId, ChessVocabulary.OpeningMatchSourceId, 21, generation)
+        : null;
     public Hash128 TrunkRootId => ChessOpeningMatchDecomposer.MarkerId(Game.LineId);
 }

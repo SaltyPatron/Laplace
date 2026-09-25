@@ -152,9 +152,8 @@ public sealed class DocumentArtifactIdentityTests
         Assert.DoesNotContain(change.Attestations,
             a => a.SubjectId == file.FileId && a.TypeId == contains && a.ObjectId == document);
 
-        Hash128 completion = LayerCompletion.RelationTypeId(2);
-        Assert.Contains(change.Attestations,
-            a => a.SubjectId == file.FileId && a.TypeId == completion && a.SourceId == file.FileId);
+        Assert.Contains(new IngestUnitCompletionKey(DocumentSource.SourceId, file.FileId, 2),
+            change.UnitCompletions);
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == FileEntity.MetadataRelationTypeId);
     }

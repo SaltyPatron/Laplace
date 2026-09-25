@@ -11,7 +11,7 @@ public sealed class IngestUnitCompletionIdentityTests
     [InlineData(0)]
     [InlineData(21)]
     [InlineData(255)]
-    public void AddingAnOperationalReceiptPreservesTheExistingSourceObservationIdentity(int layer)
+    public void CompletingAUnitAddsNoTestimonyAndPreservesTheSourceObservationIdentity(int layer)
     {
         CodepointPerfcache.LoadDefault();
         var source = SubstrateCanonicalIds.Source("UnitIdentityTest");
@@ -30,20 +30,22 @@ public sealed class IngestUnitCompletionIdentityTests
 
         var before = Build(false, source);
         var completed = Build(true, source);
-        var peerCompleted = Build(true, SubstrateCanonicalIds.Source("UnitIdentityPeer"));
+        var peer = SubstrateCanonicalIds.Source("UnitIdentityPeer");
+        var peerCompleted = Build(true, peer);
         Assert.Equal(before.Metadata.IntentId, completed.Metadata.IntentId);
         Assert.Equal(before.Metadata.IntentId, peerCompleted.Metadata.IntentId);
-        Assert.Single(completed.Attestations,
-            row => row.Id == IngestUnitCompletion.AttestationId(marker, source, layer));
-        Assert.NotEqual(completed.Attestations[^1].Id, peerCompleted.Attestations[^1].Id);
-        Assert.Equal(before.Attestations[0].Id, completed.Attestations[0].Id);
-        Assert.True(completed.Entities.Length > before.Entities.Length);
-        Assert.True(completed.Attestations.Length > before.Attestations.Length);
+        Assert.Equal(new IngestUnitCompletionKey(source, marker, layer), Assert.Single(completed.UnitCompletions));
+        Assert.Equal(new IngestUnitCompletionKey(peer, marker, layer), Assert.Single(peerCompleted.UnitCompletions));
+        Assert.Empty(before.UnitCompletions);
+        // Completion is never testimony and never an entity.
+        Assert.Equal(before.Attestations.Select(row => row.Id), completed.Attestations.Select(row => row.Id));
+        Assert.Equal(before.Entities.Select(row => row.Id), completed.Entities.Select(row => row.Id));
     }
 
     [Theory]
     [InlineData(-1)]
     [InlineData(256)]
-    public void ReceiptNamespaceCannotEscapeTheOperationalExclusionEnvelope(int layer)
-        => Assert.Throws<ArgumentOutOfRangeException>(() => IngestUnitCompletion.RelationTypeId(layer));
+    public void CompletionLayerCannotEscapeTheByteWideLayerRange(int layer)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => IngestUnitCompletion.Key(
+            Hash128.OfCanonical("test/unit"), Hash128.OfCanonical("test/owner"), layer));
 }

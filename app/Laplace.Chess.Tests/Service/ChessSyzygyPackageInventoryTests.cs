@@ -95,7 +95,7 @@ public sealed class ChessSyzygyPackageInventoryTests
     [Fact]
     public void ChessLayerCompletionMarkers_AreInsideTheConsensusExclusionEnvelope()
     {
-        Assert.InRange(new ChessSyzygyDecomposer().LayerOrder, 0, LayerCompletion.MaxMarkedLayer);
-        Assert.InRange(new ChessTacticOutcomesDecomposer().LayerOrder, 0, LayerCompletion.MaxMarkedLayer);
+        Assert.InRange(new ChessSyzygyDecomposer().LayerOrder, 0, LayerCompletion.MaxLayer);
+        Assert.InRange(new ChessTacticOutcomesDecomposer().LayerOrder, 0, LayerCompletion.MaxLayer);
     }
 }

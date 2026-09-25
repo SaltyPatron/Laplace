@@ -111,8 +111,8 @@ public sealed class ChessStockfishEvalTests
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var marker = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
         Assert.Contains(change.Entities, e => e.Id == marker);
-        Assert.Contains(change.Attestations, a => a.Id ==
-            IngestUnitCompletion.AttestationId(marker, ChessStockfishEval.SourceId, 22));
+        Assert.Contains(IngestUnitCompletion.Key(marker, ChessStockfishEval.SourceId, 22),
+            change.UnitCompletions);
         Assert.Contains(change.Attestations, a =>
             a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId && a.SubjectId == parsed.LineId
             && a.SourceId == ChessStockfishEval.SourceId && a.ContextId == marker
@@ -145,15 +145,13 @@ public sealed class ChessStockfishEvalTests
         {
             Assert.All(newChange.Attestations.Where(a => a.TypeId == ChessVocabulary.HasEvalType),
                 a => Assert.Equal(newContext, a.ContextId));
-            var oldReceipt = Assert.Single(oldChange.Attestations,
-                a => a.TypeId == IngestUnitCompletion.RelationTypeId(22));
-            var newReceipt = Assert.Single(newChange.Attestations,
-                a => a.TypeId == IngestUnitCompletion.RelationTypeId(22));
-            Assert.NotEqual(oldReceipt.Id, newReceipt.Id);
-            Assert.Equal(oldContext, oldReceipt.SubjectId);
-            Assert.Equal(newContext, newReceipt.SubjectId);
-            Assert.Equal(new ChessStockfishEvalRecord(witnessed, changedRecipe).CompletionAttestationId,
-                newReceipt.Id);
+            var oldReceipt = Assert.Single(oldChange.UnitCompletions);
+            var newReceipt = Assert.Single(newChange.UnitCompletions);
+            Assert.NotEqual(oldReceipt, newReceipt);
+            Assert.Equal(oldContext, oldReceipt.UnitId);
+            Assert.Equal(newContext, newReceipt.UnitId);
+            Assert.Equal(new ChessStockfishEvalRecord(witnessed, changedRecipe).Completion,
+                newReceipt);
         }
         finally
         {
@@ -166,8 +164,7 @@ public sealed class ChessStockfishEvalTests
     public void DeriveGame_NullEvals_ProduceNoRows()
     {
         var change = Derive(new ScriptedEvaluator(new int?[] { null, null, null, null, null, null, null }));
-        Assert.DoesNotContain(change.Attestations,
-            a => a.TypeId == IngestUnitCompletion.RelationTypeId(22));
+        Assert.Empty(change.UnitCompletions);
         Assert.DoesNotContain(change.Attestations, a => a.TypeId == ChessVocabulary.HasEvalType);
         Assert.DoesNotContain(change.Attestations, a => a.TypeId == ChessVocabulary.MoveQualityType);
     }

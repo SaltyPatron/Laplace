@@ -58,7 +58,7 @@ public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
             : root != default ? root
             : ImageTierSpine.ResolveRoot(record.Rgba, record.Width, record.Height) ?? default;
         if (fileRoot == default) return;
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, _layerOrder);
+        Laplace.Ingestion.LayerCompletion.RecordFile(builder, fileRoot, _sourceId, _layerOrder);
         if (record.Metadata is { } metadata)
             FileEntity.EmitMetadata(builder, fileRoot, metadata);
     }
@@ -143,7 +143,7 @@ public sealed class AudioIngestHandler : IIngestRecordHandler<AudioIngestRecord>
             : root != default ? root
             : AudioTierSpine.ResolveRoot(record.Pcm) ?? default;
         if (fileRoot == default) return;
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, _layerOrder);
+        Laplace.Ingestion.LayerCompletion.RecordFile(builder, fileRoot, _sourceId, _layerOrder);
         if (record.Metadata is { } metadata)
             FileEntity.EmitMetadata(builder, fileRoot, metadata);
     }

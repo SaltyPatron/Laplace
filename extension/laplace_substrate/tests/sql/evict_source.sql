@@ -25,7 +25,6 @@ DECLARE
     m2       bytea := public.laplace_hash128_blake3('test/evict/marker2');
     m3       bytea := public.laplace_hash128_blake3('test/evict/content-by-analysis');
     m4       bytea := public.laplace_hash128_blake3('test/evict/marker-of-witness');
-    fm_t     bytea := realize.canonical_id('substrate/type/HasLayerCompleted/2/v1');
     f1       bytea := public.laplace_hash128_blake3('test/evict/file/owned');
     f2       bytea := public.laplace_hash128_blake3('test/evict/file/legacy');
     phi_w    bigint := 30000000000;
@@ -48,7 +47,7 @@ BEGIN
         -- m4: a marker-typed entity of ANOTHER source (must survive).
         (m1, 4, marker_t), (m2, 4, marker_t),
         (m3, 4, type_t), (m4, 4, marker_t),
-        (fm_t, 4, type_t), (f1, 4, type_t), (f2, 4, type_t)
+        (f1, 4, type_t), (f2, 4, type_t)
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO laplace.ingest_run_journal
@@ -63,17 +62,12 @@ BEGIN
     INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id)
     VALUES (public.laplace_hash128_blake3('test/evict/replay'), src_a);
 
-    -- New checkpoints carry the vendor source in context; the second row is the
-    -- pre-migration shape. Source eviction must retract both through the file journal.
-    INSERT INTO laplace.attestations
-        (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count,
-         sum_score_fp1e9, opponent_rd_fp1e9)
-    VALUES
-        (public.laplace_hash128_blake3('test/evict/file-marker/owned'),
-         f1, fm_t, f1, f1, src_a, 2, t3, 1, win)phi_w
-        (public.laplace_hash128_blake3('test/evict/file-marker/legacy'),
-         f2, fm_t, f2, f2, NULL, 2, t3, 1, win)phi_w
+    -- Completion state owned by the analysis witness: two file units and its layer.
+    -- Source eviction must clear every completion row under the witness.
+    INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer)
+    VALUES (src_a, f1, 2), (src_a, f2, 2);
+    INSERT INTO laplace.ingest_layer_completion (witness_id, layer)
+    VALUES (src_a, 2);
 
     -- Evidence rows persist the fold's exact inputs (observation_count,
     -- sum_score_fp1e9, opponent_rd_fp1e9) — the refold replays them verbatim.
@@ -185,7 +179,6 @@ DECLARE
     m2       bytea := public.laplace_hash128_blake3('test/evict/marker2');
     m3       bytea := public.laplace_hash128_blake3('test/evict/content-by-analysis');
     m4       bytea := public.laplace_hash128_blake3('test/evict/marker-of-witness');
-    fm_t     bytea := realize.canonical_id('substrate/type/HasLayerCompleted/2/v1');
     f1       bytea := public.laplace_hash128_blake3('test/evict/file/owned');
     f2       bytea := public.laplace_hash128_blake3('test/evict/file/legacy');
     phi_w    bigint := 30000000000;
@@ -205,9 +198,12 @@ BEGIN
     SELECT count(*) INTO n FROM laplace.attestations WHERE source_id = src_w;
     IF n <> 5 THEN RAISE EXCEPTION 'FAIL: witness evidence count % <> 5', n; END IF;
     IF EXISTS (
-        SELECT 1 FROM laplace.attestations
-        WHERE type_id = fm_t AND source_id IN (f1, f2)) THEN
-        RAISE EXCEPTION 'FAIL: per-file completion marker survived source eviction';
+        SELECT 1 FROM laplace.ingest_unit_completion WHERE witness_id = src_a) THEN
+        RAISE EXCEPTION 'FAIL: per-file unit completion survived source eviction';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM laplace.ingest_layer_completion WHERE witness_id = src_a) THEN
+        RAISE EXCEPTION 'FAIL: layer completion survived source eviction';
     END IF;
     IF EXISTS (
         SELECT 1 FROM laplace.ingest_flush_journal WHERE source_id = src_a) THEN
@@ -478,8 +474,8 @@ BEGIN
     DELETE FROM laplace.ingest_run_journal
     WHERE run_id = '00000000-0000-0000-0000-000000000508';
     DELETE FROM laplace.attestations WHERE source_id IN (src_w, src_a);
-    DELETE FROM laplace.entities
-    WHERE id = realize.canonical_id('substrate/type/HasLayerCompleted/2/v1');
+    DELETE FROM laplace.ingest_unit_completion WHERE witness_id = src_a;
+    DELETE FROM laplace.ingest_layer_completion WHERE witness_id = src_a;
     DELETE FROM laplace.consensus WHERE subject_id = subj;
     DELETE FROM laplace.highway_mask_dirty WHERE id IN (
         subj,

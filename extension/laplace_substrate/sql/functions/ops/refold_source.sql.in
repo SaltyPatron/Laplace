@@ -5,7 +5,7 @@
 -- (#1271). The ledger says applied; the folds never drained. Result: relation
 -- aa43543b… holds 163,585 attestations but 28,793 consensus rows; 3d5f97dc…
 -- 108,863 vs 66,789 — lanes whose folds finished are exact. Per-file resume
--- true-skips the files (their HasLayerCompleted markers exist), so re-running
+-- true-skips the files (their unit completion rows exist), so re-running
 -- repairs nothing, and until this procedure existed the ONLY recovery was
 -- evict + full re-ingest: destroying 963,549 evidence rows to rebuild rows
 -- that are all still present.
@@ -67,18 +67,9 @@ BEGIN
             p_source_name;
     END IF;
 
-    -- Match ConsensusAccumulatingWriter's bounded operational namespace.
+    -- Match ConsensusAccumulatingWriter's operational namespace.
     -- These rows prove admission; they never supply rating observations.
-    SELECT array_agg(type_id) INTO operational_types
-    FROM (
-        SELECT realize.canonical_id('substrate/type/HasFileMetadata/v1') AS type_id
-        UNION ALL
-        SELECT realize.canonical_id('substrate/type/HasLayerCompleted/' || layer::text || '/v1')
-        FROM generate_series(0, 255) AS layers(layer)
-        UNION ALL
-        SELECT realize.canonical_id('substrate/type/HasUnitCompleted/' || layer::text || '/v1')
-        FROM generate_series(0, 255) AS units(layer)
-    ) marker_types;
+    operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
 
     SELECT array_agg(DISTINCT a.type_id) INTO rels
     FROM laplace.attestations a

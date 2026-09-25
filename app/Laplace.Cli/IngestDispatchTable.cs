@@ -216,7 +216,7 @@ internal static class IngestDispatchTable
         if (CliRuntime.Decomposers.TryResolveGeneration(sourceKey, cli.Path, out var configured, out var sourceRoot))
         {
             // A selected generation resumes per file and owns its layer: once every
-            // admitted artifact commits, the runner records HasLayerCompleted for the
+            // admitted artifact commits, the runner records layer completion for the
             // source so the next layer's precondition can see it. A scoped run commits
             // only its files and leaves the layer to a run over the whole generation.
             bool scoped = configured is Laplace.Decomposers.Structured.Decomposer<Laplace.Decomposers.Structured.SourceGenerationRecipe> { IsScoped: true };

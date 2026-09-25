@@ -80,7 +80,7 @@ public sealed class DocumentFileExtractFailureTests
             Assert.Contains(failures, failure => failure.Contains("c-empty.txt", StringComparison.Ordinal));
             Assert.Equal(2, changes.Count(change => change.Metadata.SourceContentUnitName.StartsWith(
                 IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
-            Assert.Equal(2, MarkerAttestationCount(changes));
+            Assert.Equal(2, UnitCompletionCount(changes));
             Assert.True(ContentEntityCount(changes) > 0);
         }
         finally

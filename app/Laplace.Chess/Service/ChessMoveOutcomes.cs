@@ -95,9 +95,8 @@ public static class ChessMoveOutcomes
 /// </summary>
 public sealed record ChessMoveOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
-    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(22);
-    public Hash128 CompletionAttestationId =>
-        IngestUnitCompletion.AttestationId(TrunkRootId, ChessMoveOutcomes.SourceId, 22);
+    public IngestUnitCompletionKey? Completion =>
+        IngestUnitCompletion.Key(TrunkRootId, ChessMoveOutcomes.SourceId, 22);
     public Hash128 TrunkRootId => ChessMoveOutcomes.MarkerId(Game.LineId, ChessMoveOutcomes.Version);
 }
 

@@ -1,0 +1,69 @@
+-- Extension update. Earlier versions recorded ingest completion as self-referential
+-- attestations under ungoverned relation ids (the canonical-name hashes of
+-- 'substrate/type/HasLayerCompleted/<layer>/v1' and
+-- 'substrate/type/HasUnitCompleted/<layer>/v1'), each id realized as a bookkeeping
+-- entity with a projection physicality. Completion is operational state, not
+-- testimony, and now lives in laplace.ingest_unit_completion and
+-- laplace.ingest_layer_completion. Carry every existing marker into those tables,
+-- then remove the marker rows. Idempotent: a second run finds no marker rows.
+DO $$
+DECLARE
+    layer_types bytea[];
+    unit_types  bytea[];
+BEGIN
+    SELECT array_agg(realize.canonical_id('substrate/type/HasLayerCompleted/' || l::text || '/v1') ORDER BY l),
+           array_agg(realize.canonical_id('substrate/type/HasUnitCompleted/' || l::text || '/v1') ORDER BY l)
+    INTO layer_types, unit_types
+    FROM generate_series(0, 255) AS g(l);
+
+    -- Source-unit receipts: unit --HasUnitCompleted/L--> unit, owned by the witness,
+    -- context = the unit's recipe/generation digest.
+    INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer, digest, completed_at)
+    SELECT a.source_id, a.subject_id, u.l - 1, a.context_id, a.last_observed_at
+    FROM unnest(unit_types) WITH ORDINALITY AS u(type_id, l)
+    JOIN laplace.attestations a ON a.type_id = u.type_id
+    ON CONFLICT ON CONSTRAINT ingest_unit_completion_key DO NOTHING;
+
+    -- Vendor-owned file checkpoints: file --HasLayerCompleted/L--> file, source = the
+    -- file, context = the decomposer that completed it.
+    INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer, digest, completed_at)
+    SELECT a.context_id, a.source_id, m.l - 1, NULL, a.last_observed_at
+    FROM unnest(layer_types) WITH ORDINALITY AS m(type_id, l)
+    JOIN laplace.attestations a ON a.type_id = m.type_id
+    WHERE a.context_id IS NOT NULL
+    ON CONFLICT ON CONSTRAINT ingest_unit_completion_key DO NOTHING;
+
+    -- Unowned file checkpoints: the file journal names the run, and the run the
+    -- witness that admitted the file.
+    INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer, digest, completed_at)
+    SELECT DISTINCT ON (r.source_id, a.source_id, m.l)
+           r.source_id, a.source_id, m.l - 1, NULL::bytea, a.last_observed_at
+    FROM unnest(layer_types) WITH ORDINALITY AS m(type_id, l)
+    JOIN laplace.attestations a ON a.type_id = m.type_id AND a.context_id IS NULL
+    JOIN laplace.ingest_file_journal f ON f.file_id = a.source_id
+    JOIN laplace.ingest_run_journal r ON r.run_id = f.run_id AND r.layer = m.l - 1
+    WHERE r.source_id IS NOT NULL
+    ORDER BY r.source_id, a.source_id, m.l
+    ON CONFLICT ON CONSTRAINT ingest_unit_completion_key DO NOTHING;
+
+    -- Source layer completion: source --HasLayerCompleted/L--> source, owned by it.
+    INSERT INTO laplace.ingest_layer_completion (witness_id, layer, completed_at)
+    SELECT DISTINCT ON (a.source_id, m.l) a.source_id, m.l - 1, a.last_observed_at
+    FROM unnest(layer_types) WITH ORDINALITY AS m(type_id, l)
+    JOIN laplace.attestations a ON a.type_id = m.type_id
+    WHERE a.context_id IS NULL
+      AND a.subject_id = a.source_id
+      AND NOT EXISTS (
+          SELECT 1 FROM laplace.ingest_file_journal f WHERE f.file_id = a.source_id)
+    ORDER BY a.source_id, m.l
+    ON CONFLICT (witness_id, layer) DO NOTHING;
+
+    DELETE FROM laplace.consensus c
+    WHERE c.type_id = ANY(layer_types) OR c.type_id = ANY(unit_types);
+    DELETE FROM laplace.attestations a
+    WHERE a.type_id = ANY(layer_types) OR a.type_id = ANY(unit_types);
+    DELETE FROM laplace.physicalities p
+    WHERE p.entity_id = ANY(layer_types) OR p.entity_id = ANY(unit_types);
+    DELETE FROM laplace.entities e
+    WHERE e.id = ANY(layer_types) OR e.id = ANY(unit_types);
+END $$;

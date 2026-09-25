@@ -301,10 +301,8 @@ internal static partial class IngestCommands
         // guard must not block them.
         if (Laplace.Decomposers.Model.ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
         {
-            bool alreadyIngested = await NpgsqlIngestOps.EvidenceExistsForTypeAndSourceAsync(
-                ds,
-                modelSource.ToBytes(),
-                Laplace.Ingestion.LayerCompletion.RelationTypeId(dec.LayerOrder).ToBytes());
+            bool alreadyIngested = await new NpgsqlSubstrateReader(ds)
+                .HasSourceCompletedAsync(modelSource, dec.LayerOrder);
             if (alreadyIngested)
             {
                 Console.WriteLine($"Safetensor snapshot already deposited — source {modelName}: {modelSource}");
@@ -660,7 +658,7 @@ internal static partial class IngestCommands
             // Suppressing completion and bypassing its pre-run guard are different
             // operations. Incremental lanes deliberately own their own completion
             // protocol; --force merely re-runs an ordinary source and must still
-            // publish its terminal HasLayerCompleted marker.
+            // record its terminal layer completion.
             SkipSourceCompletion = skipSourceCompletion,
             BypassSourceCompletionGuard = cli?.Force ?? false,
             EcosystemPath = ecosystemPath,
@@ -940,7 +938,7 @@ internal static partial class IngestCommands
         string srcKey = decomposer.SourceName;
         long att = await EvidenceForSource(srcKey);
         long content = await ContentForSource(srcKey);
-        bool layerOk = await NpgsqlIngestOps.LayerMarkedCompleteAsync(conn, decomposer.LayerOrder, srcKey);
+        bool layerOk = await NpgsqlIngestOps.LayerCompletedAsync(conn, decomposer.LayerOrder, decomposer.SourceId);
         Console.WriteLine($"  witness [{srcKey}] L{decomposer.LayerOrder}: {att:N0} attestations, {content:N0} content, layer_complete={layerOk}");
 
         // Executable source-content receipt. This is generated from the SAME static/runtime

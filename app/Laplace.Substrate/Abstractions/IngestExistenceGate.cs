@@ -23,7 +23,7 @@ internal static class IngestExistenceGate
     {
         if (records.Count == 0) return [];
 
-        // This gate owns durable COMPLETION receipts only. Entity/content presence is
+        // This gate owns durable COMPLETION state only. Entity/content presence is
         // Rule #8 step 5's one whole-working-set trunk->tier descent; doing a root
         // EntitiesExistBitmapAsync here creates a second novelty decision before that
         // descent and adds a database crossing that scales outside O(tiers).
@@ -33,45 +33,39 @@ internal static class IngestExistenceGate
         var removed = new bool[records.Count];
         var perFile = handler as DocumentIngestHandler;
 
-        // Explicit source-unit receipts belong to the atomic admission transaction.
-        // Group by relation type so the reader can prune attestation partitions.
-        var completionRecords = new Dictionary<Hash128, List<(int Index, Hash128 ReceiptId)>>();
+        // Explicit source-unit completions belong to the atomic admission transaction.
+        var completionRecords = new List<(int Index, IngestUnitCompletionKey Key)>();
         for (int i = 0; i < records.Count; i++)
         {
-            if (records[i] is not IIngestCompletionRecord completed) continue;
-            var typeId = completed.CompletionAttestationTypeId;
-            var receiptId = completed.CompletionAttestationId;
-            if (typeId == default || receiptId == default) continue;
-            if (!completionRecords.TryGetValue(typeId, out var candidates))
-                completionRecords[typeId] = candidates = [];
-            candidates.Add((i, receiptId));
+            if (records[i] is not IIngestCompletionRecord { Completion: { } key }) continue;
+            // An unspecified witness or unit identity cannot authorize a skip.
+            if (key.WitnessId == default || key.UnitId == default) continue;
+            completionRecords.Add((i, key));
         }
-        foreach (var (typeId, candidates) in completionRecords)
+        if (completionRecords.Count > 0)
         {
-            var ids = candidates.Select(static x => x.ReceiptId).Distinct().ToArray();
-            var completed = await reader.PresentAttestationIdsAsync(typeId, ids, ct)
-                .ConfigureAwait(false);
-            foreach (var (i, receiptId) in candidates)
+            var keys = completionRecords.Select(static x => x.Key).Distinct().ToArray();
+            var completed = await reader.CompletedUnitsAsync(keys, ct).ConfigureAwait(false);
+            foreach (var (i, key) in completionRecords)
             {
-                if (!completed.Contains(receiptId) || removed[i]) continue;
+                if (!completed.Contains(key) || removed[i]) continue;
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                 ReleaseNativeArtifacts(records[i], handler);
                 removed[i] = true;
             }
         }
 
-        // Per-file document completion is a replay receipt, not an entity-presence
-        // shortcut. Query the receipt directly. A completed file necessarily committed
+        // Per-file document completion is replay state, not an entity-presence
+        // shortcut. Query the completion directly. A completed file necessarily committed
         // its content in the accepted working set; requiring a separate content-root
-        // presence query before trusting the receipt only duplicates step 5's authority.
+        // presence query before trusting the completion only duplicates step 5's authority.
         if (perFile is not null && !perFile.IgnoreCompletedFiles)
         {
-            var candidates = new List<(int Index, Hash128 CompletionId, bool VendorOwned)>();
+            var candidates = new List<(int Index, Hash128 CompletionId)>();
             for (int i = 0; i < records.Count; i++)
             {
                 if (removed[i] || records[i] is IIngestCompletionRecord) continue;
 
-                bool vendorOwned = records[i] is ContentIngestRecord { Metadata: not null };
                 Hash128 completionId;
                 if (records[i] is ContentIngestRecord cr && cr.FileId != default)
                 {
@@ -96,27 +90,19 @@ internal static class IngestExistenceGate
                     }
                     continue;
                 }
-                candidates.Add((i, completionId, vendorOwned));
+                candidates.Add((i, completionId));
             }
 
             if (candidates.Count > 0)
             {
-                var ownedIds = candidates.Where(static x => x.VendorOwned)
-                    .Select(static x => x.CompletionId).Distinct().ToArray();
-                var legacyIds = candidates.Where(static x => !x.VendorOwned)
-                    .Select(static x => x.CompletionId).Distinct().ToArray();
-                IReadOnlySet<Hash128> owned = ownedIds.Length == 0
-                    ? new HashSet<Hash128>()
-                    : await reader.HasFilesCompletedAsync(
-                        ownedIds, DocumentSource.SourceId, perFile.LayerOrder, ct).ConfigureAwait(false);
-                IReadOnlySet<Hash128> legacy = legacyIds.Length == 0
-                    ? new HashSet<Hash128>()
-                    : await reader.HasSourcesCompletedAsync(
-                        legacyIds, perFile.LayerOrder, ct).ConfigureAwait(false);
+                // Every document file completion is witnessed by the document source.
+                var ids = candidates.Select(static x => x.CompletionId).Distinct().ToArray();
+                IReadOnlySet<Hash128> done = await reader.HasFilesCompletedAsync(
+                    ids, DocumentSource.SourceId, perFile.LayerOrder, ct).ConfigureAwait(false);
 
-                foreach (var (i, completionId, vendorOwned) in candidates)
+                foreach (var (i, completionId) in candidates)
                 {
-                    if (removed[i] || !(vendorOwned ? owned : legacy).Contains(completionId)) continue;
+                    if (removed[i] || !done.Contains(completionId)) continue;
                     shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                     removed[i] = true;
                     ReleaseNativeArtifacts(records[i], handler);
@@ -173,7 +159,7 @@ internal static class IngestExistenceGate
         // native source recipe before an existence decision can be made.
         if (record is GrammarComposeRecord) return false;
         // A generic trunk identity does not prove source-unit completion.
-        // Explicit completion receipts are checked before this content-only gate.
+        // Explicit unit completions are checked before this content-only gate.
         return false;
     }
 

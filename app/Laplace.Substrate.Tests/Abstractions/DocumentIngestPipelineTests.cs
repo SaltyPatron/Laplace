@@ -82,7 +82,7 @@ public sealed class DocumentIngestPipelineTests
         // Present content WITHOUT a per-file completion marker still deposits the marker
         // (Pillar 0: the file's trunk-grain witness) — that is provenance, not re-witness.
         Assert.Equal(0, NonMarkerAttestationCount(changes));
-        Assert.Equal(records.Count, MarkerAttestationCount(changes));
+        Assert.Equal(records.Count, UnitCompletionCount(changes));
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class DocumentIngestPipelineTests
 
         // --force re-observes: files compose (content no-ops under the present bitmap)
         // and re-deposit their markers.
-        Assert.Equal(records.Count, MarkerAttestationCount(changes));
+        Assert.Equal(records.Count, UnitCompletionCount(changes));
         Assert.Equal(0, reader.ScalarSourceCompletedCalls);
         Assert.Equal(0, reader.BatchedSourceCompletedCalls);
     }
@@ -178,14 +178,11 @@ public sealed class DocumentIngestPipelineTests
             changes.Add(c);
 
         var managed = changes.SelectMany(c => c.Attestations).ToList();
-        var markerType = Laplace.Ingestion.LayerCompletion.RelationTypeId(2);
 
-        var marker = Assert.Single(managed, a => a.TypeId == markerType);
+        var marker = Assert.Single(changes.SelectMany(c => c.UnitCompletions));
         FileIdentity identity = FileEntity.Resolve(content, metadata);
         Assert.NotEqual(fileRoot, identity.FileId);
-        Assert.Equal(identity.FileId, marker.SubjectId);
-        Assert.Equal(identity.FileId, marker.SourceId);
-        Assert.Equal(DocumentSource.SourceId, marker.ContextId);
+        Assert.Equal(new IngestUnitCompletionKey(DocumentSource.SourceId, identity.FileId, 2), marker);
         Assert.DoesNotContain(managed, a => a.TypeId == FileEntity.MetadataRelationTypeId);
 
         // Metadata-bearing records use the canonical file composition even when the

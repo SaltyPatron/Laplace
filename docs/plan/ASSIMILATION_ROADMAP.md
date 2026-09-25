@@ -210,7 +210,7 @@ Issue: #1721
 
 - `SubstrateCanonicalIds.Source(name)` `blake3` source ids for every legacy decomposer and every chess source
 - chess marker entities (`AnalysisMarkerId`)
-- completion markers (`HasLayerCompleted` / `HasUnitCompleted`)
+- completion markers — done: ingest completion is operational state (`ingest_unit_completion`, `ingest_layer_completion`), never attestations
 - the `canonical_names` table, `register_canonical(s)`, and `CanonicalNamesForReadback` in 39 decomposers
 - `laplace.source_id`
 - the `'language:eng'` and `operation/what_is/v1` SQL literals

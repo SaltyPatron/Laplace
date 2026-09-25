@@ -39,8 +39,7 @@ counts() {
 layer_done() {
   local n="$1"
   "${PSQL[@]}" -t -A -c "
-    SELECT ops.evidence_count(
-      p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${n}/v1')) > 0;
+    SELECT ops.layer_completed(NULL, ${n});
   " | tr -d '[:space:]'
 }
 
@@ -141,7 +140,7 @@ for src in "${LADDER[@]}"; do
   should_run "$src" || continue
   prev=$(( ${LAYER[$src]} - 1 ))
   if [[ "$(layer_done "$prev")" != "t" ]]; then
-    fail "ingest $src blocked: HasLayerCompleted/$prev missing (run the lower ladder layers first)"
+    fail "ingest $src blocked: layer $prev not complete (run the lower ladder layers first)"
     AUDIT_FAIL=1
     continue
   fi

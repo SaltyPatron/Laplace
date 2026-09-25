@@ -39,6 +39,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
     private readonly List<IntentStage> _intentStages = new();
     private readonly List<TestimonyWalkRow> _walks = new();
     private readonly List<EphemeralFoldInput> _ephemeralFolds = new();
+    private readonly List<IngestUnitCompletionKey> _unitCompletions = new();
+    private readonly List<IngestLayerCompletionKey> _layerCompletions = new();
 
     public SubstrateChangeBuilder(
         Hash128 sourceId,
@@ -539,6 +541,26 @@ public sealed class SubstrateChangeBuilder : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// Records that this change completes one source unit. The completion row commits
+    /// in the control transaction that accepts this change's evidence. Call only after
+    /// the complete unit has been staged.
+    /// </summary>
+    public SubstrateChangeBuilder RecordUnitCompletion(IngestUnitCompletionKey key)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _unitCompletions.Add(key.Validate());
+        return this;
+    }
+
+    /// <summary>Records that this change completes one source layer.</summary>
+    public SubstrateChangeBuilder RecordLayerCompletion(IngestLayerCompletionKey key)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _layerCompletions.Add(key.Validate());
+        return this;
+    }
+
     public SubstrateChange Build()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -590,6 +612,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
             ephemeralFolds)
         {
             PhysicalitySourcePriors = _sourcePriors.ToImmutable(),
+            UnitCompletions = _unitCompletions.Distinct().ToImmutableArray(),
+            LayerCompletions = _layerCompletions.Distinct().ToImmutableArray(),
         };
         _intentStages.Clear();
         _contentStage = null;
@@ -624,19 +648,6 @@ public sealed class SubstrateChangeBuilder : IDisposable
         ImmutableArray<AttestationRow> attestations,
         ImmutableArray<EphemeralFoldInput> ephemeralFolds)
     {
-        // Unit-completion metadata is new operational bookkeeping, not a new
-        // source observation. Preserve the legacy source-unit identity when it
-        // is added during recovery; the complete v2 payload digest still binds
-        // every receipt/type row in the returned change.
-        if (entities.Any(static row => Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.Id))
-            || attestations.Any(static row => Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.TypeId)))
-        {
-            entities = entities.Where(static row =>
-                !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.Id)).ToImmutableArray();
-            attestations = attestations.Where(static row =>
-                !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.TypeId)).ToImmutableArray();
-        }
-
         int nameByteCount = System.Text.Encoding.UTF8.GetByteCount(unitName);
         long total = 16L + nameByteCount
                      + 4L + (long)entities.Length * 16

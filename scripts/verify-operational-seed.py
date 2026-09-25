@@ -114,13 +114,8 @@ WITH expected(relative_path, bytes, fingerprint) AS MATERIALIZED (VALUES
            encode(f.resume_fingerprint,'hex') AS resume_fingerprint,
            encode(e.fingerprint,'hex') AS expected_fingerprint,
            e.bytes AS expected_bytes,
-           EXISTS (
-               SELECT 1 FROM laplace.attestations a
-               WHERE a.type_id = realize.canonical_id('substrate/type/HasLayerCompleted/2/v1')
-                 AND a.source_id = e.fingerprint
-                 AND a.subject_id = e.fingerprint AND a.object_id = e.fingerprint
-                 AND a.context_id = laplace.source_id('{SOURCE}')
-           ) AS completion_present
+           ops.unit_completed(laplace.source_id('{SOURCE}'), e.fingerprint, 2)
+               AS completion_present
     FROM laplace.ingest_file_journal f
     LEFT JOIN expected e ON e.relative_path = f.relative_path
     WHERE f.run_id = '{receipt['run_id']}'::uuid

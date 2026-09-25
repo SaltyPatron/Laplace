@@ -97,24 +97,13 @@ def check_source(
             # physicalities + trajectory geometry — and ZERO distributional attestations (sequence
             # is the trajectory geometry, containment is containers_of; PRECEDES is a MODEL relation).
             # Assert exactly that, rather than the KB-source ">0 attestations" expectation.
-            # The source-level HasLayerCompleted marker is ops metadata, not a distributional
-            # attestation — exclude it (per-file markers live under file-root sources, not here).
-            markers = int(
-                psql(
-                    dbname,
-                    "SELECT COALESCE(sum(ops.evidence_count("
-                    "p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || l || '/v1'), "
-                    f"p_source => {source_sql})), 0) FROM generate_series(0, 8) l;",
-                    host=host,
-                    user=user,
-                )
-            )
-            content_att = att - markers
+            # Layer and file completion are operational state in their own tables,
+            # never attestations, so every attestation here is content testimony.
             record(
                 "attestations",
-                content_att == 0,
-                f"{content_att:,} non-marker attestations (content-only: expect 0; {markers:,} completion markers)",
-                count=content_att,
+                att == 0,
+                f"{att:,} attestations (content-only: expect 0)",
+                count=att,
             )
         else:
             record("attestations", att > 0, f"{att:,} attestations", count=att)
@@ -138,7 +127,7 @@ def check_source(
         except Exception as e:
             record("layer_complete", False, str(e))
     elif src.get("marker_entities"):
-        # A pass whose whole output is GEOMETRY plus a completion marker (chess-trajectory:
+        # A pass whose whole output is GEOMETRY plus unit completion (chess-trajectory:
         # one physicality upsert per line and, by design, zero attestations — re-deriving
         # testimony would double every observation_count, which is why it is a separate
         # pass at all). The attestation-joined physicality probe below finds nothing for
@@ -187,13 +176,11 @@ def check_source(
         try:
             layer_ok = psql(
                 dbname,
-                "SELECT ops.evidence_count("
-                f"p_type => realize.canonical_id('substrate/type/HasLayerCompleted/{layer}/v1'), "
-                f"p_source => {source_sql}) > 0;",
+                f"SELECT ops.layer_completed({source_sql}, {int(layer)});",
                 host=host,
                 user=user,
             ).lower() in ("t", "true")
-            record("layer_complete", layer_ok, f"L{layer} HasLayerCompleted={layer_ok}")
+            record("layer_complete", layer_ok, f"L{layer} layer_completed={layer_ok}")
         except Exception as e:
             record("layer_complete", False, str(e))
 

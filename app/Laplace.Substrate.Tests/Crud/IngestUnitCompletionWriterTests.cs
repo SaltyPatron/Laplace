@@ -14,9 +14,8 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
     private sealed record Unit(Hash128 TrunkRootId, Hash128 Owner, int Layer)
         : ITrunkRootRecord, IIngestCompletionRecord
     {
-        public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(Layer);
-        public Hash128 CompletionAttestationId =>
-            IngestUnitCompletion.AttestationId(TrunkRootId, Owner, Layer);
+        public IngestUnitCompletionKey Key => IngestUnitCompletion.Key(TrunkRootId, Owner, Layer);
+        public IngestUnitCompletionKey? Completion => Key;
     }
 
     private sealed class Handler : IIngestRecordHandler<Unit>
@@ -44,7 +43,7 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
     }
 
     [Fact]
-    public async Task EntityOnlyUnitsRecoverAndReceiptsRemainOperationalAcrossReplayRefoldAndEviction()
+    public async Task EntityOnlyUnitsRecoverAndCompletionsRemainOperationalAcrossReplayRefoldAndEviction()
     {
         using var owned = new OwnedChanges();
         CodepointPerfcache.LoadDefault();
@@ -102,7 +101,9 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
 
         await using var writer = new ConsensusAccumulatingWriter(ordinary, pg.DataSource);
         // A previously successful version has a real journal receipt and body
-        // observations, but lacks the newly introduced unit-completion metadata.
+        // observations, but lacks unit completion state. Completion never enters
+        // the source-unit identity, so the completed payload replays the accepted
+        // working set and records only the completion rows it owes.
         var oldOutput = Complete("accepted-unit-output", receipts: false);
         var completedOutput = Complete("accepted-unit-output");
         Assert.Equal(oldOutput.Metadata.IntentId, completedOutput.Metadata.IntentId);
@@ -111,7 +112,8 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
         long foldedBeforeUpgrade = writer.CellsFolded;
         long observationsBeforeUpgrade = writer.ObservationsAccumulated;
         var upgrade = await writer.ApplyWorkingSetAsync(completedOutput);
-        Assert.Equal(4L, upgrade.AttestationsInserted);
+        Assert.True(upgrade.JournalReplayHit);
+        Assert.Equal(0L, upgrade.AttestationsInserted);
         Assert.Equal(foldedBeforeUpgrade, writer.CellsFolded);
         Assert.Equal(observationsBeforeUpgrade, writer.ObservationsAccumulated);
         await AssertGateAsync(true);
@@ -132,12 +134,14 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
             command.Parameters.AddWithValue(subject.ToBytes());
             return (string)(await command.ExecuteScalarAsync())!;
         }
+        // Completion is operational state: no unit is ever the subject of testimony
+        // or standing because it completed.
         async Task AssertNoOperationalStandingAsync()
         {
-            await using var command = pg.DataSource.CreateCommand(
-                "SELECT count(*) FROM laplace.consensus WHERE type_id=ANY($1::bytea[]) AND subject_id=ANY($2::bytea[])");
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                units.Select(unit => unit.CompletionAttestationTypeId.ToBytes()).ToArray());
+            await using var command = pg.DataSource.CreateCommand("""
+                SELECT (SELECT count(*) FROM laplace.attestations WHERE subject_id=ANY($1::bytea[]))
+                     + (SELECT count(*) FROM laplace.consensus WHERE subject_id=ANY($1::bytea[]))
+                """);
             command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
                 units.Select(unit => unit.TrunkRootId.ToBytes()).ToArray());
             Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
@@ -156,7 +160,7 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
         Assert.Equal(accepted, await SnapshotAsync());
 
         // Even an explicit rated-relation selection must invalidate owned unit
-        // completion. Another actual owner's receipt for the same marker survives.
+        // completion. Another witness's completion of the same unit survives.
         await using (var evict = pg.DataSource.CreateCommand(
                          "CALL ops.evict_source(p_source => $1, p_relations => $2, p_drain => false)"))
         {
@@ -166,9 +170,8 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
             await evict.ExecuteNonQueryAsync();
         }
         await AssertGateAsync(false);
-        var peerReceipt = IngestUnitCompletion.AttestationId(units[1].TrunkRootId, peer, units[1].Layer);
-        Assert.Contains(peerReceipt, await reader.PresentAttestationIdsAsync(
-            units[1].CompletionAttestationTypeId, [peerReceipt]));
+        var peerReceipt = IngestUnitCompletion.Key(units[1].TrunkRootId, peer, units[1].Layer);
+        Assert.Contains(peerReceipt, await reader.CompletedUnitsAsync([peerReceipt]));
         var retained = await reader.EntitiesExistBitmapAsync(units.Select(unit => unit.TrunkRootId).ToArray());
         for (int index = 0; index < units.Length; index++)
             Assert.True((retained[index >> 3] & (1 << (index & 7))) != 0,
@@ -207,16 +210,15 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
             .AddAttestation(secondEvidence);
         IngestUnitCompletion.Emit(builder, unit.TrunkRootId, source, unit.Layer);
         IngestUnitCompletion.Emit(builder, unit.TrunkRootId, peer, unit.Layer);
-        LayerCompletion.EmitFileMarker(builder, file, source, unit.Layer);
+        LayerCompletion.RecordFile(builder, file, source, unit.Layer);
         var complete = builder.Build();
         await writer.ApplyWorkingSetAsync(complete);
         var reader = new NpgsqlSubstrateReader(pg.DataSource);
-        Assert.Contains(unit.CompletionAttestationId, await reader.PresentAttestationIdsAsync(
-            unit.CompletionAttestationTypeId, [unit.CompletionAttestationId]));
+        Assert.Contains(unit.Key, await reader.CompletedUnitsAsync([unit.Key]));
         Assert.True(await reader.HasFileCompletedAsync(file, source, unit.Layer));
 
-        // The retained file journal is the existing source-to-file ownership edge
-        // used by eviction, while the real writer above owns the v2 flush receipt.
+        // The file journal is audit history only; completion rows carry their own
+        // witness, and the real writer above owns the v2 flush receipt.
         await using (var journal = pg.DataSource.CreateCommand("""
                          WITH run AS (
                              INSERT INTO laplace.ingest_run_journal
@@ -297,11 +299,9 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
 
             Assert.Equal(0, await ReplayClaimsAsync());
             Assert.False(await reader.HasFileCompletedAsync(file, source, unit.Layer));
-            Assert.Empty(await reader.PresentAttestationIdsAsync(
-                unit.CompletionAttestationTypeId, [unit.CompletionAttestationId]));
-            var peerReceipt = IngestUnitCompletion.AttestationId(unit.TrunkRootId, peer, unit.Layer);
-            Assert.Contains(peerReceipt, await reader.PresentAttestationIdsAsync(
-                unit.CompletionAttestationTypeId, [peerReceipt]));
+            Assert.Empty(await reader.CompletedUnitsAsync([unit.Key]));
+            var peerReceipt = IngestUnitCompletion.Key(unit.TrunkRootId, peer, unit.Layer);
+            Assert.Contains(peerReceipt, await reader.CompletedUnitsAsync([peerReceipt]));
             Assert.Empty(await reader.PresentAttestationIdsAsync(relation, [firstEvidence.Id]));
             Assert.Contains(secondEvidence.Id,
                 await reader.PresentAttestationIdsAsync(secondRelation, [secondEvidence.Id]));
@@ -313,14 +313,13 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
 
             // This is the identical previously accepted payload, not a new label
             // that could evade a stale v2 replay claim. Existing evidence survives
-            // unchanged; only the missing witness and completion rows are restored.
+            // unchanged; only the deleted evidence row and the completion rows are restored.
             var repaired = await writer.ApplyWorkingSetAsync(complete);
             Assert.False(repaired.JournalReplayHit);
-            Assert.Equal(3L, repaired.AttestationsInserted);
+            Assert.Equal(1L, repaired.AttestationsInserted);
             Assert.Equal(acceptedEvidence, await EvidenceAsync());
             Assert.True(await reader.HasFileCompletedAsync(file, source, unit.Layer));
-            Assert.Contains(unit.CompletionAttestationId, await reader.PresentAttestationIdsAsync(
-                unit.CompletionAttestationTypeId, [unit.CompletionAttestationId]));
+            Assert.Contains(unit.Key, await reader.CompletedUnitsAsync([unit.Key]));
             Assert.True(await ReplayClaimsAsync() > 0);
             var replay = await writer.ApplyWorkingSetAsync(complete);
             Assert.True(replay.JournalReplayHit);

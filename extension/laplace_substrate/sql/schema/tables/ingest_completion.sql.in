@@ -1,0 +1,43 @@
+-- Ingest completion: which source units and which source layers a witness has
+-- finished admitting. Operational state, not testimony: a source never testifies
+-- that it ingested itself, so these rows are never attestations, never entities,
+-- never folded and never walked. The ingest writer inserts them inside the same
+-- control transaction that accepts the unit's evidence (journal token, consensus
+-- fold), so a completion row is exactly as durable as the claims it vouches for,
+-- and a failed or partial admission leaves no row.
+--
+-- witness_id is the source witness that owns the unit. unit_id is the unit's own
+-- identity (a file's content fingerprint, a versioned source unit's root).
+-- digest is the unit's recipe/generation digest where the unit is versioned; NULL
+-- where the unit id already fixes the content. Readers:
+--   resume            which units of a witness are already complete
+--   preconditions     a layer blocks until the prior layer of its source is complete
+--   eviction          ops.evict_source clears the witness's rows with its evidence
+--
+-- Dumped with the extension like the evidence it vouches for: restoring the claims
+-- without their completion state would re-admit every unit on the next run.
+CREATE TABLE IF NOT EXISTS ingest_unit_completion (
+    witness_id   bytea        NOT NULL CHECK (octet_length(witness_id) = 16),
+    unit_id      bytea        NOT NULL CHECK (octet_length(unit_id) = 16),
+    layer        int          NOT NULL CHECK (layer BETWEEN 0 AND 255),
+    digest       bytea        CHECK (digest IS NULL OR octet_length(digest) = 16),
+    completed_at timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT ingest_unit_completion_key
+        UNIQUE NULLS NOT DISTINCT (witness_id, unit_id, layer, digest)
+);
+
+-- A layer is complete for a witness only after a full successful extraction:
+-- every admitted unit applied, none failed, no input cap. A partial run records
+-- its units above and no row here.
+CREATE TABLE IF NOT EXISTS ingest_layer_completion (
+    witness_id   bytea        NOT NULL CHECK (octet_length(witness_id) = 16),
+    layer        int          NOT NULL CHECK (layer BETWEEN 0 AND 255),
+    completed_at timestamptz  NOT NULL DEFAULT now(),
+    PRIMARY KEY (witness_id, layer)
+);
+
+CREATE INDEX IF NOT EXISTS ingest_layer_completion_layer
+    ON ingest_layer_completion (layer);
+
+SELECT pg_extension_config_dump('ingest_unit_completion', '');
+SELECT pg_extension_config_dump('ingest_layer_completion', '');

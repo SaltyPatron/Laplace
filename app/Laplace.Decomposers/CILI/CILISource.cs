@@ -35,7 +35,7 @@ public readonly struct CILISource : ISeedSource
     ///
     /// So it is recorded the way the substrate records provenance elsewhere: a meta-type,
     /// minted inline, never in relation_types.toml, never given a highway bit, never
-    /// folded (FileEntity.MetadataRelationTypeId, LayerCompletion's HasLayerCompleted,
+    /// folded (FileEntity.MetadataRelationTypeId,
     /// ChessVocabulary.AnalysisVersionMetaTypeId). It still converts "absent from
     /// ili-map-wn31" -- which spec 05 says is UNKNOWN, not refutation -- into a stated
     /// fact that a reader can fetch.
