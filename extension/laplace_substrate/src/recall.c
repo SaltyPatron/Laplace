@@ -627,7 +627,6 @@ static void
 define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *buf)
 {
     hash128_t   has_sense    = rel_type_id("HAS_SENSE");
-    hash128_t   is_sense_of  = rel_type_id("IS_SENSE_OF");
     hash128_t   has_def      = rel_type_id("HAS_DEFINITION");
     Datum       peers_arr;
     bool        peers_null;
@@ -653,18 +652,18 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
 
 
     {
-        Oid   types[4] = { BYTEAARRAYOID, BYTEAOID, BYTEAOID, BYTEAOID };
-        Datum args[4] = { peers_arr, hash128_to_datum(&has_sense),
-                          hash128_to_datum(&is_sense_of), hash128_to_datum(&has_def) };
+        /* word --HAS_SENSE--> key --HAS_DEFINITION--> gloss: the definition belongs
+         * to the key the word is bound to. */
+        Oid   types[3] = { BYTEAARRAYOID, BYTEAOID, BYTEAOID };
+        Datum args[3] = { peers_arr, hash128_to_datum(&has_sense), hash128_to_datum(&has_def) };
 
         rc = SPI_execute_with_args(
             "SELECT g.object_id, g.rating, g.rd, g.witness_count, "
-            "       s.rating, s.rd, ss.rating, ss.rd "
+            "       s.rating, s.rd, NULL::bigint, NULL::bigint "
             "FROM laplace.v_consensus_unrefuted s "
-            "JOIN laplace.v_consensus_unrefuted ss ON ss.subject_id = s.object_id AND ss.type_id = $3 "
-            "JOIN laplace.v_consensus_unrefuted g  ON g.subject_id  = ss.object_id AND g.type_id = $4 "
+            "JOIN laplace.v_consensus_unrefuted g  ON g.subject_id  = s.object_id AND g.type_id = $3 "
             "WHERE s.subject_id = ANY($1) AND s.type_id = $2",
-            4, types, args, NULL, true, 0);
+            3, types, args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "define_fast: sense query failed: %s", SPI_result_code_string(rc));
         for (uint64 r = 0; r < SPI_processed; r++)
