@@ -24,6 +24,7 @@
 #include "laplace/core/hash128.h"
 
 #include "cognition_program.h"
+#include "consensus_scan.h"
 #include "prompt_input.h"
 #include "prompt_intent.h"
 #include "query_evidence.h"
@@ -949,6 +950,157 @@ geometry_summary_present(const GeometrySummary *summary)
 {
     return summary &&
            (summary->has_angular || summary->has_frechet || summary->has_hilbert);
+}
+
+/*
+ * Meeting specificity. Among candidates that ground the same obligations, a
+ * meeting reached through a cell whose object is shared by few subjects is more
+ * specific than one reached through a hub: "Paris IS_INSTANCE_OF national
+ * capital" shares its object with a few hundred rows, "X IS_INSTANCE_OF Concept"
+ * with every concept. Sharing is a typed count read from consensus, bounded at
+ * SHARING_CAP per cell; it orders, it is never fused into a score. The window
+ * and cap are the default firmware image's values (spec 39).
+ */
+#define SHARING_WINDOW 32
+#define SHARING_CAP 4096
+
+typedef struct SharingKey
+{
+    hash128_t object;
+    hash128_t type;
+} SharingKey;
+
+typedef struct SharingEntry
+{
+    SharingKey key;
+    int64 count;
+} SharingEntry;
+
+static const LaplaceQueryChannel *
+candidate_support(const Candidate *candidate)
+{
+    if (candidate->query_traversal.has_positive) return &candidate->query_traversal.positive;
+    if (candidate->query.has_positive) return &candidate->query.positive;
+    if (candidate->projection.has_positive) return &candidate->projection.positive;
+    return NULL;
+}
+
+static int32
+candidate_grounded(const Candidate *candidate)
+{
+    return Max(candidate->projection.positive_required_occurrences,
+               Max(candidate->query_traversal.positive_required_occurrences,
+                   candidate->query.positive_required_occurrences));
+}
+
+static SharingKey
+candidate_sharing_key(const Candidate *candidate, const LaplaceQueryChannel *support)
+{
+    SharingKey key;
+    MemSet(&key, 0, sizeof(key));
+    key.object = support->outbound ? candidate->id : support->anchor;
+    key.type = support->relation;
+    return key;
+}
+
+static void
+receive_sharing(const LaplaceConsensusRow *row, void *context)
+{
+    SharingKey key;
+    MemSet(&key, 0, sizeof(key));
+    key.object = row->object;
+    key.type = row->type;
+    SharingEntry *entry = hash_search((HTAB *) context, &key, HASH_FIND, NULL);
+    if (entry) entry->count++;
+}
+
+static bool
+sharing_cutoff(const LaplaceConsensusRow *row, void *context)
+{
+    SharingKey key;
+    MemSet(&key, 0, sizeof(key));
+    key.object = row->object;
+    key.type = row->type;
+    SharingEntry *entry = hash_search((HTAB *) context, &key, HASH_FIND, NULL);
+    return entry && entry->count >= SHARING_CAP;
+}
+
+/* Stable reorder of the leading group (equal grounded obligations) by the
+ * sharing of each candidate's supporting cell, fewest first. */
+static void
+order_leading_by_sharing(Candidate *candidates, int count)
+{
+    int group = 0;
+    if (count < 2)
+        return;
+    while (group < count && group < SHARING_WINDOW &&
+           candidate_grounded(&candidates[group]) == candidate_grounded(&candidates[0]))
+        ++group;
+    if (group < 2)
+        return;
+
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(SharingKey);
+    ctl.entrysize = sizeof(SharingEntry);
+    ctl.hcxt = CurrentMemoryContext;
+    HTAB *sharing = hash_create("forward meeting sharing", group * 2, &ctl,
+                                HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    hash128_t *objects = palloc(sizeof(hash128_t) * group);
+    hash128_t *types = palloc(sizeof(hash128_t) * group);
+    int object_count = 0, type_count = 0;
+    int64 *shared = palloc0(sizeof(int64) * group);
+    for (int i = 0; i < group; ++i)
+    {
+        const LaplaceQueryChannel *support = candidate_support(&candidates[i]);
+        bool found;
+        if (!support) continue;
+        SharingKey key = candidate_sharing_key(&candidates[i], support);
+        SharingEntry *entry = hash_search(sharing, &key, HASH_ENTER, &found);
+        if (found) continue;
+        entry->count = 0;
+        objects[object_count++] = key.object;
+        bool seen_type = false;
+        for (int t = 0; t < type_count && !seen_type; ++t)
+            seen_type = hash128_eq(&types[t], &key.type);
+        if (!seen_type) types[type_count++] = key.type;
+    }
+    if (object_count > 0)
+    {
+        ArrayType *object_ids = hash128_array_from_ids(objects, object_count);
+        ArrayType *type_ids = hash128_array_from_ids(types, type_count);
+        laplace_consensus_scan_ranked(NULL, object_ids, type_ids, false,
+                                      receive_sharing, sharing_cutoff, sharing, NULL);
+        pfree(object_ids);
+        pfree(type_ids);
+    }
+    for (int i = 0; i < group; ++i)
+    {
+        const LaplaceQueryChannel *support = candidate_support(&candidates[i]);
+        shared[i] = SHARING_CAP;
+        if (!support) continue;
+        SharingKey key = candidate_sharing_key(&candidates[i], support);
+        SharingEntry *entry = hash_search(sharing, &key, HASH_FIND, NULL);
+        if (entry) shared[i] = entry->count;
+    }
+    /* Insertion sort keeps the existing election order within equal sharing. */
+    for (int i = 1; i < group; ++i)
+    {
+        Candidate held = candidates[i];
+        int64 held_shared = shared[i];
+        int j = i - 1;
+        while (j >= 0 && shared[j] > held_shared)
+        {
+            candidates[j + 1] = candidates[j];
+            shared[j + 1] = shared[j];
+            --j;
+        }
+        candidates[j + 1] = held;
+        shared[j + 1] = held_shared;
+    }
+    pfree(shared);
+    pfree(objects);
+    pfree(types);
+    hash_destroy(sharing);
 }
 
 static int
@@ -1956,6 +2108,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             if (candidate_can_output(&candidates[i], intent))
                 candidates[kept++] = candidates[i];
         candidate_count = kept;
+        if (open_turn)
+            order_leading_by_sharing(candidates, candidate_count);
         int limit = Min(candidate_count, top_k);
         if (spread == 0.0)
             pick = 0;

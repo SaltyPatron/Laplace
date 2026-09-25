@@ -38,9 +38,13 @@
 #include "laplace/core/relation_law.h"
 #include "consensus_neighbors.h"
 #include "spi_common.h"
+#include "cognition_program.h"
+#include "consensus_scan.h"
+#include "walk_score.h"
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_forward_respond);
+PG_FUNCTION_INFO_V1(pg_laplace_content_terms);
 
 #define RESPOND_MAX_TERMS 32
 #define RESPOND_MAX_HOPS 4
@@ -69,7 +73,18 @@ typedef struct
     double salience;       /* least salient relation along the path */
     int hops;
     bool outbound;
+    uint8 mode;            /* ROUTE_* taxonomic direction state */
 } Route;
+
+/* A path's taxonomic direction. Generalizing the term (ascending IS_A /
+ * IS_INSTANCE_OF) is allowed only straight from its key; once a path has
+ * ascended it may not descend, because up-then-down reaches siblings (Marseille
+ * is a city, as a capital is, and not a capital). Any other salient step
+ * commits the path, after which it may only specialize or keep going laterally:
+ * capital <- national capital <- Paris, France HAS_PART Paris. */
+#define ROUTE_AT_KEY 0
+#define ROUTE_ASCENDED 1
+#define ROUTE_COMMITTED 2
 
 typedef struct
 {
@@ -168,7 +183,7 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
     hash128_t *frontier;
     bool spi_top = false;
     HASHCTL ctl = {0};
-    HTAB *nodes, *routes, *binding_types, *non_salient_types;
+    HTAB *nodes, *routes, *binding_types, *non_salient_types, *upward_types;
     ArrayType *key_binding;
     ReturnSetInfo *rsinfo;
     uint32 all_terms;
@@ -202,6 +217,7 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
     key_binding = relation_set("KEY_BINDING");
     binding_types = id_set(key_binding, "respond binding types");
     non_salient_types = id_set(relation_set("NON_SALIENT_STRUCTURAL"), "respond non-salient types");
+    upward_types = id_set(relation_set("PATH_UPWARD"), "respond taxonomic types");
 
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(NodeState);
@@ -269,18 +285,28 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
             if (!found) { to->reached = 0; to->is_key = 0; }
             fresh = owners & ~(to->reached | to->is_key);
             if (fresh == 0) continue;
+            bool taxonomic = hash_search(upward_types, &e->type, HASH_FIND, NULL) != NULL;
+            bool ascending = taxonomic && e->outbound;
+            bool descending = taxonomic && !e->outbound;
+            uint32 admitted = 0;
             for (int t = 0; t < n_terms; ++t)
             {
                 RouteKey rk;
                 Route *route, *prev = NULL;
                 double salience = relation_salience(&e->type);
                 __int128 standing = (__int128) e->rating - 2 * (__int128) e->rd;
+                uint8 mode;
                 if ((fresh & (1u << t)) == 0) continue;
                 memset(&rk, 0, sizeof(rk));
                 rk.id = e->frontier;
                 rk.term = t;
                 if ((from->is_key & (1u << t)) == 0)
                     prev = hash_search(routes, &rk, HASH_FIND, NULL);
+                mode = prev ? prev->mode : ROUTE_AT_KEY;
+                if (ascending && mode == ROUTE_COMMITTED) continue;
+                if (descending && mode == ROUTE_ASCENDED) continue;
+                mode = ascending ? ROUTE_ASCENDED : ROUTE_COMMITTED;
+                admitted |= 1u << t;
                 rk.id = e->neighbor;
                 route = hash_search(routes, &rk, HASH_ENTER, &found);
                 route->origin = prev ? prev->origin : e->frontier;
@@ -294,8 +320,10 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
                 route->weakest = prev && prev->weakest < standing ? prev->weakest : standing;
                 route->hops = h;
                 route->outbound = e->outbound;
+                route->mode = mode;
             }
-            to->reached |= fresh;
+            if (admitted == 0) continue;
+            to->reached |= admitted;
             if (h < hops && n_next < frontier_cap) next[n_next++] = e->neighbor;
         }
         frontier = next;
@@ -375,4 +403,108 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
     }
     laplace_spi_finish(spi_top);
     return (Datum) 0;
+}
+
+/*
+ * converse.content_terms(words): the observation's content terms, in order. A word
+ * is a term when it binds to a key (HAS_SENSE) and its strongest witnessed
+ * universal part of speech, if any, is a content tag. Function words and
+ * punctuation are read from their own evidence, never from a word list.
+ */
+typedef struct
+{
+    hash128_t id;
+    bool has_sense;
+    bool has_upos;
+    hash128_t upos;
+    __int128 upos_standing;
+} TermEvidence;
+
+typedef struct
+{
+    HTAB *evidence;
+    hash128_t has_sense, has_pos;
+} TermRead;
+
+static void
+receive_term_evidence(const LaplaceConsensusRow *row, void *context)
+{
+    TermRead *read = context;
+    TermEvidence *entry = hash_search(read->evidence, &row->subject, HASH_FIND, NULL);
+    if (!entry || row->object_is_null || !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+        return;
+    if (hash128_eq(&row->type, &read->has_sense))
+        entry->has_sense = true;
+    else if (hash128_eq(&row->type, &read->has_pos))
+    {
+        __int128 standing = (__int128) row->rating - 2 * (__int128) row->rd;
+        if (!entry->has_upos || standing > entry->upos_standing)
+        {
+            entry->has_upos = true;
+            entry->upos = row->object;
+            entry->upos_standing = standing;
+        }
+    }
+}
+
+Datum
+pg_laplace_content_terms(PG_FUNCTION_ARGS)
+{
+    Datum *values;
+    bool *nulls;
+    int n;
+    HASHCTL ctl = {0};
+    TermRead read;
+    hash128_t types[2];
+    hash128_t *ids;
+    int n_ids = 0;
+    ArrayBuildState *out = NULL;
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+    deconstruct_array(PG_GETARG_ARRAYTYPE_P(0), BYTEAOID, -1, false, TYPALIGN_INT,
+                      &values, &nulls, &n);
+    if (laplace_relation_type_id("HAS_SENSE", &read.has_sense) != 0 ||
+        laplace_relation_type_id("HAS_POS", &read.has_pos) != 0)
+        elog(ERROR, "content_terms: HAS_SENSE / HAS_POS are not governed");
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(TermEvidence);
+    ctl.hcxt = CurrentMemoryContext;
+    read.evidence = hash_create("content term evidence", Max(n, 8), &ctl,
+                                HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    ids = palloc(sizeof(hash128_t) * Max(n, 1));
+    for (int i = 0; i < n; ++i)
+    {
+        bool found;
+        hash128_t id;
+        if (nulls[i]) continue;
+        id = datum_to_hash128(values[i]);
+        TermEvidence *entry = hash_search(read.evidence, &id, HASH_ENTER, &found);
+        if (found) continue;
+        entry->has_sense = entry->has_upos = false;
+        ids[n_ids++] = id;
+    }
+    if (n_ids > 0)
+    {
+        bool spi_top = false;
+        ArrayType *subjects = hash128_array_from_ids(ids, n_ids);
+        types[0] = read.has_sense;
+        types[1] = read.has_pos;
+        ArrayType *type_ids = hash128_array_from_ids(types, 2);
+        if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+            elog(ERROR, "content_terms: SPI connect failed");
+        laplace_consensus_scan(subjects, NULL, type_ids, receive_term_evidence, &read, NULL);
+        laplace_spi_finish(spi_top);
+    }
+    for (int i = 0; i < n_ids; ++i)
+    {
+        TermEvidence *entry = hash_search(read.evidence, &ids[i], HASH_FIND, NULL);
+        if (!entry->has_sense) continue;
+        if (entry->has_upos && !laplace_upos_is_content(&entry->upos)) continue;
+        Datum id = hash128_to_datum(&ids[i]);
+        out = accumArrayResult(out, id, false, BYTEAOID, CurrentMemoryContext);
+    }
+    if (!out)
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(BYTEAOID));
+    PG_RETURN_DATUM(makeArrayResult(out, CurrentMemoryContext));
 }

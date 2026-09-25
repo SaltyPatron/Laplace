@@ -216,3 +216,32 @@ BEGIN ATOMIC
       ON cu.subject_id = p_term AND cu.type_id = d.type_id AND cu.object_id = d.key
     ORDER BY (cd.rating - 2 * cd.rd) DESC, d.key, d.target;
 END;
+
+-- converse.content_terms(words): the words of an observation that bind to a key and
+-- whose strongest witnessed universal part of speech is a content tag.
+CREATE OR REPLACE FUNCTION converse.content_terms(p_words bytea[])
+    RETURNS bytea[]
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_content_terms'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;
+
+-- converse.answer(prompt, lang): an open turn's answer is the joint meeting of its
+-- content terms (converse.respond), realized in the asked language. One term asks
+-- what the term is; several ask what answers all of them.
+CREATE OR REPLACE FUNCTION converse.answer(p_prompt text, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH terms AS MATERIALIZED (
+        SELECT converse.content_terms(array_agg(w.id ORDER BY w.ord)) AS ids
+        FROM converse.prompt_words(p_prompt) w
+    ), met AS MATERIALIZED (
+        SELECT r.candidate
+        FROM terms t, converse.respond(t.ids, 2, 256, 4096, 1) r
+        WHERE cardinality(t.ids) > 0
+        LIMIT 1
+    )
+    SELECT (realize.forward_text_batch(
+                ARRAY[m.candidate],
+                COALESCE(p_lang, converse.prompt_language_top(p_prompt))))[1]
+    FROM met m;
+END;

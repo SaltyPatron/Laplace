@@ -60,6 +60,11 @@ BEGIN
             p_prompt, p_session, 128, 5, 0.6, 10,
             NULL::bigint,
             2, 8) g;
+        -- An open turn the program could not complete is answered by the joint
+        -- meeting of its content terms.
+        IF COALESCE(btrim(out), '') = '' THEN
+            out := converse.answer(p_prompt, p_lang);
+        END IF;
     ELSE
 
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY

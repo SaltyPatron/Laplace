@@ -637,8 +637,8 @@ record_semantic_channel(LaplaceCognitionProgram *program,
  * With no supported aligned parse, return NULL and preserve the conservative
  * all-semantic-occurrence requirement.
  */
-static bool
-program_content_upos(const hash128_t *upos)
+bool
+laplace_upos_is_content(const hash128_t *upos)
 {
     static const char *const content_tags[] = {
         "NOUN", "PROPN", "VERB", "ADJ", "ADV", "NUM", "INTJ"
@@ -673,7 +673,7 @@ program_content_origins(const LaplacePromptIntent *intent, int prompt_origin_cou
             int origin = parse->token_origins[t];
             if (origin < 0 || origin >= prompt_origin_count)
                 continue;
-            if (program_content_upos(&parse->decoded.tokens[t].upos_id))
+            if (laplace_upos_is_content(&parse->decoded.tokens[t].upos_id))
                 required = bms_add_member(required, origin);
         }
     }
@@ -765,7 +765,7 @@ program_observed_content_origins(const LaplacePromptInput *input,
             laplace_text_is_all_whitespace(text + text_off[node], text_len[node]))
             continue;
         upos = hash_search(best, &form, HASH_FIND, NULL);
-        if (upos && !program_content_upos(&upos->upos))
+        if (upos && !laplace_upos_is_content(&upos->upos))
             continue;
         required = bms_add_member(required, member);
     }

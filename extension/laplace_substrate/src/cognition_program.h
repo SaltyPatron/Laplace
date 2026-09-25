@@ -85,6 +85,10 @@ void laplace_cognition_program_finalize(
     LaplaceCognitionProgram *program,
     LaplaceCognitionDisposition disposition);
 
+/* The universal parts of speech that carry content (NOUN, PROPN, VERB, ADJ, ADV,
+ * NUM, INTJ); every other tag is a function word or punctuation. */
+bool laplace_upos_is_content(const hash128_t *upos);
+
 /* The occurrences this turn must ground before it completes. */
 const Bitmapset *laplace_cognition_program_required(const LaplaceCognitionProgram *program);
 
