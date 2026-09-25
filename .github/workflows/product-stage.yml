@@ -361,6 +361,7 @@ jobs:
               if [[ -e "$stale_workspace/.git" ]]; then
                 if [[ -z "$(git -C "$stale_workspace" status --porcelain --untracked-files=no)" ]]; then
                   rm -rf "$stale_workspace" "$stale_build"
+                  rm -f "$stale_lock"
                 else
                   echo "::warning::preserving dirty inactive candidate worktree: $stale_workspace" >&2
                 fi
@@ -370,6 +371,25 @@ jobs:
               flock -u "$stale_fd"
             fi
             exec {stale_fd}>&-
+          done
+
+          # A revision's lock outlives its reclaimed worktree unless removed: one empty
+          # file per revision ever built. Remove unheld locks with no worktree, older
+          # than the handoff window, and .NET diagnostic IPC pipes whose process is gone.
+          for stale_lock in "$work_root"/product-*.lock; do
+            [[ -e "$stale_lock" ]] || continue
+            stale_sha="${stale_lock##*/product-}"; stale_sha="${stale_sha%.lock}"
+            [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            [[ "$worktree_root/$stale_sha" != "$candidate_workspace" && ! -e "$worktree_root/$stale_sha" ]] || continue
+            find "$stale_lock" -maxdepth 0 -mmin +120 -print -quit | grep -q . || continue
+            exec {stale_fd}<>"$stale_lock"
+            if flock -n "$stale_fd"; then rm -f "$stale_lock"; flock -u "$stale_fd"; fi
+            exec {stale_fd}>&-
+          done
+          for pipe in "$work_root"/clr-debug-pipe-* "$work_root"/dotnet-diagnostic-*; do
+            [[ -e "$pipe" ]] || continue
+            pid="${pipe##*/clr-debug-pipe-}"; pid="${pid##*/dotnet-diagnostic-}"; pid="${pid%%-*}"
+            [[ "$pid" =~ ^[0-9]+$ && ! -d "/proc/$pid" ]] && rm -f "$pipe"
           done
 
           # Old versions of this workflow removed candidate worktrees without removing

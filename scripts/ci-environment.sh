@@ -47,3 +47,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     fi
   done
 fi
+
+# CI runs never attach a debugger or tracer; without this every dotnet process leaves
+# clr-debug-pipe-* / dotnet-diagnostic-* IPC files in its TMPDIR (the work root).
+export DOTNET_EnableDiagnostics=0
