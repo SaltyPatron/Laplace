@@ -88,6 +88,11 @@ void laplace_cognition_program_finalize(
 /* The occurrences this turn must ground before it completes. */
 const Bitmapset *laplace_cognition_program_required(const LaplaceCognitionProgram *program);
 
+/* The prompt occurrences an identity is grounded in through typed semantic
+ * transitions only (never geometry, glue or structural ancestry); NULL if none. */
+const Bitmapset *laplace_cognition_program_semantic_origins(
+    const LaplaceCognitionProgram *program, const hash128_t *id);
+
 /* The obligations no emitted constituent has grounded yet, allocated in the
  * caller's memory context; NULL when none remain. */
 Bitmapset *laplace_cognition_program_remaining(const LaplaceCognitionProgram *program);

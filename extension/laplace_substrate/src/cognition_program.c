@@ -1093,6 +1093,17 @@ laplace_cognition_program_required(const LaplaceCognitionProgram *program)
     return program ? program->required : NULL;
 }
 
+const Bitmapset *
+laplace_cognition_program_semantic_origins(const LaplaceCognitionProgram *program,
+                                           const hash128_t *id)
+{
+    SemanticOriginEntry *entry;
+    if (!program || !id || !program->semantic_origins)
+        return NULL;
+    entry = hash_search(program->semantic_origins, id, HASH_FIND, NULL);
+    return entry ? entry->origins : NULL;
+}
+
 Bitmapset *
 laplace_cognition_program_remaining(const LaplaceCognitionProgram *program)
 {
