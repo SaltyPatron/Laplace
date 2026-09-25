@@ -76,16 +76,9 @@ BEGIN ATOMIC
 
     UNION ALL
 
-    -- A type_id in use that was never minted as an entity: unrenderable by
-    -- construction. Reported once per dangling TYPE, not once per entity wearing
-    -- it, so the row count stays proportional to the defect rather than to the
-    -- corpus.
+    -- A type_id in use that the governed entity-type law does not declare, reported
+    -- once per type so the row count stays proportional to the defect.
     SELECT used.type_id, NULL::smallint, 'dangling_entity_type'::text
-    FROM (
-        SELECT i.type_id FROM laplace.entities i
-        UNION
-        -- Retain detection on an already incomplete legacy/corrupt sidecar.
-        SELECT e.type_id FROM laplace.entities e
-    ) used
-    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities t WHERE t.id = used.type_id);
+    FROM (SELECT DISTINCT e.type_id FROM laplace.entities e) used
+    WHERE NOT EXISTS (SELECT 1 FROM laplace.entity_type_registry() t WHERE t.type_id = used.type_id);
 END;

@@ -76,7 +76,7 @@ BEGIN
         FROM laplace.v_word_points w
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
         CROSS JOIN LATERAL generate_series(1, GREATEST(c.run_length, 1)) rs(i)
-        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
+        WHERE w.type_id IN (laplace.entity_type_id('Sentence'), laplace.entity_type_id('Document'))
           AND w.trajectory IS NOT NULL
     ),
     content AS (

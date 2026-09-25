@@ -11,9 +11,7 @@ BEGIN ATOMIC
     WITH t AS (
         SELECT w.trajectory
         FROM laplace.v_word_points w
-        WHERE EXISTS (
-              SELECT 1 FROM laplace.entities i
-              WHERE i.id = w.id AND i.type_id = realize.canonical_id('Word'))
+        WHERE w.type_id = laplace.entity_type_id('Word')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id LIMIT p_words
     ),
@@ -25,9 +23,7 @@ BEGIN ATOMIC
 
 
         SELECT g.entity_id, sum(GREATEST(g.run_length,1))::bigint AS cnt
-        FROM g JOIN laplace.entities e ON e.id = g.entity_id AND EXISTS (
-                SELECT 1 FROM laplace.entities i
-                WHERE i.id = e.id AND i.type_id IN (realize.canonical_id('Codepoint'), realize.canonical_id('Grapheme')))
+        FROM g JOIN laplace.entities e ON e.id = g.entity_id AND e.type_id IN (laplace.entity_type_id('Codepoint'), laplace.entity_type_id('Grapheme'))
         GROUP BY g.entity_id
     ),
     named AS MATERIALIZED (

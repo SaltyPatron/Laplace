@@ -70,7 +70,7 @@ WITH requested AS MATERIALIZED (
     SELECT r.id
     FROM requested r
     JOIN laplace.entities e ON e.id = r.id
-    WHERE e.type_id = realize.canonical_id('Conversation_Message')
+    WHERE e.type_id = laplace.entity_type_id('Conversation_Message')
 ), members AS MATERIALIZED (
     SELECT c.parent_id, c.child_id
     FROM (SELECT array_agg(m.id ORDER BY m.id) AS ids FROM messages m) batch,
@@ -96,10 +96,10 @@ WITH traj AS MATERIALIZED (
 ), turn_ids AS MATERIALIZED (
     SELECT DISTINCT turn_id FROM traj
 ), relation_ids AS MATERIALIZED (
-    SELECT realize.canonical_id('HAS_ROLE') AS role_type,
-           realize.canonical_id('AUTHORED_BY') AS author_type,
-           realize.canonical_id('IS_INSTANCE_OF') AS name_type,
-           realize.canonical_id('APPEARS_IN') AS occurrence_type
+    SELECT laplace.relation_type_id('HAS_ROLE') AS role_type,
+           laplace.relation_type_id('AUTHORED_BY') AS author_type,
+           laplace.relation_type_id('IS_INSTANCE_OF') AS name_type,
+           laplace.relation_type_id('APPEARS_IN') AS occurrence_type
 ), message_content AS MATERIALIZED (
     SELECT c.message_id AS turn_id, c.content_id
     FROM (SELECT array_agg(t.turn_id ORDER BY t.turn_id) AS ids FROM turn_ids t) batch,

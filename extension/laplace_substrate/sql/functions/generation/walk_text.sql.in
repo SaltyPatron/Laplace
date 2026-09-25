@@ -32,7 +32,7 @@ BEGIN
         SELECT 1
         FROM laplace.entities i
         WHERE i.id = p_lang
-          AND i.type_id = realize.canonical_id('Language')) THEN
+          AND i.type_id = laplace.entity_type_id('Language')) THEN
         RAISE EXCEPTION 'bubble_down: language % is not a Language entity', encode(p_lang, 'hex');
     END IF;
     IF p_k = 0 OR COALESCE(cardinality(p_concepts), 0) = 0 THEN
@@ -173,7 +173,7 @@ BEGIN
         JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
         JOIN laplace.entities i
           ON i.id = a.context_id
-         AND i.type_id = realize.canonical_id('Language')
+         AND i.type_id = laplace.entity_type_id('Language')
         WHERE p_lang IS NOT NULL
     ),
     lang_hit AS MATERIALIZED (

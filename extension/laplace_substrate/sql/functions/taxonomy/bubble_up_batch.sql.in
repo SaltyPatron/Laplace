@@ -193,7 +193,7 @@ cand_lang_any AS MATERIALIZED (
     SELECT DISTINCT a.subject_id AS id
     FROM laplace.attestations a
     JOIN laplace.entities e ON e.id = a.context_id
-                           AND e.type_id = realize.canonical_id('Language')
+                           AND e.type_id = laplace.entity_type_id('Language')
         CROSS JOIN language_filter lf
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
             AND lf.requested

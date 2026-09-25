@@ -10,7 +10,7 @@ BEGIN ATOMIC
     FROM wid
     JOIN laplace.v_word_points w
       ON w.trajectory IS NOT NULL
-     AND w.type_id = realize.canonical_id('Sentence')
+     AND w.type_id = laplace.entity_type_id('Sentence')
      AND public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[wid.id]
     ORDER BY rank_distance, w.id
     LIMIT p_limit

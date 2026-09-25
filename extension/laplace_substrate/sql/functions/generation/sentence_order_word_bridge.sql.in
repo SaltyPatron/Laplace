@@ -13,7 +13,7 @@ BEGIN ATOMIC
     t AS (
         SELECT DISTINCT ON (w.id) w.id AS did, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = realize.canonical_id('Document')
+        WHERE w.type_id = laplace.entity_type_id('Document')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id LIMIT p_docs
     ),

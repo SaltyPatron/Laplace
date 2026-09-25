@@ -121,9 +121,7 @@ BEGIN
                      * consensus.eff_mu(c.rating, c.rd)::float8
                      * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
             FROM laplace.consensus c
-            JOIN laplace.entities e ON e.id = c.object_id AND EXISTS (
-                SELECT 1 FROM laplace.entities i
-                WHERE i.id = e.id AND i.tier >= 3)
+            JOIN laplace.entities e ON e.id = c.object_id AND e.tier >= 3
             WHERE c.subject_id = p_topic
         ) u
         WHERE u.w > 0
