@@ -390,9 +390,8 @@ struct laplace_recipe_stream {
 
     void build_attestation(hash128_t subj, const fact& f, laplace_attestation_staged_t& row) {
         if (f.has_subject) subj = f.subject;
-        const laplace_relation_def_t* definition = nullptr;
-        double weight = laplace_relation_lookup(&f.relation, &definition) == 0 && definition
-            ? trust : trust * f.rank;
+        // The witness's trust is the claim's strength; relation rank is read-time salience.
+        const double weight = trust;
         const hash128_t* observer = f.has_source ? &f.source : &current_witness;
         if (f.games > 1 || f.score >= 0) {
             const double score = f.score >= 0 ? f.score : (f.confirm ? 1.0 : 0.0);
@@ -404,14 +403,6 @@ struct laplace_recipe_stream {
         check(laplace_attestation_resolved_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
             f.has_object ? 0 : 1, observer, f.has_context ? &f.context : nullptr,
             f.has_context ? 0 : 1, weight, f.confirm ? 1 : 0, 1, 0, &row), "testimony");
-        if (f.explicit_rank) {
-            // The compiled field rank includes any explicit recipe override.
-            // Resolve orientation/identity through the shared builder, then use
-            // its shared witness-strength transforms with that declared rank.
-            const double declared_weight = trust * f.rank;
-            row.opponent_rd_fp1e9 = static_cast<int64_t>(laplace_attestation_witness_phi(declared_weight) * LAPLACE_GLICKO2_FP_SCALE);
-            row.opponent_rating_fp1e9 = static_cast<int64_t>(laplace_attestation_witness_opponent_rating(declared_weight) * LAPLACE_GLICKO2_FP_SCALE);
-        }
     }
     void attest(intent_stage_t* stage, hash128_t subj, const fact& f) {
         laplace_attestation_staged_t row{};

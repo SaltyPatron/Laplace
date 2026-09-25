@@ -76,17 +76,21 @@ Issue: #1715
 - **Every recipe seed ran at trust 1.** This is fixed by trust from class (above). A full reseed is required.
 - **`witness_weight = rank × trust` drives both the opponent rating and the RD** (`engine/core/src/attestation_engine.c`, `laplace_attestation_witness_phi` / `_opponent_rating`). Certainty and salience are therefore one number. For example, a Unicode `HAS_SCRIPT` fact (0.95 × 0.08) plays as a weak *and uncertain* witness (rating 1229, RD 326), when it is certain and merely low-salience.
 - **Relation rank is a read-time salience weight** (`relation_types.toml` `[ranks]`, "recalibrated for semantic salience (recall)"). It is baked into write-time standing.
-- **Target:** trust sets certainty (RD). Relation rank either stays out of the fold and weights reads (QK coupling), or scales the pull without touching certainty. *Decision for the inventor.*
+- **Decided (inventor, 2026-09-25):** a claim is "this source says X is (or is not) Y": the witness, the outcome and the games. Its standing comes from the witness's trust. Relation rank (synonymy vs homonymy vs stop-word glue) is salience and applies at reading, in QK coupling. "Hot is not cold" is a refutation of hot IS cold, and "hot is antonymous with cold" is a confirmation of antonymy; neither gains or loses certainty from its relation's salience. Done: every native builder and the recipe stream use the witness's trust alone.
 - **Trust classes are `blake3("substrate/trust_class/X/v1")` strings resolved by an if-chain** (`SourceTrust.ForClass`). Chess uses classes the chain does not know (`UserPromptContent`, `ResponseContent`). **Target:** a governed trust-class registry (manifest + codegen), like the other laws.
 - Related: #1303, #1321, #1015.
 
-### B. Consensus keeps the query's context
+### B. ~~Consensus keeps the query's context~~ (withdrawn)
 
-Issue: #1716
+Issue: #1716 (closed)
 
-- **Consensus cells are `(subject, relation, object)` with context folded away.** Language, sense and qualifiers therefore collapse at fold. English "chat" and French "chat" merge, and "which ISO code" disappears. V cannot be conditioned by Q from consensus.
-- **Target:** the cell identity or a companion structure preserves the context dimension the forward pass conditions on. Qualifier masks OR-fold into the cell.
-- Related: #1052, #1401.
+This was mis-framed. A cell does not need a context dimension, because the key model already keeps context where it belongs:
+- A word binds to a language-neutral key (`dog —HAS_SENSE→ i46360 @eng`, `chien —HAS_SENSE→ i46360 @fra`). The binding carries the language, and the witness is the lexicon itself (`[omw-fr, 2.0]`).
+- Facts about a key (`i46360 IS_A …`) are language-neutral, so one consensus over every witness is correct.
+- A cross-language homograph binds to different keys. English "gift" and German "Gift" (poison) are different cells because the objects differ.
+- A shared claim such as "chat HAS_POS NOUN" is true in both languages, so aggregating it is correct.
+- The forward pass reads Q's language through the bindings, which are attestations indexed by subject and context. It reads V from consensus on the key, and O realizes the key through the bindings in the query's language.
+- A claim's qualifiers are read from its attestations.
 
 ### C. ETL ownership and order of operations
 
@@ -282,6 +286,5 @@ Issue: #1724
 
 ## 4. Decisions for the inventor
 
-1. **Relation rank:** out of the fold (read-time weight only), or scaling pull without certainty. See A.
-2. **Consensus context:** which context dimension a cell keeps. See B.
+1. ~~Relation rank~~: decided, read-time only (see A).
 3. **Wiktionary sense keys** when no Wikidata id exists. See H.
