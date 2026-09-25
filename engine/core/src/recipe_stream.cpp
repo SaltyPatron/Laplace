@@ -432,6 +432,24 @@ struct laplace_recipe_stream {
         return result.id;
     }
 
+    // "a|b": the first declared context the element carries, else its record carries
+    // (a WN-LMF sense inherits its lexicon's language). None leaves the claim unqualified.
+    const std::map<std::string, std::string>* scope_attributes = nullptr;
+    const std::string* context_of(const field_rule& rule, const std::map<std::string, std::string>& attributes) const {
+        size_t start = 0;
+        for (;;) {
+            const size_t bar = rule.context_field.find('|', start);
+            const std::string name = rule.context_field.substr(start, bar == std::string::npos ? bar : bar - start);
+            auto hit = attributes.find(name);
+            if (hit != attributes.end() && !hit->second.empty()) return &hit->second;
+            if (scope_attributes) {
+                hit = scope_attributes->find(name);
+                if (hit != scope_attributes->end() && !hit->second.empty()) return &hit->second;
+            }
+            if (bar == std::string::npos) return nullptr;
+            start = bar + 1;
+        }
+    }
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
         try { lower_field(stage, path, raw, subject_binding, attributes); }
@@ -446,11 +464,7 @@ struct laplace_recipe_stream {
         const auto& rule = i->second;
         if (rule.disposition & (1u << 10)) return;
         const std::string* context_value = nullptr;
-        if (!rule.context_field.empty()) {
-            // A declared context the record does not carry leaves the claim unqualified.
-            const auto context = attributes.find(rule.context_field);
-            if (context != attributes.end()) context_value = &context->second;
-        }
+        if (!rule.context_field.empty()) context_value = context_of(rule, attributes);
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         if (rule.group_once) {
             const auto first = attributes.find("group:first");
@@ -702,6 +716,7 @@ struct laplace_recipe_stream {
             membership = true; membership_relation = route.range_relation;
         }
         facts.clear();
+        scope_attributes = &record.attributes;
         for (const auto& a : record.attributes) {
             // Group comment lines vary by corpus (sent_id, newdoc, translit, genre...).
             // Only those the recipe declares are lowered; the rest are packaging.
@@ -713,6 +728,7 @@ struct laplace_recipe_stream {
         }
         if (has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
         for (const auto& child : record.children) lower_child(stage, route, child, child.name);
+        scope_attributes = nullptr;
         active = true;
     }
     // Nested elements lower against the record's subject under the prefix the route
