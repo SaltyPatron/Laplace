@@ -32,6 +32,15 @@ The Laplace forward pass is the program `RESOLVE → COUPLE → ORIENT → ROUTE
 
 The session's work was almost all on the input side: the recipe engine, governed vocabularies, and six sources moved onto recipes. **The forward pass has not been run end to end on a coherent database.** Every seed so far had a defect in its standing inputs: all recipe sources were admitted at trust 1. No read (capital(France), fire/ice, dog vs chien) has been verified since the claim model changed.
 
+**Live status, end of 2026-09-25 (OEWN + OMW seeded on the trust-class priors):**
+- dog → i46360 → chien works (`converse.translate`). "Hund" needs a German witness: OMW 2.0 carries no German lexicon, so German bindings come with Wiktionary or ConceptNet (H).
+- `converse.chat` still realizes nothing for "What is the capital of France?", and the trace shows why:
+  1. With no supported parse, all 12 occurrences were obligations, and Unicode property values reached from the whitespace and "?" (None, Yes, Common, V1_1…) won election.
+  2. Once content obligations came from occurrence evidence (0be08b414), obligations dropped to 6. "What", "is", "the" and "of" stay obligations until UD supplies their UPOS standing.
+  3. Glue hubs (HAS_POS NOUN, HAS_LANGUAGE eng) no longer win election.
+  4. The walk emitted partial-coverage candidates instead of routing to the joint meeting of "capital" and "France". STEER now routes while no candidate grounds every remaining obligation.
+- Next: seed UD, then rerun the slice with a trace.
+
 ---
 
 ## 1. Laws stated or clarified in this session
@@ -68,6 +77,16 @@ The session's work was almost all on the input side: the recipe engine, governed
 | `98341697e` | Governed qualifier law (`qualifiers.toml`, codegen). Static and sibling-field qualifiers, OR-merged under aggregation. UCD case mappings, foldings, decompositions and names as one relation each plus qualifiers. Delimited `headerLines` |
 | `161507ab5` | ISO 639-3 source generation (`recipes/iso639/20260415`) |
 | `c66ec31e3` | CILI source generation (`recipes/cili/a895d7e`). A hand-written Turtle reader (`recipe_turtle.hpp`, to be replaced, see D). Score and observation fields lower after the claims they grade |
+| `775af7697` | Witness weight is trust only; relation rank leaves the fold |
+| `03d244940`, `c15b89523` | Display realizes identifiers through their bindings; glome colour as a metric, constant-size points, zoom, readable labels, Merkle DAG composition edges |
+| `1ef9e9577` | Native `converse.respond` (multi-hop joint meeting under a salience envelope) and `converse.translate` (word → identifier → language → word); `key_facts`/`couple` return typed standing, no softmax share |
+| `631bbdf9a` | Trust classes are a governed native registry (`trust_classes.toml`) |
+| `eeecf3207` | Ingest completion is operational state (`ingest_unit_completion`, `ingest_layer_completion`), never attestations (#1721) |
+| `147dbc4c2` | One `recipe_syntax_provider` interface (XML, delimited, Turtle); identity-table prescan through it; proven identical output across six provider shapes (#1718) |
+| `1cdaf382b` | Variant relations retired (fail closed), `qualifier_mask` column (#1723) |
+| `5d1844fff` | Spec 39, personality firmware (#1726) |
+| `4d009f2fc` | Model ingestion first slice: operator recognition by shape, witness-scoped circuits, significance-contracted claims, tokenizer as an ordered composition (#1719) |
+| `0be08b414` | Forward program: content obligations from an occurrence's own evidence; election by grounded obligations; relation rank as read-time salience floor |
 | earlier | WN-LMF claims model (OEWN, OMW), POS/language/deprel laws, UD parse lowering, forward-pass SQL primitives, direct word→key sense readers |
 
 **Uncommitted at the time of writing, committed with this note:**
