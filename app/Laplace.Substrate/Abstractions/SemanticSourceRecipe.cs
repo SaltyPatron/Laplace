@@ -110,6 +110,8 @@ public enum SourceRelationResolver
     Deprel = 1,
     EnhancedDeprel = 2,
     Feature = 3,
+    /// <summary>A governed relation canonical or alias surface (for example WN-LMF relType).</summary>
+    Surface = 4,
 }
 
 /// <summary>An in-group pointer column resolved by the provider to the referenced row's value.</summary>

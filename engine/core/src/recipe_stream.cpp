@@ -554,6 +554,7 @@ struct laplace_recipe_stream {
         case 1: rc = laplace_relation_resolve_deprel(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
         case 2: rc = laplace_relation_resolve_enhanced_deprel(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
         case 3: rc = laplace_relation_resolve_feature(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
+        case 4: rc = laplace_relation_resolve_surface(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
         default: throw std::runtime_error("relation resolver is not declared");
         }
         if (rc < 0 || !nonzero(id)) throw std::runtime_error("relation vocabulary has no entry for " + name);
@@ -630,7 +631,12 @@ struct laplace_recipe_stream {
         double rank = rule.rank; bool flip = false;
         hash128_t relation = rule.relation;
         if (!rule.relation_field.empty()) {
-            const std::string name = sibling(rule.relation_field);
+            // "field>refinement": a present refinement attribute names the relation more
+            // exactly than the field (WN-LMF relType="other" carries it in dc:type).
+            const size_t refine = rule.relation_field.find('>');
+            std::string name = refine == std::string::npos ? std::string{}
+                : sibling(rule.relation_field.substr(refine + 1));
+            if (name.empty()) name = sibling(rule.relation_field.substr(0, refine));
             if (name.empty() || name == "_") return;
             relation = resolve_relation(rule, name, &rank, &flip);
         }
@@ -799,7 +805,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 f.subject_mode = r.number(); f.pair_mode = r.number(); f.relation_resolver = r.number();
                 f.relation_field = r.text(); f.trunk_field = r.text(); f.pair_value_separator = r.text();
                 const uint32_t omit_equal = r.number(), once = r.number();
-                if (f.subject_mode > 2 || f.pair_mode > 2 || f.relation_resolver > 3 || omit_equal > 1 || once > 1)
+                if (f.subject_mode > 2 || f.pair_mode > 2 || f.relation_resolver > 4 || omit_equal > 1 || once > 1)
                     throw std::runtime_error("invalid grouped-field instruction at " + f.path);
                 f.omit_equal_subject = omit_equal != 0; f.group_once = once != 0;
                 if ((f.pair_mode != 0 || !f.relation_field.empty()) && f.relation_resolver == 0)

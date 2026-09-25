@@ -2245,3 +2245,142 @@ members = [
   "IS_LEMMA_OF", "IS_TRANSLATION_OF", "HAS_EXAMPLE", "EVOKES_FRAME",
   "HAS_SYNSET_KEY", "IS_TYPED_AS", "HAS_NAME_ALIAS",
 ]
+
+# WN-LMF (Global WordNet Association) relType vocabulary: <SynsetRelation relType=R
+# target=T/> on S states S R T. Each surface decodes to one governed relation and
+# direction; OEWN and every OMW lexicon use this vocabulary.
+
+[[alias]]
+surface = "hypernym"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "hyponym"
+canonical = "IS_A"
+flip = true
+
+[[alias]]
+surface = "instance_hypernym"
+canonical = "IS_INSTANCE_OF"
+flip = false
+
+[[alias]]
+surface = "instance_hyponym"
+canonical = "IS_INSTANCE_OF"
+flip = true
+
+[[alias]]
+surface = "mero_part"
+canonical = "HAS_PART"
+flip = false
+
+[[alias]]
+surface = "holo_part"
+canonical = "HAS_PART"
+flip = true
+
+[[alias]]
+surface = "mero_member"
+canonical = "HAS_MEMBER"
+flip = false
+
+[[alias]]
+surface = "holo_member"
+canonical = "HAS_MEMBER"
+flip = true
+
+[[alias]]
+surface = "mero_substance"
+canonical = "HAS_SUBSTANCE"
+flip = false
+
+[[alias]]
+surface = "holo_substance"
+canonical = "HAS_SUBSTANCE"
+flip = true
+
+[[alias]]
+surface = "antonym"
+canonical = "IS_ANTONYM_OF"
+flip = false
+
+[[alias]]
+surface = "similar"
+canonical = "IS_SIMILAR_TO"
+flip = false
+
+[[alias]]
+surface = "also"
+canonical = "ALSO_SEE"
+flip = false
+
+[[alias]]
+surface = "attribute"
+canonical = "HAS_ATTRIBUTE"
+flip = false
+
+[[alias]]
+surface = "derivation"
+canonical = "DERIVATIONALLY_RELATED"
+flip = false
+
+[[alias]]
+surface = "pertainym"
+canonical = "PERTAINS_TO"
+flip = false
+
+[[alias]]
+surface = "entails"
+canonical = "ENTAILS"
+flip = false
+
+[[alias]]
+surface = "is_entailed_by"
+canonical = "ENTAILS"
+flip = true
+
+[[alias]]
+surface = "causes"
+canonical = "CAUSES"
+flip = false
+
+[[alias]]
+surface = "is_caused_by"
+canonical = "CAUSES"
+flip = true
+
+[[alias]]
+surface = "participle"
+canonical = "IS_PARTICIPLE_OF"
+flip = false
+
+[[alias]]
+surface = "domain_topic"
+canonical = "HAS_DOMAIN_TOPIC"
+flip = false
+
+[[alias]]
+surface = "has_domain_topic"
+canonical = "HAS_DOMAIN_TOPIC"
+flip = true
+
+[[alias]]
+surface = "domain_region"
+canonical = "HAS_DOMAIN_REGION"
+flip = false
+
+[[alias]]
+surface = "has_domain_region"
+canonical = "HAS_DOMAIN_REGION"
+flip = true
+
+[[alias]]
+surface = "exemplifies"
+canonical = "HAS_DOMAIN_USAGE"
+flip = false
+
+[[alias]]
+surface = "is_exemplified_by"
+canonical = "HAS_DOMAIN_USAGE"
+flip = true
