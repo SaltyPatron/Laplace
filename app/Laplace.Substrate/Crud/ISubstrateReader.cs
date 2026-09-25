@@ -23,16 +23,6 @@ public readonly record struct CircuitRelation(
     Hash128 Subject, Hash128 Object, Hash128 TypeId, double EffMu, long Witnesses);
 
 /// <summary>
-/// A keyset page of already-adjudicated token relations.  The page boundary is
-/// transport only: callers resume with the final (subject, object) key until
-/// the complete selected vocabulary has been examined.
-/// </summary>
-public readonly record struct CircuitCandidatePage(
-    IReadOnlyList<CircuitRelation> Rows,
-    Hash128? NextSubject,
-    Hash128? NextObject);
-
-/// <summary>
 /// One graph-bounded endpoint pair nominated for model analysis. Basis types
 /// prove only why OP3 returned the pair; they are never evidence for the model
 /// relation being evaluated.
@@ -232,19 +222,6 @@ public interface ISubstrateReader
     Task<IReadOnlyList<CircuitRelation>> ClassifyCircuitAsync(
         IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<CircuitRelation>>(Array.Empty<CircuitRelation>());
-
-    /// <summary>
-    /// Returns existing consensus cells of one relation whose two endpoints are
-    /// both in <paramref name="vocabulary"/>.  This is the Phase-5a admission
-    /// boundary: a checkpoint may evaluate these claims, but cannot manufacture
-    /// an unbounded vocabulary-square candidate set.  <paramref name="pageSize"/>
-    /// bounds one database transfer only; it never selects a ranked prefix.
-    /// </summary>
-    Task<CircuitCandidatePage> ReadCircuitCandidatesAsync(
-        IReadOnlyList<Hash128> vocabulary, Hash128 typeId,
-        Hash128? afterSubject, Hash128? afterObject, int pageSize,
-        CancellationToken ct = default)
-        => Task.FromResult(new CircuitCandidatePage(Array.Empty<CircuitRelation>(), null, null));
 
     /// <summary>
     /// OP3 nomination for Phase 5b. It scans existing graph cells whose two

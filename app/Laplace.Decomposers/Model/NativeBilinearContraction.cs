@@ -3,6 +3,10 @@ using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
+/// <summary>One page of significant circuit pairs over canonical entity rows.</summary>
+internal readonly record struct SignificantPairPage(
+    int[] Rows, int[] Cols, long[] ScoresFp1e9, int NextRow, double Threshold);
+
 /// <summary>
 /// Owns one transient native circuit arena while its complete candidate pages
 /// are consumed. The opaque context contains only canonical-entity factors;
@@ -13,13 +17,18 @@ internal sealed class NativeBilinearContraction : IDisposable
     private IntPtr _handle;
 
     private NativeBilinearContraction(
-        IntPtr handle, double arenaRms, nuint residentBytes, int entityCount)
+        IntPtr handle, double arenaRms, nuint residentBytes, int entityCount,
+        bool sharedFactors = false)
     {
         _handle = handle;
         ArenaRms = arenaRms;
         ResidentBytes = checked((long)residentBytes);
         EntityCount = entityCount;
+        SharedFactors = sharedFactors;
     }
+
+    /// <summary>Left and right factors are one set (s_ij = s_ji).</summary>
+    public bool SharedFactors { get; }
 
     public double ArenaRms { get; }
     public long ResidentBytes { get; }
@@ -46,7 +55,7 @@ internal sealed class NativeBilinearContraction : IDisposable
                 &handle, &arena, &resident);
         if (rc != 0 || handle == IntPtr.Zero)
             throw new InvalidOperationException($"native direct contraction creation failed: {rc}");
-        return new(handle, arena, resident, entityCount);
+        return new(handle, arena, resident, entityCount, ReferenceEquals(leftRows, rightRows));
     }
 
     public static unsafe NativeBilinearContraction Projected(
@@ -147,6 +156,37 @@ internal sealed class NativeBilinearContraction : IDisposable
         if (rc != 0)
             throw new InvalidOperationException($"native circuit salience reduction failed: {rc}");
         return (scores, order);
+    }
+
+    /// <summary>
+    /// One page of this circuit's significant pair evidence under the declared
+    /// per-subject null (native <c>bilinear_contraction_significant_pairs</c>):
+    /// z against the subject's own score distribution, kept iff z ≥ √(2 ln N).
+    /// Pages whole subjects; <paramref name="capacity"/> must hold one subject. A
+    /// symmetric relation tests each unordered pair once (shared factors only).
+    /// </summary>
+    public unsafe SignificantPairPage SignificantPairs(int rowBegin, int capacity, bool symmetric)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        if (capacity < EntityCount - 1)
+            throw new ArgumentOutOfRangeException(nameof(capacity), "a page must hold one whole subject");
+        var rows = new int[capacity];
+        var cols = new int[capacity];
+        var scores = new long[capacity];
+        nuint count = 0, rowEnd = 0;
+        double threshold = 0;
+        int rc;
+        fixed (int* rowPtr = rows)
+        fixed (int* colPtr = cols)
+        fixed (long* scorePtr = scores)
+            rc = DynInterop.BilinearContractionSignificantPairs(
+                _handle, (nuint)rowBegin, symmetric ? 1 : 0, rowPtr, colPtr, scorePtr, null,
+                (nuint)capacity, &count, &rowEnd, &threshold);
+        if (rc != 0) throw new InvalidOperationException($"native circuit significance failed: {rc}");
+        int n = checked((int)count);
+        return new SignificantPairPage(
+            rows.AsSpan(0, n).ToArray(), cols.AsSpan(0, n).ToArray(),
+            scores.AsSpan(0, n).ToArray(), checked((int)rowEnd), threshold);
     }
 
     public unsafe (long[] Scores, short[] Outcomes) Score(int[] rows, int[] cols)

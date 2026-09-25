@@ -129,6 +129,40 @@ int ffn_contraction_create_output(const float* embedding_rows, const float* outp
     bilinear_contraction_context_t** out_context,
     double* out_arena_rms, size_t* out_resident_bytes);
 
+/* Declared significance contract for one circuit's pair evidence.
+ *
+ * Family: every ordered pair (i, j), i != j, of the context's canonical
+ * entities; N = n(n-1).  Null: each subject i is compared with the circuit's
+ * own score distribution for that subject, s_ij = l_i . r_j over every other
+ * object j != i, whose exact mean and standard deviation follow from the factor
+ * mean and covariance (less the subject's own term) without the n-by-n
+ * product.  Test: z_ij = (s_ij - mean_i) / sd_i.
+ * A pair is significant iff z_ij >= tau = sqrt(2 ln N), the universal
+ * threshold: under a Gaussian null with those moments the expected number of
+ * false pairs in the whole circuit is below one.  Only the upper tail is
+ * evidence; a low or negative score is absence of evidence, never refutation.
+ * Subjects with zero variance contribute nothing.
+ *
+ * With symmetric != 0 (a symmetric relation over shared factors, where
+ * s_ij = s_ji) the family is the N = n(n-1)/2 unordered pairs; each is written
+ * once, from its lower subject, when either endpoint's null rejects it
+ * (z = max(z_ij, z_ji)).  Symmetric over unshared factors is refused.
+ *
+ * The grade is 0.5 * (1 + tanh(z / tau)): every emitted pair confirms, and a
+ * stronger departure from the circuit's own null grades higher.
+ *
+ * Pages whole subjects starting at row_begin; capacity must be at least n - 1.
+ * *out_row_end is the next subject to request (n when the circuit is done).
+ * out_z and out_threshold are optional. */
+int bilinear_contraction_significant_pairs(
+    bilinear_contraction_context_t* context,
+    size_t row_begin, int symmetric,
+    int32_t* out_rows, int32_t* out_cols,
+    int64_t* out_scores_fp1e9, double* out_z,
+    size_t capacity,
+    size_t* out_count, size_t* out_row_end,
+    double* out_threshold);
+
 void bilinear_contraction_free(bilinear_contraction_context_t* context);
 
 /* Fold each candidate's circuit-score column through the canonical Glicko-2

@@ -1,0 +1,478 @@
+# Governed operator templates for conventional checkpoints.
+#
+# A checkpoint's tensors are recognized by shape. An operator template is a set of
+# slots, each a shape constraint over the symbols below. A tensor name is a
+# contextual realization (INVENTIONS #99): it is consulted only to break a
+# symmetry between slots whose shapes are equal (Q and O when h*d_h = d, K and V,
+# gate and up, embedding and unembedding). A slot the shapes and hints do not
+# decide is reported ambiguous with its candidates; nothing is guessed. A tensor
+# no template claims is reported unrecognized.
+#
+# The recognized operators, slots and roles are source-scoped coordinates of the
+# checkpoint (INVENTIONS #58). They are not the native ontology of Laplace
+# cognition.
+#
+# Shape expressions: symbols, integers, + - * / and parentheses. "_" matches any
+# axis. orientation = "either" admits the transposed layout ([in, out] as Conv1D
+# checkpoints store it) and records which layout matched.
+#
+# Symbol binding:
+#   frequency  - the most frequent axis over every tensor shape
+#   tokenizer  - the tokenizer's id space (the smallest vocabulary axis that covers it)
+#   blocks     - the repeated block index read from the tensor paths (a hint)
+#   config     - the first declared config key, else the default expression
+#   instance   - solved per operator instance from the matched shapes
+
+[[symbol]]
+name = "d"
+meaning = "residual width"
+bind = "frequency"
+config = ["hidden_size", "n_embd", "d_model", "model_dim"]
+
+[[symbol]]
+name = "V"
+meaning = "vocabulary rows"
+bind = "tokenizer"
+config = ["vocab_size", "padded_vocab_size"]
+
+[[symbol]]
+name = "L"
+meaning = "repeated blocks"
+bind = "blocks"
+config = ["num_hidden_layers", "n_layer", "num_layers", "n_layers"]
+
+[[symbol]]
+name = "h"
+meaning = "query heads"
+bind = "config"
+config = ["num_attention_heads", "n_head", "num_heads"]
+
+[[symbol]]
+name = "h_kv"
+meaning = "key/value heads"
+bind = "config"
+config = ["num_key_value_heads", "num_kv_heads", "n_kv_heads", "multi_query_group_num"]
+default = "h"
+
+[[symbol]]
+name = "d_h"
+meaning = "head width"
+bind = "config"
+config = ["head_dim", "attention_head_dim", "kv_channels"]
+default = "d/h"
+
+[[symbol]]
+name = "f"
+meaning = "feed-forward width"
+bind = "config"
+config = ["intermediate_size", "ffn_dim", "n_inner", "encoder_ffn_dim", "ffn_hidden_size"]
+default = "4*d"
+
+[[symbol]]
+name = "E"
+meaning = "routed experts"
+bind = "config"
+config = ["num_local_experts", "num_experts", "n_routed_experts"]
+
+[[symbol]]
+name = "P"
+meaning = "learned positions"
+bind = "config"
+config = ["max_position_embeddings", "n_positions"]
+
+[[symbol]]
+name = "T"
+meaning = "segment types"
+bind = "config"
+config = ["type_vocab_size"]
+
+[[symbol]]
+name = "r_q"
+meaning = "latent query rank"
+bind = "config"
+config = ["q_lora_rank"]
+
+[[symbol]]
+name = "r_kv"
+meaning = "latent key/value rank"
+bind = "config"
+config = ["kv_lora_rank"]
+
+[[symbol]]
+name = "d_rope"
+meaning = "rotary head width"
+bind = "config"
+config = ["qk_rope_head_dim"]
+
+[[symbol]]
+name = "d_nope"
+meaning = "non-rotary head width"
+bind = "config"
+config = ["qk_nope_head_dim"]
+
+[[symbol]]
+name = "d_v"
+meaning = "value head width"
+bind = "config"
+config = ["v_head_dim"]
+
+# A feed-forward instance's own width. Dense, shared-expert and routed-expert
+# MLPs of one checkpoint differ, so the width is solved per instance; f above is
+# the config's declaration, reported where no instance carries it.
+[[symbol]]
+name = "w"
+meaning = "feed-forward width of one instance"
+bind = "instance"
+
+[[symbol]]
+name = "r"
+meaning = "factor rank"
+bind = "instance"
+
+# ---------------------------------------------------------------- model scope
+
+[[operator]]
+name = "vocabulary-projection"
+family = "vocabulary"
+scopes = ["model"]
+
+[[slot]]
+operator = "vocabulary-projection"
+role = "embedding"
+shape = ["V", "d"]
+required = true
+hints = ["embed_tokens", "wte", "word_embeddings", "tok_embeddings", "embed_in", "embedding", "shared"]
+
+[[slot]]
+operator = "vocabulary-projection"
+role = "unembedding"
+shape = ["V", "d"]
+required = false
+hints = ["lm_head", "unembed", "embed_out", "output.weight", "classifier"]
+
+[[operator]]
+name = "position-embedding"
+family = "position"
+scopes = ["model"]
+
+[[slot]]
+operator = "position-embedding"
+role = "table"
+shape = ["P", "d"]
+required = true
+hints = ["position", "wpe", "pos_emb"]
+
+[[operator]]
+name = "segment-embedding"
+family = "segment"
+scopes = ["model"]
+
+[[slot]]
+operator = "segment-embedding"
+role = "table"
+shape = ["T", "d"]
+required = true
+hints = ["token_type", "segment"]
+
+[[operator]]
+name = "model-norm"
+family = "model-norm"
+scopes = ["model"]
+
+[[slot]]
+operator = "model-norm"
+role = "final"
+shape = ["d"]
+required = false
+hints = ["model.norm", "ln_f", "final_layernorm", "norm_f", "final_norm", "final_layer_norm", "norm.weight"]
+
+[[slot]]
+operator = "model-norm"
+role = "embedding"
+shape = ["d"]
+required = false
+hints = ["embeddings.layernorm", "embed_norm", "embedding_norm", "emb_ln", "ln_emb"]
+
+# ---------------------------------------------------------------- block scope
+
+[[operator]]
+name = "self-attention"
+family = "attention"
+scopes = ["block"]
+
+[[slot]]
+operator = "self-attention"
+role = "q"
+shape = ["h*d_h", "d"]
+required = true
+hints = ["q_proj", "query", "wq", "q_lin", "to_q"]
+
+[[slot]]
+operator = "self-attention"
+role = "k"
+shape = ["h_kv*d_h", "d"]
+required = true
+hints = ["k_proj", "key", "wk", "k_lin", "to_k"]
+
+[[slot]]
+operator = "self-attention"
+role = "v"
+shape = ["h_kv*d_h", "d"]
+required = true
+hints = ["v_proj", "value", "wv", "v_lin", "to_v"]
+
+[[slot]]
+operator = "self-attention"
+role = "o"
+shape = ["d", "h*d_h"]
+required = true
+hints = ["o_proj", "out_proj", "wo", "attention.output.dense", "self_attn.dense", "out_lin", "to_out", "attn.c_proj"]
+
+[[slot]]
+operator = "self-attention"
+role = "q-norm"
+shape = ["d_h"]
+required = false
+hints = ["q_norm", "q_layernorm"]
+
+[[slot]]
+operator = "self-attention"
+role = "k-norm"
+shape = ["d_h"]
+required = false
+hints = ["k_norm", "k_layernorm"]
+
+[[operator]]
+name = "self-attention-fused"
+family = "attention"
+scopes = ["block"]
+
+[[slot]]
+operator = "self-attention-fused"
+role = "qkv"
+shape = ["(h+2*h_kv)*d_h", "d"]
+orientation = "either"
+required = true
+hints = ["qkv", "c_attn", "query_key_value", "wqkv", "in_proj"]
+
+[[slot]]
+operator = "self-attention-fused"
+role = "o"
+shape = ["d", "h*d_h"]
+orientation = "either"
+required = true
+hints = ["o_proj", "out_proj", "wo", "dense", "c_proj"]
+
+# Multi-head latent attention: keys and values pass through a shared low-rank
+# latent; the query may too.
+[[operator]]
+name = "latent-attention"
+family = "attention"
+scopes = ["block"]
+
+[[slot]]
+operator = "latent-attention"
+role = "q"
+shape = ["h*(d_nope+d_rope)", "d"]
+required = false
+hints = ["q_proj"]
+
+[[slot]]
+operator = "latent-attention"
+role = "q-down"
+shape = ["r_q", "d"]
+required = false
+hints = ["q_a_proj"]
+
+[[slot]]
+operator = "latent-attention"
+role = "q-norm"
+shape = ["r_q"]
+required = false
+hints = ["q_a_layernorm"]
+
+[[slot]]
+operator = "latent-attention"
+role = "q-up"
+shape = ["h*(d_nope+d_rope)", "r_q"]
+required = false
+hints = ["q_b_proj"]
+
+[[slot]]
+operator = "latent-attention"
+role = "kv-down"
+shape = ["r_kv+d_rope", "d"]
+required = true
+hints = ["kv_a_proj"]
+
+[[slot]]
+operator = "latent-attention"
+role = "kv-norm"
+shape = ["r_kv"]
+required = false
+hints = ["kv_a_layernorm"]
+
+[[slot]]
+operator = "latent-attention"
+role = "kv-up"
+shape = ["h*(d_nope+d_v)", "r_kv"]
+required = true
+hints = ["kv_b_proj"]
+
+[[slot]]
+operator = "latent-attention"
+role = "o"
+shape = ["d", "h*d_v"]
+required = true
+hints = ["o_proj", "out_proj", "wo"]
+
+[[operator]]
+name = "gated-mlp"
+family = "mlp"
+scopes = ["block", "expert"]
+
+[[slot]]
+operator = "gated-mlp"
+role = "gate"
+shape = ["w", "d"]
+required = true
+hints = ["gate_proj", "w1", "wi_0", "gate"]
+
+[[slot]]
+operator = "gated-mlp"
+role = "up"
+shape = ["w", "d"]
+required = true
+hints = ["up_proj", "w3", "wi_1", "up"]
+
+[[slot]]
+operator = "gated-mlp"
+role = "down"
+shape = ["d", "w"]
+required = true
+hints = ["down_proj", "w2", "wo", "down"]
+
+[[operator]]
+name = "gated-mlp-fused"
+family = "mlp"
+scopes = ["block", "expert"]
+
+[[slot]]
+operator = "gated-mlp-fused"
+role = "gate-up"
+shape = ["2*w", "d"]
+required = true
+hints = ["gate_up_proj", "w13", "fc1"]
+
+[[slot]]
+operator = "gated-mlp-fused"
+role = "down"
+shape = ["d", "w"]
+required = true
+hints = ["down_proj", "w2", "fc2"]
+
+[[operator]]
+name = "plain-mlp"
+family = "mlp"
+scopes = ["block", "expert"]
+
+[[slot]]
+operator = "plain-mlp"
+role = "up"
+shape = ["w", "d"]
+orientation = "either"
+required = true
+hints = ["up_proj", "fc1", "c_fc", "intermediate.dense", "dense_h_to_4h", "fc_in", "lin1"]
+
+[[slot]]
+operator = "plain-mlp"
+role = "down"
+shape = ["d", "w"]
+orientation = "either"
+required = true
+hints = ["down_proj", "fc2", "mlp.c_proj", "output.dense", "dense_4h_to_h", "fc_out", "lin2"]
+
+[[operator]]
+name = "moe-router"
+family = "router"
+scopes = ["block"]
+
+[[slot]]
+operator = "moe-router"
+role = "router"
+shape = ["E", "d"]
+required = true
+hints = ["gate", "router"]
+
+[[operator]]
+name = "stacked-experts"
+family = "experts"
+scopes = ["block"]
+
+[[slot]]
+operator = "stacked-experts"
+role = "gate"
+shape = ["E", "w", "d"]
+required = true
+hints = ["gate", "w1"]
+
+[[slot]]
+operator = "stacked-experts"
+role = "up"
+shape = ["E", "w", "d"]
+required = true
+hints = ["up", "w3"]
+
+[[slot]]
+operator = "stacked-experts"
+role = "down"
+shape = ["E", "d", "w"]
+required = true
+hints = ["down", "w2"]
+
+[[operator]]
+name = "block-norm"
+family = "block-norm"
+scopes = ["block"]
+
+[[slot]]
+operator = "block-norm"
+role = "attention"
+shape = ["d"]
+required = false
+hints = ["input_layernorm", "ln_1", "attention_norm", "pre_ln", "attention.output.layernorm", "sa_layer_norm", "norm1"]
+
+[[slot]]
+operator = "block-norm"
+role = "mlp"
+shape = ["d"]
+required = false
+hints = ["post_attention_layernorm", "pre_feedforward_layernorm", "ln_2", "ffn_norm", "post_ln", "output.layernorm", "output_layer_norm", "norm2"]
+
+[[slot]]
+operator = "block-norm"
+role = "post-mlp"
+shape = ["d"]
+required = false
+hints = ["post_feedforward_layernorm", "post_mlp_layernorm"]
+
+[[operator]]
+name = "low-rank-factor"
+family = "low-rank"
+scopes = ["block", "model"]
+repeat = true
+
+[[slot]]
+operator = "low-rank-factor"
+role = "down"
+shape = ["r", "d"]
+required = true
+where = "r < d"
+hints = ["_a_proj", "lora_a", "down"]
+
+[[slot]]
+operator = "low-rank-factor"
+role = "up"
+shape = ["_", "r"]
+required = true
+hints = ["_b_proj", "lora_b", "up"]

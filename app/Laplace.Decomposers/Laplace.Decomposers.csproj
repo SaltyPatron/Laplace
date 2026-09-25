@@ -25,6 +25,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Governed operator templates recognize checkpoint tensors by shape. -->
+    <EmbeddedResource Include="../../engine/manifest/model_operators.toml"
+                      LogicalName="Laplace.Decomposers.Model.model_operators.toml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="../../recipes/**/*.json"
              Link="recipes/%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

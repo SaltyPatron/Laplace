@@ -49,7 +49,39 @@ public class RealModelManifestTests
     {
         var cfg = ModelConfigReader.Read(Path.Combine(dir, "config.json"));
         var headers = SafetensorsContainerParser.ParseModel(dir);
-        return TensorRoleClassifier.Build(headers, cfg, name);
+        string tokenizer = Path.Combine(dir, "tokenizer.json");
+        int? ids = File.Exists(tokenizer) ? LlamaTokenizerParser.IdSpace(File.ReadAllBytes(tokenizer)) : null;
+        return ModelManifest.Recognize(headers, cfg, ids, name);
+    }
+
+    [SkippableFact]
+    public void TinyLlamaHeader_IsRecognizedByShapeWithNothingLeftOver()
+    {
+        const string hubDir = "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0";
+        string? dir = ResolveSnapshot(hubDir);
+        if (dir is null) throw new SkipException($"model snapshot not present: {hubDir}");
+        ModelAnatomy a = Parse(dir, hubDir).Anatomy;
+
+        Assert.Equal(201, a.TensorCount);
+        Assert.Empty(a.Unrecognized);
+        Assert.Empty(a.Conflicts);
+        Assert.Equal(2048, a.Symbol("d"));
+        Assert.Equal(32000, a.Symbol("V"));
+        Assert.Equal(22, a.Symbol("L"));
+        Assert.Equal(64, a.Symbol("d_h"));
+        Assert.Equal("frequency", a.Symbols["d"].Basis);
+        Assert.Equal("tokenizer", a.Symbols["V"].Basis);
+        Assert.Equal(22, a.Operators.Count(o => o.Operator == "self-attention"));
+        Assert.Equal(22, a.Operators.Count(o => o.Operator == "gated-mlp"));
+        Assert.Equal(22, a.Operators.Count(o => o.Operator == "block-norm"));
+        Assert.DoesNotContain(a.Operators, o => o.Slots.Any(s => s.IsAmbiguous));
+        OperatorInstance attention = a.Operators.First(o => o.Operator == "self-attention" && o.Block == 3);
+        Assert.Equal("model.layers.3.self_attn.q_proj.weight", attention.Slot("q")!.Tensor);
+        Assert.Equal("model.layers.3.self_attn.o_proj.weight", attention.Slot("o")!.Tensor);
+        Assert.Equal("shape+hint", attention.Slot("q")!.Basis);
+        OperatorInstance mlp = a.Operators.First(o => o.Operator == "gated-mlp" && o.Block == 3);
+        Assert.Equal(5632, mlp.InstanceSymbols["w"]);
+        Assert.Equal("shape", mlp.Slot("down")!.Basis);
     }
 
     [SkippableFact]
@@ -85,6 +117,35 @@ public class RealModelManifestTests
             $"first={string.Join(',', pending.Take(10))}");
     }
 
+    [SkippableFact]
+    public void TinyLlamaVocabulary_OrdinalIsTheModelLocalTokenId()
+    {
+        const string hubDir = "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0";
+        string? dir = ResolveSnapshot(hubDir);
+        if (dir is null) throw new SkipException($"model snapshot not present: {hubDir}");
+        if (!CodepointPerfcache.IsLoaded)
+            CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+
+        var records = LlamaTokenizerParser.Parse(Path.Combine(dir, "tokenizer.json"));
+        Hash128 witness = Hash128.OfCanonical("test/model/tinyllama-vocabulary");
+        var builder = new SubstrateChangeBuilder(witness, "tokenizer/vocabulary/tinyllama");
+        Hash128 vocabulary = LlamaTokenizerParser.StageVocabulary(builder, records, witness)
+            ?? throw new InvalidOperationException("TinyLlama ids are dense");
+        var change = builder.Build();
+
+        PhysicalityRow trajectory = Assert.Single(change.Physicalities, p => p.EntityId == vocabulary);
+        Assert.Equal(witness, trajectory.SourceId);
+        Assert.Equal(32_000, trajectory.NConstituents);
+        Hash128[] ordinals = Trajectory.Constituents(trajectory.TrajectoryXyzm!);
+        Assert.Equal(records.Select(r => r.EntityId).ToArray(), ordinals);
+        // Control pieces resolve to their literal surface, not to a minted id.
+        Assert.True(records[1].Role.HasFlag(TokenRole.Special));
+        Assert.True(records[1].HasContentCoord);
+        Assert.NotEqual(Hash128.OfCanonical("substrate/token/special/<s>/v1"), records[1].EntityId);
+        Assert.Equal(records[1].EntityId, LlamaTokenizerParser.Parse(System.Text.Encoding.UTF8.GetBytes(
+            """{"model":{"vocab":{"<s>":0}}}""")).Single().EntityId);
+    }
+
     [SkippableTheory]
     [MemberData(nameof(Models))]
     public void Manifest_MatchesRealModel(Expect e)
@@ -92,9 +153,7 @@ public class RealModelManifestTests
         string? dir = ResolveSnapshot(e.HubDir);
         if (dir is null) throw new SkipException($"model snapshot not present: {e.HubDir}");
 
-        var cfgResult = ModelConfigReader.Read(Path.Combine(dir, "config.json"));
-        var headers = SafetensorsContainerParser.ParseModel(dir);
-        var m = TensorRoleClassifier.Build(headers, cfgResult, e.HubDir);
+        var m = Parse(dir, e.HubDir);
         var c = m.Config;
 
 
@@ -120,25 +179,16 @@ public class RealModelManifestTests
             Assert.NotEqual(m.Embedding, m.LmHead);
 
 
-        Assert.NotNull(m.InputNorm(0));
-        if (!e.Mla)
-            Assert.NotNull(m.PostAttnNorm(0));
+        Assert.NotNull(m.Norm(0, "attention"));
+        if (e.ModelType != "phi")
+            Assert.NotNull(m.Norm(0, "mlp"));
 
-
-        if (e.ModelType == "qwen3")
-        {
-            Assert.NotNull(m.QNorm(0));
-            Assert.NotNull(m.KNorm(0));
-        }
-        else
-        {
-            Assert.Null(m.QNorm(0));
-            Assert.Null(m.KNorm(0));
-        }
-
+        bool qkNorm = m.Roles.Any(r => r.LayerIndex == 0 && r.Slot is "q-norm" or "k-norm");
+        Assert.Equal(e.ModelType == "qwen3", qkNorm);
 
         if (e.Mla)
-            Assert.NotNull(m.KvaLatentNorm(0));
+            Assert.NotNull(m.Norm(0, "kv-norm"));
+        Assert.Empty(m.Anatomy.Unrecognized);
 
 
         if (!e.Mla)
