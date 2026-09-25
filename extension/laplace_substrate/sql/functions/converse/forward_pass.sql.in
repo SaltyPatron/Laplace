@@ -229,7 +229,7 @@ CREATE OR REPLACE FUNCTION converse.content_terms(p_words bytea[])
 -- what the term is; several ask what answers all of them.
 CREATE OR REPLACE FUNCTION converse.answer(p_prompt text, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE
+    LANGUAGE sql VOLATILE
 BEGIN ATOMIC
     WITH terms AS MATERIALIZED (
         SELECT converse.content_terms(array_agg(w.id ORDER BY w.ord)) AS ids

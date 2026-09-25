@@ -330,6 +330,92 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
         n_frontier = n_next;
     }
 
+    /* Meeting pass. Forward expansion is bounded per node, so a hub's members are
+     * truncated (a national capital has ~150 instances; Paris need not be among
+     * the kept few). A node some terms reached reads its own cells, which are few,
+     * and joins every node another term already reached, under the same salience
+     * envelope and direction law. France HAS_PART Paris meets
+     * capital <- national capital through Paris IS_INSTANCE_OF national capital. */
+    {
+        long n_nodes = hash_get_num_entries(nodes);
+        hash128_t *partial = palloc(sizeof(hash128_t) * Max(Min(n_nodes, (long) frontier_cap), 1));
+        int n_partial = 0;
+        HASH_SEQ_STATUS seq;
+        NodeState *node;
+        hash_seq_init(&seq, nodes);
+        while ((node = hash_seq_search(&seq)) != NULL)
+        {
+            uint32 have = node->reached & all_terms;
+            if (node->is_key != 0 || have == 0 || have == all_terms) continue;
+            if (n_partial < frontier_cap) partial[n_partial++] = node->id;
+        }
+        if (n_partial > 0 && n_terms > 1)
+        {
+            int n_edges;
+            LaplaceNeighbor *edges = laplace_consensus_neighbors(
+                id_array(partial, n_partial), NULL, fanout, false, false, true, &n_edges, NULL);
+            for (int r = 0; r < n_edges; ++r)
+            {
+                const LaplaceNeighbor *e = &edges[r];
+                NodeState *x, *y;
+                uint32 want;
+                if (hash_search(binding_types, &e->type, HASH_FIND, NULL) ||
+                    hash_search(non_salient_types, &e->type, HASH_FIND, NULL) ||
+                    relation_salience(&e->type) < min_salience)
+                    continue;
+                x = hash_search(nodes, &e->frontier, HASH_FIND, NULL);
+                y = hash_search(nodes, &e->neighbor, HASH_FIND, NULL);
+                if (x == NULL || y == NULL) continue;
+                want = all_terms & ~x->reached & (y->reached | y->is_key);
+                if (want == 0) continue;
+                /* The step runs from y to x: its orientation is the edge's, reversed. */
+                bool step_outbound = !e->outbound;
+                bool taxonomic = hash_search(upward_types, &e->type, HASH_FIND, NULL) != NULL;
+                bool ascending = taxonomic && step_outbound;
+                bool descending = taxonomic && !step_outbound;
+                double salience = relation_salience(&e->type);
+                __int128 standing = (__int128) e->rating - 2 * (__int128) e->rd;
+                for (int t = 0; t < n_terms; ++t)
+                {
+                    RouteKey rk;
+                    Route *route, *prev = NULL;
+                    uint8 mode;
+                    int prev_hops = 0;
+                    bool found;
+                    if ((want & (1u << t)) == 0) continue;
+                    memset(&rk, 0, sizeof(rk));
+                    rk.id = y->id;
+                    rk.term = t;
+                    if ((y->is_key & (1u << t)) == 0)
+                    {
+                        prev = hash_search(routes, &rk, HASH_FIND, NULL);
+                        if (prev == NULL) continue;
+                        prev_hops = prev->hops;
+                    }
+                    if (prev_hops + 1 > hops) continue;
+                    mode = prev ? prev->mode : ROUTE_AT_KEY;
+                    if (ascending && mode == ROUTE_COMMITTED) continue;
+                    if (descending && mode == ROUTE_ASCENDED) continue;
+                    rk.id = x->id;
+                    route = hash_search(routes, &rk, HASH_ENTER, &found);
+                    route->origin = prev ? prev->origin : y->id;
+                    route->type = e->type;
+                    route->via = y->id;
+                    route->rating = e->rating;
+                    route->rd = e->rd;
+                    route->volatility = e->volatility;
+                    route->witnesses = e->witnesses;
+                    route->salience = prev && prev->salience < salience ? prev->salience : salience;
+                    route->weakest = prev && prev->weakest < standing ? prev->weakest : standing;
+                    route->hops = prev_hops + 1;
+                    route->outbound = step_outbound;
+                    route->mode = ascending ? ROUTE_ASCENDED : ROUTE_COMMITTED;
+                    x->reached |= 1u << t;
+                }
+            }
+        }
+    }
+
     /* Candidates: nodes answered by enough terms, the terms and their keys excluded. */
     {
         long n = hash_get_num_entries(nodes);

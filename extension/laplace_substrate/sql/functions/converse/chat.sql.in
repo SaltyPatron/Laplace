@@ -55,15 +55,15 @@ BEGIN
     -- Natural turns enter forward_text with the canonical prompt root. Explicit
     -- query shapes remain typed inspection requests; they do not interpret chat.
     IF shape IS NULL THEN
-        SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
-        FROM converse.forward_turn(
-            p_prompt, p_session, 128, 5, 0.6, 10,
-            NULL::bigint,
-            2, 8) g;
-        -- An open turn the program could not complete is answered by the joint
-        -- meeting of its content terms.
+        -- An open turn is answered by the joint meeting of its content terms;
+        -- the forward walk continues a turn that has no such meeting.
+        out := converse.answer(p_prompt, p_lang);
         IF COALESCE(btrim(out), '') = '' THEN
-            out := converse.answer(p_prompt, p_lang);
+            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+            FROM converse.forward_turn(
+                p_prompt, p_session, 128, 5, 0.6, 10,
+                NULL::bigint,
+                2, 8) g;
         END IF;
     ELSE
 
