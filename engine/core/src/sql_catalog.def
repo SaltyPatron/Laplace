@@ -60,6 +60,7 @@ SQL_QUERY("display.facets", "bytea[]",
     "SELECT e.id,e.tier,e.type_id,c.name FROM laplace.entities e "
     "LEFT JOIN laplace.canonical_names c ON c.id=e.id WHERE e.id=ANY($1)")
 SQL_QUERY("display.names", "bytea[]", "SELECT realize.resolve_name_batch($1)")
+SQL_QUERY("display.lexical", "bytea[]", "SELECT realize.lexicalize_batch($1)")
 SQL_QUERY("display.text", "bytea[]", "SELECT realize.render_text_batch($1)")
 SQL_QUERY("display.metadata_labels", "bytea[]", "SELECT realize.label_batch($1)")
 SQL_QUERY("display.file_metadata", "bytea[]",

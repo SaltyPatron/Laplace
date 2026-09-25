@@ -246,15 +246,13 @@ function GlomeScene({
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const invalidate = useThree((s) => s.invalidate);
   const instanceMesh = useMemo(() => {
-    // Build the complete InstancedMesh before Three ever compiles its material.
-    // Both earlier implementations populated instanceColor after mount; depending
-    // on the renderer/program cache that left USE_INSTANCING_COLOR absent and the
-    // entity spheres rendered black. setColorAt() here creates the attribute on
-    // the object before its first render, which is the supported Three.js path.
+    // Per-sphere color is the instanceColor attribute that setColorAt() creates
+    // before the first render; Three enables USE_INSTANCING_COLOR from it. The
+    // material must not set vertexColors: that multiplies by a per-vertex `color`
+    // attribute SphereGeometry does not have, which WebGL reads as zero (black).
     const geometry = new THREE.SphereGeometry(1, 9, 9);
     const material = new THREE.MeshBasicMaterial({
       color: 0xffffff,
-      vertexColors: true,
       toneMapped: false,
     });
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, nodes.length));

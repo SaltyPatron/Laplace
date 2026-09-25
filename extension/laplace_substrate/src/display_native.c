@@ -24,10 +24,10 @@ typedef struct {
 static const char *query_keys[] = {
     "display.facets", "display.names", "display.text", "display.metadata_labels",
     "display.file_metadata", "display.definition_types", "display.definitions",
-    "display.definition_owners", "display.heads", "entity.facets"
+    "display.definition_owners", "display.heads", "entity.facets", "display.lexical"
 };
 static SPIPlanPtr plans[lengthof(query_keys)];
-enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS };
+enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS,LEXICAL };
 
 static int
 run_query(int which, ArrayType *ids, ArrayType *types)
@@ -271,10 +271,17 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         Datum name=SPI_getbinval(t,d,5,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
     }
     SPI_freetuptable(SPI_tuptable);
-    int count=pending(all,unique,work,0);char **labels=batch_text(NAMES,work,count,false);
+    /* An identifier (an ILI, a synset key) realizes through the words a source
+     * binds to it, never as its own identifier text. Content then shows its own
+     * surface: the word "not" is "not" even though, as the ISO 639-3 code for
+     * Nomatsiguenga, it is also the subject of that language's HAS_NAME. A name
+     * labels only what has no surface of its own. */
+    int count=pending(all,unique,work,0);char **labels=batch_text(LEXICAL,work,count,false);
     for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
     count=pending(all,unique,work,1);labels=batch_text(TEXT,work,count,false);
-    for(int i=0;i<count;++i)if(labels[i]&&*labels[i])work[i]->label=labels[i];
+    for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
+    count=pending(all,unique,work,0);labels=batch_text(NAMES,work,count,false);
+    for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
     count=pending(all,unique,work,0);choose_targets(FILE_META,work,count,NULL,lookup);
     int selected=0;for(int i=0;i<count;++i)if(work[i]->has_target)work[selected++]=work[i];
     labels=batch_text(TEXT,work,selected,true);

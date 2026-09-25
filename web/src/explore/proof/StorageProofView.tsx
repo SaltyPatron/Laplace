@@ -21,6 +21,10 @@ const SUPER_FIB_PSI = 1.5337511687552042888118041448362171649932861328125;
 
 type WalkDirection = 'trunk' | 'leaf';
 
+// A sample of Tier-0 ranks is a placement distribution, not an ordered composition:
+// consecutive samples are not constituents of one trajectory, so no curve joins them.
+const NO_TRAJECTORY: [number, number, number][] = [];
+
 interface CarrierLane {
   slot: bigint;
   bits: string;
@@ -333,6 +337,7 @@ function DistributionLab({
           <div className={styles.canvasTall}>
             <GlomeCanvas
               nodes={canonical}
+              trajectoryPoints={NO_TRAJECTORY}
               projection="placement"
               fill
               note="Retired bounded placement: early DUCET ranks occupy a narrow Hopf-latitude band."
@@ -347,6 +352,7 @@ function DistributionLab({
           <div className={styles.canvasTall}>
             <GlomeCanvas
               nodes={interleaved}
+              trajectoryPoints={NO_TRAJECTORY}
               projection="placement"
               fill
               note="Canonical placement: same DUCET ranks, bit-reversed radial parameter, full-shell prefix coverage."
