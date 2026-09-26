@@ -87,6 +87,11 @@ TEST(LaplaceRelationLaw, MeronymyIsHasPartWithAQualifier) {
     EXPECT_EQ(substance, laplace_relation_surface_qualifier("MADE_UP_OF"));
     EXPECT_EQ(part, laplace_relation_surface_qualifier("HAS_A"));
     EXPECT_EQ(-1, laplace_relation_surface_qualifier("HAS_PART"));
+    // A macrolanguage has its individual languages as members.
+    ASSERT_EQ(0, laplace_relation_resolve_surface("MEMBER_OF_MACROLANGUAGE", &tid, &rank, &sym, &flip, &parent));
+    EXPECT_TRUE(hash128_equals(&has_part, &tid));
+    EXPECT_EQ(1, flip);
+    EXPECT_EQ(member, laplace_relation_surface_qualifier("MEMBER_OF_MACROLANGUAGE"));
     EXPECT_EQ(-1, laplace_relation_surface_qualifier("IS_A"));
 
     hash128_t retired;

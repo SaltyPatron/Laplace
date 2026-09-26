@@ -31,8 +31,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         RelationTypeRegistry.RelationTypeId("IS_LANGUAGE_CODE");
     private static readonly Hash128 RelTypeUsesScript =
         RelationTypeRegistry.RelationTypeId("USES_SCRIPT");
-    private static readonly Hash128 RelTypeMemberOfMacrolanguage =
-        RelationTypeRegistry.RelationTypeId("MEMBER_OF_MACROLANGUAGE");
     private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
     private static readonly Hash128 LanguageVariantTypeId = EntityTypeRegistry.LanguageVariant;
 
@@ -401,8 +399,10 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         {
             var indivId = LanguageReference.EmitResolvedCode(b, rec.Indiv, Source, TC.StandardsDerived);
             var macroId = LanguageReference.EmitResolvedCode(b, rec.Macro, Source, TC.StandardsDerived);
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                indivId, RelTypeMemberOfMacrolanguage, macroId, Source, null,
+            // A macrolanguage has its individual languages as members: HAS_PART read from
+            // the member's side, with meronymy/member.
+            b.AddAttestation(NativeAttestation.Categorical(
+                indivId, "MEMBER_OF_MACROLANGUAGE", macroId, Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
         protected override async IAsyncEnumerable<(string Indiv, string Macro)> ExtractRecordsAsync(

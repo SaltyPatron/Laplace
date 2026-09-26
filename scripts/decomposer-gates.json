@@ -69,7 +69,7 @@
           "min": 1
         },
         {
-          "relation": "MEMBER_OF_MACROLANGUAGE",
+          "relation": "HAS_PART",
           "min": 1
         }
       ],

@@ -1151,6 +1151,9 @@ family_root = "MEMBER_OF_VERBNET_CLASS"
 
 [[relation]]
 canonical = "MEMBER_OF_MACROLANGUAGE"
+retired = "HAS_PART"
+retired_flip = true
+retired_qualifier = "meronymy/member"
 bit = 159
 rank = "standards_structural"
 symmetry = "asymmetric"

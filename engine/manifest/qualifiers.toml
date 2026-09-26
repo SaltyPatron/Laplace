@@ -52,7 +52,7 @@ values = ["change", "duplicate", "non-existent", "split", "merge"]
 
 [[family]]
 name = "membership"
-relations = ["MEMBER_OF_MACROLANGUAGE"]
+relations = ["HAS_PART"]
 base = 160
 values = ["active", "retired"]
 
