@@ -1,0 +1,83 @@
+{
+  "authority": "PropBank",
+  "release": "3.4",
+  "sourceName": "PropBank",
+  "trustClass": "AcademicCurated",
+  "layerOrder": 3,
+  "selected": true,
+  "root": "/vault/Data/PropBank/propbank-frames-main",
+  "aliases": [
+    "propbank-recipe"
+  ],
+  "artifacts": [
+    {
+      "selector": "frames/*.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "PropBank/frameset-3.4",
+      "recipePath": "frameset.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "AMR-UMR-91-rolesets.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Not well-formed XML: an example element is closed twice (line 5684)."
+    },
+    {
+      "selector": "frames/check.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Not well-formed XML: an arg element is closed by </rel> (line 304)."
+    },
+    {
+      "selector": "frames/rend.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Not well-formed XML: an unquoted src attribute (line 38)."
+    },
+    {
+      "selector": "frames/frameset.dtd",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Format declaration of the frameset files."
+    },
+    {
+      "selector": "frames/README.txt",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Documentation."
+    },
+    {
+      "selector": "dtds/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Format declarations; the argument labels they enumerate are the recipe's value aliases."
+    },
+    {
+      "selector": "scripts/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Maintenance tooling."
+    },
+    {
+      "selector": "README.md",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Documentation."
+    },
+    {
+      "selector": "LICENSE",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "License text."
+    },
+    {
+      "selector": "frames/.gitignore",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository packaging."
+    }
+  ]
+}

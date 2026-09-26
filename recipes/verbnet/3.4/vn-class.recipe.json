@@ -63,13 +63,13 @@
       "objectParts": [
         {
           "path": "value()",
-          "splitLast": ".",
+          "splitLast": ".-",
           "side": "Before",
           "spaceMark": "_"
         },
         {
           "path": "value()",
-          "splitLast": ".",
+          "splitLast": ".-",
           "side": "After"
         }
       ]

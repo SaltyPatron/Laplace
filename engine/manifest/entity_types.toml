@@ -269,6 +269,14 @@ canonical = "PropBank_Role"
 [[type]]
 canonical = "PropBank_Roleset"
 
+# A multiword predicate's syntax: the ordered composition of its tokens.
+[[type]]
+canonical = "PropBank_Syntax"
+
+# One token of it: [slot, word, tag, dependency, head, argument].
+[[type]]
+canonical = "PropBank_Syntax_Token"
+
 [[type]]
 canonical = "Range"
 
