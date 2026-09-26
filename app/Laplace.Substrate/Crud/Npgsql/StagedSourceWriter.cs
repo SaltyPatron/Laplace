@@ -335,7 +335,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     };
 
     // Every substrate table is hashed into the same power-of-two number of leaves.
-    private static async Task<int> ModulusAsync(NpgsqlConnection control, CancellationToken ct)
+    internal static async Task<int> ModulusAsync(NpgsqlConnection control, CancellationToken ct)
     {
         var moduli = new HashSet<int>();
         await using (var cmd = new NpgsqlCommand(SqlCatalog.Get("stage.leaves").Text, control) { CommandTimeout = 0 })
@@ -344,7 +344,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
                 moduli.Add(reader.GetInt32(2));
         if (moduli.Count != 1 || !System.Numerics.BitOperations.IsPow2(moduli.First()))
             throw new InvalidOperationException(
-                "the staged load routes by one power-of-two hash modulus for every substrate table");
+                "substrate writes route by one power-of-two hash modulus for every substrate table");
         return moduli.First();
     }
 

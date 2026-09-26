@@ -102,17 +102,11 @@ public sealed partial class NpgsqlSubstrateWriter
     /// without re-reading the baseline: a journal-replay apply.
     /// </summary>
     private int _applyWriteEpochRoute = -1;
+
+    /// <summary>The substrate tables' one HASH modulus, read once per writer.</summary>
+    private int _leafModulus;
     private long _epochAfterLastCommit = -1;
     private long _epochOwnBumpsSinceBaseline;
-
-    /// <summary>
-    /// True once any run-persisted presence cache rejected an id at its
-    /// TryAddBounded capacity this run. Logged with the epoch telemetry: a
-    /// future probe skip trusts "no foreign writer AND the cache still holds
-    /// everything this run persisted", and live seeds need to see how often the
-    /// second leg fails too.
-    /// </summary>
-    private bool _presenceCacheOverflowed;
 
     /// <summary>
     /// Once-per-writer to_regclass probe: an older
@@ -133,43 +127,6 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Run-scoped persisted-id caches for the existence probe, active on the
-    /// BeginBulkRunAsync/CompleteBulkRunAsync bracket.
-    /// Inside a bulk run applies are serialized (the runner and the apply advisory
-    /// lock) and the substrate is append-only, so any content id THIS run has already
-    /// COPYed-and-committed is durably present for the rest of the run — a later
-    /// working set that re-stages it (low-tier codepoints/words recur in every working
-    /// set) needs no server round-trip to learn it exists: the write lane treats it as
-    /// present-and-skip, byte-for-byte what a probe hit would have produced. This does
-    /// NOT weaken the pure-COPY invariant (the probe still guards concurrent overlaps
-    /// for every id NOT known-persisted); it only removes re-probes of ids we ourselves
-    /// wrote.
-    ///
-    /// EXACT sets, never a bloom: a false positive would treat a genuinely novel row as
-    /// present and DROP it, so only a no-false-positive membership test may gate the
-    /// skip. Bounded by DISTINCT persisted content (tens of millions of entities/
-    /// physicalities on a full seed — a few GB, not the 12M×N re-probe volume), and
-    /// cleared at run end. Attestations use the indexed presence probe: that
-    /// accepted identity set gates both their COPY and the consensus fold.
-    /// </summary>
-    // ConcurrentDictionary because presence packing can overlap apply preparation.
-    private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _persistedEntityIds;
-    private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _persistedPhysIds;
-    private int _persistedEntityCount;
-    private int _persistedPhysCount;
-
-    /// <summary>
-    /// When true, the matching run cache holds EVERY id in the target at run
-    /// start (plus ids this run COPYed). A miss is then definitive absence —
-    /// the bitmap probe is skipped. Incomplete caches (the default) may only
-    /// treat hits as present; misses still probe.
-    /// Entities+physicalities only — attestation preload is banned in-band
-    /// (measured ~429s for 85M ids). Campaign prep: e/p outside the timed window.
-    /// </summary>
-    private bool _entityPresenceComplete;
-    private bool _physPresenceComplete;
-
-    /// <summary>
     /// Tier-0 completeness gate, resolved ONCE per bulk run: true iff the
     /// UnicodeDecomposer has completed layer 0 in the target DB.
     /// While true, every tier-0 entity id is present by definition (the t0
@@ -183,39 +140,16 @@ public sealed partial class NpgsqlSubstrateWriter
 
     public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
-        _persistedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
-        _persistedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
-        _persistedEntityCount = 0;
-        _persistedPhysCount = 0;
-        _entityPresenceComplete = false;
-        _physPresenceComplete = false;
-        // Fresh caches ⇒ fresh overflow telemetry. The epoch baseline is NOT
-        // reset: the sequence is globally monotonic, so a baseline from before
-        // the run still bounds the foreign delta correctly.
-        _presenceCacheOverflowed = false;
-        // Content roots proven present feed the spine's pre-derivation ladder skip.
-        Laplace.Decomposers.Abstractions.ContentLadderLedger.Begin(ApplySizing.LadderCacheIds);
         ApplySizing.Log();
         _tier0LayerComplete = await QueryTier0LayerCompleteAsync(ct);
         if (_tier0LayerComplete)
             _log.LogInformation(
                 "WS_APPLY tier-0 gate ON: unicode L0 layer completion present — "
                 + "tier-0 entity ids answer presence client-side, zero probes");
-        // Attestation preload (~429s / 85M) is banned in-band.
-        if (EnvFlag.IsSet("LAPLACE_PRESENCE_PRELOAD"))
-            await PreloadPresenceSetsAsync(ct).ConfigureAwait(false);
     }
 
     public async Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
-        _persistedEntityIds = null;
-        _persistedPhysIds = null;
-        _persistedEntityCount = 0;
-        _persistedPhysCount = 0;
-        _entityPresenceComplete = false;
-        _physPresenceComplete = false;
-        _presenceCacheOverflowed = false;
-        Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
         _tier0LayerComplete = false;
         // This is part of generic ingest completion, after the accumulator drains
         // its writes. It must run for every host, independently of CLI validation.
@@ -224,54 +158,6 @@ public sealed partial class NpgsqlSubstrateWriter
         await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         await NpgsqlIngestOps.CleanGinPendingListsAsync(conn, ct).ConfigureAwait(false);
         _log.LogInformation("WS_APPLY completion gin_drain_ms={GinMs}", drain.ElapsedMilliseconds);
-    }
-
-    /// <summary>
-    /// Load every entity + physicality id into the run caches so a miss means
-    /// absent. Attestations are NOT preloaded (85M ids measured ~429s in-band).
-    /// </summary>
-    private async Task PreloadPresenceSetsAsync(CancellationToken ct)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var eTask = LoadRelationIdsBinaryAsync(
-            _persistedEntityIds!, "entities", ApplySizing.EntityPresenceCacheIds, ct);
-        var pTask = LoadRelationIdsBinaryAsync(
-            _persistedPhysIds!, "physicalities", ApplySizing.PhysicalityPresenceCacheIds, ct);
-        await Task.WhenAll(eTask, pTask).ConfigureAwait(false);
-        _persistedEntityCount = _persistedEntityIds!.Count;
-        _persistedPhysCount = _persistedPhysIds!.Count;
-        _entityPresenceComplete = eTask.Result;
-        _physPresenceComplete = pTask.Result;
-        _log.LogInformation(
-            "WS_APPLY presence preload: {E:N0}e+{P:N0}p in {Ms:N0}ms — e/p bitmap probes skipped; att still probes",
-            _persistedEntityIds!.Count, _persistedPhysIds!.Count,
-            sw.ElapsedMilliseconds);
-    }
-
-    private async Task<bool> LoadRelationIdsBinaryAsync(
-        System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> into,
-        string table, int capacity, CancellationToken ct)
-    {
-        await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        // Read at most capacity+1: the extra row proves incompleteness without scanning
-        // a hundred-million-row relation after the acceleration cache is already full.
-        // Parent partitioned tables reject COPY tablename TO — use a SELECT query.
-        long limit = (long)capacity + 1;
-        await using var exporter = await conn.BeginBinaryExportAsync(
-            $"COPY (SELECT id FROM laplace.{table} LIMIT {limit}) TO STDOUT (FORMAT BINARY)", ct)
-            .ConfigureAwait(false);
-        bool complete = true;
-        int loaded = 0;
-        while (await exporter.StartRowAsync(ct).ConfigureAwait(false) >= 0)
-        {
-            var raw = await exporter.ReadAsync<byte[]>(NpgsqlDbType.Bytea, ct).ConfigureAwait(false);
-            if (raw is { Length: >= 16 })
-            {
-                if (loaded >= capacity) complete = false;
-                else if (into.TryAdd(Hash128.FromBytes(raw), 0)) loaded++;
-            }
-        }
-        return complete;
     }
 
     private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)
@@ -435,7 +321,7 @@ public sealed partial class NpgsqlSubstrateWriter
         var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 14, "attestations");
         long blobMs = prepSw.ElapsedMilliseconds;
 
-        var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
+        var phys = CopyTupleParser.ParsePhysicalities(physBlobs, decodeBodies: false);
         // The consensus participant folds the accepted evidence set itself, so it needs
         // every staged row decoded, managed and native alike, in staging order.
         List<AttestationRow>? decodedAtts = transactionParticipant is null ? null : new();
@@ -481,35 +367,48 @@ public sealed partial class NpgsqlSubstrateWriter
         // representative = latest-ts staged row, observation counts sum, and
         // sum_score_fp1e9 sums with them — the persisted evidence stays the
         // exact record of what the group folded.
-        var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games, long Sum, bool FoldReplayable)>(atts.Ids.Count);
-        // The keyed attestation probe needs the partition keys parallel to
-        // the probed ids: id alone cannot prune LIST(type_id)->HASH(subject).
-        // The first-occurrence source index rides along so the structural
-        // novelty filter below can read each candidate's object/context ids.
-        var probeAttIds = new List<Hash128>(atts.Ids.Count);
-        var probeAttTypes = new List<Hash128>(atts.Ids.Count);
-        var probeAttSubjects = new List<Hash128>(atts.Ids.Count);
-        var probeAttSrcIdx = new List<int>(atts.Ids.Count);
-        for (int i = 0; i < atts.Ids.Count; i++)
+        // One group per attestation id, in first-seen order; attGroupOfRow maps each
+        // staged row to its group.
+        int attRowCount = atts.Ids.Count;
+        var attGroupOf = new Dictionary<Hash128, int>(attRowCount);
+        var attGroupOfRow = new int[attRowCount];
+        var attRep = new int[attRowCount];
+        var attMaxTs = new long[attRowCount];
+        var attGames = new long[attRowCount];
+        var attSum = new long[attRowCount];
+        int attGroupCount = 0;
+        // The keyed attestation probe needs the partition keys parallel to the
+        // probed ids, one per group.
+        var probeAttIds = new List<Hash128>(attRowCount);
+        var probeAttTypes = new List<Hash128>(attRowCount);
+        var probeAttSubjects = new List<Hash128>(attRowCount);
+        for (int i = 0; i < attRowCount; i++)
         {
-            if (attGroups.TryGetValue(atts.Ids[i], out var g))
+            ref int slot = ref CollectionsMarshal.GetValueRefOrAddDefault(attGroupOf, atts.Ids[i], out bool grouped);
+            if (!grouped)
             {
-                if (g.FoldReplayable != atts.FoldReplayable[i])
-                    throw new InvalidOperationException(
-                        $"attestation {atts.Ids[i]} mixes replayable and transient observations in one working set");
-                long games = AttestationMergeMath.SafeAddGames(g.Games, atts.Counts[i]);
-                long sum = AttestationMergeMath.SafeAddScores(g.Sum, atts.SumScores[i]);
-                attGroups[atts.Ids[i]] = atts.TimestampsPgUs[i] > g.MaxTs
-                    ? (i, atts.TimestampsPgUs[i], games, sum, g.FoldReplayable)
-                    : (g.RepIdx, g.MaxTs, games, sum, g.FoldReplayable);
-            }
-            else
-            {
-                attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i], atts.SumScores[i], atts.FoldReplayable[i]);
+                int g0 = slot = attGroupCount++;
+                attRep[g0] = i;
+                attMaxTs[g0] = atts.TimestampsPgUs[i];
+                attGames[g0] = atts.Counts[i];
+                attSum[g0] = atts.SumScores[i];
                 probeAttIds.Add(atts.Ids[i]);
                 probeAttTypes.Add(atts.TypeIds[i]);
                 probeAttSubjects.Add(atts.SubjectIds[i]);
-                probeAttSrcIdx.Add(i);
+                attGroupOfRow[i] = g0;
+                continue;
+            }
+            int g = slot;
+            attGroupOfRow[i] = g;
+            if (atts.FoldReplayable[attRep[g]] != atts.FoldReplayable[i])
+                throw new InvalidOperationException(
+                    $"attestation {atts.Ids[i]} mixes replayable and transient observations in one working set");
+            attGames[g] = AttestationMergeMath.SafeAddGames(attGames[g], atts.Counts[i]);
+            attSum[g] = AttestationMergeMath.SafeAddScores(attSum[g], atts.SumScores[i]);
+            if (atts.TimestampsPgUs[i] > attMaxTs[g])
+            {
+                attRep[g] = i;
+                attMaxTs[g] = atts.TimestampsPgUs[i];
             }
         }
 
@@ -538,10 +437,11 @@ public sealed partial class NpgsqlSubstrateWriter
             var entsSnap = ents;
             var blobsSnap = entBlobs;
             int groupsSnap = optimisticGroups;
+            int modulusSnap = _leafModulus;
             optimisticEntCopy = Task.Run(() =>
             {
                 var payloads = BuildSortedEntityPayloads(
-                    blobsSnap, entsSnap, idxSnap, groupsSnap, out var rowsByLane);
+                    blobsSnap, entsSnap, idxSnap, groupsSnap, modulusSnap, out var rowsByLane);
                 return (payloads, rowsByLane, groupsSnap);
             }, ct);
         }
@@ -611,38 +511,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 rtJournal++;
             }
 
-            // Run-persisted-id fast path: an id THIS run already COPYed-and-committed is
-            // durably present (append-only substrate + serialized applies), so it needs
-            // no probe — drop it from the probe input and fold it straight into the
-            // present set. Everything NOT known-persisted is still probed, so the
-            // concurrent-overlap guard behind the pure-COPY invariant is untouched.
-            // Snapshot the caches once: null outside a bulk run (standalone applies always
-            // probe in full — the safe default).
-            var persistedEnt = _persistedEntityIds;
-            var persistedPhys = _persistedPhysIds;
-            // Working set of first-occurrence indices still needing verify.
-            var entVerifyIdx = firstEntIdx;
-            long entCacheSkip = 0;
-            if (persistedEnt is { Count: > 0 } && entVerifyIdx.Count > 0)
-            {
-                var kept = new List<int>(entVerifyIdx.Count);
-                for (int k = 0; k < entVerifyIdx.Count; k++)
-                {
-                    int i = entVerifyIdx[k];
-                    if (persistedEnt.ContainsKey(ents.Ids[i])) entCacheSkip++;
-                    else kept.Add(i);
-                }
-                entVerifyIdx = kept;
-            }
             var probePhysIdsUse = probePhysIds;
-            long physCacheSkip = 0;
-            if (persistedPhys is { Count: > 0 })
-            {
-                probePhysIdsUse = new List<Hash128>(probePhysIds.Count);
-                for (int i = 0; i < probePhysIds.Count; i++)
-                    if (persistedPhys.ContainsKey(probePhysIds[i])) physCacheSkip++;
-                    else probePhysIdsUse.Add(probePhysIds[i]);
-            }
 
             // Probes fan out across pooled connections. Correct under the
             // held advisory lock: every snapshot starts after the lock was
@@ -663,24 +532,12 @@ public sealed partial class NpgsqlSubstrateWriter
             // advisory lock was acquired).
             long physEmptySkip = 0, attEmptySkip = 0;
             // Canonical entity storage is HASH(id). Tier is altitude, not
-            // identity, and cannot participate in row presence or partition
-            // routing. Build the exact id set that still needs verification;
-            // the former LIST(tier) smaller-side inversion would otherwise turn
-            // a stored id observed at another tier into a false absence.
-            long entInvertResolved = 0; // retained telemetry field; no tier inversion remains
-            var probeEntIdsUse = new List<Hash128>(entVerifyIdx.Count);
-            if (!_entityPresenceComplete)
-            {
-                for (int k = 0; k < entVerifyIdx.Count; k++)
-                    probeEntIdsUse.Add(ents.Ids[entVerifyIdx[k]]);
-            }
+            // identity, and cannot participate in row presence or partition routing.
+            var probeEntIdsUse = new List<Hash128>(firstEntIdx.Count);
+            for (int k = 0; k < firstEntIdx.Count; k++)
+                probeEntIdsUse.Add(ents.Ids[firstEntIdx[k]]);
 
-            if (_physPresenceComplete)
-            {
-                // Misses already filtered out of probePhysIdsUse above; remainder novel.
-                probePhysIdsUse = new List<Hash128>();
-            }
-            else if (probePhysIdsUse.Count > 0)
+            if (probePhysIdsUse.Count > 0)
             {
                 rtProbe++;
                 if (!await RelationHasRowsAsync(_ds, "physicalities", ct))
@@ -690,38 +547,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
             }
 
-            // I/O locality — the load-bearing fix for large-DB probes. The native existence
-            // bitmaps read partitioned storage (entities HASH(id), physicalities HASH(id),
-            // attestations LIST(type_id)->HASH(subject)). Probing
-            // in staged (content-hash-random) order scatters each 131k chunk across every
-            // partition leaf and heap page — fine while the table fits cache, catastrophic once
-            // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
-            // RANDOM I/O, worsening as the DB grew). Sorting each probe by its partition key makes
-            // every chunk a CONTIGUOUS partition range = sequential index+heap scan. The probes
-            // return a present-id SET, so input order is semantically irrelevant — this reorders
-            // I/O only. The permutation is applied identically to every parallel array, so keyed
-            // alignment is preserved by construction (guarded downstream anyway).
-            if (probeEntIdsUse.Count > 1)
-            {
-                // HASH(id) owns entity placement. Sort the content hashes so
-                // each hash bucket's btree walk is forward; there is no tier key
-                // to keep aligned with this permutation anymore.
-                var perm = BuildProbePermutation(probeEntIdsUse.Count,
-                    (a, b) => probeEntIdsUse[a].CompareToBytewise(probeEntIdsUse[b]));
-                probeEntIdsUse = ApplyProbePermutation(probeEntIdsUse, perm);
-            }
-            if (probePhysIdsUse.Count > 1)
-            {
-                // Sorted by ID since physicalities became HASH(id)/PK(id). Hash
-                // routing is not monotonic in id, so a chunk is not one contiguous
-                // partition — but within each of the 64 buckets the probed ids are
-                // still ascending, so every bucket's PK index is walked forward
-                // instead of randomly. Same property attestations gets from
-                // HASH(subject_id) probed in subject order.
-                var perm = BuildProbePermutation(probePhysIdsUse.Count,
-                    (a, b) => probePhysIdsUse[a].CompareToBytewise(probePhysIdsUse[b]));
-                probePhysIdsUse = ApplyProbePermutation(probePhysIdsUse, perm);
-            }
+            // Entity and physicality ids probe in staged order. The native probe
+            // routes each id to its HASH(id) leaf and the btree array scan sorts
+            // and dedups that leaf's keys, so every leaf is walked forward.
             // Entities and physicalities probe concurrently. The attestation
             // probe waits on the ENTITY result only for ordering; every staged
             // attestation is probed.
@@ -751,7 +579,6 @@ public sealed partial class NpgsqlSubstrateWriter
             // bitmap probes then run concurrently — attestation no longer waits on
             // the entity result (novel-by-construction shortcut is gone; see comment
             // block above). Verify wall becomes max(ent,phys,att).
-            long attStructuralSkip = 0;
             var probeAttIdsUse = probeAttIds;
             var probeAttTypesUse = probeAttTypes;
             var probeAttSubjectsUse = probeAttSubjects;
@@ -799,38 +626,16 @@ public sealed partial class NpgsqlSubstrateWriter
             var presentEntities = await entProbeTask.ConfigureAwait(false);
             var presentPhys = await physProbeTask.ConfigureAwait(false);
             var presentAtts = await attProbeTask.ConfigureAwait(false);
-            // Fold the known-persisted ids (excluded from the probe above) back into the
-            // present set — the write lane below skips a row iff its id is present, and
-            // these are present by our own committed writes. Tier-0 gated ids
-            // are present by the layer-complete marker.
-            if (persistedEnt is { Count: > 0 })
-                for (int k = 0; k < firstEntIdx.Count; k++)
-                {
-                    var id = ents.Ids[firstEntIdx[k]];
-                    if (persistedEnt.ContainsKey(id)) presentEntities.Add(id);
-                }
+            // Tier-0 gated ids are present by the Unicode layer-completion marker.
             if (tier0Present is not null)
                 foreach (var id in tier0Present) presentEntities.Add(id);
-            if (persistedPhys is { Count: > 0 })
-                foreach (var id in probePhysIds)
-                    if (persistedPhys.ContainsKey(id)) presentPhys.Add(id);
-            // Epoch telemetry rides the existing verify line (PR1: observability
-            // only, no decision reads it). foreign-delta −1 = unknown (first
-            // apply of this writer, or no sequence installed); 0 = the trust
-            // condition a later PR will use to skip this probe would have held.
-            // presence-cache-overflow is the second leg of that future trust
-            // condition (an overflowed cache no longer holds everything this run
-            // persisted, so cache-miss ⇒ novel stops being provable).
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e retired-tier-invert, {AStruct:N0}a novel-by-construction; "
-                + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a; "
-                + "epoch foreign-delta {EpochForeignDelta}, presence-cache-overflow {PresenceCacheOverflow})",
+                + "(skipped {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation; "
+                + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a; epoch foreign-delta {EpochForeignDelta})",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
-                entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0,
-                physEmptySkip, attEmptySkip, entInvertResolved, attStructuralSkip,
-                presentEntities.Count, presentPhys.Count, presentAtts.Count,
-                epochForeignDelta, _presenceCacheOverflowed);
+                tier0Present?.Count ?? 0, physEmptySkip, attEmptySkip,
+                presentEntities.Count, presentPhys.Count, presentAtts.Count, epochForeignDelta);
             verificationDiagnostic?.Complete();
 
             using var filteringDiagnostic = MeasureApplyPhase("copy-survivor-selection");
@@ -861,11 +666,10 @@ public sealed partial class NpgsqlSubstrateWriter
                     {
                         int i = firstEntIdx[k];
                         var eid = ents.Ids[i];
-                        if (presentEntities.Contains(eid) || (persistedEnt?.ContainsKey(eid) ?? false))
+                        if (presentEntities.Contains(eid))
                         { eSkip++; continue; }
                         keptEnts.Add(new KeptRow(
-                            CopyPartitionKey.ForEntityId(eid),
-                            CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
+                            eid, CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
                     }
                     if (eSkip == 0)
                     {
@@ -883,11 +687,10 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     int i = firstEntIdx[k];
                     var eid = ents.Ids[i];
-                    if (presentEntities.Contains(eid) || (persistedEnt?.ContainsKey(eid) ?? false))
+                    if (presentEntities.Contains(eid))
                     { eSkip++; continue; }
                     keptEnts.Add(new KeptRow(
-                        CopyPartitionKey.ForEntityId(eid),
-                        CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
+                        eid, CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
                 }
             }
 
@@ -908,11 +711,11 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
                 var pid = phys.Ids[i];
-                if (presentPhys.Contains(pid) || (persistedPhys?.ContainsKey(pid) ?? false))
+                if (presentPhys.Contains(pid))
                 { pSkip++; continue; }
                 // Lane by id (uniform), ORDER by hilbert (coord GiST locality).
                 keptPhys.Add(new KeptRow(
-                    CopyPartitionKey.ForEntityId(pid),
+                    pid,
                     CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]),
                     phys.Rows[i], -1, 0));
             }
@@ -926,7 +729,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 for (int k = 0; k < firstEntIdx.Count; k++)
                 {
                     var eid = ents.Ids[firstEntIdx[k]];
-                    if (presentEntities.Contains(eid) || (persistedEnt?.ContainsKey(eid) ?? false))
+                    if (presentEntities.Contains(eid))
                         continue;
                     if (!placedEntities.Contains(eid)) unplaced++;
                 }
@@ -936,31 +739,23 @@ public sealed partial class NpgsqlSubstrateWriter
             // The content-addressed five-tuple owns testimony identity. An
             // existing attestation is a replay even if dispatch boundaries or
             // the working-set token changed. Only novel identities may fold.
-            var novelRepIdx = new List<int>(attGroups.Count);
-            foreach (var (id, g) in attGroups)
-            {
-                if (presentAtts.Contains(id))
-                {
-                    continue;
-                }
-                else
-                {
-                    novelRepIdx.Add(g.RepIdx);
-                }
-            }
+            var novelRepIdx = new List<int>(attGroupCount);
+            for (int g = 0; g < attGroupCount; g++)
+                if (!presentAtts.Contains(probeAttIds[g]))
+                    novelRepIdx.Add(attRep[g]);
             novelRepIdx.Sort();
             var keptAtts = new List<KeptRow>(novelRepIdx.Count);
             for (int k = 0; k < novelRepIdx.Count; k++)
             {
                 int i = novelRepIdx[k];
-                var group = attGroups[atts.Ids[i]];
-                bool collapsed = group.Games != atts.Counts[i] || group.Sum != atts.SumScores[i];
+                int g = attGroupOfRow[i];
+                bool collapsed = attGames[g] != atts.Counts[i] || attSum[g] != atts.SumScores[i];
                 keptAtts.Add(new KeptRow(
-                    CopyPartitionKey.ForEntityId(atts.Ids[i]),
+                    atts.SubjectIds[i],
                     CopyPartitionKey.ForEntityId(atts.Ids[i]), atts.Rows[i],
-                    collapsed ? group.Games : -1,
+                    collapsed ? attGames[g] : -1,
                     atts.CountValueOffsets[i],
-                    collapsed ? group.Sum : 0,
+                    collapsed ? attSum[g] : 0,
                     atts.SumScoreValueOffsets[i]));
             }
 
@@ -1091,13 +886,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 var acceptedRows = new List<AttestationRow>(novelRepIdx.Count);
                 foreach (int i in novelRepIdx)
                 {
-                    var g = attGroups[atts.Ids[i]];
+                    int g = attGroupOfRow[i];
                     acceptedRows.Add(decodedAtts![i] with
                     {
-                        ObservationCount = g.Games,
-                        SumScoreFp1e9 = g.Sum,
+                        ObservationCount = attGames[g],
+                        SumScoreFp1e9 = attSum[g],
                         LastObservedAtUnixUs = decodedAtts[i].LastObservedAtUnixUs
-                            + (g.MaxTs - atts.TimestampsPgUs[i]),
+                            + (attMaxTs[g] - atts.TimestampsPgUs[i]),
                     });
                 }
                 await transactionParticipant(conn, tx,
@@ -1140,79 +935,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 Interlocked.Exchange(ref _epochOwnBumpsSinceBaseline, 0);
                 rtEpoch++;
             }
-
-            // ONLY now that the whole apply committed are these ids durably persisted, so
-            // subsequent applies this run may skip re-probing them. Done post-commit so a
-            // rolled-back apply never poisons the cache with never-persisted ids; a miss is
-            // harmless — the next apply simply probes and finds them present. (The parallel
-            // COPY sub-txns commit their rows independently, so a control-tx failure after
-            // that point still leaves the rows present and a later probe will catch them —
-            // the cache is a pure optimization, never a correctness input.)
-            //
-            // Fill the probe-skip cache with distinct staged ids up to the exact cache's
-            // byte-derived capacity. A full cache simply restores DB probes for misses.
-            // After commit, present-at-probe and newly-COPYed rows are equally durable under
-            // append-only law. MEASURED 2026-08-04 ChessPgn (OTB year on a DB that already
-            // holds another OTB year): first WS staged ~360k distinct entities, verify paid
-            // ~34s with present≈346k, and because the old fixed fill gate rejected that
-            // apply, the cache stayed empty → every later
-            // WS re-probed the same shared position graph with "skipped 0e cached". HashSet
-            // add of ~360k ids is ~100ms; repeating a 34s bitmap is the gate killer.
-            // ContentLadderLedger stays novel/staged-gated below (provenance across sources).
-            // A false return is the capacity rejection (a duplicate returns
-            // true); the sticky flag feeds the verify line's epoch telemetry —
-            // an overflowed cache is the second reason a future probe skip
-            // could not fire, and live seeds should see both legs.
-            if (persistedEnt is not null && firstEntIdx.Count > 0)
-            {
-                var ids = CollectionsMarshal.AsSpan(ents.Ids);
-                var idx = CollectionsMarshal.AsSpan(firstEntIdx);
-                for (int k = 0; k < idx.Length; k++)
-                    if (!TryAddBounded(persistedEnt, ids[idx[k]],
-                            ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount))
-                        _presenceCacheOverflowed = true;
-                if (tier0Present is not null)
-                    foreach (var id in tier0Present)
-                        if (!TryAddBounded(persistedEnt, id,
-                                ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount))
-                            _presenceCacheOverflowed = true;
-            }
-            if (persistedPhys is not null && probePhysIds.Count > 0)
-            {
-                for (int i = 0; i < probePhysIds.Count; i++)
-                    if (!TryAddBounded(persistedPhys, probePhysIds[i],
-                            ApplySizing.PhysicalityPresenceCacheIds, ref _persistedPhysCount))
-                        _presenceCacheOverflowed = true;
-            }
-            // Same commit boundary, same reason: a root may only answer "ladder already
-            // deposited" once it is durably in the target.
-            //
-            // The feed is what THIS APPLY STAGED (first-occurrence entity ids), not
-            // everything found present. Presence alone would let one source's earlier
-            // deposit suppress the next source's FIRST witnessing of the same surface —
-            // WordNet minting "casa" would silence OMW's own attestation of it, and
-            // provenance is never mashed.
-            // The ledger is armed per bulk run, and a bulk run is one source, so a root
-            // enters only after this source has staged it and that stage has committed.
-            // What the skip then suppresses is strictly the 2nd..Nth re-emission within
-            // the run — the batch-boundary artifact, nothing a source asserts.
-            //
-            // Ids withheld from the probe are consistent with that: cache-skipped ids are
-            // already ledgered from the apply that committed them, and tier-0 gated ids
-            // are single codepoints with no ladder below them to re-walk.
-            // The ledger owns its byte-derived capacity and stops accreting when full;
-            // there is no per-apply row gate and no temporary copy of the ids.
-            if (firstEntIdx.Count > 0)
-                Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(
-                    ents.Ids, firstEntIdx);
         }
         catch
         {
-            // A competing writer, or a COPY subtransaction that committed before
-            // this apply failed, can add ids absent from the preload snapshot.
-            // Keep durable positive hits, but re-probe every cache miss on retry.
-            _entityPresenceComplete = false;
-            _physPresenceComplete = false;
             try { await tx.RollbackAsync(CancellationToken.None); }
             catch { }
             throw;
@@ -1310,39 +1035,20 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             Hash128 id = ids[i];
             if (tier0Gate && tiers[i] == 0) tier0Ids!.Add(id);
-            if (!best.TryGetValue(id, out int prior)
+            ref int prior = ref CollectionsMarshal.GetValueRefOrAddDefault(best, id, out bool seen);
+            if (!seen
                 || tiers[i] < tiers[prior]
                 || (tiers[i] == tiers[prior]
                     && types[i].CompareToBytewise(types[prior]) < 0))
-                best[id] = i;
+                prior = i;
         }
 
-        // Bytewise id order as primitive keys: the leading eight bytes big-endian sort
-        // the rows; equal leading words (rare for content hashes) are ordered by the rest.
+        // Survivors keep first-seen order: presence routes each id to its hash leaf
+        // and every COPY lane sorts its own rows, so no global id order is needed.
         int n = best.Count;
-        var lead = new ulong[n];
-        var rows = new int[n];
-        int k = 0;
-        foreach (var (id, row) in best)
-        {
-            lead[k] = System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(id.Hi);
-            rows[k++] = row;
-        }
-        Array.Sort(lead, rows);
-        List<Hash128> idList = ents.Ids;
-        for (int start = 0; start < n;)
-        {
-            int end = start + 1;
-            while (end < n && lead[end] == lead[start]) end++;
-            if (end - start > 1)
-                rows.AsSpan(start, end - start).Sort((a, b) =>
-                    System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(idList[a].Lo)
-                        .CompareTo(System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(idList[b].Lo)));
-            start = end;
-        }
         var selected = new List<int>(n);
         tier0Present = tier0Gate ? new List<Hash128>() : null;
-        foreach (int row in rows)
+        foreach (int row in best.Values)
         {
             if (tier0Gate && tier0Ids!.Contains(ids[row]))
             {
@@ -1508,7 +1214,10 @@ public sealed partial class NpgsqlSubstrateWriter
         var present = new HashSet<Hash128>();
         if (ids.Count == 0) return present;
 
-        int probeChunkIds = ApplySizing.ProbeChunkIds;
+        // Memory bounds the chunk; the apply connections share the set so every
+        // backend probes its slice concurrently.
+        int probeChunkIds = Math.Min(ApplySizing.ProbeChunkIds,
+            Math.Max(1, (ids.Count + ApplyParallelism - 1) / ApplyParallelism));
         int chunkCount = (ids.Count + probeChunkIds - 1) / probeChunkIds;
         var perChunk = new List<Hash128>[chunkCount];
 
@@ -1663,31 +1372,19 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// TWO keys, because lane assignment and insert order want different things.
+    /// <para><b>RouteKey</b> is the value of the table's HASH partition column (the id for
+    /// entities and physicalities, the subject for attestations). It names the leaf that
+    /// owns the row, and each leaf rides exactly one COPY connection.</para>
     ///
-    /// <para><b>LaneKey</b> picks which parallel COPY connection a row rides. It must be
-    /// UNIFORM or the lanes come out uneven and the widest one becomes the wall clock.
-    /// Always the row id: ids are content hashes, uniform by construction.</para>
-    ///
-    /// <para><b>OrderKey</b> is the sort within a lane, which decides the order index
-    /// pages are touched. For btree-indexed tables that is the id again — sorted ids walk
-    /// PK leaves forward instead of randomly. For physicalities it is the HILBERT INDEX,
-    /// because the contended index there is the coord GiST and hilbert order is its
-    /// spatial locality.</para>
-    ///
-    /// <para>These were one key until 2026-08-04 and the collapse cost something either
-    /// way. Keyed on hilbert, lanes inherited hilbert's distribution — and hilbert is
-    /// locality-PRESERVING, so range-splitting it splits by region of space, and content
-    /// piles at the centroid rather than spreading: one band held 60.67% of the table.
-    /// Keyed on id, lanes balanced but every GiST insert became a random descent. The
-    /// same property that makes hilbert a bad partition key makes it a good sort key, so
-    /// the fix is to stop making it be both.</para>
+    /// <para><b>OrderKey</b> is the sort within a leaf, which decides the order index pages
+    /// are touched: the id for the btree tables, the hilbert index for physicalities,
+    /// whose contended index is the coord GiST.</para>
     ///
     /// <para>Patch/PatchSum carry a duplicate-collapsed group's summed games/sum_score for
     /// the representative row (Patch = -1 means unpatched).</para>
     /// </summary>
     private readonly record struct KeptRow(
-        CopyPartitionKey LaneKey, CopyPartitionKey OrderKey, StagedRowRef Row,
+        Hash128 RouteKey, CopyPartitionKey OrderKey, StagedRowRef Row,
         long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     /// <summary>
@@ -1767,7 +1464,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private static int ResolveCopyGroups(int rowCount, long payloadBytes)
     {
-        // Id-range groups own disjoint PK leaves after LaneKey order. Fanout is
+        // Each group owns whole leaves (RouteLeaves). Fanout is
         // justified by finalized payload bytes: another connection must receive at
         // least one transport buffer/page and one row. No row-count crossover or
         // host-specific worker cap survives here; topology owns the ceiling.
@@ -1792,59 +1489,83 @@ public sealed partial class NpgsqlSubstrateWriter
         return bytes;
     }
 
-    private static bool TryAddBounded(
-        System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> cache,
-        Hash128 id, int capacity, ref int count)
+    /// <summary>
+    /// Assign whole leaves to COPY lanes: largest leaf first to the least-loaded lane.
+    /// Each backend then writes its own leaves, their rows contiguous, and no two
+    /// backends insert into the same btree.
+    /// </summary>
+    internal static int[] LaneOfLeaf(ReadOnlySpan<int> rowsPerLeaf, int groups)
     {
-        if (Volatile.Read(ref count) >= capacity) return false;
-        if (!cache.TryAdd(id, 0)) return true;
-        int after = Interlocked.Increment(ref count);
-        if (after <= capacity) return true;
-
-        // Concurrent adders may cross the boundary together. Remove only this
-        // caller's new key and restore the counter; a cache miss costs a probe and
-        // cannot affect correctness.
-        if (cache.TryRemove(id, out _)) Interlocked.Decrement(ref count);
-        return false;
+        var lanes = new int[rowsPerLeaf.Length];
+        if (groups <= 1) return lanes;
+        var order = new int[rowsPerLeaf.Length];
+        var sizes = new int[rowsPerLeaf.Length];
+        for (int leaf = 0; leaf < order.Length; leaf++)
+        {
+            order[leaf] = leaf;
+            sizes[leaf] = -rowsPerLeaf[leaf];
+        }
+        Array.Sort(sizes, order);
+        var load = new long[groups];
+        foreach (int leaf in order)
+        {
+            int lane = 0;
+            for (int g = 1; g < groups; g++)
+                if (load[g] < load[lane]) lane = g;
+            lanes[leaf] = lane;
+            load[lane] += rowsPerLeaf[leaf];
+        }
+        return lanes;
     }
 
-    /// <summary>
-    /// Map the complete unsigned key space into equally sized, ordered COPY lanes.
-    /// Integer rounding makes lane widths differ by at most one key. In particular,
-    /// six lanes must not clamp eight leading-bit buckets into the final lane:
-    /// that gives the final lane three times the rows of each other lane.
-    /// This schedules transport only; PostgreSQL still routes HASH(id) partitions.
-    /// </summary>
-    internal static int CopyGroupOf(ulong hiBe, int groups)
+    /// <summary>Owning leaf of each route key and the lane of each row.</summary>
+    private static (int[] Leaf, int[] Lane, int[] Counts) RouteLeaves(
+        ReadOnlySpan<Hash128> routeKeys, int modulus, int groups)
     {
-        if (groups <= 1) return 0;
-        return (int)(((UInt128)hiBe * (uint)groups) >> 64);
+        var leaf = new int[routeKeys.Length];
+        PartitionRoute.Remainders(routeKeys, modulus, leaf);
+        var rowsPerLeaf = new int[modulus];
+        foreach (int l in leaf) rowsPerLeaf[l]++;
+        int[] laneOfLeaf = LaneOfLeaf(rowsPerLeaf, groups);
+        var lane = new int[leaf.Length];
+        var counts = new int[Math.Max(1, groups)];
+        for (int i = 0; i < leaf.Length; i++)
+        {
+            lane[i] = laneOfLeaf[leaf[i]];
+            counts[lane[i]]++;
+        }
+        return (leaf, lane, counts);
+    }
+
+    /// <summary>Leaf first, then the order key within the leaf.</summary>
+    private readonly record struct LeafOrderKey(int Leaf, CopySortKey Order) : IComparable<LeafOrderKey>
+    {
+        public int CompareTo(LeafOrderKey other)
+        {
+            int c = Leaf.CompareTo(other.Leaf);
+            return c != 0 ? c : Order.CompareTo(other.Order);
+        }
     }
 
     private static byte[][] BuildSortedEntityPayloads(
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs,
-        CopyTupleParser.EntityRows ents, List<int> firstIdx, int groups, out int[] rowsByLane)
+        CopyTupleParser.EntityRows ents, List<int> firstIdx, int groups, int modulus,
+        out int[] rowsByLane)
     {
         int rowCount = firstIdx.Count;
-        var groupOf = new int[rowCount];
-        var keysAll = new CopySortKey[rowCount];
-        var counts = new int[groups];
+        var routes = new Hash128[rowCount];
+        for (int k = 0; k < rowCount; k++) routes[k] = ents.Ids[firstIdx[k]];
+        var (leafOf, groupOf, counts) = RouteLeaves(routes, modulus, groups);
+        var keysAll = new LeafOrderKey[rowCount];
         for (int k = 0; k < rowCount; k++)
-        {
-            int i = firstIdx[k];
-            var key = CopySortKey.FromWire(ents.Ids[i]);
-            keysAll[k] = key;
-            int g = CopyGroupOf(key.HiBe, groups);
-            groupOf[k] = g;
-            counts[g]++;
-        }
+            keysAll[k] = new LeafOrderKey(leafOf[k], CopySortKey.FromWire(routes[k]));
         var groupRefs = new StagedRowRef[groups][];
-        var groupKeys = new CopySortKey[groups][];
+        var groupKeys = new LeafOrderKey[groups][];
         var next = new int[groups];
         for (int g = 0; g < groups; g++)
         {
             groupRefs[g] = new StagedRowRef[counts[g]];
-            groupKeys[g] = new CopySortKey[counts[g]];
+            groupKeys[g] = new LeafOrderKey[counts[g]];
         }
         for (int k = 0; k < rowCount; k++)
         {
@@ -1866,32 +1587,23 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     private static byte[][] BuildSortedCopyPayloads(
-        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, int groups,
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, int groups, int modulus,
         out int[] rowsByLane)
     {
         int rowCount = kept.Count;
-        var groupOf = new int[rowCount];
-        var keysAll = new CopySortKey[rowCount];
-        var counts = new int[groups];
+        var routes = new Hash128[rowCount];
+        for (int i = 0; i < rowCount; i++) routes[i] = kept[i].RouteKey;
+        var (leafOf, groupOf, counts) = RouteLeaves(routes, modulus, groups);
+        var keysAll = new LeafOrderKey[rowCount];
         for (int i = 0; i < rowCount; i++)
-        {
-            // LANE from LaneKey, ORDER from OrderKey — two different keys on purpose.
-            // The lane must be uniform (id) or one connection carries the batch; the
-            // order should follow the contended index (hilbert for physicalities, id
-            // for the btree tables). Collapsing them forces one to lose.
-            var key = CopySortKey.FromWire(kept[i].OrderKey.Wire);
-            keysAll[i] = key;
-            int g = CopyGroupOf(CopySortKey.FromWire(kept[i].LaneKey.Wire).HiBe, groups);
-            groupOf[i] = g;
-            counts[g]++;
-        }
+            keysAll[i] = new LeafOrderKey(leafOf[i], CopySortKey.FromWire(kept[i].OrderKey.Wire));
         var groupRows = new KeptRow[groups][];
-        var groupKeys = new CopySortKey[groups][];
+        var groupKeys = new LeafOrderKey[groups][];
         var next = new int[groups];
         for (int g = 0; g < groups; g++)
         {
             groupRows[g] = new KeptRow[counts[g]];
-            groupKeys[g] = new CopySortKey[counts[g]];
+            groupKeys[g] = new LeafOrderKey[counts[g]];
         }
         for (int i = 0; i < rowCount; i++)
         {
@@ -2071,7 +1783,7 @@ public sealed partial class NpgsqlSubstrateWriter
         int[] rowsByLane;
         try
         {
-            payloads = BuildSortedCopyPayloads(blobs, kept, groups, out rowsByLane);
+            payloads = BuildSortedCopyPayloads(blobs, kept, groups, _leafModulus, out rowsByLane);
         }
         catch (IndexOutOfRangeException ex)
         {

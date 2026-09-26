@@ -7,9 +7,8 @@ namespace Laplace.Ingestion;
 /// <c>Decomposer&lt;TRecord&gt;</c> driver. Threading an <c>IIngestObservability</c> value through
 /// every handler and file worker would make an operational concern part of the vendor
 /// contract even though only the shared boundary sites consume it. IngestRunner already
-/// owns the observability instance and brackets the run, so the run brackets the ambient —
-/// the same shape ContentLadderLedger.Begin()/End() uses for run-scoped state that the
-/// pipeline reads without being handed it.
+/// owns the observability instance and brackets the run, so the run brackets the ambient
+/// the pipeline reads without being handed it.
 ///
 /// AsyncLocal, not a plain static: the file workers run concurrently inside the run's async
 /// context and inherit the value, while a second runner in the same process (tests do this)

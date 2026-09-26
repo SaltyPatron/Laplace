@@ -157,6 +157,8 @@ public sealed partial class NpgsqlSubstrateWriter
         using var connectionDiagnostic = MeasureApplyPhase("connection-and-apply-lock");
         await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         bool epochRoute = await SupportsApplyWriteEpochAsync(connection, ct).ConfigureAwait(false);
+        if (_leafModulus == 0)
+            _leafModulus = await StagedSourceWriter.ModulusAsync(connection, ct).ConfigureAwait(false);
         await using var transaction = await AdvisoryTxLock.BeginWithLockAsync(
             connection, "laplace_apply_batch", TransactionGucs(Durability), _log, ct).ConfigureAwait(false);
         connectionDiagnostic?.Complete();

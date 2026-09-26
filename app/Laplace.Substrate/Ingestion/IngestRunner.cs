@@ -16,7 +16,6 @@ public sealed class IngestRunner
     private readonly ISubstrateReader _reader;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IIngestObservability _obs;
-    private Hash128 _ladderSource;
 
     public IngestRunner(
         ISubstrateWriter writer,
@@ -245,11 +244,6 @@ public sealed class IngestRunner
 
         bool syncIngest = false;
 
-        if (_ladderSource != decomposer.SourceId)
-        {
-            ContentLadderLedger.Reset();
-            _ladderSource = decomposer.SourceId;
-        }
         var runCt = ct;
 
         try

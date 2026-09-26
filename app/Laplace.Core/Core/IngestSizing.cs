@@ -208,9 +208,6 @@ public static class IngestSizing
         int Connections,
         int ProbeChunkIds,
         int MergeChunkRows,
-        int EntityPresenceCacheIds,
-        int PhysicalityPresenceCacheIds,
-        int LadderCacheIds,
         int ReaderProvenCacheIds,
         int ReaderRootCacheIds,
         int TextRootCacheIds,
@@ -221,16 +218,12 @@ public static class IngestSizing
     {
         public void Log() => Console.Error.WriteLine(
             "apply_io_sizing: connections={0} probe_chunk_ids={1} merge_chunk_rows={2} "
-            + "entity_cache_ids={3} physicality_cache_ids={4} ladder_cache_ids={5} "
-            + "reader_proven_ids={6} reader_root_ids={7} text_root_ids={8} "
-            + "image_root_ids={9} audio_root_ids={10} cache_bytes_per_owner={11} "
-            + "copy_startup_bytes={12}",
+            + "reader_proven_ids={3} reader_root_ids={4} text_root_ids={5} "
+            + "image_root_ids={6} audio_root_ids={7} cache_bytes_per_owner={8} "
+            + "copy_startup_bytes={9}",
             Connections,
             ProbeChunkIds,
             MergeChunkRows,
-            EntityPresenceCacheIds,
-            PhysicalityPresenceCacheIds,
-            LadderCacheIds,
             ReaderProvenCacheIds,
             ReaderRootCacheIds,
             TextRootCacheIds,
@@ -372,16 +365,13 @@ public static class IngestSizing
             / MemoryTopology.AttestationMergeTransitBytesPerRow);
 
         // The cache envelope is shared by every run-long exact acceleration map:
-        // writer entity/physicality presence, content ladder, reader proven ids, and
-        // reader canonical-root pairs, and text/image/audio root memoization. Reaching
-        // capacity only restores the normal DB probe/compose path and cannot lose data.
-        const int writerPresenceOwners = 2;
-        const int contentLadderOwners = 1;
+        // reader proven ids and canonical-root pairs, text/image/audio root
+        // memoization, and vendor reuse. Reaching capacity only restores the normal
+        // DB probe/compose path and cannot lose data.
         const int readerIdentityOwners = 2;
         const int modalityRootOwners = 3;
         const int vendorReuseOwners = 1;
-        const int cacheOwners = writerPresenceOwners + contentLadderOwners
-            + readerIdentityOwners + modalityRootOwners + vendorReuseOwners;
+        const int cacheOwners = readerIdentityOwners + modalityRootOwners + vendorReuseOwners;
         long cacheBytesPerMap = Math.Max(1, envelope / cacheOwners);
         int cacheIds = IntCount(cacheBytesPerMap
             / MemoryTopology.ConcurrentHash128ResidentBytes);
@@ -392,9 +382,6 @@ public static class IngestSizing
             connections,
             probeChunkIds,
             mergeChunkRows,
-            cacheIds,
-            cacheIds,
-            cacheIds,
             cacheIds,
             rootCacheIds,
             rootCacheIds,

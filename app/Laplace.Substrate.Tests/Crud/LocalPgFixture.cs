@@ -39,8 +39,6 @@ public sealed class LocalPgFixture : IAsyncLifetime
             if (_ds is not null) return;
             if (_refCount == 0)
             {
-                // New empty DB: forget any content-ladder skips from a prior fixture life.
-                ContentLadderLedger.Reset();
                 await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
                 await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
                 // The database is shared across fixtures; its connection pool must

@@ -210,95 +210,31 @@ public class CopyTupleParserTests
             .SetEquals(distinct.Select(i => parsed.Ids[i])));
     }
 
-    [Theory]
-    [InlineData(0ul)]
-    [InlineData(1ul)]
-    [InlineData(ulong.MaxValue)]
-    [InlineData(0x8000_0000_0000_0000ul)]
-    public void CopyGroupOf_SingleGroup_NeverNegative(ulong hiBe)
-    {
-        // groups==1 is the ResolveCopyGroups result for kept < 16_384. The old
-        // shift=64 path cast a full ulong HiBe to int and indexed counts[-N].
-        Assert.Equal(0, NpgsqlSubstrateWriter.CopyGroupOf(hiBe, groups: 1));
-        Assert.Equal(0, NpgsqlSubstrateWriter.CopyGroupOf(hiBe, groups: 0));
-    }
-
     [Fact]
-    public void CopyGroupOf_MultiGroup_StaysInRange()
+    public void LaneOfLeaf_OneLaneOwnsEveryLeafWhenThereIsOneGroup()
     {
-        for (int groups = 2; groups <= 8; groups++)
-        {
-            Assert.InRange(NpgsqlSubstrateWriter.CopyGroupOf(0ul, groups), 0, groups - 1);
-            Assert.InRange(NpgsqlSubstrateWriter.CopyGroupOf(ulong.MaxValue, groups), 0, groups - 1);
-            Assert.InRange(
-                NpgsqlSubstrateWriter.CopyGroupOf(0x8000_0000_0000_0000ul, groups),
-                0, groups - 1);
-        }
+        int[] rows = Enumerable.Range(1, 64).ToArray();
+        Assert.All(NpgsqlSubstrateWriter.LaneOfLeaf(rows, 1), lane => Assert.Equal(0, lane));
+        Assert.All(NpgsqlSubstrateWriter.LaneOfLeaf(rows, 0), lane => Assert.Equal(0, lane));
     }
 
     [Theory]
+    [InlineData(2)]
     [InlineData(3)]
-    [InlineData(5)]
     [InlineData(6)]
     [InlineData(7)]
-    public void CopyGroupOf_UniformKeyPrefixesKeepEveryLaneBalanced(int groups)
+    public void LaneOfLeaf_AssignsWholeLeavesAndBalancesRows(int groups)
     {
-        // Enumerate every 16-bit prefix at the midpoint of its remaining key
-        // range. This catches range skew without relying on random sampling.
-        const int samples = 1 << 16;
-        var counts = new int[groups];
-        int previous = 0;
-        for (int prefix = 0; prefix < samples; prefix++)
-        {
-            ulong key = ((ulong)prefix << 48) | (1UL << 47);
-            int group = NpgsqlSubstrateWriter.CopyGroupOf(key, groups);
-            Assert.InRange(group, previous, groups - 1);
-            counts[group]++;
-            previous = group;
-        }
-        Assert.Equal(samples, counts.Sum());
-        Assert.InRange(counts.Max() - counts.Min(), 0, 1);
-    }
-
-    [Theory]
-    [InlineData(3)]
-    [InlineData(5)]
-    [InlineData(6)]
-    [InlineData(7)]
-    [InlineData(int.MaxValue)]
-    public void CopyGroupOf_LaneEndpointsPartitionTheEntireUnsignedDomain(int groups)
-    {
-        // Construct exact interval endpoints by independent arbitrary-precision
-        // division, including values immediately on either side of each boundary.
-        var domain = System.Numerics.BigInteger.One << 64;
-        foreach (int group in new[] { 0, 1, groups / 2, groups - 2, groups - 1 }.Distinct())
-        {
-            ulong first = (ulong)((domain * group + groups - 1) / groups);
-            ulong last = (ulong)((domain * (group + 1L) + groups - 1) / groups - 1);
-            Assert.Equal(group, NpgsqlSubstrateWriter.CopyGroupOf(first, groups));
-            Assert.Equal(group, NpgsqlSubstrateWriter.CopyGroupOf(last, groups));
-            if (first != 0)
-                Assert.Equal(group - 1, NpgsqlSubstrateWriter.CopyGroupOf(first - 1, groups));
-            if (last != ulong.MaxValue)
-                Assert.Equal(group + 1, NpgsqlSubstrateWriter.CopyGroupOf(last + 1, groups));
-        }
-    }
-
-    [Theory]
-    [InlineData(2, 1)]
-    [InlineData(4, 2)]
-    [InlineData(8, 3)]
-    [InlineData(16, 4)]
-    [InlineData(64, 6)]
-    [InlineData(256, 8)]
-    public void CopyGroupOf_PowerOfTwoLanesKeepExistingAssignments(int groups, int bits)
-    {
-        for (int prefix = 0; prefix < 1 << 16; prefix++)
-        {
-            ulong key = ((ulong)prefix << 48) | 0x0000_1234_5678_9abcUL;
-            Assert.Equal((int)(key >> (64 - bits)),
-                NpgsqlSubstrateWriter.CopyGroupOf(key, groups));
-        }
+        // Uneven leaves: the heaviest lane exceeds the mean by less than one leaf.
+        int[] rows = Enumerable.Range(0, 64).Select(static leaf => 1000 + 37 * (leaf % 11)).ToArray();
+        int[] lanes = NpgsqlSubstrateWriter.LaneOfLeaf(rows, groups);
+        Assert.Equal(64, lanes.Length);
+        Assert.All(lanes, lane => Assert.InRange(lane, 0, groups - 1));
+        var load = new long[groups];
+        for (int leaf = 0; leaf < 64; leaf++) load[lanes[leaf]] += rows[leaf];
+        Assert.Equal(rows.Sum(), load.Sum());
+        Assert.True(load.Max() - (double)rows.Sum() / groups < rows.Max(),
+            $"lane loads {string.Join(",", load)}");
     }
 
 }

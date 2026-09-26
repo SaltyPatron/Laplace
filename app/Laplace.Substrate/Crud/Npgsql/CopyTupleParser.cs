@@ -163,7 +163,10 @@ internal static class CopyTupleParser
         return result;
     }
 
-    public static unsafe PhysicalityRows ParsePhysicalities(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
+    /// <param name="decodeBodies">False keeps only id, entity, hilbert index and row
+    /// reference: the writer's verification needs no copy of coord or trajectory bytes.</param>
+    public static unsafe PhysicalityRows ParsePhysicalities(
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, bool decodeBodies = true)
     {
         var result = new PhysicalityRows();
         for (int b = 0; b < blobs.Count; b++)
@@ -209,12 +212,13 @@ internal static class CopyTupleParser
                     if (field == 0) id = ReadHash(p, off, valLen, "physicalities.id");
                     else if (field == 1)
                         entityId = ReadHash(p, off, valLen, "physicalities.entity_id");
+                    else if (field == 4)
+                        hilbert = ReadHilbert(p, off, valLen, "physicalities.hilbert_index");
+                    else if (!decodeBodies) { }
                     else if (field == 2)
                         type = ReadInt16(p, off, valLen, "physicalities.type");
                     else if (field == 3)
                         coord = ReadBytes(p, off, valLen, "physicalities.coord");
-                    else if (field == 4)
-                        hilbert = ReadHilbert(p, off, valLen, "physicalities.hilbert_index");
                     else if (field == 5)
                         trajectory = ReadBytes(p, off, valLen, "physicalities.trajectory");
                     else if (field == 6)
@@ -235,9 +239,11 @@ internal static class CopyTupleParser
                 }
                 result.Ids.Add(id);
                 result.EntityIds.Add(entityId);
+                result.HilbertKeys.Add(hilbert);
+                result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
+                if (!decodeBodies) continue;
                 result.Types.Add(type);
                 result.CoordinatesEwkb.Add(coord);
-                result.HilbertKeys.Add(hilbert);
                 result.TrajectoriesEwkb.Add(trajectory);
                 result.ConstituentCounts.Add(constituents);
                 result.AlignmentResiduals.Add(residual);
@@ -245,7 +251,6 @@ internal static class CopyTupleParser
                 result.SourceDimensions.Add(sourceDim);
                 result.HasSourceDimension.Add(hasSourceDim);
                 result.TimestampsPgUs.Add(observedAtPgUs);
-                result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
         }
         return result;
@@ -312,8 +317,23 @@ internal static class CopyTupleParser
                 long ts = 0, games = 0, sumScore = 0;
                 bool foldReplayable = true;
                 long countValOff = -1, sumValOff = -1;
-                WalkRow(p, len, ref off, AttestationFields, "attestations", (field, valOff, valLen) =>
+                // One allocation-free pass over the validated COPY row: this is the
+                // bulk evidence path, so no per-row closure or delegate.
+                if (off + 2 > len)
+                    throw Corrupt("attestations", off, "truncated field count");
+                int fields = (p[off] << 8) | p[off + 1];
+                if (fields != AttestationFields)
+                    throw Corrupt("attestations", off, $"field count {fields}, expected {AttestationFields}");
+                off += 2;
+                for (int field = 0; field < fields; field++)
                 {
+                    if (off + 4 > len)
+                        throw Corrupt("attestations", off, $"truncated length prefix at field {field}");
+                    int valLen = (p[off] << 24) | (p[off + 1] << 16) | (p[off + 2] << 8) | p[off + 3];
+                    off += 4;
+                    if (valLen != -1 && (valLen < 0 || off + valLen > len))
+                        throw Corrupt("attestations", off, $"field {field} length {valLen} overruns blob");
+                    long valOff = off;
                     switch (field)
                     {
                         case 0: id = ReadHash(p, valOff, valLen, "attestations.id"); break;
@@ -364,7 +384,8 @@ internal static class CopyTupleParser
                             }
                             break;
                     }
-                });
+                    if (valLen > 0) off += valLen;
+                }
                 if (countValOff < 0)
                     throw new InvalidOperationException("attestations row missing observation_count");
                 if (sumValOff < 0)

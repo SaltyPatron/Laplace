@@ -115,7 +115,8 @@ public sealed class WriterThroughputTests
     [Fact]
     public async Task Attestation_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        var writer = Writer(_pg.DataSource);
+        var phases = new WsApplyCaptureLog();
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource, phases);
 
         const int totalRows = 500_000;
         int seedBase = 20_000_000;
@@ -147,13 +148,15 @@ public sealed class WriterThroughputTests
         double rowsPerSec = result.AttestationsInserted / sw.Elapsed.TotalSeconds;
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Attestation apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
-            + $"({result.AttestationsInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
+            + $"({result.AttestationsInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})\n"
+            + phases.Join());
     }
 
     [Fact]
     public async Task Physicality_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        var writer = Writer(_pg.DataSource);
+        var phases = new WsApplyCaptureLog();
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource, phases);
 
         const int totalRows = 500_000;
         CodepointPerfcache.LoadDefault();
@@ -213,7 +216,8 @@ public sealed class WriterThroughputTests
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Physicality admission {rowsPerSec:F0} source forms/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
             + $"({totalRows:N0} source forms; {result.PhysicalitiesInserted:N0} total P rows inserted "
-            + $"in {sw.Elapsed.TotalSeconds:F2}s, logical_round_trips={result.RoundTrips})");
+            + $"in {sw.Elapsed.TotalSeconds:F2}s, logical_round_trips={result.RoundTrips})\n"
+            + phases.Join());
     }
 
     [Fact]

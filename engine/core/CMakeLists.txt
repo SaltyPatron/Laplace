@@ -61,6 +61,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/highway_table.h
     include/laplace/core/attestation_engine.h
     include/laplace/core/staged_load.h
+    include/laplace/core/partition_route.h
 )
 
 set(LAPLACE_CORE_SOURCES
@@ -131,6 +132,7 @@ set(LAPLACE_CORE_SOURCES
     src/highway_table.c
     src/attestation_engine.c
     src/staged_load.cpp
+    src/partition_route.c
 )
 set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
 set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_highway_perfcache.bin"

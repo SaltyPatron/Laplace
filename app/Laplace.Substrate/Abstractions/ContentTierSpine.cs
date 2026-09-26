@@ -187,19 +187,7 @@ public static class ContentTierSpine
         if (builder.DeferredContent is { } cb)
             return cb.Append(canonicalUtf8, sourceId, out rootId);
 
-        // Content this run already persisted is its entity, its form and its subtree:
-        // its root (native fast path, memoized) is the answer and nothing is staged again.
-        if (ContentLadderLedger.Armed && ContentLadderLedger.HasEntries
-            && ResolveRoot(canonicalUtf8) is { } known && ContentLadderLedger.IsPersisted(known))
-        {
-            rootId = known;
-            return true;
-        }
-        if (!builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId))
-            return false;
-        if (ContentLadderLedger.Armed)
-            TryMemoize(Hash128.Blake3(canonicalUtf8), rootId);
-        return true;
+        return builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId);
     }
 
     public static bool TryStageUnderscoredIntoBuilder(
