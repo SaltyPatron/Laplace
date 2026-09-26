@@ -119,8 +119,22 @@ public sealed record SourceRecipeField(
     // of TrunkField's text that is the subject.
     string? SpanStartField = null,
     string? SpanEndField = null,
-    // The object is the composition of these parts read from the lowering attributes.
-    IReadOnlyList<SourceIdentityPart>? ObjectParts = null);
+    // The object is the composition of these parts read from the lowering attributes;
+    // "value()" names the field's own value (each item of a separated sequence).
+    IReadOnlyList<SourceIdentityPart>? ObjectParts = null,
+    // The claim is refuted when attribute OutcomeField reads RefuteValue (a VerbNet
+    // selectional restriction Value="-", a negated predicate bool="!").
+    string? OutcomeField = null,
+    string? RefuteValue = null,
+    // A value starting with DrawPrefix is the source's uncertain claim: the prefix is
+    // stripped and the claim is a draw (VerbNet wn="?sprawl%2:38:00").
+    string? DrawPrefix = null,
+    // KeyValueComposition: a key's value list ("activity_type: walk, travel" -> one
+    // [key, value] per value), a relation claiming items without a key ("+manner"),
+    // and values/flags signed by a leading + (confirm) or - (refute).
+    string? ValueListSeparator = null,
+    string? FlagRelation = null,
+    bool SignedValues = false);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -261,8 +275,11 @@ public sealed record SourceChildSubject(
     // Several identity parts instead of IdentityField: [record subject, part...].
     IReadOnlyList<SourceIdentityPart>? IdentityParts = null,
     // The child exists apart from the record (a lemma's lexeme is the lexeme anywhere):
-    // its identity is its own parts, without the record subject.
-    bool Standalone = false);
+    // its identity is its own parts, without the enclosing subject.
+    bool Standalone = false,
+    // The parent link is refuted when the child's OutcomeField reads RefuteValue.
+    string? OutcomeField = null,
+    string? RefuteValue = null);
 
 /// <summary>
 /// One part of a composed child identity: a child-relative path ("lexeme/@name", "@POS")
@@ -282,10 +299,14 @@ public sealed record SourceIdentityPart(
     string? Children = null,
     // The source's own identifier syntax, decoded: the value before or after the last
     // SplitLast separator ("December.n" -> lemma "December", POS code "n").
+    // Side Each: every piece between any of the SplitLast characters is its own
+    // component, in order ("run-51.3.2" split on "-." -> [run, 51, 3, 2]).
     string? SplitLast = null,
-    SourceIdentitySide Side = SourceIdentitySide.Whole);
+    SourceIdentitySide Side = SourceIdentitySide.Whole,
+    // Characters the source writes for a space inside a word ("goose_step").
+    string? SpaceMark = null);
 
-public enum SourceIdentitySide { Whole = 0, Before = 1, After = 2 }
+public enum SourceIdentitySide { Whole = 0, Before = 1, After = 2, Each = 3 }
 
 /// <summary>
 /// A nested element composed from its parts (RCP8) and, when Relation is declared,
@@ -297,7 +318,12 @@ public sealed record SourceElementComposition(
     IReadOnlyList<SourceIdentityPart> Parts,
     string EntityType,
     string? Relation = null,
-    string? ObservationField = null);
+    string? ObservationField = null,
+    // Composed only where attribute WhenField (the element's or an ancestor's) reads
+    // WhenValue; elsewhere the element lowers as fields (a VerbNet restriction group is
+    // one formula when logic="or", independent claims otherwise).
+    string? WhenField = null,
+    string? WhenValue = null);
 
 /// <summary>
 /// A grouped delimited record (a CoNLL-U sentence) lowered to its trunk's parse

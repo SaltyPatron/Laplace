@@ -63,7 +63,9 @@ public static class NativeRecipeCompiler
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
             || recipe.Fields.Any(static f => f.ObjectScopedToRecord || f.ObjectScopePath is not null
-                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 })
+                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 }
+                || f.OutcomeField is not null || f.DrawPrefix is not null
+                || f.ValueListSeparator is not null || f.FlagRelation is not null || f.SignedValues)
             // A static relation named in its inverse direction needs the RCP8 flip bit.
             || recipe.Fields.Any(static f => f.Disposition.HasFlag(SourceFieldDisposition.Testimony)
                 && f.PairMode == SourcePairMode.None && f.RelationField is null
@@ -222,6 +224,13 @@ public static class NativeRecipeCompiler
                 int surfaceQualifier = testimony && !dynamicRelation
                     ? NativeInterop.RelationSurfaceQualifier(field.RelationName ?? field.PropertyName) : -1;
                 writer.Write(surfaceQualifier >= 0 ? checked((uint)surfaceQualifier + 1) : 0u);
+                WriteText(writer, field.OutcomeField);
+                WriteText(writer, field.RefuteValue);
+                WriteText(writer, field.DrawPrefix);
+                WriteText(writer, field.ValueListSeparator);
+                WriteHash(writer, field.FlagRelation is null
+                    ? Hash128.Zero : RelationTypeRegistry.Resolve(field.FlagRelation).Id);
+                writer.Write(field.SignedValues ? 1u : 0u);
             }
         }
 
@@ -339,6 +348,8 @@ public static class NativeRecipeCompiler
                     WriteHash(writer, element.Relation is null
                         ? Hash128.Zero : RelationTypeRegistry.Resolve(element.Relation).Id);
                     WriteText(writer, element.ObservationField);
+                    WriteText(writer, element.WhenField);
+                    WriteText(writer, element.WhenValue);
                 }
                 writer.Write(checked((uint)(route.ChildSubjects?.Count ?? 0)));
                 foreach (SourceChildSubject child in route.ChildSubjects ?? [])
@@ -348,11 +359,19 @@ public static class NativeRecipeCompiler
                             $"Route '{route.RecordName}' child subject '{child.ChildPath}' has no child field prefix.");
                     WriteText(writer, child.ChildPath);
                     WriteText(writer, child.IdentityField);
-                    WriteHash(writer, child.ParentRelation is null
-                        ? Hash128.Zero : RelationTypeRegistry.Resolve(child.ParentRelation).Id);
+                    // The parent relation is a governed surface: an inverse alias reverses
+                    // the link and carries its qualifier (IS_MEMBER_OF -> HAS_PART {member}).
+                    RelationTypeRegistry.RelationTypeResolution? link = child.ParentRelation is null
+                        ? null : RelationTypeRegistry.Resolve(child.ParentRelation);
+                    WriteHash(writer, link?.Id ?? Hash128.Zero);
                     WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
-                    writer.Write((child.ChildIsSubject ? 1u : 0u) | (child.Standalone ? 2u : 0u));
+                    writer.Write((child.ChildIsSubject ^ (link?.Flip ?? false) ? 1u : 0u) | (child.Standalone ? 2u : 0u));
                     WriteParts(writer, child.IdentityParts);
+                    int linkQualifier = child.ParentRelation is null
+                        ? -1 : NativeInterop.RelationSurfaceQualifier(child.ParentRelation);
+                    writer.Write(linkQualifier >= 0 ? checked((uint)linkQualifier + 1) : 0u);
+                    WriteText(writer, child.OutcomeField);
+                    WriteText(writer, child.RefuteValue);
                 }
                 writer.Write(checked((uint)(route.ConditionalPrefixes?.Count ?? 0)));
                 foreach (SourceConditionalPrefix conditional in route.ConditionalPrefixes ?? [])
@@ -403,6 +422,7 @@ public static class NativeRecipeCompiler
             WriteText(writer, part.Children);
             WriteText(writer, part.SplitLast);
             writer.Write((uint)part.Side);
+            WriteText(writer, part.SpaceMark);
         }
     }
 

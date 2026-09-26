@@ -94,6 +94,14 @@ struct field_rule {
     // RCP8: the field's static relation is named in the inverse direction (an inverse
     // alias or a flipped retirement): the value is the subject, the subject the object.
     bool flip = false;
+    // RCP8: the claim is refuted when attribute outcome_field reads refute_value; a value
+    // starting with draw_prefix is the source's uncertain claim, scored as a draw.
+    std::string outcome_field, refute_value, draw_prefix;
+    // RCP8 key-value compositions: a key's value list, a relation for keyless flags,
+    // and +/- signed values and flags (confirm/refute).
+    std::string value_list_separator;
+    hash128_t flag_relation{};
+    bool signed_values = false;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -133,15 +141,19 @@ struct route_rule {
         field_rule::vocabulary_rule vocabulary;
         hash128_t scope_type{};
         // The source's own identifier syntax, decoded: the value before (1) or after
-        // (2) the last split separator ("December.n" -> "December" / "n").
+        // (2) the last split separator ("December.n" -> "December" / "n"), or every
+        // piece between any of the split characters (3: "run-51.3.2" -> run 51 3 2).
         std::string split;
         uint32_t side = 0;
+        std::string space_mark;   // characters the source writes for a space ("goose_step")
     };
     std::vector<identity_part> subject_parts;
     struct element_rule {
         std::vector<identity_part> parts;
         hash128_t entity_type{}, relation{};
         std::string observation;
+        // Composed only where this attribute (own or ancestor's) reads when_value.
+        std::string when_field, when_value;
     };
     std::unordered_map<std::string, element_rule> elements;
     // RCP8: a child path's field prefix chosen by an attribute condition over the
@@ -156,6 +168,8 @@ struct route_rule {
         // Several identity parts: a FrameNet lexical unit is [frame, its lexemes'
         // text, UPOS]. Empty = the identity attribute.
         std::vector<identity_part> parts;
+        int link_qualifier = -1;          // the parent relation surface's own qualifier bit
+        std::string outcome_field, refute_value;   // the link is refuted on this attribute value
     };
     std::unordered_map<std::string, child_subject_rule> child_subjects;
 };
@@ -258,8 +272,11 @@ static void read_identity_parts(image_reader& r, std::vector<route_rule::identit
                         part.children = r.text();
                         part.split = r.text();
                         part.side = r.number();
-                        if (part.side > 2 || (part.side != 0) == part.split.empty())
+                        if (part.side > 3 || (part.side != 0) == part.split.empty())
                             throw std::runtime_error("invalid identity part split at " + where);
+                        part.space_mark = r.text();
+                        if (part.side == 3 && !part.scope.empty())
+                            throw std::runtime_error("a split-each identity part cannot be scoped at " + where);
                         if (part.path.empty() && part.children.empty())
                             throw std::runtime_error("identity part names neither a path nor children at " + where);
                         out.push_back(std::move(part));
@@ -348,12 +365,14 @@ struct laplace_recipe_stream {
     // from the lowering attributes (a full-text target's LU [frameName, lemma, UPOS]).
     std::unordered_map<std::string, std::vector<route_rule::identity_part>> object_parts;
     hash128_t object_from_parts(intent_stage_t* stage, const field_rule& rule,
-                                const std::map<std::string, std::string>& attributes) {
+                                const std::map<std::string, std::string>& attributes, const std::string& value) {
         const auto parts = object_parts.find(rule.path);
         std::vector<laplace_ordered_component_t> components;
         static const route_rule no_route{};
-        compose_parts(stage, no_route, nullptr, rule.path, parts->second, components, &attributes);
-        if (components.size() != parts->second.size()) return {};
+        // "value()" is the field's own value: each item of a separated sequence.
+        std::map<std::string, std::string> values = attributes;
+        values["value()"] = value;
+        if (!compose_parts(stage, no_route, nullptr, rule.path, parts->second, components, &values)) return {};
         laplace_ordered_composition_request_t request{};
         request.components = components.data(); request.component_count = components.size();
         request.type_id = rule.entity_type; request.source_id = current_witness;
@@ -875,6 +894,11 @@ struct laplace_recipe_stream {
         try {
             lower_field(stage, path, raw, subject_binding, attributes);
             const auto rule = fields.find(path);
+            if (rule != fields.end() && !rule->second.outcome_field.empty()) {
+                const auto outcome = attributes.find(rule->second.outcome_field);
+                if (outcome != attributes.end() && outcome->second == rule->second.refute_value)
+                    for (size_t k = before; k < facts.size(); ++k) facts[k].confirm = false;
+            }
             if (rule != fields.end() && facts.size() > before) qualify(path, rule->second, attributes, before);
             if (rule != fields.end() && rule->second.aggregate) aggregate_facts(before);
             else if (facts.size() > before) last_fact[path] = facts.size() - 1;
@@ -1000,8 +1024,25 @@ struct laplace_recipe_stream {
             return;
         }
         else if (rule.kind == 8) {
-            const std::string value = governed(rule, identify(rule.identity_table, raw));
-            f.object = rule.object_record_scoped ? scoped_to_record(stage, rule, value) : content(stage, value);
+            const bool composed = object_parts.count(rule.path) != 0;
+            const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
+            for (std::string item : values) {
+                fact g = f;
+                if (!rule.draw_prefix.empty() && item.rfind(rule.draw_prefix, 0) == 0) {
+                    item.erase(0, rule.draw_prefix.size());
+                    g.score = 0.5;
+                }
+                if (item.empty() || (!rule.absent.empty() && item == rule.absent)) continue;
+                if (composed) {
+                    g.object = object_from_parts(stage, rule, attributes, item);
+                    if (!nonzero(g.object)) continue;
+                } else {
+                    const std::string value = governed(rule, identify(rule.identity_table, item));
+                    g.object = rule.object_record_scoped ? scoped_to_record(stage, rule, value) : content(stage, value);
+                }
+                emit_fact(g);
+            }
+            return;
         }
         else if (rule.kind == 9) {
             // Structured text carries its own markup (FrameNet's <def-root>, <fen>,
@@ -1072,6 +1113,46 @@ struct laplace_recipe_stream {
         }
         facts.push_back(f);
     }
+    // Items "key<sep>value[<list>value...]" compose [key, value] under the field's
+    // relation (UD FEATS Number=Plur; VerbNet "activity_type: walk, travel"). A keyless
+    // item is a flag claimed through flag_relation; with signed values a leading +
+    // confirms and - refutes ("+manner_of_motion", "velocity: +fast").
+    void lower_key_values(intent_stage_t* stage, const field_rule& rule, const std::string& raw,
+                          const std::string& item_separator, const std::string& value_separator,
+                          const std::string* context_value) {
+        auto signed_value = [&](std::string v, bool* confirm) {
+            *confirm = true;
+            if (rule.signed_values && v.size() > 1 && (v[0] == '+' || v[0] == '-')) { *confirm = v[0] == '+'; v.erase(0, 1); }
+            return v;
+        };
+        // One claim per distinct item: a list that repeats an item (VerbNet subclass
+        // features aggregated from its members) states it once.
+        std::unordered_set<std::string> stated;
+        for (const auto& item : split(raw, item_separator)) {
+            if (!rule.absent.empty() && item == rule.absent) continue;
+            if (!stated.insert(item).second) continue;
+            const size_t at = item.find(value_separator);
+            bool confirm = true;
+            if (at == std::string::npos) {
+                if (!nonzero(rule.flag_relation)) throw std::runtime_error("malformed pair item: " + item);
+                const std::string flag = signed_value(item, &confirm);
+                grouped_fact(rule, subject, rule.flag_relation, content(stage, flag), rule.rank, false, context_value, stage);
+                facts.back().confirm = confirm;
+                continue;
+            }
+            const std::string key = recipe_element_text(item.substr(0, at));
+            const std::string rest = recipe_element_text(item.substr(at + value_separator.size()));
+            std::vector<std::string> values;
+            if (!rule.value_list_separator.empty()) values = split(rest, rule.value_list_separator);
+            else if (!rest.empty()) values.push_back(rest);
+            if (key.empty() || values.empty()) throw std::runtime_error("malformed pair item: " + item);
+            for (const auto& raw_value : values) {
+                const std::string value = signed_value(raw_value, &confirm);
+                grouped_fact(rule, subject, rule.relation, compose_pair(stage, rule, key, value), rule.rank, false, context_value, stage);
+                facts.back().confirm = confirm;
+            }
+        }
+    }
     void lower_grouped(intent_stage_t* stage, const field_rule& rule, const std::string& raw,
                        const std::string* context_value,
                        const std::map<std::string, std::string>& attributes) {
@@ -1092,6 +1173,7 @@ struct laplace_recipe_stream {
             if (item_separator.empty() || value_separator.empty())
                 throw std::runtime_error("pair field declares no item/value separators");
             if (raw.empty()) return;
+            if (rule.pair_mode == 3) { lower_key_values(stage, rule, raw, item_separator, value_separator, context_value); return; }
             size_t start = 0;
             for (;;) {
                 const size_t end = raw.find(item_separator, start);
@@ -1136,7 +1218,7 @@ struct laplace_recipe_stream {
         for (const auto& value : values) {
             const bool composed_object = object_parts.count(rule.path) != 0;
             const hash128_t object = rule.object_record_subject ? subject
-                : composed_object ? object_from_parts(stage, rule, attributes)
+                : composed_object ? object_from_parts(stage, rule, attributes, value)
                 : !rule.object_scope.empty() ? scoped_by_attribute(stage, rule, value, &attributes)
                 : hash128_t{};
             const bool special_object = rule.object_record_subject || composed_object || !rule.object_scope.empty();
@@ -1204,8 +1286,7 @@ struct laplace_recipe_stream {
             // The record's subject is the composition of its declared parts.
             scope_attributes = &record.attributes;
             std::vector<laplace_ordered_component_t> parts;
-            compose_parts(stage, route, &record, route.prefix, route.subject_parts, parts);
-            if (parts.size() != route.subject_parts.size())
+            if (!compose_parts(stage, route, &record, route.prefix, route.subject_parts, parts))
                 throw std::runtime_error("composition subject is missing a declared part in " + record.name);
             laplace_ordered_composition_request_t request{};
             request.components = parts.data(); request.component_count = parts.size();
@@ -1266,10 +1347,12 @@ struct laplace_recipe_stream {
     }
     // Components for identity parts, in declaration order. A part with no value is
     // absent from the composition (a valence unit with no grammatical function).
-    void compose_parts(intent_stage_t* stage, const route_rule& route, const node* element,
+    // Returns whether every declared part contributed a component.
+    bool compose_parts(intent_stage_t* stage, const route_rule& route, const node* element,
         const std::string& path, const std::vector<route_rule::identity_part>& declared,
         std::vector<laplace_ordered_component_t>& out,
         const std::map<std::string, std::string>* value_map = nullptr) {
+        bool complete = true;
         auto component = [](const hash128_t& id, const double* coord, uint8_t tier, uint32_t atom) {
             laplace_ordered_component_t c{};
             c.id = id; std::memcpy(c.coord, coord, sizeof(c.coord));
@@ -1277,17 +1360,22 @@ struct laplace_recipe_stream {
             return c;
         };
         for (const auto& part : declared) {
+            const size_t had = out.size();
             if (!part.children.empty()) {
                 if (!element) throw std::runtime_error("a record subject cannot compose child elements");
-                const std::string child_path = path + "/" + part.children;
-                const auto rule = route.elements.find(child_path);
-                if (rule == route.elements.end())
-                    throw std::runtime_error("no element composition for " + child_path);
-                for (const auto& child : element->children)
-                    if (child.name == part.children) {
-                        const auto composed = compose_element(stage, route, child, child_path, rule->second);
-                        if (composed.first) out.push_back(composed.second);
-                    }
+                // "*": every child element in source order, each by its own composition
+                // (a VerbNet frame's syntax: NP, VERB, PREP, NP).
+                const bool every = part.children == "*";
+                for (const auto& child : element->children) {
+                    if (!every && child.name != part.children) continue;
+                    const std::string child_path = path + "/" + child.name;
+                    const auto rule = route.elements.find(child_path);
+                    if (rule == route.elements.end())
+                        throw std::runtime_error("no element composition for " + child_path);
+                    const auto composed = compose_element(stage, route, child, child_path, rule->second);
+                    if (composed.first) out.push_back(composed.second);
+                }
+                if (out.size() == had) complete = false;
                 continue;
             }
             std::vector<std::string> values;
@@ -1307,8 +1395,23 @@ struct laplace_recipe_stream {
                 if (!text.empty()) text += part.join.empty() ? " " : part.join;
                 text += values[k];
             }
+            if (!part.space_mark.empty())
+                for (char& c : text) if (part.space_mark.find(c) != std::string::npos) c = ' ';
+            if (part.side == 3) {
+                size_t begin = 0;
+                for (size_t k = 0; k <= text.size(); ++k) {
+                    if (k < text.size() && part.split.find(text[k]) == std::string::npos) continue;
+                    if (k > begin) {
+                        const content_form piece = compose_content(stage, governed_value(part.vocabulary, text.substr(begin, k - begin)));
+                        out.push_back(component(piece.id, piece.coord, piece.tier, piece.atom));
+                    }
+                    begin = k + 1;
+                }
+                if (out.size() == had) complete = false;
+                continue;
+            }
             if (!part.split.empty()) text = split_side(text, part.split, part.side);
-            if (text.empty()) continue;
+            if (text.empty()) { complete = false; continue; }
             const content_form value = compose_content(stage, governed_value(part.vocabulary, text));
             if (part.scope.empty()) {
                 out.push_back(component(value.id, value.coord, value.tier, value.atom));
@@ -1333,6 +1436,7 @@ struct laplace_recipe_stream {
             check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "scoped identity part");
             out.push_back(component(result.id, result.coord, result.tier, 0));
         }
+        return complete;
     }
     std::pair<bool, laplace_ordered_component_t> compose_element(intent_stage_t* stage, const route_rule& route,
         const node& element, const std::string& path, const route_rule::element_rule& rule) {
@@ -1365,7 +1469,9 @@ struct laplace_recipe_stream {
             part.tier = c.tier; part.atom = c.atom; part.has_atom = c.tier == 0;
             parts.push_back(part);
         };
-        if (!rule.standalone) add_part(record_subject_form);
+        // A nested child scopes to its enclosing subject (a subclass's member is the
+        // subclass's), a top-level child to the record's.
+        if (!rule.standalone) add_part(subject_form);
         if (rule.parts.empty()) {
             const std::string key = child.get(rule.identity);
             if (key.empty()) throw std::runtime_error("child subject has no identity value: " + path);
@@ -1385,6 +1491,12 @@ struct laplace_recipe_stream {
             f.relation = rule.relation; f.has_object = true;
             if (rule.child_is_subject) { f.subject = child_id; f.has_subject = true; f.object = subject; }
             else f.object = child_id;
+            if (rule.link_qualifier >= 0) {
+                f.qualifiers[static_cast<size_t>(rule.link_qualifier) / 8] |=
+                    static_cast<uint8_t>(1u << (rule.link_qualifier % 8));
+                f.has_qualifiers = true;
+            }
+            if (!rule.outcome_field.empty() && child.get(rule.outcome_field) == rule.refute_value) f.confirm = false;
             facts.push_back(f);
         }
         // The child is the current subject while it lowers, so subject modes and
@@ -1441,7 +1553,12 @@ struct laplace_recipe_stream {
         // An empty prefix is a declared excluded subtree (packaging, or knowledge
         // another artifact states), never an undeclared structure.
         if (chosen.empty() && !route.elements.count(path)) return;
-        const auto composed = route.elements.find(path);
+        auto composed = route.elements.find(path);
+        if (composed != route.elements.end() && !composed->second.when_field.empty()) {
+            const auto seen_here = with_ancestors(child, ancestors);
+            const auto hit = seen_here.find(composed->second.when_field);
+            if (hit == seen_here.end() || hit->second != composed->second.when_value) composed = route.elements.end();
+        }
         if (composed != route.elements.end()) {
             const auto element = compose_element(stage, route, child, path, composed->second);
             if (element.first && nonzero(composed->second.relation)) {
@@ -1621,6 +1738,13 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     f.qualifiers[bit / 8] |= static_cast<uint8_t>(1u << (bit % 8));
                     f.has_qualifiers = true;
                 }
+                f.outcome_field = r.text(); f.refute_value = r.text(); f.draw_prefix = r.text();
+                f.value_list_separator = r.text(); f.flag_relation = r.hash();
+                const uint32_t signed_values = r.number();
+                if (signed_values > 1) throw std::runtime_error("invalid signed-values instruction at " + f.path);
+                f.signed_values = signed_values != 0;
+                if (f.outcome_field.empty() != f.refute_value.empty())
+                    throw std::runtime_error("an outcome field needs its refute value at " + f.path);
                 if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))
                     throw std::runtime_error("span subject needs trunk, start and end fields at " + f.path);
             }
@@ -1708,6 +1832,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     rule.entity_type = r.hash();
                     rule.relation = r.hash();
                     rule.observation = r.text();
+                    rule.when_field = r.text(); rule.when_value = r.text();
                     if (path.empty() || rule.parts.empty() || !route.children.count(path))
                         throw std::runtime_error("element composition names no declared child path: " + path);
                     if (!route.elements.emplace(std::move(path), std::move(rule)).second)
@@ -1725,6 +1850,10 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     rule.child_is_subject = (direction & 1u) != 0;
                     rule.standalone = (direction & 2u) != 0;
                     read_parts(rule.parts, path);
+                    const uint32_t link_qualifier = r.number();
+                    if (link_qualifier > 256) throw std::runtime_error("invalid child link qualifier");
+                    rule.link_qualifier = static_cast<int>(link_qualifier) - 1;
+                    rule.outcome_field = r.text(); rule.refute_value = r.text();
                     if (path.empty() || rule.identity.empty() || !route.children.count(path))
                         throw std::runtime_error("child subject names no declared child path");
                     if (!route.child_subjects.emplace(std::move(path), std::move(rule)).second)
