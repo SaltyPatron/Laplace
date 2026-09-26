@@ -136,6 +136,14 @@ public static class NativeRecipeCompiler
             var relation = testimony && !dynamicRelation
                 ? RelationTypeRegistry.Resolve(field.RelationName ?? field.PropertyName)
                 : default;
+            // A static field emits (record subject, relation, value). A name that resolves
+            // with a flip (an inverse alias or a flipped retirement) would state the claim
+            // backwards, so the recipe must name the relation in its governed direction.
+            if (testimony && !dynamicRelation && relation.Flip)
+                throw new InvalidDataException(
+                    $"'{field.RelationName ?? field.PropertyName}' at '{field.SyntaxPath}' names "
+                    + $"{relation.Canonical} in the inverse direction; declare the governed relation "
+                    + "and the direction the source states.");
             double rank = field.RelationRank ?? (testimony && !dynamicRelation ? relation.Rank : 1);
             if (!double.IsFinite(rank) || rank is < 0 or > 1)
                 throw new InvalidDataException($"Invalid relation rank at '{field.SyntaxPath}'.");

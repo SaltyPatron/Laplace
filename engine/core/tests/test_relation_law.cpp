@@ -29,6 +29,54 @@ hash128_t relation_type_id(const char* canonical_name) {
 
 }  
 
+// One element per meaning: an inverse reading is a flip of the element, a denial is a
+// refute of the positive, and an order/containment fact lives in trajectories.
+TEST(LaplaceRelationLaw, FlippedRetirementResolvesLikeAnInverseAlias) {
+    hash128_t tid, parent;
+    double rank = 0;
+    laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_SYMMETRIC;
+    uint8_t flip = 0;
+    ASSERT_EQ(0, laplace_relation_resolve_surface("IS_AFTER", &tid, &rank, &sym, &flip, &parent));
+    hash128_t before = relation_type_id("IS_BEFORE");
+    EXPECT_TRUE(hash128_equals(&before, &tid));
+    EXPECT_EQ(1, flip);
+
+    hash128_t retired;
+    ASSERT_EQ(0, laplace_relation_type_id("IS_AFTER", &retired));
+    EXPECT_FALSE(hash128_equals(&retired, &before));
+    const char* successor = nullptr;
+    EXPECT_EQ(1, laplace_relation_retired(&retired, &successor));
+    EXPECT_STREQ("IS_BEFORE", successor);
+
+    hash128_t earlier = hash_path("flip/earlier"), later = hash_path("flip/later"), src = hash_path("flip/src");
+    laplace_attestation_staged_t via_retired{}, direct{};
+    ASSERT_EQ(0, laplace_attestation_categorical_build(
+        "IS_AFTER", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &via_retired));
+    ASSERT_EQ(0, laplace_attestation_categorical_build(
+        "IS_BEFORE", &earlier, &later, 0, &src, NULL, 1, 1.0, 1, 1, 0, &direct));
+    EXPECT_TRUE(hash128_equals(&via_retired.id, &direct.id));
+    EXPECT_TRUE(hash128_equals(&via_retired.subject_id, &earlier));
+}
+
+TEST(LaplaceRelationLaw, DenialsAndTrajectoryFactsFailClosed) {
+    hash128_t id;
+    for (const char* name : {"NOT_CAPABLE_OF", "NOT_DESIRES", "NOT_HAS_PROPERTY", "NOT_USED_FOR"})
+        EXPECT_EQ(LAPLACE_REL_RETIRED, laplace_relation_resolve(name, &id)) << name;
+    for (const char* name : {"HAS_AST_CHILD", "COMMITS_TREE", "IS_AT_SAMPLE"}) {
+        EXPECT_EQ(LAPLACE_REL_RETIRED, laplace_relation_resolve(name, &id)) << name;
+        hash128_t retired;
+        ASSERT_EQ(0, laplace_relation_type_id(name, &retired));
+        const char* successor = nullptr;
+        EXPECT_EQ(1, laplace_relation_retired(&retired, &successor));
+        EXPECT_STREQ("TRAJECTORY", successor);
+    }
+    hash128_t denied;
+    ASSERT_EQ(0, laplace_relation_type_id("NOT_DESIRES", &denied));
+    const char* successor = nullptr;
+    EXPECT_EQ(1, laplace_relation_retired(&denied, &successor));
+    EXPECT_STREQ("DESIRES", successor);
+}
+
 TEST(LaplaceRelationLaw, HasUposResolvesToHasPos) {
     hash128_t upos, pos;
     ASSERT_EQ(0, laplace_relation_resolve("HAS_UPOS", &upos));

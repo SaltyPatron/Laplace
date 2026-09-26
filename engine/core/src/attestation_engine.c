@@ -236,6 +236,7 @@ const char* laplace_relation_manifest_canonical(size_t idx) {
 const char* laplace_relation_manifest_successor(size_t idx) {
     if (idx >= laplace_relation_table_count) return NULL;
     int16_t successor = laplace_relation_table[idx].successor_idx;
+    if (successor == -2) return "TRAJECTORY";  /* an order/containment fact (spec 05 Rule #3) */
     return successor < 0 ? NULL : laplace_relation_table[successor].canonical;
 }
 

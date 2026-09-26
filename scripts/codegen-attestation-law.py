@@ -345,6 +345,9 @@ int laplace_relation_resolve_ucd_property(
 """
 
 
+TRAJECTORY_FACT = "TRAJECTORY"
+
+
 def emit_relation_law(rel: dict) -> None:
     bad = [r["canonical"] for r in rel["relation"] if not re.fullmatch(r"[A-Za-z0-9_]+", r["canonical"])]
     if bad:
@@ -355,18 +358,37 @@ def emit_relation_law(rel: dict) -> None:
 
     canon_names = sorted({r["canonical"] for r in relations})
     name_to_idx = {n: i for i, n in enumerate(canon_names)}
+    rels_by_name = {r["canonical"]: r for r in relations}
 
     # RETIRED RELATIONS. One relation per meaning: a per-variant relation
     # (HAS_NAME_ALIAS, HAS_UPPERCASE_MAPPING, HAS_ISO639_1_CODE, ...) is replaced by its
     # successor plus the claim's qualifiers (qualifiers.toml). Highway bits are
     # append-only, so the retired entry stays declared and keeps its bit and type id for
     # reading what was already admitted; resolving it for emission fails closed.
+    #
+    # A retirement names how its meaning is carried now:
+    #   retired = "<SUCCESSOR>"                  the successor plus the claim's qualifiers;
+    #                                            emission of the retired name fails closed.
+    #   retired = "<SUCCESSOR>", retired_flip    the same meaning read in the other direction
+    #                                            (IS_AFTER is IS_BEFORE with subject and object
+    #                                            exchanged): the name resolves to the successor
+    #                                            with flip, losslessly, like any inverse alias.
+    #   retired = "TRAJECTORY"                   an order/containment fact, which lives in
+    #                                            physicality trajectories (spec 05 Rule #3), not
+    #                                            in testimony; emission fails closed.
     retired = {r["canonical"]: r["retired"] for r in relations if r.get("retired")}
     for name, successor in sorted(retired.items()):
+        if successor == TRAJECTORY_FACT:
+            if rels_by_name[name].get("retired_flip"):
+                raise SystemExit(f"relation {name} retires to trajectories and cannot flip")
+            continue
         if successor not in name_to_idx:
             raise SystemExit(f"relation {name} is retired to {successor}, which is not declared")
         if successor in retired:
             raise SystemExit(f"relation {name} is retired to {successor}, which is itself retired")
+    for r in relations:
+        if r.get("retired_flip") and not r.get("retired"):
+            raise SystemExit(f"relation {r['canonical']} declares retired_flip without retired")
 
     alias_entries = []
     for a in sorted(aliases, key=lambda x: x["surface"]):
@@ -377,6 +399,13 @@ def emit_relation_law(rel: dict) -> None:
             raise SystemExit(f"alias {a['surface']} resolves to retired relation {canon}; "
                              f"point it at {retired[canon]}")
         alias_entries.append((a["surface"], name_to_idx[canon], a["flip"]))
+    # A flipped retirement resolves like an inverse alias. Aliases take priority over
+    # canonical names in the surface table, while relation_type_id still names the
+    # retired id, so admitted evidence under it stays readable.
+    for name, successor in sorted(retired.items()):
+        if rels_by_name[name].get("retired_flip"):
+            alias_entries.append((name, name_to_idx[successor], True))
+    alias_entries.sort(key=lambda e: e[0])
 
     header = OUT_CORE / "include/laplace/core/relation_law.h"
     _write_text_if_changed(header, 
@@ -409,7 +438,8 @@ typedef struct {
     int16_t         parent_idx;
     int16_t         family_root_idx;
     uint8_t         flip;
-    int16_t         successor_idx;   /* -1 live; otherwise the relation that replaced it */
+    int16_t         successor_idx;   /* -1 live; -2 retired to trajectories; otherwise the
+                                        relation that replaced it */
 } laplace_relation_def_t;
 
 typedef struct {
@@ -474,7 +504,8 @@ int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* 
         fr_idx = str(name_to_idx[fr]) if fr in name_to_idx else str(name_to_idx[name])
         rank_key = r["rank"]
         rank_val = ranks.get(rank_key, 0.09)
-        succ_idx = str(name_to_idx[retired[name]]) if name in retired else "-1"
+        succ_idx = ("-2" if retired[name] == TRAJECTORY_FACT else str(name_to_idx[retired[name]])) \
+            if name in retired else "-1"
         lines.append(
             f'    {{ "{name}", {{0}}, {rank_val}, {sym}, {parent_idx}, {fr_idx}, 0, {succ_idx} }},'
         )
@@ -676,7 +707,7 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
         return 1;
     }}
     const laplace_relation_def_t* def = &laplace_relation_table[idx];
-    if (def->successor_idx >= 0) return LAPLACE_REL_RETIRED;
+    if (def->successor_idx != -1) return LAPLACE_REL_RETIRED;
     if (table_entry_type_id((size_t)idx, out_type_id) != 0) return -1;
     if (out_rank) *out_rank = def->rank;
     if (out_symmetry) *out_symmetry = def->symmetry;
@@ -710,9 +741,11 @@ int laplace_relation_retired(const hash128_t* type_id, const char** out_successo
     const laplace_relation_def_t* def = NULL;
     if (out_successor) *out_successor = NULL;
     if (!type_id || laplace_relation_lookup(type_id, &def) != 0 || !def
-        || def->successor_idx < 0)
+        || def->successor_idx == -1)
         return 0;
-    if (out_successor) *out_successor = laplace_relation_table[def->successor_idx].canonical;
+    if (out_successor)
+        *out_successor = def->successor_idx >= 0
+            ? laplace_relation_table[def->successor_idx].canonical : "TRAJECTORY";
     return 1;
 }}
 

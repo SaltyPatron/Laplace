@@ -25,6 +25,12 @@ probationary = 0.05
 # but resolving it for emission fails closed (LAPLACE_REL_RETIRED), and no alias or set
 # may name it.
 
+# One element per meaning. A retired relation keeps its bit and type id, so admitted
+# evidence stays readable, and names how its meaning is carried now: its successor plus
+# qualifiers (emission fails closed), its successor read in the other direction
+# (retired_flip: it resolves like an inverse alias), or TRAJECTORY for an order or
+# containment fact, which lives in physicality trajectories and not in testimony. A
+# denial is a refute outcome on the positive relation, never a NOT_ relation.
 [[relation]]
 canonical = "ADJACENT_TO_PIXEL"
 bit = 0
@@ -977,6 +983,8 @@ family_root = "INHERITS_FROM"
 
 [[relation]]
 canonical = "IS_AFTER"
+retired = "IS_BEFORE"
+retired_flip = true
 bit = 140
 rank = "causal"
 symmetry = "asymmetric"
@@ -993,6 +1001,7 @@ family_root = "IS_ANTONYM_OF"
 
 [[relation]]
 canonical = "IS_AT_SAMPLE"
+retired = "TRAJECTORY"
 bit = 142
 rank = "partitive"
 symmetry = "asymmetric"
@@ -1166,6 +1175,7 @@ family_root = "NORMALIZES_TO"
 
 [[relation]]
 canonical = "NOT_CAPABLE_OF"
+retired = "CAPABLE_OF"
 bit = 166
 rank = "oppositional"
 symmetry = "asymmetric"
@@ -1174,6 +1184,7 @@ family_root = "NOT_CAPABLE_OF"
 
 [[relation]]
 canonical = "NOT_DESIRES"
+retired = "DESIRES"
 bit = 167
 rank = "oppositional"
 symmetry = "asymmetric"
@@ -1182,6 +1193,7 @@ family_root = "NOT_DESIRES"
 
 [[relation]]
 canonical = "NOT_HAS_PROPERTY"
+retired = "HAS_PROPERTY"
 bit = 168
 rank = "oppositional"
 symmetry = "asymmetric"
@@ -1190,6 +1202,7 @@ family_root = "NOT_HAS_PROPERTY"
 
 [[relation]]
 canonical = "NOT_USED_FOR"
+retired = "USED_FOR"
 bit = 169
 rank = "oppositional"
 symmetry = "asymmetric"
@@ -1963,6 +1976,7 @@ family_root = "PRECEDES_IN_TIME"
 # Code AST witnessed structure (tree-sitter unpack → ordered child edges).
 [[relation]]
 canonical = "HAS_AST_CHILD"
+retired = "TRAJECTORY"
 bit = 44
 rank = "partitive"
 symmetry = "asymmetric"
@@ -1989,6 +2003,7 @@ family_root = "AUTHORED_BY"
 # Git commit → root tree. Reserved when CONTAINS is too weak for the root pointer (#504/#551).
 [[relation]]
 canonical = "COMMITS_TREE"
+retired = "TRAJECTORY"
 bit = 208
 rank = "partitive"
 symmetry = "asymmetric"
