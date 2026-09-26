@@ -9,7 +9,7 @@
       "propertyName": "macrolanguage",
       "valueKind": "Identity",
       "disposition": "Testimony",
-      "relationName": "MEMBER_OF_MACROLANGUAGE",
+      "relationName": "IS_MEMBER_OF",
       "qualifierFamily": "membership",
       "qualifierField": "I_Status"
     },
