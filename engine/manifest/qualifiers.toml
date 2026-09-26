@@ -100,3 +100,10 @@ name = "character_property"
 relations = ["HAS_CHARACTER_PROPERTY"]
 base = 0
 values = ["default"]
+
+# Which kind of domain a HAS_DOMAIN claim states (WordNet ;c topic, ;r region, ;u usage).
+[[family]]
+name = "domain"
+relations = ["HAS_DOMAIN"]
+base = 0
+values = ["topic", "region", "usage"]

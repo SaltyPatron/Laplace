@@ -1851,7 +1851,7 @@ internal static class FoundryCommands
         //                 frequency witness, HUBS on function words under greedy decode.
         //   --knowledge → consensus_layer_plane gated to the CONTENT rank band [0.55,0.85]: IS_A
         //                 (king→monarch), HAS_PROPERTY, IS_SYNONYM_OF — ABOVE the 0.36 glue/metadata
-        //                 bucket (PRECEDES, HAS_DOMAIN_TOPIC, HAS_EXAMPLE). The substrate's own
+        //                 bucket (PRECEDES, HAS_DOMAIN, HAS_EXAMPLE). The substrate's own
         //                 relation_rank does the de-hubbing the flat readout threw away.
         bool knowledge = !grapheme && FoundryDefaults.FaithfulKnowledge;
         double rkLo = FoundryDefaults.FaithfulRankLo;

@@ -138,7 +138,7 @@
           "min": 50000
         },
         {
-          "relation": "HAS_DOMAIN_TOPIC",
+          "relation": "HAS_DOMAIN",
           "min": 1
         },
         {

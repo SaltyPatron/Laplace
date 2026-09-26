@@ -9,8 +9,12 @@ public static class RelationTypeRegistry
 {
     public enum Symmetry { Asymmetric, Symmetric }
 
+    /// <summary>A surface's resolution: the element it names, whether it states the
+    /// element reversed, and the qualifier it carries (an alias such as mero_member or
+    /// domain_topic names one element plus a closed subcategory).</summary>
     public readonly record struct RelationTypeResolution(
-        Hash128 Id, double Rank, Symmetry Symmetry, bool Flip, Hash128? ParentId, string Canonical);
+        Hash128 Id, double Rank, Symmetry Symmetry, bool Flip, Hash128? ParentId, string Canonical,
+        Mask256 Qualifier = default);
 
     // Resolution is a pure function of the input string over small, bounded
     // vocabularies (governed surfaces, ~50 UD deprels, feature names), but the
@@ -58,10 +62,12 @@ public static class RelationTypeRegistry
 
             string canonical = Marshal.PtrToStringUTF8(NativeInterop.RelationCanonicalForTypeId(&typeId)) ?? name;
             Hash128? parent = parentId.Equals(Hash128.Zero) ? null : parentId;
+            int qualifierBit = NativeInterop.RelationSurfaceQualifier(name);
             return new RelationTypeResolution(
                 typeId, rank,
                 symmetry == 1 ? Symmetry.Symmetric : Symmetry.Asymmetric,
-                flip != 0, parent, canonical);
+                flip != 0, parent, canonical,
+                qualifierBit < 0 ? Mask256.Zero : Mask256.Zero.Set((byte)qualifierBit));
         }
     }
 

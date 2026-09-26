@@ -388,7 +388,8 @@ internal static class PredicateMatrixIngest
             {
                 Hash128? domainId = EmitVocabulary(
                     "mcr-domain", domain, EntityTypeRegistry.McrDomain, builder);
-                AddRelation(propertySubject, PredicateMatrixSource.HasDomainTopicTypeId, domainId, builder);
+                AddRelation(propertySubject, PredicateMatrixSource.HasDomainTopicTypeId, domainId, builder,
+                    PredicateMatrixSource.DomainTopic.Qualifier);
             }
             if (record.McrSumo is { } sumo)
                 AddCorrespondence(propertySubject, EmitVocabulary(
@@ -497,11 +498,13 @@ internal static class PredicateMatrixIngest
             Hash128 subjectId,
             Hash128 relationTypeId,
             Hash128? objectId,
-            SubstrateChangeBuilder builder)
+            SubstrateChangeBuilder builder,
+            Mask256 qualifiers = default)
         {
             if (objectId is null) return;
             var relation = NativeAttestation.CategoricalResolved(
-                subjectId, relationTypeId, objectId, _sourceId, null, _trust);
+                subjectId, relationTypeId, objectId, _sourceId, null, _trust)
+                with { QualifierMask = qualifiers };
             if (_relations.Add(relation.Id)) builder.AddAttestation(relation);
         }
 

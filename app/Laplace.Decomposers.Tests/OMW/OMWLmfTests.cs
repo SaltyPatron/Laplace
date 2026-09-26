@@ -3,6 +3,7 @@ using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.OMW;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.Tests.OMW;
@@ -65,12 +66,10 @@ public sealed class OMWLmfTests
             Hash128 entryId = OMWLmfEmitter.Identity("entry", "omw-xy", "omw-xy-mouse-n");
             Hash128 senseId = OMWLmfEmitter.Identity("sense", "omw-xy", "omw-xy-mouse-sense");
             Hash128 synsetId = OMWLmfEmitter.Identity("synset", "omw-xy", "omw-xy-mouse-n");
-            Assert.Contains(change.Entities, entity =>
-                entity.Id == entryId && entity.TypeId == OMWSource.LexicalEntryTypeId);
-            Assert.Contains(change.Entities, entity =>
-                entity.Id == senseId && entity.TypeId == EntityTypeRegistry.WordNetSense);
-            Assert.Contains(change.Entities, entity =>
-                entity.Id == synsetId && entity.TypeId == EntityTypeRegistry.WordNetSynset);
+            var entities = StagedEntities(change);
+            Assert.Contains((entryId, OMWSource.LexicalEntryTypeId), entities);
+            Assert.Contains((senseId, EntityTypeRegistry.WordNetSense), entities);
+            Assert.Contains((synsetId, EntityTypeRegistry.WordNetSynset), entities);
             AssertEdge(change, entryId, "HAS_SENSE", senseId);
             AssertEdge(change, senseId, "IS_SENSE_OF", synsetId);
             AssertUnorderedEdge(change, synsetId, "CORRESPONDS_TO",
@@ -161,7 +160,7 @@ public sealed class OMWLmfTests
         const string usageDomain = "omw-xy-colloquial-n";
         Hash128 memberId = OMWLmfEmitter.Identity("synset", lexicon, member);
         Hash128 domainId = OMWLmfEmitter.Identity("synset", lexicon, usageDomain);
-        Hash128 usageType = RelationTypeRegistry.Resolve("HAS_DOMAIN_USAGE").Id;
+        Hash128 usageType = RelationTypeRegistry.RelationTypeId("HAS_DOMAIN");
         Hash128 exampleType = RelationTypeRegistry.Resolve("HAS_EXAMPLE").Id;
 
         SubstrateChange exemplifies = EmitSynsetRelation(
@@ -170,11 +169,15 @@ public sealed class OMWLmfTests
             lexicon, usageDomain, new OmwLmfRelation(member, "is_exemplified_by", 1.0));
 
         AttestationRow forward = Assert.Single(exemplifies.Attestations.Where(row =>
-            row.TypeId == usageType && row.SubjectId == domainId && row.ObjectId == memberId));
+            row.TypeId == usageType && row.SubjectId == memberId && row.ObjectId == domainId));
         AttestationRow inverse = Assert.Single(isExemplifiedBy.Attestations.Where(row =>
-            row.TypeId == usageType && row.SubjectId == domainId && row.ObjectId == memberId));
+            row.TypeId == usageType && row.SubjectId == memberId && row.ObjectId == domainId));
         Assert.Equal(forward.Id, inverse.Id);
-        Assert.Equal(RelationTypeRegistry.Resolve("IS_DOMAIN_USAGE_MEMBER").Id, forward.TypeId);
+        // One element, the member HAS_DOMAIN its usage domain, qualified domain/usage.
+        Mask256 usage = RelationTypeRegistry.Resolve("exemplifies").Qualifier;
+        Assert.False(usage.IsZero);
+        Assert.Equal(usage, forward.QualifierMask & usage);
+        Assert.Equal(forward.QualifierMask, inverse.QualifierMask);
         Assert.DoesNotContain(exemplifies.Attestations, row => row.TypeId == exampleType);
         Assert.DoesNotContain(isExemplifiedBy.Attestations, row => row.TypeId == exampleType);
     }
@@ -225,6 +228,18 @@ public sealed class OMWLmfTests
             lexicon, "xy", subject, "", "n", "true", "noun.attribute", "",
             [], [], [], [relation]));
         return builder.Build();
+    }
+
+    // Entity rows are staged in the change's intent stages as well as (legacy) its
+    // managed array; the staged rows are what persists.
+    private static HashSet<(Hash128 Id, Hash128 TypeId)> StagedEntities(SubstrateChange change)
+    {
+        var rows = change.Entities.Select(static e => (e.Id, e.TypeId)).ToHashSet();
+        if (change.IntentStages.IsDefaultOrEmpty) return rows;
+        var staged = CopyTupleParser.ParseEntities(change.IntentStages
+            .Select(static stage => stage.TupleBuffer(IntentStageTable.Entities)).ToList());
+        for (int i = 0; i < staged.Ids.Count; i++) rows.Add((staged.Ids[i], staged.TypeIds[i]));
+        return rows;
     }
 
     private static void AssertEdge(

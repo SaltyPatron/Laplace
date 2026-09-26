@@ -37,8 +37,9 @@ internal static class OMWLmfEmitter
             ["pertainym"] = new(OmwRelation.PertainsTo),
             // WN-LMF usage-domain relations correspond to Princeton -u / ;u.
             // Textual examples are emitted separately from Example elements.
-            ["exemplifies"] = new(OmwRelation.IsDomainUsageMember),
-            ["is_exemplified_by"] = new(OmwRelation.HasDomainUsage),
+            // Like domain_topic/domain_region: the member states its (usage) domain.
+            ["exemplifies"] = new(OmwRelation.HasDomainUsage),
+            ["is_exemplified_by"] = new(OmwRelation.IsDomainUsageMember),
         };
 
     internal static bool SupportsRelation(string relationType) =>
@@ -364,6 +365,6 @@ internal static class OMWLmfEmitter
                 TC.AcademicCurated, value, arenaScale: 1.0)
             : NativeAttestation.CategoricalResolved(
                 subject, typeId, obj, OMWDecomposer.Source, context, TC.AcademicCurated))
-            with { QualifierMask = qualifiers });
+            with { QualifierMask = qualifiers | resolved.Qualifier });
     }
 }

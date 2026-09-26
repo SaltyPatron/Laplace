@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.OMW;
 
 internal enum OmwRelation
 {
-    HasDefinition, HasExample, IsSynonymOf, HasLanguage, HasPos, IsTypedAs,
+    HasDefinition, HasExample, IsSynonymOf, HasLanguage, HasPos,
     HasName, HasVersion, HasLicense, HasSourceUrl, HasCitation, HasAttribution,
     Contains, Requires, FormOf, HasSense, IsSenseOf, HasSenseFrequency, HasFeature,
     CorrespondsTo, HasVerbFrame, HasLexCategory, HasMember, HasProperty, IsAntonymOf,
@@ -36,13 +36,13 @@ public readonly struct OMWSource : ISeedSource
         "HAS_NAME", "HAS_VERSION", "HAS_LICENSE", "HAS_SOURCE_URL",
         "HAS_CITATION", "HAS_ATTRIBUTION", "CONTAINS", "REQUIRES", "FORM_OF", "HAS_SENSE",
         "IS_SENSE_OF", "HAS_SENSE_FREQUENCY", "HAS_FEATURE", "CORRESPONDS_TO",
-        "HAS_VERB_FRAME", "HAS_LEX_CATEGORY", "HAS_MEMBER", "HAS_PROPERTY", "IS_ANTONYM_OF",
+        "HAS_VERB_FRAME", "HAS_LEX_CATEGORY", "mero_member", "HAS_PROPERTY", "IS_ANTONYM_OF",
         "HAS_HYPERNYM", "IS_INSTANCE_OF", "HAS_HYPONYM", "HAS_INSTANCE", "IS_MEMBER_OF",
-        "IS_SUBSTANCE_OF", "IS_PART_OF", "HAS_SUBSTANCE", "HAS_PART", "HAS_ATTRIBUTE",
-        "DERIVATIONALLY_RELATED", "HAS_DOMAIN_TOPIC", "IS_DOMAIN_TOPIC_MEMBER",
-        "HAS_DOMAIN_REGION", "IS_DOMAIN_REGION_MEMBER", "ENTAILS", "CAUSES", "ALSO_SEE",
+        "IS_SUBSTANCE_OF", "IS_PART_OF", "mero_substance", "HAS_PART", "HAS_ATTRIBUTE",
+        "DERIVATIONALLY_RELATED", "domain_topic", "IS_DOMAIN_TOPIC_MEMBER",
+        "domain_region", "IS_DOMAIN_REGION_MEMBER", "ENTAILS", "CAUSES", "ALSO_SEE",
         "IS_SIMILAR_TO", "IS_PARTICIPLE_OF", "PERTAINS_TO",
-        "HAS_DOMAIN_USAGE", "IS_DOMAIN_USAGE_MEMBER", "HAS_EXTERNAL_ID",
+        "exemplifies", "IS_DOMAIN_USAGE_MEMBER", "HAS_EXTERNAL_ID",
     ];
 
     private static readonly RelationTypeRegistry.RelationTypeResolution[] Resolutions =

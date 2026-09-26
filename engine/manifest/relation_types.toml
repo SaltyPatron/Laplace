@@ -515,7 +515,19 @@ parent = null
 family_root = "HAS_DEFINITION"
 
 [[relation]]
+# The domain a sense or concept belongs to (WordNet ;c ;r ;u, WN-LMF domain_topic,
+# domain_region, exemplifies): one element, qualified by which kind of domain.
+canonical = "HAS_DOMAIN"
+bit = 231
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_DOMAIN"
+
+[[relation]]
 canonical = "HAS_DOMAIN_REGION"
+retired = "HAS_DOMAIN"
+retired_qualifier = "domain/region"
 bit = 57
 rank = "associative"
 symmetry = "asymmetric"
@@ -524,6 +536,8 @@ family_root = "HAS_DOMAIN_REGION"
 
 [[relation]]
 canonical = "HAS_DOMAIN_TOPIC"
+retired = "HAS_DOMAIN"
+retired_qualifier = "domain/topic"
 bit = 58
 rank = "associative"
 symmetry = "asymmetric"
@@ -532,6 +546,8 @@ family_root = "HAS_DOMAIN_TOPIC"
 
 [[relation]]
 canonical = "HAS_DOMAIN_USAGE"
+retired = "HAS_DOMAIN"
+retired_qualifier = "domain/usage"
 bit = 59
 rank = "associative"
 symmetry = "asymmetric"
@@ -2211,18 +2227,21 @@ flip = false
 
 [[alias]]
 surface = "IS_DOMAIN_REGION_MEMBER"
-canonical = "HAS_DOMAIN_REGION"
+canonical = "HAS_DOMAIN"
 flip = true
+qualifier = "domain/region"
 
 [[alias]]
 surface = "IS_DOMAIN_TOPIC_MEMBER"
-canonical = "HAS_DOMAIN_TOPIC"
+canonical = "HAS_DOMAIN"
 flip = true
+qualifier = "domain/topic"
 
 [[alias]]
 surface = "IS_DOMAIN_USAGE_MEMBER"
-canonical = "HAS_DOMAIN_USAGE"
+canonical = "HAS_DOMAIN"
 flip = true
+qualifier = "domain/usage"
 
 [[alias]]
 surface = "IS_FILLED_BY"
@@ -2514,33 +2533,39 @@ flip = false
 
 [[alias]]
 surface = "domain_topic"
-canonical = "HAS_DOMAIN_TOPIC"
+canonical = "HAS_DOMAIN"
 flip = false
+qualifier = "domain/topic"
 
 [[alias]]
 surface = "has_domain_topic"
-canonical = "HAS_DOMAIN_TOPIC"
+canonical = "HAS_DOMAIN"
 flip = true
+qualifier = "domain/topic"
 
 [[alias]]
 surface = "domain_region"
-canonical = "HAS_DOMAIN_REGION"
+canonical = "HAS_DOMAIN"
 flip = false
+qualifier = "domain/region"
 
 [[alias]]
 surface = "has_domain_region"
-canonical = "HAS_DOMAIN_REGION"
+canonical = "HAS_DOMAIN"
 flip = true
+qualifier = "domain/region"
 
 [[alias]]
 surface = "exemplifies"
-canonical = "HAS_DOMAIN_USAGE"
+canonical = "HAS_DOMAIN"
 flip = false
+qualifier = "domain/usage"
 
 [[alias]]
 surface = "is_exemplified_by"
-canonical = "HAS_DOMAIN_USAGE"
+canonical = "HAS_DOMAIN"
 flip = true
+qualifier = "domain/usage"
 
 # FrameNet frame-to-frame relation types (frRelation.xml / frame/*.xml frameRelation@type).
 

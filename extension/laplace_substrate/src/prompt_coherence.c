@@ -302,7 +302,7 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
              *
              * Counting only the forward scan divided incoming coherence by an
              * outgoing-only denominator. Measured on the foundation seed for
-             * `pawn -> HAS_DOMAIN_TOPIC -> chess`: both endpoints received the
+             * `pawn -> HAS_DOMAIN {topic} -> chess`: both endpoints received the
              * same peer coherence, but chess's large incoming degree was absent
              * from its denominator, so the broad domain displaced the narrower
              * pawn. Keep numerator and denominator on the same directional

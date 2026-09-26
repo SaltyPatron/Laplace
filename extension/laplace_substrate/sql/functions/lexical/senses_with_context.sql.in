@@ -27,7 +27,7 @@
 --           This is the lane that actually discriminates.
 --   FRAME   a context sense EVOKES_FRAME F and the candidate corresponds to F.
 --           Frames unify across languages, so this lane is language-agnostic.
---   DOMAIN  candidate HAS_DOMAIN_TOPIC D and a context token is (or senses to) D
+--   DOMAIN  candidate HAS_DOMAIN D and a context token is (or senses to) D
 --           (GH #785 discourse prior — e.g. pawn+chess).
 --   DIRECT  a context ENTITY has an attested edge straight to a candidate synset.
 --           Usually absent on real data, but where present it is the strongest
@@ -139,9 +139,9 @@ BEGIN ATOMIC
         ) x
         GROUP BY x.sid
     ),
-    -- DOMAIN (GH #785): a candidate synset HAS_DOMAIN_TOPIC D and a context
+    -- DOMAIN (GH #785): a candidate synset HAS_DOMAIN D and a context
     -- token is (or senses to) D. "pawn" + "chess" elects the chess-piece sense
-    -- because WordNet attached HAS_DOMAIN_TOPIC→chess; the USAGE lane also
+    -- because WordNet attached HAS_DOMAIN {topic}→chess; the USAGE lane also
     -- catches "(chess) the least powerful piece" in the gloss, but domain is
     -- the explicit discourse prior and works when the gloss spelling differs
     -- from the prompt token. Weighted by the domain edge's consensus.eff_mu.
@@ -149,7 +149,7 @@ BEGIN ATOMIC
         SELECT c.subject_id AS sid, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
         FROM @extschema@.consensus c
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND c.type_id = consensus.relation_type_resolve('HAS_DOMAIN_TOPIC')
+          AND c.type_id = consensus.relation_type_resolve('HAS_DOMAIN')
           AND (c.object_id IN (SELECT id FROM ctx)
                OR c.object_id IN (SELECT sid FROM ctx_syn))
         GROUP BY c.subject_id

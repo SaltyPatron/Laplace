@@ -61,7 +61,7 @@ public readonly struct PredicateMatrixSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
         [
             "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO", "HAS_LANGUAGE", "HAS_POS",
-            "HAS_DOMAIN_TOPIC", "HAS_LEX_CATEGORY", "HAS_BASE_CONCEPT_STATUS",
+            "domain_topic", "HAS_LEX_CATEGORY", "HAS_BASE_CONCEPT_STATUS",
             "HAS_SENSE_FREQUENCY", "HAS_SYNSET_RELATION_COUNT",
         ];
 
@@ -73,8 +73,10 @@ public readonly struct PredicateMatrixSource : ISeedSource
         RelationTypeRegistry.RelationTypeId(Relations[2]);
     internal static readonly Hash128 HasPosTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[3]);
-    internal static readonly Hash128 HasDomainTopicTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[4]);
+    // A topic domain is HAS_DOMAIN qualified domain/topic: the resolution carries both.
+    internal static readonly RelationTypeRegistry.RelationTypeResolution DomainTopic =
+        RelationTypeRegistry.Resolve(Relations[4]);
+    internal static readonly Hash128 HasDomainTopicTypeId = DomainTopic.Id;
     internal static readonly Hash128 HasLexCategoryTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[5]);
     internal static readonly Hash128 HasBaseConceptStatusTypeId =

@@ -23,16 +23,16 @@ public readonly struct WordNetSource : ISeedSource
         ["#m"] = "IS_MEMBER_OF",
         ["#s"] = "IS_SUBSTANCE_OF",
         ["#p"] = "IS_PART_OF",
-        ["%m"] = "HAS_MEMBER",
-        ["%s"] = "HAS_SUBSTANCE",
+        ["%m"] = "mero_member",
+        ["%s"] = "mero_substance",
         ["%p"] = "HAS_PART",
         ["="] = "HAS_ATTRIBUTE",
         ["+"] = "DERIVATIONALLY_RELATED",
-        [";c"] = "HAS_DOMAIN_TOPIC",
+        [";c"] = "domain_topic",
         ["-c"] = "IS_DOMAIN_TOPIC_MEMBER",
-        [";r"] = "HAS_DOMAIN_REGION",
+        [";r"] = "domain_region",
         ["-r"] = "IS_DOMAIN_REGION_MEMBER",
-        [";u"] = "HAS_DOMAIN_USAGE",
+        [";u"] = "exemplifies",
         ["-u"] = "IS_DOMAIN_USAGE_MEMBER",
         ["*"] = "ENTAILS",
         [">"] = "CAUSES",
@@ -61,7 +61,7 @@ public readonly struct WordNetSource : ISeedSource
         var set = new HashSet<string>(StringComparer.Ordinal)
         {
             "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
-            "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
+            "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
             "HAS_NAME", "MANNER_OF",
         };
         foreach (string name in DeclaredRelations)

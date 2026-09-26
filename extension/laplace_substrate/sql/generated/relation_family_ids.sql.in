@@ -72,6 +72,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'HAS_COST' THEN ARRAY[laplace.relation_type_id('HAS_COST')]
         WHEN 'HAS_DBPEDIA_RELATION' THEN ARRAY[laplace.relation_type_id('HAS_DBPEDIA_RELATION')]
         WHEN 'HAS_DEFINITION' THEN ARRAY[laplace.relation_type_id('HAS_DEFINITION')]
+        WHEN 'HAS_DOMAIN' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN')]
         WHEN 'HAS_DOMAIN_REGION' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN_REGION')]
         WHEN 'HAS_DOMAIN_TOPIC' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN_TOPIC'), laplace.relation_type_id('HAS_LEX_CATEGORY')]
         WHEN 'HAS_DOMAIN_USAGE' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN_USAGE')]
