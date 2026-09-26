@@ -34,8 +34,6 @@ public sealed class SubstrateCanonicalIdsTests
     [Fact]
     public void KeyShapesAreExact()
     {
-        Assert.Equal("substrate/pos/probationary/framenet/IDIO/v1",
-            SubstrateCanonicalKeys.PosProbationary("framenet", "IDIO"));
         Assert.Equal("substrate/test/reg/a", SubstrateCanonicalKeys.Of("test", "reg", "a"));
         Assert.Equal("substrate/test/word/v1", SubstrateCanonicalKeys.OfVersioned("test", "word"));
     }

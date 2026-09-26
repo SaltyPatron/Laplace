@@ -39,11 +39,11 @@ public class ConceptAnchorTests
         Assert.True(b.ContentStage.EntityCount > 0);
         Assert.True(b.ContentStage.PhysicalityCount > 0);
 
+        // The synset's content form is staged with it; its type is on its row, never
+        // recorded as source testimony.
+        Assert.True(b.ContentStage.WitnessContains(PhysicalityId.Compute(id!.Value, PhysicalityType.Content)));
         var change = b.Build();
-        Assert.Contains(change.Physicalities, p => p.EntityId == id);
-        var typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
-        Assert.Contains(change.Attestations, a =>
-            a.SubjectId == id!.Value && a.TypeId == typedAs && a.ObjectId == EntityTypeRegistry.WordNetSynset);
+        Assert.DoesNotContain(change.Attestations, a => a.SubjectId == id!.Value);
     }
 
 

@@ -27,12 +27,11 @@ public sealed class CompoundIdentifierDecompositionTests
         Assert.True(builder.ContentStage.EntityCount > 0);
         Assert.True(builder.ContentStage.PhysicalityCount > 0);
 
+        // The roleset's content form is staged with it; its type is on its row, never
+        // recorded as source testimony.
+        Assert.True(builder.ContentStage.WitnessContains(PhysicalityId.Compute(id!.Value, PhysicalityType.Content)));
         var change = builder.Build();
-        Assert.Contains(change.Physicalities, p => p.EntityId == id);
-        Assert.Contains(change.Attestations, a =>
-            a.SubjectId == id
-            && a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
-            && a.ObjectId == EntityTypeRegistry.PropBankRoleset);
+        Assert.DoesNotContain(change.Attestations, a => a.SubjectId == id);
     }
 
     [Fact]

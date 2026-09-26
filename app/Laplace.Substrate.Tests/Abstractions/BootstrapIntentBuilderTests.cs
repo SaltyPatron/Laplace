@@ -13,8 +13,9 @@ public class BootstrapIntentBuilderTests
     private static readonly Hash128 TrustClassId =
         TrustClassRegistry.Id("SubstrateMandate");
 
-    private static Hash128 TypeHash(string name) =>
-        Hash128.Blake3(Encoding.UTF8.GetBytes(name));
+    // A type or relation key is the content id of its label: the same entity that text
+    // is anywhere else.
+    private static Hash128 LabelId(string name) => ContentEmitter.RootId(name)!.Value;
 
     [Fact]
     public void Build_RegistersSourceEntity()
@@ -27,45 +28,28 @@ public class BootstrapIntentBuilderTests
     }
 
     [Fact]
-    public void Build_AddTypeRegistersTypeEntityWithStableId()
+    public void Build_AddTypeReturnsTheRegistryKeyAndStagesNoEntity()
     {
         var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
         var synsetId = b.AddType("WordNet_Synset");
         var senseId = b.AddType("WordNet_Sense");
         var change = b.Build();
 
-        Assert.Equal(TypeHash("WordNet_Synset"), synsetId);
-        Assert.Equal(TypeHash("WordNet_Sense"), senseId);
-        Assert.Contains(change.Entities, e => e.Id == synsetId);
-        Assert.Contains(change.Entities, e => e.Id == senseId);
+        Assert.Equal(LabelId("WordNet_Synset"), synsetId);
+        Assert.Equal(LabelId("WordNet_Sense"), senseId);
+        Assert.DoesNotContain(change.Entities, e => e.Id == synsetId);
+        Assert.DoesNotContain(change.Entities, e => e.Id == senseId);
     }
 
     [Fact]
-    public void Build_AddRelationTypeRegistersEntityWithStableId()
+    public void Build_AddRelationTypeReturnsTheRegistryKeyAndStagesNoEntity()
     {
         var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
         var typeId = b.AddRelationType("HAS_DEFINITION");
         var change = b.Build();
-        Assert.Equal(TypeHash("HAS_DEFINITION"), typeId);
-        Assert.Contains(change.Entities, e => e.Id == typeId);
-    }
-
-    [Fact]
-    public void Build_CarriesCanonicalNamesAsOneDeterministicSet()
-    {
-        var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
-        b.AddType("WordNet_Synset");
-        b.AddRelationType("HAS_DEFINITION");
-        b.AddType("WordNet_Synset");
-
-        var change = b.Build();
-
-        Assert.Equal(
-            change.CanonicalNames.OrderBy(static name => name, StringComparer.Ordinal),
-            change.CanonicalNames);
-        Assert.Equal(change.CanonicalNames.Distinct(StringComparer.Ordinal), change.CanonicalNames);
-        Assert.Contains("WordNet_Synset", change.CanonicalNames);
-        Assert.Contains("HAS_DEFINITION", change.CanonicalNames);
+        Assert.Equal(LabelId("HAS_DEFINITION"), typeId);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_DEFINITION"), typeId);
+        Assert.DoesNotContain(change.Entities, e => e.Id == typeId);
     }
 
     [Fact]
@@ -76,7 +60,7 @@ public class BootstrapIntentBuilderTests
         var isA = RelationTypeRegistry.RelationTypeId("IS_A");
 
         Assert.DoesNotContain(change.Attestations, a => a.TypeId == isA);
-        Assert.Contains(change.Entities,
+        Assert.DoesNotContain(change.Entities,
             e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_DEFINITION"));
     }
 
@@ -86,8 +70,8 @@ public class BootstrapIntentBuilderTests
         BootstrapIntentBuilder Make()
         {
             var b = new BootstrapIntentBuilder(SourceId, "DetTest", TrustClassId);
-            b.AddType("DetTest_Foo");
-            b.AddRelationType("DET_TEST_TYPE");
+            b.AddType("WordNet_Synset");
+            b.AddRelationType("HAS_DEFINITION");
             return b;
         }
         var a = Make().Build();
@@ -96,14 +80,15 @@ public class BootstrapIntentBuilderTests
         Assert.Equal(a.Entities.Length, b2.Entities.Length);
         for (int i = 0; i < a.Entities.Length; i++)
             Assert.Equal(a.Entities[i].Id, b2.Entities[i].Id);
+        Assert.Equal(a.Attestations.Select(static x => x.Id), b2.Attestations.Select(static x => x.Id));
     }
 
     [Fact]
     public void CanonicalIdConventions_AreContentAddressed()
     {
-        Assert.Equal(TypeHash("Source"), BootstrapIntentBuilder.SourceTypeId);
-        Assert.Equal(TypeHash("Type"), BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Equal(TypeHash("RelationType"), BootstrapIntentBuilder.RelationTypeMetaTypeId);
+        Assert.Equal(LabelId("Source"), BootstrapIntentBuilder.SourceTypeId);
+        Assert.Equal(LabelId("Type"), BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Equal(LabelId("RelationType"), BootstrapIntentBuilder.RelationTypeMetaTypeId);
     }
 }
 

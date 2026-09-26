@@ -12,9 +12,10 @@ public class CanonicalPathLawTests
     public void RelationTypeId_IsContentAddressed(string name)
     {
 
+        // A relation's id is the content id of its label: the same entity that text is
+        // anywhere else.
         var id = RelationTypeRegistry.RelationTypeId(name);
-        var expected = Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(name));
-        Assert.Equal(expected, id);
+        Assert.Equal(ContentEmitter.RootId(name)!.Value, id);
     }
 
     [Fact]

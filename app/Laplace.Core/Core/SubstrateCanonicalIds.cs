@@ -25,14 +25,6 @@ public static class SubstrateCanonicalKeys
     /// <summary>Key for a decomposer/source identity — mirrors SQL <c>source_id(name)</c>.</summary>
     public static string Source(string name) => Versioned("source", name);
 
-    /// <summary>Key for a probationary POS tag minted under a named tagset.</summary>
-    public static string PosProbationary(string tagset, string tag)
-    {
-        Validate(tagset, nameof(tagset));
-        Validate(tag, nameof(tag));
-        return $"{Root}/pos/probationary/{tagset}/{tag}/v1";
-    }
-
     /// <summary>
     /// Key for a conversation session — the conversational analogue of a chess game id.
     /// Tenant is part of the key, so a session key can never resolve into another
@@ -86,9 +78,6 @@ public static class SubstrateCanonicalKeys
 public static class SubstrateCanonicalIds
 {
     public static Hash128 Source(string name) => Hash128.OfCanonical(SubstrateCanonicalKeys.Source(name));
-
-    public static Hash128 PosProbationary(string tagset, string tag) =>
-        Hash128.OfCanonical(SubstrateCanonicalKeys.PosProbationary(tagset, tag));
 
     public static Hash128 ConversationSession(string tenant, string sessionKey) =>
         Hash128.OfCanonical(SubstrateCanonicalKeys.ConversationSession(tenant, sessionKey));

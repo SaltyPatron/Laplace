@@ -50,7 +50,7 @@ public class TypeColumnLawTests
     {
         await using var cmd = _pg.DataSource.CreateCommand(@"
             SELECT laplace.relation_type_id('IS_A')
-                 = public.laplace_hash128_blake3('IS_A'::bytea)");
+                 = laplace.content_id(convert_to('IS_A', 'UTF8'))");
         var eq = (bool)(await cmd.ExecuteScalarAsync())!;
         Assert.True(eq);
     }

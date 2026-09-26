@@ -112,11 +112,10 @@ public class NativeAttestationParityTests
 
 
 
-        Assert.Equal(SubstrateCanonicalIds.PosProbationary("framenet", "IDIO"), posId);
-
-
-
-        Assert.Contains(change.Entities, e => e.Id == posId && e.TypeId == PosReference.PosTypeId);
+        // An unknown tag is exact observed content: its id is the content of the tag,
+        // not a tagset-salted name.
+        Assert.Equal(ContentEmitter.RootId("IDIO"), posId);
+        Assert.Contains(change.IntentStages, stage => stage.WitnessContains(posId));
         Assert.Contains(change.Attestations, att => att.ObjectId == posId && att.SubjectId == form);
     }
 

@@ -141,7 +141,7 @@ public class RealModelManifestTests
         // Control pieces resolve to their literal surface, not to a minted id.
         Assert.True(records[1].Role.HasFlag(TokenRole.Special));
         Assert.True(records[1].HasContentCoord);
-        Assert.NotEqual(Hash128.OfCanonical("substrate/token/special/<s>/v1"), records[1].EntityId);
+        Assert.Equal(Laplace.Decomposers.Abstractions.ContentEmitter.RootId("<s>"), records[1].EntityId);
         Assert.Equal(records[1].EntityId, LlamaTokenizerParser.Parse(System.Text.Encoding.UTF8.GetBytes(
             """{"model":{"vocab":{"<s>":0}}}""")).Single().EntityId);
     }
