@@ -207,7 +207,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => await ApplyCoreAsync(
             changes, workingSet: false, append: false, default,
-            reconciliation: null, precommitVerifier: null, ct);
+            precommitVerifier: null, ct);
 
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyWorkingSetAsync(new[] { change }, ct);
@@ -228,7 +228,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             {
                 return await ApplyCoreAsync(
                     [change], workingSet: true, append: false, default,
-                    reconciliation: null, precommitVerifier: null, ct,
+                    precommitVerifier: null, ct,
                     async (connection, transaction, token) =>
                     {
                         await using var command = new NpgsqlCommand(
@@ -268,7 +268,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => await ApplyCoreAsync(
             changes, workingSet: true, append: false, default,
-            reconciliation: null, precommitVerifier: null, ct);
+            precommitVerifier: null, ct);
 
     public async Task<ApplyResult> ApplyWorkingSetAsync(
         IReadOnlyList<SubstrateChange> changes,
@@ -278,23 +278,14 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         ArgumentNullException.ThrowIfNull(precommitVerifier);
         return await ApplyCoreAsync(
             changes, workingSet: true, append: false, default,
-            reconciliation: null, precommitVerifier, ct);
+            precommitVerifier, ct);
     }
-
-    internal Task<ApplyResult> ApplyLegacyBootstrapWorkingSetAsync(
-        IReadOnlyList<SubstrateChange> changes,
-        Hash128 legacyMarkerAttestationId,
-        CancellationToken ct = default) =>
-        ApplyCoreAsync(
-            changes, workingSet: true, append: false, default,
-            new WorkingSetReconciliation(legacyMarkerAttestationId),
-            precommitVerifier: null, ct);
 
     public async Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => await ApplyCoreAsync(
             changes, workingSet: false, append: true, sourceId,
-            reconciliation: null, precommitVerifier: null, ct);
+            precommitVerifier: null, ct);
 
     /// <summary>
     /// STRUCT, not a class (2026-07-21). One 32-byte heap allocation per merged
@@ -335,7 +326,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
 
     private async Task<ApplyResult> ApplyCoreAsync(
         IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
-        Hash128 sourceId, WorkingSetReconciliation? reconciliation,
+        Hash128 sourceId,
         Func<CancellationToken, ValueTask>? precommitVerifier,
         CancellationToken ct,
         Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? appendConversation = null)
@@ -405,7 +396,6 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                         if (precommitVerifier is not null)
                             await precommitVerifier(token).ConfigureAwait(false);
                     },
-                    reconciliation,
                     ct).ConfigureAwait(false);
 
                 if (!result.JournalReplayHit)

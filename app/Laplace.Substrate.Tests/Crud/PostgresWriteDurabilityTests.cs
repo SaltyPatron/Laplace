@@ -83,7 +83,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
                 var settings = await NpgsqlSubstrateWriter.ReadCommitSettingsAsync(connection, transaction, mode, ct);
                 participantMode = settings.SynchronousCommit;
                 Assert.False(settings.WriteCommitAcknowledged);
-            }, reconciliation: null);
+            });
             PhysicalityWriterTestSupport.AssertAttempts(applied, 1024, 1, 1);
             Assert.Equal(expected, participantMode);
             var commit = Assert.IsType<PostgresCommitReceipt>(applied.PostgresCommit);
@@ -103,7 +103,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
                 Assert.Equal(applied.CopyTransactionsStarted, applied.CopyTransactionsCommitted);
             }
             var replay = await writer.ApplyWorkingSetAtomicAsync([change], (_, _, _, _) =>
-                throw new InvalidOperationException("Replay must not invoke the transaction participant."), null);
+                throw new InvalidOperationException("Replay must not invoke the transaction participant."));
             Assert.True(replay.JournalReplayHit);
             Assert.False(Assert.IsType<PostgresCommitReceipt>(replay.PostgresCommit).WriteCommitAcknowledged);
             Assert.Equal(0, replay.CopyTransactionsStarted);
@@ -134,7 +134,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
         var change = new SubstrateChangeBuilder(source, "durability-failure").AddAttestation(attestation).Build();
         var writer = new NpgsqlSubstrateWriter(pg.DataSource, durability: PostgresWriteDurability.Synchronous);
         await Assert.ThrowsAsync<InvalidDataException>(() => writer.ApplyWorkingSetAtomicAsync([change],
-            (_, _, _, _) => throw new InvalidDataException("controlled participant failure"), null));
+            (_, _, _, _) => throw new InvalidDataException("controlled participant failure")));
         await using var query = pg.DataSource.CreateCommand("""
             SELECT (SELECT count(*) FROM laplace.attestations WHERE source_id=$1),
                    (SELECT count(*) FROM laplace.ingest_flush_journal WHERE source_id=$1)
@@ -146,7 +146,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
             Assert.Equal(0L, rows.GetInt64(0));
             Assert.Equal(0L, rows.GetInt64(1));
         }
-        var retried = await writer.ApplyWorkingSetAtomicAsync([change], (_, _, _, _) => Task.CompletedTask, null);
+        var retried = await writer.ApplyWorkingSetAtomicAsync([change], (_, _, _, _) => Task.CompletedTask);
         Assert.True(Assert.IsType<PostgresCommitReceipt>(retried.PostgresCommit).LocalWalFlushAcknowledged);
     }
 }

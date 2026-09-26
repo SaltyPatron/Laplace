@@ -60,28 +60,3 @@ public sealed record PostgresCommitReceipt(
         && SynchronousCommit == "on" && Fsync && FullPageWrites;
 }
 
-public class LegacyReplayRequiresReconciliationException : InvalidOperationException
-{
-    public LegacyReplayRequiresReconciliationException(Hash128 legacyToken)
-        : this($"legacy replay token {legacyToken} cannot prove semantic-payload equality; "
-             + "source reconciliation is required before this working set can be accepted", legacyToken)
-    {
-    }
-
-    protected LegacyReplayRequiresReconciliationException(string message, Hash128 legacyToken)
-        : base(message)
-        => LegacyToken = legacyToken;
-
-    public Hash128 LegacyToken { get; }
-}
-
-public sealed class LegacyBootstrapReconciliationException
-    : LegacyReplayRequiresReconciliationException
-{
-    public LegacyBootstrapReconciliationException(Hash128 marker, string reason)
-        : base($"legacy bootstrap marker {marker} exists but its durable payload cannot be "
-             + $"reconciled: {reason}", marker)
-        => Marker = marker;
-
-    public Hash128 Marker { get; }
-}

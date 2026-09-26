@@ -71,18 +71,16 @@ public class ConversationContentIdTests
         var changes = ConversationContent.BuildTenantBootstrapChanges(scope);
         Assert.Equal(3, changes.Length);
 
-        var trustClassType = RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS");
-        Assert.Contains(changes[0].Attestations, a =>
-            a.TypeId == trustClassType && a.SubjectId == scope.PromptSource);
-        Assert.Contains(changes[1].Attestations, a =>
-            a.TypeId == trustClassType && a.SubjectId == scope.ResponseSource);
+        // A source's trust is the prior it declares on its change, never testimony about
+        // itself.
+        Assert.True(changes[0].PhysicalitySourcePriors.ContainsKey(scope.PromptSource));
+        Assert.True(changes[1].PhysicalitySourcePriors.ContainsKey(scope.ResponseSource));
 
-        // The declared-relations law: emitted relation families are registered.
-        var relationMeta = EntityTypeRegistry.Id("RelationType");
+        // Relation keys are registry codes, never entity rows.
         foreach (var rel in new[] { "APPEARS_IN", "HAS_ATTRIBUTION", "HAS_ROLE", "IS_INSTANCE_OF", "DEPENDS_ON" })
         {
             var relId = RelationTypeRegistry.RelationTypeId(rel);
-            Assert.Contains(changes[0].Entities, e => e.Id == relId && e.TypeId == relationMeta);
+            Assert.All(changes, change => Assert.DoesNotContain(change.Entities, e => e.Id == relId));
         }
 
         var attribution = RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTION");

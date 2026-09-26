@@ -48,10 +48,6 @@ internal static class UserContentEndpointMappings
             {
                 return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_provenance", message = ex.Message } });
             }
-            catch (LegacyReplayRequiresReconciliationException ex)
-            {
-                return Results.Conflict(new { error = new { type = "reconciliation_required", code = "legacy_replay_requires_reconciliation", message = ex.Message } });
-            }
 
             if (ids is not { } value)
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -107,10 +103,6 @@ internal static class UserContentEndpointMappings
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_provenance", message = ex.Message } });
-            }
-            catch (LegacyReplayRequiresReconciliationException ex)
-            {
-                return Results.Conflict(new { error = new { type = "reconciliation_required", code = "legacy_replay_requires_reconciliation", message = ex.Message } });
             }
 
             if (ids is not { } value)
@@ -242,10 +234,6 @@ internal static class UserContentEndpointMappings
         catch (ArgumentException ex)
         {
             return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_provenance", message = ex.Message } });
-        }
-        catch (LegacyReplayRequiresReconciliationException ex)
-        {
-            return Results.Conflict(new { error = new { type = "reconciliation_required", code = "legacy_replay_requires_reconciliation", message = ex.Message } });
         }
 
         if (ids is not { } value) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

@@ -86,18 +86,14 @@ public class WorkingSetApplyTests
         return rows.ToArray();
     }
 
-    private static void AssertAppliedReceiptPair(
+    private static void AssertAppliedReceipt(
         (string Token, string Kind, DateTime AppliedAt, bool SourceOwned)[] receipts)
     {
-        // One source-semantic receipt suppresses repeated participant work; the
-        // distinct full receipt also binds the accepted interpretation payload.
-        Assert.Equal(2, receipts.Length);
-        Assert.NotEqual(receipts[0].Token, receipts[1].Token);
-        Assert.All(receipts, receipt =>
-        {
-            Assert.Equal("applied", receipt.Kind);
-            Assert.True(receipt.SourceOwned);
-        });
+        // One receipt binds the working set's key to the semantic digest of everything
+        // it admitted: a replay of the same content is recognised by it.
+        var receipt = Assert.Single(receipts);
+        Assert.Equal("applied", receipt.Kind);
+        Assert.True(receipt.SourceOwned);
     }
 
     [Fact]
@@ -272,7 +268,7 @@ public class WorkingSetApplyTests
             Assert.Equal(4L, (await AttStateAsync(witness.Id)).Games);
 
             var receipts = await JournalStateAsync(source);
-            AssertAppliedReceiptPair(receipts);
+            AssertAppliedReceipt(receipts);
             Assert.True((await writer.ApplyWorkingSetAsync(change)).JournalReplayHit);
             Assert.Equal(4L, (await AttStateAsync(witness.Id)).Games);
             Assert.Equal(receipts, await JournalStateAsync(source));
@@ -389,7 +385,7 @@ public class WorkingSetApplyTests
         Assert.Equal(1, first.EntitiesInserted);
         Assert.Equal(1, first.AttestationsInserted);
         var receipts = await JournalStateAsync(src);
-        AssertAppliedReceiptPair(receipts);
+        AssertAppliedReceipt(receipts);
 
         // Retry after commit-ambiguity: same change, same intent hash. The
         // journal token must block the additive attestation merge that a
@@ -429,38 +425,6 @@ public class WorkingSetApplyTests
         await writer.ApplyAsync(change);
         (games, _) = await AttStateAsync(H("att/journal"));
         Assert.Equal(4, games);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WorkingSetReplay_BothLegacySingletonAliasesPreventSilentPostUpgradeReapply(
-        bool rawIntentAlias)
-    {
-        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        string suffix = rawIntentAlias ? "raw" : "list-one";
-        var src = H($"source/legacy-journal/{suffix}");
-        var change = new SubstrateChangeBuilder(src, $"legacy-journal-unit/{suffix}")
-            .AddEntity(Entity($"legacy-journal/{suffix}/e1"))
-            .AddAttestation(Att($"legacy-journal/{suffix}", 3, IntentStage.PgEpochUnixUs))
-            .Build();
-        byte[] intentBytes = new byte[16];
-        change.Metadata.IntentId.WriteBytes(intentBytes);
-        Hash128 legacyAlias = rawIntentAlias
-            ? change.Metadata.IntentId
-            : Hash128.Blake3(intentBytes);
-
-        await using (var seed = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) VALUES ($1, $2)"))
-        {
-            seed.Parameters.AddWithValue(legacyAlias.ToBytes());
-            seed.Parameters.AddWithValue(src.ToBytes());
-            await seed.ExecuteNonQueryAsync();
-        }
-
-        await Assert.ThrowsAsync<LegacyReplayRequiresReconciliationException>(
-            () => writer.ApplyWorkingSetAsync(change));
-        Assert.Equal(0L, await CountEntityAsync(H($"legacy-journal/{suffix}/e1")));
     }
 
     [Fact]

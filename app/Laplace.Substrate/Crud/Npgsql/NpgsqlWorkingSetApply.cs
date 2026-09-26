@@ -303,12 +303,10 @@ public sealed partial class NpgsqlSubstrateWriter
         ArgumentNullException.ThrowIfNull(changes);
         if (changes.Count == 0)
             return ApplyManyInternalAsync(
-                changes, legacyWorkingSetToken: null, transactionParticipant: null,
-                reconciliation: null, ct);
+                changes, workingSetKey: null, transactionParticipant: null, ct);
         changes = CanonicalWorkingSetOrder(changes);
         return ApplyManyInternalAsync(
-            changes, WorkingSetToken(changes), transactionParticipant: null,
-            reconciliation: null, ct);
+            changes, WorkingSetToken(changes), transactionParticipant: null, ct);
     }
 
     private static IReadOnlyList<SubstrateChange> CanonicalWorkingSetOrder(
@@ -417,12 +415,9 @@ public sealed partial class NpgsqlSubstrateWriter
         NpgsqlConnection conn, NpgsqlTransaction tx, bool epochRoute,
         IReadOnlyList<IntentStage> stages,
         Hash128? workingSetToken,
-        Hash128? legacyWorkingSetToken,
-        Hash128? legacySingletonToken,
         Hash128? workingSetSource,
         IReadOnlyList<Hash128> workingSetSources,
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
-        WorkingSetReconciliation? reconciliation,
         IngestCompletionRows completions,
         CancellationToken ct)
     {
@@ -584,37 +579,14 @@ public sealed partial class NpgsqlSubstrateWriter
                 await using var journal = conn.CreateCommand();
                 journal.Transaction = tx;
                 journal.CommandText =
-                    "SELECT CASE WHEN working_set_id = $1 THEN 1 ELSE 2 END AS result"
-                    + " FROM laplace.ingest_flush_journal"
-                    + " WHERE working_set_id = $1 OR working_set_id = $3 OR working_set_id = $4"
-                    + " ORDER BY result LIMIT 1";
+                    "SELECT 1 FROM laplace.ingest_flush_journal WHERE working_set_id = $1";
                 journal.Parameters.Add(new NpgsqlParameter
                 { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
-                journal.Parameters.Add(new NpgsqlParameter
-                {
-                    Value = workingSetSource is { } source ? source.ToBytes() : DBNull.Value,
-                    NpgsqlDbType = NpgsqlDbType.Bytea,
-                });
-                journal.Parameters.Add(new NpgsqlParameter
-                {
-                    Value = legacyWorkingSetToken is { } legacy
-                        ? legacy.ToBytes()
-                        : DBNull.Value,
-                    NpgsqlDbType = NpgsqlDbType.Bytea,
-                });
-                journal.Parameters.Add(new NpgsqlParameter
-                {
-                    Value = legacySingletonToken is { } singleton
-                        ? singleton.ToBytes()
-                        : DBNull.Value,
-                    NpgsqlDbType = NpgsqlDbType.Bytea,
-                });
                 object? replay = await journal.ExecuteScalarAsync(ct);
                 rtJournal++;
                 if (replay is not null)
                 {
-                    int replayKind = Convert.ToInt32(replay);
-                    if (replayKind == 1 && !completions.IsEmpty)
+                    if (!completions.IsEmpty)
                     {
                         // The journal proves this working set's evidence committed, so
                         // its completion state is owed; record it without re-admission.
@@ -626,50 +598,10 @@ public sealed partial class NpgsqlSubstrateWriter
                     {
                         await tx.RollbackAsync(CancellationToken.None);
                     }
-                    if (replayKind == 2)
-                        throw new LegacyReplayRequiresReconciliationException(
-                            legacyWorkingSetToken!.Value);
                     _log.LogInformation(
                         "WORKING_SET_REPLAY token={Token} already journaled — skipping complete admission",
                         token);
                     return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true, commit, copyTransactions);
-                }
-
-                if (reconciliation is not null)
-                {
-                    var verified = await LegacyBootstrapVerifier.VerifyAsync(
-                        conn, tx, reconciliation, entBlobs, ents.Rows,
-                        physBlobs, phys.Rows, attBlobs, atts.Rows,
-                        ct).ConfigureAwait(false);
-                    rtJournal += verified.RoundTrips;
-                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled)
-                    {
-                        // This path performs no COPY: verified legacy rows already
-                        // exist, so the control receipt seals them as they stand.
-                        await InsertJournalReceiptAsync(
-                            conn, tx, token, workingSetSource, workingSetSources,
-                            receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
-                        rtJournal++;
-                        if (!completions.IsEmpty)
-                        {
-                            await completions.InsertAsync(conn, tx, ct).ConfigureAwait(false);
-                            rtJournal++;
-                        }
-                        await CommitMeasuredAsync(tx, ct).ConfigureAwait(false);
-                        if (epochRoute)
-                        {
-                            await using var last = conn.CreateCommand();
-                            last.CommandText = "SELECT last_value FROM laplace.apply_write_epoch";
-                            _epochAfterLastCommit = (long)(await last.ExecuteScalarAsync(ct))!;
-                            Interlocked.Exchange(ref _epochOwnBumpsSinceBaseline, 0);
-                            rtEpoch++;
-                        }
-                        _log.LogInformation(
-                            "WORKING_SET_RECONCILED token={Token} verified legacy bootstrap and recorded v2 receipt",
-                            token);
-                        return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true,
-                            commit with { WriteCommitAcknowledged = true }, copyTransactions);
-                    }
                 }
 
                 await InsertJournalReceiptAsync(

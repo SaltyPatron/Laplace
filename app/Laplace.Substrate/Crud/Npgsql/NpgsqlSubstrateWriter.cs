@@ -38,13 +38,11 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
     public Task<ApplyResult> ApplyManyAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => ApplyManyInternalAsync(
-            changes, legacyWorkingSetToken: null, transactionParticipant: null,
-            reconciliation: null, ct);
+            changes, workingSetKey: null, transactionParticipant: null, ct);
 
     internal Task<ApplyResult> ApplyWorkingSetAtomicAsync(
         IReadOnlyList<SubstrateChange> changes,
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task> transactionParticipant,
-        WorkingSetReconciliation? reconciliation,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(changes);
@@ -54,15 +52,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
             changes,
             changes.Count == 0 ? null : WorkingSetToken(changes),
             transactionParticipant,
-            reconciliation,
             ct);
     }
 
     private async Task<ApplyResult> ApplyManyInternalAsync(
         IReadOnlyList<SubstrateChange> changes,
-        Hash128? legacyWorkingSetToken,
+        Hash128? workingSetKey,
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
-        WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
@@ -97,16 +93,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
         }
         Hash128? workingSetSource = null;
         Hash128[] workingSetSources = [];
-        if (legacyWorkingSetToken is not null)
+        if (workingSetKey is not null)
         {
             workingSetSources = changes.Select(change => change.Metadata.SourceId)
                 .Distinct()
                 .OrderBy(source => source, Hash128BytewiseOrder)
                 .ToArray();
             workingSetSource = workingSetSources.Length == 1 ? workingSetSources[0] : null;
-            if (reconciliation is not null && workingSetSources.Length != 1)
-                throw new InvalidOperationException(
-                    "legacy bootstrap reconciliation requires one source-owned working set");
         }
 
 
@@ -147,11 +140,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                 || managedStage.AttestationCount > 0))
             sourceStages.Add(managedStage);
 
-        Hash128? workingSetToken = legacyWorkingSetToken is { } legacy
-            ? ReplayTokenV2(legacy, sourceStages)
-            : null;
-        Hash128? legacySingletonToken = legacyWorkingSetToken is not null && changes.Count == 1
-            ? changes[0].Metadata.IntentId
+        Hash128? workingSetToken = workingSetKey is { } key
+            ? ReplayTokenV2(key, sourceStages)
             : null;
 
         long entCount = sourceStages.Sum(s => (long)s.EntityCount);
@@ -179,8 +169,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
         if (anyRows)
         {
             var r = await ApplyStagesCoreAsync(
-                sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
-                workingSetSource, workingSetSources, transactionParticipant, reconciliation,
+                sourceStages, workingSetToken,
+                workingSetSource, workingSetSources, transactionParticipant,
                 completions, ct);
             entitiesInserted = r.e;
             physicalitiesInserted = r.p;
@@ -547,16 +537,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
         FoldReplayable = (byte)(a.FoldReplayable ? 1 : 0),
     };
 
-    // The working-set replay token binds the legacy intent token to the semantic
-    // digest of every staged entity, physicality and attestation tuple. Equal
+    // The working-set replay token binds the working set's key to the semantic
+    // digest of every staged entity, physicality and attestation row. Equal
     // staged content yields the equal token, so a replay is recognised exactly.
     private static Hash128 ReplayTokenV2(
-        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages)
+        Hash128 workingSetKey, IReadOnlyList<IntentStage> sourceStages)
     {
         Hash128 semanticDigest = IntentStage.SemanticDigestBatch(sourceStages);
         Span<byte> v2 = stackalloc byte[23 + 16 + 16];
         "LaplaceReplayIntent/v2\0"u8.CopyTo(v2);
-        legacyToken.WriteBytes(v2.Slice(23, 16));
+        workingSetKey.WriteBytes(v2.Slice(23, 16));
         semanticDigest.WriteBytes(v2.Slice(39, 16));
         return Hash128.Blake3(v2);
     }

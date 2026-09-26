@@ -114,17 +114,10 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
             if (!_scopes.TryGetValue(tenant, out var scope))
             {
                 scope = UserArtifactContent.Resolve(tenant);
+                // The tenant's bootstrap is one working set: its journal key makes a
+                // repeat a replay, never a second admission.
                 SubstrateChange[] bootstrap = UserArtifactContent.BuildTenantBootstrapChanges(scope);
-                Hash128 attributionType = RelationTypeRegistry.RelationTypeId(
-                    UserArtifactContent.AttributionRelation);
-                AttestationRow marker = bootstrap
-                    .SelectMany(static change => change.Attestations)
-                    .Single(attestation =>
-                        attestation.SubjectId == scope.Source
-                        && attestation.TypeId == attributionType
-                        && attestation.SourceId == scope.Source);
-                await _writer.ApplyLegacyBootstrapWorkingSetAsync(
-                    bootstrap, marker.Id, ct).ConfigureAwait(false);
+                await _writer.ApplyWorkingSetAsync(bootstrap, ct).ConfigureAwait(false);
                 _scopes[tenant] = scope;
             }
 
@@ -152,10 +145,6 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
             throw;
         }
         catch (ArgumentException)
-        {
-            throw;
-        }
-        catch (LegacyReplayRequiresReconciliationException)
         {
             throw;
         }
