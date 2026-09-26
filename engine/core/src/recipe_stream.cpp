@@ -103,6 +103,7 @@ struct field_rule {
     hash128_t flag_relation{};
     bool signed_values = false;
     bool require_context = false;   // claim only in the context field's context
+    std::string unless_field;       // no claim while this attribute has a value
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -530,9 +531,48 @@ struct laplace_recipe_stream {
         if (intent_stage_allocation_failed(stage))
             throw std::runtime_error("recipe entity deduplication exceeded the admitted byte envelope");
     }
+    // A string holding a lone surrogate (its generalized UTF-8 form, ED A0..BF xx) is no
+    // text: it is the ordered composition of its code point atoms (IdnaTestV2's a, U+D900, z;
+    // UCA CollationTest's lone-surrogate strings).
+    static bool has_lone_surrogate(const std::string& text) {
+        for (size_t i = 0; i + 2 < text.size(); ++i)
+            if (static_cast<unsigned char>(text[i]) == 0xED && (static_cast<unsigned char>(text[i + 1]) & 0xE0) == 0xA0)
+                return true;
+        return false;
+    }
+    content_form compose_ill_formed(intent_stage_t* stage, const std::string& text) {
+        std::vector<laplace_ordered_component_t> atoms;
+        for (size_t i = 0; i < text.size();) {
+            const auto b = reinterpret_cast<const uint8_t*>(text.data()) + i;
+            uint32_t cp = 0; size_t used = 0;
+            if (b[0] == 0xED && i + 2 < text.size() && (b[1] & 0xE0) == 0xA0 && (b[2] & 0xC0) == 0x80) {
+                cp = 0xD000u | (uint32_t(b[1] & 0x3F) << 6) | (b[2] & 0x3F); used = 3;
+            } else if (laplace_utf8_decode(b, text.size() - i, &cp, &used) != 0) {
+                throw std::runtime_error("ill-formed content is not a code point sequence");
+            }
+            laplace_ordered_component_t atom{};
+            hilbert128_t hb{};
+            if (codepoint_table_resolve_atom(cp, &atom.id, atom.coord, &hb) != 0)
+                throw std::runtime_error("code point has no atom");
+            check(content_witness_emit_floor_atom(stage, cp, &atom.id, INTENT_STAGE_PG_EPOCH_UNIX_US), "code point atom");
+            atom.tier = 0; atom.atom = cp; atom.has_atom = true;
+            atoms.push_back(atom);
+            i += used;
+        }
+        laplace_ordered_composition_request_t request{};
+        request.components = atoms.data(); request.component_count = atoms.size();
+        request.source_id = current_witness; request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "ill-formed code point sequence");
+        content_form form{};
+        form.id = result.id; std::memcpy(form.coord, result.coord, sizeof(form.coord));
+        form.hilbert = result.hilbert; form.tier = result.tier;
+        return form;
+    }
     content_form compose_content(intent_stage_t* stage, const std::string& text) {
         if (text.empty()) throw std::runtime_error("empty content reference");
         auto i = content_cache.find(text); if (i != content_cache.end()) { observe(i->second); return i->second; }
+        if (has_lone_surrogate(text)) return compose_ill_formed(stage, text);
         tier_tree_t* raw = nullptr;
         check(content_witness_source_tree_build(
             reinterpret_cast<const uint8_t*>(text.data()), text.size(), &raw), "content composition");
@@ -1067,6 +1107,10 @@ struct laplace_recipe_stream {
         if (!rule.context_field.empty()) context_value = context_of(rule, attributes);
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         if (rule.require_context && (!context_value || context_value->empty())) return;
+        if (!rule.unless_field.empty()) {
+            const auto unless = attributes.find(rule.unless_field);
+            if (unless != attributes.end() && !unless->second.empty()) return;
+        }
         // A form equal to its source is no claim (NormalizationTest's NFC of an NFC string).
         if (rule.omit_equal_subject && raw == current_identity) return;
         if (rule.group_once) {
@@ -1953,6 +1997,17 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         }
                         const uint32_t carried = r.number();
                         for (uint32_t g = 0; g < carried; ++g) config.carry_columns.push_back(r.text());
+                        const uint32_t escapes = r.number();
+                        if (escapes > 1) throw std::runtime_error("invalid escape instruction");
+                        config.unicode_escapes = escapes != 0;
+                        const uint32_t blanks = r.number();
+                        for (uint32_t g = 0; g < blanks; ++g) {
+                            auto column = r.text(); auto from = r.text();
+                            if (!config.blank_defaults.emplace(std::move(column), std::move(from)).second)
+                                throw std::runtime_error("duplicate blank default");
+                        }
+                        const uint32_t empties = r.number();
+                        for (uint32_t g = 0; g < empties; ++g) config.empty_values.push_back(r.text());
                         if (config.comment_pattern.empty() != config.comment_groups.empty()
                             || (!config.state_keys.empty() && config.state_separator.empty()))
                             throw std::runtime_error("invalid comment-data instruction");
@@ -2048,6 +2103,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (require_context > 1 || (require_context && f.context_field.empty()))
                     throw std::runtime_error("a context-required field needs its context field at " + f.path);
                 f.require_context = require_context != 0;
+                f.unless_field = r.text();
                 if (f.outcome_field.empty() != f.refute_value.empty())
                     throw std::runtime_error("an outcome field needs its refute value at " + f.path);
                 if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <regex>
@@ -65,6 +66,11 @@ struct recipe_delimited_config {
     // character's code point for its annotation lines; a subheader for its characters).
     std::map<std::string, std::string> keyed_record_names;
     std::vector<std::string> carry_columns;
+    // UTS 46 IdnaTestV2: backslash-u (4 hex digits) and backslash-x{hex} escape code points; a blank column means
+    // another column's value (resolved in column order); some spellings mean empty.
+    bool unicode_escapes = false;
+    std::map<std::string, std::string> blank_defaults;
+    std::vector<std::string> empty_values;
 };
 
 class recipe_delimited_stream {
@@ -86,6 +92,30 @@ class recipe_delimited_stream {
         auto first = text.find_first_not_of(" \t\r");
         if (first == std::string_view::npos) return {};
         return text.substr(first, text.find_last_not_of(" \t\r") - first + 1);
+    }
+    // Backslash-u and backslash-x{} escapes to UTF-8. A lone surrogate keeps its
+    // generalized (WTF-8) three-byte form: the data names ill-formed strings (IdnaTestV2:
+    // a, U+D900, z), which compose as their code point atoms, not as text.
+    std::string unescape(const std::string& text) const {
+        std::string out;
+        for (size_t i = 0; i < text.size();) {
+            uint32_t cp = 0; size_t used = 0;
+            if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == 'u' && i + 6 <= text.size()) {
+                cp = static_cast<uint32_t>(std::stoul(text.substr(i + 2, 4), nullptr, 16)); used = 6;
+            } else if (text[i] == '\\' && i + 2 < text.size() && text[i + 1] == 'x' && text[i + 2] == '{') {
+                const auto close = text.find('}', i + 3);
+                if (close == std::string::npos || close == i + 3 || close - i - 3 > 6) fail("malformed \\x{} escape");
+                cp = static_cast<uint32_t>(std::stoul(text.substr(i + 3, close - i - 3), nullptr, 16)); used = close - i + 1;
+            }
+            if (!used) { out.push_back(text[i++]); continue; }
+            if (cp > 0x10FFFF) fail("escaped code point out of range");
+            if (cp < 0x80) out.push_back(static_cast<char>(cp));
+            else if (cp < 0x800) { out.push_back(static_cast<char>(0xC0 | (cp >> 6))); out.push_back(static_cast<char>(0x80 | (cp & 0x3F))); }
+            else if (cp < 0x10000) { out.push_back(static_cast<char>(0xE0 | (cp >> 12))); out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F))); out.push_back(static_cast<char>(0x80 | (cp & 0x3F))); }
+            else { out.push_back(static_cast<char>(0xF0 | (cp >> 18))); out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F))); out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F))); out.push_back(static_cast<char>(0x80 | (cp & 0x3F))); }
+            i += used;
+        }
+        return out;
     }
     [[noreturn]] void fail(const std::string& reason) const {
         throw std::runtime_error("delimited provider line " + std::to_string(line_) + ": " + reason);
@@ -199,6 +229,22 @@ class recipe_delimited_stream {
             + " fields, recovered " + std::to_string(column));
         while (column < columns.size())
             if (!values.emplace(columns[column++], std::string{}).second) fail("duplicate column name");
+        if (config.unicode_escapes)
+            for (auto& value : values) value.second = unescape(value.second);
+        for (const auto& name : columns) {
+            const auto from = config.blank_defaults.find(name);
+            if (from == config.blank_defaults.end()) continue;
+            auto& value = values[name];
+            if (value.empty()) {
+                const auto source = values.find(from->second);
+                if (source == values.end()) fail("blank default names no column: " + from->second);
+                value = source->second;
+            }
+        }
+        if (!config.empty_values.empty())
+            for (auto& value : values)
+                if (std::find(config.empty_values.begin(), config.empty_values.end(), value.second)
+                    != config.empty_values.end()) value.second.clear();
         if (!config.range_column.empty()) {
             auto range = values.find(config.range_column);
             if (range != values.end()) {

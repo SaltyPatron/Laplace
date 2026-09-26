@@ -1,0 +1,155 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS46/IdnaTestV2",
+  "fields": [
+    {
+      "syntaxPath": "record/@source",
+      "propertyName": "source",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@toUnicode",
+      "propertyName": "toUnicode",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "NORMALIZES_TO",
+      "qualifiers": [
+        "mapping/ToUnicode"
+      ],
+      "omitWhenEqualsSubject": true,
+      "unlessField": "toUnicodeStatus"
+    },
+    {
+      "syntaxPath": "record/@toUnicodeStatus",
+      "propertyName": "toUnicodeStatus",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PARSE",
+      "objectEntityType": "UTS46_Status",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ToUnicode"
+        },
+        {
+          "path": "value()",
+          "splitLast": "[], ",
+          "side": "Each",
+          "nested": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@toAsciiN",
+      "propertyName": "toAsciiN",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "NORMALIZES_TO",
+      "qualifiers": [
+        "mapping/ToASCII"
+      ],
+      "omitWhenEqualsSubject": true,
+      "unlessField": "toAsciiNStatus"
+    },
+    {
+      "syntaxPath": "record/@toAsciiNStatus",
+      "propertyName": "toAsciiNStatus",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PARSE",
+      "objectEntityType": "UTS46_Status",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ToASCII"
+        },
+        {
+          "path": "value()",
+          "splitLast": "[], ",
+          "side": "Each",
+          "nested": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@toAsciiT",
+      "propertyName": "toAsciiT",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "NORMALIZES_TO",
+      "qualifiers": [
+        "mapping/ToASCII",
+        "mapping/Transitional_Processing"
+      ],
+      "omitWhenEqualsSubject": true,
+      "unlessField": "toAsciiTStatus"
+    },
+    {
+      "syntaxPath": "record/@toAsciiTStatus",
+      "propertyName": "toAsciiTStatus",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PARSE",
+      "objectEntityType": "UTS46_Status",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ToASCII"
+        },
+        {
+          "path": "",
+          "literal": "Transitional_Processing"
+        },
+        {
+          "path": "value()",
+          "splitLast": "[], ",
+          "side": "Each",
+          "nested": true
+        }
+      ]
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "source"
+      },
+      "subjectOptional": true
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "source",
+      "toUnicode",
+      "toUnicodeStatus",
+      "toAsciiN",
+      "toAsciiNStatus",
+      "toAsciiT",
+      "toAsciiTStatus"
+    ],
+    "unicodeEscapes": true,
+    "blankDefaults": {
+      "toUnicode": "source",
+      "toAsciiN": "toUnicode",
+      "toAsciiNStatus": "toUnicodeStatus",
+      "toAsciiT": "toAsciiN",
+      "toAsciiTStatus": "toAsciiNStatus"
+    },
+    "emptyValues": [
+      "\"\"",
+      "[]"
+    ]
+  }
+}

@@ -138,7 +138,10 @@ public sealed record SourceRecipeField(
     // The claim is made only in its ContextField's context: the source states the
     // context-free claim elsewhere (SpecialCasing's unconditional lines are the UCD XML's
     // full case mappings; its conditional ones are its own).
-    bool RequireContext = false);
+    bool RequireContext = false,
+    // No claim while this field has a value (UTS 46's IdnaTestV2: a result is a mapping
+    // only when its operation's status set is empty).
+    string? UnlessField = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -430,7 +433,14 @@ public sealed record SourceDelimitedSyntax(
     // A keyed line's record name, and columns whose last value holds for later records
     // that lack them (NamesList: a character's code point for its annotation lines).
     IReadOnlyDictionary<string, string>? KeyedRecordNames = null,
-    IReadOnlyList<string>? CarryColumns = null)
+    IReadOnlyList<string>? CarryColumns = null,
+    // Field text escapes a code point as \uXXXX or \x{X...} (UTS 46 IdnaTestV2).
+    bool UnicodeEscapes = false,
+    // A blank column means the value of another column, resolved in column order
+    // (IdnaTestV2: a blank toASCII means the toUnicode value).
+    IReadOnlyDictionary<string, string>? BlankDefaults = null,
+    // Values that spell an empty value where a blank means something else ("" and []).
+    IReadOnlyList<string>? EmptyValues = null)
 {
     public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
 }

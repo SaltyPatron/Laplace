@@ -395,6 +395,11 @@ canonical = "UD_XPOS"
 [[type]]
 canonical = "U_Source_Ideograph"
 
+# How UTS #46 processing of a string fails: [operation, [status codes]], the codes the
+# standard's own step labels (P4, V3, B1, C2, A4_2, X4_2) (IdnaTestV2).
+[[type]]
+canonical = "UTS46_Status"
+
 [[type]]
 canonical = "UcdClassifier"
 

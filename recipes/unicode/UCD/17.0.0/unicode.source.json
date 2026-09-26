@@ -109,8 +109,11 @@
     {
       "selector": "idna/IdnaTestV2.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS46/IdnaTestV2",
+      "recipePath": "idna-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "idna/ReadMe.txt",

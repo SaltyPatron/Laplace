@@ -44,6 +44,9 @@ DECLARE
         WHEN 'mapping/nfc' THEN 71
         WHEN 'mapping/nfd' THEN 72
         WHEN 'mapping/nfkd' THEN 73
+        WHEN 'mapping/ToUnicode' THEN 74
+        WHEN 'mapping/ToASCII' THEN 75
+        WHEN 'mapping/Transitional_Processing' THEN 76
         WHEN 'decomposition/Canonical' THEN 96
         WHEN 'decomposition/Compat' THEN 97
         WHEN 'decomposition/Circle' THEN 98

@@ -64,6 +64,8 @@ public static class NativeRecipeCompiler
             || recipe.DelimitedSyntax?.CommentColumn is not null || recipe.DelimitedSyntax?.CommentPattern is not null
             || recipe.DelimitedSyntax?.StateKeys is { Count: > 0 }
             || recipe.DelimitedSyntax?.KeyedRecordNames is { Count: > 0 } || recipe.DelimitedSyntax?.CarryColumns is { Count: > 0 }
+            || recipe.DelimitedSyntax is { UnicodeEscapes: true } || recipe.DelimitedSyntax?.BlankDefaults is { Count: > 0 }
+            || recipe.DelimitedSyntax?.EmptyValues is { Count: > 0 }
             || recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
@@ -71,7 +73,7 @@ public static class NativeRecipeCompiler
                 || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 }
                 || f.OutcomeField is not null || f.DrawPrefix is not null
                 || f.ValueListSeparator is not null || f.FlagRelation is not null || f.SignedValues
-                || f.RequireContext)
+                || f.RequireContext || f.UnlessField is not null)
             // A static relation named in its inverse direction needs the RCP8 flip bit.
             || recipe.Fields.Any(static f => f.Disposition.HasFlag(SourceFieldDisposition.Testimony)
                 && f.PairMode == SourcePairMode.None && f.RelationField is null
@@ -160,6 +162,13 @@ public static class NativeRecipeCompiler
                     foreach (var name in names) { WriteText(writer, name.Key); WriteText(writer, name.Value); }
                     writer.Write(checked((uint)(syntax.CarryColumns?.Count ?? 0)));
                     foreach (string column in syntax.CarryColumns ?? []) WriteText(writer, column);
+                    writer.Write(syntax.UnicodeEscapes ? 1u : 0u);
+                    var blanks = (syntax.BlankDefaults ?? new Dictionary<string, string>())
+                        .OrderBy(static pair => pair.Key, StringComparer.Ordinal).ToArray();
+                    writer.Write(checked((uint)blanks.Length));
+                    foreach (var blank in blanks) { WriteText(writer, blank.Key); WriteText(writer, blank.Value); }
+                    writer.Write(checked((uint)(syntax.EmptyValues?.Count ?? 0)));
+                    foreach (string value in syntax.EmptyValues ?? []) WriteText(writer, value);
                 }
             }
         }
@@ -265,6 +274,7 @@ public static class NativeRecipeCompiler
                     ? Hash128.Zero : RelationTypeRegistry.Resolve(field.FlagRelation).Id);
                 writer.Write(field.SignedValues ? 1u : 0u);
                 writer.Write(field.RequireContext ? 1u : 0u);
+                WriteText(writer, field.UnlessField);
             }
         }
 
