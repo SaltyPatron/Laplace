@@ -1,0 +1,366 @@
+{
+  "authority": "FrameNet",
+  "release": "1.7",
+  "provider": "laplace/native-streaming-xml-recipe/v1",
+  "syntax": "FrameNet/frame-1.7",
+  "fields": [
+    {
+      "syntaxPath": "Frame/@name",
+      "propertyName": "frame",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "Frame/@ID",
+      "propertyName": "frameId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Frame/@cBy",
+      "propertyName": "createdBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Frame/@cDate",
+      "propertyName": "createdDate",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Frame/@xsi:schemaLocation",
+      "propertyName": "schemaLocation",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Definition",
+      "propertyName": "definition",
+      "valueKind": "StructuredText",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_DEFINITION"
+    },
+    {
+      "syntaxPath": "SemType/@name",
+      "propertyName": "frameSemType",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_SEMANTIC_TYPE"
+    },
+    {
+      "syntaxPath": "SemType/@ID",
+      "propertyName": "frameSemTypeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FE/@name",
+      "propertyName": "frameElement",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "FE/@ID",
+      "propertyName": "frameElementId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FE/@coreType",
+      "propertyName": "coreType",
+      "valueKind": "Enumerated",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_FEATURE"
+    },
+    {
+      "syntaxPath": "FE/@abbrev",
+      "propertyName": "abbreviation",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/abbreviation"
+      ]
+    },
+    {
+      "syntaxPath": "FE/@bgColor",
+      "propertyName": "bgColor",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FE/@fgColor",
+      "propertyName": "fgColor",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FE/@cBy",
+      "propertyName": "feCreatedBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FE/@cDate",
+      "propertyName": "feCreatedDate",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FEDefinition",
+      "propertyName": "frameElementDefinition",
+      "valueKind": "StructuredText",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_DEFINITION"
+    },
+    {
+      "syntaxPath": "FESemType/@name",
+      "propertyName": "frameElementSemType",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_SEMANTIC_TYPE"
+    },
+    {
+      "syntaxPath": "FESemType/@ID",
+      "propertyName": "frameElementSemTypeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FERequires/@name",
+      "propertyName": "requiresFrameElement",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "REQUIRES",
+      "objectScopedToRecord": true,
+      "objectEntityType": "FrameNet_FE"
+    },
+    {
+      "syntaxPath": "FERequires/@ID",
+      "propertyName": "requiresId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FEExcludes/@name",
+      "propertyName": "excludesFrameElement",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "EXCLUDES",
+      "objectScopedToRecord": true,
+      "objectEntityType": "FrameNet_FE"
+    },
+    {
+      "syntaxPath": "FEExcludes/@ID",
+      "propertyName": "excludesId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "CoreMember/@name",
+      "propertyName": "coreSetMember",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "CoreMember/@ID",
+      "propertyName": "coreSetMemberId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FrameRelation/@type",
+      "propertyName": "frameRelationType",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "RelatedFrame",
+      "propertyName": "relatedFrame",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationField": "type",
+      "relationResolver": "Surface"
+    },
+    {
+      "syntaxPath": "RelatedFrame/@ID",
+      "propertyName": "relatedFrameId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexUnit/@name",
+      "propertyName": "lexicalUnit",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "LexUnit/@POS",
+      "propertyName": "lexicalUnitPos",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/framenet"
+    },
+    {
+      "syntaxPath": "LexUnit/@status",
+      "propertyName": "lexicalUnitStatus",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@ID",
+      "propertyName": "lexicalUnitId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexUnit/@lemmaID",
+      "propertyName": "lemmaId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexUnit/@cBy",
+      "propertyName": "luCreatedBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@cDate",
+      "propertyName": "luCreatedDate",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@incorporatedFE",
+      "propertyName": "incorporatedFrameElement",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "INCORPORATES",
+      "objectScopedToRecord": true,
+      "objectEntityType": "FrameNet_FE"
+    },
+    {
+      "syntaxPath": "LuDefinition",
+      "propertyName": "lexicalUnitDefinition",
+      "valueKind": "StructuredText",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_DEFINITION"
+    },
+    {
+      "syntaxPath": "LuSemType/@name",
+      "propertyName": "lexicalUnitSemType",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_SEMANTIC_TYPE"
+    },
+    {
+      "syntaxPath": "LuSemType/@ID",
+      "propertyName": "lexicalUnitSemTypeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Lexeme/@name",
+      "propertyName": "lemma",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "IS_LEMMA_OF",
+      "subjectMode": "Value"
+    },
+    {
+      "syntaxPath": "Lexeme/@POS",
+      "propertyName": "lexemePos",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lexeme/@order",
+      "propertyName": "lexemeOrder",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lexeme/@headword",
+      "propertyName": "lexemeHeadword",
+      "valueKind": "Boolean",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lexeme/@breakBefore",
+      "propertyName": "lexemeBreakBefore",
+      "valueKind": "Boolean",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "SentenceCount/@annotated",
+      "propertyName": "annotatedCount",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "SentenceCount/@total",
+      "propertyName": "sentenceTotal",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "frame",
+      "namespaceUri": "http://framenet.icsi.berkeley.edu",
+      "fieldPrefix": "Frame",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "name",
+        "entityType": "FrameNet_Frame"
+      },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "definition": "Definition",
+        "semType": "SemType",
+        "FE": "FE",
+        "FE/definition": "FEDefinition",
+        "FE/semType": "FESemType",
+        "FE/requiresFE": "FERequires",
+        "FE/excludesFE": "FEExcludes",
+        "FEcoreSet": "CoreSet",
+        "FEcoreSet/memberFE": "CoreMember",
+        "frameRelation": "FrameRelation",
+        "frameRelation/relatedFrame": "RelatedFrame",
+        "lexUnit": "LexUnit",
+        "lexUnit/definition": "LuDefinition",
+        "lexUnit/semType": "LuSemType",
+        "lexUnit/lexeme": "Lexeme",
+        "lexUnit/sentenceCount": "SentenceCount"
+      },
+      "childSubjects": [
+        {
+          "childPath": "FE",
+          "identityField": "name",
+          "parentRelation": "HAS_FRAME_ELEMENT",
+          "entityType": "FrameNet_FE"
+        },
+        {
+          "childPath": "lexUnit",
+          "identityField": "name",
+          "parentRelation": "EVOKES_FRAME",
+          "entityType": "FrameNet_LU",
+          "childIsSubject": true,
+          "identityParts": [
+            {
+              "path": "lexeme/@name",
+              "join": " "
+            },
+            {
+              "path": "@POS",
+              "vocabulary": "pos/framenet"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

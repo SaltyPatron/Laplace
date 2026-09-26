@@ -597,6 +597,27 @@ family_root = "HAS_VALENCE_PATTERN"
 # relation serves every property. It is standards metadata, not a semantic attribute:
 # WordNet's attribute (hot -> temperature) and ConceptNet's HasProperty keep
 # HAS_ATTRIBUTE / HAS_PROPERTY, and character metadata no longer shares their salience.
+# HAS_SEMANTIC_TYPE: the ontological type a frame element's filler, a frame or a lexical
+# unit belongs to in the source's semantic type hierarchy (FrameNet semTypes: Sentient,
+# Physical_entity...). A classification of meaning, not a part-whole.
+[[relation]]
+canonical = "HAS_SEMANTIC_TYPE"
+bit = 229
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SEMANTIC_TYPE"
+
+# INCORPORATES: a lexical unit whose word itself expresses a frame element (FrameNet
+# incorporatedFE: "back.v" in Self_motion incorporates Direction).
+[[relation]]
+canonical = "INCORPORATES"
+bit = 230
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "INCORPORATES"
+
 [[relation]]
 canonical = "HAS_CHARACTER_PROPERTY"
 bit = 228

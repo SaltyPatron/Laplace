@@ -106,7 +106,10 @@ public sealed record SourceRecipeField(
     // A qualifier read from the record: the attribute QualifierField's value names a
     // value of QualifierFamily (a UCD name alias's type -> name/correction).
     string? QualifierFamily = null,
-    string? QualifierField = null);
+    string? QualifierField = null,
+    // The object is [record subject, value]: the same identity the record's child
+    // subject named value has (a FrameNet requiresFE names an FE of the same frame).
+    bool ObjectScopedToRecord = false);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -222,7 +225,21 @@ public sealed record SourceChildSubject(
     string ChildPath,
     string IdentityField,
     string? ParentRelation = null,
-    string EntityType = "Recipe_Subject");
+    string EntityType = "Recipe_Subject",
+    // The link runs child -> parent (a lexical unit EVOKES_FRAME its frame).
+    bool ChildIsSubject = false,
+    // Several identity parts instead of IdentityField: [record subject, part...].
+    IReadOnlyList<SourceIdentityPart>? IdentityParts = null);
+
+/// <summary>
+/// One part of a composed child identity: a child-relative path ("lexeme/@name", "@POS")
+/// whose values in source order are joined (Join, default one space) and optionally
+/// resolved through a governed vocabulary ("pos/framenet": V -> VERB).
+/// </summary>
+public sealed record SourceIdentityPart(
+    string Path,
+    string? Vocabulary = null,
+    string? Join = null);
 
 /// <summary>
 /// A grouped delimited record (a CoNLL-U sentence) lowered to its trunk's parse

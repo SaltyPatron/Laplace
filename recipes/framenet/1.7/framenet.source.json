@@ -1,0 +1,113 @@
+{
+  "authority": "FrameNet",
+  "release": "1.7",
+  "sourceName": "FrameNet",
+  "trustClass": "AcademicCurated",
+  "layerOrder": 3,
+  "selected": false,
+  "root": "/vault/Data/FrameNet/framenet_v17",
+  "aliases": [
+    "framenet-recipe"
+  ],
+  "artifacts": [
+    {
+      "selector": "frame/*.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "FrameNet/frame-1.7",
+      "recipePath": "frame.recipe.json",
+      "recordDepth": 0
+    },
+    {
+      "selector": "lu/*.xml",
+      "disposition": "unsupported",
+      "required": true,
+      "reason": "Lexical-unit files (valence patterns, annotated sentences) need the lexical-unit recipe; not yet written."
+    },
+    {
+      "selector": "fulltext/*.xml",
+      "disposition": "unsupported",
+      "required": true,
+      "reason": "Full-text annotations need the span recipe; not yet written."
+    },
+    {
+      "selector": "semTypes.xml",
+      "disposition": "unsupported",
+      "required": false,
+      "reason": "Semantic type hierarchy recipe not yet written."
+    },
+    {
+      "selector": "frRelation.xml",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "The same frame-to-frame relations every frame file states in frameRelation."
+    },
+    {
+      "selector": "frameIndex.xml",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Index of the frame files."
+    },
+    {
+      "selector": "luIndex.xml",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Index of the lexical-unit files."
+    },
+    {
+      "selector": "fulltextIndex.xml",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Index of the full-text files."
+    },
+    {
+      "selector": "*.xsl",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Presentation stylesheets."
+    },
+    {
+      "selector": "frame/*.xsl",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Presentation stylesheets."
+    },
+    {
+      "selector": "lu/*.xsl",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Presentation stylesheets."
+    },
+    {
+      "selector": "fulltext/*.xsl",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Presentation stylesheets."
+    },
+    {
+      "selector": "schema/*.xsd",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Format declarations; governed vocabularies come from commonTypes.xsd via the vocabulary manifest."
+    },
+    {
+      "selector": "miscXML/*.xml",
+      "disposition": "unsupported",
+      "required": false,
+      "reason": "Release differences and lemma/lexeme-to-wordform maps; recipe not yet written."
+    },
+    {
+      "selector": "docs/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Documentation."
+    },
+    {
+      "selector": "README.txt",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Documentation."
+    }
+  ]
+}

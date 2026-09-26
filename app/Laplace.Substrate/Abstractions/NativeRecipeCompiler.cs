@@ -59,7 +59,8 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
-        bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 });
+        bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 })
+            || recipe.Fields.Any(static f => f.ObjectScopedToRecord);
         uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -197,6 +198,7 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.QualifierFamily);
                 WriteText(writer, field.QualifierField);
             }
+            if (version >= Rcp8) writer.Write(field.ObjectScopedToRecord ? 1u : 0u);
         }
 
         if (version >= Rcp4)
@@ -314,6 +316,14 @@ public static class NativeRecipeCompiler
                     WriteHash(writer, child.ParentRelation is null
                         ? Hash128.Zero : RelationTypeRegistry.Resolve(child.ParentRelation).Id);
                     WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
+                    writer.Write(child.ChildIsSubject ? 1u : 0u);
+                    writer.Write(checked((uint)(child.IdentityParts?.Count ?? 0)));
+                    foreach (SourceIdentityPart part in child.IdentityParts ?? [])
+                    {
+                        WriteText(writer, part.Path);
+                        WriteText(writer, part.Vocabulary);
+                        WriteText(writer, part.Join);
+                    }
                 }
             }
         }

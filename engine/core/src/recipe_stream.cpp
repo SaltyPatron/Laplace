@@ -80,6 +80,10 @@ struct field_rule {
     std::array<uint8_t, 32> qualifiers{};
     bool has_qualifiers = false;
     std::string qualifier_family, qualifier_field;
+    // RCP8: the object is the ordered composition [record subject, value], the same
+    // identity a child subject of that record has (a FrameNet requiresFE names an FE
+    // of the same frame).
+    bool object_record_scoped = false;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -114,6 +118,15 @@ struct route_rule {
     struct child_subject_rule {
         std::string identity;
         hash128_t relation{}, entity_type{};
+        bool child_is_subject = false;   // child -rel-> parent (an LU EVOKES_FRAME its frame)
+        // Several identity parts, each a record-relative path whose values in source
+        // order are joined and optionally resolved through a governed vocabulary: a
+        // FrameNet lexical unit is [frame, its lexemes' text, UPOS]. Empty = identity.
+        struct identity_part {
+            std::string path, join;
+            field_rule::vocabulary_rule vocabulary;
+        };
+        std::vector<identity_part> parts;
     };
     std::unordered_map<std::string, child_subject_rule> child_subjects;
 };
@@ -276,7 +289,8 @@ struct laplace_recipe_stream {
     stage_ptr ready{nullptr, intent_stage_free};
     uint64_t ready_completed = 0;
     hash128_t subject{};
-    content_form subject_form{};     // the record subject's content, when it is content
+    content_form subject_form{};     // the current subject's form, when it is content
+    content_form record_subject_form{};  // the record's own subject (child subjects scope to it)
     bool subject_form_known = false;
     // Observation structure (not testimony): each record's observed content in source
     // order composes the record's trunk, and the records compose the file's trunk, so
@@ -392,6 +406,24 @@ struct laplace_recipe_stream {
     }
     hash128_t content(intent_stage_t* stage, const std::string& text) {
         return compose_content(stage, text).id;
+    }
+    // [record subject, value]: the identity a child subject of this record named value has.
+    hash128_t scoped_to_record(intent_stage_t* stage, const field_rule& rule, const std::string& value) {
+        if (!subject_form_known) throw std::runtime_error("record-scoped object needs a content subject");
+        const content_form b = compose_content(stage, value);
+        laplace_ordered_component_t parts[2]{};
+        parts[0].id = record_subject_form.id; std::memcpy(parts[0].coord, record_subject_form.coord, sizeof(parts[0].coord));
+        parts[0].tier = record_subject_form.tier; parts[0].atom = record_subject_form.atom;
+        parts[0].has_atom = record_subject_form.tier == 0;
+        parts[1].id = b.id; std::memcpy(parts[1].coord, b.coord, sizeof(parts[1].coord));
+        parts[1].tier = b.tier; parts[1].atom = b.atom; parts[1].has_atom = b.tier == 0;
+        laplace_ordered_composition_request_t request{};
+        request.components = parts; request.component_count = 2;
+        request.type_id = rule.entity_type; request.source_id = current_witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "record-scoped object");
+        return result.id;
     }
     // The ordered composition [key, value] of two content parts, composed and staged
     // by the native ordered-composition kernel (identity, placement, trajectory).
@@ -831,7 +863,8 @@ struct laplace_recipe_stream {
             return;
         }
         else if (rule.kind == 8) {
-            f.object = content(stage, governed(rule, identify(rule.identity_table, raw)));
+            const std::string value = governed(rule, identify(rule.identity_table, raw));
+            f.object = rule.object_record_scoped ? scoped_to_record(stage, rule, value) : content(stage, value);
         }
         else if (rule.kind == 9) {
             // Structured text carries its own markup (FrameNet's <def-root>, <fen>,
@@ -995,6 +1028,7 @@ struct laplace_recipe_stream {
                 subject_form = compose_content(stage, identify(route.identity_table, value));
                 subject = subject_form.id;
                 subject_form_known = true;
+                record_subject_form = subject_form;
             }
             else if (route.subject_codec == 2)
                 subject = content(stage, sequence_text(value, route.separator));
@@ -1050,18 +1084,35 @@ struct laplace_recipe_stream {
     void lower_child_subject(intent_stage_t* stage, const route_rule& route, const node& child,
         const std::string& path, const std::string& prefix, const route_rule::child_subject_rule& rule,
         const std::map<std::string, std::string>* ancestors) {
-        const std::string key = child.get(rule.identity);
-        if (key.empty()) throw std::runtime_error("child subject has no identity value: " + path);
         if (!subject_form_known)
             throw std::runtime_error("child subjects compose over a content subject: " + path);
-        const content_form label = compose_content(stage, key);
-        laplace_ordered_component_t parts[2]{};
-        parts[0].id = subject_form.id; std::memcpy(parts[0].coord, subject_form.coord, sizeof(parts[0].coord));
-        parts[0].tier = subject_form.tier; parts[0].atom = subject_form.atom; parts[0].has_atom = subject_form.tier == 0;
-        parts[1].id = label.id; std::memcpy(parts[1].coord, label.coord, sizeof(parts[1].coord));
-        parts[1].tier = label.tier; parts[1].atom = label.atom; parts[1].has_atom = label.tier == 0;
+        std::vector<laplace_ordered_component_t> parts;
+        auto add_part = [&](const content_form& c) {
+            laplace_ordered_component_t part{};
+            part.id = c.id; std::memcpy(part.coord, c.coord, sizeof(part.coord));
+            part.tier = c.tier; part.atom = c.atom; part.has_atom = c.tier == 0;
+            parts.push_back(part);
+        };
+        add_part(record_subject_form);
+        if (rule.parts.empty()) {
+            const std::string key = child.get(rule.identity);
+            if (key.empty()) throw std::runtime_error("child subject has no identity value: " + path);
+            add_part(compose_content(stage, key));
+        } else {
+            for (const auto& part : rule.parts) {
+                std::vector<std::string> values;
+                collect(child, part.path, values);
+                if (values.empty()) throw std::runtime_error("child subject identity part is absent: " + part.path);
+                std::string text;
+                for (size_t k = 0; k < values.size(); ++k) {
+                    if (k) text += part.join.empty() ? " " : part.join;
+                    text += values[k];
+                }
+                add_part(compose_content(stage, governed_value(part.vocabulary, text)));
+            }
+        }
         laplace_ordered_composition_request_t request{};
-        request.components = parts; request.component_count = 2;
+        request.components = parts.data(); request.component_count = parts.size();
         request.type_id = rule.entity_type; request.source_id = current_witness;
         request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
         laplace_ordered_composition_result_t result{};
@@ -1069,9 +1120,18 @@ struct laplace_recipe_stream {
         const hash128_t child_id = result.id;
         if (nonzero(rule.relation)) {
             fact f;
-            f.relation = rule.relation; f.object = child_id; f.has_object = true;
+            f.relation = rule.relation; f.has_object = true;
+            if (rule.child_is_subject) { f.subject = child_id; f.has_subject = true; f.object = subject; }
+            else f.object = child_id;
             facts.push_back(f);
         }
+        // The child is the current subject while it lowers, so subject modes and
+        // record-scoped objects read relative to it; the record's subject returns after.
+        const hash128_t outer_subject = subject;
+        const content_form outer_form = subject_form;
+        subject = child_id;
+        subject_form.id = child_id; std::memcpy(subject_form.coord, result.coord, sizeof(subject_form.coord));
+        subject_form.tier = result.tier; subject_form.atom = 0;
         const size_t first = facts.size();
         const auto seen = with_ancestors(child, ancestors);
         for (const auto& a : child.attributes) {
@@ -1083,6 +1143,8 @@ struct laplace_recipe_stream {
             lower_child(stage, route, grandchild, path + "/" + grandchild.name, &seen);
         for (size_t k = first; k < facts.size(); ++k)
             if (!facts[k].has_subject) { facts[k].subject = child_id; facts[k].has_subject = true; }
+        subject = outer_subject;
+        subject_form = outer_form;
     }
     // Nested elements lower against the record's subject under the prefix the route
     // declares for their path ("Sense", "Sense/SenseRelation").
@@ -1240,6 +1302,11 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 }
                 f.qualifier_family = r.text(); f.qualifier_field = r.text();
             }
+            if (rcp8) {
+                const uint32_t scoped = r.number();
+                if (scoped > 1) throw std::runtime_error("invalid object-scope instruction at " + f.path);
+                f.object_record_scoped = scoped != 0;
+            }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;
@@ -1319,6 +1386,19 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     rule.identity = r.text();
                     rule.relation = r.hash();
                     rule.entity_type = r.hash();
+                    const uint32_t direction = r.number();
+                    if (direction > 1) throw std::runtime_error("invalid child subject direction");
+                    rule.child_is_subject = direction != 0;
+                    const uint32_t part_count = r.number();
+                    for (uint32_t q = 0; q < part_count; ++q) {
+                        route_rule::child_subject_rule::identity_part part;
+                        part.path = r.text();
+                        const std::string vocabulary = r.text();
+                        if (!vocabulary.empty()) part.vocabulary = parse_vocabulary(vocabulary, part.path);
+                        part.join = r.text();
+                        if (part.path.empty()) throw std::runtime_error("child subject identity part has no path");
+                        rule.parts.push_back(std::move(part));
+                    }
                     if (path.empty() || rule.identity.empty() || !route.children.count(path))
                         throw std::runtime_error("child subject names no declared child path");
                     if (!route.child_subjects.emplace(std::move(path), std::move(rule)).second)
