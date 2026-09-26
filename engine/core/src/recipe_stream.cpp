@@ -177,6 +177,7 @@ struct route_rule {
         std::string outcome_field, refute_value;   // the link is refuted on this attribute value
     };
     std::unordered_map<std::string, child_subject_rule> child_subjects;
+    bool subject_optional = false;   // a record without an identity value lowers nothing
 };
 using node = recipe_node;
 static uint32_t point(const std::string& s) {
@@ -1325,6 +1326,12 @@ struct laplace_recipe_stream {
         const auto& route = route_it->second;
         const std::string identity = record.get(route.identity);
         current_identity = identity;
+        if (route.subject_optional && identity.empty() && (route.first.empty() || record.get(route.first).empty())) {
+            facts.clear(); last_fact.clear(); fact_offset = 0;
+            range = false; membership = false; record_facts_done = true; subject = {};
+            active = true;
+            return;
+        }
         record_context = record.name + " [" + (identity.empty()
             ? route.first + "=" + record.get(route.first) + ", " + route.last + "=" + record.get(route.last)
             : route.identity + "=" + identity.substr(0, 160) + (identity.size() > 160 ? "..." : "")) + "]";
@@ -1813,7 +1820,8 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                             std::vector<std::string> cols;
                             const uint32_t n = r.number();
                             for (uint32_t c = 0; c < n; ++c) cols.push_back(r.text());
-                            if (key.empty() || cols.empty() || !config.keyed_columns.emplace(std::move(key), std::move(cols)).second)
+                            // An empty key names lines that begin with the separator.
+                            if (cols.empty() || !config.keyed_columns.emplace(std::move(key), std::move(cols)).second)
                                 throw std::runtime_error("invalid keyed column layout");
                         }
                         config.comment_column = r.text(); config.comment_pattern = r.text();
@@ -1822,6 +1830,15 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         const uint32_t keys = r.number();
                         for (uint32_t g = 0; g < keys; ++g) config.state_keys.push_back(r.text());
                         config.state_separator = r.text();
+                        config.pattern_column = r.text();
+                        const uint32_t named = r.number();
+                        for (uint32_t g = 0; g < named; ++g) {
+                            auto key = r.text(); auto name = r.text();
+                            if (!config.keyed_record_names.emplace(std::move(key), std::move(name)).second)
+                                throw std::runtime_error("duplicate keyed record name");
+                        }
+                        const uint32_t carried = r.number();
+                        for (uint32_t g = 0; g < carried; ++g) config.carry_columns.push_back(r.text());
                         if (config.comment_pattern.empty() != config.comment_groups.empty()
                             || (!config.state_keys.empty() && config.state_separator.empty()))
                             throw std::runtime_error("invalid comment-data instruction");
@@ -2042,6 +2059,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         throw std::runtime_error("conditional prefix names no declared child path: " + path);
                     route.conditional_prefixes[path].push_back(std::move(c));
                 }
+                const uint32_t optional = r.number();
+                if (optional > 1) throw std::runtime_error("invalid optional-subject instruction");
+                route.subject_optional = optional != 0;
                 if (route.kind == 4 && route.subject_parts.empty())
                     throw std::runtime_error("composition subject declares no parts at " + route.name);
             }

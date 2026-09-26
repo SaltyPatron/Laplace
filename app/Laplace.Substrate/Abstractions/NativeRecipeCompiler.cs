@@ -60,8 +60,10 @@ public static class NativeRecipeCompiler
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
         bool childSubjects = recipe.DelimitedSyntax?.KeyedColumns is { Count: > 0 }
+            || recipe.ProviderRoutes.Any(static r => r.SubjectOptional)
             || recipe.DelimitedSyntax?.CommentColumn is not null || recipe.DelimitedSyntax?.CommentPattern is not null
             || recipe.DelimitedSyntax?.StateKeys is { Count: > 0 }
+            || recipe.DelimitedSyntax?.KeyedRecordNames is { Count: > 0 } || recipe.DelimitedSyntax?.CarryColumns is { Count: > 0 }
             || recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
@@ -150,6 +152,13 @@ public static class NativeRecipeCompiler
                     writer.Write(checked((uint)(syntax.StateKeys?.Count ?? 0)));
                     foreach (string key in syntax.StateKeys ?? []) WriteText(writer, key);
                     WriteText(writer, syntax.StateSeparator);
+                    WriteText(writer, syntax.PatternColumn);
+                    var names = (syntax.KeyedRecordNames ?? new Dictionary<string, string>())
+                        .OrderBy(static pair => pair.Key, StringComparer.Ordinal).ToArray();
+                    writer.Write(checked((uint)names.Length));
+                    foreach (var name in names) { WriteText(writer, name.Key); WriteText(writer, name.Value); }
+                    writer.Write(checked((uint)(syntax.CarryColumns?.Count ?? 0)));
+                    foreach (string column in syntax.CarryColumns ?? []) WriteText(writer, column);
                 }
             }
         }
@@ -405,6 +414,7 @@ public static class NativeRecipeCompiler
                     WriteText(writer, conditional.Value);
                     WriteText(writer, conditional.Prefix);
                 }
+                writer.Write(route.SubjectOptional ? 1u : 0u);
             }
         }
 

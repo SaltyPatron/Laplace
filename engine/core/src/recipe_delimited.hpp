@@ -58,6 +58,13 @@ struct recipe_delimited_config {
     // whose value holds for the records that follow.
     std::string comment_column, comment_pattern, state_separator;
     std::vector<std::string> comment_groups, state_keys;
+    // The pattern reads this column instead of the comment (NamesList's annotation).
+    std::string pattern_column;
+    // A keyed line's record name (NamesList's block headers and notices are their own
+    // records), and columns whose last value holds for later records that lack them (a
+    // character's code point for its annotation lines; a subheader for its characters).
+    std::map<std::string, std::string> keyed_record_names;
+    std::vector<std::string> carry_columns;
 };
 
 class recipe_delimited_stream {
@@ -72,6 +79,7 @@ class recipe_delimited_stream {
     std::vector<std::vector<std::string>> group_lines_;
     std::vector<std::vector<std::string>> group_row_cells_;
     std::map<std::string, std::string> state_;       // comment-set values for later records
+    std::map<std::string, std::string> carried_;     // carry-column values for later records
     std::unique_ptr<std::regex> comment_regex_;
 
     static std::string_view trim(std::string_view text) {
@@ -140,10 +148,13 @@ class recipe_delimited_stream {
             }
         }
         const std::vector<std::string>* layout = directive ? &config.directive_columns : &config.columns;
+        const std::string* record_name = directive ? &config.directive_record_name : &config.record_name;
         if (!directive && !config.keyed_columns.empty()) {
             const auto key = trim(text.substr(0, text.find(config.separator)));
             const auto keyed = config.keyed_columns.find(std::string(key));
             if (keyed != config.keyed_columns.end()) layout = &keyed->second;
+            const auto named = config.keyed_record_names.find(std::string(key));
+            if (named != config.keyed_record_names.end()) record_name = &named->second;
         }
         const auto& columns = *layout;
         std::map<std::string, std::string> values;
@@ -200,10 +211,15 @@ class recipe_delimited_stream {
             if (!config.comment_column.empty() && !comment_text.empty()
                 && !values.emplace(config.comment_column, comment_text).second)
                 fail("comment column collides with a declared column");
-            if (!config.comment_pattern.empty() && !comment_text.empty()) {
+            std::string pattern_text = comment_text;
+            if (!config.pattern_column.empty()) {
+                const auto source = values.find(config.pattern_column);
+                pattern_text = source == values.end() ? std::string{} : source->second;
+            }
+            if (!config.comment_pattern.empty() && !pattern_text.empty()) {
                 if (!comment_regex_) comment_regex_ = std::make_unique<std::regex>(config.comment_pattern);
                 std::smatch match;
-                if (std::regex_match(comment_text, match, *comment_regex_))
+                if (std::regex_match(pattern_text, match, *comment_regex_))
                     for (size_t g = 0; g < config.comment_groups.size() && g + 1 < match.size(); ++g)
                         if (match[g + 1].matched && !values.emplace(config.comment_groups[g], match[g + 1].str()).second)
                             fail("comment field collides with a declared column: " + config.comment_groups[g]);
@@ -211,6 +227,11 @@ class recipe_delimited_stream {
             for (const auto& state : state_)
                 if (!values.emplace(state.first, state.second).second)
                     fail("comment state collides with a declared column: " + state.first);
+            for (const auto& column : config.carry_columns) {
+                const auto own = values.find(column);
+                if (own != values.end()) carried_[column] = own->second;   // a layout naming it sets it, even to empty
+                else values.emplace(column, carried_[column]);
+            }
         }
         if (config.group_blank_lines && !directive) {
             if (!config.skip_key_column.empty()) {
@@ -227,7 +248,7 @@ class recipe_delimited_stream {
             group_row_cells_.push_back(std::move(cells));
             return;
         }
-        emit(directive ? config.directive_record_name : config.record_name,
+        emit(*record_name,
              config.namespace_uri, std::move(values),
              recipe_delimited_structure{std::move(cells), nullptr});
     }

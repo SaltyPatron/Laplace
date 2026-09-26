@@ -373,8 +373,11 @@
     {
       "selector": "ucd/NamesList.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX44/NamesList",
+      "recipePath": "names-list.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/NormalizationCorrections.txt",

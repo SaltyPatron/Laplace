@@ -251,7 +251,10 @@ public sealed record SourceRecipeProviderRoute(
     // composition [record subject, content(identity attribute)].
     IReadOnlyList<SourceChildSubject>? ChildSubjects = null,
     IReadOnlyList<SourceElementComposition>? ElementCompositions = null,
-    IReadOnlyList<SourceConditionalPrefix>? ConditionalPrefixes = null);
+    IReadOnlyList<SourceConditionalPrefix>? ConditionalPrefixes = null,
+    // A record without an identity value is not about anything this route names and
+    // lowers nothing (NamesList's header prose, before any character).
+    bool SubjectOptional = false);
 
 /// <summary>
 /// A child path's field prefix chosen by an attribute condition over the element and its
@@ -412,7 +415,13 @@ public sealed record SourceDelimitedSyntax(
     string? CommentPattern = null,
     IReadOnlyList<string>? CommentGroups = null,
     IReadOnlyList<string>? StateKeys = null,
-    string StateSeparator = ":")
+    string StateSeparator = ":",
+    // The pattern reads this column instead of the comment.
+    string? PatternColumn = null,
+    // A keyed line's record name, and columns whose last value holds for later records
+    // that lack them (NamesList: a character's code point for its annotation lines).
+    IReadOnlyDictionary<string, string>? KeyedRecordNames = null,
+    IReadOnlyList<string>? CarryColumns = null)
 {
     public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
 }

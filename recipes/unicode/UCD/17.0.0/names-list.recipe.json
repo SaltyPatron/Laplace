@@ -1,0 +1,348 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX44/NamesList",
+  "fields": [
+    {
+      "syntaxPath": "record/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Codepoint",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepoint"
+    },
+    {
+      "syntaxPath": "record/@subheader",
+      "propertyName": "subheader",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "NamesList_Subheader"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@name",
+      "propertyName": "name",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Codepoint",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepoint"
+    },
+    {
+      "syntaxPath": "annotation/@alias",
+      "propertyName": "informativeAlias",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/alias"
+      ]
+    },
+    {
+      "syntaxPath": "annotation/@note",
+      "propertyName": "note",
+      "valueKind": "Text",
+      "disposition": "Content"
+    },
+    {
+      "syntaxPath": "annotation/@xref",
+      "propertyName": "crossReference",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "RELATED_TO",
+      "objectParts": [
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "annotation/@indent",
+      "propertyName": "indent",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@annotation",
+      "propertyName": "annotation",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@noticeAnnotation",
+      "propertyName": "noticeAnnotation",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@subheader",
+      "propertyName": "subheader",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@formalAlias",
+      "propertyName": "formalAlias",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@compat",
+      "propertyName": "compat",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@decomposition",
+      "propertyName": "decomposition",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "annotation/@variation",
+      "propertyName": "variation",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "subheader/@subheader",
+      "propertyName": "subheader",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "subheader/@marker",
+      "propertyName": "marker",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "subheader/@indent",
+      "propertyName": "indent",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "subheader/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "block/@blockName",
+      "propertyName": "blockName",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "block/@marker",
+      "propertyName": "marker",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "block/@blockStart",
+      "propertyName": "blockStart",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "block/@blockEnd",
+      "propertyName": "blockEnd",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "block/@subheader",
+      "propertyName": "subheader",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "block/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "notice/@notice",
+      "propertyName": "notice",
+      "valueKind": "Text",
+      "disposition": "Content"
+    },
+    {
+      "syntaxPath": "notice/@marker",
+      "propertyName": "marker",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "notice/@indent",
+      "propertyName": "indent",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "notice/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "notice/@subheader",
+      "propertyName": "subheader",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "codepoint"
+      }
+    },
+    {
+      "recordName": "annotation",
+      "namespaceUri": "",
+      "fieldPrefix": "annotation",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "codepoint"
+      },
+      "subjectOptional": true
+    },
+    {
+      "recordName": "subheader",
+      "namespaceUri": "",
+      "fieldPrefix": "subheader",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "subheader"
+      }
+    },
+    {
+      "recordName": "block",
+      "namespaceUri": "",
+      "fieldPrefix": "block",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "blockName"
+      }
+    },
+    {
+      "recordName": "notice",
+      "namespaceUri": "",
+      "fieldPrefix": "notice",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "notice"
+      },
+      "subjectOptional": true
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": "\t",
+    "commentPrefix": "",
+    "trimFields": true,
+    "columns": [
+      "codepoint",
+      "name"
+    ],
+    "minimumColumns": 1,
+    "keyedColumns": {
+      "": [
+        "indent",
+        "annotation",
+        "noticeAnnotation"
+      ],
+      "@": [
+        "marker",
+        "indent",
+        "subheader"
+      ],
+      "@@": [
+        "marker",
+        "blockStart",
+        "blockName",
+        "blockEnd",
+        "subheader"
+      ],
+      "@+": [
+        "marker",
+        "indent",
+        "notice"
+      ],
+      "@@+": [
+        "marker",
+        "indent",
+        "notice"
+      ],
+      "@~": [
+        "marker",
+        "notice"
+      ],
+      "@@@": [
+        "marker",
+        "notice"
+      ],
+      "@@@+": [
+        "marker",
+        "notice"
+      ],
+      "; charset=UTF-8": [
+        "notice"
+      ]
+    },
+    "keyedRecordNames": {
+      "": "annotation",
+      "@": "subheader",
+      "@@": "block",
+      "@+": "notice",
+      "@@+": "notice",
+      "@~": "notice",
+      "@@@": "notice",
+      "@@@+": "notice",
+      "; charset=UTF-8": "notice"
+    },
+    "patternColumn": "annotation",
+    "commentPattern": "^(?:= (.+)|\\* (.+)|x \\((?:.* - )?([0-9A-F]{4,6})\\)|x ([0-9A-F]{4,6}(?: [0-9A-F]{4,6})*)|% (.+)|# (.+)|: (.+)|~ (.+))$",
+    "commentGroups": [
+      "alias",
+      "note",
+      "xref",
+      "xref",
+      "formalAlias",
+      "compat",
+      "decomposition",
+      "variation"
+    ],
+    "carryColumns": [
+      "codepoint",
+      "subheader"
+    ]
+  }
+}
