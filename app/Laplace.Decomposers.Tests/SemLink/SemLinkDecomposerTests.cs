@@ -96,10 +96,9 @@ public sealed class SemLinkDecomposerTests
         Hash128 roleset = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
         Hash128 propBankRole = RoleAnchor.Id(RoleIdentityKind.PropBank, roleset, "ARG0")!.Value;
 
-        Assert.Contains(entities, e =>
-            e.Id == predicate && e.TypeId == EntityTypeRegistry.PredicateMatrixPredicate);
-        Assert.Contains(entities, e =>
-            e.Id == matrixRole && e.TypeId == EntityTypeRegistry.PredicateMatrixRole);
+        // A reference key is its content; its declared type is not written into entity rows.
+        Assert.Contains(entities, e => e.Id == predicate);
+        Assert.Contains(entities, e => e.Id == matrixRole);
         Assert.Contains(atts, a =>
             a.SubjectId == predicate
             && a.TypeId == PredicateMatrixSource.HasLanguageTypeId
@@ -117,13 +116,18 @@ public sealed class SemLinkDecomposerTests
     public async Task PredicateMatrix_PreservesMcrAndEsoNativeFieldsWithoutTextAdmission()
     {
         var (entities, atts) = await CollectPredicateMatrixAsync();
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrDomain);
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrSumo);
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrTopOntology);
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrLexname);
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.EsoClass);
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.EsoRole);
-        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.PredicateMatrixAnnotationValue);
+        // MCR and ESO values are content the source states, each staged with its claims.
+        var staged = entities.Select(static e => e.Id).ToHashSet();
+        Hash128 Vocabulary(string field, string value) => ReferenceAnchor.Id(
+            ReferenceIdentityKind.PredicateMatrixVocabulary, $"{field}\0{value}")!.Value;
+        Assert.Contains(Vocabulary("mcr-domain", "factotum"), staged);
+        Assert.Contains(Vocabulary("mcr-sumo", "Motion"), staged);
+        Assert.Contains(Vocabulary("mcr-top", "Dynamic"), staged);
+        Assert.Contains(Vocabulary("mcr-top", "Location"), staged);
+        Assert.Contains(Vocabulary("mcr-lexname", "motion"), staged);
+        Hash128 esoClass = Vocabulary("eso-class", "Transfer");
+        Assert.Contains(esoClass, staged);
+        Assert.Contains(RoleAnchor.Id(RoleIdentityKind.Eso, esoClass, "source")!.Value, staged);
 
         Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasDomainTopicTypeId);
         Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasLexCategoryTypeId);
@@ -167,8 +171,9 @@ public sealed class SemLinkDecomposerTests
         try
         {
             Assert.Equal(4L, await PredicateMatrixIngest.EstimateRecordCountAsync(path, null, default));
+            // The scope names the tag the source writes; ISO 639 testimony widens it at ingest.
             Assert.Equal(1L, await PredicateMatrixIngest.EstimateRecordCountAsync(
-                path, LanguageFilter.FromSpec("es"), default));
+                path, LanguageFilter.FromSpec("spa"), default));
         }
         finally { try { File.Delete(path); } catch { } }
     }
@@ -242,18 +247,19 @@ public sealed class SemLinkDecomposerTests
             await foreach (var change in phase.DecomposeAsync(
                 new FakeContext(new NullWriter()), DecomposerOptions.Default).WithoutWriter())
             {
-                entities.AddRange(change.Entities.ToArray());
-                atts.AddRange(change.Attestations.ToArray());
+                entities.AddRange(StagedChangeRows.Entities(change));
+                atts.AddRange(StagedChangeRows.Attestations(change));
             }
 
-            Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.SourceFile);
-
+            // The annotated corpus file is named by its content; the occurrence appears in it.
             Hash128 appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
-            Hash128 occurrence = Assert.Single(atts, a =>
+            AttestationRow appearance = Assert.Single(atts, a =>
                 a.TypeId == appearsIn
                 && a.ContextId is { } ctx
                 && a.SubjectId == ctx
-                && a.ObjectId is not null).SubjectId;
+                && a.ObjectId is not null);
+            Hash128 occurrence = appearance.SubjectId;
+            Assert.Contains(entities, e => e.Id == appearance.ObjectId);
             Hash128 lemma = ContentEmitter.RootId("join")!.Value;
 
             foreach (string relation in new[]
@@ -482,8 +488,8 @@ public sealed class SemLinkDecomposerTests
             {
                 await foreach (var change in phase.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 {
-                    ents.AddRange(change.Entities.ToArray());
-                    atts.AddRange(change.Attestations.ToArray());
+                    ents.AddRange(StagedChangeRows.Entities(change));
+                    atts.AddRange(StagedChangeRows.Attestations(change));
                 }
             }
             return (ents, atts);
@@ -510,8 +516,8 @@ public sealed class SemLinkDecomposerTests
             var atts = new List<AttestationRow>();
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
-                ents.AddRange(change.Entities.ToArray());
-                atts.AddRange(change.Attestations.ToArray());
+                ents.AddRange(StagedChangeRows.Entities(change));
+                atts.AddRange(StagedChangeRows.Attestations(change));
             }
             return (ents, atts);
         }
@@ -532,8 +538,8 @@ public sealed class SemLinkDecomposerTests
             var atts = new List<AttestationRow>();
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
-                ents.AddRange(change.Entities.ToArray());
-                atts.AddRange(change.Attestations.ToArray());
+                ents.AddRange(StagedChangeRows.Entities(change));
+                atts.AddRange(StagedChangeRows.Attestations(change));
             }
             return (ents, atts);
         }

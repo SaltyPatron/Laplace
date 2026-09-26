@@ -95,7 +95,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
         long resolvable = await ScalarLong(
             @"SELECT count(*) FROM laplace.entities e
-              WHERE e.type_id = realize.canonical_id('Codepoint')
+              WHERE e.type_id = laplace.entity_type_id('Codepoint')
                 AND e.tier = 0
                 AND realize.codepoint_for_id(e.id) IS NOT NULL");
         Assert.True(resolvable > 1_100_000, $"perfcache-resolvable codepoints unexpectedly few: {resolvable:N0}");

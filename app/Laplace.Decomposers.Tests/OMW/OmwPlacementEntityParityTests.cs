@@ -31,7 +31,10 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
 
         string fileLang = OMWTabFiles.FileLang(tab!);
         var builder = new SubstrateChangeBuilder(OMWDecomposer.Source, "omw-semantic-values");
-        using var expected = IntentStage.New(256);
+        // The oracle stages what a row states and nothing of its packaging: the lemma, the
+        // synset it names, its language tag and a lemma's part of speech, each as content.
+        using var oracle = new SubstrateChangeBuilder(OMWDecomposer.Source, "omw-oracle");
+        IntentStage expected = oracle.ContentStage;
         long rows = 0;
 
         await foreach (var line in StreamingUtf8LineReader.ReadLinesAsync(tab!))
@@ -41,12 +44,17 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
                 continue;
             OMWEmitter.Emit(builder, row, valueUtf8);
 
-            // Supply only the selected semantic value to the native content owner.
-            // The synset key, field tag and TSV delimiters never enter this oracle.
+            // Field tags and TSV delimiters never enter this oracle.
             byte[] semanticValue = NormalizeValue(valueUtf8);
-            if (semanticValue.Length > 0)
-                Assert.True(expected.TryAddContentWitness(
-                    semanticValue, OMWDecomposer.Source, out _));
+            if (semanticValue.Length > 0
+                && expected.TryAddContentWitness(semanticValue, OMWDecomposer.Source, out _)
+                && ConceptAnchor.EmitAnchor(oracle, row.Offset, row.SsType, OMWDecomposer.Source) is not null)
+            {
+                LanguageReference.Emit(oracle, row.Lang, OMWDecomposer.Source, SourceTrust.AcademicCurated);
+                if (row.Type == OmwType.Lemma && !row.Removed)
+                    PosReference.Emit(oracle, row.SsType.ToString(), PosReference.PosTagset.WordNet,
+                        OMWDecomposer.Source, SourceTrust.AcademicCurated);
+            }
             rows++;
         }
 

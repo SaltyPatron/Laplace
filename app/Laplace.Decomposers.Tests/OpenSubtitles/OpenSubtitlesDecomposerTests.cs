@@ -83,7 +83,7 @@ public sealed class OpenSubtitlesDecomposerTests
             var ctx = new FakeContext(dir, new NullWriter());
 
             var entities = new Dictionary<Hash128, EntityRow>();
-            var physicalities = new Dictionary<Hash128, PhysicalityRow>();
+            var trajectories = new Dictionary<Hash128, double[]>();
             int translationEdges = 0, languageEdges = 0, intentStages = 0;
             var langObjects = new HashSet<Hash128>();
             var languageSubjects = new HashSet<Hash128>();
@@ -96,8 +96,9 @@ public sealed class OpenSubtitlesDecomposerTests
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
                     continue;
                 intentStages += change.IntentStages.Length;
-                foreach (var e in change.Entities) entities[e.Id] = e;
-                foreach (var p in change.Physicalities) physicalities[p.EntityId] = p;
+                foreach (var e in StagedChangeRows.Entities(change)) entities[e.Id] = e;
+                foreach (var form in StagedChangeRows.Forms(change))
+                    if (form.TrajectoryXyzm is { } xyzm) trajectories[form.EntityId] = xyzm;
                 foreach (var a in change.Attestations)
                 {
                     if (a.TypeId == translationType)
@@ -154,18 +155,19 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[rightSequence].TypeId);
             Assert.Equal(
                 [helloId.Value, whatId.Value],
-                Trajectory.Constituents(physicalities[leftSequence].TrajectoryXyzm!));
+                Trajectory.Constituents(trajectories[leftSequence]));
             Assert.Equal(
                 [holaId.Value, comoId.Value],
-                Trajectory.Constituents(physicalities[rightSequence].TrajectoryXyzm!));
+                Trajectory.Constituents(trajectories[rightSequence]));
             Assert.True(languageSubjects.SetEquals([leftSequence, rightSequence]));
 
-            Hash128 pairReference =
-                Hash128.OfCanonical("opensubtitles/language-pair/en-es/v1");
-            Hash128 start = Hash128.OfCanonical("opensubtitles/source-ordinal/1/v1");
-            Hash128 end = Hash128.OfCanonical("opensubtitles/source-ordinal/2/v1");
+            // Every constituent of an alignment is content: its schema text, the language
+            // pair as written, and the ordinals as numbers.
+            Hash128 pairReference = ContentEmitter.RootId("en-es")!.Value;
+            Hash128 start = ContentEmitter.RootId("1")!.Value;
+            Hash128 end = ContentEmitter.RootId("2")!.Value;
             Hash128 alignmentSchema =
-                Hash128.OfCanonical("opensubtitles/alignment-block512/schema/v1");
+                ContentEmitter.RootId("opensubtitles/alignment-block512/schema/v1")!.Value;
             Hash128[] alignmentMembers =
             [
                 alignmentSchema, pairReference,
@@ -175,7 +177,7 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.Equal(EntityTypeRegistry.OpenSubtitlesAlignment, entities[alignment].TypeId);
             Assert.Equal(
                 alignmentMembers,
-                Trajectory.Constituents(physicalities[alignment].TrajectoryXyzm!));
+                Trajectory.Constituents(trajectories[alignment]));
         }
         finally
         {

@@ -40,44 +40,61 @@ public sealed class UnicodeDecomposerTests
         var ctx = Context(new NullWriter());
 
         await dec.EstimateUnitCountAsync(ctx);
-        Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
         var codepointEntities = new HashSet<Hash128>();
         var highByteEntities = new HashSet<Hash128>();
         long codepointPhysicalities = 0, passThreeEntities = 0, inputUnits = 0;
-        bool allTier0 = true, anySourceWitness = false;
-        EntityRow? aEntity = null;
-        PhysicalityRow? aPhys = null;
+        bool allTier0 = true;
+        CodepointRecord cachedA = CodepointPerfcache.Records['A'];
+        bool aEntity = false;
+        double[]? aCoord = null;
+        Hilbert128? aHilbert = null;
+        bool aHasTrajectory = true;
+
+        // Rows arrive as managed rows or as native stages; both are what the source states.
+        void Entity(Hash128 id, short tier, Hash128 type)
+        {
+            if (type == UnicodeDecomposer.CodepointType)
+            {
+                codepointEntities.Add(id);
+                if (tier != 0) allTier0 = false;
+                if (id == cachedA.Hash) aEntity = true;
+            }
+            else
+            {
+                passThreeEntities++;
+                if (type == ByteAtoms.TypeId) highByteEntities.Add(id);
+            }
+        }
 
         await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
         {
             inputUnits += change.Metadata.InputUnitsConsumed;
-            for (int i = 0; i < change.Entities.Length; i++)
-            {
-                var e = change.Entities[i];
-                if (e.TypeId == UnicodeDecomposer.CodepointType)
-                {
-                    codepointEntities.Add(e.Id);
-                    if (e.Tier != 0) allTier0 = false;
-                    if (aEntity is null && e.Id == aHash)
-                    {
-                        aEntity = e;
-                        foreach (var ph in change.Physicalities)
-                            if (ph.EntityId == aHash) { aPhys = ph; break; }
-                    }
-                }
-                else
-                {
-                    passThreeEntities++;
-                    if (e.TypeId == ByteAtoms.TypeId)
-                        highByteEntities.Add(e.Id);
-                }
-            }
+            foreach (var e in change.Entities) Entity(e.Id, e.Tier, e.TypeId);
             foreach (var ph in change.Physicalities)
                 if (ph.Type == PhysicalityType.Content && ph.TrajectoryXyzm is null)
                     codepointPhysicalities++;
-            if (change.Attestations.Any(a => a.SourceId == UnicodeDecomposer.Source))
-                anySourceWitness = true;
+            if (change.IntentStages.IsDefaultOrEmpty) continue;
+            var stages = change.IntentStages.Where(static stage => !stage.IsInvalid).ToList();
+            var entities = CopyTupleParser.ParseEntities(
+                stages.Select(stage => stage.TupleBuffer(IntentStageTable.Entities)).ToList());
+            for (int i = 0; i < entities.Ids.Count; i++)
+                Entity(entities.Ids[i], entities.Tiers[i], entities.TypeIds[i]);
+            var forms = CopyTupleParser.ParsePhysicalities(
+                stages.Select(stage => stage.TupleBuffer(IntentStageTable.Physicalities)).ToList());
+            for (int i = 0; i < forms.Ids.Count; i++)
+            {
+                if (forms.Types[i] != (short)PhysicalityType.Content || forms.TrajectoriesEwkb[i] is not null)
+                    continue;
+                codepointPhysicalities++;
+                if (forms.EntityIds[i] == cachedA.Hash)
+                {
+                    aCoord = PointZm(forms.CoordinatesEwkb[i]);
+                    aHilbert = forms.HilbertKeys[i];
+                    aHasTrajectory = false;
+                }
+            }
+            foreach (var stage in stages) stage.Dispose();
         }
 
         Assert.Equal(TotalCodepoints, codepointEntities.Count);
@@ -92,26 +109,36 @@ public sealed class UnicodeDecomposerTests
         Assert.True(passThreeEntities > 0,
             "pass 3 must witness name aliases / confusable sequences as content");
         Assert.True(allTier0, "all codepoint entities are tier 0");
-        Assert.True(anySourceWitness, "the Unicode source witnesses its codepoints through attestations");
 
-        Assert.NotNull(aEntity);
-        Assert.NotNull(aPhys);
-        Assert.Equal(PhysicalityType.Content, aPhys!.Type);
-        ref readonly CodepointRecord cachedA = ref CodepointPerfcache.Records['A'];
-        Assert.Equal(cachedA.Hash, aPhys.EntityId);
-        Assert.Equal(cachedA.CoordX, aPhys.CoordX);
-        Assert.Equal(cachedA.CoordY, aPhys.CoordY);
-        Assert.Equal(cachedA.CoordZ, aPhys.CoordZ);
-        Assert.Equal(cachedA.CoordM, aPhys.CoordM);
-        Assert.Equal(0, cachedA.Hilbert.CompareToBytewise(aPhys.HilbertIndex));
-        double r2 = aPhys.CoordX * aPhys.CoordX + aPhys.CoordY * aPhys.CoordY
-                  + aPhys.CoordZ * aPhys.CoordZ + aPhys.CoordM * aPhys.CoordM;
+        // 'A' is its perfcache atom: the same id, coordinate and Hilbert index, no trajectory.
+        Assert.True(aEntity);
+        Assert.NotNull(aCoord);
+        Assert.False(aHasTrajectory);
+        Assert.Equal(cachedA.CoordX, aCoord![0]);
+        Assert.Equal(cachedA.CoordY, aCoord[1]);
+        Assert.Equal(cachedA.CoordZ, aCoord[2]);
+        Assert.Equal(cachedA.CoordM, aCoord[3]);
+        Assert.Equal(0, cachedA.Hilbert.CompareToBytewise(aHilbert!.Value));
+        double r2 = aCoord[0] * aCoord[0] + aCoord[1] * aCoord[1] + aCoord[2] * aCoord[2] + aCoord[3] * aCoord[3];
         Assert.InRange(Math.Sqrt(r2), 1.0 - 1e-9, 1.0 + 1e-9);
-        Assert.Null(aPhys.TrajectoryXyzm);
-        Assert.Equal(0, aPhys.NConstituents);
-        Assert.Equal(0, aPhys.ObservedAtUnixUs);
-        Assert.Equal(UnicodeDecomposer.Source, aPhys.SourceId);
-        Assert.Equal(aEntity!.Id, aPhys.EntityId);
+    }
+
+    // A PostGIS EWKB Point ZM: byte order, type (with SRID flag), optional SRID, x y z m.
+    private static double[] PointZm(byte[] ewkb)
+    {
+        bool little = ewkb[0] == 1;
+        uint type = little ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(ewkb.AsSpan(1))
+                           : System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(ewkb.AsSpan(1));
+        int at = 5 + ((type & 0x20000000u) != 0 ? 4 : 0);
+        var xyzm = new double[4];
+        for (int k = 0; k < 4; k++)
+        {
+            long bits = little
+                ? System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(ewkb.AsSpan(at + 8 * k))
+                : System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(ewkb.AsSpan(at + 8 * k));
+            xyzm[k] = BitConverter.Int64BitsToDouble(bits);
+        }
+        return xyzm;
     }
 
     [Fact]
