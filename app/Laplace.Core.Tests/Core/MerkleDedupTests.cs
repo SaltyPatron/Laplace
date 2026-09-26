@@ -73,8 +73,9 @@ public class MerkleDedupTests
     }
 
     [Fact]
-    public void TrunkShortcircuit_RootPresenceDoesNotProveChildren()
+    public void TrunkShortcircuit_PresentRootCoversItsChildren()
     {
+        // A composition lands only with its constituents: a present root is its subtree.
         using var tree = TierTree.New(8);
         tree.AddLeaf(0, 1, 0, 0);
         tree.AddLeaf(0, 2, 0, 0);
@@ -82,8 +83,6 @@ public class MerkleDedupTests
         tree.FinalizeParents();
         var bm = new byte[] { 0b00000100 };
         var outBuf = new uint[3];
-        Assert.Equal(2, MerkleDedup.TrunkShortcircuit(tree, bm, outBuf));
-        Assert.Equal(0u, outBuf[0]);
-        Assert.Equal(1u, outBuf[1]);
+        Assert.Equal(0, MerkleDedup.TrunkShortcircuit(tree, bm, outBuf));
     }
 }

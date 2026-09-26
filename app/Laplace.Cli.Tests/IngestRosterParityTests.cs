@@ -80,6 +80,8 @@ public sealed class IngestRosterParityTests
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
     {
+        // Selected source generations are routes too; they come from the CLI's services.
+        CliRuntime.InitializeServices();
         var manifestRoutes = ReadManifestRoutes();
         var runtimeRoutes = IngestDispatchTable.RegisteredKeys
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -87,9 +89,15 @@ public sealed class IngestRosterParityTests
         var missing = manifestRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        // A source generation answers to its source name and each alias: one route.
+        var generations = new Laplace.Decomposers.Composition.SourceGenerationCatalog();
+        bool SameGenerationAsLadderRoute(string key) =>
+            generations.TryGet(key, out var recipe)
+            && recipe.Aliases.Append(recipe.SourceName).Any(manifestRoutes.Contains);
         var unclassified = runtimeRoutes
             .Except(manifestRoutes, StringComparer.OrdinalIgnoreCase)
             .Except(OperationalOnlyRoutes, StringComparer.OrdinalIgnoreCase)
+            .Where(key => !SameGenerationAsLadderRoute(key))
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var stale = OperationalOnlyRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase)

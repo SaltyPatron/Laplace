@@ -6,9 +6,6 @@
   "layerOrder": 3,
   "selected": true,
   "root": "/vault/Data/FrameNet/framenet_v17",
-  "aliases": [
-    "framenet-recipe"
-  ],
   "artifacts": [
     {
       "selector": "frame/*.xml",

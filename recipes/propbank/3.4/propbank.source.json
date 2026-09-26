@@ -6,9 +6,6 @@
   "layerOrder": 3,
   "selected": true,
   "root": "/vault/Data/PropBank/propbank-frames-main",
-  "aliases": [
-    "propbank-recipe"
-  ],
   "artifacts": [
     {
       "selector": "frames/*.xml",

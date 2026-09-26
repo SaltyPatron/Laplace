@@ -48,14 +48,16 @@ public class IntentStageTests
         s.AddEntity(id, 5, typeId);
         Assert.Equal(1, s.EntityCount);
 
+        // An entity row is its id, its tier and its type: three fields.
         var bytes = s.EmitCopyBinary(IntentStageTable.Entities);
-        Assert.Equal(73, bytes.Length);
-        Assert.Equal(4, ReadBe16(bytes.AsSpan(19, 2)));
+        Assert.Equal(69, bytes.Length);
+        Assert.Equal(3, ReadBe16(bytes.AsSpan(19, 2)));
         Assert.Equal(16u, ReadBe32(bytes.AsSpan(21, 4)));
         Assert.Equal(2u, ReadBe32(bytes.AsSpan(41, 4)));
         Assert.Equal(5, ReadBe16(bytes.AsSpan(45, 2)));
         Assert.Equal(16u, ReadBe32(bytes.AsSpan(47, 4)));
-        Assert.Equal(unchecked((uint)-1), ReadBe32(bytes.AsSpan(67, 4)));
+        Assert.Equal(0xff, bytes[67]);
+        Assert.Equal(0xff, bytes[68]);
     }
 
     [Fact]
