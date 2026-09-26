@@ -9,7 +9,7 @@ BEGIN ATOMIC
     WITH subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), expected(name) AS (SELECT unnest(ARRAY[
-        'IS_A','HAS_PART','HAS_MEMBER','CAUSES','USED_FOR','IS_ANTONYM_OF',
+        'IS_A','HAS_PART','CAUSES','USED_FOR','IS_ANTONYM_OF',
         'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
     -- A SYMMETRIC ARENA IS NOT A GAP WHEN THE EVIDENCE SITS ON THE OTHER END.
     --

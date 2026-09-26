@@ -660,9 +660,9 @@ SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_ban
 (1 row)
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(laplace.word_id('dog'));
-                                     dog_gaps                                      
------------------------------------------------------------------------------------
- {DERIVATIONALLY_RELATED,HAS_ATTRIBUTE,HAS_MEMBER,HAS_PART,IS_SIMILAR_TO,USED_FOR}
+                                dog_gaps                                
+------------------------------------------------------------------------
+ {DERIVATIONALLY_RELATED,HAS_ATTRIBUTE,HAS_PART,IS_SIMILAR_TO,USED_FOR}
 (1 row)
 
 SELECT bool_and(status = 'confirmed') AS isa_confirmed

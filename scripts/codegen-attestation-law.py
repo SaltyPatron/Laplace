@@ -359,6 +359,17 @@ def emit_relation_law(rel: dict) -> None:
     canon_names = sorted({r["canonical"] for r in relations})
     name_to_idx = {n: i for i, n in enumerate(canon_names)}
     rels_by_name = {r["canonical"]: r for r in relations}
+    qualifier_families = {f["name"]: f for f in read_qualifier_families(MANIFEST / "qualifiers.toml")}
+
+    def qualifier_bit(spec: str, relation: str, where: str) -> int:
+        """A "family/value" qualifier a surface carries onto `relation`."""
+        family, _, value = spec.partition("/")
+        f = qualifier_families.get(family)
+        if f is None or value not in f["values"]:
+            raise SystemExit(f"{where}: undeclared qualifier {spec}")
+        if f["relations"] is not None and relation not in f["relations"]:
+            raise SystemExit(f"{where}: qualifier family {family} does not qualify {relation}")
+        return f["base"] + f["values"].index(value)
 
     # RETIRED RELATIONS. One relation per meaning: a per-variant relation
     # (HAS_NAME_ALIAS, HAS_UPPERCASE_MAPPING, HAS_ISO639_1_CODE, ...) is replaced by its
@@ -387,8 +398,10 @@ def emit_relation_law(rel: dict) -> None:
         if successor in retired:
             raise SystemExit(f"relation {name} is retired to {successor}, which is itself retired")
     for r in relations:
-        if r.get("retired_flip") and not r.get("retired"):
-            raise SystemExit(f"relation {r['canonical']} declares retired_flip without retired")
+        if (r.get("retired_flip") or r.get("retired_qualifier")) and not r.get("retired"):
+            raise SystemExit(f"relation {r['canonical']} declares a retired reading without retired")
+        if r.get("retired_qualifier") and r.get("retired") == TRAJECTORY_FACT:
+            raise SystemExit(f"relation {r['canonical']} retires to trajectories and cannot qualify")
 
     alias_entries = []
     for a in sorted(aliases, key=lambda x: x["surface"]):
@@ -398,13 +411,18 @@ def emit_relation_law(rel: dict) -> None:
         if canon in retired:
             raise SystemExit(f"alias {a['surface']} resolves to retired relation {canon}; "
                              f"point it at {retired[canon]}")
-        alias_entries.append((a["surface"], name_to_idx[canon], a["flip"]))
-    # A flipped retirement resolves like an inverse alias. Aliases take priority over
-    # canonical names in the surface table, while relation_type_id still names the
-    # retired id, so admitted evidence under it stays readable.
+        q = qualifier_bit(a["qualifier"], canon, f"alias {a['surface']}") if a.get("qualifier") else -1
+        alias_entries.append((a["surface"], name_to_idx[canon], a["flip"], q))
+    # A retirement with a reading (flip and/or qualifier) resolves like an alias: the
+    # successor, read in the stated direction, with the stated qualifier. Aliases take
+    # priority over canonical names in the surface table, while relation_type_id still
+    # names the retired id, so admitted evidence under it stays readable.
     for name, successor in sorted(retired.items()):
-        if rels_by_name[name].get("retired_flip"):
-            alias_entries.append((name, name_to_idx[successor], True))
+        r = rels_by_name[name]
+        if r.get("retired_flip") or r.get("retired_qualifier"):
+            q = qualifier_bit(r["retired_qualifier"], successor, f"relation {name}") \
+                if r.get("retired_qualifier") else -1
+            alias_entries.append((name, name_to_idx[successor], bool(r.get("retired_flip")), q))
     alias_entries.sort(key=lambda e: e[0])
 
     header = OUT_CORE / "include/laplace/core/relation_law.h"
@@ -446,6 +464,7 @@ typedef struct {
     const char* surface;
     int16_t     canon_idx;
     uint8_t     flip;
+    int16_t     qualifier_bit;  /* the claim qualifier this surface states; -1 none */
 } laplace_relation_alias_t;
 
 extern const laplace_relation_def_t* laplace_relation_table;
@@ -463,6 +482,10 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
 /* 1 when type_id names a retired manifest relation (out_successor, when given, receives
  * its successor's canonical name); 0 when it is live or not a manifest relation. */
 int laplace_relation_retired(const hash128_t* type_id, const char** out_successor);
+/* The claim qualifier a relation surface states (qualifiers.toml bit of the attestation
+ * mask): "holo_member" is HAS_PART read backwards with meronymy/member. -1 when the surface
+ * states none. Every emitter that resolves a surface ORs this bit into the claim's mask. */
+int laplace_relation_surface_qualifier(const char* surface);
 
 int laplace_relation_resolve_deprel(const char* deprel, hash128_t* out_type_id,
                                     double* out_rank, laplace_rel_symmetry_t* out_symmetry,
@@ -513,8 +536,8 @@ int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* 
     lines.append("};")
     lines.append("")
     lines.append("static const laplace_relation_alias_t k_alias_storage[] = {")
-    for surf, idx, flip in alias_entries:
-        lines.append(f'    {{ "{surf}", {idx}, {1 if flip else 0} }},')
+    for surf, idx, flip, q in alias_entries:
+        lines.append(f'    {{ "{surf}", {idx}, {1 if flip else 0}, {q} }},')
     lines.append("};")
     lines.append("")
 
@@ -575,6 +598,7 @@ typedef struct {{
     const char* surface;
     int16_t     idx;
     uint8_t     flip;
+    int16_t     qualifier_bit;
 }} rel_surface_slot_t;
 
 #define LAPLACE_REL_SURFACE_BUCKET_SIZE {surface_bucket_size}u
@@ -593,13 +617,14 @@ static uint64_t rel_surface_hash(const char* s) {{
 
 static void rel_slot_insert(rel_surface_slot_t* tab, size_t mask,
                             const char* surface, int16_t idx, uint8_t flip,
-                            int keep_existing) {{
+                            int16_t qualifier_bit, int keep_existing) {{
     size_t b = (size_t)(rel_surface_hash(surface) & mask);
     for (;;) {{
         if (tab[b].surface == NULL) {{
             tab[b].surface = surface;
             tab[b].idx = idx;
             tab[b].flip = flip;
+            tab[b].qualifier_bit = qualifier_bit;
             return;
         }}
         if (keep_existing && strcmp(tab[b].surface, surface) == 0)
@@ -656,12 +681,13 @@ static void relation_ids_ensure(void) {{
             rel_slot_insert(k_relation_surface_bucket, LAPLACE_REL_SURFACE_BUCKET_MASK,
                             laplace_relation_alias_table[i].surface,
                             laplace_relation_alias_table[i].canon_idx,
-                            laplace_relation_alias_table[i].flip, 0);
+                            laplace_relation_alias_table[i].flip,
+                            laplace_relation_alias_table[i].qualifier_bit, 0);
         for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
             rel_slot_insert(k_relation_surface_bucket, LAPLACE_REL_SURFACE_BUCKET_MASK,
-                            laplace_relation_table[i].canonical, (int16_t)i, 0, 1);
+                            laplace_relation_table[i].canonical, (int16_t)i, 0, -1, 1);
             rel_slot_insert(k_relation_canonical_bucket, LAPLACE_REL_BUCKET_MASK,
-                            laplace_relation_table[i].canonical, (int16_t)i, 0, 0);
+                            laplace_relation_table[i].canonical, (int16_t)i, 0, -1, 0);
         }}
         ids_mark_ready();
     }} else {{
@@ -733,6 +759,19 @@ int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def
             return 0;
         }}
         b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
+    }}
+    return -1;
+}}
+
+int laplace_relation_surface_qualifier(const char* surface) {{
+    if (!surface) return -1;
+    relation_ids_ensure();
+    size_t b = (size_t)(rel_surface_hash(surface) & LAPLACE_REL_SURFACE_BUCKET_MASK);
+    for (size_t probes = 0; probes <= LAPLACE_REL_SURFACE_BUCKET_MASK; ++probes) {{
+        const rel_surface_slot_t* slot = &k_relation_surface_bucket[b];
+        if (slot->surface == NULL) return -1;
+        if (strcmp(slot->surface, surface) == 0) return slot->qualifier_bit;
+        b = (b + 1) & LAPLACE_REL_SURFACE_BUCKET_MASK;
     }}
     return -1;
 }}
@@ -1453,19 +1492,45 @@ def emit_deprel_law() -> None:
     _write_text_if_changed(OUT_CORE / "src/generated/deprel_law.c", "\n".join(lines) + "\n")
 
 
-def emit_qualifier_law(path: Path) -> None:
-    """Governed claim qualifiers (engine/manifest/qualifiers.toml): family/value -> bit
-    of the attestation's 256-bit qualifier mask."""
+def read_qualifier_families(path: Path) -> list[dict]:
+    """qualifiers.toml families: name, base, values, and the relations they qualify
+    (None = every relation)."""
     import re as _re
     body = path.read_text(encoding="utf-8")
-    rows = []
+    families = []
     for block in body.split("[[family]]")[1:]:
+        block = "\n".join(l.split("#", 1)[0] for l in block.splitlines())
         name = _re.search(r'name\s*=\s*"([^"]+)"', block).group(1)
         base = int(_re.search(r"base\s*=\s*(\d+)", block).group(1))
         values = _re.findall(r'"([^"]+)"', _re.search(r"values\s*=\s*\[(.*?)\]", block, _re.S).group(1))
+        rel = _re.search(r"relations\s*=\s*\[(.*?)\]", block, _re.S)
+        relations = set(_re.findall(r'"([^"]+)"', rel.group(1))) if rel else None
         if base % 32 or base + len(values) > 256 or len(values) > 32 or len(values) != len(set(values)):
             raise SystemExit(f"qualifiers.toml: family {name} is out of its 32-bit range")
-        rows += [(name, v, base + i) for i, v in enumerate(values)]
+        families.append({"name": name, "base": base, "values": values, "relations": relations})
+    names = [f["name"] for f in families]
+    if len(names) != len(set(names)):
+        raise SystemExit("qualifiers.toml declares a family twice")
+    # Two families may share bit positions only when each qualifies its own, disjoint
+    # relations; a family that applies to every relation owns its bits outright.
+    for i, a in enumerate(families):
+        for b in families[i + 1:]:
+            if a["base"] < b["base"] + len(b["values"]) and b["base"] < a["base"] + len(a["values"]):
+                if a["relations"] is None or b["relations"] is None or a["relations"] & b["relations"]:
+                    raise SystemExit(f"qualifiers.toml: families {a['name']} and {b['name']} share bits "
+                                     "under a common relation")
+    return families
+
+
+def emit_qualifier_law(path: Path, relation_names: set[str]) -> None:
+    """Governed claim qualifiers (engine/manifest/qualifiers.toml): family/value -> bit
+    of the attestation's 256-bit qualifier mask, meaningful under the family's relations."""
+    families = read_qualifier_families(path)
+    for f in families:
+        for r in f["relations"] or ():
+            if r not in relation_names:
+                raise SystemExit(f"qualifiers.toml: family {f['name']} qualifies undeclared relation {r}")
+    rows = [(f["name"], v, f["base"] + i) for f in families for i, v in enumerate(f["values"])]
     _write_text_if_changed(OUT_CORE / "include/laplace/core/qualifier_law.h",
         "#pragma once\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
         "/* \"family/value\" (\"identifier/iso639-1\") -> its bit in an attestation's 256-bit\n"
@@ -1723,7 +1788,7 @@ def main() -> int:
     emit_entity_type_law(MANIFEST / "entity_types.toml")
     emit_language_law(MANIFEST / "languages.tsv")
     emit_deprel_law()
-    emit_qualifier_law(MANIFEST / "qualifiers.toml")
+    emit_qualifier_law(MANIFEST / "qualifiers.toml", {r["canonical"] for r in rel["relation"]})
     emit_trust_class_law(MANIFEST / "trust_classes.toml")
     emit_firmware_law(MANIFEST / "firmware.toml")
     emit_highway_perfcache(rel, bin_out_dir)

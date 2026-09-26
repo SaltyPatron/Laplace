@@ -783,7 +783,8 @@ static int staged_sum_score_total(const laplace_attestation_staged_t* a, int64_t
     return 0;
 }
 
-static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_staged_t* a) {
+static int staged_to_intent_masked(intent_stage_t* stage, const laplace_attestation_staged_t* a,
+                                   const uint8_t* qualifier_mask) {
     hash128_t* obj_ptr = a->object_is_null ? NULL : (hash128_t*)&a->object_id;
     hash128_t* ctx_ptr = a->context_is_null ? NULL : (hash128_t*)&a->context_id;
     int64_t sum_score;
@@ -792,7 +793,22 @@ static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_sta
         stage, &a->id, &a->subject_id, &a->type_id, obj_ptr, &a->source_id, ctx_ptr,
         a->outcome, a->last_observed_at_unix_us, a->observation_count,
         sum_score, a->opponent_rd_fp1e9, a->opponent_rating_fp1e9,
-        a->fold_replayable, NULL);
+        a->fold_replayable, qualifier_mask);
+}
+
+static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_staged_t* a) {
+    return staged_to_intent_masked(stage, a, NULL);
+}
+
+/* A claim staged from a relation surface carries the qualifier that surface states
+ * ("holo_member" is HAS_PART with meronymy/member), so the kind survives the element. */
+static int staged_to_intent_surface(intent_stage_t* stage, const laplace_attestation_staged_t* a,
+                                    const char* surface_relation) {
+    const int bit = laplace_relation_surface_qualifier(surface_relation);
+    if (bit < 0) return staged_to_intent(stage, a);
+    uint8_t mask[32] = {0};
+    mask[bit >> 3] = (uint8_t)(1u << (bit & 7));
+    return staged_to_intent_masked(stage, a, mask);
 }
 
 int laplace_attestation_categorical_add(
@@ -813,7 +829,7 @@ int laplace_attestation_categorical_add(
         surface_relation, subject, object, object_is_null, source, context, context_is_null,
         trust_weight, confirm, observation_count, 0, &staged);
     if (rc != 0) return rc;
-    return staged_to_intent(stage, &staged);
+    return staged_to_intent_surface(stage, &staged, surface_relation);
 }
 
 /* Parameter order deliberately identical to laplace_attestation_aggregated_build — a
@@ -879,7 +895,7 @@ int laplace_attestation_witness_batch_add(
             source, e->context, e->context_is_null,
             e->trust_weight, e->confirm, e->observation_count, now_unix_us, &staged);
         if (rc != 0) return -2;
-        if (staged_to_intent(stage, &staged) != 0) return -2;
+        if (staged_to_intent_surface(stage, &staged, e->surface_relation) != 0) return -2;
     }
     return 0;
 }

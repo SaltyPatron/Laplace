@@ -2144,9 +2144,8 @@ public sealed class UnicodeDecomposer
             double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
 
             if (row.CountsSourceRow)
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    property.Id, RelationTypeRegistry.RelationTypeId("HAS_MEMBER"),
-                    valueId, Source, null, weight));
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    property.Id, "HAS_MEMBER", valueId, Source, null, weight));
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 valueId, UcdProperties.RelTypeHasName,
                 aliasId.Value, Source, contextId: null, witnessWeight: weight)

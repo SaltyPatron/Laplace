@@ -169,8 +169,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     Datum          x, y, lang;
     int32          lim;
     hash128_t      up_types[2];
-    hash128_t      feat_types[9];
-    int            feat_n = 9;
+    hash128_t      feat_types[7];
+    int            feat_n = 7;
     TaxNode       *ax, *ay;
     int            n_ax, n_ay;
     Datum         *synsets_x = NULL, *synsets_y = NULL;
@@ -195,15 +195,15 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
     up_types[0] = rel_type_id("IS_A");
     up_types[1] = rel_type_id("IS_INSTANCE_OF");
+    /* HAS_PART holds every meronymy (part, member, substance); the kind is the
+     * claim's qualifier, not a relation of its own. */
     feat_types[0] = rel_type_id("HAS_PART");
-    feat_types[1] = rel_type_id("HAS_MEMBER");
-    feat_types[2] = rel_type_id("HAS_SUBSTANCE");
-    feat_types[3] = rel_type_id("HAS_ATTRIBUTE");
-    feat_types[4] = rel_type_id("CAUSES");
-    feat_types[5] = rel_type_id("USED_FOR");
-    feat_types[6] = rel_type_id("IS_ANTONYM_OF");
-    feat_types[7] = rel_type_id("IS_SIMILAR_TO");
-    feat_types[8] = rel_type_id("PERTAINS_TO");
+    feat_types[1] = rel_type_id("HAS_ATTRIBUTE");
+    feat_types[2] = rel_type_id("CAUSES");
+    feat_types[3] = rel_type_id("USED_FOR");
+    feat_types[4] = rel_type_id("IS_ANTONYM_OF");
+    feat_types[5] = rel_type_id("IS_SIMILAR_TO");
+    feat_types[6] = rel_type_id("PERTAINS_TO");
 
     {
         hash128_t *seeds_x, *seeds_y;

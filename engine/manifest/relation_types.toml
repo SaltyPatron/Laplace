@@ -432,6 +432,8 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "HAS_A"
+retired = "HAS_PART"
+retired_qualifier = "meronymy/part"
 bit = 42
 rank = "partitive"
 symmetry = "asymmetric"
@@ -701,6 +703,8 @@ family_root = "HAS_LOWERCASE_MAPPING"
 
 [[relation]]
 canonical = "HAS_MEMBER"
+retired = "HAS_PART"
+retired_qualifier = "meronymy/member"
 bit = 90
 rank = "partitive"
 symmetry = "asymmetric"
@@ -814,6 +818,8 @@ family_root = "HAS_SUBEVENT"
 
 [[relation]]
 canonical = "HAS_SUBSTANCE"
+retired = "HAS_PART"
+retired_qualifier = "meronymy/substance"
 bit = 116
 rank = "partitive"
 symmetry = "asymmetric"
@@ -1117,6 +1123,8 @@ family_root = "LOCATED_NEAR"
 
 [[relation]]
 canonical = "MADE_UP_OF"
+retired = "HAS_PART"
+retired_qualifier = "meronymy/substance"
 bit = 157
 rank = "partitive"
 symmetry = "asymmetric"
@@ -2193,8 +2201,9 @@ flip = true
 
 [[alias]]
 surface = "IS_MEMBER_OF"
-canonical = "HAS_MEMBER"
+canonical = "HAS_PART"
 flip = true
+qualifier = "meronymy/member"
 
 [[alias]]
 surface = "IS_PART_OF"
@@ -2203,13 +2212,15 @@ flip = true
 
 [[alias]]
 surface = "IS_SUBSTANCE_OF"
-canonical = "HAS_SUBSTANCE"
+canonical = "HAS_PART"
 flip = true
+qualifier = "meronymy/substance"
 
 [[alias]]
 surface = "MADE_OF"
-canonical = "HAS_SUBSTANCE"
+canonical = "HAS_PART"
 flip = false
+qualifier = "meronymy/substance"
 
 [[alias]]
 surface = "SUBFRAME_OF"
@@ -2278,8 +2289,7 @@ members = ["COMPLETES_TO", "CONTINUES_TO"]
 [[set]]
 name = "PATH_LATERAL"
 members = [
-  "IS_SYNONYM_OF", "IS_SIMILAR_TO", "IS_ANTONYM_OF", "HAS_PART", "HAS_MEMBER",
-  "HAS_SUBSTANCE", "DERIVATIONALLY_RELATED", "PERTAINS_TO", "ALSO_SEE",
+  "IS_SYNONYM_OF", "IS_SIMILAR_TO", "IS_ANTONYM_OF", "HAS_PART", "DERIVATIONALLY_RELATED", "PERTAINS_TO", "ALSO_SEE",
   "IN_VERB_GROUP_WITH", "HAS_ATTRIBUTE",
 ]
 
@@ -2320,8 +2330,7 @@ members = ["HAS_EXTERNAL_ID", "HAS_NAME", "HAS_FEATURE", "HAS_RATING"]
 name = "PATH_TRAVERSABLE"
 members = [
   "IS_A", "IS_INSTANCE_OF",
-  "IS_SYNONYM_OF", "IS_SIMILAR_TO", "IS_ANTONYM_OF", "HAS_PART", "HAS_MEMBER",
-  "HAS_SUBSTANCE", "DERIVATIONALLY_RELATED", "PERTAINS_TO", "ALSO_SEE",
+  "IS_SYNONYM_OF", "IS_SIMILAR_TO", "IS_ANTONYM_OF", "HAS_PART", "DERIVATIONALLY_RELATED", "PERTAINS_TO", "ALSO_SEE",
   "IN_VERB_GROUP_WITH", "HAS_ATTRIBUTE",
 ]
 
@@ -2379,31 +2388,37 @@ flip = true
 surface = "mero_part"
 canonical = "HAS_PART"
 flip = false
+qualifier = "meronymy/part"
 
 [[alias]]
 surface = "holo_part"
 canonical = "HAS_PART"
 flip = true
+qualifier = "meronymy/part"
 
 [[alias]]
 surface = "mero_member"
-canonical = "HAS_MEMBER"
+canonical = "HAS_PART"
 flip = false
+qualifier = "meronymy/member"
 
 [[alias]]
 surface = "holo_member"
-canonical = "HAS_MEMBER"
+canonical = "HAS_PART"
 flip = true
+qualifier = "meronymy/member"
 
 [[alias]]
 surface = "mero_substance"
-canonical = "HAS_SUBSTANCE"
+canonical = "HAS_PART"
 flip = false
+qualifier = "meronymy/substance"
 
 [[alias]]
 surface = "holo_substance"
-canonical = "HAS_SUBSTANCE"
+canonical = "HAS_PART"
 flip = true
+qualifier = "meronymy/substance"
 
 [[alias]]
 surface = "antonym"

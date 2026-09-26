@@ -47,9 +47,7 @@
     "g3_c_vocabulary_literalism": {
       "extension/laplace_substrate/src/graph_contrast.c::CAUSES": 1,
       "extension/laplace_substrate/src/graph_contrast.c::HAS_ATTRIBUTE": 1,
-      "extension/laplace_substrate/src/graph_contrast.c::HAS_MEMBER": 1,
       "extension/laplace_substrate/src/graph_contrast.c::HAS_PART": 1,
-      "extension/laplace_substrate/src/graph_contrast.c::HAS_SUBSTANCE": 1,
       "extension/laplace_substrate/src/graph_contrast.c::IS_A": 1,
       "extension/laplace_substrate/src/graph_contrast.c::IS_ANTONYM_OF": 1,
       "extension/laplace_substrate/src/graph_contrast.c::IS_INSTANCE_OF": 1,

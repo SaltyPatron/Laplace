@@ -9,6 +9,7 @@
 #include "laplace/core/pos_law.h"
 #include "laplace/core/deprel_law.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/core/qualifier_law.h"
 
 namespace {
 
@@ -56,6 +57,43 @@ TEST(LaplaceRelationLaw, FlippedRetirementResolvesLikeAnInverseAlias) {
         "IS_BEFORE", &earlier, &later, 0, &src, NULL, 1, 1.0, 1, 1, 0, &direct));
     EXPECT_TRUE(hash128_equals(&via_retired.id, &direct.id));
     EXPECT_TRUE(hash128_equals(&via_retired.subject_id, &earlier));
+}
+
+// A kind of part is a qualifier of the one element HAS_PART, stated by the surface.
+TEST(LaplaceRelationLaw, MeronymyIsHasPartWithAQualifier) {
+    const int part = laplace_qualifier_bit("meronymy", "part");
+    const int member = laplace_qualifier_bit("meronymy", "member");
+    const int substance = laplace_qualifier_bit("meronymy", "substance");
+    ASSERT_GE(part, 0);
+    ASSERT_GE(member, 0);
+    ASSERT_GE(substance, 0);
+    // Qualifier bits mean something only under their relation: meronymy under HAS_PART
+    // may reuse the positions identifiers use under HAS_EXTERNAL_ID.
+    EXPECT_EQ(laplace_qualifier_bit("identifier", "iso639-1"), part);
+
+    hash128_t has_part = relation_type_id("HAS_PART"), tid, parent;
+    double rank = 0;
+    laplace_rel_symmetry_t sym;
+    uint8_t flip = 9;
+    ASSERT_EQ(0, laplace_relation_resolve_surface("HAS_MEMBER", &tid, &rank, &sym, &flip, &parent));
+    EXPECT_TRUE(hash128_equals(&has_part, &tid));
+    EXPECT_EQ(0, flip);
+    EXPECT_EQ(member, laplace_relation_surface_qualifier("HAS_MEMBER"));
+
+    ASSERT_EQ(0, laplace_relation_resolve_surface("holo_substance", &tid, &rank, &sym, &flip, &parent));
+    EXPECT_TRUE(hash128_equals(&has_part, &tid));
+    EXPECT_EQ(1, flip);
+    EXPECT_EQ(substance, laplace_relation_surface_qualifier("holo_substance"));
+    EXPECT_EQ(substance, laplace_relation_surface_qualifier("MADE_UP_OF"));
+    EXPECT_EQ(part, laplace_relation_surface_qualifier("HAS_A"));
+    EXPECT_EQ(-1, laplace_relation_surface_qualifier("HAS_PART"));
+    EXPECT_EQ(-1, laplace_relation_surface_qualifier("IS_A"));
+
+    hash128_t retired;
+    ASSERT_EQ(0, laplace_relation_type_id("HAS_MEMBER", &retired));
+    const char* successor = nullptr;
+    EXPECT_EQ(1, laplace_relation_retired(&retired, &successor));
+    EXPECT_STREQ("HAS_PART", successor);
 }
 
 TEST(LaplaceRelationLaw, DenialsAndTrajectoryFactsFailClosed) {
