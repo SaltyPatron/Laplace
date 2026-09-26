@@ -233,7 +233,7 @@ BEGIN
     --
     -- The previous comment here rejected the id form on the grounds that Unicode
     -- general category is attested on CODEPOINTS while toks holds words, so every
-    -- probe would miss. That is true of a per-token HAS_GENERAL_CATEGORY probe and
+    -- probe would miss. That is true of a per-token General_Category probe and
     -- NOT true of generation.separator_ids(), which is the closed separator set including
     -- compositions (composition lifts the property, §3 Merkle). Measured over 362
     -- real trajectory tokens: render-side and id-side agree on every one, 0

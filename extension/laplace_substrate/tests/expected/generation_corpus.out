@@ -3,6 +3,7 @@ NOTICE:  extension "postgis" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+
 NOTICE:  extension "laplace_substrate" already exists, skipping
 -- The generation SEQUENCE surface, corpus-free (#728): trajectory_continuations
 -- reads exact ordinal successors straight off physicalities.trajectory;
@@ -13,7 +14,9 @@ NOTICE:  extension "laplace_substrate" already exists, skipping
 -- is deterministic, and a dead-end context continues through the floor with
 -- stride_used = 0. New-era invariant replacing "probe invalidation": there is no
 -- cache to invalidate — a trajectory written now is visible to the next read.
+
 BEGIN;
+
 -- Exercise the whole-input matcher, including its stride-zero cancellation
 -- callbacks. A real matched physicality used to crash the backend before it
 -- could nominate its first successor; an empty corpus concealed the defect.
@@ -48,6 +51,7 @@ BEGIN
     DELETE FROM laplace.physicalities WHERE entity_id=root;
 END
 $whole_input$;
+
 -- The declared relational operation is evaluated against the joint operand
 -- set. An isolated stronger cell must not outrank combined query support.
 DO $joint_election$
@@ -141,6 +145,7 @@ BEGIN
       AND type_id IN (route_relation,result_relation);
 END
 $routing_state$;
+
 DO $$
 DECLARE
     type_t    bytea := public.laplace_hash128_blake3('Type');
@@ -155,7 +160,7 @@ DECLARE
     w_end     bytea := public.laplace_hash128_blake3('test/corpus/word-end');
     w_target  bytea := laplace.word_id('β'); -- mapped floor, no database row
     sp        bytea := public.laplace_hash128_blake3('test/corpus/space');
-    zs_cat    bytea := public.laplace_hash128_blake3('test/corpus/zs-category');
+    zs_cat    bytea := laplace.property_value_id('General_Category', 'Space_Separator');
     sent      bytea := public.laplace_hash128_blake3('test/corpus/sentence');
     sent2     bytea := public.laplace_hash128_blake3('test/corpus/sentence2');
     sent3     bytea := public.laplace_hash128_blake3('test/corpus/sentence3');
@@ -169,24 +174,23 @@ BEGIN
     -- also holds relation types, trust classes, POS tags, sources and languages, and a
     -- single-grapheme word collapses to tier 0. A fixture that typed everything the same
     -- could not tell a correct role predicate from a broken one.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL),
-        (w_the, 2, type_word, src), (w_capital, 2, type_word, src),
-        (w_of, 2, type_word, src), (w_france, 2, type_word, src),
-        (w_end, 2, type_word, src),
-        (sp, 2, type_word, src), (zs_cat, 0, type_t, src),
-        (sent, 3, type_sent, src), (sent2, 3, type_sent, src), (doc, 4, type_doc, src);
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (w_the, 2, type_word), (w_capital, 2, type_word),
+        (w_of, 2, type_word), (w_france, 2, type_word),
+        (w_end, 2, type_word),
+        (sp, 2, type_word), (zs_cat, 2, type_word),
+        (sent, 3, type_sent), (sent2, 3, type_sent), (doc, 4, type_doc);
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
-    -- HAS_GENERAL_CATEGORY → Zs — and generation.separator_ids() resolves it.
-    INSERT INTO laplace.canonical_names (id, name)
-    VALUES (zs_cat, 'unicode/category/Zs/v1');
+    -- HAS_CHARACTER_PROPERTY → [General_Category, Space_Separator] — and
+    -- generation.separator_ids() resolves it.
     INSERT INTO laplace.attestations (id, subject_id, type_id, object_id, source_id,
                               context_id, outcome, last_observed_at, observation_count,
                               sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES (public.laplace_hash128_blake3('test/corpus/att-sp-zs'), sp,
-            laplace.relation_type_id('HAS_GENERAL_CATEGORY'), zs_cat, src,
+            laplace.relation_type_id('HAS_CHARACTER_PROPERTY'), zs_cat, src,
             NULL, 2, now(), 1, 1000000000, 30000000000);
 
     IF NOT (sp = ANY (generation.separator_ids())) THEN
@@ -358,7 +362,7 @@ BEGIN
 
     -- Consensus floor: a dead-end context continues through COMPLETES_TO with
     -- stride_used = 0.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    INSERT INTO laplace.entities (id, tier, type_id)
     VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'), src)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
@@ -403,8 +407,8 @@ BEGIN
     -- No cache, no invalidation: a trajectory written NOW is visible to the very
     -- next read. sent3 repeats capital of twice (no separator): every matching
     -- occurrence counts, so the new unseparated capital→of has weight 2.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (sent3, 3, type_sent, src);
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (sent3, 3, type_sent);
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (public.laplace_hash128_blake3('test/corpus/phys-sentence3'), sent3, 1,
@@ -565,6 +569,7 @@ BEGIN
 
     RAISE NOTICE '✓ generation_corpus: trajectories are the single source — exact separator ordinals, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
+
 NOTICE:  ✓ generation_corpus: trajectories are the single source — exact separator ordinals, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
 -- A lossy bitmap contains nonmatching tuples from matching heap pages. Exercise
 -- recheck against an independent SQL oracle, including mixed physicality types.
@@ -625,6 +630,7 @@ END
 $membership_bitmap$;
 ROLLBACK TO SAVEPOINT membership_bitmap_fixture;
 RELEASE SAVEPOINT membership_bitmap_fixture;
+
 -- Observation contexts are admissible sequence evidence. An arbitrary relation
 -- object is routing state, even when its physicality contains a matching prefix.
 -- More than one former fetch page also checks streaming and root deduplication.
@@ -677,6 +683,7 @@ BEGIN
     END IF;
 END
 $observation_scope$;
+
 -- A selected typed result keeps its semantic identity through selection. Only
 -- the final surface operation descends to its witnessed name. This fixture is
 -- an explicit continuation claim, not evidence of natural-language orientation.
@@ -713,6 +720,7 @@ BEGIN
     END IF;
 END
 $realization$;
+
 -- Query-side occurrences and recorded witness tuples survive the shared native
 -- reader. Source scope, refutation and missing context are not pooled away.
 DO $bindings$
@@ -786,6 +794,7 @@ BEGIN
     END IF;
 END
 $bindings$;
+
 CREATE ROLE laplace_membership_reader_test;
 GRANT USAGE ON SCHEMA structural TO laplace_membership_reader_test;
 GRANT USAGE ON SCHEMA generation TO laplace_membership_reader_test;

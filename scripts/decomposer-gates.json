@@ -40,7 +40,7 @@
           "min": 1
         },
         {
-          "relation": "HAS_GENERAL_CATEGORY",
+          "relation": "HAS_CHARACTER_PROPERTY",
           "min": 1
         },
         {

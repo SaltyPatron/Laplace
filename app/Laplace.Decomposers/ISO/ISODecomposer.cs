@@ -29,8 +29,8 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
     private static readonly Hash128 Iso639CodeTypeId = EntityTypeRegistry.Iso639Code;
     private static readonly Hash128 RelTypeIsLanguageCode =
         RelationTypeRegistry.RelationTypeId("IS_LANGUAGE_CODE");
-    private static readonly Hash128 RelTypeUsesScript =
-        RelationTypeRegistry.RelationTypeId("USES_SCRIPT");
+    private static readonly Hash128 RelTypeHasScript =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasScript)));
     private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
     private static readonly Hash128 LanguageVariantTypeId = EntityTypeRegistry.LanguageVariant;
 
@@ -164,7 +164,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         var scriptId = ContentEmitter.Emit(b, script, Source)
             ?? throw new InvalidOperationException($"script name could not be composed: {script}");
         b.AddAttestation(NativeAttestation.CategoricalResolved(
-            langId, RelTypeUsesScript, scriptId, Source, null,
+            langId, RelTypeHasScript, scriptId, Source, null,
             RelationTypeRank.StandardsStructural * TC.StandardsDerived));
     }
 

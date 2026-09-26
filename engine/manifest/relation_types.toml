@@ -448,6 +448,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "HAS_AGE"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 43
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -464,6 +465,7 @@ family_root = "HAS_ATTRIBUTE"
 
 [[relation]]
 canonical = "HAS_BIDI_CLASS"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 48
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -472,6 +474,7 @@ family_root = "HAS_BIDI_CLASS"
 
 [[relation]]
 canonical = "HAS_BLOCK"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 50
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -480,6 +483,7 @@ family_root = "HAS_BLOCK"
 
 [[relation]]
 canonical = "HAS_COMBINING_CLASS"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 53
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -536,6 +540,7 @@ family_root = "HAS_DOMAIN_USAGE"
 
 [[relation]]
 canonical = "HAS_EMOJI_PROPERTY"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 63
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -644,6 +649,7 @@ family_root = "HAS_CHARACTER_PROPERTY"
 
 [[relation]]
 canonical = "HAS_GENERAL_CATEGORY"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 74
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -740,6 +746,7 @@ family_root = "HAS_NAME_ALIAS"
 
 [[relation]]
 canonical = "HAS_NUMERIC_VALUE"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 96
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -1394,6 +1401,7 @@ family_root = "USED_FOR"
 
 [[relation]]
 canonical = "USES_SCRIPT"
+retired = "HAS_SCRIPT"
 bit = 197
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1527,6 +1535,7 @@ family_root = "HAS_NAME"
 [[relation]]
 # Unicode Line_Break property (LineBreak.txt): AL, BA, CR, ... — the text-segmentation class of a codepoint.
 canonical = "HAS_LINE_BREAK"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 88
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1536,6 +1545,7 @@ family_root = "HAS_LINE_BREAK"
 [[relation]]
 # Unicode East_Asian_Width property (EastAsianWidth.txt): F, H, W, Na, A, N — fixed-width rendering class.
 canonical = "HAS_EAST_ASIAN_WIDTH"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 61
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1545,6 +1555,7 @@ family_root = "HAS_EAST_ASIAN_WIDTH"
 [[relation]]
 # Unicode Joining_Type property (DerivedJoiningType.txt): C, D, L, R, T, U — Arabic/Syriac cursive shaping.
 canonical = "HAS_JOINING_TYPE"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 81
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1555,6 +1566,7 @@ family_root = "HAS_JOINING_TYPE"
 # Unicode Numeric_Type property (DerivedNumericType.txt): Decimal, Digit, Numeric — the KIND of numeric,
 # distinct from HAS_NUMERIC_VALUE (the scalar value).
 canonical = "HAS_NUMERIC_TYPE"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 95
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -1584,6 +1596,7 @@ family_root = "HAS_NORMALIZATION_FORM"
 # Unicode Script_Extensions (ScriptExtensions.txt): a codepoint usable across multiple scripts. Weaker,
 # multi-valued sibling of USES_SCRIPT.
 canonical = "USES_SCRIPT_EXTENSION"
+retired = "HAS_CHARACTER_PROPERTY"
 bit = 198
 rank = "standards_structural"
 symmetry = "asymmetric"

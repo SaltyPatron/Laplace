@@ -5,27 +5,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Unicode;
 
-
-
-
-
 internal sealed class UcdProperties
 {
-    public static readonly Hash128 RelTypeHasGeneralCategory = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
-    public static readonly Hash128 RelTypeHasCombiningClass = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
     public static readonly Hash128 RelTypeHasScript = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
-    public static readonly Hash128 RelTypeHasBlock = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
-    public static readonly Hash128 RelTypeHasNumericValue = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
-    public static readonly Hash128 RelTypeHasBidiClass = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
     public static readonly Hash128 RelTypeHasMirror = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
-    public static readonly Hash128 RelTypeHasAge = RelationTypeRegistry.RelationTypeId("HAS_AGE");
     public static readonly Hash128 RelTypeConfusableWith = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
-    public static readonly Hash128 RelTypeHasEmojiProperty = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
     public static readonly Hash128 RelTypeHasName = RelationTypeRegistry.RelationTypeId("HAS_NAME");
-    public static readonly Hash128 RelTypeHasLineBreak = RelationTypeRegistry.RelationTypeId("HAS_LINE_BREAK");
-    public static readonly Hash128 RelTypeHasEastAsianWidth = RelationTypeRegistry.RelationTypeId("HAS_EAST_ASIAN_WIDTH");
-    public static readonly Hash128 RelTypeHasJoiningType = RelationTypeRegistry.RelationTypeId("HAS_JOINING_TYPE");
-    public static readonly Hash128 RelTypeHasNumericType = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_TYPE");
     // Derived from this field's own name, never spelled: the sole roster is
     // UnicodeSource.Relations, the declaration span the vocabulary law exempts. The g3
     // baseline froze 2026-08-03 and is shrink-only, so a relation added after it may not
@@ -40,6 +25,9 @@ internal sealed class UcdProperties
     public static readonly Hash128 RelTypeHasCaseMapping =
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeHasCaseMapping)));
+    public static readonly Hash128 RelTypeNormalizesTo =
+        RelationTypeRegistry.RelationTypeId(
+            RelationSymbol.CanonicalFromField(nameof(RelTypeNormalizesTo)));
     public static readonly Hash128 RelTypeDecomposesTo =
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeDecomposesTo)));
@@ -51,10 +39,14 @@ internal sealed class UcdProperties
     public static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
 
     // Character metadata, not ConceptNet's semantic HasProperty (see relation_types.toml).
-    public static readonly Hash128 RelTypeHasProperty =
-        RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
-    public static readonly Hash128 RelTypeUsesScriptExtension =
-        RelationTypeRegistry.RelationTypeId("USES_SCRIPT_EXTENSION");
+    public static readonly Hash128 RelTypeHasCharacterProperty =
+        RelationTypeRegistry.RelationTypeId(
+            RelationSymbol.CanonicalFromField(nameof(RelTypeHasCharacterProperty)));
+    // A property's values are its members: HAS_PART qualified meronymy/member.
+    public static readonly Hash128 RelTypeHasPart =
+        RelationTypeRegistry.RelationTypeId(
+            RelationSymbol.CanonicalFromField(nameof(RelTypeHasPart)));
+    public static readonly Mask256 MemberPart = ClaimQualifiers.Of("meronymy", "member");
 
     public readonly string?[] Name;
 

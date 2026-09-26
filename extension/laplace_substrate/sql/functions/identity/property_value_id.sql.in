@@ -1,0 +1,9 @@
+-- A property's value is content: the ordered composition [property, value], both named
+-- as the authority names them (ContentEmitter.StagePropertyValue in C#). The UCD's
+-- General_Category=Space_Separator is [General_Category, Space_Separator].
+CREATE OR REPLACE FUNCTION laplace.property_value_id(p_property text, p_value text) RETURNS bytea
+    LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT public.laplace_hash128_merkle(0::smallint,
+        ARRAY[laplace.word_id(p_property), laplace.word_id(p_value)]);
+END;

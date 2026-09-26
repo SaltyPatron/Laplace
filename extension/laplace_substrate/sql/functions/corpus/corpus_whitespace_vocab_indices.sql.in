@@ -2,7 +2,7 @@
 --
 -- Answered from what the substrate ATTESTS, not by rendering each id to text and
 -- inspecting the string. The Unicode seed already deposits
--- HAS_GENERAL_CATEGORY on every codepoint, so "is this a separator" is an indexed
+-- [General_Category, value] on every codepoint, so "is this a separator" is an indexed
 -- consensus read on the id itself: category Zs / Zl / Zp is the separator class,
 -- Cc covers the control characters (tab, newline) that word-break treats the same
 -- way.
@@ -28,7 +28,7 @@
 -- input.
 --
 -- UNATTESTED IS NOT "NOT A SEPARATOR". The COALESCE is load-bearing. An id with no
--- HAS_GENERAL_CATEGORY attestation is unattested, and answering false there is a
+-- General_Category attestation is unattested, and answering false there is a
 -- silently wrong result on an unseeded substrate. The generation_corpus regress
 -- fixture is exactly that: synthetic content, zero Unicode layer, so the
 -- attestation-only body classified nothing and the test read 10 word-stride
@@ -57,7 +57,7 @@
 --
 -- The fix is the idiom the sibling probes already prove:
 --   * bind the type_id ONCE into a plpgsql variable, so the LIST parent prunes at
---     plan time to the single HAS_GENERAL_CATEGORY partition;
+--     plan time to the single HAS_CHARACTER_PROPERTY partition;
 --   * probe with `subject_id = ANY(p_vocab)`, which becomes the index condition
 --     itself and prunes the HASH sublevel per element -- one descent per id;
 --   * GROUP BY subject_id once, then LEFT JOIN the result back to the ordinals.
@@ -73,14 +73,17 @@ CREATE OR REPLACE FUNCTION generation.corpus_whitespace_vocab_indices(p_vocab by
     RETURNS TABLE(vocab_idx int)
     LANGUAGE plpgsql STABLE PARALLEL SAFE AS $$
 DECLARE
-    v_type bytea := laplace.relation_type_id('HAS_GENERAL_CATEGORY');
+    v_type bytea := laplace.relation_type_id('HAS_CHARACTER_PROPERTY');
+    v_sep  bytea[] := ARRAY[laplace.property_value_id('General_Category', 'Space_Separator'),
+                      laplace.property_value_id('General_Category', 'Line_Separator'),
+                      laplace.property_value_id('General_Category', 'Paragraph_Separator'),
+                      laplace.property_value_id('General_Category', 'Control')];
 BEGIN
     RETURN QUERY
     WITH cat AS MATERIALIZED (
         SELECT a.subject_id AS id,
-               -- The UCD states a character's General_Category; its value is content.
-               bool_or(a.object_id = ANY (ARRAY[laplace.word_id('Space_Separator'), laplace.word_id('Line_Separator'),
-                  laplace.word_id('Paragraph_Separator'), laplace.word_id('Control')])) AS is_sep
+               -- The UCD states a character's General_Category as [General_Category, value].
+               bool_or(a.object_id = ANY (v_sep)) AS is_sep
         FROM laplace.attestations a
         WHERE a.type_id = v_type              -- bound literal -> LIST prune at plan time
           AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id

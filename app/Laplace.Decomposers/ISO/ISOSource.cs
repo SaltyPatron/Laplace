@@ -15,7 +15,7 @@ public readonly struct ISOSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
     [
-        "IS_LANGUAGE_CODE", "USES_SCRIPT",
+        "IS_LANGUAGE_CODE", "HAS_SCRIPT",
         "HAS_PART", "HAS_LANGUAGE_SCOPE",
         // HAS_DEFINITION dropped: ISO 639-3 publishes codes and names, no glosses. Both
         // emit sites were depositing the language's own NAME as its definition.

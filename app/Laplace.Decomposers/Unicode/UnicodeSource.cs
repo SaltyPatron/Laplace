@@ -16,14 +16,10 @@ public readonly struct UnicodeSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
     [
-        "HAS_GENERAL_CATEGORY", "HAS_COMBINING_CLASS", "HAS_SCRIPT",
-        "HAS_BLOCK", "HAS_CASE_MAPPING", "DECOMPOSES_TO",
-        "HAS_NUMERIC_VALUE", "HAS_BIDI_CLASS",
-        "HAS_MIRROR", "HAS_AGE", "HAS_NAME", "HAS_LINE_BREAK",
-        "HAS_EAST_ASIAN_WIDTH", "HAS_JOINING_TYPE", "HAS_NUMERIC_TYPE",
-        "CONFUSABLE_WITH", "HAS_EMOJI_PROPERTY",
-        "DECODES_TO", "HAS_UTF8_ROLE",
-        "HAS_NORMALIZATION_FORM", "HAS_CHARACTER_PROPERTY", "USES_SCRIPT_EXTENSION",
+        "HAS_SCRIPT", "HAS_CASE_MAPPING", "DECOMPOSES_TO", "NORMALIZES_TO",
+        "HAS_MIRROR", "HAS_NAME", "HAS_PART",
+        "CONFUSABLE_WITH", "DECODES_TO", "HAS_UTF8_ROLE",
+        "HAS_NORMALIZATION_FORM", "HAS_CHARACTER_PROPERTY",
     ];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =

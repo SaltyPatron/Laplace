@@ -30,7 +30,7 @@ values = ["primary", "alias", "reference", "print", "inverted", "abbreviation",
 name = "mapping"
 relations = ["HAS_CASE_MAPPING", "NORMALIZES_TO"]
 base = 64
-values = ["lower", "upper", "title", "fold", "simple", "full", "nfkc"]
+values = ["lower", "upper", "title", "fold", "simple", "full", "nfkc", "nfc", "nfd", "nfkd"]
 
 [[family]]
 name = "decomposition"

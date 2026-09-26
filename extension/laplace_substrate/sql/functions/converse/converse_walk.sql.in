@@ -169,7 +169,7 @@ BEGIN
     --
     -- The general form of the mistake is rendering an entity to text in order to
     -- classify it. corpus_whitespace_vocab_indices had the same shape and reading
-    -- the attested HAS_GENERAL_CATEGORY instead measured 22.6ms against 29,899ms
+    -- the attested General_Category instead measured 22.6ms against 29,899ms
     -- with zero disagreement (#688/#689). Nothing here needs to classify at all,
     -- so this just goes.
     kept AS MATERIALIZED (

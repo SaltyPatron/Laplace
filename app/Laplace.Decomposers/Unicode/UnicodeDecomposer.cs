@@ -26,7 +26,6 @@ public sealed class UnicodeDecomposer
 
     private readonly string? _ucdxmlZip;
     private readonly string? _ducet;
-    private readonly ConcurrentIdSet _ucdPropertyTypes = new();
     private readonly ConcurrentIdSet _ucdPropertyDeclarations = new();
     private readonly LaplaceCookbook _cookbook = LaplaceCookbook.Shared;
     private InstalledSourceGeneration? _ucdXmlRecipe;
@@ -630,43 +629,28 @@ public sealed class UnicodeDecomposer
         return id;
     }
 
-    private Hash128 PropertyValueEntity(
-        SubstrateChangeBuilder builder,
-        string property,
-        string value)
+    // A character property's value is the ordered composition [property, value] under
+    // HAS_CHARACTER_PROPERTY, both named as the UCD names them (PropertyAliases.txt,
+    // PropertyValueAliases.txt long names): [General_Category, Uppercase_Letter].
+    private Hash128 PropertyValue(SubstrateChangeBuilder builder, string property, string value)
     {
         string canonicalProperty = _ucdXmlRecipe?.CanonicalProperty(property) ?? property;
-        string canonicalValue = _ucdXmlRecipe?.CanonicalValue(canonicalProperty, value) ?? value;
-        string prefix = canonicalProperty switch
-        {
-            "Script" or "Script_Extensions" => "unicode/script",
-            "Block" => "unicode/block",
-            "General_Category" => "unicode/category",
-            "Canonical_Combining_Class" => "unicode/combining_class",
-            "Bidi_Class" => "unicode/bidi_class",
-            "Age" => "unicode/age",
-            "Line_Break" => "unicode/line_break",
-            "East_Asian_Width" => "unicode/east_asian_width",
-            "Joining_Type" => "unicode/joining_type",
-            "Numeric_Type" => "unicode/numeric_type",
-            _ => $"unicode/property_value/{canonicalProperty}",
-        };
-        return ClassifierEntity(builder, prefix, canonicalValue);
+        string canonicalValue = _ucdXmlRecipe?.CanonicalValue(canonicalProperty, value.Trim()) ?? value.Trim();
+        return ContentEmitter.StagePropertyValue(builder, canonicalProperty, canonicalValue, Source)
+            ?? throw new InvalidOperationException(
+                $"Unicode property value could not be admitted: {canonicalProperty}={canonicalValue}");
     }
 
-    private RelationTypeRegistry.RelationTypeResolution PropertyRelation(
-        SubstrateChangeBuilder builder,
-        string canonicalPropertyName)
+    // A binary property's value, as PropertyValueAliases.txt names it (Y; Yes; T; True).
+    private const string BinaryYes = "Yes";
+
+    // A property is content named as the UCD names it (PropertyAliases.txt long name).
+    private Hash128 PropertyContent(SubstrateChangeBuilder builder, string property)
     {
-        canonicalPropertyName = _ucdXmlRecipe?.CanonicalProperty(canonicalPropertyName)
-            ?? canonicalPropertyName;
-        RelationTypeRegistry.RelationTypeResolution relation =
-            RelationTypeRegistry.ResolveUcdProperty(canonicalPropertyName);
-        _ucdPropertyTypes.Add(relation.Id);
-        // Relation identity/family is governed by the native relation registry.
-        // Do not materialize the operator key as content or duplicate its parentage
-        // as source testimony.
-        return relation;
+        string canonicalProperty = _ucdXmlRecipe?.CanonicalProperty(property) ?? property;
+        return ContentEmitter.Emit(builder, canonicalProperty, Source)
+            ?? throw new InvalidOperationException(
+                $"Unicode property could not be admitted: {canonicalProperty}");
     }
 
     private static void EnsureOrdinalContexts(SubstrateChangeBuilder builder)
@@ -688,27 +672,16 @@ public sealed class UnicodeDecomposer
             ArtifactKind.Scripts => new RangePropertyPhase(
                 this, job.Path, "scripts", UcdProperties.RelTypeHasScript,
                 "unicode/script", batch),
-            ArtifactKind.Blocks => new RangePropertyPhase(
-                this, job.Path, "blocks", UcdProperties.RelTypeHasBlock,
-                "unicode/block", batch),
-            ArtifactKind.DerivedAge => new RangePropertyPhase(
-                this, job.Path, "age", UcdProperties.RelTypeHasAge,
-                "unicode/age", batch),
-            ArtifactKind.LineBreak => new RangePropertyPhase(
-                this, job.Path, "line-break", UcdProperties.RelTypeHasLineBreak,
-                "unicode/line_break", batch),
-            ArtifactKind.EastAsianWidth => new RangePropertyPhase(
-                this, job.Path, "east-asian-width", UcdProperties.RelTypeHasEastAsianWidth,
-                "unicode/east_asian_width", batch),
-            ArtifactKind.JoiningType => new RangePropertyPhase(
-                this, job.Path, "joining-type", UcdProperties.RelTypeHasJoiningType,
-                "unicode/joining_type", batch),
-            ArtifactKind.NumericType => new RangePropertyPhase(
-                this, job.Path, "numeric-type", UcdProperties.RelTypeHasNumericType,
-                "unicode/numeric_type", batch),
+            ArtifactKind.Blocks => new ContextualRangePropertyPhase(this, job.Path, batch, "Block"),
+            ArtifactKind.DerivedAge => new ContextualRangePropertyPhase(this, job.Path, batch, "Age"),
+            ArtifactKind.LineBreak => new ContextualRangePropertyPhase(this, job.Path, batch, "Line_Break"),
+            ArtifactKind.EastAsianWidth => new ContextualRangePropertyPhase(this, job.Path, batch, "East_Asian_Width"),
+            ArtifactKind.JoiningType => new ContextualRangePropertyPhase(this, job.Path, batch, "Joining_Type"),
+            ArtifactKind.NumericType => new ContextualRangePropertyPhase(this, job.Path, batch, "Numeric_Type"),
             ArtifactKind.BidiMirroring => new MirrorPhase(job.Path, batch),
+            // An emoji property is binary: the character HAS_CHARACTER_PROPERTY [property, Yes].
             ArtifactKind.EmojiData => new RangePropertyPhase(
-                this, job.Path, "emoji", UcdProperties.RelTypeHasEmojiProperty,
+                this, job.Path, "emoji", UcdProperties.RelTypeHasCharacterProperty,
                 "unicode/emoji", batch,
                 new HashSet<string>(UcdProperties.EmojiPropNames, StringComparer.Ordinal)),
             ArtifactKind.NameAliases => new AliasPhase(job.Path, batch),
@@ -724,15 +697,9 @@ public sealed class UnicodeDecomposer
             ArtifactKind.VerticalOrientation => new ContextualRangePropertyPhase(this, job.Path, batch, "Vertical_Orientation"),
             ArtifactKind.IndicPositionalCategory => new ContextualRangePropertyPhase(this, job.Path, batch, "Indic_Positional_Category"),
             ArtifactKind.IndicSyllabicCategory => new ContextualRangePropertyPhase(this, job.Path, batch, "Indic_Syllabic_Category"),
-            ArtifactKind.DerivedGeneralCategory => new RangePropertyPhase(
-                this, job.Path, "derived-general-category", UcdProperties.RelTypeHasGeneralCategory,
-                "unicode/category", batch),
-            ArtifactKind.DerivedCombiningClass => new RangePropertyPhase(
-                this, job.Path, "derived-combining-class", UcdProperties.RelTypeHasCombiningClass,
-                "unicode/combining_class", batch),
-            ArtifactKind.DerivedBidiClass => new RangePropertyPhase(
-                this, job.Path, "derived-bidi-class", UcdProperties.RelTypeHasBidiClass,
-                "unicode/bidi_class", batch),
+            ArtifactKind.DerivedGeneralCategory => new ContextualRangePropertyPhase(this, job.Path, batch, "General_Category"),
+            ArtifactKind.DerivedCombiningClass => new ContextualRangePropertyPhase(this, job.Path, batch, "Canonical_Combining_Class"),
+            ArtifactKind.DerivedBidiClass => new ContextualRangePropertyPhase(this, job.Path, batch, "Bidi_Class"),
             ArtifactKind.IdentifierStatus => new ContextualRangePropertyPhase(this, job.Path, batch, "Identifier_Status"),
             ArtifactKind.IdentifierType => new ContextualRangePropertyPhase(this, job.Path, batch, "Identifier_Type"),
             ArtifactKind.UnihanProperties => new UnihanPropertyPhase(this, job.Path, batch),
@@ -1505,43 +1472,20 @@ public sealed class UnicodeDecomposer
                     Source, null, structural)
                     with { QualifierMask = UcdProperties.PrimaryName });
 
+            void Property(string property, string value, double weight) =>
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    entityId, UcdProperties.RelTypeHasCharacterProperty,
+                    _owner.PropertyValue(builder, property, value), Source, null, weight));
+
             if (row.GeneralCategory.Length > 0)
-            {
-                Hash128 categoryId = _owner.ClassifierEntity(
-                    builder, "unicode/category", row.GeneralCategory);
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasGeneralCategory, categoryId,
-                    Source, null, structural));
-            }
-
+                Property("General_Category", row.GeneralCategory, structural);
             if (row.CombiningClass > 0)
-            {
-                Hash128 ccId = _owner.ClassifierEntity(
-                    builder, "unicode/combining_class",
-                    row.CombiningClass.ToString(CultureInfo.InvariantCulture));
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasCombiningClass, ccId,
-                    Source, null, structural));
-            }
-
+                Property("Canonical_Combining_Class",
+                    row.CombiningClass.ToString(CultureInfo.InvariantCulture), structural);
             if (row.BidiClass.Length > 0)
-            {
-                Hash128 bidiId = _owner.ClassifierEntity(
-                    builder, "unicode/bidi_class", row.BidiClass);
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasBidiClass, bidiId,
-                    Source, null, structural));
-            }
-
+                Property("Bidi_Class", row.BidiClass, structural);
             if (row.NumericValue is { Length: > 0 } numeric)
-            {
-                Hash128 numericId = ContentEmitter.Emit(builder, numeric, Source)
-                    ?? throw new InvalidOperationException(
-                        $"numeric value '{numeric}' is not a composition of the codepoint floor");
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    entityId, UcdProperties.RelTypeHasNumericValue, numericId,
-                    Source, null, RelationTypeRank.ScalarValued * TC.StandardsDerived));
-            }
+                Property("Numeric_Value", numeric, RelationTypeRank.ScalarValued * TC.StandardsDerived);
 
             EmitCaseMappings(builder, entityId, row, structural);
 
@@ -1648,8 +1592,10 @@ public sealed class UnicodeDecomposer
             SubstrateChangeBuilder builder)
         {
             if (_allowed is not null && !_allowed.Contains(row.Value)) return;
-            Hash128 valueId = _owner.ClassifierEntity(
-                builder, _canonicalPrefix, row.Value);
+            // A binary property holds as [property, Yes]; any other value is plain content.
+            Hash128 valueId = _relation == UcdProperties.RelTypeHasCharacterProperty
+                ? _owner.PropertyValue(builder, row.Value, BinaryYes)
+                : _owner.ClassifierEntity(builder, _canonicalPrefix, row.Value);
             NativeAttestation.AddCodepointRange(
                 builder.ContentStage, row.Start, row.End,
                 _relation, valueId, Source, contextId: null,
@@ -1687,13 +1633,10 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.BinaryPropertyRange row,
             SubstrateChangeBuilder builder)
         {
-            RelationTypeRegistry.RelationTypeResolution relation =
-                _owner.PropertyRelation(builder, row.Property);
             NativeAttestation.AddCodepointRange(
                 builder.ContentStage, row.Start, row.End,
-                relation.Id, objectId: null, sourceId: Source,
-                contextId: null, sourceTrust: TC.StandardsDerived,
-                confirm: true);
+                UcdProperties.RelTypeHasCharacterProperty, _owner.PropertyValue(builder, row.Property, BinaryYes),
+                Source, contextId: null, sourceTrust: TC.StandardsDerived, confirm: true);
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.BinaryPropertyRange>
@@ -1730,14 +1673,10 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.RangeRecord row,
             SubstrateChangeBuilder builder)
         {
-            RelationTypeRegistry.RelationTypeResolution relation =
-                _owner.PropertyRelation(builder, _property);
-            Hash128 valueId = _owner.ClassifierEntity(
-                builder, $"unicode/property_value/{_property}", row.Value);
             NativeAttestation.AddCodepointRange(
                 builder.ContentStage, row.Start, row.End,
-                relation.Id, valueId, Source,
-                contextId: null, sourceTrust: TC.StandardsDerived);
+                UcdProperties.RelTypeHasCharacterProperty, _owner.PropertyValue(builder, _property, row.Value),
+                Source, contextId: null, sourceTrust: TC.StandardsDerived);
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangeRecord>
@@ -1773,13 +1712,13 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.RangeRecord row,
             SubstrateChangeBuilder builder)
         {
+            // Multi-valued: one [Script_Extensions, script] claim per listed script.
             foreach (string script in row.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
-                Hash128 scriptId = _owner.ClassifierEntity(
-                    builder, "unicode/script", script);
                 NativeAttestation.AddCodepointRange(
                     builder.ContentStage, row.Start, row.End,
-                    UcdProperties.RelTypeUsesScriptExtension, scriptId, Source,
+                    UcdProperties.RelTypeHasCharacterProperty,
+                    _owner.PropertyValue(builder, "Script_Extensions", script), Source,
                     contextId: null, sourceTrust: TC.StandardsDerived);
             }
         }
@@ -1811,13 +1750,9 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.UnihanPropertyRow row,
             SubstrateChangeBuilder builder)
         {
-            RelationTypeRegistry.RelationTypeResolution relation =
-                _owner.PropertyRelation(builder, row.Property);
-            Hash128? valueId = ContentEmitter.Emit(builder, row.Value, Source);
-            if (valueId is null) return;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), relation.Id,
-                valueId.Value, Source, null, TC.StandardsDerived));
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, row.Property, row.Value), Source, null, TC.StandardsDerived));
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.UnihanPropertyRow>
@@ -1857,26 +1792,10 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.DelimitedCodepointPropertyRow row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 keyId = _owner.ClassifierEntity(
-                builder, "unicode/property_key", row.Property);
-            Hash128? valueId;
-            if (row.ValueIsUnicodeSequence)
-            {
-                int first = char.ConvertToUtf32(row.Value, 0);
-                int firstLength = char.IsSurrogatePair(row.Value, 0) ? 2 : 1;
-                valueId = row.Value.Length == firstLength
-                    ? CodepointId((uint)first)
-                    : ContentEmitter.Emit(builder, row.Value, Source);
-            }
-            else
-            {
-                valueId = ContentEmitter.Emit(builder, row.Value, Source);
-            }
-            if (valueId is null) return;
-
+            // The value is content; a single-codepoint value collapses to that codepoint.
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
-                valueId.Value, Source, keyId,
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, row.Property, row.Value), Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
@@ -1913,11 +1832,9 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.CodepointListRow row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 propertyId = _owner.ClassifierEntity(
-                builder, "unicode/property", _property);
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
-                propertyId, Source, null,
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, _property, BinaryYes), Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
@@ -1992,13 +1909,10 @@ public sealed class UnicodeDecomposer
             SubstrateChangeBuilder builder)
         {
             Hash128? subject = ContentEmitter.Emit(builder, row.Sequence, Source);
-            Hash128? value = ContentEmitter.Emit(builder, row.Value, Source);
-            if (subject is null || value is null) return;
-            Hash128 keyId = _owner.ClassifierEntity(
-                builder, "unicode/property_key", row.Property);
+            if (subject is null || row.Value.Length == 0) return;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                subject.Value, UcdProperties.RelTypeHasProperty,
-                value.Value, Source, keyId,
+                subject.Value, UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, row.Property, row.Value), Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
@@ -2028,18 +1942,16 @@ public sealed class UnicodeDecomposer
         {
             Hash128 radicalId = _owner.ClassifierEntity(
                 builder, "unicode/cjk_radical", row.Radical);
-            Hash128 radicalKey = _owner.ClassifierEntity(
-                builder, "unicode/property_key", "CJK_Radical_Character");
-            Hash128 unifiedKey = _owner.ClassifierEntity(
-                builder, "unicode/property_key", "CJK_Unified_Ideograph");
             double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
 
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                radicalId, UcdProperties.RelTypeHasProperty,
-                CodepointId(row.RadicalCodepoint), Source, radicalKey, weight));
+                radicalId, UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, "CJK_Radical_Character",
+                    char.ConvertFromUtf32((int)row.RadicalCodepoint)), Source, null, weight));
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                radicalId, UcdProperties.RelTypeHasProperty,
-                CodepointId(row.UnifiedIdeograph), Source, unifiedKey, weight));
+                radicalId, UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, "CJK_Unified_Ideograph",
+                    char.ConvertFromUtf32((int)row.UnifiedIdeograph)), Source, null, weight));
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.CjkRadicalRow>
@@ -2064,14 +1976,14 @@ public sealed class UnicodeDecomposer
             SubstrateChangeBuilder builder)
         {
             Hash128? subject = ContentEmitter.Emit(builder, row.Sequence, Source);
-            Hash128? replacement = ContentEmitter.Emit(builder, row.Replacement, Source);
-            if (subject is null || replacement is null) return;
-            Hash128 kind = _owner.ClassifierEntity(
-                builder, "unicode/do_not_emit_type", row.Kind);
+            if (subject is null || row.Replacement.Length == 0) return;
+            double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                subject.Value, UcdProperties.RelTypeHasProperty,
-                replacement.Value, Source, kind,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                subject.Value, UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, "Do_Not_Emit", row.Replacement), Source, null, weight));
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                subject.Value, UcdProperties.RelTypeHasCharacterProperty,
+                _owner.PropertyValue(builder, "Do_Not_Emit_Type", row.Kind), Source, null, weight));
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.DoNotEmitRow>
@@ -2099,12 +2011,11 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.PropertyAliasRow row,
             SubstrateChangeBuilder builder)
         {
-            RelationTypeRegistry.RelationTypeResolution property =
-                _owner.PropertyRelation(builder, row.CanonicalProperty);
+            Hash128 property = _owner.PropertyContent(builder, row.CanonicalProperty);
             Hash128? aliasId = ContentEmitter.Emit(builder, row.Alias, Source);
             if (aliasId is null) return;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                property.Id, UcdProperties.RelTypeHasName,
+                property, UcdProperties.RelTypeHasName,
                 aliasId.Value, Source, contextId: null,
                 witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived)
                 with { QualifierMask = UcdProperties.AliasName });
@@ -2135,17 +2046,16 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.PropertyValueAliasRow row,
             SubstrateChangeBuilder builder)
         {
-            RelationTypeRegistry.RelationTypeResolution property =
-                _owner.PropertyRelation(builder, row.Property);
-            Hash128 valueId = _owner.PropertyValueEntity(
-                builder, property.Canonical, row.CanonicalValue);
+            Hash128 property = _owner.PropertyContent(builder, row.Property);
+            Hash128 valueId = _owner.PropertyValue(builder, row.Property, row.CanonicalValue);
             Hash128? aliasId = ContentEmitter.Emit(builder, row.Alias, Source);
             if (aliasId is null) return;
             double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
 
             if (row.CountsSourceRow)
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    property.Id, "HAS_MEMBER", valueId, Source, null, weight));
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    property, UcdProperties.RelTypeHasPart, valueId, Source, null, weight)
+                    with { QualifierMask = UcdProperties.MemberPart });
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 valueId, UcdProperties.RelTypeHasName,
                 aliasId.Value, Source, contextId: null, witnessWeight: weight)
@@ -2178,7 +2088,7 @@ public sealed class UnicodeDecomposer
             Hash128 context = _owner.ClassifierEntity(
                 builder, "unicode/property_key", "Index_Term");
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
                 termId.Value, Source, context,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
@@ -2215,7 +2125,7 @@ public sealed class UnicodeDecomposer
             Hash128? value = ContentEmitter.Emit(builder, row.Value, Source);
             if (value is not null)
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    sourceEntry, UcdProperties.RelTypeHasProperty,
+                    sourceEntry, UcdProperties.RelTypeHasCharacterProperty,
                     value.Value, Source, key,
                     RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
@@ -2224,7 +2134,7 @@ public sealed class UnicodeDecomposer
                 Hash128 cpKey = _owner.ClassifierEntity(
                     builder, "unicode/property_key", "USource_Codepoint_Reference");
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    sourceEntry, UcdProperties.RelTypeHasProperty,
+                    sourceEntry, UcdProperties.RelTypeHasCharacterProperty,
                     CodepointId(cp), Source, cpKey,
                     RelationTypeRank.StandardsStructural * TC.StandardsDerived));
             }
@@ -2303,7 +2213,7 @@ public sealed class UnicodeDecomposer
                 Hash128 key = _owner.ClassifierEntity(
                     builder, "unicode/property_key", property);
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                    CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
                     valueId.Value, Source, key,
                     RelationTypeRank.StandardsStructural * TC.StandardsDerived));
             }
@@ -2348,7 +2258,7 @@ public sealed class UnicodeDecomposer
             Hash128 key = _owner.ClassifierEntity(
                 builder, "unicode/names_list_property", row.Kind);
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
                 value.Value, Source, key,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
@@ -2398,21 +2308,18 @@ public sealed class UnicodeDecomposer
             Hash128? sequence = ContentEmitter.Emit(builder, row.Sequence, Source);
             Hash128? boundaries = ContentEmitter.Emit(builder, row.Boundaries, Source);
             if (sequence is null || boundaries is null) return;
-            RelationTypeRegistry.RelationTypeResolution expectation =
-                _owner.PropertyRelation(builder, _property);
+            Hash128 expectation = _owner.PropertyValue(builder, _property, row.Boundaries);
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                sequence.Value, expectation.Id, boundaries.Value,
+                sequence.Value, UcdProperties.RelTypeHasCharacterProperty, expectation,
                 Source, contextId: null,
                 witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             if (row.Description.Length == 0) return;
-            Hash128? description = ContentEmitter.Emit(builder, row.Description, Source);
-            if (description is null) return;
-            RelationTypeRegistry.RelationTypeResolution descriptionRelation =
-                _owner.PropertyRelation(builder, $"{_property}_Description");
+            Hash128 description = _owner.PropertyValue(
+                builder, $"{_property}_Description", row.Description);
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                sequence.Value, descriptionRelation.Id, description.Value,
-                Source, contextId: boundaries.Value,
+                sequence.Value, UcdProperties.RelTypeHasCharacterProperty, description,
+                Source, contextId: expectation,
                 witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
@@ -2425,7 +2332,11 @@ public sealed class UnicodeDecomposer
     private sealed class NormalizationTestPhase
         : UnicodeComposePhase<UnicodePhysicalArtifactParser.NormalizationTestRow>
     {
-        private static readonly string[] Forms = ["NFC", "NFD", "NFKC", "NFKD"];
+        private static readonly Mask256[] Forms =
+        [
+            ClaimQualifiers.Of("mapping", "nfc"), ClaimQualifiers.Of("mapping", "nfd"),
+            ClaimQualifiers.Of("mapping", "nfkc"), ClaimQualifiers.Of("mapping", "nfkd"),
+        ];
         private readonly UnicodeDecomposer _owner;
         private readonly string _path;
 
@@ -2458,12 +2369,11 @@ public sealed class UnicodeDecomposer
             {
                 Hash128? target = ContentEmitter.Emit(builder, expected[i], Source);
                 if (target is null) continue;
-                RelationTypeRegistry.RelationTypeResolution relation =
-                    _owner.PropertyRelation(builder, $"Normalization_Test_{Forms[i]}");
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    source.Value, relation.Id, target.Value, Source,
+                    source.Value, UcdProperties.RelTypeNormalizesTo, target.Value, Source,
                     contextId: description,
-                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived)
+                    with { QualifierMask = Forms[i] });
             }
         }
 
@@ -2498,23 +2408,23 @@ public sealed class UnicodeDecomposer
         {
             Hash128? sequence = ContentEmitter.Emit(builder, row.Sequence, Source);
             if (sequence is null) return;
-            EmitValue("Emoji_Test_Status", row.Status, content: false);
-            EmitValue("Emoji_Test_Version", row.Version, content: false);
-            EmitValue("Emoji_Test_Name", row.Name, content: true);
-            EmitValue("Emoji_Test_Group", row.Group, content: true);
-            EmitValue("Emoji_Test_Subgroup", row.Subgroup, content: true);
+            EmitValue("Emoji_Test_Status", row.Status);
+            EmitValue("Emoji_Test_Version", row.Version);
+            EmitValue("Emoji_Test_Group", row.Group);
+            EmitValue("Emoji_Test_Subgroup", row.Subgroup);
+            Hash128? name = row.Name.Length == 0 ? null : ContentEmitter.Emit(builder, row.Name, Source);
+            if (name is not null)
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    sequence.Value, UcdProperties.RelTypeHasName, name.Value, Source,
+                    contextId: null,
+                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
-            void EmitValue(string property, string raw, bool content)
+            void EmitValue(string property, string raw)
             {
                 if (raw.Length == 0) return;
-                Hash128? value = content
-                    ? ContentEmitter.Emit(builder, raw, Source)
-                    : _owner.PropertyValueEntity(builder, property, raw);
-                if (value is null) return;
-                RelationTypeRegistry.RelationTypeResolution relation =
-                    _owner.PropertyRelation(builder, property);
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    sequence.Value, relation.Id, value.Value, Source,
+                    sequence.Value, UcdProperties.RelTypeHasCharacterProperty,
+                    _owner.PropertyValue(builder, property, raw), Source,
                     contextId: null,
                     witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
             }

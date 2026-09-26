@@ -157,7 +157,7 @@ DECLARE
     w_end     bytea := public.laplace_hash128_blake3('test/corpus/word-end');
     w_target  bytea := laplace.word_id('β'); -- mapped floor, no database row
     sp        bytea := public.laplace_hash128_blake3('test/corpus/space');
-    zs_cat    bytea := laplace.word_id('Space_Separator');
+    zs_cat    bytea := laplace.property_value_id('General_Category', 'Space_Separator');
     sent      bytea := public.laplace_hash128_blake3('test/corpus/sentence');
     sent2     bytea := public.laplace_hash128_blake3('test/corpus/sentence2');
     sent3     bytea := public.laplace_hash128_blake3('test/corpus/sentence3');
@@ -181,13 +181,13 @@ BEGIN
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
-    -- HAS_GENERAL_CATEGORY → Space_Separator (content) — and
+    -- HAS_CHARACTER_PROPERTY → [General_Category, Space_Separator] — and
     -- generation.separator_ids() resolves it.
     INSERT INTO laplace.attestations (id, subject_id, type_id, object_id, source_id,
                               context_id, outcome, last_observed_at, observation_count,
                               sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES (public.laplace_hash128_blake3('test/corpus/att-sp-zs'), sp,
-            laplace.relation_type_id('HAS_GENERAL_CATEGORY'), zs_cat, src,
+            laplace.relation_type_id('HAS_CHARACTER_PROPERTY'), zs_cat, src,
             NULL, 2, now(), 1, 1000000000, 30000000000);
 
     IF NOT (sp = ANY (generation.separator_ids())) THEN
