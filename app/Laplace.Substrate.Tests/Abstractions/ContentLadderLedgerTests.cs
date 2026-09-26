@@ -71,7 +71,7 @@ public sealed class ContentLadderLedgerTests : IDisposable
     }
 
     [Fact]
-    public void Armed_empty_run_memoizes_and_retains_observations_after_commit()
+    public void Armed_empty_run_memoizes_and_stages_nothing_after_commit()
     {
         const string surface = "memoize before first committed apply";
         ContentLadderLedger.Begin();
@@ -87,12 +87,13 @@ public sealed class ContentLadderLedgerTests : IDisposable
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
             repeated, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var repeatedRoot));
         Assert.Equal(root, repeatedRoot);
-        Assert.True(repeated.ContentStage.PhysicalityCount > 0);
+        Assert.Equal(0, repeated.ContentStage.EntityCount);
+        Assert.Equal(0, repeated.ContentStage.PhysicalityCount);
     }
 
     [Theory]
     [MemberData(nameof(Surfaces))]
-    public void Recorded_root_retains_observation_and_returns_the_identical_identity(string surface)
+    public void Recorded_root_stages_nothing_and_returns_the_identical_identity(string surface)
     {
         var derived = Stage(surface, "baseline");
 
@@ -103,23 +104,22 @@ public sealed class ContentLadderLedgerTests : IDisposable
         // Presence never changes the canonical root.
         Assert.Equal(derived, Stage(surface, "recorded"));
 
-        // The new source unit still reaches the native physicality owner.
+        // A persisted root is its entity, form and subtree: nothing is staged again.
         var skipped = NewBuilder("recorded-empty");
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
             skipped, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var id));
         Assert.Equal(derived, id);
-        Assert.True(skipped.ContentStage.PhysicalityCount > 0);
+        Assert.Equal(0, skipped.ContentStage.PhysicalityCount);
     }
 
     [Fact]
-    public void Recorded_root_preserves_the_actual_source_span()
+    public void Recorded_root_stages_nothing_even_when_first_seen_by_this_process()
     {
         const string surface = "New York";
         var control = NewBuilder("control");
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
             control, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var derived));
-        int stagedWhenDeriving = control.ContentStage.EntityCount;
-        Assert.True(stagedWhenDeriving > 0);
+        Assert.True(control.ContentStage.EntityCount > 0);
 
         ContentLadderLedger.Begin();
         ContentLadderLedger.MarkPersisted([derived]);
@@ -129,14 +129,12 @@ public sealed class ContentLadderLedgerTests : IDisposable
             skipped, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var id));
 
         Assert.Equal(derived, id);
-        Assert.True(skipped.ContentStage.PhysicalityCount > 0);
-        var range = Assert.Single(skipped.ContentStage.PhysicalitySourceRanges);
-        Assert.Equal(Source, range.SourceId);
-        Assert.Equal(skipped.ContentStage.PhysicalityCount, range.RowCount);
+        Assert.Equal(0, skipped.ContentStage.EntityCount);
+        Assert.Equal(0, skipped.ContentStage.PhysicalityCount);
     }
 
     [Fact]
-    public void Warm_root_memo_retains_each_native_source_observation()
+    public void Warm_persisted_root_stages_nothing_whatever_its_sources()
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes("ab");
         Hash128 root = ContentTierSpine.ResolveRoot(bytes)!.Value;
@@ -149,14 +147,12 @@ public sealed class ContentLadderLedgerTests : IDisposable
             Assert.True(ContentTierSpine.TryStageIntoBuilder(builder, bytes, source, out var observed));
             Assert.Equal(root, observed);
         }
-        Assert.Equal(1, builder.ContentStage.EntityCount);
-        Assert.Equal(3, builder.ContentStage.PhysicalityCount);
-        Assert.Equal(new[] { new PhysicalitySourceRange(0, 2, Source),
-            new PhysicalitySourceRange(2, 1, other) }, builder.ContentStage.PhysicalitySourceRanges.ToArray());
+        Assert.Equal(0, builder.ContentStage.EntityCount);
+        Assert.Equal(0, builder.ContentStage.PhysicalityCount);
     }
 
     [Fact]
-    public void Warm_atomic_root_retains_floor_observation_without_entity_or_wrapper()
+    public void Warm_persisted_atomic_root_stages_nothing()
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes("a");
         Hash128 root = ContentTierSpine.ResolveRoot(bytes)!.Value;
@@ -166,9 +162,7 @@ public sealed class ContentLadderLedgerTests : IDisposable
         Assert.True(ContentTierSpine.TryStageIntoBuilder(builder, bytes, Source, out var observed));
         Assert.Equal(root, observed);
         Assert.Equal(0, builder.ContentStage.EntityCount);
-        Assert.Equal(1, builder.ContentStage.PhysicalityCount);
-        Assert.Equal(new PhysicalitySourceRange(0, 1, Source),
-            Assert.Single(builder.ContentStage.PhysicalitySourceRanges));
+        Assert.Equal(0, builder.ContentStage.PhysicalityCount);
     }
 
     [Fact]

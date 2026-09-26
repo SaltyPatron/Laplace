@@ -182,10 +182,17 @@ public sealed class TextEntityBuilderEmissionTests
         using var expected = IntentStage.New(tree.NodeCount);
         Assert.True(expected.EmitContentTree(tree, Src, bitmap, out var expectedRoot));
         var (entities, physicalities) = new TextEntityBuilder(tree, Src, bitmap).Build();
-        if (known) Assert.Empty(entities);
-        Assert.NotEmpty(physicalities);
-        Assert.True(physicalities.Length > physicalities.Select(p => p.EntityId).Distinct().Count(),
-            "Repeated content must retain each actual native raw occurrence.");
+        // Known content is its entities and forms already; repeated content is one form.
+        if (known)
+        {
+            Assert.Empty(entities);
+            Assert.Empty(physicalities);
+        }
+        else
+        {
+            Assert.NotEmpty(physicalities);
+            Assert.Equal(physicalities.Length, physicalities.Select(p => p.Id).Distinct().Count());
+        }
         using var transported = IntentStage.New(tree.NodeCount);
         foreach (var entity in entities)
             transported.AddEntity(entity.Id, entity.Tier, entity.TypeId);
@@ -200,7 +207,7 @@ public sealed class TextEntityBuilderEmissionTests
             transported.EmitCopyBinary(IntentStageTable.Entities));
         Assert.Equal(expected.EmitCopyBinary(IntentStageTable.Physicalities),
             transported.EmitCopyBinary(IntentStageTable.Physicalities));
-        Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities, expectedRoot));
+        if (!known) Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities, expectedRoot));
     }
 
     [Theory]
@@ -230,7 +237,7 @@ public sealed class TextEntityBuilderEmissionTests
             Enumerable.Repeat("alpha beta. alpha beta. ", 32)));
         using var tree = TextDecomposer.Run(bytes);
         HashComposer.Run(tree, &TextEntityBuilder.Resolver);
-        var bitmap = Enumerable.Repeat((byte)255, (tree.NodeCount + 7) / 8).ToArray();
+        byte[]? bitmap = null;
         long high = IngestSizing.ResolveWorkingSetBudgetBytes();
         bool CanStage(long grant)
         {
@@ -254,7 +261,7 @@ public sealed class TextEntityBuilderEmissionTests
         var error = Assert.Throws<InvalidOperationException>(() => builder.Build(low));
         Assert.Contains("managed metadata exhausted", error.Message);
         var (entities, physicalities) = builder.Build();
-        Assert.Empty(entities);
+        Assert.NotEmpty(entities);
         Assert.NotEmpty(physicalities);
         Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities,
             tree.GetNode(tree.NaturalUnitIndex()).Id));

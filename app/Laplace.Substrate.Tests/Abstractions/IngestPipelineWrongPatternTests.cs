@@ -63,7 +63,7 @@ public sealed class IngestPipelineWrongPatternTests
     }
 
     [Fact]
-    public async Task PresentEntityProbeRetainsPhysicalityComposition()
+    public async Task PresentRootProbeStagesNothing()
     {
         var records = new[] { ContentRecord("compose physicalities for an existing content root") };
         var reader = new ProbeTrackingReader(present: true);
@@ -79,13 +79,12 @@ public sealed class IngestPipelineWrongPatternTests
                 changes.Add(c);
 
             Assert.Equal(1, reader.FlatCandidateCounts[0]);
-            Assert.InRange(reader.FlatProbeCalls, 2, MaxProbeCallsFor(1));
+            Assert.Equal(1, reader.FlatProbeCalls);
             Assert.Equal(0, reader.LegacyContentDescentCalls);
             Assert.True(ContentEntityCount(baseline) > 0);
             Assert.Equal(0, ContentEntityCount(changes));
-            var expectedBodies = PhysicalityBodies(baseline);
-            Assert.NotEmpty(expectedBodies);
-            Assert.Equal(expectedBodies, PhysicalityBodies(changes));
+            Assert.NotEmpty(PhysicalityBodies(baseline));
+            Assert.Empty(PhysicalityBodies(changes));
             Assert.Equal(records.Length, changes.Sum(x => x.Metadata.InputUnitsConsumed));
         }
         finally

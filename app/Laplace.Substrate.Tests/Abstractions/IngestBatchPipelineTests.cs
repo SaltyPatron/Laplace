@@ -121,7 +121,7 @@ public sealed class IngestBatchPipelineTests
     }
 
     [Fact]
-    public async Task PresentBatch_EmitsZeroEntitiesAndRetainsPhysicalityBodies()
+    public async Task PresentBatch_StagesNothingAfterOneRootProbe()
     {
         const int rowCount = 12;
         var records = Enumerable.Range(1, rowCount)
@@ -143,16 +143,15 @@ public sealed class IngestBatchPipelineTests
                 DefaultConfig(reader, batchSize: rowCount, probeChunk: rowCount)))
                 changes.Add(c);
 
-            // Root presence does not prove descendant presence. Preserve the
-            // bounded batched tier probes and suppress only existing entities.
+            // A present root is its whole subtree: one root probe decides every record,
+            // and nothing beneath a present root is asked or staged.
             Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
-            Assert.InRange(reader.FlatProbeCalls, 2, MaxProbeCallsFor(1));
+            Assert.Equal(1, reader.FlatProbeCalls);
             Assert.Equal(0, reader.LegacyContentDescentCalls);
             Assert.Equal(0, ContentEntityCount(changes));
             Assert.Equal(records.Count, changes.Sum(x => x.Metadata.InputUnitsConsumed));
-            var expectedBodies = PhysicalityBodies(baseline);
-            Assert.NotEmpty(expectedBodies);
-            Assert.Equal(expectedBodies, PhysicalityBodies(changes));
+            Assert.NotEmpty(PhysicalityBodies(baseline));
+            Assert.Empty(PhysicalityBodies(changes));
         }
         finally
         {

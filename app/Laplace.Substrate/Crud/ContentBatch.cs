@@ -94,26 +94,19 @@ public sealed class ContentBatch : IDisposable
         for (int i = 0; i < entries.Count; i++)
         {
             var e = entries[i];
+            if (BitmapBits.IsSet(rootBm, i))
+            {
+                // A present root is its whole subtree: nothing under it is asked or staged.
+                _reader.MarkProven([e.RootId], presenceScope);
+                _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
+                continue;
+            }
+            // Carry this exact negative result into descent so the root is
+            // not queried again within the same unwritten working set.
+            rootsProvenAbsent.Add(e.RootId);
             e.Tree ??= ContentTierSpine.BuildTree(e.Canonical);
             if (e.Tree is null)
                 throw new InvalidOperationException("previously resolved content could not produce its native tree");
-            if (BitmapBits.IsSet(rootBm, i))
-            {
-                _reader.MarkProven([e.RootId], presenceScope);
-                _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
-            }
-            else
-            {
-                // Carry this exact negative result into descent so the root is
-                // not queried again within the same unwritten working set.
-                rootsProvenAbsent.Add(e.RootId);
-            }
-
-            // A present root proves only that identity, not its descendants.
-            // The shared descent reuses positive root proof for every collapsed
-            // occurrence and probes each remaining exact node in tier batches.
-            // Every source's physicality observations are still emitted below.
-
             probeTrees.Add(e.Tree);
             emitEntries.Add(e);
         }
@@ -126,13 +119,13 @@ public sealed class ContentBatch : IDisposable
         for (int t = 0; t < emitEntries.Count; t++)
             emitEntries[t].ExistingBitmap = t < bitmaps.Length ? bitmaps[t] : null;
 
-        foreach (var e in entries)
+        // One content is one entity and one form, whichever sources stated it.
+        foreach (var e in emitEntries)
         {
-            foreach (Hash128 source in e.Sources)
-                if (!ContentTierSpine.EmitTree(stage, e.Tree!, source,
-                        e.ExistingBitmap ?? ReadOnlySpan<byte>.Empty, out var emittedRoot)
-                    || emittedRoot != e.RootId)
-                    throw new InvalidOperationException("native content observation emission failed or changed its root identity");
+            if (!ContentTierSpine.EmitTree(stage, e.Tree!, e.Sources.First(),
+                    e.ExistingBitmap ?? ReadOnlySpan<byte>.Empty, out var emittedRoot)
+                || emittedRoot != e.RootId)
+                throw new InvalidOperationException("native content emission failed or changed its root identity");
             _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
         }
 

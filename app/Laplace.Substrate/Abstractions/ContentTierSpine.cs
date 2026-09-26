@@ -187,10 +187,14 @@ public static class ContentTierSpine
         if (builder.DeferredContent is { } cb)
             return cb.Append(canonicalUtf8, sourceId, out rootId);
 
-        // A memo or committed root proves identity/presence, not that this
-        // source unit's form was observed. The native owner derives once and
-        // retains raw forms before its entity filter. Admission owns exact
-        // descriptor reuse and source-unit replay exclusion.
+        // Content this run already persisted is its entity, its form and its subtree:
+        // its root (native fast path, memoized) is the answer and nothing is staged again.
+        if (ContentLadderLedger.Armed && ContentLadderLedger.HasEntries
+            && ResolveRoot(canonicalUtf8) is { } known && ContentLadderLedger.IsPersisted(known))
+        {
+            rootId = known;
+            return true;
+        }
         if (!builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId))
             return false;
         if (ContentLadderLedger.Armed)
