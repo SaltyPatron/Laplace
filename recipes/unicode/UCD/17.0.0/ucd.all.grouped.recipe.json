@@ -11,12 +11,20 @@
       "disposition": "Reference, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Block_First",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Block_First"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Block_First"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "blocks/block/@last-cp",
@@ -25,12 +33,20 @@
       "disposition": "Reference, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Block_Last",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Block_Last"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Block_Last"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "blocks/block/@name",
@@ -39,11 +55,9 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/block",
-      "objectEntityType": "UcdClassifier",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_BLOCK"
+      "relationName": "HAS_NAME"
     },
     {
       "syntaxPath": "cjk-radicals/cjk-radical/@ideograph",
@@ -52,12 +66,20 @@
       "disposition": "Reference, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/CJK_Radical_Ideograph",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "CJK_Radical_Ideograph"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "CJK_Unified_Ideograph"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "cjk-radicals/cjk-radical/@number",
@@ -66,12 +88,19 @@
       "disposition": "Identity",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/CJK_Radical_Number",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "CJK_Radical_Number"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "CJK_Radical_Number"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "cjk-radicals/cjk-radical/@radical",
@@ -80,12 +109,20 @@
       "disposition": "Reference, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/CJK_Radical",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "CJK_Radical"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "CJK_Radical_Character"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "do-not-emit/instead/@because",
@@ -94,12 +131,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Do_Not_Emit_Reason",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Do_Not_Emit_Reason"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Do_Not_Emit_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "do-not-emit/instead/@of",
@@ -122,12 +166,20 @@
       "disposition": "Reference, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": " ",
-      "objectNamespace": "unicode/property_value/Do_Not_Emit_Replacement",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "UnicodeCodepointSequence",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Do_Not_Emit_Replacement"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Do_Not_Emit"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "named-sequences/named-sequence/@cps",
@@ -165,12 +217,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/ASCII_Hex_Digit",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "ASCII_Hex_Digit"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ASCII_Hex_Digit"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Alpha",
@@ -181,12 +240,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Alphabetic",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Alphabetic"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Alphabetic"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Bidi_C",
@@ -197,12 +263,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Bidi_Control",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Bidi_Control"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi_Control"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Bidi_M",
@@ -213,12 +286,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Bidi_Mirrored",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Bidi_Mirrored"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi_Mirrored"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CE",
@@ -229,12 +309,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Composition_Exclusion",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Composition_Exclusion"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Composition_Exclusion"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CI",
@@ -245,12 +332,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Case_Ignorable",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Case_Ignorable"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Case_Ignorable"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CWCF",
@@ -261,12 +355,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Changes_When_Casefolded",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Changes_When_Casefolded"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Changes_When_Casefolded"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CWCM",
@@ -277,12 +378,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Changes_When_Casemapped",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Changes_When_Casemapped"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Changes_When_Casemapped"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CWKCF",
@@ -293,12 +401,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Changes_When_NFKC_Casefolded",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Changes_When_NFKC_Casefolded"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Changes_When_NFKC_Casefolded"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CWL",
@@ -309,12 +424,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Changes_When_Lowercased",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Changes_When_Lowercased"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Changes_When_Lowercased"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CWT",
@@ -325,12 +447,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Changes_When_Titlecased",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Changes_When_Titlecased"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Changes_When_Titlecased"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@CWU",
@@ -341,12 +470,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Changes_When_Uppercased",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Changes_When_Uppercased"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Changes_When_Uppercased"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Cased",
@@ -357,12 +493,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Cased",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Cased"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Cased"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Comp_Ex",
@@ -373,12 +516,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Full_Composition_Exclusion",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Full_Composition_Exclusion"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Full_Composition_Exclusion"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@DI",
@@ -389,12 +539,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Default_Ignorable_Code_Point",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Default_Ignorable_Code_Point"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Default_Ignorable_Code_Point"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Dash",
@@ -405,12 +562,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Dash",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Dash"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Dash"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Dep",
@@ -421,12 +585,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Deprecated",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Deprecated"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Deprecated"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Dia",
@@ -437,12 +608,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Diacritic",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Diacritic"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Diacritic"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@EBase",
@@ -453,12 +631,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Emoji_Modifier_Base",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EMOJI_PROPERTY",
-      "objectLiteral": "Emoji_Modifier_Base"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Modifier_Base"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@EComp",
@@ -469,12 +654,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Emoji_Component",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EMOJI_PROPERTY",
-      "objectLiteral": "Emoji_Component"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Component"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@EMod",
@@ -485,12 +677,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Emoji_Modifier",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EMOJI_PROPERTY",
-      "objectLiteral": "Emoji_Modifier"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Modifier"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@EPres",
@@ -501,12 +700,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Emoji_Presentation",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EMOJI_PROPERTY",
-      "objectLiteral": "Emoji_Presentation"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Presentation"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Emoji",
@@ -517,12 +723,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Emoji",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EMOJI_PROPERTY",
-      "objectLiteral": "Emoji"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@EqUIdeo",
@@ -547,12 +760,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Extender",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Extender"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Extender"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@ExtPict",
@@ -563,12 +783,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Extended_Pictographic",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EMOJI_PROPERTY",
-      "objectLiteral": "Extended_Pictographic"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Extended_Pictographic"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@GCB",
@@ -577,12 +804,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Grapheme_Cluster_Break",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Grapheme_Cluster_Break"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Grapheme_Cluster_Break"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Gr_Base",
@@ -593,12 +827,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Grapheme_Base",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Grapheme_Base"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Grapheme_Base"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Gr_Ext",
@@ -609,12 +850,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Grapheme_Extend",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Grapheme_Extend"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Grapheme_Extend"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Hex",
@@ -625,12 +873,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Hex_Digit",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Hex_Digit"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Hex_Digit"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@IDC",
@@ -641,12 +896,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/ID_Continue",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "ID_Continue"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ID_Continue"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@IDS",
@@ -657,12 +919,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/ID_Start",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "ID_Start"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ID_Start"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@IDSB",
@@ -673,12 +942,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/IDS_Binary_Operator",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "IDS_Binary_Operator"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "IDS_Binary_Operator"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@IDST",
@@ -689,12 +965,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/IDS_Trinary_Operator",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "IDS_Trinary_Operator"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "IDS_Trinary_Operator"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@IDSU",
@@ -705,12 +988,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/IDS_Unary_Operator",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "IDS_Unary_Operator"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "IDS_Unary_Operator"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@ID_Compat_Math_Continue",
@@ -721,12 +1011,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/ID_Compat_Math_Continue",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "ID_Compat_Math_Continue"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ID_Compat_Math_Continue"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@ID_Compat_Math_Start",
@@ -737,12 +1034,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/ID_Compat_Math_Start",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "ID_Compat_Math_Start"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "ID_Compat_Math_Start"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Ideo",
@@ -753,12 +1057,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Ideographic",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Ideographic"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Ideographic"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@InCB",
@@ -767,12 +1078,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Indic_Conjunct_Break",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Indic_Conjunct_Break"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Indic_Conjunct_Break"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@InPC",
@@ -781,12 +1099,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Indic_Positional_Category",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Indic_Positional_Category"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Indic_Positional_Category"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@InSC",
@@ -795,12 +1120,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Indic_Syllabic_Category",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Indic_Syllabic_Category"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Indic_Syllabic_Category"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@JSN",
@@ -827,12 +1159,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Join_Control",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Join_Control"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Join_Control"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@LOE",
@@ -843,12 +1182,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Logical_Order_Exception",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Logical_Order_Exception"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Logical_Order_Exception"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Lower",
@@ -859,12 +1205,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Lowercase",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Lowercase"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Lowercase"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@MCM",
@@ -875,12 +1228,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Modifier_Combining_Mark",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Modifier_Combining_Mark"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Modifier_Combining_Mark"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Math",
@@ -891,12 +1251,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Math",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Math"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Math"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NChar",
@@ -907,12 +1274,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Noncharacter_Code_Point",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Noncharacter_Code_Point"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Noncharacter_Code_Point"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NFC_QC",
@@ -921,12 +1295,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/NFC_Quick_Check",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "NFC_Quick_Check"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "NFC_Quick_Check"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NFD_QC",
@@ -935,12 +1316,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/NFD_Quick_Check",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "NFD_Quick_Check"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "NFD_Quick_Check"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NFKC_CF",
@@ -967,12 +1355,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/NFKC_Quick_Check",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "NFKC_Quick_Check"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "NFKC_Quick_Check"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@NFKC_SCF",
@@ -999,12 +1394,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/NFKD_Quick_Check",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "NFKD_Quick_Check"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "NFKD_Quick_Check"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OAlpha",
@@ -1015,12 +1417,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_Alphabetic",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_Alphabetic"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_Alphabetic"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@ODI",
@@ -1031,12 +1440,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_Default_Ignorable_Code_Point",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_Default_Ignorable_Code_Point"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_Default_Ignorable_Code_Point"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OGr_Ext",
@@ -1047,12 +1463,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_Grapheme_Extend",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_Grapheme_Extend"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_Grapheme_Extend"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OIDC",
@@ -1063,12 +1486,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_ID_Continue",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_ID_Continue"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_ID_Continue"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OIDS",
@@ -1079,12 +1509,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_ID_Start",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_ID_Start"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_ID_Start"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OLower",
@@ -1095,12 +1532,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_Lowercase",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_Lowercase"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_Lowercase"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OMath",
@@ -1111,12 +1555,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_Math",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_Math"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_Math"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@OUpper",
@@ -1127,12 +1578,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Other_Uppercase",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Other_Uppercase"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Other_Uppercase"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@PCM",
@@ -1143,12 +1601,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Prepended_Concatenation_Mark",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Prepended_Concatenation_Mark"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Prepended_Concatenation_Mark"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Pat_Syn",
@@ -1159,12 +1624,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Pattern_Syntax",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Pattern_Syntax"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Pattern_Syntax"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Pat_WS",
@@ -1175,12 +1647,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Pattern_White_Space",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Pattern_White_Space"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Pattern_White_Space"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@QMark",
@@ -1191,12 +1670,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Quotation_Mark",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Quotation_Mark"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Quotation_Mark"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@RI",
@@ -1207,12 +1693,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Regional_Indicator",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Regional_Indicator"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Regional_Indicator"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Radical",
@@ -1223,12 +1716,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Radical",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Radical"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Radical"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@SB",
@@ -1237,12 +1737,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Sentence_Break",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Sentence_Break"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Sentence_Break"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@SD",
@@ -1253,12 +1760,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Soft_Dotted",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Soft_Dotted"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Soft_Dotted"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@STerm",
@@ -1269,12 +1783,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Sentence_Terminal",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Sentence_Terminal"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Sentence_Terminal"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Term",
@@ -1285,12 +1806,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Terminal_Punctuation",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Terminal_Punctuation"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Terminal_Punctuation"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@UIdeo",
@@ -1301,12 +1829,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Unified_Ideograph",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Unified_Ideograph"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Unified_Ideograph"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@Upper",
@@ -1317,12 +1852,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Uppercase",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Uppercase"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Uppercase"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@VS",
@@ -1333,12 +1875,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Variation_Selector",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "Variation_Selector"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Variation_Selector"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@WB",
@@ -1347,12 +1896,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Word_Break",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Word_Break"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Word_Break"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@WSpace",
@@ -1363,12 +1919,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/White_Space",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "White_Space"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "White_Space"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@XIDC",
@@ -1379,12 +1942,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/XID_Continue",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "XID_Continue"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "XID_Continue"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@XIDS",
@@ -1395,12 +1965,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/XID_Start",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "XID_Start"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "XID_Start"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@age",
@@ -1409,11 +1986,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/age",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_AGE"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Age"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@bc",
@@ -1422,11 +2007,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/bidi_class",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_BIDI_CLASS"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi_Class"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@blk",
@@ -1435,11 +2028,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/block",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_BLOCK"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Block"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@bmg",
@@ -1461,12 +2062,20 @@
       "disposition": "Reference, Testimony",
       "absentSentinel": "#",
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Bidi_Paired_Bracket",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "UnicodeCodepoint",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Bidi_Paired_Bracket"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi_Paired_Bracket"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@bpt",
@@ -1475,12 +2084,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Bidi_Paired_Bracket_Type",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Bidi_Paired_Bracket_Type"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi_Paired_Bracket_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@ccc",
@@ -1489,11 +2105,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/combining_class",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_COMBINING_CLASS"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Canonical_Combining_Class"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@cf",
@@ -1554,11 +2178,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/east_asian_width",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_EAST_ASIAN_WIDTH"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "East_Asian_Width"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@first-cp",
@@ -1581,11 +2213,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/category",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_GENERAL_CATEGORY"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "General_Category"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@hst",
@@ -1594,12 +2234,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Hangul_Syllable_Type",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Hangul_Syllable_Type"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Hangul_Syllable_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@jg",
@@ -1608,12 +2255,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Joining_Group",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Joining_Group"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Joining_Group"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@jt",
@@ -1622,11 +2276,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/joining_type",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_JOINING_TYPE"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Joining_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kAccountingNumeric",
@@ -1635,12 +2297,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kAccountingNumeric",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE",
-      "contextLiteral": "kAccountingNumeric"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kAccountingNumeric"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kAlternateTotalStrokes",
@@ -1649,12 +2318,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kAlternateTotalStrokes",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kAlternateTotalStrokes"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kAlternateTotalStrokes"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kBigFive",
@@ -1663,12 +2339,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kBigFive",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kBigFive"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kBigFive"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCCCII",
@@ -1677,12 +2360,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCCCII",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCCCII"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCCCII"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCNS1986",
@@ -1691,12 +2381,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCNS1986",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCNS1986"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCNS1986"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCNS1992",
@@ -1705,12 +2402,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCNS1992",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCNS1992"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCNS1992"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCangjie",
@@ -1719,12 +2423,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCangjie",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCangjie"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCangjie"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCantonese",
@@ -1747,12 +2458,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCheungBauer",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCheungBauer"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCheungBauer"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCheungBauerIndex",
@@ -1761,12 +2479,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCheungBauerIndex",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCheungBauerIndex"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCheungBauerIndex"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCihaiT",
@@ -1775,12 +2500,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCihaiT",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCihaiT"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCihaiT"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kCompatibilityVariant",
@@ -1803,12 +2535,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kCowles",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kCowles"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kCowles"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kDaeJaweon",
@@ -1817,12 +2556,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kDaeJaweon",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kDaeJaweon"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kDaeJaweon"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kDefinition",
@@ -1844,12 +2590,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEACC",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEACC"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEACC"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_AltSeq",
@@ -1858,12 +2611,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_AltSeq",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_AltSeq"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_AltSeq"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Cat",
@@ -1872,12 +2632,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_Cat",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_Cat"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_Cat"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Core",
@@ -1886,12 +2653,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_Core",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_Core"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_Core"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Desc",
@@ -1900,12 +2674,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_Desc",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_Desc"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_Desc"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_FVal",
@@ -1914,12 +2695,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_FVal",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_FVal"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_FVal"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_Func",
@@ -1928,12 +2716,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_Func",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_Func"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_Func"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_HG",
@@ -1942,12 +2737,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_HG",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_HG"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_HG"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_IFAO",
@@ -1956,12 +2758,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_IFAO",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_IFAO"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_IFAO"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_JSesh",
@@ -1970,12 +2779,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_JSesh",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_JSesh"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_JSesh"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_NoMirror",
@@ -1986,12 +2802,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_NoMirror",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "kEH_NoMirror"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_NoMirror"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_NoRotate",
@@ -2002,12 +2825,19 @@
       "defaultValue": "N",
       "omitDefaultTestimony": true,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_NoRotate",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectLiteral": "kEH_NoRotate"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_NoRotate"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kEH_UniK",
@@ -2016,12 +2846,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kEH_UniK",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kEH_UniK"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kEH_UniK"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kFanqie",
@@ -2044,12 +2881,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kFenn",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kFenn"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kFenn"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kFennIndex",
@@ -2058,12 +2902,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kFennIndex",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kFennIndex"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kFennIndex"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kFourCornerCode",
@@ -2072,12 +2923,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kFourCornerCode",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kFourCornerCode"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kFourCornerCode"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGB0",
@@ -2086,12 +2944,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGB0",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGB0"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGB0"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGB1",
@@ -2100,12 +2965,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGB1",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGB1"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGB1"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGB3",
@@ -2114,12 +2986,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGB3",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGB3"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGB3"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGB5",
@@ -2128,12 +3007,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGB5",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGB5"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGB5"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGB8",
@@ -2142,12 +3028,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGB8",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGB8"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGB8"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGSR",
@@ -2156,12 +3049,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGSR",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGSR"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGSR"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kGradeLevel",
@@ -2170,12 +3070,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kGradeLevel",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kGradeLevel"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kGradeLevel"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kHDZRadBreak",
@@ -2184,12 +3091,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kHDZRadBreak",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kHDZRadBreak"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kHDZRadBreak"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kHKGlyph",
@@ -2198,12 +3112,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kHKGlyph",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kHKGlyph"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kHKGlyph"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kHanYu",
@@ -2212,12 +3133,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kHanYu",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kHanYu"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kHanYu"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kHangul",
@@ -2268,12 +3196,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIBMJapan",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIBMJapan"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIBMJapan"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIICore",
@@ -2282,12 +3217,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIICore",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIICore"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIICore"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRGDaeJaweon",
@@ -2296,12 +3238,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRGDaeJaweon",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRGDaeJaweon"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRGDaeJaweon"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRGHanyuDaZidian",
@@ -2310,12 +3259,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRGHanyuDaZidian",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRGHanyuDaZidian"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRGHanyuDaZidian"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRGKangXi",
@@ -2324,12 +3280,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRGKangXi",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRGKangXi"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRGKangXi"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_GSource",
@@ -2338,12 +3301,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_GSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_GSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_GSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_HSource",
@@ -2352,12 +3322,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_HSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_HSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_HSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_JSource",
@@ -2366,12 +3343,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_JSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_JSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_JSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_KPSource",
@@ -2380,12 +3364,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_KPSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_KPSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_KPSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_KSource",
@@ -2394,12 +3385,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_KSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_KSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_KSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_MSource",
@@ -2408,12 +3406,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_MSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_MSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_MSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_SSource",
@@ -2422,12 +3427,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_SSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_SSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_SSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_TSource",
@@ -2436,12 +3448,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_TSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_TSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_TSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_UKSource",
@@ -2450,12 +3469,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_UKSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_UKSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_UKSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_USource",
@@ -2464,12 +3490,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_USource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_USource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_USource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kIRG_VSource",
@@ -2478,12 +3511,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kIRG_VSource",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kIRG_VSource"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kIRG_VSource"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kJIS0213",
@@ -2492,12 +3532,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kJIS0213",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kJIS0213"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kJIS0213"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kJapanese",
@@ -2548,12 +3595,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kJinmeiyoKanji",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kJinmeiyoKanji"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kJinmeiyoKanji"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kJis0",
@@ -2562,12 +3616,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kJis0",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kJis0"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kJis0"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kJis1",
@@ -2576,12 +3637,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kJis1",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kJis1"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kJis1"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kJoyoKanji",
@@ -2590,12 +3658,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kJoyoKanji",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kJoyoKanji"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kJoyoKanji"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kKangXi",
@@ -2604,12 +3679,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kKangXi",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kKangXi"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kKangXi"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kKarlgren",
@@ -2618,12 +3700,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kKarlgren",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kKarlgren"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kKarlgren"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kKorean",
@@ -2646,12 +3735,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kKoreanEducationHanja",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kKoreanEducationHanja"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kKoreanEducationHanja"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kKoreanName",
@@ -2660,12 +3756,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kKoreanName",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kKoreanName"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kKoreanName"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kLau",
@@ -2674,12 +3777,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kLau",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kLau"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kLau"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kMainlandTelegraph",
@@ -2688,12 +3798,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kMainlandTelegraph",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kMainlandTelegraph"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kMainlandTelegraph"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kMandarin",
@@ -2716,12 +3833,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kMatthews",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kMatthews"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kMatthews"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kMeyerWempe",
@@ -2730,12 +3854,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kMeyerWempe",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kMeyerWempe"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kMeyerWempe"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kMojiJoho",
@@ -2744,12 +3875,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kMojiJoho",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kMojiJoho"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kMojiJoho"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kMorohashi",
@@ -2758,12 +3896,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kMorohashi",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kMorohashi"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kMorohashi"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kNSHU_DubenSrc",
@@ -2772,12 +3917,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kNSHU_DubenSrc",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kNSHU_DubenSrc"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kNSHU_DubenSrc"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kNSHU_Reading",
@@ -2786,12 +3938,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kNSHU_Reading",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kNSHU_Reading"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kNSHU_Reading"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kNelson",
@@ -2800,12 +3959,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kNelson",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kNelson"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kNelson"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kOtherNumeric",
@@ -2814,12 +3980,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kOtherNumeric",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE",
-      "contextLiteral": "kOtherNumeric"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kOtherNumeric"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kPhonetic",
@@ -2828,12 +4001,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kPhonetic",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kPhonetic"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kPhonetic"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kPrimaryNumeric",
@@ -2842,12 +4022,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": " ",
-      "objectNamespace": "unicode/property_value/kPrimaryNumeric",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE",
-      "contextLiteral": "kPrimaryNumeric"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kPrimaryNumeric"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kPseudoGB1",
@@ -2856,12 +4043,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kPseudoGB1",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kPseudoGB1"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kPseudoGB1"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kRSAdobe_Japan1_6",
@@ -2870,12 +4064,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kRSAdobe_Japan1_6",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kRSAdobe_Japan1_6"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kRSAdobe_Japan1_6"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kRSUnicode",
@@ -2884,12 +4085,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kRSUnicode",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kRSUnicode"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kRSUnicode"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kSBGY",
@@ -2898,12 +4106,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kSBGY",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kSBGY"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kSBGY"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kSMSZD2003Index",
@@ -2912,12 +4127,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kSMSZD2003Index",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kSMSZD2003Index"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kSMSZD2003Index"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kSMSZD2003Readings",
@@ -2996,12 +4218,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kStrange",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kStrange"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kStrange"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTGH",
@@ -3010,12 +4239,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kTGH",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kTGH"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTGH"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTGHZ2013",
@@ -3038,12 +4274,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kTGT_MergedSrc",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kTGT_MergedSrc"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTGT_MergedSrc"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTGT_RSUnicode",
@@ -3052,12 +4295,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kTGT_RSUnicode",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kTGT_RSUnicode"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTGT_RSUnicode"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTaiwanTelegraph",
@@ -3066,12 +4316,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kTaiwanTelegraph",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kTaiwanTelegraph"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTaiwanTelegraph"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTang",
@@ -3094,12 +4351,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kTayNumeric",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE",
-      "contextLiteral": "kTayNumeric"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTayNumeric"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTotalStrokes",
@@ -3108,12 +4372,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kTotalStrokes",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kTotalStrokes"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTotalStrokes"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kTraditionalVariant",
@@ -3136,12 +4407,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kUnihanCore2020",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kUnihanCore2020"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kUnihanCore2020"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kVietnamese",
@@ -3164,12 +4442,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kVietnameseNumeric",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE",
-      "contextLiteral": "kVietnameseNumeric"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kVietnameseNumeric"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kXHC1983",
@@ -3192,12 +4477,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kXerox",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "kXerox"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kXerox"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@kZVariant",
@@ -3234,12 +4526,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/kZhuangNumeric",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE",
-      "contextLiteral": "kZhuangNumeric"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kZhuangNumeric"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@last-cp",
@@ -3262,11 +4561,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/line_break",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_LINE_BREAK"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Line_Break"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@lc",
@@ -3324,11 +4631,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/numeric_type",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_TYPE"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Numeric_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@nv",
@@ -3337,11 +4652,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": "NaN",
       "sequenceSeparator": null,
-      "objectNamespace": null,
-      "objectEntityType": "Scalar",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
-      "relationName": "HAS_NUMERIC_VALUE"
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Numeric_Value"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/@sc",
@@ -3480,12 +4803,19 @@
       "disposition": "Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Vertical_Orientation",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Vertical_Orientation"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Vertical_Orientation"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "repertoire/*/name-alias/@alias",
@@ -3532,12 +4862,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Standardized_Variant_Description",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Standardized_Variant_Description"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Standardized_Variant_Description"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "standardized-variants/standardized-variant/@when",
@@ -3546,12 +4883,19 @@
       "disposition": "Content, Testimony",
       "absentSentinel": null,
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Standardized_Variant_Condition",
-      "objectEntityType": "UcdClassifier",
+      "objectEntityType": "Property_Value",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Standardized_Variant_Condition"
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Standardized_Variant_Condition"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     }
   ],
   "structures": [
@@ -5972,13 +7316,19 @@
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "blocks/block",
       "subject": {
-        "kind": "ClassifierField",
+        "kind": "Composition",
         "identityField": "name",
-        "rangeStartField": null,
-        "lastField": null,
-        "entityNamespace": "unicode/block",
-        "entityType": "UcdClassifier",
-        "sequenceSeparator": null
+        "entityType": "Property_Value",
+        "identityParts": [
+          {
+            "path": "",
+            "literal": "Block"
+          },
+          {
+            "path": "@name",
+            "aliased": true
+          }
+        ]
       },
       "structurePaths": [
         "blocks"
@@ -5986,7 +7336,7 @@
       "rangeRelationProperty": "Block",
       "rangeStartField": "first-cp",
       "rangeEndField": "last-cp",
-      "rangeRelationName": "HAS_BLOCK"
+      "rangeRelationName": "HAS_CHARACTER_PROPERTY"
     },
     {
       "recordName": "named-sequence",
