@@ -59,7 +59,8 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
-        bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
+        bool childSubjects = recipe.DelimitedSyntax?.KeyedColumns is { Count: > 0 }
+            || recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
             || recipe.Fields.Any(static f => f.ObjectScopedToRecord || f.ObjectScopePath is not null
@@ -128,6 +129,18 @@ public static class NativeRecipeCompiler
                     WriteText(writer, constant.Value);
                 }
                 if (version >= Rcp7) writer.Write(checked((uint)syntax.HeaderLines));
+                if (version >= Rcp8)
+                {
+                    var keyed = (syntax.KeyedColumns ?? new Dictionary<string, IReadOnlyList<string>>())
+                        .OrderBy(static pair => pair.Key, StringComparer.Ordinal).ToArray();
+                    writer.Write(checked((uint)keyed.Length));
+                    foreach (var layout in keyed)
+                    {
+                        WriteText(writer, layout.Key);
+                        writer.Write(checked((uint)layout.Value.Count));
+                        foreach (string column in layout.Value) WriteText(writer, column);
+                    }
+                }
             }
         }
         writer.Write(checked((uint)recipe.Fields.Count));

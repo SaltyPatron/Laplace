@@ -50,6 +50,8 @@ struct recipe_delimited_config {
     uint32_t header_lines = 0;    // leading lines naming the columns, not records
     bool allow_trailing_empty_column = false;
     std::vector<std::string> columns, directive_columns;
+    // A line whose first field is a key here is read with that key's columns.
+    std::map<std::string, std::vector<std::string>> keyed_columns;
 };
 
 class recipe_delimited_stream {
@@ -114,7 +116,13 @@ class recipe_delimited_stream {
             auto comment = text.find(config.comment_prefix);
             if (comment != std::string_view::npos) text = text.substr(0, comment);
         }
-        const auto& columns = directive ? config.directive_columns : config.columns;
+        const std::vector<std::string>* layout = directive ? &config.directive_columns : &config.columns;
+        if (!directive && !config.keyed_columns.empty()) {
+            const auto key = trim(text.substr(0, text.find(config.separator)));
+            const auto keyed = config.keyed_columns.find(std::string(key));
+            if (keyed != config.keyed_columns.end()) layout = &keyed->second;
+        }
+        const auto& columns = *layout;
         std::map<std::string, std::string> values;
         std::vector<std::string> cells;
         size_t start = 0, column = 0;
@@ -153,6 +161,11 @@ class recipe_delimited_stream {
                     values.erase(range);
                     if (!values.emplace(config.range_first_field, std::move(first)).second
                         || !values.emplace(config.range_last_field, std::move(last)).second)
+                        fail("range endpoint collides with a declared column");
+                } else if (!range->second.empty()) {
+                    // One code point (or one sequence) is a range of itself.
+                    if (!values.emplace(config.range_first_field, range->second).second
+                        || !values.emplace(config.range_last_field, range->second).second)
                         fail("range endpoint collides with a declared column");
                 }
             }

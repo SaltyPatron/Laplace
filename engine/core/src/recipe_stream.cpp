@@ -378,6 +378,10 @@ struct laplace_recipe_stream {
     bool range = false, membership = false, record_facts_done = false;
     size_t fact_offset = 0;
     hash128_t membership_relation{};
+    // A membership "range" that is one code-point sequence has that sequence's text as
+    // its single member (an emoji sequence of a type).
+    bool membership_sequence = false;
+    hash128_t membership_member{};
     stage_ptr ready{nullptr, intent_stage_free};
     uint64_t ready_completed = 0;
     hash128_t subject{};
@@ -1352,9 +1356,17 @@ struct laplace_recipe_stream {
             if (alias != route.aliases.end()) value = alias->second;
             subject = classifier(stage, value);
         } else throw std::runtime_error("unknown subject instruction");
+        membership_sequence = false;
         if (!route.range_first.empty()) {
-            cursor = point(record.get(route.range_first));
-            end = point(record.get(route.range_last));
+            const std::string first = record.get(route.range_first);
+            if (first.find(' ') != std::string::npos) {
+                membership_sequence = true;
+                membership_member = content(stage, sequence_text(first, " "));
+                cursor = end = 0;
+            } else {
+                cursor = point(first);
+                end = point(record.get(route.range_last));
+            }
             if (cursor > end) throw std::runtime_error("inverted subject membership range");
             membership = true; membership_relation = route.range_relation;
         }
@@ -1757,6 +1769,17 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                             throw std::runtime_error("duplicate record constant");
                     }
                     if (generation >= 7) config.header_lines = r.number();
+                    if (generation >= 8) {
+                        const uint32_t layouts = r.number();
+                        for (uint32_t k = 0; k < layouts; ++k) {
+                            auto key = r.text();
+                            std::vector<std::string> cols;
+                            const uint32_t n = r.number();
+                            for (uint32_t c = 0; c < n; ++c) cols.push_back(r.text());
+                            if (key.empty() || cols.empty() || !config.keyed_columns.emplace(std::move(key), std::move(cols)).second)
+                                throw std::runtime_error("invalid keyed column layout");
+                        }
+                    }
                 }
                 s->delimited = true;
                 s->delimited_columns = config.columns;
@@ -2359,7 +2382,7 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
                             if (rows(s->ready.get()) == capacity) break;
                             fact member; member.relation = s->membership_relation;
                             member.object = s->subject; member.has_object = true;
-                            s->attest(s->ready.get(), point_id(s->cursor), member);
+                            s->attest(s->ready.get(), s->membership_sequence ? s->membership_member : point_id(s->cursor), member);
                             if (s->cursor != s->end) { ++s->cursor; continue; }
                         }
                         s->active = false; s->pending.pop_front(); ++s->ready_completed;
