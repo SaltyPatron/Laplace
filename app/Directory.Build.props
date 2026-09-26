@@ -91,10 +91,25 @@
     layout against a new native ABI. App-local native libraries keep the previous
     published payload coherent until the next complete publish.
   -->
+  <!--
+    A managed-only plan (LAPLACE_REUSE_INSTALLED_NATIVE=1) builds no native tree: its
+    native closure is the installed, qualified one it will be published beside, the same
+    source scripts/sync-managed-native-artifacts.sh uses. The build itself needs it too:
+    OpenAPI generation starts the endpoint host, whose static vocabularies load the core.
+  -->
+  <PropertyGroup>
+    <LAPLACE_INSTALL_PREFIX Condition="'$(LAPLACE_INSTALL_PREFIX)' == ''">/opt/laplace</LAPLACE_INSTALL_PREFIX>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT' AND '$(LAPLACE_REUSE_INSTALLED_NATIVE)' == '1'">
+    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_core.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_syzygy.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_dynamics.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_synthesis.so*" />
+  </ItemGroup>
   <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
-    <LaplaceNativeArtifact Include="$(LAPLACE_ENGINE_BUILD)/core/*.so*" />
-    <LaplaceNativeArtifact Include="$(LAPLACE_ENGINE_BUILD)/dynamics/*.so*" />
-    <LaplaceNativeArtifact Include="$(LAPLACE_ENGINE_BUILD)/synthesis/*.so*" />
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'" Include="$(LAPLACE_ENGINE_BUILD)/core/*.so*" />
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'" Include="$(LAPLACE_ENGINE_BUILD)/dynamics/*.so*" />
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'" Include="$(LAPLACE_ENGINE_BUILD)/synthesis/*.so*" />
     <None Include="@(LaplaceNativeArtifact)">
       <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
