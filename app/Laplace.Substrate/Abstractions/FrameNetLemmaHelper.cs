@@ -1,7 +1,7 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// FrameNet LU name → surface lemma. Shared by FrameNetDecomposer and FrameNetLuIngest.
+/// FrameNet LU name → surface lemma (the mapping sources' FrameNetLexicalUnit).
 /// </summary>
 public static class FrameNetLemmaHelper
 {

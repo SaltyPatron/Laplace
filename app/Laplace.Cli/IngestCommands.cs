@@ -15,10 +15,8 @@ using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.Wiktionary;
-using Laplace.Decomposers.FrameNet;
 using Laplace.Decomposers.OpenSubtitles;
 using Laplace.Decomposers.VerbNet;
-using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
@@ -1040,7 +1038,7 @@ internal static partial class IngestCommands
                 Console.WriteLine($"  check verbnet: HAS_VERB_FRAME={await RelationEvidence("HAS_VERB_FRAME", srcKey):N0} "
                                 + $"HAS_THEMATIC_ROLE={await RelationEvidence("HAS_THEMATIC_ROLE", srcKey):N0}");
                 break;
-            case "PropBankDecomposer":
+            case "PropBank":
                 Console.WriteLine($"  check propbank: HAS_SEMANTIC_ROLE={await RelationEvidence("HAS_SEMANTIC_ROLE", srcKey):N0} "
                                 + $"HAS_SENSE={await RelationEvidence("HAS_SENSE", srcKey):N0}");
                 break;
@@ -1068,7 +1066,7 @@ internal static partial class IngestCommands
                                 + $"{CILISource.Relations[2]}={await RelationEvidence(CILISource.Relations[2], srcKey):N0} "
                                 + $"IS_TYPED_AS={await RelationEvidence("IS_TYPED_AS", srcKey):N0}");
                 break;
-            case "FrameNetDecomposer":
+            case "FrameNet":
                 Console.WriteLine($"  check framenet: HAS_FRAME_ELEMENT={await RelationEvidence("HAS_FRAME_ELEMENT", srcKey):N0}");
                 break;
             case "SemLinkDecomposer":

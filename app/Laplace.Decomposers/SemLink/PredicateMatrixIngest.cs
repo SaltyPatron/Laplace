@@ -361,7 +361,7 @@ internal static class PredicateMatrixIngest
                 _ = EmitCategory(new CategoryCorrespondenceRecord(
                     $"{luFrame} {frameLu}", FrameLuTypeId, predicateId.Value,
                     DeclareSubject: (b, source) =>
-                        FrameNet.FrameNetLuIngest.DeclareLexicalUnit(b, luFrame, frameLu, source)), builder);
+                        FrameNetLexicalUnit.Declare(b, luFrame, frameLu, source)), builder);
             Hash128? rolesetId = record.PropBankRoleset is { } roleset
                 ? EmitCategory(new CategoryCorrespondenceRecord(
                     roleset, RolesetTypeId, predicateId.Value), builder)

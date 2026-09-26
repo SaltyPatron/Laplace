@@ -2,14 +2,12 @@ using Laplace.Decomposers.Atomic2020;
 using Laplace.Decomposers.CILI;
 using Laplace.Decomposers.Code;
 using Laplace.Decomposers.ConceptNet;
-using Laplace.Decomposers.FrameNet;
 using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Media;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.OpenSubtitles;
 using Laplace.Decomposers.Operational;
-using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.Unicode;
@@ -43,10 +41,8 @@ public static class SeedIngestComposition
         ("omw", typeof(OMWDecomposer)),
         ("wordnet", typeof(WordNetDecomposer)),
         ("tatoeba", typeof(TatoebaDecomposer)),
-        ("framenet", typeof(FrameNetDecomposer)),
         ("opensubtitles", typeof(OpenSubtitlesDecomposer)),
         ("verbnet", typeof(VerbNetDecomposer)),
-        ("propbank", typeof(PropBankDecomposer)),
         ("semlink", typeof(SemLinkDecomposer)),
         ("mapnet", typeof(MapNetDecomposer)),
         ("wordframenet", typeof(WordFrameNetDecomposer)),

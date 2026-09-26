@@ -30,8 +30,6 @@ public sealed class LanguageScopeGateTests
     /// </summary>
     private static readonly HashSet<string> NotYetEmitting = new(StringComparer.Ordinal)
     {
-        "FrameNetDecomposer",
-        "PropBankDecomposer",
         "VerbNetDecomposer",
         "SemLinkDecomposer",
         "WordFrameNetDecomposer",
@@ -58,7 +56,7 @@ public sealed class LanguageScopeGateTests
         // it must not be counted as a source-wide English declaration.
         foreach (string source in new[]
                  {
-                     "WordNetDecomposer", "FrameNetDecomposer", "PropBankDecomposer",
+                     "WordNetDecomposer",
                      "VerbNetDecomposer", "SemLinkDecomposer", "WordFrameNetDecomposer",
                  })
             Assert.Contains(source, scoped);

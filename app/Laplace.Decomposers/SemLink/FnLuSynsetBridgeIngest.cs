@@ -40,7 +40,7 @@ internal static class FnLuSynsetBridgeIngest
             yield return new CategoryCorrespondenceRecord(
                 $"{luFrame} {luLabel}", LuTypeId, synId.Value,
                 DeclareSubject: (builder, source) =>
-                    FrameNet.FrameNetLuIngest.DeclareLexicalUnit(builder, luFrame, luLabel, source));
+                    FrameNetLexicalUnit.Declare(builder, luFrame, luLabel, source));
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
@@ -84,7 +84,7 @@ internal static class FnLuSynsetBridgeIngest
             yield return new CategoryCorrespondenceRecord(
                 $"{luFrame} {luLabel}", LuTypeId, synId.Value,
                 DeclareSubject: (builder, source) =>
-                    FrameNet.FrameNetLuIngest.DeclareLexicalUnit(builder, luFrame, luLabel, source));
+                    FrameNetLexicalUnit.Declare(builder, luFrame, luLabel, source));
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }

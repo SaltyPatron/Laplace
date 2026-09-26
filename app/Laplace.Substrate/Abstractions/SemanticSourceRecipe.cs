@@ -286,7 +286,10 @@ public sealed record SourceChildSubject(
     bool Standalone = false,
     // The parent link is refuted when the child's OutcomeField reads RefuteValue.
     string? OutcomeField = null,
-    string? RefuteValue = null);
+    string? RefuteValue = null,
+    // A child-relative count ("sentenceCount/@annotated") is how often the source observed
+    // the link: its games, at least one (FrameNet's annotated sentences of a lexical unit).
+    string? ObservationPath = null);
 
 /// <summary>
 /// One part of a composed child identity: a child-relative path ("lexeme/@name", "@POS")

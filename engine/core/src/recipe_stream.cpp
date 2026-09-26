@@ -179,6 +179,7 @@ struct route_rule {
         std::vector<identity_part> parts;
         int link_qualifier = -1;          // the parent relation surface's own qualifier bit
         std::string outcome_field, refute_value;   // the link is refuted on this attribute value
+        std::string observation_path;   // a child-relative count: the link's games (at least 1)
     };
     std::unordered_map<std::string, child_subject_rule> child_subjects;
     bool subject_optional = false;   // a record without an identity value lowers nothing
@@ -1810,6 +1811,17 @@ struct laplace_recipe_stream {
                 f.has_qualifiers = true;
             }
             if (!rule.outcome_field.empty() && child.get(rule.outcome_field) == rule.refute_value) f.confirm = false;
+            if (!rule.observation_path.empty()) {
+                std::vector<std::string> counts;
+                collect(child, rule.observation_path, counts);
+                if (!counts.empty() && !counts.front().empty()) {
+                    char* end = nullptr;
+                    const long long n = std::strtoll(counts.front().c_str(), &end, 10);
+                    if (end == counts.front().c_str() || *end || n < 0)
+                        throw std::runtime_error("invalid observation count: " + counts.front());
+                    f.games = n > 0 ? n : 1;
+                }
+            }
             facts.push_back(f);
         }
         // The child is the current subject while it lowers, so subject modes and
@@ -2215,6 +2227,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     if (link_qualifier > 256) throw std::runtime_error("invalid child link qualifier");
                     rule.link_qualifier = static_cast<int>(link_qualifier) - 1;
                     rule.outcome_field = r.text(); rule.refute_value = r.text();
+                    rule.observation_path = r.text();
                     if (path.empty() || rule.identity.empty() || !route.children.count(path))
                         throw std::runtime_error("child subject names no declared child path");
                     if (!route.child_subjects.emplace(std::move(path), std::move(rule)).second)

@@ -352,6 +352,7 @@
           "parentRelation": "EVOKES_FRAME",
           "entityType": "FrameNet_LU",
           "childIsSubject": true,
+          "observationPath": "sentenceCount/@annotated",
           "identityParts": [
             {
               "path": "lexeme/@name",

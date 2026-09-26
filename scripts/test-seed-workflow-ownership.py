@@ -3,6 +3,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -46,7 +47,7 @@ class WorkflowOwnership(unittest.TestCase):
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
         text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("name: Product — maintenance"))
-        self.assertIn("options: [verify, reconcile, chess-lab, deploy]", text)
+        self.assertIn("options: [verify, forward-chat-proof, reconcile, chess-lab, deploy]", text)
         for internal in ("test-dev", "test-db", "test-live", "applications", "install", "check", "provision"):
             self.assertNotIn(f", {internal}", text)
 
@@ -187,19 +188,29 @@ class SeedHostOwnership(unittest.TestCase):
 class FoundationCompletion(unittest.TestCase):
     """Execute the real ladder shell with explicit ingest/psql test boundaries."""
 
-    SOURCES = {
-        "unicode": "UnicodeDecomposer",
-        "iso639": "ISO639Decomposer",
-        "operational": "OperationalDecomposer",
-        "cili": "CILIDecomposer",
-        "wordnet": "WordNetDecomposer",
-        "verbnet": "VerbNetDecomposer",
-        "propbank": "PropBankDecomposer",
-        "framenet": "FrameNetDecomposer",
-        "mapnet": "MapNetDecomposer",
-        "wordframenet": "WordFrameNetDecomposer",
-        "semlink": "SemLinkDecomposer",
-    }
+    LADDER = ("unicode", "iso639", "operational", "cili", "wordnet", "verbnet", "propbank",
+              "framenet", "mapnet", "wordframenet", "semlink")
+
+    @staticmethod
+    def completion(name):
+        """The ladder's own resolution: (completion key, diagnostic label). A recipe
+        source completes under its witness, a legacy decomposer under its source."""
+        line = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "source-layer-complete.py"), name],
+            text=True, capture_output=True, check=True).stdout.strip()
+        predicate, label = line.split("\t")
+        witness = re.search(r"witness_id\('([^']+)', '([^']+)'\)", predicate)
+        key = f"{witness.group(1)}@{witness.group(2)}" if witness else \
+            re.search(r"source_id\('([^']+)'\)", predicate).group(1)
+        return key, label
+
+    SOURCES = {}
+    LABELS = {}
+
+    @classmethod
+    def setUpClass(cls):
+        for name in cls.LADDER:
+            cls.SOURCES[name], cls.LABELS[name] = cls.completion(name)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="foundation-completion-")
@@ -207,8 +218,8 @@ class FoundationCompletion(unittest.TestCase):
         self.root = Path(self.temporary.name)
         scripts = self.root / "scripts"
         scripts.mkdir()
-        shutil.copyfile(ROOT / "scripts" / "ensure-foundation.sh",
-                        scripts / "ensure-foundation.sh")
+        for name in ("ensure-foundation.sh", "source-layer-complete.py", "decomposer-gates.json"):
+            shutil.copyfile(ROOT / "scripts" / name, scripts / name)
         self.state = self.root / "state.json"
         self.ingests = self.root / "ingests.jsonl"
         self.env = dict(os.environ)
@@ -232,10 +243,12 @@ from pathlib import Path
 query = sys.argv[-1]
 if "pg_database" in query:
     print("1")
-elif "ops.evidence_count" in query:
-    source = re.search(r"laplace\.source_id\('([^']+)'\)", query).group(1)
+elif "ops.layer_completed" in query:
+    witness = re.search(r"laplace\.witness_id\('([^']+)', '([^']+)'\)", query)
+    key = f"{witness.group(1)}@{witness.group(2)}" if witness else \
+        re.search(r"laplace\.source_id\('([^']+)'\)", query).group(1)
     present = json.loads(Path(os.environ["FOUNDATION_TEST_STATE"]).read_text())
-    print("t" if source in present else "f")
+    print("t" if key in present else "f")
 elif "laplace.ingest_run_journal" in query:
     print("test journal: ingest returned without fabricating a completion marker")
 else:
@@ -292,10 +305,8 @@ state.write_text(json.dumps(sorted(present)))
             missing=("framenet", "mapnet"), omitted=("framenet", "mapnet"))
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(self.calls(), [["framenet", "mapnet"]])
-        self.assertIn("missing: framenet (source=FrameNetDecomposer layer=3)",
-                      result.stderr)
-        self.assertIn("missing: mapnet (source=MapNetDecomposer layer=3)",
-                      result.stderr)
+        self.assertIn(f"missing: framenet ({self.LABELS['framenet']})", result.stderr)
+        self.assertIn(f"missing: mapnet ({self.LABELS['mapnet']})", result.stderr)
         self.assertNotIn("foundation complete:", result.stdout)
         self.assertNotIn("missing: unicode", result.stderr)
 

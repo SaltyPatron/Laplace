@@ -69,16 +69,6 @@ MUTATIONS = [
     filter="FullyQualifiedName~UcdNormalizationQc",
   ),
   dict(
-    id="framenet-total-annotated",
-    defect="FrameNet states annotation depth as totalAnnotated on 13,572 <lexUnit>. Unread, "
-           "an LU with 116 instances evoked its frame exactly as hard as one with 1.",
-    file="app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs",
-    before='long.TryParse((string?)root.Attribute("totalAnnotated"), out long ta) && ta > 0 ? ta : 1;',
-    after='1;',
-    project="Laplace.Decomposers.Tests",
-    filter="FullyQualifiedName~ParseLu_Reads_TotalAnnotated",
-  ),
-  dict(
     id="topology-threads-as-cores",
     defect="DetectPlatform discarded pools.PhysicalPCores on any non-hybrid CPU and reported "
            "Environment.ProcessorCount -- the LOGICAL count -- as physical. 911 tests passed "

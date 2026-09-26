@@ -416,6 +416,7 @@ public static class NativeRecipeCompiler
                     writer.Write(linkQualifier >= 0 ? checked((uint)linkQualifier + 1) : 0u);
                     WriteText(writer, child.OutcomeField);
                     WriteText(writer, child.RefuteValue);
+                    WriteText(writer, child.ObservationPath);
                 }
                 writer.Write(checked((uint)(route.ConditionalPrefixes?.Count ?? 0)));
                 foreach (SourceConditionalPrefix conditional in route.ConditionalPrefixes ?? [])

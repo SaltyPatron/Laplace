@@ -255,9 +255,6 @@ public sealed class DecomposerArchitectureGateTests
         // one file over.
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs",
-            "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs",
-            "app/Laplace.Decomposers/PropBank/PropBankDecomposer.cs",
             "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs",
             "app/Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
             "app/Laplace.Decomposers/SemLink/SemLinkIngestAdapter.cs",

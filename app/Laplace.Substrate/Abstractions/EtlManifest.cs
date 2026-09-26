@@ -123,12 +123,14 @@ public static class EtlManifest
                 anchor: AnchorResolver.IliSynset),
 
 
-            ["framenet"] = Row("framenet", "FrameNetDecomposer", 3, "AcademicCurated",
+            // FrameNet and PropBank are read through their recipes (recipes/framenet/1.7,
+            // recipes/propbank/3.4) and named by their source generations.
+            ["framenet"] = Row("framenet", "FrameNet", 3, "AcademicCurated",
                 "framenet", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
-                anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
-            ["propbank"] = Row("propbank", "PropBankDecomposer", 2, "AcademicCurated",
+                anchor: AnchorResolver.FrameCategory),
+            ["propbank"] = Row("propbank", "PropBank", 2, "AcademicCurated",
                 "propbank", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
-                anchor: AnchorResolver.SenseKey, languageScope: "eng"),
+                anchor: AnchorResolver.SenseKey),
             ["verbnet"] = Row("verbnet", "VerbNetDecomposer", 2, "AcademicCurated",
                 "verbnet", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
                 anchor: AnchorResolver.SenseKey, languageScope: "eng"),

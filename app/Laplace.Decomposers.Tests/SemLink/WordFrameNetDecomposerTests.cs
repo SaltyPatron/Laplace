@@ -116,7 +116,7 @@ public sealed class WordFrameNetDecomposerTests
         if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectAttestationsAsync();
-        var luId = Laplace.Decomposers.FrameNet.FrameNetLuIngest.LexicalUnitId("Giving", "give.v")!.Value;
+        var luId = FrameNetLexicalUnit.Id("Giving", "give.v")!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
         Assert.NotNull(synId);
         CorrespondsToAssert.Contains(atts, luId, synId.Value);
