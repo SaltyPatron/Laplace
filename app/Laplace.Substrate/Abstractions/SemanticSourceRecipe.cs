@@ -361,7 +361,9 @@ public sealed record SourceParseStructure(
     string UposColumn,
     string HeadColumn,
     string DeprelColumn,
-    string UposVocabulary = "pos/upos");
+    string UposVocabulary = "pos/upos",
+    // The record attribute whose content is the parse claim's context (the treebank file).
+    string? ContextField = null);
 
 public enum SourceArtifactDisposition
 {

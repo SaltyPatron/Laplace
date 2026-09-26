@@ -84,6 +84,20 @@ laplace_ud_parse_status_t laplace_ud_parse_decode(
 
 void laplace_ud_parse_free(laplace_ud_parse_t *parse);
 
+/* Decode the recipe parse layout: a parse entity's type-8 trajectory runs over its token
+ * forms, each vertex a LAPLACE_VFLAG_PARSE vertex carrying the UPOS index, deprel and
+ * subtype codes and head ordinal. Tokens get ref_id = the content of their ordinal,
+ * form_id, upos_id (content of the UPOS label), deprel_id (content of the relation, or
+ * the composition [relation, subtype]) and head_ref_id (the head's ordinal content; the
+ * root marker for 0, the none marker when absent); lemma, XPOS, features and misc are
+ * separate claims, not parse slots. sentence_id and language_id are zero: the sentence
+ * is the subject of its HAS_PARSE claims. out_parse_id receives the parse identity the
+ * units compose ([form, UPOS, deprel, head] each), for the caller to check against the
+ * physicality's entity. Returns SCHEMA when a vertex is not a parse vertex. */
+laplace_ud_parse_status_t laplace_ud_parse_from_vertices(
+    const hash128_t *forms, const uint64_t *flags, size_t count,
+    laplace_ud_parse_t *out, hash128_t *out_parse_id);
+
 #ifdef __cplusplus
 }
 #endif

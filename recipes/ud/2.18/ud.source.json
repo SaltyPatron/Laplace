@@ -28,6 +28,9 @@
         "constants": {
           "language": {
             "pathPattern": "/([a-z]+)_[a-z0-9]+-ud-[a-z]+\\.conllu$"
+          },
+          "treebank": {
+            "pathPattern": "/([a-z]+_[a-z0-9]+-ud-[a-z]+)\\.conllu$"
           }
         }
       }

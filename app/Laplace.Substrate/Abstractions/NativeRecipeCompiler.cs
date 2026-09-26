@@ -60,7 +60,7 @@ public static class NativeRecipeCompiler
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
         bool childSubjects = recipe.DelimitedSyntax?.KeyedColumns is { Count: > 0 }
-            || recipe.ProviderRoutes.Any(static r => r.SubjectOptional)
+            || recipe.ProviderRoutes.Any(static r => r.SubjectOptional || r.ParseStructure?.ContextField is not null)
             || recipe.DelimitedSyntax?.CommentColumn is not null || recipe.DelimitedSyntax?.CommentPattern is not null
             || recipe.DelimitedSyntax?.StateKeys is { Count: > 0 }
             || recipe.DelimitedSyntax?.KeyedRecordNames is { Count: > 0 } || recipe.DelimitedSyntax?.CarryColumns is { Count: > 0 }
@@ -416,6 +416,7 @@ public static class NativeRecipeCompiler
                     WriteText(writer, conditional.Prefix);
                 }
                 writer.Write(route.SubjectOptional ? 1u : 0u);
+                WriteText(writer, route.ParseStructure?.ContextField);
             }
         }
 

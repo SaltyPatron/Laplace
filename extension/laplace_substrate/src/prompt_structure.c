@@ -11,6 +11,7 @@
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/mantissa.h"
 #include "content_membership_read.h"
 #include "content_trajectory_read.h"
 #include "consensus_scan.h"
@@ -18,6 +19,14 @@
 #include "spi_common.h"
 #include "trajectory_wkb.h"
 #include "walk_score.h"
+
+static inline bool
+structure_id_is_zero(const hash128_t *id)
+{
+    hash128_t zero;
+    hash128_zero(&zero);
+    return hash128_eq(id, &zero);
+}
 
 typedef struct StructureParseIndex
 {
@@ -37,21 +46,26 @@ typedef struct StructureRead
     int fanout;
     int witness_count;
     int candidate_count;
+    bool vertex_only;
     ArrayBuildState *direct_ids;
 } StructureRead;
 
 typedef struct StructureConstituents
 {
     hash128_t *ids;
+    uint64_t *flags;
     size_t count;
 } StructureConstituents;
 
+/* A parse arrives in one of two layouts: the schema-v1 flat structure (unflagged
+ * constituents) or the recipe layout (the token forms, each a PARSE vertex). */
 static int
 receive_constituent(void *context, size_t ordinal, const hash128_t *id, uint64_t flags)
 {
     StructureConstituents *output = context;
-    if (ordinal == 0 || ordinal > output->count || flags != 0) return -1;
+    if (ordinal == 0 || ordinal > output->count) return -1;
     output->ids[ordinal - 1] = *id;
+    output->flags[ordinal - 1] = flags;
     return 0;
 }
 
@@ -214,25 +228,47 @@ receive_parse(Datum physicality, Datum entity, Datum geometry, void *context)
         length > INT_MAX || length > MaxAllocSize / sizeof(hash128_t))
         elog(ERROR, "structural coupling requires a complete valid packed trajectory");
     hash128_t *flat = palloc(Max(length, 1) * sizeof(hash128_t));
-    StructureConstituents output = {flat, length};
+    uint64_t *flags = palloc(Max(length, 1) * sizeof(uint64_t));
+    StructureConstituents output = {flat, flags, length};
     if (trajectory_visit_constituents(aligned, vertices, receive_constituent, &output) != 0)
         elog(ERROR, "structural coupling cannot decode the complete trajectory");
     pfree(aligned);
     pfree(wkb);
 
+    bool vertex_layout = length > 0;
+    bool flat_layout = true;
+    for (size_t i = 0; i < length; ++i)
+    {
+        if (!laplace_vflag_is_parse(flags[i])) vertex_layout = false;
+        if (flags[i] != 0) flat_layout = false;
+    }
     laplace_ud_parse_t decoded = {0};
-    laplace_ud_parse_status_t status = laplace_ud_parse_decode(flat, length, &decoded);
+    laplace_ud_parse_status_t status = LAPLACE_UD_PARSE_SCHEMA;
+    hash128_t canonical;
+    hash128_zero(&canonical);
+    if (vertex_layout)
+        status = laplace_ud_parse_from_vertices(flat, flags, length, &decoded, &canonical);
+    else if (flat_layout)
+    {
+        status = laplace_ud_parse_decode(flat, length, &decoded);
+        if (length == 1)
+            canonical = flat[0];
+        else if (length > 1)
+            hash128_merkle(4, flat, length, &canonical);
+    }
+    pfree(flags);
     if (status == LAPLACE_UD_PARSE_MEMORY)
         elog(ERROR, "structural coupling cannot allocate the complete decoded parse");
-    hash128_t canonical;
-    if (length == 0)
-        hash128_zero(&canonical);
-    else if (length == 1)
-        canonical = flat[0];
-    else
-        hash128_merkle(4, flat, length, &canonical);
-    if (!hash128_eq(&canonical, &id))
+    if (!(vertex_layout || flat_layout) || (read->vertex_only && !vertex_layout) ||
+        !hash128_eq(&canonical, &id))
     {
+        /* Structures that merely contain the forms (sentences, passages) are not
+         * parse candidates and spend no parse budget. */
+        if (read->vertex_only && !vertex_layout)
+        {
+            --read->candidate_count;
+            hash_search(read->ids, &id, HASH_REMOVE, NULL);
+        }
         laplace_ud_parse_free(&decoded);
         pfree(flat);
         MemoryContextSwitchTo(previous);
@@ -241,7 +277,7 @@ receive_parse(Datum physicality, Datum entity, Datum geometry, void *context)
     LaplacePromptParse *parse = palloc0(sizeof(*parse));
     parse->id = id;
     parse->physicality = datum_to_hash128(physicality);
-    if (length > 0) parse->schema_id = flat[0];
+    if (length > 0 && flat_layout) parse->schema_id = flat[0];
     parse->constituents = flat;
     parse->constituent_count = length;
     parse->decoded = decoded;
@@ -295,7 +331,7 @@ receive_witness(int ordinal, int16 role, const LaplaceObservation *row, void *co
     StructureParseIndex *index = hash_search(read->ids, &row->object, HASH_FIND, NULL);
     if (!index || !index->parse) return;
     LaplacePromptParse *parse = index->parse;
-    if (parse->decode_status == LAPLACE_UD_PARSE_OK &&
+    if (parse->decode_status == LAPLACE_UD_PARSE_OK && !structure_id_is_zero(&parse->decoded.sentence_id) &&
         !hash128_eq(&row->subject, &parse->decoded.sentence_id)) return;
     if (read->witness_count >= read->fanout)
     {
@@ -329,7 +365,7 @@ receive_standing(const LaplaceConsensusRow *row, void *context)
     if (!index || !index->parse) return;
     LaplacePromptParse *parse = index->parse;
     if (parse->decode_status == LAPLACE_UD_PARSE_OK &&
-        hash128_eq(&row->subject, &parse->decoded.sentence_id))
+        (structure_id_is_zero(&parse->decoded.sentence_id) || hash128_eq(&row->subject, &parse->decoded.sentence_id)))
         parse->positive_standing = laplace_walk_edge_weight(row->rating, row->rd) > 0.0;
 }
 
@@ -448,6 +484,12 @@ laplace_prompt_structure_couple(const LaplacePromptInput *input,
     bool complete = laplace_typed_membership_read_with_required(forms, true,
         required, 8, fanout, receive_parse, &read);
     pfree(required);
+    /* The recipe layout carries no schema marker: its parses are the type-8 structures
+     * over these forms whose vertices are PARSE vertices (receive_parse checks). */
+    read.vertex_only = true;
+    complete = laplace_typed_membership_read_with_required(forms, true,
+        NULL, 8, fanout, receive_parse, &read) && complete;
+    read.vertex_only = false;
     state->budget_exhausted = state->budget_exhausted || !complete;
     if (state->count > 0)
     {

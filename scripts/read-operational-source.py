@@ -67,6 +67,9 @@ def decode_candidates(report: dict, core_path: Path) -> None:
     core.laplace_ud_parse_decode.restype = C.c_int
     core.laplace_ud_parse_free.argtypes = [C.POINTER(Parse)]
     core.laplace_ud_parse_free.restype = None
+    core.laplace_ud_parse_from_vertices.argtypes = [C.POINTER(Id), C.POINTER(C.c_uint64), C.c_size_t,
+                                                    C.POINTER(Parse), C.POINTER(Id)]
+    core.laplace_ud_parse_from_vertices.restype = C.c_int
     report["decoder_sha256"] = file_sha256(core_path)
     report["decoder_path"] = str(core_path.resolve())
 
@@ -83,8 +86,23 @@ def decode_candidates(report: dict, core_path: Path) -> None:
             candidate["decode_status"] = "identity-or-count-mismatch"
             continue
         data = (Id * len(flat)).from_buffer_copy(b"".join(bytes.fromhex(x) for x in flat))
+        flags = candidate.get("constituent_flags") or [0] * len(flat)
         decoded = Parse()
-        status = core.laplace_ud_parse_decode(data, len(flat), C.byref(decoded))
+        # A recipe-layout parse is its token forms as PARSE vertices; its identity is the
+        # composition of its units, which the native decoder reports for this check.
+        if any(flags):
+            composed = Id()
+            status = core.laplace_ud_parse_from_vertices(
+                data, (C.c_uint64 * len(flat))(*[f & 0xFFFFFFFFFFFFFFFF for f in flags]),
+                len(flat), C.byref(decoded), C.byref(composed))
+            candidate["layout"] = "vertex"
+            if status == 0 and identity(composed) != candidate["parse_id"]:
+                core.laplace_ud_parse_free(C.byref(decoded))
+                candidate["decode_status"] = "identity-mismatch"
+                continue
+        else:
+            status = core.laplace_ud_parse_decode(data, len(flat), C.byref(decoded))
+            candidate["layout"] = "schema-v1"
         candidate["decode_status"] = status
         if status != 0:
             continue
@@ -351,7 +369,8 @@ packed_sizes AS MATERIALIZED (
 ),
 expanded AS MATERIALIZED (
  SELECT p.id,p.entity_id,p.n_constituents,
-        array_agg(u.entity_id ORDER BY u.ordinal) AS ids
+        array_agg(u.entity_id ORDER BY u.ordinal) AS ids,
+        array_agg(u.flags ORDER BY u.ordinal) AS flags
  FROM selected p JOIN packed_sizes z ON z.id=p.id CROSS JOIN LATERAL
    public.laplace_trajectory_expanded_constituents(p.trajectory) u
  WHERE z.logical_count=p.n_constituents AND z.logical_count BETWEEN 1 AND {constituents}
@@ -364,9 +383,11 @@ structure_records AS MATERIALIZED (
     'coordinate_ewkb_hex',encode(public.st_asewkb(p.coord),'hex'),
     'hilbert_index',encode(p.hilbert_index,'hex'),
     'trajectory_ewkb_hex',encode(public.st_asewkb(p.trajectory),'hex'),
-    'canonical_identity',p.entity_id=public.laplace_hash128_merkle(4::smallint,e.ids)
+    'canonical_identity',(p.entity_id=public.laplace_hash128_merkle(4::smallint,e.ids)
+          OR EXISTS(SELECT 1 FROM unnest(e.flags) f WHERE f<>0))
        AND p.id=public.laplace_hash128_blake3(p.entity_id||decode('0800','hex')),
-    'constituent_ids',(SELECT jsonb_agg(encode(x,'hex')) FROM unnest(e.ids) x)) AS record
+    'constituent_ids',(SELECT jsonb_agg(encode(x,'hex')) FROM unnest(e.ids) x),
+    'constituent_flags',(SELECT jsonb_agg(f) FROM unnest(e.flags) f)) AS record
  FROM selected p JOIN expanded e ON e.id=p.id
 ),
 parse_witnesses AS MATERIALIZED (

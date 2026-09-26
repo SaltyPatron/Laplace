@@ -10,6 +10,7 @@
 #include "laplace/core/sql_catalog.h"
 #include "laplace/core/task_shape.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/mantissa.h"
 #include "content_membership_read.h"
 #include "content_trajectory_read.h"
 #include "prompt_intent.h"
@@ -47,8 +48,25 @@ typedef struct ShapeRead
     hash128_t example_type, call_type, input_type, parse_type;
     Oid as_binary;
     int fanout;
-    bool failed;
+    bool failed, vertex_only;
 } ShapeRead;
+
+typedef struct ShapeConstituents
+{
+    hash128_t *ids;
+    uint64_t *flags;
+    size_t count;
+} ShapeConstituents;
+
+static int
+shape_receive_constituent(void *context, size_t ordinal, const hash128_t *id, uint64_t flags)
+{
+    ShapeConstituents *output = context;
+    if (ordinal == 0 || ordinal > output->count) return -1;
+    output->ids[ordinal - 1] = *id;
+    output->flags[ordinal - 1] = flags;
+    return 0;
+}
 
 static HTAB *
 shape_table(const char *name, Size key, Size entry, MemoryContext owner)
@@ -93,26 +111,65 @@ shape_receive_structure(Datum physicality, Datum entity, Datum geometry, void *o
         count > INT_MAX || count > MaxAllocSize / sizeof(hash128_t))
         elog(ERROR, "task shape: invalid complete trajectory");
     hash128_t *flat = palloc(Max(count, 1) * sizeof(hash128_t));
-    if (trajectory_constituents(aligned, vertices, flat, count) != (int) count)
+    uint64_t *flags = palloc(Max(count, 1) * sizeof(uint64_t));
+    ShapeConstituents output = {flat, flags, count};
+    if (trajectory_visit_constituents(aligned, vertices, shape_receive_constituent, &output) != 0)
         elog(ERROR, "task shape: trajectory decode failed");
     pfree(aligned);
     pfree(wkb);
-    hash128_t canonical;
-    if (count == 0)
-        hash128_zero(&canonical);
-    else if (count == 1)
-        canonical = flat[0];
-    else
-        hash128_merkle(4, flat, count, &canonical);
-    if (!hash128_eq(&canonical, &id))
+    /* A parse is either the schema-v1 flat structure (unflagged constituents) or the
+     * recipe layout: the token forms, each a PARSE vertex, identified by its units. */
+    bool vertex_layout = count > 0, flat_layout = true;
+    for (size_t i = 0; i < count; ++i)
     {
+        if (!laplace_vflag_is_parse(flags[i])) vertex_layout = false;
+        if (flags[i] != 0) flat_layout = false;
+    }
+    hash128_t canonical;
+    hash128_zero(&canonical);
+    int status;
+    if (vertex_layout)
+    {
+        status = laplace_ud_parse_from_vertices(flat, flags, count, &record->parse, &canonical);
+        if (status == LAPLACE_UD_PARSE_MEMORY)
+            elog(ERROR, "task shape: exemplar allocation failed");
+        if (status == LAPLACE_UD_PARSE_OK && !hash128_eq(&canonical, &id))
+        {
+            laplace_ud_parse_free(&record->parse);
+            status = LAPLACE_UD_PARSE_SCHEMA;
+        }
+        pfree(flags);
+        if (status != LAPLACE_UD_PARSE_OK)
+        {
+            pfree(flat);
+            MemoryContextSwitchTo(previous);
+            return;
+        }
+        record->flat = flat;
+        record->length = count;
+        record->is_parse = true;
+        record->cleanup.func = shape_release_parse;
+        record->cleanup.arg = record;
+        MemoryContextRegisterResetCallback(read->owner, &record->cleanup);
+        MemoryContextSwitchTo(previous);
+        return;
+    }
+    pfree(flags);
+    if (count == 1)
+        canonical = flat[0];
+    else if (count > 1)
+        hash128_merkle(4, flat, count, &canonical);
+    if (!flat_layout || read->vertex_only || !hash128_eq(&canonical, &id))
+    {
+        /* Passed over by the vertex read, a structure stays readable by the typed reads. */
+        if (read->vertex_only) hash_search(read->structures, &id, HASH_REMOVE, NULL);
         pfree(flat);
         MemoryContextSwitchTo(previous);
         return;
     }
     record->flat = flat;
     record->length = count;
-    int status = laplace_task_shape_decode_view(flat, count, &record->shape);
+    status = laplace_task_shape_decode_view(flat, count, &record->shape);
     if (status == -3) elog(ERROR, "task shape: codec allocation failed");
     record->is_shape = status == 0;
     if (!record->is_shape)
@@ -142,8 +199,12 @@ shape_receive_witness(int ordinal, int16 role, const LaplaceObservation *row, vo
     if (hash128_eq(&row->type, &read->parse_type))
     {
         ShapeStructure *record = hash_search(read->structures, &row->object, HASH_FIND, NULL);
+        hash128_t unnamed;
+        hash128_zero(&unnamed);
+        /* A recipe-layout parse names no sentence; its HAS_PARSE subject is the sentence. */
         if (role != 2 || !record || !record->is_parse ||
-            !hash128_eq(&record->parse.sentence_id, &row->subject)) return;
+            (!hash128_eq(&record->parse.sentence_id, &unnamed) &&
+             !hash128_eq(&record->parse.sentence_id, &row->subject))) return;
     }
     else if (role != 1) return;
     if (!hash_search(read->witnesses, &row->id, HASH_FIND, NULL) &&
@@ -560,6 +621,14 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
     read.failed = !laplace_typed_membership_read_with_required(members, false,
         required, 8, fanout, shape_receive_structure, &read);
     pfree(required);
+    /* Recipe-layout parses carry no schema constituent; their parse-ness is in the
+     * vertex flags. This read only adds such exemplars: the structures it passes over
+     * (sentences sharing a form) are not this compiler's domain, so its bound is not
+     * the schema domain's completeness. */
+    read.vertex_only = true;
+    (void) laplace_typed_membership_read_with_required(members, false,
+        NULL, 8, fanout, shape_receive_structure, &read);
+    read.vertex_only = false;
     pfree(members);
     if (read.failed) goto done;
     parse_ids = shape_structure_ids(&read, true);

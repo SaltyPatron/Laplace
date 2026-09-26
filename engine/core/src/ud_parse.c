@@ -1,4 +1,8 @@
 #include "laplace/core/ud_parse.h"
+#include "laplace/core/mantissa.h"
+#include "laplace/core/pos_law.h"
+#include "laplace/core/deprel_law.h"
+#include <stdio.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -227,4 +231,82 @@ laplace_ud_parse_status_t laplace_ud_parse_decode(
     }
     *out = parse;
     return LAPLACE_UD_PARSE_OK;
+}
+
+/* ---- the recipe parse layout -------------------------------------------------------- */
+static int label_id(const char *label, hash128_t *out) {
+    return label && *label ? hash128_label_content_id(label, strlen(label), out) : -1;
+}
+
+static int ordinal_id(unsigned value, hash128_t *out) {
+    char digits[12];
+    snprintf(digits, sizeof(digits), "%u", value);
+    return label_id(digits, out);
+}
+
+laplace_ud_parse_status_t laplace_ud_parse_from_vertices(
+    const hash128_t *forms, const uint64_t *flags, size_t count,
+    laplace_ud_parse_t *out, hash128_t *out_parse_id) {
+    laplace_ud_markers_t markers;
+    if (!out) return LAPLACE_UD_PARSE_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    if (!forms || !flags || count == 0 || count > 0xFFFE) return LAPLACE_UD_PARSE_ARGUMENT;
+    for (size_t i = 0; i < count; ++i)
+        if (!laplace_vflag_is_parse(flags[i])) return LAPLACE_UD_PARSE_SCHEMA;
+    laplace_ud_markers_init(&markers);
+    laplace_ud_token_t *tokens = (laplace_ud_token_t *)calloc(count, sizeof(*tokens));
+    hash128_t *units = (hash128_t *)malloc(count * sizeof(*units));
+    if (!tokens || !units) { free(tokens); free(units); return LAPLACE_UD_PARSE_MEMORY; }
+    size_t upos_count = 0;
+    const char *const *upos = laplace_pos_upos_canonical(&upos_count);
+    for (size_t i = 0; i < count; ++i) {
+        laplace_ud_token_t *token = &tokens[i];
+        const uint64_t f = flags[i];
+        hash128_t unit[4];
+        size_t n = 0;
+        if (ordinal_id((unsigned)(i + 1), &token->ref_id) != 0) goto malformed;
+        token->form_id = forms[i];
+        unit[n++] = forms[i];
+        const uint8_t upos1 = laplace_vflag_parse_upos1(f);
+        if (upos1 > 0) {
+            if ((size_t)upos1 > upos_count || label_id(upos[upos1 - 1], &token->upos_id) != 0) goto malformed;
+            unit[n++] = token->upos_id;
+        }
+        const uint8_t deprel = laplace_vflag_parse_deprel(f);
+        if (deprel > 0) {
+            hash128_t relation[2];
+            if (label_id(laplace_deprel_label(deprel), &relation[0]) != 0) goto malformed;
+            const uint16_t subtype = laplace_vflag_parse_subtype(f);
+            if (subtype > 0) {
+                if (label_id(laplace_deprel_subtype_label(subtype), &relation[1]) != 0) goto malformed;
+                hash128_merkle(0, relation, 2, &token->deprel_id);
+            } else {
+                token->deprel_id = relation[0];
+            }
+            unit[n++] = token->deprel_id;
+        }
+        const uint16_t head = laplace_vflag_parse_head(f);
+        if (head == 0xFFFF) {
+            token->head_ref_id = markers.none;
+        } else {
+            hash128_t head_content;
+            if (ordinal_id(head, &head_content) != 0) goto malformed;
+            unit[n++] = head_content;
+            token->head_ref_id = head == 0 ? markers.root : head_content;
+        }
+        if (n == 1) units[i] = unit[0];
+        else hash128_merkle(0, unit, n, &units[i]);
+    }
+    if (out_parse_id) {
+        if (count == 1) *out_parse_id = units[0];
+        else hash128_merkle(0, units, count, out_parse_id);
+    }
+    free(units);
+    out->tokens = tokens;
+    out->token_count = count;
+    return LAPLACE_UD_PARSE_OK;
+malformed:
+    free(tokens);
+    free(units);
+    return LAPLACE_UD_PARSE_MALFORMED;
 }

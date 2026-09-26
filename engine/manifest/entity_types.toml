@@ -367,6 +367,10 @@ canonical = "UD_Annotation_Marker"
 [[type]]
 canonical = "UD_Annotation_Value"
 
+# A dependency relation with its subtype: [nsubj, pass].
+[[type]]
+canonical = "UD_Deprel"
+
 [[type]]
 canonical = "UD_Feature"
 
@@ -375,6 +379,10 @@ canonical = "UD_Parse"
 
 [[type]]
 canonical = "UD_Parse_Occurrence"
+
+# One token of a parse: [form, UPOS, deprel, head ordinal].
+[[type]]
+canonical = "UD_Parse_Unit"
 
 [[type]]
 canonical = "UD_Token_Ref"

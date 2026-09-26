@@ -129,6 +129,7 @@ struct route_rule {
         std::string trunk;
         size_t id = 0, form = 0, upos = 0, head = 0, deprel = 0;
         int upos_tagset = -1;
+        std::string context;   // the record attribute that is the parse's context (its file)
     } parse;
     std::vector<std::string> witness_fields;
     // A nested element that is its own subject (RCP8): the ordered composition
@@ -911,8 +912,35 @@ struct laplace_recipe_stream {
         check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "witness composition");
         return result.id;
     }
-    // A sentence's parse: its token forms in order, each vertex carrying governed
-    // codes (UPOS index, universal deprel code and subtype, head ordinal) in its metadata.
+    // A sentence's parse is its own entity: the ordered composition of its token units
+    // [form, UPOS, deprel, head], the deprel slot [relation, subtype] when subtyped and the
+    // head the content of its ordinal (0 the root), so two annotations of one token
+    // sequence are two parses. Its type-8 trajectory runs over the token forms with each
+    // vertex carrying the governed codes (UPOS index, deprel and subtype codes, head
+    // ordinal) for decoding, and the treebank attests sentence HAS_PARSE parse in the
+    // parse context (the treebank file).
+    laplace_ordered_component_t form_component(const content_form& c) {
+        laplace_ordered_component_t out{};
+        out.id = c.id; std::memcpy(out.coord, c.coord, sizeof(out.coord));
+        out.tier = c.tier; out.atom = c.atom; out.has_atom = c.tier == 0;
+        return out;
+    }
+    laplace_ordered_component_t compose_components(intent_stage_t* stage, std::vector<laplace_ordered_component_t>& parts,
+                                                   const char* type, hilbert128_t* hilbert = nullptr) {
+        if (parts.size() == 1) return parts.front();
+        hash128_t type_id{};
+        (void)laplace_entity_type_id(type, &type_id);
+        laplace_ordered_composition_request_t request{};
+        request.components = parts.data(); request.component_count = parts.size();
+        request.type_id = type_id; request.source_id = current_witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), type);
+        laplace_ordered_component_t out{};
+        out.id = result.id; std::memcpy(out.coord, result.coord, sizeof(out.coord)); out.tier = result.tier;
+        if (hilbert) *hilbert = result.hilbert;
+        return out;
+    }
     void lower_parse(intent_stage_t* stage, const route_rule& route, const node& record) {
         const auto& p = route.parse;
         const auto trunk = record.attributes.find(p.trunk);
@@ -921,6 +949,7 @@ struct laplace_recipe_stream {
         const size_t width = std::max({p.id, p.form, p.upos, p.head, p.deprel}) + 1;
         std::vector<hash128_t> ids;
         std::vector<uint64_t> flags;
+        std::vector<laplace_ordered_component_t> units;
         for (const auto& line : *record.group) {
             if (line.size() < width) continue;
             const std::string& id = line[p.id];
@@ -930,11 +959,13 @@ struct laplace_recipe_stream {
             const content_form token = compose_content(stage, form);
             const char* canonical = nullptr;
             int index = -1;
-            const uint8_t upos1 = laplace_pos_resolve_canonical(line[p.upos].c_str(),
-                static_cast<laplace_pos_tagset_t>(p.upos_tagset), &canonical, &index) == 0 && index >= 0
-                ? static_cast<uint8_t>(index + 1) : 0;
-            const uint8_t deprel = static_cast<uint8_t>(laplace_deprel_code(line[p.deprel].c_str()));
-            const int subtype_code = laplace_deprel_subtype_code(line[p.deprel].c_str());
+            const bool resolved = laplace_pos_resolve_canonical(line[p.upos].c_str(),
+                static_cast<laplace_pos_tagset_t>(p.upos_tagset), &canonical, &index) == 0 && index >= 0 && canonical;
+            const uint8_t upos1 = resolved ? static_cast<uint8_t>(index + 1) : 0;
+            const std::string& label = line[p.deprel];
+            const int deprel_code = laplace_deprel_code(label.c_str());
+            const uint8_t deprel = static_cast<uint8_t>(deprel_code);
+            const int subtype_code = laplace_deprel_subtype_code(label.c_str());
             const uint16_t subtype = subtype_code > 0 ? static_cast<uint16_t>(subtype_code) : 0;
             uint16_t head = 0xFFFF;
             const std::string& h = line[p.head];
@@ -942,17 +973,52 @@ struct laplace_recipe_stream {
                 const unsigned long v = std::stoul(h);
                 if (v < 0xFFFF) head = static_cast<uint16_t>(v);
             }
+            // The unit [form, UPOS, deprel, head]; an unresolved UPOS or relation is the
+            // source's own label, an absent one no slot.
+            std::vector<laplace_ordered_component_t> unit{form_component(token)};
+            const std::string upos_label = resolved ? std::string(canonical) : line[p.upos];
+            if (!upos_label.empty() && upos_label != "_") unit.push_back(form_component(compose_content(stage, upos_label)));
+            if (!label.empty() && label != "_") {
+                std::vector<laplace_ordered_component_t> relation;
+                const char* universal = deprel_code > 0 ? laplace_deprel_label(deprel_code) : nullptr;
+                const size_t colon = label.find(':');
+                relation.push_back(form_component(compose_content(stage,
+                    universal ? std::string(universal) : label.substr(0, colon))));
+                if (colon != std::string::npos && colon + 1 < label.size()) {
+                    const char* sub = subtype > 0 ? laplace_deprel_subtype_label(subtype) : nullptr;
+                    relation.push_back(form_component(compose_content(stage, sub ? std::string(sub) : label.substr(colon + 1))));
+                }
+                unit.push_back(compose_components(stage, relation, "UD_Deprel"));
+            }
+            if (head != 0xFFFF) unit.push_back(form_component(compose_content(stage, std::to_string(head))));
+            units.push_back(compose_components(stage, unit, "UD_Parse_Unit"));
             ids.push_back(token.id);
             flags.push_back(laplace_parse_vertex_flags(token.tier, upos1, deprel, head, subtype));
         }
         if (ids.empty()) return;
+        hilbert128_t hilbert{};
+        const laplace_ordered_component_t parse = compose_components(stage, units, "UD_Parse", &hilbert);
+        if (units.size() == 1) hilbert = {};
         std::vector<double> trajectory(ids.size() * 4);
         check(trajectory_build_flagged(ids.data(), flags.data(), ids.size(), trajectory.data()), "parse trajectory");
         hash128_t physicality;
-        laplace_physicality_id_compute(sentence.id, 8, &physicality);
-        check(intent_stage_add_physicality(stage, &physicality, &sentence.id, 8, sentence.coord,
-            &sentence.hilbert, trajectory.data(), static_cast<uint32_t>(ids.size()),
+        laplace_physicality_id_compute(parse.id, 8, &physicality);
+        check(intent_stage_add_physicality(stage, &physicality, &parse.id, 8, parse.coord,
+            &hilbert, trajectory.data(), static_cast<uint32_t>(ids.size()),
             static_cast<int32_t>(ids.size()), 1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US), "parse physicality");
+        // The treebank's testimony: the sentence has this parse, in its file.
+        fact f;
+        f.subject = sentence.id; f.has_subject = true;
+        f.object = parse.id; f.has_object = true;
+        hash128_t has_parse{}, parent{}; laplace_rel_symmetry_t symmetry{}; uint8_t flipped = 0; double rank = 1.0;
+        check(laplace_relation_resolve_surface("HAS_PARSE", &has_parse, &rank, &symmetry, &flipped, &parent) < 0 ? -1 : 0,
+              "HAS_PARSE relation");
+        f.relation = has_parse; f.rank = rank; f.explicit_rank = true;
+        if (!p.context.empty()) {
+            const std::string context = record.get(p.context);
+            if (!context.empty()) { f.context = content(stage, context); f.has_context = true; }
+        }
+        facts.push_back(f);
     }
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
@@ -2110,6 +2176,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 const uint32_t optional = r.number();
                 if (optional > 1) throw std::runtime_error("invalid optional-subject instruction");
                 route.subject_optional = optional != 0;
+                route.parse.context = r.text();
                 if (route.kind == 4 && route.subject_parts.empty())
                     throw std::runtime_error("composition subject declares no parts at " + route.name);
             }

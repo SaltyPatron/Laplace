@@ -1,4 +1,7 @@
 #include "laplace/core/ud_parse.h"
+#include "laplace/core/deprel_law.h"
+#include "laplace/core/mantissa.h"
+#include "laplace/core/pos_law.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -215,6 +218,66 @@ static void test_logical_reference_ordinals(const laplace_ud_markers_t *m) {
     free(flat);
 }
 
+static hash128_t label(const char *text) {
+    hash128_t out;
+    CHECK(hash128_label_content_id(text, strlen(text), &out) == 0);
+    return out;
+}
+
+static uint8_t upos1(const char *tag) {
+    size_t count = 0;
+    const char *const *tags = laplace_pos_upos_canonical(&count);
+    for (size_t i = 0; i < count; ++i)
+        if (strcmp(tags[i], tag) == 0) return (uint8_t)(i + 1);
+    CHECK(!"UPOS tag is canonical");
+    return 0;
+}
+
+/* The recipe layout: forms carrying PARSE vertex flags; the parse is the composition of
+ * its units [form, UPOS, deprel, head ordinal], a subtyped deprel being [relation, subtype]. */
+static void test_vertex_layout(const laplace_ud_markers_t *m) {
+    const hash128_t forms[3] = {id(301), id(302), id(303)};
+    const int nsubj = laplace_deprel_code("nsubj"), root = laplace_deprel_code("root"),
+              punct = laplace_deprel_code("punct"), pass = laplace_deprel_subtype_code("nsubj:pass");
+    CHECK(nsubj > 0 && root > 0 && punct > 0 && pass > 0);
+    uint64_t flags[3] = {
+        laplace_parse_vertex_flags(1, upos1("NOUN"), (uint8_t)nsubj, 2, (uint16_t)pass),
+        laplace_parse_vertex_flags(1, upos1("VERB"), (uint8_t)root, 0, 0),
+        laplace_parse_vertex_flags(1, upos1("PUNCT"), (uint8_t)punct, 0xFFFF, 0),
+    };
+    laplace_ud_parse_t parse;
+    hash128_t parse_id;
+    CHECK(laplace_ud_parse_from_vertices(forms, flags, 3, &parse, &parse_id) == LAPLACE_UD_PARSE_OK);
+    CHECK(parse.token_count == 3 && parse.mwt_count == 0);
+    hash128_t zero = {0, 0};
+    CHECK(eq(parse.sentence_id, zero) && eq(parse.language_id, zero));
+
+    hash128_t relation[2] = {label("nsubj"), label("pass")}, subtyped;
+    hash128_merkle(0, relation, 2, &subtyped);
+    hash128_t unit0[4] = {forms[0], label("NOUN"), subtyped, label("2")};
+    hash128_t unit1[4] = {forms[1], label("VERB"), label("root"), label("0")};
+    hash128_t unit2[3] = {forms[2], label("PUNCT"), label("punct")};
+    hash128_t units[3];
+    hash128_merkle(0, unit0, 4, &units[0]);
+    hash128_merkle(0, unit1, 4, &units[1]);
+    hash128_merkle(0, unit2, 3, &units[2]);
+    hash128_t expected;
+    hash128_merkle(0, units, 3, &expected);
+    CHECK(eq(parse_id, expected));
+
+    CHECK(eq(parse.tokens[0].ref_id, label("1")) && eq(parse.tokens[2].ref_id, label("3")));
+    CHECK(eq(parse.tokens[0].form_id, forms[0]) && eq(parse.tokens[1].upos_id, label("VERB")));
+    CHECK(eq(parse.tokens[0].deprel_id, subtyped) && eq(parse.tokens[2].deprel_id, label("punct")));
+    CHECK(eq(parse.tokens[0].head_ref_id, parse.tokens[1].ref_id));
+    CHECK(eq(parse.tokens[1].head_ref_id, m->root) && eq(parse.tokens[2].head_ref_id, m->none));
+    laplace_ud_parse_free(&parse);
+
+    /* One vertex that is not a parse vertex makes the structure another layout. */
+    flags[1] = 0;
+    CHECK(laplace_ud_parse_from_vertices(forms, flags, 3, &parse, &parse_id) == LAPLACE_UD_PARSE_SCHEMA);
+    require_empty(&parse);
+}
+
 int main(void) {
     laplace_ud_markers_t markers;
     laplace_ud_markers_init(&markers);
@@ -222,6 +285,7 @@ int main(void) {
     test_invalid_structures(&markers);
     test_ids_are_language_independent(&markers);
     test_logical_reference_ordinals(&markers);
-    puts("UD schema-v1 decoder: field fidelity, malformed input, scoped references, language identities and logical ordinals passed");
+    test_vertex_layout(&markers);
+    puts("UD schema-v1 decoder: field fidelity, malformed input, scoped references, language identities, logical ordinals and the vertex layout passed");
     return EXIT_SUCCESS;
 }

@@ -108,6 +108,12 @@
       "propertyName": "groupFirst",
       "valueKind": "Text",
       "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "token/@treebank",
+      "propertyName": "treebank",
+      "valueKind": "Text",
+      "disposition": "Excluded"
     }
   ],
   "providerRoutes": [
@@ -128,7 +134,8 @@
         "uposColumn": "upos",
         "headColumn": "head",
         "deprelColumn": "deprel",
-        "uposVocabulary": "pos/upos"
+        "uposVocabulary": "pos/upos",
+        "contextField": "treebank"
       }
     }
   ],
