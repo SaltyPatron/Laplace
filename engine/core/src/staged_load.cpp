@@ -214,12 +214,14 @@ using fold_memo = std::unordered_map<fold_memo_key, glicko2_state_t, fold_memo_h
 
 void fold_period(fold_memo& memo, glicko2_state_t& st, const period_group* groups, size_t n) {
     if (n == 1) {
-        fold_memo_key key{{st.rating, st.rd, st.volatility, groups[0].opponent_rating,
+        const int64_t opponent = groups[0].opponent_rating == 0 ? kNeutralMu : groups[0].opponent_rating;
+        fold_memo_key key{{st.rating, st.rd, st.volatility, opponent,
                            groups[0].phi, groups[0].games, groups[0].sum}};
         auto it = memo.find(key);
         if (it != memo.end()) { st = it->second; return; }
-        if (glicko2_fold_uniform_period(&st, groups[0].opponent_rating, groups[0].phi,
-                groups[0].games, groups[0].sum, LAPLACE_GLICKO2_DEFAULT_TAU, 0) != 0)
+        int64_t phi = groups[0].phi, games = groups[0].games, sum = groups[0].sum;
+        if (glicko2_fold_grouped_period(&st, &opponent, &phi, &games, &sum, 1,
+                LAPLACE_GLICKO2_DEFAULT_TAU, 0) != 0)
             throw fail("native rating-period update failed");
         memo.emplace(key, st);
         return;
@@ -316,9 +318,10 @@ struct laplace_staged_claims {
     uint64_t rows_in = 0, rows_out = 0;
 };
 
-// New evidence sorted by consensus cell and witness, each row carrying its cell's
-// prior standing: one rating period per witness per cell, exactly as the source
-// reducer folds.
+// Every evidence row of each touched consensus cell, stored and new, sorted by cell
+// and then by (observed at, id). A cell's standing is one rating period over all of
+// its evidence from the neutral prior, exactly laplace.consensus_fold; the prior
+// columns say only whether the cell already stands.
 struct laplace_staged_score {
     std::string error;
     copy_slices in;
@@ -363,17 +366,8 @@ void score_flush(laplace_staged_score* s) {
     if (!s->has) return;
     cell& target = s->current;
     glicko2_state_t st;
-    if (s->has_prior) glicko2_init(&st, s->prior_rating, s->prior_rd, s->prior_volatility);
-    else glicko2_init(&st, kNeutralMu, kInitialRd, kInitialVolatility);
-    // Rows arrive in (witness, opponent rating, phi) order within the cell, so equal
-    // groups are adjacent and each witness's groups form one rating period.
-    size_t begin = 0;
-    while (begin < target.groups.size()) {
-        size_t end = begin + 1;
-        while (end < target.groups.size() && target.groups[end].witness == target.groups[begin].witness) ++end;
-        fold_period(s->memo, st, target.groups.data() + begin, end - begin);
-        begin = end;
-    }
+    glicko2_init(&st, kNeutralMu, kInitialRd, kInitialVolatility);
+    fold_period(s->memo, st, target.groups.data(), target.groups.size());
     copy_stream& out = s->has_prior ? s->standing.s : s->novel.s;
     out.row(9);
     out.field_bytes(target.id.b, 16);
@@ -436,15 +430,7 @@ void score_feed(laplace_staged_score* s, const uint8_t* p, size_t n, int final) 
         if (__builtin_add_overflow(target.games, games, &target.games))
             throw fail("cell games exceed int8");
         target.ts_pg_us = std::max(target.ts_pg_us, ts);
-        if (!target.groups.empty()) {
-            period_group& last = target.groups.back();
-            if (last.witness == witness && last.opponent_rating == opponent_rating && last.phi == phi) {
-                if (__builtin_add_overflow(last.games, games, &last.games)
-                    || __builtin_add_overflow(last.sum, sum, &last.sum))
-                    throw fail("rating-period group exceeds int8");
-                continue;
-            }
-        }
+        // One group per evidence row, in the aggregate's order.
         target.groups.push_back({witness, opponent_rating, phi, games, sum});
     }
     if (final) {

@@ -114,20 +114,20 @@ TEST(StagedLoad, UnsortedClaimsAreRejected) {
     laplace_staged_claims_free(m);
 }
 
-// One witness is one rating period on the cell's prior standing; a novel cell starts
-// from the neutral prior. The result equals the Glicko-2 kernel applied directly.
-TEST(StagedLoad, ScoreFoldsOnePeriodPerWitnessOnPriorStanding) {
+// A cell's standing is one rating period over all of its evidence rows from the
+// neutral prior (laplace.consensus_fold); a prior only says the cell already stands.
+TEST(StagedLoad, ScoreFoldsOnePeriodOverAllEvidenceFromNeutral) {
     const int64_t rating = 1500000000000, rd = 350000000000, vol = 60000000;
     const int64_t opp = 1500000000000, phi = 30000000000;
     Copy in;
-    // Cell A (novel): one witness, two groups with equal opponent state merge.
+    // Cell A (novel): two evidence rows, two groups of one period.
     for (int k = 0; k < 2; ++k) {
         in.row(12);
         in.id(0x10); in.id(0x20); in.id(0x30); in.id(0x40);
         in.i8(opp); in.i8(phi); in.i8(1); in.i8(1000000000); in.i8(50 + k);
         in.null(); in.null(); in.null();
     }
-    // Cell B (prior standing).
+    // Cell B (already stands; its stored evidence arrives with the new).
     in.row(12);
     in.id(0x11); in.id(0x20); in.null(); in.id(0x40);
     in.i8(opp); in.i8(phi); in.i8(3); in.i8(3000000000); in.i8(70);
@@ -149,7 +149,10 @@ TEST(StagedLoad, ScoreFoldsOnePeriodPerWitnessOnPriorStanding) {
 
     glicko2_state_t a;
     glicko2_init(&a, rating, rd, vol);
-    ASSERT_EQ(0, glicko2_fold_uniform_period(&a, opp, phi, 2, 2000000000, LAPLACE_GLICKO2_DEFAULT_TAU, 0));
+    const int64_t a_opps[2] = {opp, opp}, a_phis[2] = {phi, phi};
+    const int64_t a_games[2] = {1, 1}, a_sums[2] = {1000000000, 1000000000};
+    ASSERT_EQ(0, glicko2_fold_grouped_period(&a, a_opps, a_phis, a_games, a_sums, 2,
+                                             LAPLACE_GLICKO2_DEFAULT_TAU, 0));
     auto n = rows_of(novel);
     ASSERT_EQ(1u, n.size());
     EXPECT_EQ(a.rating, be64(n[0][4]));
@@ -158,8 +161,10 @@ TEST(StagedLoad, ScoreFoldsOnePeriodPerWitnessOnPriorStanding) {
     EXPECT_EQ(51, be64(n[0][8]));
 
     glicko2_state_t b;
-    glicko2_init(&b, 1600000000000, 100000000000, vol);
-    ASSERT_EQ(0, glicko2_fold_uniform_period(&b, opp, phi, 3, 3000000000, LAPLACE_GLICKO2_DEFAULT_TAU, 0));
+    glicko2_init(&b, rating, rd, vol);
+    const int64_t b_games = 3, b_sum = 3000000000;
+    ASSERT_EQ(0, glicko2_fold_grouped_period(&b, &opp, &phi, &b_games, &b_sum, 1,
+                                             LAPLACE_GLICKO2_DEFAULT_TAU, 0));
     auto p = rows_of(standing);
     ASSERT_EQ(1u, p.size());
     uint8_t key[48];
@@ -170,5 +175,6 @@ TEST(StagedLoad, ScoreFoldsOnePeriodPerWitnessOnPriorStanding) {
     hash128_blake3(key, sizeof(key), &cell);
     EXPECT_EQ(0, std::memcmp(p[0][0].data(), &cell, 16));
     EXPECT_EQ(b.rating, be64(p[0][4]));
+    EXPECT_EQ(3, be64(p[0][7]));
     EXPECT_TRUE(p[0][3].empty());
 }

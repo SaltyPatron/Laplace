@@ -29,13 +29,14 @@ const uint8_t* laplace_staged_claims_output(laplace_staged_claims_t* merge, size
 void laplace_staged_claims_consume(laplace_staged_claims_t* merge);
 void laplace_staged_claims_counts(const laplace_staged_claims_t* merge, uint64_t* rows_in, uint64_t* rows_out);
 
-/* New evidence in, sorted by (subject, type, object, witness, opponent rating,
- * opponent rd); row: subject, type, object?, witness, opponent rating, opponent rd,
- * games, score sum, observed at, prior rating?, prior rd?, prior volatility?. The
- * consensus id of each (subject, type, object) cell is computed natively.
- * Out: one rating period per witness per cell on the cell's prior standing; novel
- * cells (standing = 0) and cells with prior standing (standing = 1), each row
- * id, subject, type, object, rating, rd, volatility, games, last observed at. */
+/* Every evidence row of each touched cell in, stored and new, sorted by (subject,
+ * type, object, observed at, id); row: subject, type, object?, witness, opponent
+ * rating, opponent rd, games, score sum, observed at, prior rating?, prior rd?,
+ * prior volatility?. The consensus id of each (subject, type, object) cell is
+ * computed natively. Out: one rating period over all of the cell's evidence from the
+ * neutral prior (laplace.consensus_fold); novel cells (standing = 0) and cells that
+ * already stand (standing = 1, a non-null prior), each row id, subject, type,
+ * object, rating, rd, volatility, total games, last observed at. */
 laplace_staged_score_t* laplace_staged_score_new(void);
 void laplace_staged_score_free(laplace_staged_score_t* score);
 const char* laplace_staged_score_error(const laplace_staged_score_t* score);
