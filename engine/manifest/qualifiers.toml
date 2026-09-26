@@ -107,3 +107,11 @@ name = "domain"
 relations = ["HAS_DOMAIN"]
 base = 0
 values = ["topic", "region", "usage"]
+
+# Whose effect, reaction or want an ATOMIC 2020 claim states: PersonX (xEffect, xReact,
+# xWant) or the others in the event (oEffect, oReact, oWant). One element each.
+[[family]]
+name = "participant"
+relations = ["X_EFFECT", "X_REACT", "X_WANT"]
+base = 0
+values = ["agent", "others"]

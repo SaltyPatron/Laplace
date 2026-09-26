@@ -26,11 +26,16 @@ public readonly struct ISOSource : ISeedSource
         "HAS_EXTERNAL_ID", "HAS_NAME",
         // SUPERSEDED_BY is the retirement lane's edge.
         "SUPERSEDED_BY",
+        // A macrolanguage HAS_PART its individual languages {member}, stated from the member.
+        "IS_MEMBER_OF",
     ];
 
     /// <summary>The one relation binding a language to each of its ISO 639 codes; the
     /// scheme (identifier/iso639-1, -2b, -2t, -3) is the claim's qualifier.</summary>
-    public static string CodeRelation => Relations[^3];
+    public static string CodeRelation => Relations[^4];
+
+    /// <summary>An individual language's membership in its macrolanguage.</summary>
+    public static string MemberRelation => Relations[^1];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["Language", "ISO639Code", "LanguageVariant"];

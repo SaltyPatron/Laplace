@@ -402,7 +402,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             // A macrolanguage has its individual languages as members: HAS_PART read from
             // the member's side, with meronymy/member.
             b.AddAttestation(NativeAttestation.Categorical(
-                indivId, "MEMBER_OF_MACROLANGUAGE", macroId, Source, null,
+                indivId, ISOSource.MemberRelation, macroId, Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
         protected override async IAsyncEnumerable<(string Indiv, string Macro)> ExtractRecordsAsync(

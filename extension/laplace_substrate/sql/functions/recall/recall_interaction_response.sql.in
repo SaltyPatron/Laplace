@@ -13,13 +13,12 @@ BEGIN ATOMIC
     WITH kinds(type_id, phrase) AS (
         VALUES
             (laplace.relation_type_id('X_INTENT'),         'intends'),
+            -- xWant/oWant, xReact/oReact, xEffect/oEffect share one element each;
+            -- whose want, reaction or effect is the claim's participant qualifier.
             (laplace.relation_type_id('X_WANT'),           'then wants'),
             (laplace.relation_type_id('X_NEED'),           'first needs'),
             (laplace.relation_type_id('X_REACT'),          'feels'),
             (laplace.relation_type_id('X_EFFECT'),         'then'),
-            (laplace.relation_type_id('O_WANT'),           'others then want'),
-            (laplace.relation_type_id('O_REACT'),          'others feel'),
-            (laplace.relation_type_id('O_EFFECT'),         'for others,'),
             (laplace.relation_type_id('CAUSES'),           'causes'),
             (laplace.relation_type_id('CAUSES_DESIRE'),    'causes a desire for'),
             (laplace.relation_type_id('MOTIVATED_BY_GOAL'),'is motivated by'),

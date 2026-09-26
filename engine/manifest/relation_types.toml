@@ -1283,6 +1283,8 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "O_EFFECT"
+retired = "X_EFFECT"
+retired_qualifier = "participant/others"
 bit = 176
 rank = "causal"
 symmetry = "asymmetric"
@@ -1291,6 +1293,8 @@ family_root = "O_EFFECT"
 
 [[relation]]
 canonical = "O_REACT"
+retired = "X_REACT"
+retired_qualifier = "participant/others"
 bit = 177
 rank = "causal"
 symmetry = "asymmetric"
@@ -1299,6 +1303,8 @@ family_root = "O_REACT"
 
 [[relation]]
 canonical = "O_WANT"
+retired = "X_WANT"
+retired_qualifier = "participant/others"
 bit = 178
 rank = "causal"
 symmetry = "asymmetric"
@@ -2639,3 +2645,77 @@ flip = true
 surface = "See also"
 canonical = "ALSO_SEE"
 flip = false
+
+# ConceptNet 5 and ATOMIC 2020 name their relations; where a name states an element plus a
+# flip or a closed subcategory, the authority's own name is the surface that carries it.
+
+[[alias]]
+surface = "HasA"
+canonical = "HAS_PART"
+flip = false
+qualifier = "meronymy/part"
+
+[[alias]]
+surface = "MadeOf"
+canonical = "HAS_PART"
+flip = false
+qualifier = "meronymy/substance"
+
+[[alias]]
+surface = "HasFirstSubevent"
+canonical = "HAS_SUBEVENT"
+flip = false
+qualifier = "subevent/first"
+
+[[alias]]
+surface = "HasLastSubevent"
+canonical = "HAS_SUBEVENT"
+flip = false
+qualifier = "subevent/last"
+
+[[alias]]
+surface = "MadeUpOf"
+canonical = "HAS_PART"
+flip = false
+qualifier = "meronymy/substance"
+
+[[alias]]
+surface = "isAfter"
+canonical = "IS_BEFORE"
+flip = true
+
+[[alias]]
+surface = "xEffect"
+canonical = "X_EFFECT"
+flip = false
+qualifier = "participant/agent"
+
+[[alias]]
+surface = "oEffect"
+canonical = "X_EFFECT"
+flip = false
+qualifier = "participant/others"
+
+[[alias]]
+surface = "xReact"
+canonical = "X_REACT"
+flip = false
+qualifier = "participant/agent"
+
+[[alias]]
+surface = "oReact"
+canonical = "X_REACT"
+flip = false
+qualifier = "participant/others"
+
+[[alias]]
+surface = "xWant"
+canonical = "X_WANT"
+flip = false
+qualifier = "participant/agent"
+
+[[alias]]
+surface = "oWant"
+canonical = "X_WANT"
+flip = false
+qualifier = "participant/others"

@@ -20,10 +20,11 @@ public readonly struct Atomic2020Source : ISeedSource
 
     public static readonly (string Rel, string Type)[] RelPairs =
     [
-        ("oEffect", "O_EFFECT"), ("oReact", "O_REACT"), ("oWant", "O_WANT"),
-        ("xAttr", "X_ATTR"), ("xEffect", "X_EFFECT"), ("xIntent", "X_INTENT"),
-        ("xNeed", "X_NEED"), ("xReact", "X_REACT"), ("xWant", "X_WANT"), ("xReason", "X_REASON"),
-        ("HinderedBy", "OBSTRUCTED_BY"), ("isAfter", "IS_AFTER"), ("isBefore", "IS_BEFORE"),
+        // xEffect/oEffect, xReact/oReact, xWant/oWant: one element each, qualified by whose.
+        ("oEffect", "oEffect"), ("oReact", "oReact"), ("oWant", "oWant"),
+        ("xAttr", "X_ATTR"), ("xEffect", "xEffect"), ("xIntent", "X_INTENT"),
+        ("xNeed", "X_NEED"), ("xReact", "xReact"), ("xWant", "xWant"), ("xReason", "X_REASON"),
+        ("HinderedBy", "OBSTRUCTED_BY"), ("isAfter", "isAfter"), ("isBefore", "IS_BEFORE"),
         ("isFilledBy", "X_FILLED_BY"), ("Causes", "CAUSES"), ("ObjectUse", "OBJECT_USE"),
         ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"),
         ("CapableOf", "CAPABLE_OF"), ("Desires", Desires), ("HasProperty", "HAS_PROPERTY"),
@@ -32,7 +33,7 @@ public readonly struct Atomic2020Source : ISeedSource
         // positive form asserts. As NOT_DESIRES it landed in a separate positive type
         // where it could never meet what it denies. Same fix as ConceptNet's four Not*
         // relations; see docs/evidence-flattening-2026-08-23.md.
-        ("MadeUpOf", "MADE_UP_OF"), ("NotDesires", Desires),
+        ("MadeUpOf", "MadeUpOf"), ("NotDesires", Desires),
     ];
 
     /// <summary>Relations whose assertion DENIES the relation they map to.</summary>

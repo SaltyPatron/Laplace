@@ -225,4 +225,55 @@ public class RelationTypeRegistryTests
         Assert.Contains(all, r => r.Canonical == "PRECEDES");
         Assert.DoesNotContain(all, r => r.Canonical == "HAS_UPOS");
     }
+
+    [Theory]
+    [InlineData("xWant", "X_WANT", false)]
+    [InlineData("oWant", "X_WANT", false)]
+    [InlineData("oEffect", "X_EFFECT", false)]
+    [InlineData("isAfter", "IS_BEFORE", true)]
+    [InlineData("HasA", "HAS_PART", false)]
+    [InlineData("MadeOf", "HAS_PART", false)]
+    [InlineData("HasFirstSubevent", "HAS_SUBEVENT", false)]
+    [InlineData("domain_topic", "HAS_DOMAIN", false)]
+    [InlineData("IS_DOMAIN_USAGE_MEMBER", "HAS_DOMAIN", true)]
+    public void An_authority_surface_names_one_element_with_its_flip(string surface, string element, bool flip)
+    {
+        var resolved = RelationTypeRegistry.Resolve(surface);
+        Assert.Equal(Kid(element), resolved.Id);
+        Assert.Equal(flip, resolved.Flip);
+    }
+
+    [Fact]
+    public void A_closed_subcategory_is_the_surface_qualifier_not_a_relation()
+    {
+        var agent = RelationTypeRegistry.Resolve("xWant");
+        var others = RelationTypeRegistry.Resolve("oWant");
+        Assert.Equal(agent.Id, others.Id);
+        Assert.False(agent.Qualifier.IsZero);
+        Assert.False(others.Qualifier.IsZero);
+        Assert.NotEqual(agent.Qualifier, others.Qualifier);
+        Assert.NotEqual(RelationTypeRegistry.Resolve("HasA").Qualifier,
+                        RelationTypeRegistry.Resolve("MadeOf").Qualifier);
+    }
+
+    // A retired name whose meaning is its successor plus a flip or qualifier stays a surface
+    // of that successor; one whose meaning needs more (a [property, value] object) fails closed.
+    [Theory]
+    [InlineData("O_WANT", "oWant")]
+    [InlineData("HAS_DOMAIN_TOPIC", "domain_topic")]
+    [InlineData("HAS_A", "HasA")]
+    public void A_retired_name_is_a_surface_of_its_successor(string retired, string surface)
+    {
+        var old = RelationTypeRegistry.Resolve(retired);
+        var now = RelationTypeRegistry.Resolve(surface);
+        Assert.Equal(now.Id, old.Id);
+        Assert.Equal(now.Flip, old.Flip);
+        Assert.Equal(now.Qualifier, old.Qualifier);
+    }
+
+    [Theory]
+    [InlineData("HAS_BLOCK")]
+    [InlineData("HAS_GENERAL_CATEGORY")]
+    public void A_retirement_that_moves_meaning_into_the_object_fails_closed(string retired) =>
+        Assert.Throws<InvalidOperationException>(() => RelationTypeRegistry.Resolve(retired));
 }
