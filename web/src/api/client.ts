@@ -176,3 +176,25 @@ export function apiPut<T>(path: string, payload: unknown, opts: ApiOptions = {})
 export function apiDelete<T = void>(path: string, opts: ApiOptions = {}): Promise<T> {
   return request<T>(path, { method: 'DELETE' }, opts);
 }
+
+export type FailureKind = 'auth' | 'forbidden' | 'payment' | 'missing' | 'unavailable' | 'server' | 'network' | 'other';
+
+/**
+ * What a failed request means to the person reading it. Authority, payment and
+ * absence are different answers: a refused read never says "nothing witnessed",
+ * and an unreachable host never says "sign in".
+ */
+export function describeFailure(error: unknown): { kind: FailureKind; message: string } {
+  if (error instanceof PaymentRequiredError) return { kind: 'payment', message: error.message };
+  if (error instanceof ApiError) {
+    if (error.status === 401) return { kind: 'auth', message: 'Sign in, or use an API key, to read this.' };
+    if (error.status === 403) return { kind: 'forbidden', message: error.message || 'This operation needs more authority than this session holds.' };
+    if (error.status === 404) return { kind: 'missing', message: error.message };
+    if (error.status === 503) return { kind: 'unavailable', message: error.message || 'The substrate is unavailable right now.' };
+    if (error.status >= 500) return { kind: 'server', message: `The server failed this request: ${error.message}` };
+    return { kind: 'other', message: error.message };
+  }
+  if (error instanceof DOMException && error.name === 'AbortError') return { kind: 'other', message: 'Request cancelled.' };
+  if (error instanceof TypeError) return { kind: 'network', message: 'The Laplace API could not be reached.' };
+  return { kind: 'other', message: error instanceof Error ? error.message : String(error) };
+}

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { apiGet } from '../api/client';
+import { apiGet, describeFailure } from '../api/client';
 import { useVisiblePolling } from '@ui';
 
 export interface Pulse {
@@ -18,6 +18,8 @@ export interface PulseState {
   /** Attestations folded per second, from the last two samples (0 when idle). */
   ratePerSec: number;
   reachable: boolean;
+  /** Why the last read failed, when it did: a refused read is not an unreachable host. */
+  failure: string | null;
 }
 
 /**
@@ -30,12 +32,14 @@ export function usePulse(intervalMs = 4000): PulseState {
   const [pulse, setPulse] = useState<Pulse | null>(null);
   const [ratePerSec, setRate] = useState(0);
   const [reachable, setReachable] = useState(true);
+  const [failure, setFailure] = useState<string | null>(null);
   const prev = useRef<Pulse | null>(null);
 
   useVisiblePolling(async () => {
     try {
       const next = await apiGet<Pulse>('/v1/pulse');
       setReachable(true);
+      setFailure(null);
       const p = prev.current;
       if (p && next.at > p.at) {
         const dAtt = next.attestations - p.attestations;
@@ -44,11 +48,13 @@ export function usePulse(intervalMs = 4000): PulseState {
       }
       prev.current = next;
       setPulse(next);
-    } catch {
-      setReachable(false);
+    } catch (error) {
+      const failed = describeFailure(error);
+      setReachable(failed.kind !== 'network' && failed.kind !== 'server' && failed.kind !== 'unavailable');
+      setFailure(failed.message);
     }
   }, { intervalMs });
 
 
-  return { pulse, ratePerSec, reachable };
+  return { pulse, ratePerSec, reachable, failure };
 }

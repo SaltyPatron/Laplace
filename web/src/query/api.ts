@@ -1,4 +1,4 @@
-import { apiGet, apiGetCached, apiPost, type ApiOptions } from '../api/client';
+import { apiGet, apiGetCached, apiPost, type ApiOptions, type Schemas } from '../api/client';
 import type { HighwayPopulationStatus, QueryResult, QueryShape, RelationBand } from './types';
 
 export function queryShapes(opts?: ApiOptions) {
@@ -7,6 +7,11 @@ export function queryShapes(opts?: ApiOptions) {
 
 export function relationBands(opts?: ApiOptions) {
   return apiGetCached<{ bands: RelationBand[] }>('/v1/query/bands', 5 * 60_000, opts);
+}
+
+/** The governed relation vocabulary, as the manifest registry holds it. */
+export function relationTypes(opts?: ApiOptions) {
+  return apiGetCached<Schemas['RelationTypesResponse']>('/v1/query/relations', 30 * 60_000, opts);
 }
 
 export function highwayPopulation(opts?: ApiOptions) {

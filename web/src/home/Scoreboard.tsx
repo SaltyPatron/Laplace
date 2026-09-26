@@ -10,13 +10,13 @@ import styles from './Scoreboard.module.css';
  * count, polled, and the rate is measured from consecutive samples.
  */
 export function Scoreboard() {
-  const { pulse, ratePerSec, reachable } = usePulse();
+  const { pulse, ratePerSec, reachable, failure } = usePulse();
 
   return (
     <section className={styles.board} aria-label="Live substrate scoreboard">
       <div className={styles.status}>
         <StatusPill folding={pulse?.folding ?? false} reachable={reachable} rate={ratePerSec}
-          lastFlushAt={pulse?.last_flush_at ?? null} />
+          lastFlushAt={pulse?.last_flush_at ?? null} failure={failure} />
       </div>
       <div className={styles.counts}>
         <Count value={pulse?.entities ?? null} label="Entities" hint="deduplicated content" />
@@ -28,11 +28,14 @@ export function Scoreboard() {
   );
 }
 
-function StatusPill({ folding, reachable, rate, lastFlushAt }: {
-  folding: boolean; reachable: boolean; rate: number; lastFlushAt: number | null;
+function StatusPill({ folding, reachable, rate, lastFlushAt, failure }: {
+  folding: boolean; reachable: boolean; rate: number; lastFlushAt: number | null; failure: string | null;
 }) {
   if (!reachable) {
-    return <span className={`${styles.pill} ${styles.down}`}><span className={styles.dot} /> substrate unreachable</span>;
+    return <span className={`${styles.pill} ${styles.down}`} title={failure ?? undefined}><span className={styles.dot} /> substrate unreachable</span>;
+  }
+  if (failure) {
+    return <span className={`${styles.pill} ${styles.idle}`}><span className={styles.dot} /> {failure}</span>;
   }
   if (folding) {
     return (

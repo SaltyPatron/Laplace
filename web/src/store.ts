@@ -74,6 +74,8 @@ interface AppState {
   authReady: boolean;
   authUser: AuthUser | null;
   authProviders: AuthProvider[];
+  /** The sandbox workspace this host serves an uncredentialed browser as, when configured. */
+  devPrincipal: string | null;
   setTenant: (tenant: string) => void;
   setSession: (session: string | null) => void;
   setQuoteId: (quoteId: string) => void;
@@ -83,7 +85,7 @@ interface AppState {
   setPendingQuote: (gate: QuoteGate | null) => void;
   setExploreSeedPrompt: (prompt: string | null) => void;
   setQuerySeed: (seed: QuerySeed | null) => void;
-  setAuth: (user: AuthUser | null, providers: AuthProvider[]) => void;
+  setAuth: (user: AuthUser | null, providers: AuthProvider[], devPrincipal?: string | null) => void;
   clearConversation: () => void;
 }
 
@@ -102,6 +104,7 @@ export const useAppStore = create<AppState>((set) => ({
   authReady: false,
   authUser: null,
   authProviders: [],
+  devPrincipal: null,
   setTenant: (tenant) => {
     localStorage.setItem('laplace.tenant', tenant);
     // A tenant switch is a different witnessed world — never carry a session across.
@@ -129,13 +132,22 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingQuote: (pendingQuote) => set({ pendingQuote }),
   setExploreSeedPrompt: (exploreSeedPrompt) => set({ exploreSeedPrompt }),
   setQuerySeed: (querySeed) => set({ querySeed }),
-  setAuth: (authUser, authProviders) => set((state) => {
-    if (!authUser) return { authReady: true, authUser: null, authProviders };
+  setAuth: (authUser, authProviders, devPrincipal = null) => set((state) => {
+    if (!authUser && devPrincipal) {
+      localStorage.setItem('laplace.tenant', devPrincipal);
+      return {
+        authReady: true, authUser: null, authProviders, devPrincipal, tenant: devPrincipal,
+        session: localStorage.getItem(sessionKey(devPrincipal)),
+        messages: state.tenant === devPrincipal ? state.messages : [],
+      };
+    }
+    if (!authUser) return { authReady: true, authUser: null, authProviders, devPrincipal };
     localStorage.setItem('laplace.tenant', authUser.tenantId);
     return {
       authReady: true,
       authUser,
       authProviders,
+      devPrincipal,
       tenant: authUser.tenantId,
       session: localStorage.getItem(sessionKey(authUser.tenantId)),
       messages: state.tenant === authUser.tenantId ? state.messages : [],

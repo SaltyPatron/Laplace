@@ -31,4 +31,25 @@
     padding: var(--space-3); background: var(--material-enamel); border: 1px solid var(--color-border-default);
   }
   .skipLink:focus { transform: none; }
+
+  .headerTools {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .search { width: clamp(12rem, 24vw, 22rem); }
+  .devPrincipal {
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--color-copper);
+    border-radius: 999px;
+    color: #f7fbfd;
+    font-size: var(--text-xs);
+    font-family: var(--font-mono, monospace);
+    white-space: nowrap;
+  }
+  .accountLinks { display: flex; gap: var(--space-3); font-size: var(--text-sm); }
+  .accountLinks a { color: #f7fbfd; }
+  @media (max-width: 720px) { .search { width: 100%; } }
 }

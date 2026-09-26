@@ -86,10 +86,11 @@ export async function* streamChat(
     try {
       body = await res.json();
     } catch {
-      
+      // A proxy may answer with HTML or nothing; the status line still stands.
     }
     if (res.status === 402 && body) throw new PaymentRequiredError(body as PaymentRequiredResponse);
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    const error = (body as { error?: { message?: string } } | null)?.error;
+    throw new ApiError(res.status, error?.message ?? `${res.status} ${res.statusText}`);
   }
   if (!res.body) throw new ApiError(res.status, 'Response has no body to stream.');
 

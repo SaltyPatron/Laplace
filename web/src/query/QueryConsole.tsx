@@ -6,7 +6,7 @@ import { captureRows } from '../ui/lib/resultRows';
 import { useAppStore } from '../store';
 import { BandPicker } from './BandPicker';
 import { DialPanel } from './DialPanel';
-import { queryShapes, relationBands, runQuery } from './api';
+import { queryShapes, relationBands, relationTypes, runQuery } from './api';
 import { DIAL_DEFAULTS, type QueryDials, type QueryRow } from './types';
 import styles from './QueryConsole.module.css';
 
@@ -29,6 +29,10 @@ export function QueryConsole() {
   const bandsRead = useReadResource({
     key: JSON.stringify(['query-bands', tenant, quoteId]),
     read: (signal) => relationBands({ tenant, quoteId, signal }), enabled: usesBands,
+  });
+  const relationsRead = useReadResource({
+    key: JSON.stringify(['query-relations', tenant, quoteId]),
+    read: (signal) => relationTypes({ tenant, quoteId, signal }),
   });
   const shapes = shapesRead.data?.shapes;
   const active = useMemo(() => shapes?.find((item) => item.shape === shape), [shapes, shape]);
@@ -85,15 +89,20 @@ export function QueryConsole() {
         <Field label="shape" help="Available read operations, supplied by the substrate catalog." htmlFor="query-shape">
           <Select id="query-shape" value={shape} onChange={(event) => setShape(event.target.value)}>
             {!active && <option value={shape} disabled>{shapesRead.busy ? 'Loading shapes…' : 'Choose an available shape'}</option>}
-            {shapes?.map((item) => <option key={item.shape} value={item.shape}>{item.shape}</option>)}
+            {shapes?.map((item) => <option key={item.shape} value={item.shape}>{item.shape.replace(/_/g, ' ')} — {item.summary}</option>)}
           </Select>
         </Field>
         <ReadStatus label="Query shapes" resource={shapesRead} />
         {shapes && shapes.length === 0 && <Muted>No query shapes were returned by the catalog.</Muted>}
         {active && <Muted className={styles.shapeHelp}>{active.summary}</Muted>}
-        {needsType && <Field label="relation type" help="The exact canonical relation name, for example HAS_PART." htmlFor="query-type">
-          <Input id="query-type" required value={relationType} placeholder="HAS_PART" onChange={(event) => setRelationType(event.target.value)} />
+        {needsType && <Field label="relation" help="A governed relation from the manifest registry." htmlFor="query-type">
+          <Select id="query-type" required value={relationType} onChange={(event) => setRelationType(event.target.value)}>
+            <option value="" disabled>{relationsRead.busy ? 'Loading relations…' : 'Choose a relation'}</option>
+            {relationsRead.data?.relations.map((relation) => <option key={relation.id_hex} value={relation.name}>{relation.name.replace(/_/g, ' ').toLowerCase()}</option>)}
+            {relationType && !relationsRead.data?.relations.some((relation) => relation.name === relationType) && <option value={relationType}>{relationType}</option>}
+          </Select>
         </Field>}
+        {needsType && <ReadStatus label="Relations" resource={relationsRead} />}
         {acceptsLang && <Field label="language" help="Optional target language for the returned surface." htmlFor="query-lang">
           <Input id="query-lang" value={lang} placeholder="any" onChange={(event) => setLang(event.target.value)} />
         </Field>}

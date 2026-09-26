@@ -9,7 +9,7 @@ import {
   TextArea,
 } from '@ui';
 
-import { apiGet, apiPost, PaymentRequiredError, type PreflightQuoteResponse, type ChatCompletionResponse } from '../api/client';
+import { apiGet, apiPost, describeFailure, PaymentRequiredError, type PreflightQuoteResponse, type ChatCompletionResponse } from '../api/client';
 
 import { streamChat } from '../api/sse';
 
@@ -254,7 +254,7 @@ export function ChatView() {
 
           streaming: false,
 
-          error: e instanceof Error ? e.message : 'Request failed.',
+          error: describeFailure(e).message,
 
         }));
 
@@ -349,7 +349,7 @@ export function ChatView() {
 
         streaming: false,
 
-        error: e instanceof Error ? e.message : 'Request failed.',
+        error: describeFailure(e).message,
 
       }));
 
@@ -371,8 +371,7 @@ export function ChatView() {
 
         <div className={styles.toolbar}>
           <Muted className={styles.modeHint}>
-            One witnessed forward pass: resolve every constituent, route typed relations,
-            follow physical trajectories, then update the frontier after each selection.
+            Replies are composed from witnessed consensus; each carries its receipt.
           </Muted>
 
           {authUser && conversations.length > 0 && (

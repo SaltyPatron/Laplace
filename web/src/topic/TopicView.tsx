@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { Button, ConsensusBadge, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
+import { describeFailure } from '../api/client';
 import { entityRecord, entityTaxonomy, runQuery, type TaxonomyResponse } from '../query/api';
 import { exploreMesh, exploreResolve } from '../explore/api';
 import type { MeshResponse } from '../explore/mesh/types';
@@ -43,6 +44,7 @@ function TopicBody({ topicRef }: { topicRef: string }) {
   const [idHex, setIdHex] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [notFound, setNotFound] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   const [define, setDefine] = useState<QueryResult | null>(null);
   const [facts, setFacts] = useState<QueryResult | null>(null);
@@ -53,13 +55,13 @@ function TopicBody({ topicRef }: { topicRef: string }) {
 
   useEffect(() => {
     let stale = false;
-    setIdHex(null); setNotFound(false);
+    setIdHex(null); setNotFound(false); setFailure(null);
     setDefine(null); setFacts(null); setTranslations(null);
     setTaxonomy(null); setMesh(null); setRecord(null);
 
     exploreResolve(topicRef).then((hit) => {
       if (stale) return;
-      if (!hit) { setNotFound(true); return; }
+      if (!hit || hit.exists === false) { setNotFound(true); return; }
       setIdHex(hit.id_hex); setLabel(hit.label);
 
       // Everything, in parallel — each section lands when it lands.
@@ -69,12 +71,22 @@ function TopicBody({ topicRef }: { topicRef: string }) {
       entityTaxonomy(hit.id_hex).then((r) => !stale && setTaxonomy(r)).catch(() => {});
       exploreMesh(hit.id_hex).then((r) => !stale && setMesh(r)).catch(() => {});
       entityRecord(hit.id_hex).then((r) => !stale && setRecord(r)).catch(() => {});
-    }).catch(() => { if (!stale) setNotFound(true); });
+    }).catch((error) => {
+      if (stale) return;
+      const failed = describeFailure(error);
+      if (failed.kind === 'missing') setNotFound(true); else setFailure(failed.message);
+    });
 
     return () => { stale = true; };
   }, [topicRef]);
 
-  if (notFound) return <ErrorText>Nothing witnessed for “{topicRef}”.</ErrorText>;
+  if (failure) return <ErrorText role="alert">{failure}</ErrorText>;
+  if (notFound) return (
+    <Muted>
+      Nothing admitted is named “{topicRef}”. <RouterLink to={`/explore?q=${encodeURIComponent(topicRef)}`}>Browse</RouterLink> finds
+      the witnessed words and structures it is made of.
+    </Muted>
+  );
   if (!idHex) return <LoadingText>Resolving…</LoadingText>;
 
   return (
