@@ -26,12 +26,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         await using var conn = await pg.DataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
-        await Execute($"CREATE TABLE laplace.{relation} PARTITION OF laplace.consensus "
-            + $"FOR VALUES IN ({typeLiteral}) PARTITION BY HASH (subject_id)");
-        for (int i = 0; i < 8; i++)
-            await Execute($"CREATE TABLE laplace.{relation}_{i} PARTITION OF laplace.{relation} "
-                + $"FOR VALUES WITH (MODULUS 8, REMAINDER {i})");
-        await Execute($"ANALYZE laplace.{relation}");
+        // Consensus is HASH(subject_id) over its leaves; a relation owns no partition.
 
         // Reproduce the hostile seed-time planner environment from #1370. The
         // production repair must be structural, not dependent on these caller GUCs.
@@ -70,7 +65,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         await Execute("SET LOCAL auto_explain.log_min_duration=-1");
         await using (var verify = new NpgsqlCommand(
             $"SELECT count(*), count(*) FILTER (WHERE witness_count >= 2) "
-            + $"FROM laplace.{relation}", conn, tx))
+            + $"FROM laplace.consensus WHERE type_id = {typeLiteral}", conn, tx))
         await using (var result = await verify.ExecuteReaderAsync())
         {
             Assert.True(await result.ReadAsync());
@@ -104,7 +99,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
             var priorPlans = phasePlans
                 .Where(p => p.Contains("Query Text: WITH locked AS MATERIALIZED"))
                 .ToArray();
-            Assert.InRange(priorPlans.Length, 1, 8);
+            Assert.InRange(priorPlans.Length, 1, 64); // at most one exact read per consensus leaf
             Assert.All(priorPlans, p =>
             {
                 Assert.Contains("FROM ONLY", p);
@@ -112,8 +107,9 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
                 Assert.Contains("b.id", p);
                 Assert.Contains("b.s", p);
                 Assert.DoesNotContain("Append", p);
-                Assert.Equal(1, Enumerable.Range(0, 8)
-                    .Count(i => p.Contains($"{relation}_{i}")));
+                // One exact leaf per prior read, never the parent's union of leaves.
+                Assert.Single(System.Text.RegularExpressions.Regex.Matches(p, @"consensus_h[0-9a-f]{2}\b")
+                    .Select(static m => m.Value).Distinct());
                 Assert.True(p.Contains("Index Scan") || p.Contains("Hash Join")
                     || p.Contains("Merge Join") || p.Contains("Seq Scan"),
                     "exact-leaf prior plan did not expose a target access path");
@@ -182,12 +178,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         await using var conn = await pg.DataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
-        await Execute($"CREATE TABLE laplace.{relation} PARTITION OF laplace.consensus "
-            + $"FOR VALUES IN ({typeLiteral}) PARTITION BY HASH (subject_id)");
-        for (int i = 0; i < 8; i++)
-            await Execute($"CREATE TABLE laplace.{relation}_{i} PARTITION OF laplace.{relation} "
-                + $"FOR VALUES WITH (MODULUS 8, REMAINDER {i})");
-        await Execute($"ANALYZE laplace.{relation}");
+        // Consensus is HASH(subject_id) over its leaves; a relation owns no partition.
         await Execute("SET LOCAL plan_cache_mode=force_generic_plan; "
             + "SET LOCAL enable_hashjoin=off; SET LOCAL enable_mergejoin=off; "
             + "SET LOCAL enable_material=on; SET LOCAL enable_seqscan=on");
@@ -206,7 +197,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         long leafSeqScans = after.Seq - before.Seq;
         long leafIndexScans = after.Idx - before.Idx;
         Assert.True(leafSeqScans >= 0, $"leaf seq_scan counter moved backwards: {leafSeqScans}");
-        Assert.True(leafSeqScans <= 24,
+        Assert.True(leafSeqScans <= 3 * 64,
             $"target leaf sequential scans must be O(calls x leaves), got {leafSeqScans} for {count} rows");
         Assert.True(leafSeqScans < count,
             $"target leaf scans scaled with rows: {leafSeqScans} scans for {count} rows");
@@ -259,7 +250,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
             await using var counters = new NpgsqlCommand(
                 $"SELECT COALESCE(sum(seq_scan), 0)::bigint, COALESCE(sum(idx_scan), 0)::bigint "
                 + $"FROM pg_stat_xact_all_tables "
-                + $"WHERE schemaname='laplace' AND relname LIKE '{relation}_%'", conn, tx);
+                + $"WHERE schemaname='laplace' AND relname LIKE 'consensus\\_h%'", conn, tx);
             await using var result = await counters.ExecuteReaderAsync();
             Assert.True(await result.ReadAsync());
             return (result.GetInt64(0), result.GetInt64(1));
@@ -317,11 +308,6 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
 
         try
         {
-            await Execute(control, $"CREATE TABLE laplace.{relation} PARTITION OF laplace.consensus "
-                + $"FOR VALUES IN ({typeLiteral}) PARTITION BY HASH (subject_id)");
-            for (int i = 0; i < 8; i++)
-                await Execute(control, $"CREATE TABLE laplace.{relation}_{i} PARTITION OF laplace.{relation} "
-                    + $"FOR VALUES WITH (MODULUS 8, REMAINDER {i})");
             await Execute(control, $@"
 CREATE FUNCTION laplace.{blockerFunction}() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -334,9 +320,8 @@ BEGIN
 END
 $$;
 CREATE TRIGGER {blockerFunction}
-BEFORE INSERT ON laplace.{relation}
-FOR EACH ROW EXECUTE FUNCTION laplace.{blockerFunction}();
-ANALYZE laplace.{relation};");
+BEFORE INSERT ON laplace.consensus
+FOR EACH ROW EXECUTE FUNCTION laplace.{blockerFunction}();");
 
             // The sequential subject is the exact state expected after two folds.
             Assert.Equal(1, await Fold(control, sequentialSubject));
@@ -383,7 +368,7 @@ ANALYZE laplace.{relation};");
                 try { await primaryFold.WaitAsync(TimeSpan.FromSeconds(15)); }
                 catch { /* Preserve the original assertion/setup failure. */ }
             }
-            await Execute(control, $"DROP TABLE IF EXISTS laplace.{relation} CASCADE; "
+            await Execute(control, $"DROP TRIGGER IF EXISTS {blockerFunction} ON laplace.consensus; "
                 + $"DROP FUNCTION IF EXISTS laplace.{blockerFunction}()");
         }
 
