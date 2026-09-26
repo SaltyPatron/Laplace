@@ -96,13 +96,22 @@ public static class SourceGenerationResolver
         {
             ct.ThrowIfCancellationRequested();
             string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            // A selector naming the file itself governs it over a pattern that also matches
+            // (PropBank's frames/*.xml admits framesets; frames/check.xml, malformed, is
+            // excluded by name). Two patterns, or two names, never share a file.
             SourceGenerationArtifactRule? match = null;
+            bool matchNamesFile = false;
             foreach (var rule in rules)
             {
                 if (!matchers[rule.Artifact.Selector].IsMatch(relative)) continue;
-                if (match is not null)
+                bool namesFile = rule.Artifact.Selector.IndexOfAny(['*', '?']) < 0;
+                if (match is not null && namesFile == matchNamesFile)
                     throw new InvalidDataException($"Artifact '{relative}' matches both '{match.Artifact.Selector}' and '{rule.Artifact.Selector}'.");
-                match = rule;
+                if (match is null || namesFile)
+                {
+                    match = rule;
+                    matchNamesFile = namesFile;
+                }
             }
             if (match?.Artifact.Disposition == SourceArtifactDisposition.Absent)
                 throw new InvalidDataException($"Artifact '{relative}' exists but its rule declares it absent.");
