@@ -20,7 +20,8 @@ public static class PosReference
 
 
 
-    public enum PosTagset { Upos = 0, WordNet = 1, Wiktionary = 2, FrameNet = 3 }
+    // A tagset reaches the native POS law by its name, never by ordinal.
+    public enum PosTagset { Upos, WordNet, FrameNet, PropBank, Wiktionary }
 
 
     public static readonly string[] Canonical = ReadCanonicalFromNative();

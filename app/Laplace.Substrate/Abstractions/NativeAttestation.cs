@@ -226,6 +226,11 @@ public static class NativeAttestation
     /// (engine/manifest/vocabulary/pos_alias.tsv), or null when the tagset does not map it: an
     /// unmapped tag is the source's own value, never a guessed UPOS.
     /// </summary>
+    private static readonly int[] NativeTagset = Enum.GetValues<PosReference.PosTagset>()
+        .Select(static tagset => NativeInterop.PosTagsetFromName(tagset.ToString()) is var id and >= 0
+            ? id : throw new InvalidOperationException($"native POS law has no tagset {tagset}"))
+        .ToArray();
+
     public static string? ResolvePosCanonical(string tag, PosReference.PosTagset tagset)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tag);
@@ -233,7 +238,7 @@ public static class NativeAttestation
         {
             byte* canonical = null;
             int index;
-            int rc = NativeInterop.PosResolveCanonical(tag, (int)tagset, &canonical, &index);
+            int rc = NativeInterop.PosResolveCanonical(tag, NativeTagset[(int)tagset], &canonical, &index);
             if (rc < 0) throw new InvalidOperationException($"pos resolve failed: {tag}");
             return rc == 0 ? System.Runtime.InteropServices.Marshal.PtrToStringUTF8((IntPtr)canonical) : null;
         }
