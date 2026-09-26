@@ -20,7 +20,17 @@
       "relationName": "HAS_CHARACTER_PROPERTY",
       "referenceCodec": "UnicodeCodepointSequence",
       "sequenceSeparator": " ",
-      "contextLiteral": "Normalization_Corrections_Original"
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Normalization_Corrections_Original"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
     },
     {
       "syntaxPath": "record/@new",
@@ -29,8 +39,7 @@
       "disposition": "Reference, Testimony",
       "relationName": "NORMALIZES_TO",
       "referenceCodec": "UnicodeCodepointSequence",
-      "sequenceSeparator": " ",
-      "contextLiteral": "Normalization_Corrections"
+      "sequenceSeparator": " "
     },
     {
       "syntaxPath": "record/@version",

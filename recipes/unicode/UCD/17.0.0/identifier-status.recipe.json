@@ -1,0 +1,107 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS39/IdentifierStatus",
+  "fields": [
+    {
+      "syntaxPath": "record/@status",
+      "propertyName": "Identifier_Status",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@first",
+      "propertyName": "first",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@last",
+      "propertyName": "last",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@codepoints",
+      "propertyName": "codepoints",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "missing/@range",
+      "propertyName": "range",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "missing/@value",
+      "propertyName": "value",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "status",
+        "entityType": "Property_Value",
+        "identityParts": [
+          {
+            "path": "",
+            "literal": "Identifier_Status"
+          },
+          {
+            "path": "@status"
+          }
+        ]
+      },
+      "rangeStartField": "first",
+      "rangeEndField": "last",
+      "rangeRelationName": "HAS_CHARACTER_PROPERTY"
+    },
+    {
+      "recordName": "missing",
+      "namespaceUri": "",
+      "fieldPrefix": "missing",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "value",
+        "entityType": "Property_Value",
+        "identityParts": [
+          {
+            "path": "",
+            "literal": "Identifier_Status"
+          },
+          {
+            "path": "@value"
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "codepoints",
+      "status"
+    ],
+    "rangeColumn": "codepoints",
+    "rangeSeparator": "..",
+    "directivePrefix": "@missing:",
+    "directiveRecordName": "missing",
+    "directiveColumns": [
+      "range",
+      "value"
+    ]
+  }
+}

@@ -18,8 +18,16 @@
       "valueKind": "Enumerated",
       "disposition": "Testimony",
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectNamespace": "unicode/emoji_sequence_type",
-      "contextLiteral": "Emoji_Sequence_Type"
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Sequence_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "record/@description",

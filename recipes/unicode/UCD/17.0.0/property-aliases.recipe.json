@@ -1,0 +1,80 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX44/PropertyAliases",
+  "fields": [
+    {
+      "syntaxPath": "record/@long",
+      "propertyName": "property",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@short",
+      "propertyName": "shortName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/abbreviation"
+      ]
+    },
+    {
+      "syntaxPath": "record/@alias1",
+      "propertyName": "aliasName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/alias"
+      ]
+    },
+    {
+      "syntaxPath": "record/@alias2",
+      "propertyName": "aliasName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/alias"
+      ]
+    },
+    {
+      "syntaxPath": "record/@alias3",
+      "propertyName": "aliasName",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/alias"
+      ]
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "long"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "short",
+      "long",
+      "alias1",
+      "alias2",
+      "alias3"
+    ],
+    "minimumColumns": 2
+  }
+}

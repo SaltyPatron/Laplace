@@ -61,8 +61,11 @@
     {
       "selector": "emoji/emoji-sequences.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS51/EmojiSequences",
+      "recipePath": "emoji-sequences.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "emoji/emoji-test.txt",
@@ -106,14 +109,20 @@
     {
       "selector": "security/IdentifierStatus.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS39/IdentifierStatus",
+      "recipePath": "identifier-status.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "security/IdentifierType.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS39/IdentifierType",
+      "recipePath": "identifier-type.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "security/ReadMe.txt",
@@ -139,8 +148,11 @@
     {
       "selector": "security/intentional.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS39/intentional",
+      "recipePath": "intentional.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "security/uts39-data-17.0.0.zip",
@@ -277,8 +289,8 @@
     {
       "selector": "ucd/EquivalentUnifiedIdeograph.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "The same mapping as the UCD XML EqUIdeo property."
     },
     {
       "selector": "ucd/HangulSyllableType.txt",
@@ -289,8 +301,11 @@
     {
       "selector": "ucd/Index.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX44/Index",
+      "recipePath": "index.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/IndicPositionalCategory.txt",
@@ -331,8 +346,11 @@
     {
       "selector": "ucd/NamedSequencesProv.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX34/NamedSequences",
+      "recipePath": "named-sequences.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/NamesList.html",
@@ -376,14 +394,20 @@
     {
       "selector": "ucd/PropertyAliases.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX44/PropertyAliases",
+      "recipePath": "property-aliases.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/PropertyValueAliases.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX44/PropertyValueAliases",
+      "recipePath": "property-value-aliases.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/ReadMe.txt",
@@ -526,8 +550,8 @@
     {
       "selector": "ucd/auxiliary/GraphemeBreakTest.html",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "An HTML rendering of GraphemeBreakTest.txt."
     },
     {
       "selector": "ucd/auxiliary/GraphemeBreakTest.txt",
@@ -538,8 +562,8 @@
     {
       "selector": "ucd/auxiliary/LineBreakTest.html",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "An HTML rendering of LineBreakTest.txt."
     },
     {
       "selector": "ucd/auxiliary/LineBreakTest.txt",
@@ -556,8 +580,8 @@
     {
       "selector": "ucd/auxiliary/SentenceBreakTest.html",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "An HTML rendering of SentenceBreakTest.txt."
     },
     {
       "selector": "ucd/auxiliary/SentenceBreakTest.txt",
@@ -574,8 +598,8 @@
     {
       "selector": "ucd/auxiliary/WordBreakTest.html",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "An HTML rendering of WordBreakTest.txt."
     },
     {
       "selector": "ucd/auxiliary/WordBreakTest.txt",
@@ -598,8 +622,8 @@
     {
       "selector": "ucd/emoji/emoji-variation-sequences.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "The same variation sequences, with their text/emoji style, as the UCD XML standardized-variant elements (371 of each)."
     },
     {
       "selector": "ucd/extracted/DerivedBidiClass.txt",

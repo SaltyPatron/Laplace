@@ -26,7 +26,16 @@
       "valueKind": "Text",
       "disposition": "Content, Testimony",
       "relationName": "HAS_CHARACTER_PROPERTY",
-      "contextLiteral": "Collation_Directive"
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Collation_Directive"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
       "syntaxPath": "directive/@payload",

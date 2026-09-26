@@ -2,7 +2,7 @@
   "authority": "Unicode/UCD",
   "release": "17.0.0",
   "provider": "laplace/native-streaming-delimited-recipe/v1",
-  "syntax": "UTS39/confusables",
+  "syntax": "UTS39/intentional",
   "fields": [
     {
       "syntaxPath": "record/@source",
@@ -18,27 +18,8 @@
       "valueKind": "CodepointSequence",
       "disposition": "Reference, Testimony",
       "relationName": "CONFUSABLE_WITH",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08,
       "referenceCodec": "UnicodeCodepointSequence",
       "sequenceSeparator": " "
-    },
-    {
-      "syntaxPath": "record/@status",
-      "propertyName": "status",
-      "valueKind": "Enumerated",
-      "disposition": "Testimony",
-      "relationName": "HAS_CHARACTER_PROPERTY",
-      "objectEntityType": "Property_Value",
-      "objectParts": [
-        {
-          "path": "",
-          "literal": "Confusable_Status"
-        },
-        {
-          "path": "value()"
-        }
-      ]
     }
   ],
   "providerRoutes": [
@@ -46,11 +27,11 @@
       "recordName": "record",
       "namespaceUri": "",
       "fieldPrefix": "record",
+      "structurePaths": [],
       "subject": {
         "kind": "ContentField",
         "identityField": "source"
-      },
-      "structurePaths": []
+      }
     }
   ],
   "delimitedSyntax": {
@@ -60,8 +41,7 @@
     "trimFields": true,
     "columns": [
       "source",
-      "target",
-      "status"
+      "target"
     ]
   }
 }

@@ -2185,6 +2185,12 @@ surface = "HAS_FORM"
 canonical = "FORM_OF"
 flip = true
 
+# A name, stated from the name's side (Unicode's Index: the term names the character).
+[[alias]]
+surface = "NAME_OF"
+canonical = "HAS_NAME"
+flip = true
+
 [[alias]]
 surface = "HAS_HYPERNYM"
 canonical = "IS_A"

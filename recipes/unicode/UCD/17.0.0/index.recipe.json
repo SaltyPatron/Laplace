@@ -1,0 +1,63 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX44/Index",
+  "fields": [
+    {
+      "syntaxPath": "record/@term",
+      "propertyName": "term",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Codepoint",
+      "disposition": "Reference, Testimony",
+      "referenceCodec": "UnicodeCodepoint",
+      "relationName": "NAME_OF",
+      "qualifiers": [
+        "name/reference"
+      ]
+    },
+    {
+      "syntaxPath": "record/@notCodepoint",
+      "propertyName": "notCodepoint",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "term"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": "\t",
+    "commentPrefix": "",
+    "trimFields": true,
+    "columns": [
+      "term",
+      "codepoint"
+    ],
+    "keyedColumns": {
+      "Betty": [
+        "term",
+        "notCodepoint"
+      ],
+      "the": [
+        "term",
+        "notCodepoint"
+      ]
+    }
+  }
+}
