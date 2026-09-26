@@ -233,6 +233,7 @@ functions/converse/correlate.sql.in
 functions/converse/drop_recompiled_prompt_programs.sql.in
 generated/relation_family_ids.sql.in
 generated/relation_set_ids.sql.in
+generated/qualifier_bits.sql.in
 functions/cascade/astar_path.sql.in
 functions/cascade/cascade.sql.in
 functions/structural/word_curve.sql.in
