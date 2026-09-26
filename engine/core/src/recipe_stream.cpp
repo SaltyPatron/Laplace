@@ -91,6 +91,9 @@ struct field_rule {
     // RCP8 subject mode 3 (span): the subject is the content of trunk_field's text
     // between the span_start and span_end attributes (inclusive codepoint offsets).
     std::string span_start, span_end;
+    // RCP8: the field's static relation is named in the inverse direction (an inverse
+    // alias or a flipped retirement): the value is the subject, the subject the object.
+    bool flip = false;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -923,7 +926,17 @@ struct laplace_recipe_stream {
             if ((rule.disposition & (1u << 9)) || ((rule.disposition & 1u) && subject_binding)) return;
             throw std::runtime_error("field disposition has no executable lowering");
         }
-        auto emit_fact = [&](const fact& value) { if (emitted_testimony) facts.push_back(value); };
+        auto emit_fact = [&](const fact& value) {
+            if (!emitted_testimony) return;
+            if (rule.flip && value.has_object && !value.has_subject) {
+                fact reversed = value;
+                reversed.subject = value.object; reversed.has_subject = true;
+                reversed.object = subject;
+                facts.push_back(reversed);
+                return;
+            }
+            facts.push_back(value);
+        };
         // Relation family/parentage is governed by the native relation manifest,
         // not reified as content entities or source testimony here.
         fact f; f.relation = rule.relation; f.rank = rule.rank; f.explicit_rank = true;
@@ -1583,6 +1596,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 std::vector<route_rule::identity_part> object_parts;
                 read_identity_parts(r, object_parts, f.path);
                 if (!object_parts.empty()) s->object_parts[f.path] = std::move(object_parts);
+                const uint32_t flip = r.number();
+                if (flip > 1) throw std::runtime_error("invalid relation direction at " + f.path);
+                f.flip = flip != 0;
                 if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))
                     throw std::runtime_error("span subject needs trunk, start and end fields at " + f.path);
             }

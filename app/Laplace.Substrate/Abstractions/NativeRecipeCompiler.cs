@@ -63,7 +63,11 @@ public static class NativeRecipeCompiler
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
             || recipe.Fields.Any(static f => f.ObjectScopedToRecord || f.ObjectScopePath is not null
-                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 });
+                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 })
+            // A static relation named in its inverse direction needs the RCP8 flip bit.
+            || recipe.Fields.Any(static f => f.Disposition.HasFlag(SourceFieldDisposition.Testimony)
+                && f.PairMode == SourcePairMode.None && f.RelationField is null
+                && RelationTypeRegistry.Resolve(f.RelationName ?? f.PropertyName).Flip);
         uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -140,13 +144,10 @@ public static class NativeRecipeCompiler
                 ? RelationTypeRegistry.Resolve(field.RelationName ?? field.PropertyName)
                 : default;
             // A static field emits (record subject, relation, value). A name that resolves
-            // with a flip (an inverse alias or a flipped retirement) would state the claim
-            // backwards, so the recipe must name the relation in its governed direction.
-            if (testimony && !dynamicRelation && relation.Flip)
-                throw new InvalidDataException(
-                    $"'{field.RelationName ?? field.PropertyName}' at '{field.SyntaxPath}' names "
-                    + $"{relation.Canonical} in the inverse direction; declare the governed relation "
-                    + "and the direction the source states.");
+            // with a flip (an inverse alias or a flipped retirement) states the claim in the
+            // inverse direction: the field program carries the flip and the stream emits
+            // (value, relation, record subject).
+            bool flip = testimony && !dynamicRelation && relation.Flip;
             double rank = field.RelationRank ?? (testimony && !dynamicRelation ? relation.Rank : 1);
             if (!double.IsFinite(rank) || rank is < 0 or > 1)
                 throw new InvalidDataException($"Invalid relation rank at '{field.SyntaxPath}'.");
@@ -217,6 +218,7 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.SpanStartField);
                 WriteText(writer, field.SpanEndField);
                 WriteParts(writer, field.ObjectParts);
+                writer.Write(flip ? 1u : 0u);
             }
         }
 
