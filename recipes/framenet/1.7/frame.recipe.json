@@ -46,7 +46,8 @@
       "propertyName": "frameSemType",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "HAS_SEMANTIC_TYPE"
+      "relationName": "HAS_SEMANTIC_TYPE",
+      "objectEntityType": "FrameNet_Semantic_Type"
     },
     {
       "syntaxPath": "SemType/@ID",
@@ -119,7 +120,8 @@
       "propertyName": "frameElementSemType",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "HAS_SEMANTIC_TYPE"
+      "relationName": "HAS_SEMANTIC_TYPE",
+      "objectEntityType": "FrameNet_Semantic_Type"
     },
     {
       "syntaxPath": "FESemType/@ID",
@@ -254,7 +256,8 @@
       "propertyName": "lexicalUnitSemType",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "HAS_SEMANTIC_TYPE"
+      "relationName": "HAS_SEMANTIC_TYPE",
+      "objectEntityType": "FrameNet_Semantic_Type"
     },
     {
       "syntaxPath": "LuSemType/@ID",

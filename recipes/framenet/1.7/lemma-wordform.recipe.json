@@ -1,0 +1,146 @@
+{
+  "authority": "FrameNet",
+  "release": "1.7",
+  "provider": "laplace/native-streaming-xml-recipe/v1",
+  "syntax": "FrameNet/lemmaToWordform-1.7",
+  "fields": [
+    {
+      "syntaxPath": "Lemma/@name",
+      "propertyName": "lemma",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lemma/@pos",
+      "propertyName": "lemmaPos",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lemma/@id",
+      "propertyName": "lemmaId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Lemma/@parts",
+      "propertyName": "lexemeCount",
+      "valueKind": "Integer",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FormEntry",
+      "propertyName": "wordForm",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_FORM"
+    },
+    {
+      "syntaxPath": "FormEntry/@lexemeentryids",
+      "propertyName": "lexemeEntryIds",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "FormEntry/@wordformids",
+      "propertyName": "wordFormIds",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexemeEntry/@lexemename",
+      "propertyName": "lexeme",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexemeEntry/@lexemepos",
+      "propertyName": "lexemePos",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexemeEntry/@id",
+      "propertyName": "lexemeEntryId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexemeEntry/@lexemeid",
+      "propertyName": "lexemeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexemeEntry/@order",
+      "propertyName": "lexemeOrder",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexemeEntry/@headword",
+      "propertyName": "lexemeHeadword",
+      "valueKind": "Boolean",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexemeForm/@name",
+      "propertyName": "wordForm",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_FORM"
+    },
+    {
+      "syntaxPath": "LexemeForm/@id",
+      "propertyName": "wordFormId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "Lemma",
+      "fieldPrefix": "Lemma",
+      "subject": {
+        "kind": "Composition",
+        "identityField": "name",
+        "entityType": "Lexeme",
+        "identityParts": [
+          {
+            "path": "@name"
+          },
+          {
+            "path": "@pos",
+            "vocabulary": "pos/framenet"
+          }
+        ]
+      },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "WordFormEntries": "FormEntries",
+        "WordFormEntries/WordFormEntry": "FormEntry",
+        "LexemeEntries/LexemeEntry": "LexemeEntry",
+        "LexemeEntries/LexemeEntry/WordForm": "LexemeForm",
+        "LexemeEntries": "LexemeEntries"
+      },
+      "childSubjects": [
+        {
+          "childPath": "LexemeEntries/LexemeEntry",
+          "identityField": "lexemename",
+          "parentRelation": "HAS_PART",
+          "entityType": "Lexeme",
+          "identityParts": [
+            {
+              "path": "@lexemename"
+            },
+            {
+              "path": "@lexemepos",
+              "vocabulary": "pos/framenet"
+            }
+          ],
+          "standalone": true
+        }
+      ]
+    }
+  ]
+}

@@ -2139,6 +2139,12 @@ surface = "FOLLOWS"
 canonical = "PRECEDES"
 flip = true
 
+# A lexeme's forms, named from the lexeme's side (FrameNet lexeme/lemma-to-wordform).
+[[alias]]
+surface = "HAS_FORM"
+canonical = "FORM_OF"
+flip = true
+
 [[alias]]
 surface = "HAS_HYPERNYM"
 canonical = "IS_A"

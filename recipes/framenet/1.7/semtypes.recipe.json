@@ -1,0 +1,68 @@
+{
+  "authority": "FrameNet",
+  "release": "1.7",
+  "provider": "laplace/native-streaming-xml-recipe/v1",
+  "syntax": "FrameNet/semTypes-1.7",
+  "fields": [
+    {
+      "syntaxPath": "SemType/@name",
+      "propertyName": "semType",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "SemType/@ID",
+      "propertyName": "semTypeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "SemType/@abbrev",
+      "propertyName": "abbreviation",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME",
+      "qualifiers": [
+        "name/abbreviation"
+      ]
+    },
+    {
+      "syntaxPath": "Definition",
+      "propertyName": "definition",
+      "valueKind": "StructuredText",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_DEFINITION"
+    },
+    {
+      "syntaxPath": "SuperType/@superTypeName",
+      "propertyName": "superType",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "IS_A",
+      "objectEntityType": "FrameNet_Semantic_Type"
+    },
+    {
+      "syntaxPath": "SuperType/@supID",
+      "propertyName": "superTypeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "semType",
+      "namespaceUri": "http://framenet.icsi.berkeley.edu",
+      "fieldPrefix": "SemType",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "name",
+        "entityType": "FrameNet_Semantic_Type"
+      },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "definition": "Definition",
+        "superType": "SuperType"
+      }
+    }
+  ]
+}

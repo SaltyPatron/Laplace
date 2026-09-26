@@ -4,7 +4,7 @@
   "sourceName": "FrameNet",
   "trustClass": "AcademicCurated",
   "layerOrder": 3,
-  "selected": false,
+  "selected": true,
   "root": "/vault/Data/FrameNet/framenet_v17",
   "aliases": [
     "framenet-recipe"
@@ -21,21 +21,30 @@
     },
     {
       "selector": "lu/*.xml",
-      "disposition": "unsupported",
+      "disposition": "admitted",
       "required": true,
-      "reason": "Lexical-unit files (valence patterns, annotated sentences) need the lexical-unit recipe; not yet written."
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "FrameNet/lexUnit-1.7",
+      "recipePath": "lexunit.recipe.json",
+      "recordDepth": 0
     },
     {
       "selector": "fulltext/*.xml",
-      "disposition": "unsupported",
+      "disposition": "admitted",
       "required": true,
-      "reason": "Full-text annotations need the span recipe; not yet written."
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "FrameNet/fullText-1.7",
+      "recipePath": "fulltext.recipe.json",
+      "recordDepth": 0
     },
     {
       "selector": "semTypes.xml",
-      "disposition": "unsupported",
-      "required": false,
-      "reason": "Semantic type hierarchy recipe not yet written."
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "FrameNet/semTypes-1.7",
+      "recipePath": "semtypes.recipe.json",
+      "recordDepth": 1
     },
     {
       "selector": "frRelation.xml",
@@ -92,10 +101,28 @@
       "reason": "Format declarations; governed vocabularies come from commonTypes.xsd via the vocabulary manifest."
     },
     {
-      "selector": "miscXML/*.xml",
-      "disposition": "unsupported",
+      "selector": "miscXML/lexeme_to_wordformR1.7.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "FrameNet/lexemeToWordform-1.7",
+      "recipePath": "lexeme-wordform.recipe.json",
+      "recordDepth": 1
+    },
+    {
+      "selector": "miscXML/lemma_to_wordformR1.7.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "FrameNet/lemmaToWordform-1.7",
+      "recipePath": "lemma-wordform.recipe.json",
+      "recordDepth": 1
+    },
+    {
+      "selector": "miscXML/DifferencesR1.6-R1.7.xml",
+      "disposition": "excluded-with-reason",
       "required": false,
-      "reason": "Release differences and lemma/lexeme-to-wordform maps; recipe not yet written."
+      "reason": "The 1.6-to-1.7 change log; the 1.7 frames, units and types it describes are the admitted content (and its attributes are unquoted, so it is not XML)."
     },
     {
       "selector": "docs/**",

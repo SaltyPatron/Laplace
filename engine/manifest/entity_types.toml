@@ -113,6 +113,16 @@ canonical = "FrameNet_Frame"
 [[type]]
 canonical = "FrameNet_LU"
 
+# A word with its part of speech: the ordered composition [word, UPOS] (FrameNet
+# lexemes and lemmas; a multiword lemma's word is its whole text).
+[[type]]
+canonical = "Lexeme"
+
+# A FrameNet semantic type (semTypes.xml: Sentient, Body_of_water...): the ontological
+# class a frame, frame element filler or lexical unit is marked with.
+[[type]]
+canonical = "FrameNet_Semantic_Type"
+
 # A frame element realized with a grammatical function and phrase type: the
 # composition [frame element, GF, PT(, preposition)].
 [[type]]

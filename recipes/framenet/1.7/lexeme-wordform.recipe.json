@@ -1,0 +1,63 @@
+{
+  "authority": "FrameNet",
+  "release": "1.7",
+  "provider": "laplace/native-streaming-xml-recipe/v1",
+  "syntax": "FrameNet/lexemeToWordform-1.7",
+  "fields": [
+    {
+      "syntaxPath": "Lexeme/@Name",
+      "propertyName": "lexeme",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lexeme/@POS",
+      "propertyName": "lexemePos",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Lexeme/@ID",
+      "propertyName": "lexemeId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "WordForm",
+      "propertyName": "wordForm",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_FORM"
+    },
+    {
+      "syntaxPath": "WordForm/@ID",
+      "propertyName": "wordFormId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "Lexeme",
+      "fieldPrefix": "Lexeme",
+      "subject": {
+        "kind": "Composition",
+        "identityField": "Name",
+        "entityType": "Lexeme",
+        "identityParts": [
+          {
+            "path": "@Name"
+          },
+          {
+            "path": "@POS",
+            "vocabulary": "pos/framenet"
+          }
+        ]
+      },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "WordForm": "WordForm"
+      }
+    }
+  ]
+}
