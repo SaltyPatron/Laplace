@@ -583,6 +583,8 @@ family_root = "HAS_FEATURE"
 
 [[relation]]
 canonical = "HAS_FIRST_SUBEVENT"
+retired = "HAS_SUBEVENT"
+retired_qualifier = "subevent/first"
 bit = 71
 rank = "causal"
 symmetry = "asymmetric"
@@ -692,6 +694,8 @@ family_root = "HAS_LANGUAGE_TYPE"
 
 [[relation]]
 canonical = "HAS_LAST_SUBEVENT"
+retired = "HAS_SUBEVENT"
+retired_qualifier = "subevent/last"
 bit = 85
 rank = "causal"
 symmetry = "asymmetric"
@@ -1590,6 +1594,8 @@ family_root = "USES_SCRIPT"
 # Wiktionary etymology "borrowed" (bor): a word taken from another language without native transmission
 # (English "sushi" <- Japanese). Distinct etymological channel from inheritance/derivation.
 canonical = "BORROWED_FROM"
+retired = "ETYMOLOGICALLY_DERIVED_FROM"
+retired_qualifier = "etymology/borrowed"
 bit = 5
 rank = "associative"
 symmetry = "asymmetric"
@@ -1600,6 +1606,8 @@ family_root = "HAS_ETYMOLOGY"
 # Wiktionary etymology "inherited" (inh): native intergenerational transmission within a language lineage
 # (French "mere" <- Latin "mater"). NOT frame-inheritance (INHERITS_FROM) — this is etymological lineage.
 canonical = "INHERITED_FROM"
+retired = "ETYMOLOGICALLY_DERIVED_FROM"
+retired_qualifier = "etymology/inherited"
 bit = 136
 rank = "associative"
 symmetry = "asymmetric"

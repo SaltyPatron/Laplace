@@ -72,3 +72,20 @@ name = "meronymy"
 relations = ["HAS_PART"]
 base = 0
 values = ["part", "member", "substance"]
+
+# The kind of etymological derivation, named as Wiktionary's own etymology templates
+# name it ({{bor}}, {{inh}}, {{af}}, {{prefix}}, {{suffix}}, {{compound}}, {{blend}},
+# {{back-form}}): one element, ETYMOLOGICALLY_DERIVED_FROM, qualified by how.
+[[family]]
+name = "etymology"
+relations = ["ETYMOLOGICALLY_DERIVED_FROM"]
+base = 0
+values = ["borrowed", "inherited", "affix", "prefix", "suffix", "compound", "blend", "back-formation"]
+
+# Which subevent an event states (ConceptNet HasFirstSubevent / HasLastSubevent): one
+# element, HAS_SUBEVENT, qualified by position.
+[[family]]
+name = "subevent"
+relations = ["HAS_SUBEVENT"]
+base = 0
+values = ["first", "last"]

@@ -91,7 +91,7 @@ internal static class WiktionaryEmit
         foreach (var t in templates)
         {
             if (t.Name is null || t.Args is not { } args) continue;
-            if (!TryEtymologyRule(t.Name, out _, out string[] termArgs)) continue;
+            if (!TryEtymologyRule(t.Name, out _, out _, out string[] termArgs)) continue;
             foreach (var arg in termArgs)
             {
                 if (!args.TryGetValue(arg, out var term)) continue;
@@ -416,40 +416,43 @@ internal static class WiktionaryEmit
         foreach (var t in templates)
         {
             if (t.Name is null || t.Args is not { } args) continue;
-            if (!TryEtymologyRule(t.Name, out string etymType, out string[] termArgs)) continue;
+            if (!TryEtymologyRule(t.Name, out string etymType, out string? kind, out string[] termArgs)) continue;
             foreach (var arg in termArgs)
             {
                 if (!args.TryGetValue(arg, out var term)) continue;
                 if (string.IsNullOrEmpty(term) || term == "-") continue;
-                if (Stage(b, term, roots, out var termId)) Attest(b, wordId, etymType, termId, null);
+                if (!Stage(b, term, roots, out var termId)) continue;
+                var row = NativeAttestation.Categorical(
+                    wordId, etymType, termId, WiktionaryDecomposer.Source, Trust, contextId: null);
+                b.AddAttestation(kind is null ? row
+                    : row with { QualifierMask = row.QualifierMask | ClaimQualifiers.Of("etymology", kind) });
             }
         }
     }
 
-    private static bool TryEtymologyRule(string name, out string etymType, out string[] termArgs)
+    // A template names how a word descends from its etymon: one element,
+    // ETYMOLOGICALLY_DERIVED_FROM, with the template's kind as the claim's qualifier.
+    // Cognates and doublets are relatives, not ancestors.
+    private static bool TryEtymologyRule(
+        string name, out string etymType, out string? kind, out string[] termArgs)
     {
-        switch (name)
+        const string Derived = "ETYMOLOGICALLY_DERIVED_FROM", Related = "ETYMOLOGICALLY_RELATED_TO";
+        (etymType, kind, termArgs) = name switch
         {
-            case "bor": case "borrowed": etymType = "BORROWED_FROM"; termArgs = new[] { "3" }; return true;
-            case "inh": case "inherited": etymType = "INHERITED_FROM"; termArgs = new[] { "3" }; return true;
-            case "der": case "derived": etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "3" }; return true;
-            case "cog": case "cognate": etymType = "ETYMOLOGICALLY_RELATED_TO"; termArgs = new[] { "2" }; return true;
-            case "suffix": case "suf": etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "2" }; return true;
-            case "prefix": case "pre": etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "3" }; return true;
-            case "af":
-            case "affix":
-            case "com":
-            case "compound":
-            case "blend":
-                etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "2", "3", "4" }; return true;
-            case "doublet": case "dbt": etymType = "ETYMOLOGICALLY_RELATED_TO"; termArgs = new[] { "2" }; return true;
-            case "back-form":
-            case "back-formation":
-            case "bf":
-                etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "2" }; return true;
-            default:
-                etymType = string.Empty; termArgs = Array.Empty<string>(); return false;
-        }
+            "bor" or "borrowed" => (Derived, "borrowed", new[] { "3" }),
+            "inh" or "inherited" => (Derived, "inherited", new[] { "3" }),
+            "der" or "derived" => (Derived, null, new[] { "3" }),
+            "cog" or "cognate" => (Related, null, new[] { "2" }),
+            "suffix" or "suf" => (Derived, "suffix", new[] { "2" }),
+            "prefix" or "pre" => (Derived, "prefix", new[] { "3" }),
+            "af" or "affix" => (Derived, "affix", new[] { "2", "3", "4" }),
+            "com" or "compound" => (Derived, "compound", new[] { "2", "3", "4" }),
+            "blend" => (Derived, "blend", new[] { "2", "3", "4" }),
+            "doublet" or "dbt" => (Related, null, new[] { "2" }),
+            "back-form" or "back-formation" or "bf" => (Derived, "back-formation", new[] { "2" }),
+            _ => (string.Empty, (string?)null, Array.Empty<string>()),
+        };
+        return etymType.Length > 0;
     }
 
     private static void RouteSynsetLinks(

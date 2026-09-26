@@ -101,6 +101,26 @@ TEST(LaplaceRelationLaw, MeronymyIsHasPartWithAQualifier) {
     EXPECT_STREQ("HAS_PART", successor);
 }
 
+// How a word descends and which subevent an event states are qualifiers of one element.
+TEST(LaplaceRelationLaw, EtymologyAndSubeventKindsAreQualifiers) {
+    hash128_t tid, parent;
+    double rank = 0;
+    laplace_rel_symmetry_t sym;
+    uint8_t flip = 9;
+    hash128_t derived = relation_type_id("ETYMOLOGICALLY_DERIVED_FROM");
+    ASSERT_EQ(0, laplace_relation_resolve_surface("BORROWED_FROM", &tid, &rank, &sym, &flip, &parent));
+    EXPECT_TRUE(hash128_equals(&derived, &tid));
+    EXPECT_EQ(0, flip);
+    EXPECT_EQ(laplace_qualifier_bit("etymology", "borrowed"), laplace_relation_surface_qualifier("BORROWED_FROM"));
+    EXPECT_EQ(laplace_qualifier_bit("etymology", "inherited"), laplace_relation_surface_qualifier("INHERITED_FROM"));
+
+    hash128_t subevent = relation_type_id("HAS_SUBEVENT");
+    ASSERT_EQ(0, laplace_relation_resolve_surface("HAS_LAST_SUBEVENT", &tid, &rank, &sym, &flip, &parent));
+    EXPECT_TRUE(hash128_equals(&subevent, &tid));
+    EXPECT_EQ(laplace_qualifier_bit("subevent", "first"), laplace_relation_surface_qualifier("HAS_FIRST_SUBEVENT"));
+    EXPECT_EQ(laplace_qualifier_bit("subevent", "last"), laplace_relation_surface_qualifier("HAS_LAST_SUBEVENT"));
+}
+
 TEST(LaplaceRelationLaw, DenialsAndTrajectoryFactsFailClosed) {
     hash128_t id;
     for (const char* name : {"NOT_CAPABLE_OF", "NOT_DESIRES", "NOT_HAS_PROPERTY", "NOT_USED_FOR"})
