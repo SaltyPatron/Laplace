@@ -24,23 +24,8 @@ internal static class ChessReadEndpoints
             var laplaceId = Convert.ToHexStringLower(ChessVocabulary.LaplacePlayerId.ToBytes());
             int take = Math.Clamp(limit ?? 100, 0, 1000);
             int skip = Math.Max(0, offset ?? 0);
-            int fetch = Math.Min(1000, take + skip);
-            var ids = new[] { ChessVocabulary.LaplacePlayerId }
-                .Concat(ChessVocabulary.HistoricalLaplacePlayerIds)
-                .Select(static id => Convert.ToHexStringLower(id.ToBytes()))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var pages = await Task.WhenAll(ids.Select(id =>
-                substrate.ChessPlayerGamesAsync(id, fetch, 0, ct)));
-            var rows = pages.Where(static page => page is not null)
-                .SelectMany(static page => page!.Games)
-                .GroupBy(static game => game.IdHex, StringComparer.OrdinalIgnoreCase)
-                .Select(static group => group.First())
-                .OrderByDescending(static game => game.PlayedOn, StringComparer.Ordinal)
-                .ThenBy(static game => game.IdHex, StringComparer.Ordinal)
-                .Skip(skip)
-                .Take(take)
-                .ToArray();
+            var page = await substrate.ChessPlayerGamesAsync(laplaceId, take, skip, ct);
+            var rows = page?.Games.ToArray() ?? [];
             return Results.Json(new ChessGamesResponse(
                 "chess.games", laplaceId, skip, rows));
         })

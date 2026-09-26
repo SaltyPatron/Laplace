@@ -44,8 +44,7 @@ export const HIGHWAY_LAYERS: HighwayLayer[] = [
       'The language axis. Every 639-1/-2/-3 code for one language converges to a single language entity; a macrolanguage holds its members.',
     relations: [
       'HAS_LANGUAGE', 'IS_LANGUAGE_CODE', 'HAS_LANGUAGE_TYPE', 'HAS_LANGUAGE_SCOPE',
-      'HAS_ISO639_1_CODE', 'HAS_ISO639_2_CODE', 'HAS_ISO639_2B_CODE', 'HAS_ISO639_2T_CODE',
-      'MEMBER_OF_MACROLANGUAGE',
+      'HAS_EXTERNAL_ID', 'HAS_PART',
     ],
     band: 11,
     read: '/v1/query { topic, shape: "languages" } — which languages witness a concept',
@@ -97,7 +96,7 @@ export const HIGHWAY_LAYERS: HighwayLayer[] = [
     relations: [
       'EVOKES_FRAME', 'HAS_FRAME', 'HAS_FRAME_ELEMENT', 'IS_FRAME_OF', 'HAS_VERB_FRAME',
       'HAS_SEMANTIC_ROLE', 'HAS_THEMATIC_ROLE', 'IS_FILLED_BY', 'ROLE_CORRESPONDS_TO',
-      'MEMBER_OF_VERBNET_CLASS', 'HAS_VALENCE_PATTERN',
+      'HAS_PART', 'HAS_VALENCE_PATTERN',
     ],
     read: '/v1/query { topic, shape: "related", relation_type: "EVOKES_FRAME" }',
     contributes:

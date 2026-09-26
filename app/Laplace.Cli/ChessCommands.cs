@@ -31,54 +31,8 @@ internal static class ChessCommands
             "measure-corpus" => await ChessCorpusCommands.RunAsync(args[1..]),
             "verify-recorded-corpus" => await ChessRecordedCorpusCommands.RunAsync(args[1..]),
             "export-recorded-pgn" => await ChessRecordedCorpusCommands.ExportAsync(args[1..]),
-            "repair-position-outcomes" => await RepairPositionOutcomesAsync(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
-    }
-
-    private static async Task<int> RepairPositionOutcomesAsync(string[] args)
-    {
-        string directory = ArgStr(args, "--evidence-root", "/build/laplace/recovery/chess-position-outcomes");
-        string label = ArgStr(args, "--invocation", "invocation");
-        int maximumMiB = ArgInt(args, "--maximum-retained-mib", 512);
-        if (maximumMiB <= 0) return Fail("repair-position-outcomes requires a positive retention envelope.");
-        var connection = new NpgsqlConnectionStringBuilder(ConnString);
-        string? applicationName = Environment.GetEnvironmentVariable("LAPLACE_CHESS_OBSERVATION_APPLICATION_NAME");
-        if (connection.Database == "laplace" && applicationName is null)
-            return Fail("Run the installed position-outcome transition through scripts/quiesce-managed-database.py and scripts/repair-chess-position-outcomes.sh.");
-        if (applicationName is not null)
-        {
-            if (!System.Text.RegularExpressions.Regex.IsMatch(applicationName, "^laplace-chess-outcome-[0-9a-f]{32}$"))
-                return Fail("Invalid chess observation maintenance session identity.");
-            connection.ApplicationName = applicationName;
-            if (connection.Host != "/var/run/postgresql" || connection.Port != 5432 || connection.Database != "laplace")
-                return Fail("Chess observation maintenance must use the managed local database connection.");
-        }
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, connection.ConnectionString);
-        if (applicationName is not null)
-        {
-            string estatePath = Path.Combine(Environment.GetEnvironmentVariable("LAPLACE_DATABASE_QUIESCENCE_RECEIPT")
-                ?? throw new InvalidOperationException("Chess maintenance lacks its service transaction receipt."),
-                "chess-observation-estate.json");
-            if (new FileInfo(estatePath).Length > 65536)
-                throw new InvalidDataException("Chess maintenance estate exceeds its metadata bound.");
-            using var estate = System.Text.Json.JsonDocument.Parse(await File.ReadAllBytesAsync(estatePath));
-            if (estate.RootElement.GetProperty("application_name").GetString() != applicationName)
-                throw new InvalidDataException("Chess maintenance session differs from its retained owner.");
-            var expected = estate.RootElement.GetProperty("database_identity");
-            var identities = await NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("maintenance.database_identity"),
-                static row => (Database: row.GetString(0), DatabaseOid: row.GetString(1), SystemIdentifier: row.GetString(2)),
-                timeoutSeconds: 10);
-            if (identities.Count != 1
-                || identities[0].Database != expected.GetProperty("database").GetString()
-                || identities[0].DatabaseOid != expected.GetProperty("database_oid").GetString()
-                || identities[0].SystemIdentifier != expected.GetProperty("system_identifier").GetString())
-                throw new InvalidDataException("Chess maintenance database differs from its retained service transaction.");
-        }
-        var receipt = await ChessPositionOutcomesMigration.RunAsync(ds, directory,
-            maximumRetainedBytes: (long)maximumMiB * 1024 * 1024, invocationLabel: label);
-        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(receipt));
-        return 0;
     }
 
     // Engine-vs-engine match with a live terminal board (GH #604): drives the ChessLabService
@@ -115,8 +69,6 @@ internal static class ChessCommands
         + "      [--expected-sha256 lowercase64]   (authentic PGN recording, readback, and replay evidence)\n"
         + "  export-recorded-pgn --selection-manifest /absolute/selection.json --expected-sha256 lowercase64\n"
         + "      --output-pgn /absolute/new-selected.pgn   (exact original frames; ordinary measure-corpus admits them)\n"
-        + "  repair-position-outcomes [--evidence-root DIR] [--maximum-retained-mib N] [--invocation NAME]\n"
-        + "      retain and verify the complete playing corpus, then replace legacy observations under writer quiescence.\n"
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
         + "  learned-eval-test [--games N] [--depth D] [--scale X] [--blend] [--openings]   (learned-PST vs PeSTO;\n"
         + "      --blend = PeSTO floor + small learned overlay (additive), else learned REPLACES PeSTO)\n"

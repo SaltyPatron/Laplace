@@ -56,7 +56,7 @@ public class RelationTypeRegistryTests
         Assert.Equal(Kid("OBSTRUCTED_BY"), RelationTypeRegistry.Resolve("HINDERED_BY").Id);
         Assert.Equal(Kid("X_FILLED_BY"), RelationTypeRegistry.Resolve("IS_FILLED_BY").Id);
         // MadeUpOf is meronymy: the element HAS_PART with the substance qualifier.
-        Assert.Equal(Kid("HAS_PART"), RelationTypeRegistry.Resolve("MADE_UP_OF").Id);
+        Assert.Equal(Kid("HAS_PART"), RelationTypeRegistry.Resolve("MadeUpOf").Id);
     }
 
     [Fact]
@@ -211,24 +211,15 @@ public class RelationTypeRegistryTests
                         RelationTypeRegistry.Resolve("MadeOf").Qualifier);
     }
 
-    // A retired name whose meaning is its successor plus a flip or qualifier stays a surface
-    // of that successor; one whose meaning needs more (a [property, value] object) fails closed.
+    // A retired name resolves to nothing: its rows were restated under the successor, so no
+    // surface keeps the old name alive.
     [Theory]
-    [InlineData("O_WANT", "oWant")]
-    [InlineData("HAS_DOMAIN_TOPIC", "domain_topic")]
-    [InlineData("HAS_A", "HasA")]
-    public void A_retired_name_is_a_surface_of_its_successor(string retired, string surface)
-    {
-        var old = RelationTypeRegistry.Resolve(retired);
-        var now = RelationTypeRegistry.Resolve(surface);
-        Assert.Equal(now.Id, old.Id);
-        Assert.Equal(now.Flip, old.Flip);
-        Assert.Equal(now.Qualifier, old.Qualifier);
-    }
-
-    [Theory]
+    [InlineData("O_WANT")]
+    [InlineData("HAS_DOMAIN_TOPIC")]
+    [InlineData("HAS_A")]
     [InlineData("HAS_BLOCK")]
     [InlineData("HAS_GENERAL_CATEGORY")]
-    public void A_retirement_that_moves_meaning_into_the_object_fails_closed(string retired) =>
+    [InlineData("HAS_WHITE")]
+    public void A_retired_name_fails_closed(string retired) =>
         Assert.Throws<InvalidOperationException>(() => RelationTypeRegistry.Resolve(retired));
 }

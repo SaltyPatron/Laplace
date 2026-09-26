@@ -15,24 +15,7 @@ CREATE OR REPLACE PROCEDURE chess.repair_player_ratings_batch(
 AS 'MODULE_PATHNAME', 'pg_laplace_repair_player_ratings_batch'
 LANGUAGE C;
 
--- Transition compatibility for the one legacy deployment caller left behind when
--- PR #1453 retired the queue/journal/worker. This entrypoint MUST stay inert: it
--- validates only the declared relation ids, performs no table reads or writes, and
--- never calls repair_player_ratings_batch. Historical reconstruction requires an
--- explicit caller-selected subject set through the bounded batch procedure above.
 DROP PROCEDURE IF EXISTS chess.repair_player_ratings(bytea, bytea, bytea);
-CREATE PROCEDURE chess.repair_player_ratings(
-    p_outcome bytea,
-    p_played bytea,
-    p_rating bytea)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF p_outcome IS NULL OR p_played IS NULL OR p_rating IS NULL THEN
-        RAISE EXCEPTION 'repair_player_ratings: required relation id is NULL';
-    END IF;
-END;
-$$;
 
 -- Explicit retained-provenance reconstruction; preserves source calibration.
 -- Recorded order is subject/type/object/observed timestamp/attestation id, with

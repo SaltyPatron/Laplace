@@ -176,7 +176,7 @@ WHERE (c.subject_id IN (word_id('capital'), word_id('france'), word_id('Paris'))
   AND c.type_id IN (
     SELECT relation_type_id(n) FROM unnest(ARRAY[
         'IS_A','IS_SYNONYM_OF','IS_COORDINATE_TERM_WITH','IS_ANTONYM_OF',
-        'HAS_PART','PART_OF','MEMBER_OF','HAS_MEMBER','DERIVATIONALLY_RELATED',
+        'HAS_PART','PART_OF','MEMBER_OF','DERIVATIONALLY_RELATED',
         'FORM_OF','HAS_HYPONYM','IS_HYPERNYM_OF','SIMILAR_TO','PERTAINS_TO',
         'HAS_SENSE','IS_SENSE_OF'
     ]) AS n

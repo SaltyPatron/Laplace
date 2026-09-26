@@ -30,18 +30,19 @@ hash128_t relation_type_id(const char* canonical_name) {
 
 }  
 
-// One element per meaning: an inverse reading is a flip of the element, a denial is a
-// refute of the positive, and an order/containment fact lives in trajectories.
-TEST(LaplaceRelationLaw, FlippedRetirementResolvesLikeAnInverseAlias) {
+// One element per meaning: an inverse reading is a flip of the element. A source's own
+// inverse name is an alias of the element; a retired canonical name resolves to nothing.
+TEST(LaplaceRelationLaw, InverseSurfaceIsAFlipAndRetiredNameFailsClosed) {
     hash128_t tid, parent;
     double rank = 0;
     laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_SYMMETRIC;
     uint8_t flip = 0;
-    ASSERT_EQ(0, laplace_relation_resolve_surface("IS_AFTER", &tid, &rank, &sym, &flip, &parent));
+    ASSERT_EQ(0, laplace_relation_resolve_surface("isAfter", &tid, &rank, &sym, &flip, &parent));
     hash128_t before = relation_type_id("IS_BEFORE");
     EXPECT_TRUE(hash128_equals(&before, &tid));
     EXPECT_EQ(1, flip);
 
+    EXPECT_NE(0, laplace_relation_resolve_surface("IS_AFTER", &tid, &rank, &sym, &flip, &parent));
     hash128_t retired;
     ASSERT_EQ(0, laplace_relation_type_id("IS_AFTER", &retired));
     EXPECT_FALSE(hash128_equals(&retired, &before));
@@ -50,13 +51,15 @@ TEST(LaplaceRelationLaw, FlippedRetirementResolvesLikeAnInverseAlias) {
     EXPECT_STREQ("IS_BEFORE", successor);
 
     hash128_t earlier = hash_path("flip/earlier"), later = hash_path("flip/later"), src = hash_path("flip/src");
-    laplace_attestation_staged_t via_retired{}, direct{};
+    laplace_attestation_staged_t via_surface{}, direct{}, via_retired{};
     ASSERT_EQ(0, laplace_attestation_categorical_build(
-        "IS_AFTER", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &via_retired));
+        "isAfter", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &via_surface));
     ASSERT_EQ(0, laplace_attestation_categorical_build(
         "IS_BEFORE", &earlier, &later, 0, &src, NULL, 1, 1.0, 1, 1, 0, &direct));
-    EXPECT_TRUE(hash128_equals(&via_retired.id, &direct.id));
-    EXPECT_TRUE(hash128_equals(&via_retired.subject_id, &earlier));
+    EXPECT_TRUE(hash128_equals(&via_surface.id, &direct.id));
+    EXPECT_TRUE(hash128_equals(&via_surface.subject_id, &earlier));
+    EXPECT_NE(0, laplace_attestation_categorical_build(
+        "IS_AFTER", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &via_retired));
 }
 
 // A kind of part is a qualifier of the one element HAS_PART, stated by the surface.
@@ -75,25 +78,28 @@ TEST(LaplaceRelationLaw, MeronymyIsHasPartWithAQualifier) {
     double rank = 0;
     laplace_rel_symmetry_t sym;
     uint8_t flip = 9;
-    ASSERT_EQ(0, laplace_relation_resolve_surface("HAS_MEMBER", &tid, &rank, &sym, &flip, &parent));
+    ASSERT_EQ(0, laplace_relation_resolve_surface("mero_member", &tid, &rank, &sym, &flip, &parent));
     EXPECT_TRUE(hash128_equals(&has_part, &tid));
     EXPECT_EQ(0, flip);
-    EXPECT_EQ(member, laplace_relation_surface_qualifier("HAS_MEMBER"));
+    EXPECT_EQ(member, laplace_relation_surface_qualifier("mero_member"));
 
     ASSERT_EQ(0, laplace_relation_resolve_surface("holo_substance", &tid, &rank, &sym, &flip, &parent));
     EXPECT_TRUE(hash128_equals(&has_part, &tid));
     EXPECT_EQ(1, flip);
     EXPECT_EQ(substance, laplace_relation_surface_qualifier("holo_substance"));
-    EXPECT_EQ(substance, laplace_relation_surface_qualifier("MADE_UP_OF"));
-    EXPECT_EQ(part, laplace_relation_surface_qualifier("HAS_A"));
+    EXPECT_EQ(part, laplace_relation_surface_qualifier("HasA"));
     EXPECT_EQ(-1, laplace_relation_surface_qualifier("HAS_PART"));
-    // A macrolanguage has its individual languages as members.
-    ASSERT_EQ(0, laplace_relation_resolve_surface("MEMBER_OF_MACROLANGUAGE", &tid, &rank, &sym, &flip, &parent));
+    // An individual language is a member of its macrolanguage.
+    ASSERT_EQ(0, laplace_relation_resolve_surface("IS_MEMBER_OF", &tid, &rank, &sym, &flip, &parent));
     EXPECT_TRUE(hash128_equals(&has_part, &tid));
     EXPECT_EQ(1, flip);
-    EXPECT_EQ(member, laplace_relation_surface_qualifier("MEMBER_OF_MACROLANGUAGE"));
+    EXPECT_EQ(member, laplace_relation_surface_qualifier("IS_MEMBER_OF"));
     EXPECT_EQ(-1, laplace_relation_surface_qualifier("IS_A"));
 
+    for (const char* name : {"HAS_MEMBER", "MADE_UP_OF", "HAS_A", "MEMBER_OF_MACROLANGUAGE"}) {
+        EXPECT_NE(0, laplace_relation_resolve_surface(name, &tid, &rank, &sym, &flip, &parent)) << name;
+        EXPECT_EQ(-1, laplace_relation_surface_qualifier(name)) << name;
+    }
     hash128_t retired;
     ASSERT_EQ(0, laplace_relation_type_id("HAS_MEMBER", &retired));
     const char* successor = nullptr;
@@ -107,18 +113,16 @@ TEST(LaplaceRelationLaw, EtymologyAndSubeventKindsAreQualifiers) {
     double rank = 0;
     laplace_rel_symmetry_t sym;
     uint8_t flip = 9;
-    hash128_t derived = relation_type_id("ETYMOLOGICALLY_DERIVED_FROM");
-    ASSERT_EQ(0, laplace_relation_resolve_surface("BORROWED_FROM", &tid, &rank, &sym, &flip, &parent));
-    EXPECT_TRUE(hash128_equals(&derived, &tid));
-    EXPECT_EQ(0, flip);
-    EXPECT_EQ(laplace_qualifier_bit("etymology", "borrowed"), laplace_relation_surface_qualifier("BORROWED_FROM"));
-    EXPECT_EQ(laplace_qualifier_bit("etymology", "inherited"), laplace_relation_surface_qualifier("INHERITED_FROM"));
+    EXPECT_GE(laplace_qualifier_bit("etymology", "borrowed"), 0);
+    EXPECT_GE(laplace_qualifier_bit("etymology", "inherited"), 0);
+    for (const char* name : {"BORROWED_FROM", "INHERITED_FROM", "HAS_FIRST_SUBEVENT", "HAS_LAST_SUBEVENT"})
+        EXPECT_NE(0, laplace_relation_resolve_surface(name, &tid, &rank, &sym, &flip, &parent)) << name;
 
     hash128_t subevent = relation_type_id("HAS_SUBEVENT");
-    ASSERT_EQ(0, laplace_relation_resolve_surface("HAS_LAST_SUBEVENT", &tid, &rank, &sym, &flip, &parent));
+    ASSERT_EQ(0, laplace_relation_resolve_surface("HasLastSubevent", &tid, &rank, &sym, &flip, &parent));
     EXPECT_TRUE(hash128_equals(&subevent, &tid));
-    EXPECT_EQ(laplace_qualifier_bit("subevent", "first"), laplace_relation_surface_qualifier("HAS_FIRST_SUBEVENT"));
-    EXPECT_EQ(laplace_qualifier_bit("subevent", "last"), laplace_relation_surface_qualifier("HAS_LAST_SUBEVENT"));
+    EXPECT_EQ(laplace_qualifier_bit("subevent", "first"), laplace_relation_surface_qualifier("HasFirstSubevent"));
+    EXPECT_EQ(laplace_qualifier_bit("subevent", "last"), laplace_relation_surface_qualifier("HasLastSubevent"));
 }
 
 TEST(LaplaceRelationLaw, DenialsAndTrajectoryFactsFailClosed) {

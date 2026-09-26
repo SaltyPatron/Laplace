@@ -30,7 +30,7 @@ WITH grouped AS (
                        AND e.type_id = laplace.relation_type_id('HAS_ECO')
     WHERE a.object_id = p_player
       AND a.context_id IS NOT NULL
-      AND a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
+      AND a.type_id = laplace.relation_type_id('HAS_PLAYER')
       AND (p_tc_class IS NULL OR tcc.object_id = laplace.word_id(lower(p_tc_class)))
     GROUP BY tcc.object_id, e.object_id
     ORDER BY count(*) DESC, tcc.object_id, e.object_id

@@ -1498,14 +1498,13 @@ parent = null
 family_root = "X_WANT"
 
 [[relation]]
-# WordNet lexicographer-file class (noun.animal, verb.motion) — a coarse semantic category. Was emitted
-# ungoverned (absent from the manifest); register it so it has a rank/family in consensus.
+# WordNet lexicographer-file class (noun.animal, verb.motion) — a coarse semantic category.
 canonical = "HAS_LEX_CATEGORY"
 bit = 86
 rank = "associative"
 symmetry = "asymmetric"
-parent = "HAS_DOMAIN_TOPIC"
-family_root = "HAS_DOMAIN_TOPIC"
+parent = "HAS_DOMAIN"
+family_root = "HAS_DOMAIN"
 
 [[relation]]
 # Cross-resource ROLE-level alignment (PropBank argument <-> VerbNet thematic role). Distinct from the

@@ -747,10 +747,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (string.IsNullOrWhiteSpace(name) || name == "?") return null;
         var canonicalId = ChessVocabulary.PlayerId(name);
         ChessVocabulary.EmitPlayer(b, canonicalId, name, src);
-        var legacyId = ChessVocabulary.LegacyPlayerId(name);
-        if (legacyId != canonicalId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                canonicalId, "CORRESPONDS_TO", legacyId, src, null, PgnWitnessWeight));
         return canonicalId;
     }
 

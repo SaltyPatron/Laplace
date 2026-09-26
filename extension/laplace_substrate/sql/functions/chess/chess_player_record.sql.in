@@ -10,15 +10,6 @@ BEGIN ATOMIC
     -- to pick up each game's HAS_RESULT -- both index lookups, so this stays
     -- interactive for a 9k-game career.
     --
-    -- PLAYER-ID MIGRATION LAW (#1405): a playing can already be present while
-    -- the governed player-id encoding changed later. The playing novelty gate
-    -- correctly refuses to re-witness that source record, so a replay cannot
-    -- repair old player rows by emitting them again. Career reads
-    -- therefore admit ONLY the deterministic ChessPgn legacy-id bridge emitted
-    -- by ChessPgnDecomposer.EmitPlayer. CORRESPONDS_TO is symmetric, so probe
-    -- both indexed directions. This is not fuzzy/name identity and deliberately
-    -- does not walk profile-provider or arbitrary CORRESPONDS_TO testimony.
-    --
     -- GROUPING SETS emits three rows: as_white = true, false, and NULL for the
     -- career total, so every number on a player page comes from one pass over
     -- the same evidence and the splits can never disagree with the total.
@@ -30,34 +21,15 @@ BEGIN ATOMIC
     -- PLAYING, so the result join threads both -- the line finds the rows, the
     -- context pins each to its own playing (a shared line must not cross one
     -- playing's result onto another's appearance).
-    WITH identity_ids AS MATERIALIZED (
-        SELECT p_player AS id
-        UNION
-        SELECT a.object_id
-        FROM laplace.attestations a
-        WHERE a.subject_id = p_player
-          AND a.object_id IS NOT NULL
-          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
-          AND a.source_id = laplace.source_id('ChessPgn')
-          AND a.context_id IS NULL
-        UNION
-        SELECT a.subject_id
-        FROM laplace.attestations a
-        WHERE a.object_id = p_player
-          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
-          AND a.source_id = laplace.source_id('ChessPgn')
-          AND a.context_id IS NULL
-    ),
-    sides AS (
+    WITH sides AS (
         SELECT a.subject_id AS line,
                a.context_id AS event,
-               -- The side is the claim's qualifier; rows admitted as HAS_WHITE/HAS_BLACK
-               -- state it through their retired type (laplace.claim_has_qualifier).
-               laplace.claim_has_qualifier(a.type_id, a.qualifier_mask, 'side', 'white') AS white
+               -- The side is the claim's qualifier.
+               laplace.has_qualifier(a.qualifier_mask, 'side', 'white') AS white
         FROM laplace.attestations a
-        JOIN identity_ids i ON i.id = a.object_id
-        WHERE a.context_id IS NOT NULL
-          AND a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
+        WHERE a.object_id = p_player
+          AND a.context_id IS NOT NULL
+          AND a.type_id = laplace.relation_type_id('HAS_PLAYER')
     ),
     scored AS (
         SELECT s.white,

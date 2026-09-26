@@ -147,16 +147,7 @@ public static class ChessVocabulary
 
     public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
 
-    public static Hash128 LegacyPlayerId(string rawName) => Hash128.OfCanonical($"chess/player/{rawName.Trim()}");
-
     public static readonly Hash128 LaplacePlayerId = PlayerId("Laplace");
-
-    public static readonly IReadOnlyList<Hash128> HistoricalLaplacePlayerIds =
-    [
-        PlayerId("Laplace-guided-transition"),
-        PlayerId("Laplace-guided-fold"),
-        PlayerId("Laplace-guided-edge"),
-    ];
 
     // A player's name as a source wrote it is one of the player's names: HAS_NAME
     // qualified name/alias (one relation per meaning, qualifiers.toml).

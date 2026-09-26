@@ -7,7 +7,7 @@ WITH seed_ids AS (
 rel_types AS (
     SELECT array_agg(relation_type_id(n)) AS ids FROM unnest(ARRAY[
         'IS_A','IS_SYNONYM_OF','IS_COORDINATE_TERM_WITH','IS_ANTONYM_OF',
-        'HAS_PART','PART_OF','MEMBER_OF','HAS_MEMBER','DERIVATIONALLY_RELATED',
+        'HAS_PART','PART_OF','MEMBER_OF','DERIVATIONALLY_RELATED',
         'FORM_OF','HAS_HYPONYM','IS_HYPERNYM_OF','SIMILAR_TO','PERTAINS_TO',
         'HAS_SENSE','IS_SENSE_OF']) AS n
 ),

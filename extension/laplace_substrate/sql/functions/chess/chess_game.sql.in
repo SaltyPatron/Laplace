@@ -52,11 +52,11 @@ BEGIN ATOMIC
     ),
     hdr AS MATERIALIZED (
         SELECT max(a.object_id) FILTER (
-                   WHERE a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
-                     AND laplace.claim_has_qualifier(a.type_id, a.qualifier_mask, 'side', 'white')) AS white_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_PLAYER')
+                     AND laplace.has_qualifier(a.qualifier_mask, 'side', 'white')) AS white_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
-                     AND laplace.claim_has_qualifier(a.type_id, a.qualifier_mask, 'side', 'black')) AS black_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_PLAYER')
+                     AND laplace.has_qualifier(a.qualifier_mask, 'side', 'black')) AS black_id,
                max(a.object_id) FILTER (
                    WHERE a.type_id = laplace.relation_type_id('HAS_RESULT')) AS result_id,
                max(a.object_id) FILTER (
@@ -75,7 +75,7 @@ BEGIN ATOMIC
         JOIN laplace.attestations a
           ON a.subject_id = l.line
          AND a.context_id = p_event
-        WHERE a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER') || ARRAY[
+        WHERE a.type_id = ANY (ARRAY[laplace.relation_type_id('HAS_PLAYER'),
                             laplace.relation_type_id('HAS_RESULT'),
                             laplace.relation_type_id('ON_DATE'),
                             laplace.relation_type_id('HAS_EVENT'),

@@ -850,8 +850,6 @@ phase_sync_extension() (
       return "$rc"
     fi
     rm -f "$log"
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c \
-      "CALL chess.repair_player_ratings(laplace.relation_type_id('OUTCOME'),laplace.relation_type_id('PLAYED_BY'),laplace.relation_type_id('HAS_RATING'))"
   fi
 
   if [[ "$api_was_active" == 1 ]]; then

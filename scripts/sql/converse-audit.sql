@@ -66,7 +66,7 @@ SELECT t.name AS relation,
 FROM (VALUES
     ('HAS_DEFINITION'),('HAS_SENSE'),('IS_SENSE_OF'),('IS_SYNONYM_OF'),
     ('IS_ANTONYM_OF'),('IS_TRANSLATION_OF'),('HAS_EXAMPLE'),('IS_A'),
-    ('HAS_PART'),('HAS_MEMBER'),('CAUSES'),('USED_FOR'),('PRECEDES'),
+    ('HAS_PART'),('CAUSES'),('USED_FOR'),('PRECEDES'),
     ('FOLLOWS'),('COMPLETES_TO'),('HAS_POS')
 ) AS t(name)
 ORDER BY edges DESC;

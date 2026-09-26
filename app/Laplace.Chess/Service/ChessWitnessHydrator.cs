@@ -24,29 +24,24 @@ internal static class ChessWitnessHydrator
 {
     private static readonly Hash128 RelPlaysLine = RelationTypeRegistry.RelationTypeId("PLAYS_LINE");
     private static readonly Hash128 RelHasResult = RelationTypeRegistry.RelationTypeId("HAS_RESULT");
-    // A line's players are HAS_PLAYER {side/white|black}; rows admitted before that
-    // retirement still carry the HAS_WHITE/HAS_BLACK type ids and read the same.
-    private static readonly Hash128 RelHasWhite = RelationTypeRegistry.RelationTypeId("HAS_WHITE");
-    private static readonly Hash128 RelHasBlack = RelationTypeRegistry.RelationTypeId("HAS_BLACK");
+    // A line's players are HAS_PLAYER; which side is the claim's side qualifier.
     private static readonly Hash128 RelHasPlayer = ChessVocabulary.RelTypeHasPlayer;
-    private static readonly Mask256 SideWhite = ChessVocabulary.WhiteSide;
-    private static readonly Mask256 SideBlack = ChessVocabulary.BlackSide;
 
-    /// <summary>The side a player claim states, keyed as the admitted white/black type.</summary>
-    private static Hash128 SideKey(Hash128 type, byte[]? qualifiers)
+    private enum Side : byte { None, White, Black }
+
+    private static Side SideOf(byte[]? qualifiers)
     {
-        if (type != RelHasPlayer || qualifiers is not { Length: 32 }) return type;
+        if (qualifiers is not { Length: 32 }) return Side.None;
         Mask256 mask = Mask256.FromByteArray(qualifiers);
-        return !(mask & SideWhite).IsZero ? RelHasWhite
-             : !(mask & SideBlack).IsZero ? RelHasBlack
-             : type;
+        return !(mask & ChessVocabulary.WhiteSide).IsZero ? Side.White
+             : !(mask & ChessVocabulary.BlackSide).IsZero ? Side.Black
+             : Side.None;
     }
     private static readonly Hash128 RelHasSetup = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
 
     private static readonly byte[][] GameRelationTypes =
     [
-        RelHasPlayer.ToBytes(), RelHasWhite.ToBytes(), RelHasBlack.ToBytes(),
-        RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
+        RelHasPlayer.ToBytes(), RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
     ];
 
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
@@ -354,7 +349,7 @@ internal static class ChessWitnessHydrator
         var headers = await NpgsqlSubstrateReads.ChessWitnessInputsAsync(ds,
             lines.Select(id => id.ToBytes()).ToArray(), GameRelationTypes,
             TransitionWitnessSources(), selected, budget, ct).ConfigureAwait(false);
-        var values = new Dictionary<(Hash128 Playing, Hash128 Type), Hash128>();
+        var values = new Dictionary<(Hash128 Playing, Hash128 Type, Side Side), Hash128>();
         foreach (var row in headers)
         {
             if (row.Context is null || row.Object is null)
@@ -362,7 +357,8 @@ internal static class ChessWitnessHydrator
             Hash128 playing = Hash128.FromBytes(row.Context), line = Hash128.FromBytes(row.Subject);
             if (lineByPlaying[playing] != line)
                 throw new InvalidDataException("Recorded playing header names a competing line.");
-            var key = (playing, SideKey(Hash128.FromBytes(row.Type), row.Qualifiers));
+            Hash128 type = Hash128.FromBytes(row.Type);
+            var key = (playing, type, type == RelHasPlayer ? SideOf(row.Qualifiers) : Side.None);
             var value = Hash128.FromBytes(row.Object);
             if (values.TryGetValue(key, out var previous) && previous != value)
                 throw new InvalidDataException("Recorded playing has competing header values.");
@@ -371,14 +367,14 @@ internal static class ChessWitnessHydrator
         var wanted = new List<(Hash128 Line, Hash128 Event, GameMeta Meta)>(playingIds.Count);
         foreach (var playing in playingIds)
         {
-            if (!values.TryGetValue((playing, RelHasResult), out var result))
+            if (!values.TryGetValue((playing, RelHasResult, Side.None), out var result))
                 throw new InvalidDataException("Selected playing corpus could not be completely reconstructed: missing recorded result.");
             wanted.Add((lineByPlaying[playing], playing, new GameMeta
             {
                 ResultObj = result,
-                White = values.GetValueOrDefault((playing, RelHasWhite)),
-                Black = values.GetValueOrDefault((playing, RelHasBlack)),
-                SetupObj = values.GetValueOrDefault((playing, RelHasSetup)),
+                White = values.GetValueOrDefault((playing, RelHasPlayer, Side.White)),
+                Black = values.GetValueOrDefault((playing, RelHasPlayer, Side.Black)),
+                SetupObj = values.GetValueOrDefault((playing, RelHasSetup, Side.None)),
             }));
         }
 
@@ -505,10 +501,14 @@ internal static class ChessWitnessHydrator
             if (row.ContextId is null) continue;
             var key = (Hash128.FromBytes(row.SubjectId), Hash128.FromBytes(row.ContextId));
             if (!groups.TryGetValue(key, out var gm)) groups[key] = gm = new GameMeta();
-            var type = SideKey(Hash128.FromBytes(row.TypeId), row.QualifierMask);
+            var type = Hash128.FromBytes(row.TypeId);
             var obj = row.ObjectId is null ? default : Hash128.FromBytes(row.ObjectId);
-            if (type == RelHasWhite) gm.White = obj;
-            else if (type == RelHasBlack) gm.Black = obj;
+            if (type == RelHasPlayer)
+            {
+                Side side = SideOf(row.QualifierMask);
+                if (side == Side.White) gm.White = obj;
+                else if (side == Side.Black) gm.Black = obj;
+            }
             else if (type == RelHasSetup) gm.SetupObj = obj;
             else if (type == RelHasResult) gm.ResultObj = obj;
         }
