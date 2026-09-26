@@ -129,6 +129,10 @@ struct route_rule {
         std::string path, join, scope, children;
         field_rule::vocabulary_rule vocabulary;
         hash128_t scope_type{};
+        // The source's own identifier syntax, decoded: the value before (1) or after
+        // (2) the last split separator ("December.n" -> "December" / "n").
+        std::string split;
+        uint32_t side = 0;
     };
     std::vector<identity_part> subject_parts;
     struct element_rule {
@@ -152,40 +156,6 @@ struct route_rule {
     std::unordered_map<std::string, child_subject_rule> child_subjects;
 };
 using node = recipe_node;
-struct ordinal_span {
-    uint32_t first = 0, last = 0;
-};
-struct fact {
-    hash128_t relation{}, object{}, context{}, subject{};
-    bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
-    bool has_subject = false;
-    double rank = 1;
-    hash128_t source{};           // the witness of this observation
-    bool has_source = false;
-    std::array<uint8_t, 32> qualifiers{};   // multi-select qualifier flags
-    bool has_qualifiers = false;
-    // A claim is a Glicko-2 game series: games observed, each scored in [0,1]
-    // (win 1, draw 0.5, loss 0). A binary claim is one game at 1 or 0.
-    int64_t games = 1;
-    double score = -1;   // < 0: the categorical score of `confirm`
-};
-struct content_form {
-    hash128_t id{};
-    double coord[4]{};
-    hilbert128_t hilbert{};
-    uint8_t tier = 0;
-    uint32_t atom = 0;
-};
-using stage_ptr = std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)>;
-static bool nonzero(const hash128_t& h) { return h.hi != 0 || h.lo != 0; }
-static std::string alias_key(const std::string& s) {
-    std::string r;
-    for (unsigned char c : s) {
-        if (c == '_' || c == '-' || c == ' ' || c == '\t') continue;
-        r += char(c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c);
-    }
-    return r;
-}
 static uint32_t point(const std::string& s) {
     size_t i = s.rfind("U+", 0) == 0 || s.rfind("u+", 0) == 0 ? 2 : 0;
     if (i == s.size()) throw std::runtime_error("empty ordinal reference");
@@ -246,6 +216,12 @@ static std::string sequence_text(const std::string& raw, const std::string& sepa
 // Record-relative path: "@attr" on the record itself or "Child/.../@attr" on every
 // matching descendant, in source order.
 static void collect(const node& n, const std::string& path, std::vector<std::string>& out) {
+    // "name()": the character data of the child elements of that name.
+    if (path.size() > 2 && path.compare(path.size() - 2, 2, "()") == 0 && path.find('/') == std::string::npos) {
+        const std::string name = path.substr(0, path.size() - 2);
+        for (const auto& c : n.children) if (c.name == name && !c.text.empty()) out.push_back(c.text);
+        return;
+    }
     if (path.rfind("@", 0) == 0) {
         auto i = n.attributes.find(path.substr(1));
         if (i != n.attributes.end() && !i->second.empty()) out.push_back(i->second);
@@ -264,6 +240,60 @@ static field_rule::vocabulary_rule parse_vocabulary(const std::string& name, con
     else if (name == "lang/iso639") v.kind = 2;
     else throw std::runtime_error("undeclared vocabulary " + name + " at " + where);
     return v;
+}
+static void read_identity_parts(image_reader& r, std::vector<route_rule::identity_part>& out, const std::string& where) {                
+                    const uint32_t count = r.number();
+                    for (uint32_t q = 0; q < count; ++q) {
+                        route_rule::identity_part part;
+                        part.path = r.text();
+                        const std::string vocabulary = r.text();
+                        if (!vocabulary.empty()) part.vocabulary = parse_vocabulary(vocabulary, where);
+                        part.join = r.text();
+                        part.scope = r.text();
+                        part.scope_type = r.hash();
+                        part.children = r.text();
+                        part.split = r.text();
+                        part.side = r.number();
+                        if (part.side > 2 || (part.side != 0) == part.split.empty())
+                            throw std::runtime_error("invalid identity part split at " + where);
+                        if (part.path.empty() && part.children.empty())
+                            throw std::runtime_error("identity part names neither a path nor children at " + where);
+                        out.push_back(std::move(part));
+                    }
+                }
+struct ordinal_span {
+    uint32_t first = 0, last = 0;
+};
+struct fact {
+    hash128_t relation{}, object{}, context{}, subject{};
+    bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
+    bool has_subject = false;
+    double rank = 1;
+    hash128_t source{};           // the witness of this observation
+    bool has_source = false;
+    std::array<uint8_t, 32> qualifiers{};   // multi-select qualifier flags
+    bool has_qualifiers = false;
+    // A claim is a Glicko-2 game series: games observed, each scored in [0,1]
+    // (win 1, draw 0.5, loss 0). A binary claim is one game at 1 or 0.
+    int64_t games = 1;
+    double score = -1;   // < 0: the categorical score of `confirm`
+};
+struct content_form {
+    hash128_t id{};
+    double coord[4]{};
+    hilbert128_t hilbert{};
+    uint8_t tier = 0;
+    uint32_t atom = 0;
+};
+using stage_ptr = std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)>;
+static bool nonzero(const hash128_t& h) { return h.hi != 0 || h.lo != 0; }
+static std::string alias_key(const std::string& s) {
+    std::string r;
+    for (unsigned char c : s) {
+        if (c == '_' || c == '-' || c == ' ' || c == '\t') continue;
+        r += char(c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c);
+    }
+    return r;
 }
 static std::string governed_value(const field_rule::vocabulary_rule& v, const std::string& value) {
     const char* canonical = nullptr;
@@ -310,6 +340,24 @@ struct laplace_recipe_stream {
     stage_ptr ready{nullptr, intent_stage_free};
     uint64_t ready_completed = 0;
     hash128_t subject{};
+    // RCP8 per-field object parts: the object is the composition of these parts read
+    // from the lowering attributes (a full-text target's LU [frameName, lemma, UPOS]).
+    std::unordered_map<std::string, std::vector<route_rule::identity_part>> object_parts;
+    hash128_t object_from_parts(intent_stage_t* stage, const field_rule& rule,
+                                const std::map<std::string, std::string>& attributes) {
+        const auto parts = object_parts.find(rule.path);
+        std::vector<laplace_ordered_component_t> components;
+        static const route_rule no_route{};
+        compose_parts(stage, no_route, nullptr, rule.path, parts->second, components, &attributes);
+        if (components.size() != parts->second.size()) return {};
+        laplace_ordered_composition_request_t request{};
+        request.components = components.data(); request.component_count = components.size();
+        request.type_id = rule.entity_type; request.source_id = current_witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "object composition");
+        return result.id;
+    }
     content_form subject_form{};     // the current subject's form, when it is content
     content_form record_subject_form{};  // the record's own subject (child subjects scope to it)
     bool subject_form_known = false;
@@ -459,13 +507,16 @@ struct laplace_recipe_stream {
         return content(stage, span);
     }
     // [content(record attribute object_scope), value], typed as the field's object type.
-    hash128_t scoped_by_attribute(intent_stage_t* stage, const field_rule& rule, const std::string& value) {
+    hash128_t scoped_by_attribute(intent_stage_t* stage, const field_rule& rule, const std::string& value,
+                                  const std::map<std::string, std::string>* attributes = nullptr) {
         const std::string key = rule.object_scope.rfind("@", 0) == 0 ? rule.object_scope.substr(1) : rule.object_scope;
-        if (!scope_attributes) throw std::runtime_error("scoped object outside a record");
-        const auto scope = scope_attributes->find(key);
-        if (scope == scope_attributes->end() || scope->second.empty())
-            throw std::runtime_error("object scope attribute is absent: " + rule.object_scope);
-        const content_form a = compose_content(stage, scope->second), b = compose_content(stage, value);
+        std::string scope_text;
+        if (attributes) { const auto h = attributes->find(key); if (h != attributes->end()) scope_text = h->second; }
+        if (scope_text.empty() && scope_attributes) {
+            const auto h = scope_attributes->find(key); if (h != scope_attributes->end()) scope_text = h->second;
+        }
+        if (scope_text.empty()) throw std::runtime_error("object scope attribute is absent: " + rule.object_scope);
+        const content_form a = compose_content(stage, scope_text), b = compose_content(stage, value);
         laplace_ordered_component_t parts[2]{};
         parts[0].id = a.id; std::memcpy(parts[0].coord, a.coord, sizeof(parts[0].coord));
         parts[0].tier = a.tier; parts[0].atom = a.atom; parts[0].has_atom = a.tier == 0;
@@ -1058,10 +1109,13 @@ struct laplace_recipe_stream {
         if (!nonzero(relation)) throw std::runtime_error("grouped testimony has no relation");
         const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
         for (const auto& value : values) {
+            const bool composed_object = object_parts.count(rule.path) != 0;
             const hash128_t object = rule.object_record_subject ? subject
-                : !rule.object_scope.empty() ? scoped_by_attribute(stage, rule, value)
+                : composed_object ? object_from_parts(stage, rule, attributes)
+                : !rule.object_scope.empty() ? scoped_by_attribute(stage, rule, value, &attributes)
                 : hash128_t{};
-            const bool special_object = rule.object_record_subject || !rule.object_scope.empty();
+            const bool special_object = rule.object_record_subject || composed_object || !rule.object_scope.empty();
+            if (special_object && !nonzero(object)) continue;
             switch (rule.subject_mode) {
             case 3: {
                 const hash128_t span = span_subject(stage, rule, attributes);
@@ -1171,7 +1225,8 @@ struct laplace_recipe_stream {
             field(stage, path, a.second, bound, record.attributes);
         }
         if (recipe_has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
-        for (const auto& child : record.children) lower_child(stage, route, child, child.name);
+        const auto record_seen = with_ancestors(record, nullptr);
+        for (const auto& child : record.children) lower_child(stage, route, child, child.name, &record_seen);
         if (route.parse.on) lower_parse(stage, route, record);
         scope_attributes = nullptr;
         observing = false;
@@ -1179,11 +1234,17 @@ struct laplace_recipe_stream {
         else if (record_parts.size() > 1) file_parts.push_back(compose_trunk(stage, record_parts, "SourceRecord"));
         active = true;
     }
+    static std::string split_side(const std::string& text, const std::string& separator, uint32_t side) {
+        const size_t at = text.rfind(separator);
+        if (at == std::string::npos) return side == 1 ? text : std::string{};
+        return side == 1 ? text.substr(0, at) : text.substr(at + separator.size());
+    }
     // Components for identity parts, in declaration order. A part with no value is
     // absent from the composition (a valence unit with no grammatical function).
     void compose_parts(intent_stage_t* stage, const route_rule& route, const node* element,
         const std::string& path, const std::vector<route_rule::identity_part>& declared,
-        std::vector<laplace_ordered_component_t>& out) {
+        std::vector<laplace_ordered_component_t>& out,
+        const std::map<std::string, std::string>* value_map = nullptr) {
         auto component = [](const hash128_t& id, const double* coord, uint8_t tier, uint32_t atom) {
             laplace_ordered_component_t c{};
             c.id = id; std::memcpy(c.coord, coord, sizeof(c.coord));
@@ -1205,7 +1266,11 @@ struct laplace_recipe_stream {
                 continue;
             }
             std::vector<std::string> values;
-            if (element) collect(*element, part.path, values);
+            if (value_map) {
+                const std::string key = part.path.rfind("@", 0) == 0 ? part.path.substr(1) : part.path;
+                const auto hit = value_map->find(key);
+                if (hit != value_map->end() && !hit->second.empty()) values.push_back(hit->second);
+            } else if (element) collect(*element, part.path, values);
             else if (scope_attributes) {
                 const std::string key = part.path.rfind("@", 0) == 0 ? part.path.substr(1) : part.path;
                 const auto hit = scope_attributes->find(key);
@@ -1217,6 +1282,7 @@ struct laplace_recipe_stream {
                 if (!text.empty()) text += part.join.empty() ? " " : part.join;
                 text += values[k];
             }
+            if (!part.split.empty()) text = split_side(text, part.split, part.side);
             if (text.empty()) continue;
             const content_form value = compose_content(stage, governed_value(part.vocabulary, text));
             if (part.scope.empty()) {
@@ -1224,10 +1290,13 @@ struct laplace_recipe_stream {
                 continue;
             }
             const std::string key = part.scope.rfind("@", 0) == 0 ? part.scope.substr(1) : part.scope;
-            const auto scope_value = scope_attributes ? scope_attributes->find(key) : decltype(scope_attributes->end()){};
-            if (!scope_attributes || scope_value == scope_attributes->end() || scope_value->second.empty())
-                throw std::runtime_error("identity part scope is absent: " + part.scope);
-            const content_form scope = compose_content(stage, scope_value->second);
+            std::string scope_text;
+            if (value_map) { const auto h = value_map->find(key); if (h != value_map->end()) scope_text = h->second; }
+            if (scope_text.empty() && scope_attributes) {
+                const auto h = scope_attributes->find(key); if (h != scope_attributes->end()) scope_text = h->second;
+            }
+            if (scope_text.empty()) throw std::runtime_error("identity part scope is absent: " + part.scope);
+            const content_form scope = compose_content(stage, scope_text);
             laplace_ordered_component_t pair[2] = {
                 component(scope.id, scope.coord, scope.tier, scope.atom),
                 component(value.id, value.coord, value.tier, value.atom)};
@@ -1511,6 +1580,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (record_subject > 1) throw std::runtime_error("invalid record-subject object at " + f.path);
                 f.object_record_subject = record_subject != 0;
                 f.span_start = r.text(); f.span_end = r.text();
+                std::vector<route_rule::identity_part> object_parts;
+                read_identity_parts(r, object_parts, f.path);
+                if (!object_parts.empty()) s->object_parts[f.path] = std::move(object_parts);
                 if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))
                     throw std::runtime_error("span subject needs trunk, start and end fields at " + f.path);
             }
@@ -1587,20 +1659,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             }
             if (rcp8) {
                 auto read_parts = [&](std::vector<route_rule::identity_part>& out, const std::string& where) {
-                    const uint32_t count = r.number();
-                    for (uint32_t q = 0; q < count; ++q) {
-                        route_rule::identity_part part;
-                        part.path = r.text();
-                        const std::string vocabulary = r.text();
-                        if (!vocabulary.empty()) part.vocabulary = parse_vocabulary(vocabulary, where);
-                        part.join = r.text();
-                        part.scope = r.text();
-                        part.scope_type = r.hash();
-                        part.children = r.text();
-                        if (part.path.empty() && part.children.empty())
-                            throw std::runtime_error("identity part names neither a path nor children at " + where);
-                        out.push_back(std::move(part));
-                    }
+                    read_identity_parts(r, out, where);
                 };
                 read_parts(route.subject_parts, route.name + " subject");
                 const uint32_t element_count = r.number();

@@ -63,7 +63,7 @@ public static class NativeRecipeCompiler
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
             || recipe.Fields.Any(static f => f.ObjectScopedToRecord || f.ObjectScopePath is not null
-                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span);
+                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 });
         uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -216,6 +216,7 @@ public static class NativeRecipeCompiler
                 writer.Write(field.ObjectIsRecordSubject ? 1u : 0u);
                 WriteText(writer, field.SpanStartField);
                 WriteText(writer, field.SpanEndField);
+                WriteParts(writer, field.ObjectParts);
             }
         }
 
@@ -395,6 +396,8 @@ public static class NativeRecipeCompiler
             WriteHash(writer, part.ScopeEntityType is null
                 ? Hash128.Zero : EntityTypeRegistry.Id(part.ScopeEntityType));
             WriteText(writer, part.Children);
+            WriteText(writer, part.SplitLast);
+            writer.Write((uint)part.Side);
         }
     }
 

@@ -118,7 +118,9 @@ public sealed record SourceRecipeField(
     // SubjectMode Span: attributes naming the inclusive codepoint offsets of the span
     // of TrunkField's text that is the subject.
     string? SpanStartField = null,
-    string? SpanEndField = null);
+    string? SpanEndField = null,
+    // The object is the composition of these parts read from the lowering attributes.
+    IReadOnlyList<SourceIdentityPart>? ObjectParts = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -274,7 +276,13 @@ public sealed record SourceIdentityPart(
     string? ScopeEntityType = null,
     // The part is the ordered compositions of the child elements of this name, each
     // composed by its own element composition (a pattern's valence units).
-    string? Children = null);
+    string? Children = null,
+    // The source's own identifier syntax, decoded: the value before or after the last
+    // SplitLast separator ("December.n" -> lemma "December", POS code "n").
+    string? SplitLast = null,
+    SourceIdentitySide Side = SourceIdentitySide.Whole);
+
+public enum SourceIdentitySide { Whole = 0, Before = 1, After = 2 }
 
 /// <summary>
 /// A nested element composed from its parts (RCP8) and, when Relation is declared,
