@@ -46,7 +46,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_grammar_physicality.cpp
     test_grammar_tags.cpp
     test_relation_law.cpp
-    test_source_reduce.cpp
+    test_staged_load.cpp
 )
 
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")

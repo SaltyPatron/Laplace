@@ -1,3 +1,5 @@
+#include <unordered_map>
+#include <string>
 #include "laplace/core/grammar_compose.h"
 #include "laplace/core/entity_type_law.h"
 
@@ -1500,6 +1502,22 @@ static int entity_novel(const compose_emit_filter_t* f, size_t idx) {
     return f->emit_all || (f->novel_entity && idx < f->entity_n && f->novel_entity[idx]);
 }
 
+/* The entities a physicality may realize and whether each is novel: built once per
+ * drain. An owner outside this composition is novel as far as this drain knows. */
+struct owner_novelty {
+    std::unordered_map<std::string, bool> novel;
+    owner_novelty(const laplace_compose_result_t* r, const compose_emit_filter_t* f) {
+        novel.reserve(r->entity_count);
+        for (size_t i = 0; i < r->entity_count; ++i)
+            novel.emplace(std::string(reinterpret_cast<const char*>(&r->entities[i].id), sizeof(hash128_t)),
+                          entity_novel(f, i) != 0);
+    }
+    bool operator()(const hash128_t* owner) const {
+        auto it = novel.find(std::string(reinterpret_cast<const char*>(owner), sizeof(hash128_t)));
+        return it == novel.end() || it->second;
+    }
+};
+
 int laplace_compose_drain_into_stage(
     const laplace_compose_result_t* r,
     intent_stage_t*                 stage,
@@ -1545,11 +1563,12 @@ int laplace_compose_drain_into_stage(
         }
     }
 
-    /* Presence and witness filters govern canonical entity creation. Every
-     * physicality already computed by the owner is a raw source observation,
-     * including another body or another observation of the same placement. */
+    /* A physicality realizes its entity: a covered entity already has it, so only
+     * physicalities of novel entities are staged. */
+    const owner_novelty owner_novel(r, &filter);
     for (size_t i = 0; i < r->phys_count; ++i) {
         const laplace_compose_physicality_t* ph = &r->physicalities[i];
+        if (!filter.emit_all && !owner_novel(&ph->entity_id)) continue;
         if (intent_stage_add_physicality(
                 stage, &ph->id, &ph->entity_id, 1, ph->coord, &ph->hilbert,
                 ph->trajectory_xyzm, (uint32_t)(ph->trajectory_n / 4), (int32_t)ph->n_constituents,

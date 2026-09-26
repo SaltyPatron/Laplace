@@ -595,10 +595,6 @@ TEST(OrderedCompositionStage, FloorSingletonCopiesExactLoadedBodyWithoutWrapperO
     value.observed_at_unix_us += 123;
     Stage stage(intent_stage_new(0), intent_stage_free);
     ASSERT_NE(stage, nullptr);
-    hash128_t placement{};
-    laplace_physicality_id_compute(atom.id, 1, &placement);
-    ASSERT_EQ(intent_stage_witness_record(stage.get(), &atom.id), 0);
-    ASSERT_EQ(intent_stage_witness_record(stage.get(), &placement), 0);
     laplace_ordered_composition_result_t result{};
     ASSERT_EQ(laplace_ordered_composition_stage_batch(stage.get(), &value, 1, &result), 0);
     EXPECT_EQ(result.tier, 0u);
@@ -609,6 +605,10 @@ TEST(OrderedCompositionStage, FloorSingletonCopiesExactLoadedBodyWithoutWrapperO
     EXPECT_EQ(intent_stage_physicality_count(stage.get()), 1u);
     EXPECT_EQ(result.first_physicality_row, 0u);
     expect_physicality(stage.get(), value, result);
+    // The atom's physicality is staged once per stage.
+    laplace_ordered_composition_result_t again{};
+    ASSERT_EQ(laplace_ordered_composition_stage_batch(stage.get(), &value, 1, &again), 0);
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), 1u);
 
     // Resolve-only singleton semantics continue to return the supplied child;
     // copying an admitted floor observation is specific to stage_batch.

@@ -252,8 +252,8 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         EXPECT_EQ(laplace_compose_physicality_count(full), count)
             << "a fully composed result must already be complete";
 
-        // Drain actual owner output with and without exact E presence. P tuples
-        // (including placement IDs and occurrence order) stay exactly identical.
+        // Drain with and without presence: a present composition is its entity and its
+        // one composition physicality, so the present drain stages nothing.
         std::unique_ptr<intent_stage_t,decltype(&intent_stage_free)> all_stage(
             intent_stage_new(0),intent_stage_free), known_stage(intent_stage_new(0),intent_stage_free);
         std::vector<uint8_t> present((entity_count+7)/8,255);
@@ -262,11 +262,8 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         ASSERT_EQ(0,laplace_compose_drain_into_stage(probe,known_stage.get(),&source_id,
             INTENT_STAGE_PG_EPOCH_UNIX_US,1.0,present.data(),entity_count));
         EXPECT_EQ(0u,intent_stage_entity_count(known_stage.get()));
-        size_t full_bytes=0,known_bytes=0;
-        const auto* full_p=intent_stage_tuple_ptr(all_stage.get(),INTENT_STAGE_TABLE_PHYSICALITIES,&full_bytes);
-        const auto* known_p=intent_stage_tuple_ptr(known_stage.get(),INTENT_STAGE_TABLE_PHYSICALITIES,&known_bytes);
-        ASSERT_EQ(full_bytes,known_bytes);
-        EXPECT_EQ(0,std::memcmp(full_p,known_p,full_bytes));
+        EXPECT_EQ(0u,intent_stage_physicality_count(known_stage.get()));
+        EXPECT_GT(intent_stage_physicality_count(all_stage.get()),0u);
     }
 }
 

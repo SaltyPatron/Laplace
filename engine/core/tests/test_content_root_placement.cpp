@@ -212,27 +212,26 @@ int alternate_floor(uint32_t atom, void*, hash128_t* id, double coord[4], hilber
 
 } // namespace
 
-TEST(LaplaceContentObservations, ExistingRootRetainsSourcesAndFormsWithoutDuplicateEntities) {
+TEST(LaplaceContentObservations, OneContentStagesOneEntityAndOnePhysicalityForEverySource) {
     ASSERT_TRUE(codepoint_table_is_loaded());
-    constexpr size_t budget = 64u * 1024u * 1024u;
-    const hash128_t source_a{101, 102}, source_b{201, 202}, unit_a{301, 302}, unit_b{401, 402};
+    const hash128_t source_a{101, 102}, source_b{201, 202};
     tier_tree_t* raw_tree = nullptr;
     ASSERT_EQ(0, content_witness_tree_build(reinterpret_cast<const uint8_t*>("ab"), 2, &raw_tree));
     Tree tree(raw_tree, tier_tree_free);
     Stage stage(intent_stage_new(0), intent_stage_free);
     ASSERT_NE(nullptr, stage);
     hash128_t original{}, repeated{}, alternate{};
+    // One content, one entity, one composition physicality, whichever source observes it:
+    // sources witness content through their claims and their trunks' trajectories.
     ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source_a, nullptr, 0, &original));
     ASSERT_EQ(1u, intent_stage_physicality_count(stage.get()));
     ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source_b, nullptr, 0, &repeated));
-    ASSERT_EQ(2u, intent_stage_physicality_count(stage.get()));
     ASSERT_EQ(0, hash_composer_run(tree.get(), alternate_floor, nullptr));
     ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source_b, nullptr, 0, &alternate));
-    ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source_b, nullptr, 0, &repeated));
     EXPECT_TRUE(hash128_equals(&original, &alternate));
     EXPECT_TRUE(hash128_equals(&original, &repeated));
     EXPECT_EQ(1u, intent_stage_entity_count(stage.get()));
-    ASSERT_EQ(4u, intent_stage_physicality_count(stage.get()));
+    ASSERT_EQ(1u, intent_stage_physicality_count(stage.get()));
 
     size_t size = 0, offset = 0;
     const uint8_t* entity_bytes = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &size);
@@ -245,51 +244,12 @@ TEST(LaplaceContentObservations, ExistingRootRetainsSourcesAndFormsWithoutDuplic
     EXPECT_EQ(0, std::memcmp(fields[0].bytes, &original, 16));
     EXPECT_EQ(size, offset);
 
-    physicality_descriptor_vocabulary_t* raw_vocabulary = nullptr;
-    ASSERT_EQ(PHYSICALITY_DESCRIPTOR_OK,
-        physicality_descriptor_vocabulary_create(&source_a, budget, &raw_vocabulary));
-    std::unique_ptr<physicality_descriptor_vocabulary_t, decltype(&physicality_descriptor_vocabulary_free)>
-        vocabulary(raw_vocabulary, physicality_descriptor_vocabulary_free);
-    const intent_stage_t* source_stage = stage.get();
-    const physicality_descriptor_limits_t limits{budget};
-    physicality_descriptor_capture_t* raw_capture = nullptr;
-    ASSERT_EQ(PHYSICALITY_DESCRIPTOR_OK, physicality_descriptor_capture_stages(&source_stage, 1,
-        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, budget, &raw_capture));
-    std::unique_ptr<physicality_descriptor_capture_t, decltype(&physicality_descriptor_capture_free)>
-        capture(raw_capture, physicality_descriptor_capture_free);
-    size_t count = 0;
-    const hash128_t* descriptors = physicality_descriptor_plan_roots(
-        physicality_descriptor_capture_plan(capture.get()), &count);
-    ASSERT_EQ(4u, count);
-    EXPECT_TRUE(hash128_equals(&descriptors[0], &descriptors[1]));
-    EXPECT_TRUE(hash128_equals(&descriptors[2], &descriptors[3]));
-    EXPECT_FALSE(hash128_equals(&descriptors[0], &descriptors[2]));
-
-    const physicality_descriptor_source_observation_t a{source_a, unit_a, 0.8}, b{source_b, unit_b, 0.9};
-    const std::array<physicality_descriptor_source_observation_t, 4> sources{a, b, b, b};
-    physicality_descriptor_materialization_t* raw_materialized = nullptr;
-    ASSERT_EQ(PHYSICALITY_DESCRIPTOR_OK, physicality_descriptor_materialize(capture.get(), vocabulary.get(),
-        nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(),
-        INTENT_STAGE_PG_EPOCH_UNIX_US, budget, &raw_materialized));
-    std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
-        materialized(raw_materialized, physicality_descriptor_materialization_free);
-    size_t provenance_count = 0;
-    const auto* provenance =
-        physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
-    ASSERT_NE(provenance, nullptr);
-    ASSERT_EQ(provenance_count, sources.size());
-    for (size_t i = 0; i < provenance_count; ++i) {
-        EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &original));
-        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &descriptors[i]));
-        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
-        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
-    }
-    Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
-    ASSERT_NE(nullptr, generated);
-    EXPECT_EQ(0u, intent_stage_attestation_count(generated.get()));
 }
 
-TEST(LaplaceContentObservations, PresentRootDoesNotSuppressMissingDescendantsOrOccurrenceForms) {
+// Same content, same hash, same physicality: a present node is its whole subtree, so
+// only nodes neither present nor under a present ancestor stage an entity and its one
+// composition physicality. Repeated occurrences live in the parent's trajectory.
+TEST(LaplaceContentObservations, PresentNodesCoverTheirSubtreeAndItsPhysicalities) {
     tier_tree_t* raw_tree = nullptr;
     ASSERT_EQ(0, content_witness_tree_build(reinterpret_cast<const uint8_t*>("ab ab"), 5, &raw_tree));
     Tree tree(raw_tree, tier_tree_free);
@@ -304,42 +264,37 @@ TEST(LaplaceContentObservations, PresentRootDoesNotSuppressMissingDescendantsOrO
     const size_t nodes = tier_tree_node_count(tree.get());
     const hash128_t source{101, 102};
 
-    for (const bool all_present : {false, true}) {
-        SCOPED_TRACE(all_present);
+    struct Case { const char* name; const hash128_t* present; size_t entities, physicalities; };
+    const Case cases[] = {
+        {"nothing present", nullptr, 2u, 2u},
+        {"root present", &expected_root.id, 0u, 0u},
+        {"word present", &expected_word.id, 1u, 1u},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.name);
         std::vector<uint8_t> bitmap((nodes + 7u) / 8u, 0);
         for (size_t index = 0; index < nodes; ++index) {
             tier_node_view_t node{};
             ASSERT_EQ(0, tier_tree_get_node(tree.get(), static_cast<uint32_t>(index), &node));
-            // Identity is tier-blind: mark every occurrence of the known root,
-            // including collapsed singleton wrappers with that same identity.
-            if (all_present || hash128_equals(&node.id, &expected_root.id))
+            // Identity is tier-blind: every occurrence of a present id is marked.
+            if (c.present && hash128_equals(&node.id, c.present))
                 bitmap[index / 8u] |= uint8_t(1u << (index & 7u));
         }
-        hash128_t root{}, replay{};
+        hash128_t root{};
         Stage stage(intent_stage_new(0), intent_stage_free);
         ASSERT_NE(nullptr, stage);
         ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &root));
         EXPECT_TRUE(hash128_equals(&root, &expected_root.id));
-        EXPECT_EQ(all_present ? 0u : 1u, intent_stage_entity_count(stage.get()));
-        // The two "ab" occurrences collapse to one placement by the identity
-        // law (same content, same form), so exactly one word form plus the
-        // sentence composition is retained; no duplicate rows per occurrence.
-        EXPECT_EQ(2u, intent_stage_physicality_count(stage.get()));
-        if (!all_present) {
+        EXPECT_EQ(c.entities, intent_stage_entity_count(stage.get()));
+        EXPECT_EQ(c.physicalities, intent_stage_physicality_count(stage.get()));
+        if (c.present && hash128_equals(c.present, &expected_word.id)) {
             size_t size = 0, offset = 0;
             const uint8_t* bytes = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &size);
             std::vector<Field> fields;
             ASSERT_TRUE(next_row(bytes, size, offset, fields));
-            ASSERT_EQ(3u, fields.size());
             ASSERT_EQ(16, fields[0].length);
-            EXPECT_EQ(0, std::memcmp(fields[0].bytes, &expected_word.id, 16));
-            EXPECT_EQ(size, offset);
+            EXPECT_EQ(0, std::memcmp(fields[0].bytes, &expected_root.id, 16));
         }
-        ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &replay));
-        EXPECT_TRUE(hash128_equals(&root, &replay));
-        EXPECT_EQ(all_present ? 0u : 1u, intent_stage_entity_count(stage.get()));
-        // The replay stages the same two forms again; the apply converges them by id.
-        EXPECT_EQ(4u, intent_stage_physicality_count(stage.get()));
     }
 }
 
@@ -358,7 +313,9 @@ TEST(LaplaceContentObservations, InvalidBitmapAndEmptyTreeDoNotEmitRows) {
     EXPECT_EQ(0u, intent_stage_physicality_count(stage.get()));
 }
 
-TEST(LaplaceContentObservations, ExplicitAtomicRootsCopyFloorDespiteExistingWitnessesAndBitmap) {
+// A single-character content is its Tier-0 atom: no entity row, one floor physicality
+// per stage, and nothing at all when that physicality is already staged.
+TEST(LaplaceContentObservations, AtomicRootsStageTheirFloorPhysicalityOnce) {
     ASSERT_TRUE(codepoint_table_is_loaded());
     const hash128_t source{101, 102};
     for (const char text : {'a', ' ', '7'}) {
@@ -373,107 +330,22 @@ TEST(LaplaceContentObservations, ExplicitAtomicRootsCopyFloorDespiteExistingWitn
         ASSERT_EQ(content_witness_tree_root_node(tree.get(), &root), 0);
         ASSERT_EQ(root.tier, 0u);
         ASSERT_TRUE(hash128_equals(&root.id, &floor.hash));
-        const size_t nodes = tier_tree_node_count(tree.get());
-        std::vector<uint8_t> existing((nodes + 7u) / 8u, 0xff);
         Stage stage(intent_stage_new(0), intent_stage_free);
         ASSERT_NE(stage, nullptr);
-        hash128_t placement{};
-        laplace_physicality_id_compute(floor.hash, 1, &placement);
-        ASSERT_EQ(intent_stage_witness_record(stage.get(), &floor.hash), 0);
-        ASSERT_EQ(intent_stage_witness_record(stage.get(), &placement), 0);
         for (size_t observation = 0; observation < 2; ++observation) {
             hash128_t emitted{};
-            ASSERT_EQ(content_witness_emit_tree(stage.get(), tree.get(), &source,
-                existing.data(), nodes, &emitted), 0);
+            ASSERT_EQ(content_witness_emit_tree(stage.get(), tree.get(), &source, nullptr, 0, &emitted), 0);
             EXPECT_TRUE(hash128_equals(&emitted, &floor.hash));
             EXPECT_EQ(intent_stage_entity_count(stage.get()), 0u);
-            EXPECT_EQ(intent_stage_physicality_count(stage.get()), observation + 1u);
+            EXPECT_EQ(intent_stage_physicality_count(stage.get()), 1u);
         }
         size_t size = 0, offset = 0;
         const auto* bytes = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &size);
         std::vector<Field> fields;
-        for (size_t observation = 0; observation < 2; ++observation) {
-            ASSERT_TRUE(next_row(bytes, size, offset, fields));
-            expect_atomic_body(fields, floor, INTENT_STAGE_PG_EPOCH_UNIX_US);
-        }
+        ASSERT_TRUE(next_row(bytes, size, offset, fields));
+        expect_atomic_body(fields, floor, INTENT_STAGE_PG_EPOCH_UNIX_US);
         EXPECT_EQ(offset, size);
     }
-}
-
-TEST(LaplaceContentObservations, AtomicRootReplaySharesDescriptorAndPreservesEveryStructuralObservation) {
-    constexpr size_t budget = 64u * 1024u * 1024u;
-    const hash128_t source_a{101, 102}, source_b{201, 202}, unit_one{301, 302}, unit_two{401, 402};
-    const physicality_descriptor_source_observation_t a{source_a, unit_one, 0.8};
-    const physicality_descriptor_source_observation_t b{source_b, unit_one, 0.9};
-    const physicality_descriptor_source_observation_t another_unit{source_a, unit_two, 0.8};
-    const std::array<physicality_descriptor_source_observation_t, 5> sources{a, a, b, b, another_unit};
-    tier_tree_t* raw_tree = nullptr;
-    ASSERT_EQ(content_witness_tree_build(reinterpret_cast<const uint8_t*>("a"), 1, &raw_tree), 0);
-    Tree tree(raw_tree, tier_tree_free);
-    const auto* floor = codepoint_table_lookup('a');
-    ASSERT_NE(floor, nullptr);
-    Stage stage(intent_stage_new(0), intent_stage_free);
-    ASSERT_NE(stage, nullptr);
-    // The source/unit array binds the five actual appended rows externally.
-    for (const auto& source : sources) {
-        hash128_t root{};
-        ASSERT_EQ(content_witness_emit_tree(stage.get(), tree.get(), &source.source_id,
-            nullptr, 0, &root), 0);
-        EXPECT_TRUE(hash128_equals(&root, &floor->hash));
-    }
-    EXPECT_EQ(intent_stage_entity_count(stage.get()), 0u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), sources.size());
-    physicality_descriptor_vocabulary_t* raw_vocabulary = nullptr;
-    ASSERT_EQ(physicality_descriptor_vocabulary_create(&source_a, budget, &raw_vocabulary),
-        PHYSICALITY_DESCRIPTOR_OK);
-    std::unique_ptr<physicality_descriptor_vocabulary_t, decltype(&physicality_descriptor_vocabulary_free)>
-        vocabulary(raw_vocabulary, physicality_descriptor_vocabulary_free);
-    const intent_stage_t* source_stage = stage.get();
-    const physicality_descriptor_limits_t limits{budget};
-    physicality_descriptor_capture_t* raw_capture = nullptr;
-    ASSERT_EQ(physicality_descriptor_capture_stages(&source_stage, 1,
-        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, budget, &raw_capture),
-        PHYSICALITY_DESCRIPTOR_OK);
-    std::unique_ptr<physicality_descriptor_capture_t, decltype(&physicality_descriptor_capture_free)>
-        capture(raw_capture, physicality_descriptor_capture_free);
-    size_t count = 0;
-    const auto* bodies = physicality_descriptor_capture_inputs(capture.get(), &count);
-    ASSERT_EQ(count, sources.size());
-    for (size_t i = 0; i < count; ++i) {
-        EXPECT_TRUE(hash128_equals(&bodies[i].entity_id, &floor->hash));
-        EXPECT_EQ(bodies[i].type, 1);
-        EXPECT_EQ(std::memcmp(bodies[i].coord, floor->coord, sizeof(floor->coord)), 0);
-        EXPECT_EQ(std::memcmp(&bodies[i].hilbert_index, &floor->hilbert, sizeof(floor->hilbert)), 0);
-        EXPECT_EQ(bodies[i].trajectory_vertices, 0u);
-        EXPECT_EQ(bodies[i].n_constituents, 0);
-        EXPECT_TRUE(bodies[i].alignment_residual_is_null);
-        EXPECT_TRUE(bodies[i].source_dim_is_null);
-    }
-    const auto* descriptors = physicality_descriptor_plan_roots(
-        physicality_descriptor_capture_plan(capture.get()), &count);
-    ASSERT_EQ(count, sources.size());
-    for (size_t i = 1; i < count; ++i)
-        EXPECT_TRUE(hash128_equals(&descriptors[i], &descriptors[0]));
-    physicality_descriptor_materialization_t* raw_materialized = nullptr;
-    ASSERT_EQ(physicality_descriptor_materialize(capture.get(), vocabulary.get(),
-        nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(),
-        INTENT_STAGE_PG_EPOCH_UNIX_US, budget, &raw_materialized), PHYSICALITY_DESCRIPTOR_OK);
-    std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
-        materialized(raw_materialized, physicality_descriptor_materialization_free);
-    size_t provenance_count = 0;
-    const auto* provenance =
-        physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
-    ASSERT_NE(provenance, nullptr);
-    ASSERT_EQ(provenance_count, sources.size());
-    for (size_t i = 0; i < provenance_count; ++i) {
-        EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &floor->hash));
-        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &descriptors[i]));
-        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
-        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
-    }
-    Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
-    ASSERT_NE(generated, nullptr);
-    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
 
 TEST(LaplaceContentObservations, FloorAtomRejectsInvalidIdentityAndMissingFloorWithoutAppending) {

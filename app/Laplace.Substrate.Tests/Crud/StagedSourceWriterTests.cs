@@ -6,16 +6,17 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
-/// The source-reduced order of operations stores the same evidence and standing as the
-/// working-set writer for one source's claims, folds each claim exactly once, and folds a
-/// source's claims onto the standing other witnesses already established.
+/// The staged order of operations (extract into staging, load once, score once) stores the
+/// same evidence and standing as the working-set writer for one source's claims, scores each
+/// claim exactly once, and scores a source's claims onto the standing other witnesses
+/// already established.
 /// </summary>
 [Collection("substrate-pg")]
 [Trait("Tier", "db")]
-public class SourceReducedApplyWriterTests
+public class StagedSourceWriterTests
 {
     private readonly LocalPgFixture _pg;
-    public SourceReducedApplyWriterTests(LocalPgFixture pg) => _pg = pg;
+    public StagedSourceWriterTests(LocalPgFixture pg) => _pg = pg;
 
     private static Hash128 H(ulong n) => Hash128.OfCanonical($"substrate/test/source-reduced/{n}");
 
@@ -40,8 +41,8 @@ public class SourceReducedApplyWriterTests
             new SubstrateChangeMetadata(Hash128.OfCanonical($"intent/source-reduced/{unit}"), source, unit,
                 DateTimeOffset.UnixEpoch, null));
 
-    private SourceReducedApplyWriter Reduced(ConsensusAccumulatingWriter inner) =>
-        new(inner, _pg.DataSource, PostgresWriteDurability.Asynchronous, lanes: 3, budgetBytes: 1L << 30);
+    private StagedSourceWriter Staged(ConsensusAccumulatingWriter inner) =>
+        new(inner, _pg.DataSource, PostgresWriteDurability.Asynchronous, lanes: 3);
 
     private async Task<(long Rating, long Rd, long Volatility, long Witnesses)?> StandingAsync(
         Hash128 subject, Hash128 type, Hash128 obj)
@@ -83,13 +84,13 @@ public class SourceReducedApplyWriterTests
             await working.ApplyWorkingSetAsync(Change(source, "working", Claims(viaWorkingSet)));
 
         await using (var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource))
-        await using (var reduced = Reduced(inner))
+        await using (var staged = Staged(inner))
         {
-            await reduced.BeginBulkRunAsync();
-            await reduced.ApplyWorkingSetAsync(Change(source, "reduced", Claims(viaReduction)));
+            await staged.BeginBulkRunAsync();
+            await staged.ApplyWorkingSetAsync(Change(source, "reduced", Claims(viaReduction)));
             Assert.Null(await StandingAsync(subject, viaReduction, obj));
-            await reduced.CompleteBulkRunAsync();
-            Assert.Equal(5, reduced.ObservationsAccumulated - inner.ObservationsAccumulated);
+            await staged.CompleteBulkRunAsync();
+            Assert.Equal(5, staged.ObservationsAccumulated - inner.ObservationsAccumulated);
         }
 
         Assert.Equal(await StandingAsync(subject, viaWorkingSet, obj), await StandingAsync(subject, viaReduction, obj));
@@ -103,16 +104,16 @@ public class SourceReducedApplyWriterTests
         var source = H(30); var type = H(31); var subject = H(32); var obj = H(33);
         var claim = Claim(subject, type, obj, source, 1_000_000_000);
         await using var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
-        await using var reduced = Reduced(inner);
-        await reduced.ApplyWorkingSetAsync(Change(source, "once", claim));
-        await reduced.CompleteBulkRunAsync();
+        await using var staged = Staged(inner);
+        await staged.ApplyWorkingSetAsync(Change(source, "once", claim));
+        await staged.CompleteBulkRunAsync();
         var standing = await StandingAsync(subject, type, obj);
         Assert.NotNull(standing);
 
         // The same claim again, and beside it a new one: only the new one folds.
         var fresh = Claim(subject, type, obj, source, 1_000_000_000, context: H(34));
-        await reduced.ApplyWorkingSetAsync(Change(source, "again", claim, fresh));
-        await reduced.CompleteBulkRunAsync();
+        await staged.ApplyWorkingSetAsync(Change(source, "again", claim, fresh));
+        await staged.CompleteBulkRunAsync();
         var after = await StandingAsync(subject, type, obj);
         Assert.Equal(2, after!.Value.Witnesses);
 
@@ -137,10 +138,10 @@ public class SourceReducedApplyWriterTests
         await using (var working = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource))
             await working.ApplyWorkingSetAsync(Change(second, "second/working", Claim(subject, viaWorkingSet, obj, second, 0)));
         await using (var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource))
-        await using (var reduced = Reduced(inner))
+        await using (var staged = Staged(inner))
         {
-            await reduced.ApplyWorkingSetAsync(Change(second, "second/reduced", Claim(subject, viaReduction, obj, second, 0)));
-            await reduced.CompleteBulkRunAsync();
+            await staged.ApplyWorkingSetAsync(Change(second, "second/reduced", Claim(subject, viaReduction, obj, second, 0)));
+            await staged.CompleteBulkRunAsync();
         }
         var expected = await StandingAsync(subject, viaWorkingSet, obj);
         Assert.Equal(3, expected!.Value.Witnesses);
@@ -154,12 +155,12 @@ public class SourceReducedApplyWriterTests
         var reference = new Mask256(1UL << 34, 0, 0, 0);
         var print = new Mask256(1UL << 35, 0, 0, 0);
         await using var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
-        await using var reduced = Reduced(inner);
-        await reduced.ApplyWorkingSetAsync(Change(source, "code-table",
+        await using var staged = Staged(inner);
+        await staged.ApplyWorkingSetAsync(Change(source, "code-table",
             Claim(subject, type, obj, source, 1_000_000_000, qualifiers: reference)));
-        await reduced.ApplyWorkingSetAsync(Change(source, "name-index",
+        await staged.ApplyWorkingSetAsync(Change(source, "name-index",
             Claim(subject, type, obj, source, 1_000_000_000, qualifiers: print)));
-        await reduced.CompleteBulkRunAsync();
+        await staged.CompleteBulkRunAsync();
         var (games, sum, mask) = await EvidenceAsync(ClaimId(subject, type, obj, source, null));
         Assert.Equal(2, games);
         Assert.Equal(2_000_000_000, sum);

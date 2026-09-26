@@ -157,26 +157,26 @@ TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitAllAbsentEmitsEveryIndex) {
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRootPresentStillEmitsMissingDescendants) {
+// Same content, same hash: a present root is the whole tree, so nothing is novel.
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitPresentRootCoversTheWholeTree) {
     tier_tree_t* t = sample_tree();
     uint8_t bm[1] = { (uint8_t)(1u << 6) };
     uint32_t out[7];
     size_t n = 99;
     ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
-    ASSERT_EQ(6u, n);
-    for (uint32_t i = 0; i < 6; ++i) EXPECT_EQ(i, out[i]);
+    EXPECT_EQ(0u, n);
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitInteriorPresenceSkipsOnlyThatNode) {
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitInteriorPresenceCoversItsSubtree) {
     tier_tree_t* t = sample_tree();
     uint8_t bm[1] = { (uint8_t)(1u << 4) };
     uint32_t out[7];
     size_t n = 0;
     ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
-    ASSERT_EQ(6u, n);
-    const uint32_t expected[] = {0, 1, 2, 3, 5, 6};
-    for (size_t i = 0; i < 6; ++i) EXPECT_EQ(expected[i], out[i]);
+    ASSERT_EQ(4u, n);
+    const uint32_t expected[] = {2, 3, 5, 6};
+    for (size_t i = 0; i < 4; ++i) EXPECT_EQ(expected[i], out[i]);
     tier_tree_free(t);
 }
 
@@ -223,8 +223,10 @@ TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRejectsTooSmallBitmap) {
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreMerkleDedup, EveryPartialCommitBitmapFiltersOnlyItsExactNodes) {
+// Every presence pattern: a node is novel only when neither it nor an ancestor is present.
+TEST(LaplaceCoreMerkleDedup, EveryPresentNodeCoversItsSubtree) {
     tier_tree_t* t = sample_tree();
+    const int parent[7] = {4, 4, 5, 5, 6, 6, -1};
     for (unsigned mask = 0; mask < 128; ++mask) {
         const uint8_t bm = (uint8_t)mask;
         uint32_t out[7];
@@ -232,7 +234,10 @@ TEST(LaplaceCoreMerkleDedup, EveryPartialCommitBitmapFiltersOnlyItsExactNodes) {
         ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, &bm, 7, out, &n));
         size_t expected_count = 0;
         for (uint32_t i = 0; i < 7; ++i) {
-            if ((mask & (1u << i)) != 0) continue;
+            bool covered = false;
+            for (int at = (int)i; at >= 0; at = parent[at])
+                if ((mask & (1u << at)) != 0) { covered = true; break; }
+            if (covered) continue;
             ASSERT_LT(expected_count, n) << "mask=" << mask;
             EXPECT_EQ(i, out[expected_count++]) << "mask=" << mask;
         }

@@ -124,7 +124,9 @@ TEST_F(GrammarPhysicality, DistinctSourcesRetainEveryComputedBodyAndFirstEntityW
     }
 }
 
-TEST_F(GrammarPhysicality, ExistingBitmapAndSeenPlacementCannotSuppressComputedPhysicalities) {
+// A present composition is its entity and its one composition physicality: a present
+// bitmap stages nothing, entity or physicality.
+TEST_F(GrammarPhysicality, PresentCompositionsStageNoEntityAndNoPhysicality) {
     const std::string source = kGame;
     auto ast = parse(source);
     ASSERT_NE(ast, nullptr);
@@ -137,18 +139,10 @@ TEST_F(GrammarPhysicality, ExistingBitmapAndSeenPlacementCannotSuppressComputedP
     std::vector<uint8_t> present((nodes + 7u) / 8u, 0xff);
     Stage stage(intent_stage_new_bounded(0, kBudget), intent_stage_free);
     ASSERT_NE(stage, nullptr);
-    for (size_t i = 0; i < result->phys_count; ++i)
-        ASSERT_GE(intent_stage_witness_record(stage.get(), &result->physicalities[i].id), 0);
     ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceA,
         42, 1.0, present.data(), nodes), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), 0u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), result->phys_count);
-    auto captured = capture(stage);
-    ASSERT_NE(captured, nullptr);
-    size_t count = 0;
-    const auto* bodies = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, result->phys_count);
-    for (size_t i = 0; i < count; ++i) expect_body(bodies[i], result->physicalities[i]);
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), 0u);
 }
 
 TEST_F(GrammarPhysicality, AlternateNativeCoordinateAtSamePlacementSurvivesDrainAndDescriptorCapture) {

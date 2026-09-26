@@ -309,6 +309,34 @@ pg_apply_wal_compression() {
   fi
 }
 
+# The WAL flush call is measured on the WAL device, not assumed: its cost differs by an
+# order of magnitude between devices and calls (on the 600p WAL volume, fdatasync 23 ms
+# against fsync 0.7 ms per 8 kB flush), and every WAL write-out pays it.
+pg_apply_wal_sync_method() {
+  local data wal probe tool best
+  data=$(pg_tune_psql -tAc "SHOW data_directory")
+  wal=$(readlink -f "$data/pg_wal" 2>/dev/null || true)
+  tool=$(command -v pg_test_fsync || echo "${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin/pg_test_fsync")
+  if [[ -z "$wal" || ! -w "$wal" || ! -x "$tool" ]]; then
+    echo "pg-machine-tuning: wal_sync_method left unchanged (cannot probe the WAL device)" >&2
+    return 0
+  fi
+  probe="$wal/laplace_sync_probe.tmp"
+  best=$("$tool" -s 2 -f "$probe" 2>/dev/null | awk '
+    /one 8kB write/ { section = 1; next }
+    /two 8kB writes/ { section = 0 }
+    section && ($1 == "open_datasync" || $1 == "fdatasync" || $1 == "fsync") && $2 ~ /^[0-9.]+$/ {
+      if ($2 + 0 > rate) { rate = $2 + 0; method = $1 } }
+    END { print method }')
+  rm -f "$probe"
+  if [[ -z "$best" ]]; then
+    echo "pg-machine-tuning: wal_sync_method left unchanged (probe produced no rates)" >&2
+    return 0
+  fi
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET wal_sync_method = $best"
+  echo "pg-machine-tuning: wal_sync_method=$best (measured on $wal)"
+}
+
 pg_apply_io_method() {
   local io
   io=$(pg_tune_psql -tAc \
@@ -331,6 +359,7 @@ pg_apply_machine_tuning() {
       # io_method=worker. Correct it here, on the path that actually runs.
       pg_apply_io_method
       pg_apply_wal_compression
+      pg_apply_wal_sync_method
       pg_apply_toast_compression
       pg_apply_huge_pages
       pg_apply_temp_tablespace
@@ -381,6 +410,7 @@ pg_apply_machine_tuning_fallback() {
 
   pg_apply_io_method
   pg_apply_wal_compression
+  pg_apply_wal_sync_method
   pg_apply_toast_compression
   pg_apply_huge_pages
   pg_apply_temp_tablespace

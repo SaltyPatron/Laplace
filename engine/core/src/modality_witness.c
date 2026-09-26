@@ -344,18 +344,10 @@ static int emit_node(
     tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
     if (!should_emit(tree, idx, modality)) return 0;
-    if (emit_entity) {
-        if (intent_stage_witness_seen(stage, &node.id)) return 0;
-        hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
-        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0)
-            return -2;
-    }
 
-    /* A signed Sample's ScalarId is the shared text root of "-digits", not
-     * the flat hash of its interchange leaves. Retain that scalar's complete
-     * content ladder, including children missing from this modality bitmap.
-     * Keep the modality's canonical Sample E winner, then let the shared owner
-     * emit its valid bodies and independently deduplicate intermediate E. */
+    /* A signed Sample is the text composition "-digits": its content id, its entity and
+     * its composition physicality (over ['-', digits]) are the content ladder's, so the
+     * content path stages them, once per stage like any content. */
     if (modality == LAPLACE_MODALITY_AUDIO && node.tier == 1u
         && node.child_count > 1u) {
         tier_node_view_t first;
@@ -370,15 +362,19 @@ static int emit_node(
                     return -2;
                 scalar_bytes[k] = (uint8_t)digit.atom;
             }
-            if (!intent_stage_witness_seen(stage, &node.id)
-                && intent_stage_witness_record(stage, &node.id) != 0) return -2;
-            if (intent_stage_allocation_failed(stage)) return -2;
             hash128_t scalar_root;
             if (content_witness_batch_add(stage, scalar_bytes, node.child_count, source_id, &scalar_root) != 0
                 || !hash128_equals(&scalar_root, &node.id)) return -2;
             *emitted = 1;
             return 0;
         }
+    }
+
+    if (emit_entity) {
+        if (intent_stage_witness_seen(stage, &node.id)) return 0;
+        hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0)
+            return -2;
     }
 
     double* traj = NULL;
@@ -463,17 +459,11 @@ int laplace_modality_witness_emit_tree(
         }
     }
 
-    /* Keep canonical entity insertion separate from source-form observations.
-     * Preserve existing first-winner ordering, then retain every other computed
-     * occurrence, including nodes whose entity was already stored or staged. */
+    /* A node covered by a present trunk already has its entity and its one
+     * composition physicality: only novel nodes are staged. */
     for (size_t k = 0; k < (novel ? novel_n : nc); ++k) {
         const uint32_t idx = novel ? novel[k] : (uint32_t)k;
         rc = emit_node(stage, tree, idx, modality, source_id, now_us, 1, &emitted[idx]);
-        if (rc != 0) goto done;
-    }
-    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        if (emitted[idx]) continue;
-        rc = emit_node(stage, tree, idx, modality, source_id, now_us, 0, &emitted[idx]);
         if (rc != 0) goto done;
     }
 done:

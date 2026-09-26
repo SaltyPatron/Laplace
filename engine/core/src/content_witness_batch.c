@@ -86,10 +86,14 @@ int content_witness_emit_floor_atom(
     if (codepoint_table_resolve_atom(atom, &entity, coord, &hilbert) != 0
         || !hash128_equals(&entity, expected_id)) return -2;
     laplace_physicality_id_compute(entity, 1, &placement);
+    /* The atom's physicality is staged once per stage like any content's. */
+    if (intent_stage_witness_seen(stage, &placement)) return 0;
     /* This is the existing atomic floor body, not a composition of itself.
      * Root observation creates no E and carries no invented child trajectory. */
-    return intent_stage_add_physicality(stage, &placement, &entity, 1, coord,
-        &hilbert, NULL, 0, 0, 1, 0.0, 1, 0, observed_at_unix_us) == 0 ? 0 : -2;
+    if (intent_stage_add_physicality(stage, &placement, &entity, 1, coord,
+            &hilbert, NULL, 0, 0, 1, 0.0, 1, 0, observed_at_unix_us) != 0) return -2;
+    return intent_stage_witness_record(stage, &placement) == 0
+        && !intent_stage_allocation_failed(stage) ? 0 : -2;
 }
 
 
@@ -368,7 +372,6 @@ typedef struct {
     uint64_t*  flags;
     double*    trajectory;
     size_t     capacity;
-    intent_stage_t* forms;
 } emit_scratch_t;
 
 static void emit_scratch_free(emit_scratch_t* scratch) {
@@ -376,7 +379,6 @@ static void emit_scratch_free(emit_scratch_t* scratch) {
     free(scratch->child_ids);
     free(scratch->flags);
     free(scratch->trajectory);
-    intent_stage_free(scratch->forms);
     memset(scratch, 0, sizeof(*scratch));
 }
 
@@ -425,8 +427,13 @@ static int emit_node(
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
     if (node.tier == 0) return 0;
     if (!should_emit_compositional(tree, idx)) return 0;
-
-    emit_entity = emit_entity && !intent_stage_witness_seen(stage, &node.id);
+    /* One content is one entity with one composition physicality (its id is the
+     * entity id and the physicality type): a node already staged here stages nothing
+     * more. Repeated occurrences live in their parents' trajectories. */
+    if (intent_stage_witness_seen(stage, &node.id)) {
+        *emitted = 1;
+        return 0;
+    }
 
     double* traj = NULL;
     size_t m = node.child_count;
@@ -447,32 +454,6 @@ static int emit_node(
                 ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
         }
     }
-
-    /* Repeated occurrences retain their ordered parent vertices. They do not
-     * need identical E/P/form bytes restaged for the same source observation.
-     * Include the entire realized form, not just E: distinct tier/coordinate/
-     * constituent-role interpretations of one canonical id remain observable.
-     * This scratch set lives for one emit call, so another source or observation
-     * never loses its physicality provenance through an earlier call's cache. */
-    blake3_hasher form;
-    hash128_t form_id;
-    blake3_hasher_init(&form);
-    blake3_hasher_update(&form, &node.id, sizeof(node.id));
-    blake3_hasher_update(&form, &node.tier, sizeof(node.tier));
-    blake3_hasher_update(&form, node.coord, sizeof(node.coord));
-    blake3_hasher_update(&form, &node.hilbert, sizeof(node.hilbert));
-    blake3_hasher_update(&form, &m, sizeof(m));
-    if (m > 1) {
-        blake3_hasher_update(&form, scratch->child_ids, m * sizeof(hash128_t));
-        blake3_hasher_update(&form, scratch->flags, m * sizeof(uint64_t));
-    }
-    blake3_hasher_finalize(&form, (uint8_t*)&form_id, sizeof(form_id));
-    if (intent_stage_witness_seen(scratch->forms, &form_id)) {
-        *emitted = 1;
-        return 0;
-    }
-    if (intent_stage_witness_record(scratch->forms, &form_id) != 0
-        || intent_stage_allocation_failed(scratch->forms)) return -2;
 
     if (emit_entity) {
         hash128_t type_id = laplace_content_tier_type_id(node.tier);
@@ -497,10 +478,8 @@ static int emit_node(
             (int32_t)(m > 1 ? m : 0), 1, 0.0, 1, 0, now_us) != 0) {
         return -2;
     }
-    if (emit_entity) {
-        if (intent_stage_witness_record(stage, &node.id) != 0
-            || intent_stage_allocation_failed(stage)) return -2;
-    }
+    if (intent_stage_witness_record(stage, &node.id) != 0
+        || intent_stage_allocation_failed(stage)) return -2;
     *emitted = 1;
     return 0;
 }
@@ -570,8 +549,6 @@ int content_witness_emit_tree(
         return content_witness_emit_floor_atom(stage, root.atom, &root.id, now_us);
 
     emit_scratch_t scratch = {0};
-    scratch.forms = intent_stage_new(0);
-    if (!scratch.forms) return -2;
     uint8_t* emitted = (uint8_t*)calloc(nc, 1);
     if (!emitted) { emit_scratch_free(&scratch); return -2; }
     uint32_t* novel = NULL;
@@ -589,17 +566,11 @@ int content_witness_emit_tree(
         }
     }
 
-    /* Presence proofs and stage witnesses govern entity novelty. Preserve the
-     * former placement winners first, then retain every remaining computed
-     * compositional form as a raw observation for the calling source unit. */
+    /* A node covered by a present trunk already has its entity and its one
+     * composition physicality: only novel nodes are staged. */
     for (size_t k = 0; k < (novel ? novel_n : nc); ++k) {
         const uint32_t idx = novel ? novel[k] : (uint32_t)k;
         rc = emit_node(stage, tree, idx, now_us, &scratch, 1, &emitted[idx]);
-        if (rc != 0) goto done;
-    }
-    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        if (emitted[idx]) continue;
-        rc = emit_node(stage, tree, idx, now_us, &scratch, 0, &emitted[idx]);
         if (rc != 0) goto done;
     }
 
