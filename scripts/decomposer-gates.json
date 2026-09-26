@@ -195,7 +195,7 @@
       ]
     },
     "verbnet": {
-      "decomposer": "VerbNetDecomposer",
+      "decomposer": "VerbNet",
       "layer": 2,
       "prerequisites": [
         "iso639"
@@ -216,10 +216,14 @@
         "VerbNet_Role",
         "VerbNet_Predicate",
         "PropBank_Roleset"
+      ],
+      "witness": [
+        "VerbNet",
+        "3.4"
       ]
     },
     "propbank": {
-      "decomposer": "PropBankDecomposer",
+      "decomposer": "PropBank",
       "layer": 2,
       "prerequisites": [
         "iso639"
@@ -230,17 +234,21 @@
           "min": 10000
         },
         {
-          "relation": "HAS_SENSE",
+          "relation": "EVOKES_FRAME",
           "min": 5000
         }
       ],
       "physicality_types": [
         "PropBank_Roleset",
         "PropBank_Role"
+      ],
+      "witness": [
+        "PropBank",
+        "3.4"
       ]
     },
     "framenet": {
-      "decomposer": "FrameNetDecomposer",
+      "decomposer": "FrameNet",
       "layer": 3,
       "prerequisites": [
         "wordnet"
@@ -258,6 +266,10 @@
       "physicality_types": [
         "FrameNet_LU",
         "FrameNet_FE"
+      ],
+      "witness": [
+        "FrameNet",
+        "1.7"
       ]
     },
     "mapnet": {
@@ -339,7 +351,7 @@
       ]
     },
     "ud": {
-      "decomposer": "UDDecomposer",
+      "decomposer": "UD",
       "layer": 2,
       "prerequisites": [
         "iso639"
@@ -661,6 +673,50 @@
       "prerequisites": [],
       "consensus_gates": [],
       "skip_layer_complete": true
+    },
+    "verbnet-gl": {
+      "decomposer": "VerbNet-GL",
+      "layer": 2,
+      "prerequisites": [
+        "iso639"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "HAS_THEMATIC_ROLE",
+          "min": 500
+        },
+        {
+          "relation": "HAS_VERB_FRAME",
+          "min": 1000
+        }
+      ],
+      "physicality_types": [
+        "VerbNet_Class",
+        "VerbNet_Member",
+        "VerbNet_Role",
+        "VerbNet_Predicate"
+      ],
+      "witness": [
+        "VerbNet-GL",
+        "3.4"
+      ]
+    },
+    "uca": {
+      "decomposer": "UnicodeCollation",
+      "layer": 0,
+      "prerequisites": [
+        "unicode"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "DECOMPOSES_TO",
+          "min": 1000
+        }
+      ],
+      "witness": [
+        "Unicode/UCA",
+        "17.0.0"
+      ]
     }
   }
 }

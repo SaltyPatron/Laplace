@@ -76,7 +76,7 @@ public static class EtlManifest
                 bootstrapRelations: WiktionaryBootstrap, hasDedicatedDecomposer: true),
 
 
-            ["ud"] = Row("ud", "UDDecomposer", 2, "AcademicCurated",
+            ["ud"] = Row("ud", "UD", 2, "AcademicCurated",
                 "ud", new EtlModality("conllu", Glob: "*.conllu", GrammarReady: false),
                 bootstrapRelations: UdBootstrap),
 

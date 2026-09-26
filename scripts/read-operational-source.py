@@ -306,7 +306,7 @@ roster AS MATERIALIZED (
         laplace.relation_type_id('IS_SENSE_OF') AS sense_of,
         laplace.relation_type_id('HAS_DEFINITION') AS definition,
         realize.canonical_id('ud/parse/schema/v1') AS ud_schema,
-        laplace.source_id('UDDecomposer') AS ud_source,
+        laplace.witness_id('UD', '2.18') AS ud_source,
         laplace.source_id('WordNetDecomposer') AS wordnet_source
 ),
 nominated AS MATERIALIZED (
