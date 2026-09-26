@@ -853,7 +853,7 @@ fold_run_states(const InArray *phis, const InArray *opps,
          * result. Do not turn the transport delta into another rating period. */
         if (recomputed != NULL && recomputed[i])
         {
-            seen[i] = BoolGetDatum(true);
+            seen[i] = BoolGetDatum(matched[i]);
             continue;
         }
         glicko2_state_t st;
