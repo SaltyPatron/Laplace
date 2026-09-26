@@ -52,7 +52,6 @@ internal static partial class IngestCommands
         string? GitCorpusSelection = null,
         string? GitCorpusReceipt = null);
 
-
     internal static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
         var rest = new List<string>(args);
@@ -174,9 +173,6 @@ internal static partial class IngestCommands
                         + "  chain: run several ingests sequentially in ONE process; Unicode admits its\n"
                         + "         floor before T0 runtime acceleration is mapped; stops at the first failing spec");
 
-
-
-
         string sourceKey = cli.Source.ToLowerInvariant();
 
         if (IngestDispatchTable.TryDispatch(sourceKey, cli, out var task))
@@ -268,12 +264,6 @@ internal static partial class IngestCommands
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
-
-
-
-
-
-
         // Explicit unbounded timeout: the Ingest policy passes the base string through
         // untouched, so it inherits Command Timeout=0 only when LAPLACE_DB carries it.
         await using var ds = LaplaceDataSource.Create(
@@ -282,9 +272,6 @@ internal static partial class IngestCommands
             ConnString);
 
         var dec = CliRuntime.Decomposers.ResolveModel(modelDir, persistEvidence: ResolvePersistEvidence(cli));
-
-
-
 
         if (cli.RegisterOnly)
         {
@@ -309,84 +296,12 @@ internal static partial class IngestCommands
             }
         }
 
-        var loggerFactory = CliRuntime.LoggerFactory;
-        var inner = new NpgsqlSubstrateWriter(ds,
-            logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
-
-
-
-
-
-        bool persistEvidenceResolved = ResolvePersistEvidence(cli);
-        var accumulator = new ConsensusAccumulatingWriter(inner, ds,
-            persistEvidence: persistEvidenceResolved,
-            logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
-        ISubstrateWriter writer = accumulator;
-        var reader = new NpgsqlSubstrateReader(ds);
-        var runner = new IngestRunner(writer, reader, loggerFactory,
-            new NpgsqlIngestObservability(ds, persistEvidenceResolved));
-        Console.WriteLine("mode: safetensor snapshot apply (anti-join merge; consensus accumulates at ingest)");
-
-        Console.WriteLine($"deposit safetensor snapshot {modelDir} via IngestRunner → {ConnString} ...");
-
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            var result = await runner.RunAsync(
-                dec,
-                BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null, cli,
-                    // Analyzer modes are calculated re-passes over an already-recorded
-                    // model (doc 08's chess-analyze pattern): the recorder's
-                    // completion marker must neither block them nor be re-written.
-                    skipSourceCompletion:
-                        Laplace.Decomposers.Model.ModelTokenEdgeETL.ResolvePlanesMode() != "structure")
-                with
-                {
-                    DecomposerOptions =                     DecomposerOptions.ForWitness(
-                    dec.SourceName,
-                    IngestSizing.Resolve(
-                        IngestTopology.Current.PerformanceCoreCount,
-                        IngestTopology.Current.FileWorkers,
-                        IngestTopology.Current.ApplyPartitions).RecordBatchSize,
-                    cli.LangOverride,
-                    cli.EmitCrossLanguageLinks)
-                },
-                CancellationToken.None);
-            sw.Stop();
-
-            Console.WriteLine(
-                $"done: {result.UnitsApplied:N0} intents applied, "
-                + $"{result.EntitiesInserted:N0} novel entities, "
-                + $"{result.AttestationsInserted:N0} attestations, "
-                + $"{result.TotalRoundTrips:N0} round-trips, "
-                + $"{sw.Elapsed.TotalSeconds:F1}s");
-            if (result.Failures.Count > 0)
-            {
-                Console.Error.WriteLine($"failures: {result.Failures.Count}");
-                foreach (var f in result.Failures.Take(5))
-                    Console.Error.WriteLine($"  {f}");
-                return 1;
-            }
-
-
-
-
-
-            await RegisterDynamicCanonicalsAsync(ds, dec);
-
-            Console.WriteLine(
-                $"consensus: {accumulator.CellsFolded:N0} cells materialized during ingest from "
-                + $"{accumulator.ObservationsAccumulated:N0} observations "
-                + $"(queued folds drained before success; evidence = provenance-only)");
-        }
-        finally
-        {
-            sw.Stop();
-        }
-        try { await PrintIngestValidationAsync(ds, dec, exactSourceValidation: false); }
-        catch (Exception ex)
-        { Console.Error.WriteLine($"warn: safetensor deposition validation failed: {ex.Message}"); }
-        return 0;
+        // Analyzer modes are calculated re-passes over an already-recorded model
+        // (doc 08's chess-analyze pattern): the recorder's completion marker must
+        // neither block them nor be re-written.
+        return await IngestViaRunnerAsync(dec, ecosystemPath: null, skipLayerCheck: true, cli,
+            skipSourceCompletion:
+                Laplace.Decomposers.Model.ModelTokenEdgeETL.ResolvePlanesMode() != "structure");
     }
 
     internal static async Task<int> CorroborateSafetensorSnapshotsAsync(IngestCliArgs cli)
@@ -669,7 +584,7 @@ internal static partial class IngestCommands
     }
 
     internal static async Task<int> IngestViaRunnerAsync(
-        IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
+        IDecomposer dec, string? ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
     {
         // T0 ROM is an accelerator (round-trip / bit-bang), not the populate
@@ -733,7 +648,6 @@ internal static partial class IngestCommands
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
-
 
         await RegisterDynamicCanonicalsAsync(ds, dec);
         Console.WriteLine($"consensus: {((IConsensusFoldMetrics)writer).CellsFolded:N0} cells materialized during ingest "
