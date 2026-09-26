@@ -18,10 +18,10 @@ public sealed class RecipeRuntimeManifest : ISourceManifest
         TrustClassRegistry.Id("UserCuratedResource");
 
     public IReadOnlyList<string> Relations { get; } =
-        ["HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS"];
+        ["HAS_ATTRIBUTE"];
 
     public IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["Model_Recipe", "Scalar"];
+        ["Model_Recipe", "Property_Value"];
 
     public SourceLicense License => SourceLicense.Unknown;
     public IngestSourceProfile Profile => IngestSourceProfile.Default;

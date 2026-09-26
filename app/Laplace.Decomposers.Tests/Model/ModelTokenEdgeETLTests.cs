@@ -36,10 +36,10 @@ public sealed class ModelTokenEdgeETLTests
     }
 
     [Theory]
-    [InlineData("ATTENDS", "402001019b7e964d3cf0ef7532de16bb")]
-    [InlineData("COMPLETES_TO", "c9490ac67209d8d3efd7993a24d88102")]
-    [InlineData("OV_RELATES", "5ea99a7eacf84eef2088c932cea7cea9")]
-    [InlineData("SIMILAR_TO", "dc766e130b55698b2fdcc15a52e2a718")]
+    [InlineData("ATTENDS", "903e286faebb410c2f107de6aa095f03")]
+    [InlineData("COMPLETES_TO", "49ec81960cbe360cdb5ce7de5b049143")]
+    [InlineData("OV_RELATES", "2b09e12315238ab81c865effe3d92b10")]
+    [InlineData("SIMILAR_TO", "b143f4ae76d9784bfaece173f44acf4a")]
     public void ModelRelationIds_MatchRetainedDatabaseResolution(string relation, string expectedHex)
     {
         Hash128 id = RelationTypeRegistry.RelationTypeId(relation);

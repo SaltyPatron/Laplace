@@ -9,9 +9,6 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeInfo>
 {
-    private static readonly Hash128 HasHiddenSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
-    private static readonly Hash128 HasNumLayersTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
-
     private readonly RecipeExtractor.RecipeInfo _recipe;
     private readonly Hash128 _source;
     private readonly string _sourceName;
@@ -49,9 +46,7 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
     }
 
     protected override void Compose(RecipeExtractor.RecipeInfo rec, SubstrateChangeBuilder b) =>
-        RecipeExtractor.StageRecipe(
-            b, rec, _source, EntityTypeRegistry.ModelRecipe,
-            HasHiddenSizeTypeId, HasNumLayersTypeId);
+        RecipeExtractor.StageRecipe(b, rec, _source, EntityTypeRegistry.ModelRecipe);
 
     protected override Task OnBeforeDecomposeAsync(
         IDecomposerContext context,

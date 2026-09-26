@@ -92,6 +92,7 @@ public static class EntityTypeRegistry
     public static readonly Hash128 RepoRoot = Id("RepoRoot");
     public static readonly Hash128 Sample = Id("Sample");
     public static readonly Hash128 Scalar = Id("Scalar");
+    public static readonly Hash128 PropertyValue = Id("Property_Value");
     public static readonly Hash128 Sentence = Id("Sentence");
     public static readonly Hash128 SourceReference = Id("Source_Reference");
     public static readonly Hash128 SourceVersion = Id("Source_Version");

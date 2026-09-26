@@ -69,6 +69,7 @@ family_root = "APPEARS_IN"
 # comment describes. Scalar-valued: they attach numeric Scalar entities to a recipe.
 [[relation]]
 canonical = "HAS_HIDDEN_SIZE"
+retired = "HAS_ATTRIBUTE"
 bit = 75
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -77,6 +78,7 @@ family_root = "HAS_HIDDEN_SIZE"
 
 [[relation]]
 canonical = "HAS_NUM_LAYERS"
+retired = "HAS_ATTRIBUTE"
 bit = 99
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -109,6 +111,7 @@ family_root = "HAS_SYNSET_RELATION_COUNT"
 
 [[relation]]
 canonical = "HAS_NUM_HEADS"
+retired = "HAS_ATTRIBUTE"
 bit = 97
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -117,6 +120,7 @@ family_root = "HAS_NUM_HEADS"
 
 [[relation]]
 canonical = "HAS_NUM_KV_HEADS"
+retired = "HAS_ATTRIBUTE"
 bit = 98
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -125,6 +129,7 @@ family_root = "HAS_NUM_KV_HEADS"
 
 [[relation]]
 canonical = "HAS_INTERMEDIATE_SIZE"
+retired = "HAS_ATTRIBUTE"
 bit = 76
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -133,6 +138,7 @@ family_root = "HAS_INTERMEDIATE_SIZE"
 
 [[relation]]
 canonical = "HAS_VOCAB_SIZE"
+retired = "HAS_ATTRIBUTE"
 bit = 131
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -2059,6 +2065,7 @@ family_root = "HAS_INPUT"
 # (HAS_HIDDEN_SIZE): scalar_valued, object = Scalar entity of the decimal string.
 [[relation]]
 canonical = "HAS_INPUT_TOKENS"
+retired = "HAS_ATTRIBUTE"
 bit = 216
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -2067,6 +2074,7 @@ family_root = "HAS_INPUT_TOKENS"
 
 [[relation]]
 canonical = "HAS_OUTPUT_TOKENS"
+retired = "HAS_ATTRIBUTE"
 bit = 217
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -2075,6 +2083,7 @@ family_root = "HAS_OUTPUT_TOKENS"
 
 [[relation]]
 canonical = "HAS_CACHE_READ_TOKENS"
+retired = "HAS_ATTRIBUTE"
 bit = 218
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -2083,6 +2092,7 @@ family_root = "HAS_CACHE_READ_TOKENS"
 
 [[relation]]
 canonical = "HAS_CACHE_CREATE_TOKENS"
+retired = "HAS_ATTRIBUTE"
 bit = 219
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -2092,6 +2102,7 @@ family_root = "HAS_CACHE_CREATE_TOKENS"
 # Turn → provider stop/termination reason (end_turn, tool_use, aborted, …).
 [[relation]]
 canonical = "HAS_STOP_REASON"
+retired = "HAS_ATTRIBUTE"
 bit = 220
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -2102,6 +2113,7 @@ family_root = "HAS_STOP_REASON"
 # reports one.
 [[relation]]
 canonical = "HAS_COST"
+retired = "HAS_ATTRIBUTE"
 bit = 221
 rank = "scalar_valued"
 symmetry = "asymmetric"

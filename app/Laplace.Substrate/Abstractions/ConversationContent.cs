@@ -73,7 +73,6 @@ public static class ConversationContent
     public static string MembershipRelation => DeclaredRelations[0];
     private static string AttributionRelation => DeclaredRelations[1];
     private static string RoleRelation => DeclaredRelations[2];
-    private static string InstanceRelation => DeclaredRelations[3];
     private static string DependencyRelation => DeclaredRelations[4];
 
     /// <summary>
@@ -278,14 +277,11 @@ public static class ConversationContent
             PhysicalityType.Content, centroid[0], centroid[1], centroid[2], centroid[3],
             hilbert, Trajectory.Build(members, flags), members.Length, null, null,
             IngestClock.NowUnixUs()));
-        Hash128 roleId = Hash128.OfCanonical($"agent/role/{role}/v1");
-        builder.AddEntity(roleId, EntityTier.Word, EntityTypeRegistry.ConversationTurn);
+        // The role is content: "user" is the text, the same entity it is anywhere else.
         Hash128 roleName = ContentEmitter.Emit(builder, role, sourceId)
             ?? throw new InvalidOperationException("Conversation role could not be composed.");
         builder.AddAttestation(NativeAttestation.Categorical(
-            roleId, InstanceRelation, roleName, sourceId, sessionId, trust));
-        builder.AddAttestation(NativeAttestation.Categorical(
-            id, RoleRelation, roleId, sourceId, sessionId, trust));
+            id, RoleRelation, roleName, sourceId, sessionId, trust));
         builder.AddAttestation(NativeAttestation.Categorical(
             id, MembershipRelation, sessionId, sourceId, sessionId, trust));
         if (participantKey is not null)

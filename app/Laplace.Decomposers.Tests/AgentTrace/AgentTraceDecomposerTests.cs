@@ -68,7 +68,7 @@ public sealed class AgentTraceDecomposerTests
             Hash128 calls = RelationTypeRegistry.Resolve("CALLS").Id;
             Hash128 hasInput = RelationTypeRegistry.Resolve("HAS_INPUT").Id;
             Hash128 hasResult = RelationTypeRegistry.Resolve("HAS_RESULT").Id;
-            Hash128 hasInputTokens = RelationTypeRegistry.Resolve("HAS_INPUT_TOKENS").Id;
+            Hash128 hasAttribute = RelationTypeRegistry.Resolve("HAS_ATTRIBUTE").Id;
             Hash128 precedes = RelationTypeRegistry.Resolve("PRECEDES").Id;
 
             Assert.Contains(entities, e =>
@@ -107,25 +107,26 @@ public sealed class AgentTraceDecomposerTests
             Assert.Contains(entities, e =>
                 e.Id == orderedTurnIds[1] && e.TypeId == EntityTypeRegistry.ConversationTurn);
 
+            // A role, a model id and a tool name are content, never keyed entities.
             Assert.Contains(attestations, a =>
                 a.TypeId == hasRole && a.SubjectId == orderedTurnIds[1]
-                && a.ObjectId == Hash128.OfCanonical("agent/role/assistant/v1"));
+                && a.ObjectId == ContentTierSpine.ResolveRoot("assistant"));
             Assert.Contains(attestations, a =>
                 a.TypeId == authoredBy && a.SubjectId == orderedTurnIds[1]
-                && a.ObjectId == Hash128.OfCanonical("agent/model/claude-opus-5/v1"));
+                && a.ObjectId == ContentTierSpine.ResolveRoot("claude-opus-5"));
             Assert.Contains(attestations, a =>
                 a.TypeId == calls && a.SubjectId == orderedTurnIds[1]
-                && a.ObjectId == Hash128.OfCanonical("agent/tool/Bash/v1"));
+                && a.ObjectId == ContentTierSpine.ResolveRoot("Bash"));
             Assert.Contains(attestations, a => a.TypeId == hasInput);
             Hash128? resultRoot = ContentTierSpine.ResolveRoot("all green");
             Assert.NotNull(resultRoot);
             Assert.Contains(attestations, a =>
                 a.TypeId == hasResult && a.ObjectId == resultRoot!.Value);
-            Hash128? tokens120 = ContentTierSpine.ResolveRoot("120");
-            Assert.NotNull(tokens120);
+            // Usage is the property value [input_tokens, 120] under HAS_ATTRIBUTE.
+            Hash128 inputTokens120 = PropertyValue("input_tokens", "120");
             Assert.Contains(attestations, a =>
-                a.TypeId == hasInputTokens && a.SubjectId == orderedTurnIds[1]
-                && a.ObjectId == tokens120!.Value);
+                a.TypeId == hasAttribute && a.SubjectId == orderedTurnIds[1]
+                && a.ObjectId == inputTokens120);
 
             Hash128? replyRoot = ContentTierSpine.ResolveRoot("Running the gate now.");
             Assert.NotNull(replyRoot);
@@ -141,6 +142,11 @@ public sealed class AgentTraceDecomposerTests
         }
     }
 
+    // [property, value]: the Merkle composition of the two content roots.
+    private static Hash128 PropertyValue(string property, string value) =>
+        Hash128.Merkle(EntityTier.Sentence,
+            [ContentTierSpine.ResolveRoot(property)!.Value, ContentTierSpine.ResolveRoot(value)!.Value]);
+
     [Fact]
     public async Task Session_Totals_Aggregate_Turn_Usage()
     {
@@ -154,12 +160,11 @@ public sealed class AgentTraceDecomposerTests
             var (_, _, attestations) = await RunAsync(dir);
 
             Hash128 sessionId = ConversationContent.SessionId("claude-code", SessionKey);
-            Hash128 hasInputTokens = RelationTypeRegistry.Resolve("HAS_INPUT_TOKENS").Id;
-            Hash128? total = ContentTierSpine.ResolveRoot("320");
-            Assert.NotNull(total);
+            Hash128 hasAttribute = RelationTypeRegistry.Resolve("HAS_ATTRIBUTE").Id;
+            Hash128 total = PropertyValue("input_tokens", "320");
             Assert.Contains(attestations, a =>
-                a.TypeId == hasInputTokens && a.SubjectId == sessionId
-                && a.ObjectId == total!.Value);
+                a.TypeId == hasAttribute && a.SubjectId == sessionId
+                && a.ObjectId == total);
         }
         finally
         {

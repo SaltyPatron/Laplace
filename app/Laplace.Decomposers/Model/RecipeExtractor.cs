@@ -67,24 +67,22 @@ public sealed class RecipeExtractor
     public static SubstrateChange BuildChange(
         RecipeInfo recipe,
         Hash128 sourceId,
-        Hash128 modelRecipeTypeId,
-        Hash128 hasHiddenSizeTypeId,
-        Hash128 hasNumLayersTypeId)
+        Hash128 modelRecipeTypeId)
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/laplace.recipe",
             entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 5)
             .DeclareSourcePrior(SourceTrust.AiModelProbe);
-        StageRecipe(b, recipe, sourceId, modelRecipeTypeId, hasHiddenSizeTypeId, hasNumLayersTypeId);
+        StageRecipe(b, recipe, sourceId, modelRecipeTypeId);
         return b.Build();
     }
+
+    private static readonly string[] DeclaredRelations = ["HAS_ATTRIBUTE"];
 
     public static void StageRecipe(
         SubstrateChangeBuilder b,
         RecipeInfo recipe,
         Hash128 sourceId,
-        Hash128 modelRecipeTypeId,
-        Hash128 hasHiddenSizeTypeId,
-        Hash128 hasNumLayersTypeId)
+        Hash128 modelRecipeTypeId)
     {
         b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId);
 
@@ -97,20 +95,18 @@ public sealed class RecipeExtractor
             recipe.RecipeEntityId, RelationTypeRegistry.RelationTypeId("ENCODES"),
             recipeContentId, sourceId, null, 1.0));
 
-        void AddScalar(Hash128 typeId, string value)
+        // A dimension is the property value [key, value] under HAS_ATTRIBUTE, with the
+        // key as the recipe states it; composed content, never a relation per property.
+        void AddProperty(string key, string value)
         {
-            // Scalar identity is the decomposed textual content root. Do not mint the
-            // same hash and then insert only a naked entity row: that creates an id that
-            // claims content identity without retaining the content hierarchy/physicality.
-            var valueId = ContentEmitter.Emit(b, Encoding.UTF8.GetBytes(value), sourceId)
-                ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
-            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar);
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                recipe.RecipeEntityId, typeId, valueId, sourceId, null, 1.0));
+            Hash128 fact = ContentEmitter.StagePropertyValue(b, key, value, sourceId)
+                ?? throw new InvalidOperationException($"recipe value {key}={value} has no content root");
+            b.AddAttestation(NativeAttestation.Categorical(
+                recipe.RecipeEntityId, DeclaredRelations[0], fact, sourceId, null, 1.0));
         }
 
-        AddScalar(hasHiddenSizeTypeId, recipe.HiddenSize);
-        AddScalar(hasNumLayersTypeId, recipe.NumLayers.ToString());
+        AddProperty("hidden_size", recipe.HiddenSize);
+        AddProperty("num_layers", recipe.NumLayers.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public static string CanonicalName(RecipeInfo recipe) =>

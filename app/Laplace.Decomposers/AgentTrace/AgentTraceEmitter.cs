@@ -162,20 +162,14 @@ public static class AgentTraceEmitter
                 tid, Rel(AgentRelation.AppearsIn), sessionId, roleSource, sessionId,
                 TC.AppDerived));
 
-            AttestCanonical(b, ts, tid, Rel(AgentRelation.HasRole),
-                CanonicalEntity(b, $"agent/role/{turn.Role}/v1", turn.Role,
-                    EntityTypeRegistry.ConversationTurn, coords: null),
-                sessionId);
-            if (IsRealModelId(turn.Model))
-                AttestCanonical(b, ts, tid, Rel(AgentRelation.AuthoredBy),
-                    CanonicalEntity(b, $"agent/model/{turn.Model}/v1", turn.Model!,
-                        EntityTypeRegistry.AgentModel, coords: null),
-                    sessionId);
+            // A role, a model id and a tool name are content: the text itself is the
+            // entity, and the claim that uses it says what it is.
+            if (ContentEmitter.Emit(b, turn.Role, LaneSource) is { } role)
+                AttestCanonical(b, ts, tid, Rel(AgentRelation.HasRole), role, sessionId);
+            if (IsRealModelId(turn.Model) && ContentEmitter.Emit(b, turn.Model!, LaneSource) is { } model)
+                AttestCanonical(b, ts, tid, Rel(AgentRelation.AuthoredBy), model, sessionId);
             if (!string.IsNullOrEmpty(turn.StopReason))
-                AttestCanonical(b, ts, tid, Rel(AgentRelation.HasStopReason),
-                    CanonicalEntity(b, $"agent/stop/{SanitizeKey(turn.StopReason)}/v1",
-                        turn.StopReason, EntityTypeRegistry.ConversationTurn, coords: null),
-                    sessionId);
+                AttestProperty(b, ts, tid, sessionId, "stop_reason", turn.StopReason);
 
             if (turn.Usage is { IsEmpty: false } usage)
             {
@@ -185,9 +179,7 @@ public static class AgentTraceEmitter
 
             foreach (var (call, invocationId, inputRoot, resultRoot) in invocations)
             {
-                Hash128 toolEntity = CanonicalEntity(
-                    b, $"agent/tool/{SanitizeKey(call.Name)}/v1", call.Name,
-                    EntityTypeRegistry.AgentTool, coords: null);
+                if (ContentEmitter.Emit(b, call.Name, LaneSource) is not { } toolEntity) continue;
                 Attest(b, ts, NativeAttestation.Categorical(
                     tid, Rel(AgentRelation.Calls), toolEntity, LaneSource, sessionId, TC.AppDerived));
                 if (invocationId is not { } inv) continue;
@@ -202,11 +194,11 @@ public static class AgentTraceEmitter
                     Attest(b, ts, NativeAttestation.Categorical(
                         inv, Rel(AgentRelation.HasResult), rr, LaneSource, sessionId, TC.AppDerived));
                 if (call.IsError)
-                    AttestMetaAttribute(b, ts, inv, sessionId, "is_error", "true", coords);
+                    AttestProperty(b, ts, inv, sessionId, "is_error", "true");
             }
 
             foreach (var (k, v) in turn.Meta)
-                AttestMetaAttribute(b, ts, tid, sessionId, k, v, coords);
+                AttestProperty(b, ts, tid, sessionId, k, v);
         }
 
         long endUs = session.EndedAtUnixUs > 0 ? session.EndedAtUnixUs : turnsUsedUs;
@@ -249,7 +241,7 @@ public static class AgentTraceEmitter
             Attest(b, endUs, NativeAttestation.Categorical(
                 sessionId, Rel(AgentRelation.HasContext), cwd, LaneSource, sessionId, TC.AppDerived));
         if (session.GitBranch is { Length: > 0 } branch)
-            AttestMetaAttribute(b, endUs, sessionId, sessionId, "gitBranch", branch, coords);
+            AttestProperty(b, endUs, sessionId, sessionId, "gitBranch", branch);
         if (session.UserKey is { Length: > 0 } user
             && Witness(b, user, scope.Tenant.PromptSource, coords, members: null) is { } userRoot)
             Attest(b, endUs, NativeAttestation.Categorical(
@@ -264,7 +256,7 @@ public static class AgentTraceEmitter
                     sessionId, Rel(AgentRelation.OnDate), dateRoot, LaneSource, sessionId, TC.AppDerived));
         }
         foreach (var (k, v) in session.Meta)
-            AttestMetaAttribute(b, endUs, sessionId, sessionId, k, v, coords);
+            AttestProperty(b, endUs, sessionId, sessionId, k, v);
         if (!totals.IsEmpty)
             EmitUsage(b, endUs, sessionId, sessionId, totals.ToUsage(), coords);
     }
@@ -348,65 +340,43 @@ public static class AgentTraceEmitter
         return list;
     }
 
-    private static Hash128 CanonicalEntity(
-        SubstrateChangeBuilder b, string canonicalKey, string surfaceName, Hash128 typeId,
-        Dictionary<Hash128, double[]>? coords)
-    {
-        Hash128 id = Hash128.OfCanonical(canonicalKey);
-        b.AddEntity(id, EntityTier.Word, typeId);
-        if (ContentEmitter.Emit(b, surfaceName, LaneSource) is { } nameRoot && nameRoot != id)
-            b.AddAttestation(NativeAttestation.Categorical(
-                id, Rel(AgentRelation.IsInstanceOf), nameRoot, LaneSource, null, TC.AppDerived));
-        _ = coords;
-        return id;
-    }
-
     private static void AttestCanonical(
         SubstrateChangeBuilder b, long ts, Hash128 subject, string relation, Hash128 obj,
         Hash128 sessionId) =>
         Attest(b, ts, NativeAttestation.Categorical(
             subject, relation, obj, LaneSource, sessionId, TC.AppDerived));
 
-    private static void AttestMetaAttribute(
-        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
-        string key, string value, Dictionary<Hash128, double[]> coords)
+    // A property the log states about a turn, invocation or session: the property value
+    // [key, value] under HAS_ATTRIBUTE, never "key=value" text and never a relation per key.
+    private static void AttestProperty(
+        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId, string key, string value)
     {
-        if (Witness(b, $"{key}={value}", LaneSource, coords, members: null) is { } kv)
+        if (ContentEmitter.StagePropertyValue(b, key, value, LaneSource) is { } fact)
             Attest(b, ts, NativeAttestation.Categorical(
-                subject, Rel(AgentRelation.HasAttribute), kv, LaneSource, sessionId, TC.AppDerived));
+                subject, Rel(AgentRelation.HasAttribute), fact, LaneSource, sessionId, TC.AppDerived));
     }
 
+    // Token usage and cost under the provider API's own field names, so every agent's
+    // usage converges on the same property values.
     private static void EmitUsage(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId, AgentUsage usage,
         Dictionary<Hash128, double[]> coords)
     {
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasInputTokens), usage.InputTokens, coords);
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasOutputTokens), usage.OutputTokens, coords);
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasCacheReadTokens), usage.CacheReadTokens, coords);
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasCacheCreateTokens), usage.CacheCreateTokens, coords);
+        _ = coords;
+        AttestCount(b, ts, subject, sessionId, "input_tokens", usage.InputTokens);
+        AttestCount(b, ts, subject, sessionId, "output_tokens", usage.OutputTokens);
+        AttestCount(b, ts, subject, sessionId, "cache_read_input_tokens", usage.CacheReadTokens);
+        AttestCount(b, ts, subject, sessionId, "cache_creation_input_tokens", usage.CacheCreateTokens);
         if (usage.CostUsd is { } cost)
-            AttestScalarText(b, ts, subject, sessionId, Rel(AgentRelation.HasCost),
-                cost.ToString("0.######", CultureInfo.InvariantCulture), coords);
+            AttestProperty(b, ts, subject, sessionId, "cost_usd",
+                cost.ToString("0.######", CultureInfo.InvariantCulture));
     }
 
-    private static void AttestScalar(
-        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
-        string relation, long? value, Dictionary<Hash128, double[]> coords)
+    private static void AttestCount(
+        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId, string key, long? value)
     {
         if (value is { } v)
-            AttestScalarText(b, ts, subject, sessionId, relation,
-                v.ToString(CultureInfo.InvariantCulture), coords);
-    }
-
-    private static void AttestScalarText(
-        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
-        string relation, string value, Dictionary<Hash128, double[]> coords)
-    {
-        if (Witness(b, value, LaneSource, coords, members: null) is not { } scalarRoot)
-            return;
-        b.AddEntity(scalarRoot, EntityTier.Word, EntityTypeRegistry.Scalar);
-        Attest(b, ts, NativeAttestation.Categorical(
-            subject, relation, scalarRoot, LaneSource, sessionId, TC.AppDerived));
+            AttestProperty(b, ts, subject, sessionId, key, v.ToString(CultureInfo.InvariantCulture));
     }
 
     private static void Attest(SubstrateChangeBuilder b, long eventUs, AttestationRow row) =>

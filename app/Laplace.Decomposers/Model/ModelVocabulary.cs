@@ -21,8 +21,7 @@ public static class ModelVocabulary
         "MERGES_WITH", "SIMILAR_TO", "ATTENDS", "OV_RELATES",
         "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO", "APPEARS_IN",
         "CONTAINS", "PRECEDES",
-        "HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS", "HAS_NUM_HEADS", "HAS_NUM_KV_HEADS",
-        "HAS_INTERMEDIATE_SIZE", "HAS_VOCAB_SIZE", "IS_A",
+        "HAS_ATTRIBUTE", "IS_A",
     ];
 }
 

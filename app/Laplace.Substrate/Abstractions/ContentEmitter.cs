@@ -53,6 +53,25 @@ public static class ContentEmitter
             node.Atom, node.Tier == 0);
     }
 
+    /// <summary>
+    /// A named property's value as content: the ordered composition [property, value]
+    /// ([hidden_size, 2048], [stop_reason, end_turn]) staged by the native ordered-
+    /// composition kernel. A claim states it under one relation (HAS_ATTRIBUTE); the
+    /// property is never a relation of its own and never a joined "key=value" string.
+    /// </summary>
+    public static Hash128? StagePropertyValue(
+        SubstrateChangeBuilder b, string property, string value, Hash128 sourceId)
+    {
+        if (StageComponent(b, property, sourceId) is not { } key
+            || StageComponent(b, value, sourceId) is not { } val)
+            return null;
+        Span<OrderedCompositionResult> result = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(b.ContentStage,
+            [new OrderedCompositionRequest([key, val], EntityTypeRegistry.PropertyValue, sourceId, 0)],
+            result);
+        return result[0].Id;
+    }
+
     public static Hash128? RootId(string surface) => ContentTierSpine.ResolveRoot(surface);
 
     public static Hash128? RootId(ReadOnlySpan<byte> canonical) => ContentTierSpine.ResolveRoot(canonical);

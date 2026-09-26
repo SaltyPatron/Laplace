@@ -105,19 +105,22 @@ WITH traj AS MATERIALIZED (
     FROM (SELECT array_agg(t.turn_id ORDER BY t.turn_id) AS ids FROM turn_ids t) batch,
          converse.message_content_ids(batch.ids) c
 ), labels AS MATERIALIZED (
-    SELECT r.subject_id AS turn_id, r.type_id, n.object_id AS name_id,
+    -- A role or model is content: the claim's object is the text itself. Sessions
+    -- admitted before that named a keyed entity whose IS_INSTANCE_OF edge carries the
+    -- text, so the name hop stays as the fallback.
+    SELECT r.subject_id AS turn_id, r.type_id, COALESCE(n.object_id, r.object_id) AS name_id,
            row_number() OVER (
                PARTITION BY r.subject_id, r.type_id
                ORDER BY consensus.eff_mu(r.rating, r.rd) DESC,
-                        consensus.eff_mu(n.rating, n.rd) DESC,
+                        consensus.eff_mu(n.rating, n.rd) DESC NULLS FIRST,
                         n.object_id, r.object_id) AS rank
     FROM turn_ids t
     CROSS JOIN relation_ids types
     JOIN laplace.consensus r ON r.subject_id = t.turn_id
         AND r.type_id IN (types.role_type, types.author_type)
-    JOIN laplace.consensus n ON n.subject_id = r.object_id
-        AND n.type_id = types.name_type
-    WHERE n.object_id IS NOT NULL
+    LEFT JOIN laplace.consensus n ON n.subject_id = r.object_id
+        AND n.type_id = types.name_type AND n.object_id IS NOT NULL
+    WHERE r.object_id IS NOT NULL
 ), observed AS MATERIALIZED (
     SELECT a.subject_id AS turn_id, max(a.last_observed_at) AS observed_at
     FROM turn_ids t

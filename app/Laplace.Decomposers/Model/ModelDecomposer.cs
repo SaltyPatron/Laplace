@@ -52,12 +52,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public static readonly Hash128 OvRelatesTypeId = RelationTypeRegistry.RelationTypeId("OV_RELATES");
     public static readonly Hash128 CompletesToTypeId = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
 
-    public static readonly Hash128 HasHiddenSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
-    public static readonly Hash128 HasNumLayersTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
-    public static readonly Hash128 HasNumHeadsTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_HEADS");
-    public static readonly Hash128 HasNumKvHeadsTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_KV_HEADS");
-    public static readonly Hash128 HasIntermSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_INTERMEDIATE_SIZE");
-    public static readonly Hash128 HasVocabSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
 
     public static readonly Hash128 ModelLayerTypeId = EntityTypeRegistry.ModelLayer;
 
@@ -393,30 +387,30 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     }
 
     // The config's declared dimensions, as the model witness states them about its
-    // checkpoint structure. Values are canonical scalar content; the config file is
-    // not minted as a recipe entity of its own.
-    private static readonly (string Key, Hash128 Relation)[] ConfigFacts =
+    // checkpoint structure: each is the property value [config key, value] under
+    // HAS_ATTRIBUTE. The key is the config's own vocabulary, never a relation of its own;
+    // the config file is not minted as a recipe entity of its own.
+    private static readonly string[] DeclaredRelations = ["HAS_ATTRIBUTE"];
+    private static string HasAttribute => DeclaredRelations[0];
+
+    private static readonly string[] ConfigFacts =
     [
-        ("hidden_size", HasHiddenSizeTypeId),
-        ("num_hidden_layers", HasNumLayersTypeId),
-        ("num_attention_heads", HasNumHeadsTypeId),
-        ("num_key_value_heads", HasNumKvHeadsTypeId),
-        ("intermediate_size", HasIntermSizeTypeId),
-        ("vocab_size", HasVocabSizeTypeId),
+        "hidden_size", "num_hidden_layers", "num_attention_heads", "num_key_value_heads",
+        "intermediate_size", "vocab_size",
     ];
 
     private int StageConfigFacts(
         SubstrateChangeBuilder b, Hash128 checkpoint, IReadOnlyDictionary<string, long> config)
     {
         int written = 0;
-        foreach ((string key, Hash128 relation) in ConfigFacts)
+        foreach (string key in ConfigFacts)
         {
             if (!config.TryGetValue(key, out long value)) continue;
-            Hash128 valueId = ContentEmitter.Emit(
-                    b, System.Text.Encoding.UTF8.GetBytes(value.ToString(System.Globalization.CultureInfo.InvariantCulture)), _source)
-                ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                checkpoint, relation, valueId, _source, null, 1.0));
+            Hash128 fact = ContentEmitter.StagePropertyValue(
+                    b, key, value.ToString(System.Globalization.CultureInfo.InvariantCulture), _source)
+                ?? throw new InvalidOperationException($"config value {key}={value} has no content root");
+            b.AddAttestation(NativeAttestation.Categorical(
+                checkpoint, HasAttribute, fact, _source, null, 1.0));
             written++;
         }
         return written;

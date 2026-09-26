@@ -127,6 +127,12 @@ canonical = "FrameNet_Valence_Pattern"
 [[type]]
 canonical = "Morphological_Feature"
 
+# A named property's value: the ordered composition [property, value], for example
+# [hidden_size, 2048] in a model config or [input_tokens, 1234] in an agent trace. The
+# property name is the source's own vocabulary (content), never a relation of its own.
+[[type]]
+canonical = "Property_Value"
+
 [[type]]
 canonical = "Grapheme"
 
