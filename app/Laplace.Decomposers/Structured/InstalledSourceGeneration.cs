@@ -38,7 +38,7 @@ public sealed class InstalledSourceGeneration
             0 => throw new FileNotFoundException(
                 $"No installed recipe matches authority='{authority}', release='{release ?? "selected"}', syntax='{syntax}' in '{root}'."),
             _ => throw new InvalidOperationException(
-                $"Several installed recipes match authority='{authority}', release='{release ?? "selected"}', syntax='{syntax}'. Select the exact recipe with LAPLACE_COOKBOOK_PATH."),
+                $"Several installed recipes match authority='{authority}', release='{release ?? "selected"}', syntax='{syntax}'. Choose the exact recipe with LAPLACE_COOKBOOK_PATH."),
         };
     }
 

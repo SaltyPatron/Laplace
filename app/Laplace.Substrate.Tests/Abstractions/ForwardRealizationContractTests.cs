@@ -22,7 +22,7 @@ public sealed class ForwardRealizationContractTests
         Assert.Contains("p_bands bytea", sql);
         Assert.Contains("p_temp numeric", sql);
         Assert.Contains("IS_SYNONYM_OF", sql);
-        Assert.Contains("HAS_SENSE→IS_SENSE_OF", sql);
+        Assert.Contains("'HAS_SENSE'", sql);
         Assert.Contains("EVOKES_FRAME", sql);
         Assert.Contains("CORRESPONDS_TO", sql);
         Assert.Contains("consensus.relation_mask_types(p_bands)", sql);

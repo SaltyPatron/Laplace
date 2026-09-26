@@ -21,7 +21,7 @@ BEGIN ATOMIC
         SELECT count(*)::bigint AS n FROM ev WHERE channel = 'usage'
     ), labels AS (
         SELECT realize.batch(ARRAY[b.x_key, b.via, b.y_key], (SELECT l FROM lang)) AS l,
-               lexical.type_label(b.relation) AS rel
+               (lexical.type_label_batch(ARRAY[b.relation]))[1] AS rel
         FROM best b
     )
     SELECT CASE WHEN b.channel IS NULL THEN NULL

@@ -9,6 +9,7 @@
   },
   "manifest_order": [
     "unicode",
+    "uca",
     "iso639",
     "operational",
     "cili",
@@ -17,6 +18,7 @@
     "oewn",
     "omw",
     "verbnet",
+    "verbnet-gl",
     "propbank",
     "framenet",
     "mapnet",

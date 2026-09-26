@@ -5,8 +5,8 @@ source="${1:-}"
 path="${2:-}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
-FLOOR=(unicode iso639 operational cili)
-KNOWLEDGE=(wordnet oewn omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
+FLOOR=(unicode uca iso639 operational cili)
+KNOWLEDGE=(wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 USAGE=(tatoeba opensubtitles)
 
 if [[ -z "$source" ]]; then

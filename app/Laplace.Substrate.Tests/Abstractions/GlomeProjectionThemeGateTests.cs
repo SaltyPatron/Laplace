@@ -19,8 +19,12 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("const radius4", canvas, StringComparison.Ordinal);
         Assert.Contains("const displayRadius = SHELL * Math.max(0.02, radius4)", canvas, StringComparison.Ordinal);
         Assert.Contains("<color attach=\"background\"", canvas, StringComparison.Ordinal);
-        Assert.Contains("<meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />", canvas, StringComparison.Ordinal);
-        Assert.Contains("material.needsUpdate = true", canvas, StringComparison.Ordinal);
+        // Nodes are painted by their per-instance color; a vertexColors material multiplies
+        // by a color attribute the sphere geometry lacks and renders every node black.
+        Assert.Contains("mesh.setColorAt(", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("<meshBasicMaterial vertexColors", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("vertexColors: true", canvas, StringComparison.Ordinal);
+        Assert.Contains("mesh.instanceColor.needsUpdate = true", canvas, StringComparison.Ordinal);
         Assert.Contains("export function carrierDisplayPos", canvas, StringComparison.Ordinal);
         Assert.Contains("Math.max(-1, Math.min(1, n.x)) * SHELL", canvas, StringComparison.Ordinal);
 
@@ -56,8 +60,10 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("Database verification failed", proof, StringComparison.Ordinal);
         Assert.Contains("<h3>Finite address ledger</h3>", proof, StringComparison.Ordinal);
         Assert.Contains("projection=\"carrier\"", proof, StringComparison.Ordinal);
-        Assert.Contains("Packed X/Y/Z sign+mantissa payloads are mapped independently into 3-D bit-space", proof, StringComparison.Ordinal);
-        Assert.Contains("M is metadata (ordinal/run/flags), not a spatial axis", proof, StringComparison.Ordinal);
+        // The packed carrier and the constituents' live coordinates are two views, never
+        // one another.
+        Assert.Contains("the exact packed identity carrier transformed into a 4-D bit-space display", proof, StringComparison.Ordinal);
+        Assert.Contains("the same ordered constituents at their real live coordinates", proof, StringComparison.Ordinal);
         Assert.DoesNotContain("'alignment unknown'", proof, StringComparison.Ordinal);
     }
 

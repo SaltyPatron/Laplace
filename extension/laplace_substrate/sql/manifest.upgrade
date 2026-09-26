@@ -1,4 +1,3 @@
-schema/retire_interpretation_observation.sql.in
 schema/purpose_schemas.sql.in
 schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
@@ -498,9 +497,5 @@ functions/converse/election_token_profile.sql.in
 functions/structural/geometry_audit.sql.in
 functions/converse/resolve_audit.sql.in
 functions/mu/drop_retired_foundry_weight_knobs.sql.in
-schema/retire_interpretation_tables.sql.in
 views/v_entities_highway.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
-schema/retire_bootstrap_vocabulary.sql.in
-schema/retire_side_tables.sql.in
-schema/retire_completion_markers.sql.in

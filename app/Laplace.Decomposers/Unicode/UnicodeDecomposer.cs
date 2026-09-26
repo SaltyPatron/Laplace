@@ -760,7 +760,7 @@ public sealed class UnicodeDecomposer
                     throw new InvalidOperationException(
                         $"Unicode artifact graph admits '{artifact.Id}' even though its semantic fields "
                         + "are owned by the selected ucd.all.grouped.xml recipe. Mark the artifact "
-                        + "superseded (or select a source generation whose recipe does not cover it); "
+                        + "superseded (or choose a source generation whose recipe does not cover it); "
                         + "duplicate Unicode testimony is not admitted.");
                 if (IsSingletonArtifactRole(kind) && !singletonKinds.Add(kind))
                     throw new InvalidOperationException(

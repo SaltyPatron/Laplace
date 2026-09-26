@@ -54,8 +54,13 @@ public sealed class DecomposerArchitectureGateTests
     /// DecomposerOrchestrator was removed in Wave 3 — multi-phase sources use
     /// <see cref="DecomposerMultiPhase"/> with nested ComposeDecomposerPhase types.
     /// </summary>
+    // The generic decomposer itself: every recipe source runs through it, so the gates that
+    // route decomposers to it do not apply to its own definition.
+    private const string GenericDecomposer = "Laplace.Decomposers/Structured/Decomposer.cs";
+
     private static readonly HashSet<string> MultiPhaseAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
+        GenericDecomposer,
         "Laplace.Decomposers/CILI/CILIDecomposer.cs",
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
@@ -266,6 +271,10 @@ public sealed class DecomposerArchitectureGateTests
             "app/Laplace.Decomposers/ISO/LanguageGraph.cs",
             "app/Laplace.Decomposers/Model/LlamaRecipeExtractor.cs",
             "app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs",
+            // Laplace's own source-generation manifests (*.source.json): the install
+            // configuration that selects what is ingested, not source content.
+            "app/Laplace.Decomposers/Composition/SourceGenerationCatalog.cs",
+            "app/Laplace.Decomposers/Structured/SourceGenerationRecipe.cs",
             "app/Laplace.Decomposers/Model/ModelConfigReader.cs",
             "app/Laplace.Decomposers/Model/RecipeDescriptor.cs",
             "app/Laplace.Decomposers/Model/RecipeExtractor.cs",
@@ -686,7 +695,7 @@ public sealed class DecomposerArchitectureGateTests
             {
                 if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
                 var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
-                if (HandBuilderAllowlist.Contains(rel)) continue;
+                if (HandBuilderAllowlist.Contains(rel) || $"{projectRel}/{rel}" == GenericDecomposer) continue;
 
                 var text = File.ReadAllText(file);
                 if (!text.Contains("DecomposeAsync", StringComparison.Ordinal)) continue;
@@ -795,9 +804,11 @@ public sealed class DecomposerArchitectureGateTests
             {
                 if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
                 var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                if ($"{projectRel}/{rel}" == GenericDecomposer) continue;
                 var text = File.ReadAllText(file);
-                // Direct ": IDecomposer" without an intervening base class name.
-                if (Regex.IsMatch(text, @":\s*IDecomposer\b"))
+                // A decomposer type declaring ": IDecomposer" first, without a base class. A
+                // phase nested inside a multi-phase decomposer is that decomposer's part.
+                if (Regex.IsMatch(text, @"class\s+\w*Decomposer\b[^{]*?:\s*IDecomposer\b"))
                     violations.Add($"{projectRel}/{rel}");
             }
         }
@@ -892,6 +903,7 @@ public sealed class DecomposerArchitectureGateTests
 
         foreach (var rel in MultiPhaseAllowlist)
         {
+            if (rel == GenericDecomposer) continue;
             var path = Path.Combine(repoRoot, "app", rel.Replace('/', Path.DirectorySeparatorChar));
             Assert.True(File.Exists(path), $"missing MultiPhaseAllowlist entry: {rel}");
             var text = File.ReadAllText(path);

@@ -14,9 +14,12 @@ public sealed class IngestFileJournalStateTests
         var text = File.ReadAllText(observability);
 
         Assert.Contains("status = 'composed'", text, StringComparison.Ordinal);
+        // A run that ends leaves every file it had not finished visible as incomplete.
+        var runs = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "sql", "functions", "ops", "ingest_runs.sql.in"));
         Assert.Contains(
-            "WHERE f.status IN ('running','composed')",
-            text,
+            "f.status IN ('inventoried', 'running', 'composed')",
+            runs,
             StringComparison.Ordinal);
     }
 }

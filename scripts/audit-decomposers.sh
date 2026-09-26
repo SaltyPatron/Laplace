@@ -128,12 +128,12 @@ fi
 AUDIT_FAIL=0
 declare -A LAYER=(
   [iso639]=1
-  [wordnet]=2 [omw]=3 [verbnet]=4 [propbank]=5 [framenet]=6
-  [mapnet]=7 [wordframenet]=8 [semlink]=9
-  [conceptnet]=10 [atomic2020]=11 [ud]=12 [wiktionary]=13
-  [tatoeba]=14 [opensubtitles]=15
+  [wordnet]=2 [oewn]=3 [omw]=4 [verbnet]=5 [verbnet-gl]=6 [propbank]=7 [framenet]=8
+  [mapnet]=9 [wordframenet]=10 [semlink]=11
+  [conceptnet]=12 [atomic2020]=13 [ud]=14 [wiktionary]=15
+  [tatoeba]=16 [opensubtitles]=17
 )
-KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
+KNOWLEDGE=(wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 LADDER=(iso639 "${KNOWLEDGE[@]}")
 [[ $FULL -eq 1 ]] && LADDER+=(tatoeba opensubtitles)
 for src in "${LADDER[@]}"; do

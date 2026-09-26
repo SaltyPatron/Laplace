@@ -38,7 +38,7 @@ exit /b 0
 :stage_knowledge
 
 
-for %%s in (cili wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary) do (
+for %%s in (cili wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary) do (
   call "%SCRIPTS%seed-step.cmd" %%s || exit /b 1
 )
 exit /b 0

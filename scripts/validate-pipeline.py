@@ -63,11 +63,13 @@ def validate_retired_workflows() -> list[str]:
     else:
         text = read_text(laplace)
         compact = re.sub(r"\s+", "", text)
-        # Main delivery is automatic only. Manual maintenance lives in a separate
-        # operator workflow so the main Actions graph remains one source-to-product chain.
+        # Main delivery is automatic. Its one manual form replays delivery of the product
+        # work not yet installed, planned from the installed base_sha; other manual
+        # maintenance lives in the operator workflow, so the main Actions graph remains one
+        # source-to-product chain.
         if "push:branches:[main]" not in compact:
             errs.append("laplace.yml: expected push trigger on main")
-        if "workflow_dispatch:" in compact:
+        if "workflow_dispatch:" in compact and "workflow_dispatch:inputs:base_sha:" not in compact:
             errs.append("laplace.yml: manual dispatch belongs in product-operator.yml")
         if "pull_request:" in compact:
             errs.append("laplace.yml: pull_request trigger forbidden (self-hosted runner)")
@@ -273,7 +275,7 @@ def parse_audit_layer_map(text: str) -> dict[str, int] | None:
     if not m:
         return None
     out: dict[str, int] = {}
-    for key, val in re.findall(r"\[(\w+)\]=(\d+)", m.group(1)):
+    for key, val in re.findall(r"\[([\w-]+)\]=(\d+)", m.group(1)):
         out[key] = int(val)
     return out or None
 
@@ -528,9 +530,7 @@ def validate_type_identity_law() -> list[str]:
         (ROOT / "scripts", (".py", ".sql", ".sh")),
     ]
     skip_dirs = {"audit-2026-06-26", "node_modules", "bin", "obj"}
-    # The upgrade step that retires ingest-completion attestations names their
-    # historical ids in order to delete them.
-    skip_files: set[str] = {"retire_completion_markers.sql.in"}
+    skip_files: set[str] = set()
 
     for root, suffixes in scan_roots:
         if not root.is_dir():
@@ -592,7 +592,8 @@ def main() -> int:
     eviction_sql = read_text(
         ROOT / "extension" / "laplace_substrate" / "sql" / "functions" / "ops" / "evict_source.sql.in"
     )
-    for receipt in ("file checkpoint(s)", "replay claim(s)"):
+    # Resume is decided by unit and layer completion receipts; eviction must clear both.
+    for receipt in ("layer completion(s)", "unit completion(s)", "replay claim(s)"):
         if receipt not in eviction_sql:
             errs.append(f"evict_source.sql.in: eviction receipt missing {receipt}")
 

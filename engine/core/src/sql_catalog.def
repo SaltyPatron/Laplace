@@ -517,17 +517,6 @@ SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
     "UNION ALL SELECT 3::int2,a.id,a.observation_count FROM laplace.attestations a "
     "WHERE a.id=ANY($3) AND a.type_id=ANY($4)")
 
-/* Native generated-stage deposit: one caller transaction and fixed set queries. */
-SQL_QUERY("ingest.generated_stage_sink.epoch", "",
-    "SELECT nextval('laplace.apply_write_epoch')")
-SQL_QUERY("ingest.generated_stage_sink.presence", "bytea[]",
-    "SELECT DISTINCT id FROM laplace.entities WHERE id=ANY($1)")
-SQL_QUERY("ingest.generated_stage_sink.physicality_presence", "bytea[]",
-    "SELECT id FROM laplace.physicalities WHERE id=ANY($1)")
-SQL_QUERY("ingest.generated_stage_sink.entities", "bytea[],int2[],bytea[]",
-    "INSERT INTO laplace.entities(id,tier,type_id) SELECT r.* FROM unnest($1,$2,$3) r(id,tier,type_id) ORDER BY r.id RETURNING id")
-SQL_QUERY("ingest.generated_stage_sink.physicalities", "bytea[],bytea[],int2[],bytea[],bytea[],bytea[],int4[],float8[],int4[],timestamptz[]",
-    "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT r.id,r.entity,r.type,public.ST_GeomFromEWKB(r.coord),r.hilbert,public.ST_GeomFromEWKB(r.trajectory),r.n,r.residual,r.dim,r.observed FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) r(id,entity,type,coord,hilbert,trajectory,n,residual,dim,observed) ORDER BY r.id RETURNING id")
 /* Direct indexed containment selects candidates, never unverified body rows. */
 SQL_QUERY("readback.physicality_form_candidates", "bytea,bytea[],bytea,int4",
     "SELECT candidate.entity_id FROM ("

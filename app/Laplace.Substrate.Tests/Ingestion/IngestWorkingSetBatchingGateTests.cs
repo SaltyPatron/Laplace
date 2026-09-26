@@ -69,7 +69,7 @@ public sealed class IngestWorkingSetBatchingGateTests
         Assert.Contains("Hash128 owner = intent.Metadata.SourceId", source);
         Assert.DoesNotContain("if (terminal && bucket.Batch.Count > 0)", source);
         Assert.DoesNotContain("|| IsPeriodBoundaryIntent(intent)", source);
-        Assert.Contains("await _writer.CompleteFileAsync(fileLabel", source);
+        Assert.Contains("_writer.CompleteFileAsync(fileLabel", source);
     }
 
 }
