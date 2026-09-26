@@ -437,6 +437,21 @@ public static class NativeRecipeCompiler
                 WriteText(writer, pair.Value);
             }
         }
+        if (version >= Rcp8)
+        {
+            // The whole value-alias table, for parts that resolve by a record's property.
+            bool aliasBy = recipe.ProviderRoutes.Any(static r => (r.Subject.IdentityParts ?? []).Any(static p => p.AliasBy is not null))
+                || recipe.Fields.Any(static f => (f.ObjectParts ?? []).Any(static p => p.AliasBy is not null));
+            var table = aliasBy ? recipe.ValueAliases.OrderBy(static p => p.Key, StringComparer.Ordinal).ToArray() : [];
+            writer.Write(checked((uint)table.Length));
+            foreach (var pair in table)
+            {
+                int separator = pair.Key.IndexOf('\0');
+                WriteText(writer, pair.Key[..separator]);
+                WriteText(writer, pair.Key[(separator + 1)..]);
+                WriteText(writer, pair.Value);
+            }
+        }
 
         writer.Flush();
         return image.ToArray();
@@ -461,6 +476,7 @@ public static class NativeRecipeCompiler
             writer.Write(part.Nested ? 1u : 0u);
             writer.Write(part.Aliased ? 1u : 0u);
             writer.Write(part.Codepoints ? 1u : 0u);
+            WriteText(writer, part.AliasBy);
         }
     }
 

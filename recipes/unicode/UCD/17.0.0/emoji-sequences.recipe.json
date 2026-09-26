@@ -35,16 +35,42 @@
       "disposition": "Excluded"
     },
     {
-      "syntaxPath": "missing/@range",
-      "propertyName": "range",
+      "syntaxPath": "missing/@value",
+      "propertyName": "default",
       "valueKind": "Text",
-      "disposition": "Excluded"
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "qualifiers": [
+        "character_property/default"
+      ],
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Sequence_Type"
+        },
+        {
+          "path": "value()"
+        }
+      ]
     },
     {
-      "syntaxPath": "missing/@value",
-      "propertyName": "value",
+      "syntaxPath": "missing/@codepoints",
+      "propertyName": "codepoints",
       "valueKind": "Text",
-      "disposition": "Identity"
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "missing/@first",
+      "propertyName": "first",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "missing/@last",
+      "propertyName": "last",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
     }
   ],
   "providerRoutes": [
@@ -77,18 +103,10 @@
       "fieldPrefix": "missing",
       "structurePaths": [],
       "subject": {
-        "kind": "Composition",
-        "identityField": "value",
-        "entityType": "Property_Value",
-        "identityParts": [
-          {
-            "path": "",
-            "literal": "Emoji_Sequence_Type"
-          },
-          {
-            "path": "@value"
-          }
-        ]
+        "kind": "CodepointInterval",
+        "identityField": "codepoints",
+        "rangeStartField": "first",
+        "lastField": "last"
       }
     }
   ],
@@ -107,7 +125,7 @@
     "directivePrefix": "@missing:",
     "directiveRecordName": "missing",
     "directiveColumns": [
-      "range",
+      "codepoints",
       "value"
     ]
   }

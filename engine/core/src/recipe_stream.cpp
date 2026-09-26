@@ -151,6 +151,7 @@ struct route_rule {
         bool nested = false;      // the pieces compose one inner composition typed scope_type
         bool aliased = false;     // resolve through the enclosing route's or field's value aliases
         bool codepoints = false;  // the value is hex code points: the part is their text
+        std::string alias_by;     // resolve through the aliases of the property this attribute names
     };
     std::vector<identity_part> subject_parts;
     struct element_rule {
@@ -325,6 +326,7 @@ static void read_identity_parts(image_reader& r, std::vector<route_rule::identit
                         const uint32_t codepoints = r.number();
                         if (codepoints > 1) throw std::runtime_error("invalid code-point identity part at " + where);
                         part.codepoints = codepoints != 0;
+                        part.alias_by = r.text();
                         if (part.side == 3 && !part.scope.empty())
                             throw std::runtime_error("a split-each identity part cannot be scoped at " + where);
                         if (part.path.empty() && part.children.empty() && part.literal.empty())
@@ -418,6 +420,8 @@ struct laplace_recipe_stream {
     // RCP8 per-field object parts: the object is the composition of these parts read
     // from the lowering attributes (a full-text target's LU [frameName, lemma, UPOS]).
     std::unordered_map<std::string, std::vector<route_rule::identity_part>> object_parts;
+    // Every value alias of the recipe, by (property, value), for AliasBy parts.
+    std::unordered_map<std::string, std::string> property_aliases;
     hash128_t object_from_parts(intent_stage_t* stage, const field_rule& rule,
                                 const std::map<std::string, std::string>& attributes, const std::string& value) {
         const auto parts = object_parts.find(rule.path);
@@ -1545,6 +1549,16 @@ struct laplace_recipe_stream {
                 laplace_ordered_component_t atom{};
                 if (codepoint_value(stage, text, atom)) { sink.push_back(atom); close_nested(); continue; }
             }
+            if (!part.alias_by.empty() && !text.empty()) {
+                std::string property;
+                const std::string key = part.alias_by.rfind("@", 0) == 0 ? part.alias_by.substr(1) : part.alias_by;
+                if (value_map) { const auto h = value_map->find(key); if (h != value_map->end()) property = h->second; }
+                if (property.empty() && scope_attributes) {
+                    const auto h = scope_attributes->find(key); if (h != scope_attributes->end()) property = h->second;
+                }
+                const auto hit = property_aliases.find(alias_key(property) + '\0' + alias_key(text));
+                if (hit != property_aliases.end()) text = hit->second;
+            }
             if (part.aliased) {
                 if (!aliases) throw std::runtime_error("an aliased identity part has no value aliases: " + part.path);
                 const auto hit = aliases->find(alias_key(text)); if (hit != aliases->end()) text = hit->second;
@@ -2095,6 +2109,13 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             for (const auto& route : s->routes)
                 if (!route.second.identity_table.empty() && !s->tables.count(route.second.identity_table))
                     throw std::runtime_error("route references undeclared identity table " + route.first);
+        }
+        if (rcp8) {
+            const uint32_t aliases = r.number();
+            for (uint32_t k = 0; k < aliases; ++k) {
+                auto property = r.text(); auto value = r.text(); auto canonical = r.text();
+                s->property_aliases[alias_key(property) + '\0' + alias_key(value)] = std::move(canonical);
+            }
         }
         if (r.remaining) throw std::runtime_error("trailing recipe instructions");
         if (provider_kind == 0) {

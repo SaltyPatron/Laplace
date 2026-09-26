@@ -323,7 +323,11 @@ public sealed record SourceIdentityPart(
     bool Aliased = false,
     // The value is code points (hex, space-separated): the part is their text, a single
     // character being its own atom ([Bidi_Paired_Bracket, ")"]).
-    bool Codepoints = false);
+    bool Codepoints = false,
+    // The value resolves through the value aliases of the property named by this
+    // attribute ("@property": a PropertyValueAliases @missing default "n" of
+    // Bidi_Paired_Bracket_Type is None).
+    string? AliasBy = null);
 
 public enum SourceIdentitySide { Whole = 0, Before = 1, After = 2, Each = 3 }
 
