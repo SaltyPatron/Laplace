@@ -7,43 +7,52 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class OperatorLanguageTests
 {
     [Fact]
-    public void ExplicitLanguageOverridesHeaderAndCanonicalizes()
+    public void ExplicitLanguageOverridesHeaderAsWritten()
     {
         var request = new DefaultHttpContext().Request;
         request.Headers.AcceptLanguage = "en-US,en;q=0.9";
 
-        Assert.True(OperatorLanguage.TryResolve(
-            request, "Japanese", out var language, out var invalid));
+        var language = OperatorLanguage.Resolve(request, " Japanese ");
 
-        Assert.Null(invalid);
-        Assert.Equal("jpn", language?.Code);
+        Assert.Equal("Japanese", language?.Code);
         Assert.Equal("request", language?.Source);
-        Assert.Equal(LanguageReference.IdForResolvedCode("jpn").ToBytes(), language?.Id);
+        Assert.Equal(LanguageReference.IdForResolvedCode("Japanese").ToBytes(), language?.Id);
     }
 
     [Fact]
-    public void AcceptLanguageUsesQualityThenCanonicalizes()
+    public void AcceptLanguageUsesQualityAndKeepsTheTagAsWritten()
     {
         var request = new DefaultHttpContext().Request;
         request.Headers.AcceptLanguage = "en-US;q=0.2, ja-JP;q=0.9";
 
-        Assert.True(OperatorLanguage.TryResolve(
-            request, null, out var language, out var invalid));
+        var language = OperatorLanguage.Resolve(request, null);
 
-        Assert.Null(invalid);
-        Assert.Equal("jpn", language?.Code);
+        Assert.Equal("ja-JP", language?.Code);
+        Assert.Equal("accept-language", language?.Source);
+        Assert.Equal(LanguageReference.IdForResolvedCode("ja-JP").ToBytes(), language?.Id);
+    }
+
+    [Fact]
+    public void BlankExplicitLanguageFallsThroughToTheHeader()
+    {
+        var request = new DefaultHttpContext().Request;
+        request.Headers.AcceptLanguage = "fr-CA";
+
+        var language = OperatorLanguage.Resolve(request, "   ");
+
+        Assert.Equal("fr-CA", language?.Code);
         Assert.Equal("accept-language", language?.Source);
     }
 
     [Fact]
-    public void UnknownExplicitLanguageIsRejectedRatherThanMappedToUndetermined()
+    public void UnrecognizedExplicitLanguageIsCarriedAsContentNotMappedToUndetermined()
     {
         var request = new DefaultHttpContext().Request;
 
-        Assert.False(OperatorLanguage.TryResolve(
-            request, "zz-not-a-language", out var language, out var invalid));
+        var language = OperatorLanguage.Resolve(request, "zz-not-a-language");
 
-        Assert.Null(language);
-        Assert.Equal("zz-not-a-language", invalid);
+        Assert.Equal("zz-not-a-language", language?.Code);
+        Assert.Equal("request", language?.Source);
+        Assert.NotEqual(LanguageReference.IdForResolvedCode("und").ToBytes(), language?.Id);
     }
 }

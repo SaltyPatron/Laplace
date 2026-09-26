@@ -76,10 +76,7 @@ internal static class InferenceEndpoints
                 request, tenantResolver, payload.Session, payload.User, ct);
             if (scopeError is not null) return scopeError;
 
-            if (!OperatorLanguage.TryResolve(request, payload.Language,
-                    out var operatorLanguage, out var invalidLanguage))
-                return EndpointJson.BadRequest("invalid_language",
-                    $"Field 'language' does not resolve to an ISO 639 language: '{invalidLanguage}'.");
+            var operatorLanguage = OperatorLanguage.Resolve(request, payload.Language);
 
             bool tenantScoped = string.Equals(payload.Scope, "tenant", StringComparison.Ordinal);
             if (payload.Scope is not null && !tenantScoped)

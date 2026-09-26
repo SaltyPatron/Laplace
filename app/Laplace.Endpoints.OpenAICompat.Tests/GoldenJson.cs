@@ -92,6 +92,12 @@ internal static partial class GoldenJson
                         obj[key] = 0;
                         continue;
                     }
+                    // Each served prompt occurrence is minted a fresh key.
+                    if (key == "prompt_occurrence_key" && value is JsonValue)
+                    {
+                        obj[key] = "<occurrence>";
+                        continue;
+                    }
                     if (key == "created" && value is JsonValue cv && cv.TryGetValue<long>(out var unix) && unix > 0)
                     {
                         obj[key] = 0;

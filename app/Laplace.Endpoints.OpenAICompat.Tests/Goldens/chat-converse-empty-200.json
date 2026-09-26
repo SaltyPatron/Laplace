@@ -18,14 +18,50 @@
     "reply_rows": 0,
     "session": "golden-empty-session",
     "laplace": {
-      "provenance": []
+      "provenance": [],
+      "forward_proof": {
+        "session": "golden-empty-session",
+        "prompt_occurrence_key": "<occurrence>",
+        "response_witnessed": true,
+        "completion": true,
+        "disposition": "complete",
+        "required_obligations": 0,
+        "satisfied_obligations": 0,
+        "remaining_required": 0,
+        "output_count": 0,
+        "prior_discourse_ids": [],
+        "events": [
+          {
+            "step": 0,
+            "entity_id_hex": "",
+            "entity": "",
+            "stride_used": 0,
+            "root_id_hex": "",
+            "candidate_count": 0,
+            "ordered_context_count": 0,
+            "proposal_channel_count": 0,
+            "exact_channel_count": 0,
+            "sequence_occurrences": 0,
+            "covered_occurrences": 0,
+            "relation_families": 0,
+            "opposed_occurrences": 0,
+            "support_sources": 0,
+            "support_contexts": 0,
+            "declared_result": false,
+            "event": "witness",
+            "routing_round": 0
+          }
+        ]
+      }
     },
     "performance": {
       "substrate_ms": 0,
       "elapsed_ms": 0,
       "output_utf8_bytes": 0,
       "output_codepoints": 0,
-      "output_words": 0
+      "output_words": 0,
+      "generated_tokens": 0,
+      "generated_tokens_per_second": 0
     }
   }
 }

@@ -191,6 +191,18 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         string prompt, byte[]? session, ConverseOptions options,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        // An explicit operator language is echoed so an endpoint test can observe
+        // the tag that reached the substrate client on the ordinary forward lane.
+        if (string.Equals(options.LanguageSource, "request", StringComparison.Ordinal))
+        {
+            string echo = $"language={options.LanguageCode}";
+            yield return new ForwardObservedEvent(1, "emit", 0, string.Empty, echo, echo, 0, string.Empty);
+            yield return new ForwardObservedEvent(
+                1, "complete", 0, string.Empty, string.Empty, null, 0, string.Empty,
+                Completion: true, Disposition: "complete", OutputCount: 1,
+                PriorDiscourseIds: Array.Empty<string>());
+            yield break;
+        }
         var count = 0;
         await foreach (var token in ForwardTurnStreamAsync(prompt, session, options, ct))
         {
@@ -226,14 +238,11 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
         string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
         options.Shape is null && options.Bands is null && !options.Elaborate
-            && !string.Equals(options.LanguageSource, "request", StringComparison.Ordinal)
             ? ForwardRowsAsync(prompt, session, options, ct)
             : Task.FromResult<IReadOnlyList<ConverseRow>>(
             [
                 new ConverseRow(
-                    options.Shape is null && options.Bands is null && !options.Elaborate
-                        ? $"language={options.LanguageCode}"
-                        : $"shape={options.Shape ?? "-"};bands={string.Join(',', options.Bands ?? [])};elaborate={options.Elaborate}",
+                    $"shape={options.Shape ?? "-"};bands={string.Join(',', options.Bands ?? [])};elaborate={options.Elaborate}",
                     0.91m, 42)
             ]);
 

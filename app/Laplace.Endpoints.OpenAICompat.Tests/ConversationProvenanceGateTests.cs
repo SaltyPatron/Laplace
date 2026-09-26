@@ -60,7 +60,7 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// ONE CLOSE, THREE LANES. The close sequence — floor gate, accumulating writer,
+    /// ONE CLOSE, THREE LANES. The close sequence — Tier-0 ROM, accumulating writer,
     /// tenant scope, bootstrap-once, attribute-once, build, apply — is TurnCloser's
     /// and no frontend may re-derive it. It was previously copied into MCP and the
     /// HTTP lane (which had already diverged: only HTTP checked the substrate floor)
@@ -74,7 +74,7 @@ public sealed class ConversationProvenanceGateTests
         Assert.Contains("ConversationContent.BuildTenantBootstrapChanges", closer);
         Assert.Contains("ConversationContent.TryBuildTurnChange", closer);
         Assert.Contains("ConsensusAccumulatingWriter", closer);   // fold inline, not deferred
-        Assert.Contains("FloorPresentAsync", closer);             // the gate all lanes now share
+        Assert.Contains("CodepointPerfcache.LoadDefault", closer); // the Tier-0 ROM floor all lanes share
 
         // No frontend re-derives it.
         foreach (var lane in new[]

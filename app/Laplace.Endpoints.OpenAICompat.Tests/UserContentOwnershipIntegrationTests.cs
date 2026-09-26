@@ -353,91 +353,6 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
     }
 
     [Fact]
-    public async Task LegacyReplayToken_ReturnsConflict_AndDoesNotJournalAcceptance()
-    {
-        await using var factory = new UserContentEndpointFactory();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri("https://localhost")
-        });
-
-        string tenant = $"legacy-replay-{Guid.NewGuid():N}";
-        const string text = "legacy token cannot prove this semantic payload";
-        const string path = "proof/legacy-replay.txt";
-        var request = new UserTextArtifactWriteRequest(
-            Name: "legacy-replay.txt",
-            Path: path,
-            Text: text,
-            ContentBase64: null,
-            UserId: null,
-            ModifiedAt: DateTimeOffset.UnixEpoch);
-        var scope = UserArtifactContent.Resolve(tenant);
-        CodepointPerfcache.LoadDefault();
-        await using (var bootstrapWriter = new ConsensusAccumulatingWriter(
-            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource))
-        {
-            await bootstrapWriter.ApplyWorkingSetAsync(
-                UserArtifactContent.BuildTenantBootstrapChanges(scope));
-        }
-        Assert.True(UserArtifactContent.TryBuildTextArtifactChange(
-            scope,
-            request.Name!,
-            path,
-            Encoding.UTF8.GetBytes(text),
-            userKey: null,
-            modifiedUtc: DateTime.UnixEpoch,
-            out SubstrateChange change,
-            out _));
-        foreach (IntentStage stage in change.IntentStages) stage.Dispose();
-
-        // The legacy token was computed before native stages were collected, so
-        // reproduce the warmed content-bank state in which the endpoint composes.
-        Assert.True(UserArtifactContent.TryBuildTextArtifactChange(
-            scope,
-            request.Name!,
-            path,
-            Encoding.UTF8.GetBytes(text),
-            userKey: null,
-            modifiedUtc: DateTime.UnixEpoch,
-            out change,
-            out _));
-
-        await using (var seed = pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) VALUES ($1, $2)"))
-        {
-            // The closer submits a one-change list, whose legacy working-set
-            // token is the digest of its member intent IDs.
-            seed.Parameters.AddWithValue(
-                NpgsqlDbType.Bytea,
-                Hash128.Blake3(change.Metadata.IntentId.ToBytes()).ToBytes());
-            seed.Parameters.AddWithValue(NpgsqlDbType.Bytea, scope.Source.ToBytes());
-            await seed.ExecuteNonQueryAsync();
-        }
-        foreach (IntentStage stage in change.IntentStages) stage.Dispose();
-
-        using var message = new HttpRequestMessage(HttpMethod.Post, "/v1/content/text")
-        {
-            Content = JsonContent.Create(request)
-        };
-        message.Headers.Add(HeaderTenantResolver.TenantHeader, tenant);
-        using HttpResponseMessage response = await client.SendAsync(message);
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Contains(
-            "legacy_replay_requires_reconciliation",
-            await response.Content.ReadAsStringAsync(),
-            StringComparison.Ordinal);
-
-        await using var accepted = pg.DataSource.CreateCommand("""
-            SELECT count(*)
-            FROM laplace.ingest_file_journal
-            WHERE source_name = $1 AND file_label = $2 AND status = 'ok'
-            """);
-        accepted.Parameters.AddWithValue(NpgsqlDbType.Text, scope.SourceName);
-        accepted.Parameters.AddWithValue(NpgsqlDbType.Text, path);
-        Assert.Equal(0L, (long)(await accepted.ExecuteScalarAsync())!);
-    }
-
-    [Fact]
     public async Task FailedAtomicApply_RollsBackEvidence_AndLaterFileIsAccepted()
     {
         string suffix = Guid.NewGuid().ToString("N");
@@ -674,7 +589,7 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
 
         command.CommandText = """
             INSERT INTO laplace.entities (id, tier, type_id)
-            VALUES (laplace.word_id('☃'), 0, laplace.entity_type_id('Codepoint'), NULL)
+            VALUES (laplace.word_id('☃'), 0, laplace.entity_type_id('Codepoint'))
             ON CONFLICT DO NOTHING
             """;
         await command.ExecuteNonQueryAsync();

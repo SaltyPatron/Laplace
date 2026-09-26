@@ -3,48 +3,30 @@ using Laplace.Decomposers.Abstractions;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
+/// <summary>
+/// The operator's language tag as written: an explicit request field, else the
+/// highest-quality Accept-Language entry, else the host culture. The tag's entity is
+/// its content id; ISO 639 testimony in the substrate relates it to other
+/// tags, so no tag is rewritten or refused here.
+/// </summary>
 internal readonly record struct OperatorLanguage(string Code, byte[] Id, string Source)
 {
-    public static bool TryResolve(
-        HttpRequest request,
-        string? explicitLanguage,
-        out OperatorLanguage? language,
-        out string? invalidExplicitLanguage)
+    public static OperatorLanguage? Resolve(HttpRequest request, string? explicitLanguage)
     {
-        language = null;
-        invalidExplicitLanguage = null;
-
-        if (!string.IsNullOrWhiteSpace(explicitLanguage))
-        {
-            var code = LanguageReference.ResolveCode(explicitLanguage);
-            if (code is null)
-            {
-                invalidExplicitLanguage = explicitLanguage.Trim();
-                return false;
-            }
-
-            language = FromCode(code, "request");
-            return true;
-        }
+        if (LanguageReference.ResolveCode(explicitLanguage) is { } requested)
+            return FromCode(requested, "request");
 
         foreach (var candidate in AcceptLanguageCandidates(request.Headers.AcceptLanguage.ToString()))
-        {
-            var code = LanguageReference.ResolveCode(candidate);
-            if (code is null) continue;
-            language = FromCode(code, "accept-language");
-            return true;
-        }
+            if (LanguageReference.ResolveCode(candidate) is { } accepted)
+                return FromCode(accepted, "accept-language");
 
         if (LanguageReference.ResolveSystemCode() is { } systemCode)
-        {
-            language = FromCode(systemCode, "system");
-            return true;
-        }
+            return FromCode(systemCode, "system");
 
         // An invariant or unconfigured host has no honest default.  SQL can still
         // infer the prompt language, so absence remains absence instead of becoming
         // an invented English preference.
-        return true;
+        return null;
     }
 
     private static OperatorLanguage FromCode(string code, string source) =>

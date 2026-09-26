@@ -196,35 +196,25 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
             (string?)body["choices"]?[0]?["message"]?["content"]);
     }
 
-    [Fact]
-    public async Task Chat_OperatorLanguage_ReachesTheSubstrateClient()
+    // A language tag is content: a region-qualified tag and a tag no ISO 639 source
+    // attests both reach the substrate as written, after billing, rather than being
+    // rewritten to another code or refused.
+    [Theory]
+    [InlineData("ja-JP", "evt_language_routing_region")]
+    [InlineData("zz-not-a-language", "evt_language_routing_unattested")]
+    public async Task Chat_OperatorLanguage_ReachesTheSubstrateClientAsWritten(string tag, string evt)
     {
-        var quoteId = await ApproveQuoteAsync("chat.completions", "language-routing-tenant", "evt_language_routing");
+        var quoteId = await ApproveQuoteAsync("chat.completions", "language-routing-" + tag, evt);
         using var response = await PostWithQuoteAsync("/v1/chat/completions", new
         {
             model = "laplace-converse-001",
-            language = "ja-JP",
+            language = tag,
             messages = new[] { new { role = "user", content = "犬" } }
         }, quoteId);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        Assert.Equal("language=jpn", (string?)body["choices"]?[0]?["message"]?["content"]);
-    }
-
-    [Fact]
-    public async Task Chat_UnknownExplicitLanguage_IsRejectedBeforeBilling()
-    {
-        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
-        {
-            model = "laplace-converse-001",
-            language = "zz-not-a-language",
-            messages = new[] { new { role = "user", content = "hello" } }
-        });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        Assert.Equal("invalid_language", (string?)body["error"]?["code"]);
+        Assert.Equal($"language={tag}", (string?)body["choices"]?[0]?["message"]?["content"]);
     }
 
     [Theory]
