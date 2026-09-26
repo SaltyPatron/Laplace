@@ -301,43 +301,6 @@ TEST(LaplaceDeprelLaw, ParseVertexKeepsEveryCode) {
     EXPECT_EQ(0xFFFu, laplace_vflag_parse_subtype(laplace_parse_vertex_flags(1, 1, 1, 0, 0xFFF)));
 }
 
-TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
-    hash128_t tid, parent_id;
-    double rank = 0;
-    laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
-    uint8_t flip = 1;
-    ASSERT_EQ(0, laplace_relation_resolve_deprel(
-        "nsubj", &tid, &rank, &sym, &flip, &parent_id));
-    hash128_t dep_nsubj  = relation_type_id("DEP_NSUBJ");
-    hash128_t depends_on = relation_type_id("DEPENDS_ON");
-    EXPECT_TRUE(hash128_equals(&dep_nsubj, &tid));
-    EXPECT_TRUE(hash128_equals(&depends_on, &parent_id));
-    
-    
-    
-    EXPECT_DOUBLE_EQ(0.18, rank);
-    EXPECT_EQ(0, flip);
-
-    ASSERT_EQ(0, laplace_relation_resolve_deprel(
-        "nsubj:pass", &tid, &rank, &sym, &flip, &parent_id));
-    hash128_t dep_nsubj_pass = relation_type_id("DEP_NSUBJ_PASS");
-    EXPECT_TRUE(hash128_equals(&dep_nsubj_pass, &tid));
-    EXPECT_TRUE(hash128_equals(&dep_nsubj, &parent_id));
-}
-
-TEST(LaplaceRelationLaw, FeatureDynamicFamily) {
-    hash128_t tid, parent_id;
-    double rank = 0;
-    laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
-    uint8_t flip = 1;
-    ASSERT_EQ(0, laplace_relation_resolve_feature(
-        "Number", &tid, &rank, &sym, &flip, &parent_id));
-    hash128_t feat_number = relation_type_id("FEAT_NUMBER");
-    hash128_t has_feature = relation_type_id("HAS_FEATURE");
-    EXPECT_TRUE(hash128_equals(&feat_number, &tid));
-    EXPECT_TRUE(hash128_equals(&has_feature, &parent_id));
-}
-
 TEST(LaplacePosLaw, WiktionaryMapsToCanonical) {
     hash128_t id;
     ASSERT_EQ(0, laplace_pos_resolve_entity("noun", LAPLACE_POS_TAGSET_WIKTIONARY, &id));

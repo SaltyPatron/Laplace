@@ -85,8 +85,6 @@ public class GrammarSpineConformanceTests
                 "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
             // Atomic: multi-file triple — same ExtractFileAsync unit via RelationTripleMultiFile.
             ("Atomic2020", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleMultiFileDecomposerBase"]),
-            ("UD", ["DecomposerMultiFile<UdIngestRecord", "ExtractFileAsync",
-                "UdIngestHandler", "UdConlluParser"]),
         };
 
         foreach (var (project, needles) in grammarSpine)

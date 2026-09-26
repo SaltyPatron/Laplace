@@ -16,7 +16,7 @@ public readonly struct UnicodeSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
     [
-        "HAS_SCRIPT", "HAS_CASE_MAPPING", "DECOMPOSES_TO", "NORMALIZES_TO",
+        "HAS_SCRIPT", "HAS_CASE_MAPPING", "DECOMPOSES_TO",
         "HAS_MIRROR", "HAS_NAME",
         "CONFUSABLE_WITH", "DECODES_TO", "HAS_UTF8_ROLE",
         "HAS_NORMALIZATION_FORM", "HAS_CHARACTER_PROPERTY",

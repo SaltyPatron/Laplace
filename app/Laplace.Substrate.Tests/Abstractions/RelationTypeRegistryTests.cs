@@ -68,24 +68,6 @@ public class RelationTypeRegistryTests
     }
 
     [Fact]
-    public void SeedEnhancedDeprel_SubtypedRel_StagesParentChain()
-    {
-
-
-
-        CodepointPerfcache.LoadDefault();
-        var b = new SubstrateChangeBuilder(Hash128.OfCanonical("src"), "test/edep", null,
-            entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
-        var names = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>();
-        RelationTypeRegistry.SeedEnhancedDeprel(b, "advcl:cond", Hash128.OfCanonical("src"),
-            new HashSet<Hash128>(), new ConcurrentIdSet(), names);
-        var change = b.Build();
-        // A relation key is registry law, never an entity row; only its readback name is kept.
-        Assert.Empty(change.Entities);
-        Assert.NotEmpty(names);
-    }
-
-    [Fact]
     public void TokenizerWitnessTypes_FirstClass_NoParent()
     {
         foreach (var role in new[] { "TOKEN_MAPS_TO", "MERGES_WITH" })
@@ -171,33 +153,6 @@ public class RelationTypeRegistryTests
         Assert.Equal(Kid("RELATED_TO"), RelationTypeRegistry.Resolve("OV_RELATES").ParentId);
         Assert.Null(RelationTypeRegistry.Resolve("COMPLETES_TO").ParentId);
         Assert.Equal(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_XPOS").ParentId);
-    }
-
-    [Fact]
-    public void Deprel_DynamicFamily_UnderDependsOn()
-    {
-        var nsubj = RelationTypeRegistry.ResolveDeprel("nsubj");
-        Assert.Equal(Kid("DEP_NSUBJ"), nsubj.Id);
-        Assert.Equal(Kid("DEPENDS_ON"), nsubj.ParentId);
-
-        var pass = RelationTypeRegistry.ResolveDeprel("nsubj:pass");
-        Assert.Equal(Kid("DEP_NSUBJ_PASS"), pass.Id);
-        Assert.Equal(Kid("DEP_NSUBJ"), pass.ParentId);
-
-        Assert.NotEqual(RelationTypeRegistry.ResolveDeprel("nsubj").Id, RelationTypeRegistry.ResolveDeprel("obj").Id);
-    }
-
-    [Fact]
-    public void Feature_DynamicFamily_PerType_UnderHasFeature()
-    {
-        Assert.True(RelationTypeRegistry.ParseFeature("Number=Sing", out var n, out var v));
-        Assert.Equal("Number", n);
-        Assert.Equal("Sing", v);
-
-        var num = RelationTypeRegistry.ResolveFeature("Number");
-        Assert.Equal(Kid("FEAT_NUMBER"), num.Id);
-        Assert.Equal(Kid("HAS_FEATURE"), num.ParentId);
-        Assert.NotEqual(RelationTypeRegistry.ResolveFeature("Number").Id, RelationTypeRegistry.ResolveFeature("Case").Id);
     }
 
     [Fact]

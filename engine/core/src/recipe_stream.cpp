@@ -1160,9 +1160,6 @@ struct laplace_recipe_stream {
         double resolved_rank = 1.0;
         int rc = -1;
         switch (rule.relation_resolver) {
-        case 1: rc = laplace_relation_resolve_deprel(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
-        case 2: rc = laplace_relation_resolve_enhanced_deprel(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
-        case 3: rc = laplace_relation_resolve_feature(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
         case 4: rc = laplace_relation_resolve_surface(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
         default: throw std::runtime_error("relation resolver is not declared");
         }

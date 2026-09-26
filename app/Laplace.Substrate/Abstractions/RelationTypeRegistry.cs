@@ -21,9 +21,6 @@ public static class RelationTypeRegistry
     // native resolve is a P/Invoke plus 3-4 string allocations — and hot
     // emitters call it per token edge. Memoize per distinct key.
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> SurfaceCache = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, RelationTypeResolution> DeprelCache = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, RelationTypeResolution> EnhancedDeprelCache = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, RelationTypeResolution> FeatureCache = new(StringComparer.Ordinal);
 
     // LAPLACE_REL_RETIRED (relation_law.h): a retired relation keeps its bit and type id
     // for reading admitted evidence, but surface resolution for emission fails closed.
@@ -71,64 +68,6 @@ public static class RelationTypeRegistry
         }
     }
 
-    public static RelationTypeResolution ResolveDeprel(string deprel)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(deprel);
-        return DeprelCache.GetOrAdd(deprel, static d => ResolveDeprelUncached(d));
-    }
-
-    private static RelationTypeResolution ResolveDeprelUncached(string deprel)
-    {
-        unsafe
-        {
-            Hash128 typeId, parentId;
-            double rank;
-            byte flip;
-            int symmetry;
-            NativeInterop.RelationResolveDeprel(deprel, &typeId, &rank, &symmetry, &flip, &parentId);
-            return DynamicResolution(deprel, "DEP_", typeId, parentId, rank, symmetry, flip);
-        }
-    }
-
-    private static RelationTypeResolution DynamicResolution(
-        string input, string prefix, Hash128 typeId, Hash128 parentId,
-        double rank, int symmetry, byte flip)
-    {
-        string canonical = BuildDynamicCanonical(input, prefix);
-        Hash128? parent = parentId.Equals(Hash128.Zero) ? null : parentId;
-        return new RelationTypeResolution(
-            typeId, rank,
-            symmetry == 1 ? Symmetry.Symmetric : Symmetry.Asymmetric,
-            flip != 0, parent, canonical);
-    }
-
-    private static string BuildDynamicCanonical(string input, string prefix)
-    {
-        string norm = prefix.StartsWith("FEAT_", StringComparison.Ordinal)
-            ? input.Trim().ToUpperInvariant()
-            : input.Trim().ToLowerInvariant().Replace(':', '_').ToUpperInvariant();
-        return prefix + norm;
-    }
-
-    public static RelationTypeResolution ResolveEnhancedDeprel(string deprel)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(deprel);
-        return EnhancedDeprelCache.GetOrAdd(deprel, static d => ResolveEnhancedDeprelUncached(d));
-    }
-
-    private static RelationTypeResolution ResolveEnhancedDeprelUncached(string deprel)
-    {
-        unsafe
-        {
-            Hash128 typeId, parentId;
-            double rank;
-            byte flip;
-            int symmetry;
-            NativeInterop.RelationResolveEnhancedDeprel(deprel, &typeId, &rank, &symmetry, &flip, &parentId);
-            return DynamicResolution(deprel, "EDEP_", typeId, parentId, rank, symmetry, flip);
-        }
-    }
-
     // ResolveDbpedia was deleted here. It minted DBPEDIA_<REL> types from ConceptNet's
     // dbpedia lane, which puts the SOURCE into the type name. consensus.id is
     // blake3(subject‖type‖object), so a source-scoped type guarantees that the same
@@ -136,36 +75,6 @@ public static class RelationTypeRegistry
     // they never merge, witness_count never climbs, RD never tightens. Provenance
     // already has a slot — AttestationRow.SourceId. It does not belong in TypeId.
     // It had zero callers. dbpedia edges map onto generic manifest relations instead.
-
-    public static bool ParseFeature(string feature, out string name, out string value)
-    {
-        name = ""; value = "";
-        if (string.IsNullOrEmpty(feature)) return false;
-        int eq = feature.IndexOf('=');
-        if (eq <= 0 || eq >= feature.Length - 1) return false;
-        name = feature[..eq].Trim();
-        value = feature[(eq + 1)..].Trim();
-        return name.Length > 0 && value.Length > 0;
-    }
-
-    public static RelationTypeResolution ResolveFeature(string featureName)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(featureName);
-        return FeatureCache.GetOrAdd(featureName, static f => ResolveFeatureUncached(f));
-    }
-
-    private static RelationTypeResolution ResolveFeatureUncached(string featureName)
-    {
-        unsafe
-        {
-            Hash128 typeId, parentId;
-            double rank;
-            byte flip;
-            int symmetry;
-            NativeInterop.RelationResolveFeature(featureName, &typeId, &rank, &symmetry, &flip, &parentId);
-            return DynamicResolution(featureName, "FEAT_", typeId, parentId, rank, symmetry, flip);
-        }
-    }
 
     /// <summary>The live manifest relations; a retired relation (its meaning carried by a
     /// successor plus qualifiers) is not emittable vocabulary.</summary>
@@ -189,48 +98,5 @@ public static class RelationTypeRegistry
         // Relation identity/rank/symmetry/family/bit live in the native manifest and
         // highway perfcache. They are operator vocabulary, not reusable content
         // entities. Do not deposit relation keys into entities/physicalities.
-    }
-
-    public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,
-                                   ISet<Hash128> seenEntitiesThisBatch,
-                                   ConcurrentIdSet seenAttestationsThisRun,
-                                   ConcurrentDictionary<string, byte>? readbackNames = null,
-                                   double? witnessWeight = null,
-                                   Hash128? contextId = null)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-        ArgumentNullException.ThrowIfNull(seenEntitiesThisBatch);
-        ArgumentNullException.ThrowIfNull(seenAttestationsThisRun);
-        _ = sourceId;
-        _ = witnessWeight;
-        _ = contextId;
-        VocabularyNames.Track(readbackNames, VocabularyNames.RelationType(k.Canonical));
-        // Dynamic relation metadata is resolved by the native relation law. A relation
-        // key is not an Entity, and its parent family is not vendor testimony.
-        // Keeping the parameters preserves callers while removing the fake graph lane.
-    }
-
-    public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
-                                  ISet<Hash128> seenEntitiesThisBatch,
-                                  ConcurrentIdSet seenAttestationsThisRun,
-                                  ConcurrentDictionary<string, byte>? readbackNames = null,
-                                  double? witnessWeight = null,
-                                  Hash128? contextId = null)
-    {
-        int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
-        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
-    }
-
-    public static void SeedEnhancedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
-                                          ISet<Hash128> seenEntitiesThisBatch,
-                                          ConcurrentIdSet seenAttestationsThisRun,
-                                          ConcurrentDictionary<string, byte>? readbackNames = null,
-                                          double? witnessWeight = null,
-                                          Hash128? contextId = null)
-    {
-        int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveEnhancedDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
-        SeedDynamic(builder, ResolveEnhancedDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
     }
 }

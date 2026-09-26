@@ -140,7 +140,6 @@
       "app/Laplace.Cli/IngestCommands.cs::MERGES_WITH": 1,
       "app/Laplace.Cli/IngestCommands.cs::PRECEDES": 1,
       "app/Laplace.Cli/IngestCommands.cs::RELATED_TO": 1,
-      "app/Laplace.Cli/IngestCommands.cs::TOKEN_MAPS_TO": 1,
       "app/Laplace.Cli/IngestCommands.cs::X_WANT": 1,
       "app/Laplace.Cli/Provenance/ProvenanceExtractor.cs::ATTENDS": 1,
       "app/Laplace.Cli/Provenance/ProvenanceExtractor.cs::COMPLETES_TO": 1,

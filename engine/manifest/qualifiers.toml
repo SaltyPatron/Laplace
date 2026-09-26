@@ -115,3 +115,13 @@ name = "participant"
 relations = ["X_EFFECT", "X_REACT", "X_WANT"]
 base = 0
 values = ["agent", "others"]
+
+# Which kind of variant a Unihan variant claim states (kSemanticVariant,
+# kCompatibilityVariant, kSimplifiedVariant, kTraditionalVariant,
+# kSpecializedSemanticVariant, kSpoofingVariant, kZVariant): one element, HAS_VARIANT_OF.
+[[family]]
+name = "variant"
+relations = ["HAS_VARIANT_OF"]
+base = 0
+values = ["semantic", "compatibility", "simplified", "traditional", "specialized-semantic",
+          "spoofing", "z"]

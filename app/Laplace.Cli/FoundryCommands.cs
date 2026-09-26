@@ -13,7 +13,6 @@ using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.UD;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.FrameNet;
 using Laplace.Decomposers.OpenSubtitles;

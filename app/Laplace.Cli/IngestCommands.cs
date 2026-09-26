@@ -14,7 +14,6 @@ using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.UD;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.FrameNet;
 using Laplace.Decomposers.OpenSubtitles;
@@ -1052,12 +1051,6 @@ internal static partial class IngestCommands
             case "ConceptNetDecomposer":
                 Console.WriteLine($"  check conceptnet: RelatedTo={await RelationEvidence("RELATED_TO", srcKey):N0} "
                                 + $"IsA={await RelationEvidence("IS_A", srcKey):N0}");
-                break;
-            case "UDDecomposer":
-                string udParse = UDSource.Relations[2];
-                string udLanguage = UDSource.Relations[0];
-                Console.WriteLine($"  check ud: {udParse}={await RelationEvidence(udParse, srcKey):N0} "
-                                + $"{udLanguage}={await RelationEvidence(udLanguage, srcKey):N0}");
                 break;
             case "TatoebaDecomposer":
                 Console.WriteLine($"  check tatoeba: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0} "

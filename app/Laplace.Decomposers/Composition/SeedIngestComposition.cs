@@ -12,7 +12,6 @@ using Laplace.Decomposers.Operational;
 using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.UD;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.VerbNet;
 using Laplace.Decomposers.Wiktionary;
@@ -43,7 +42,6 @@ public static class SeedIngestComposition
         ("wiktionary", typeof(WiktionaryDecomposer)),
         ("omw", typeof(OMWDecomposer)),
         ("wordnet", typeof(WordNetDecomposer)),
-        ("ud", typeof(UDDecomposer)),
         ("tatoeba", typeof(TatoebaDecomposer)),
         ("framenet", typeof(FrameNetDecomposer)),
         ("opensubtitles", typeof(OpenSubtitlesDecomposer)),

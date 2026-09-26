@@ -169,9 +169,6 @@ public enum SourcePairMode
 public enum SourceRelationResolver
 {
     None = 0,
-    Deprel = 1,
-    EnhancedDeprel = 2,
-    Feature = 3,
     /// <summary>A governed relation canonical or alias surface (for example WN-LMF relType).</summary>
     Surface = 4,
 }

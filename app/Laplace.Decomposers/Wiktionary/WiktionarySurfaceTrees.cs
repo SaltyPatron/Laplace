@@ -27,7 +27,7 @@ namespace Laplace.Decomposers.Wiktionary;
 /// laplace_t0_perfcache exists for at the codepoint tier.
 /// </para>
 /// <para>
-/// UD already separates the two halves (UdIngestAdapter.EnsureTrees/DrainInto); this is
+/// The retired C# UD adapter separated the two halves the same way; this is
 /// the same split, plus a cache across records because Wiktionary's repeat class spans
 /// entries rather than living inside one sentence. The bulk ingest handler builds via
 /// <see cref="TryBuild"/> on the compose fan and emits via <see cref="TryEmit"/> in

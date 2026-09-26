@@ -732,9 +732,6 @@ public sealed class UnicodeDecomposer
                 this, job.Path, batch,
                 ["UCA_Decomposition_Tag", "UCA_Decomposition"],
                 new HashSet<int> { 1 }),
-            ArtifactKind.NamesList => new NamesListPhase(this, job.Path, batch),
-            ArtifactKind.NormalizationTest => new NormalizationTestPhase(this, job.Path, batch),
-            ArtifactKind.EmojiTest => new EmojiTestPhase(this, job.Path, batch),
             ArtifactKind.LinkBracket => new DelimitedCodepointPropertyPhase(
                 this, job.Path, batch, ["Link_Bracket"], new HashSet<int> { 0 }),
             ArtifactKind.LinkEmail => new CodepointListPropertyPhase(
@@ -827,10 +824,6 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "ucd", "auxiliary", "WordBreakProperty.txt"), "ucd/auxiliary/WordBreakProperty.txt");
         AddIfPresent(legacy, ArtifactKind.SentenceBreak,
             Path.Combine(baseDir, "ucd", "auxiliary", "SentenceBreakProperty.txt"), "ucd/auxiliary/SentenceBreakProperty.txt");
-        AddIfPresent(legacy, ArtifactKind.NormalizationTest,
-            Path.Combine(baseDir, "ucd", "NormalizationTest.txt"), "ucd/NormalizationTest.txt");
-        AddIfPresent(legacy, ArtifactKind.EmojiTest,
-            Path.Combine(baseDir, "emoji", "emoji-test.txt"), "emoji/emoji-test.txt");
         AddIfPresent(legacy, ArtifactKind.IndicConjunctBreak,
             Path.Combine(baseDir, "ucd", "auxiliary", "IndicConjunctBreak.txt"), "ucd/auxiliary/IndicConjunctBreak.txt");
         AddIfPresent(legacy, ArtifactKind.HangulSyllableType,
@@ -883,8 +876,6 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "ucd", "DoNotEmit.txt"), "ucd/DoNotEmit.txt");
         AddIfPresent(legacy, ArtifactKind.UcaDecompositions,
             Path.Combine(baseDir, "uca", "decomps.txt"), "uca/decomps.txt");
-        AddIfPresent(legacy, ArtifactKind.NamesList,
-            Path.Combine(baseDir, "ucd", "NamesList.txt"), "ucd/NamesList.txt");
         AddIfPresent(legacy, ArtifactKind.LinkBracket,
             Path.Combine(baseDir, "linkification", "LinkBracket.txt"), "linkification/LinkBracket.txt");
         AddIfPresent(legacy, ArtifactKind.LinkEmail,
@@ -907,7 +898,8 @@ public sealed class UnicodeDecomposer
         or "emoji/emoji-zwj-sequences.txt" or "ucd/SpecialCasing.txt" or "ucd/USourceData.txt"
         or "idna/Idna2008.txt" or "idna/IdnaMappingTable.txt" or "charts/RSIndex.txt"
         or "uca/ctt.txt" or "ucd/auxiliary/GraphemeBreakTest.txt" or "ucd/auxiliary/WordBreakTest.txt"
-        or "ucd/auxiliary/SentenceBreakTest.txt" or "ucd/auxiliary/LineBreakTest.txt";
+        or "ucd/auxiliary/SentenceBreakTest.txt" or "ucd/auxiliary/LineBreakTest.txt"
+        or "ucd/NormalizationTest.txt" or "emoji/emoji-test.txt" or "ucd/NamesList.txt";
 
     private static ArtifactKind ClassifyArtifact(
         string fullPath,
@@ -963,8 +955,6 @@ public sealed class UnicodeDecomposer
             "ucd/auxiliary/GraphemeBreakProperty.txt" => ArtifactKind.GraphemeBreak,
             "ucd/auxiliary/WordBreakProperty.txt" => ArtifactKind.WordBreak,
             "ucd/auxiliary/SentenceBreakProperty.txt" => ArtifactKind.SentenceBreak,
-            "ucd/NormalizationTest.txt" => ArtifactKind.NormalizationTest,
-            "emoji/emoji-test.txt" => ArtifactKind.EmojiTest,
             "ucd/auxiliary/IndicConjunctBreak.txt" => ArtifactKind.IndicConjunctBreak,
             "ucd/HangulSyllableType.txt" => ArtifactKind.HangulSyllableType,
             "ucd/VerticalOrientation.txt" => ArtifactKind.VerticalOrientation,
@@ -990,7 +980,6 @@ public sealed class UnicodeDecomposer
             "ucd/CJKRadicals.txt" => ArtifactKind.CjkRadicals,
             "ucd/DoNotEmit.txt" => ArtifactKind.DoNotEmit,
             "uca/decomps.txt" => ArtifactKind.UcaDecompositions,
-            "ucd/NamesList.txt" => ArtifactKind.NamesList,
             "linkification/LinkBracket.txt" => ArtifactKind.LinkBracket,
             "linkification/LinkEmail.txt" => ArtifactKind.LinkEmail,
             "linkification/LinkTerm.txt" => ArtifactKind.LinkTerm,
@@ -1017,9 +1006,7 @@ public sealed class UnicodeDecomposer
     private static bool IsSingletonArtifactRole(ArtifactKind kind) =>
         kind is not ArtifactKind.BinaryProperties
             and not ArtifactKind.UnihanProperties
-            and not ArtifactKind.TabbedCodepointProperties
-            and not ArtifactKind.NormalizationTest
-            and not ArtifactKind.EmojiTest;
+            and not ArtifactKind.TabbedCodepointProperties;
 
     private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
     {
@@ -1102,12 +1089,9 @@ public sealed class UnicodeDecomposer
         CjkRadicals = 48,
         DoNotEmit = 49,
         UcaDecompositions = 58,
-        NamesList = 60,
         LinkBracket = 61,
         LinkEmail = 62,
         LinkTerm = 63,
-        NormalizationTest = 65,
-        EmojiTest = 66,
         Unknown = int.MaxValue,
     }
 
@@ -1684,6 +1668,8 @@ public sealed class UnicodeDecomposer
             SubstrateChangeBuilder builder)
         {
             // The value is content; a single-codepoint value collapses to that codepoint.
+            // An empty field (decomps.txt's untagged lines) states nothing.
+            if (row.Value.Length == 0) return;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
                 _owner.PropertyValue(builder, row.Property, row.Value), Source, null,
@@ -1845,157 +1831,6 @@ public sealed class UnicodeDecomposer
             ExtractRecordsAsync(
                 string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
             UnicodePhysicalArtifactParser.DoNotEmitAsync(_path, ct);
-    }
-
-    private sealed class NamesListPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.NamesListRow>
-    {
-        private readonly UnicodeDecomposer _owner;
-        private readonly string _path;
-
-        public NamesListPhase(UnicodeDecomposer owner, string path, int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
-
-        protected override string PhaseLabel => "ucd/names-list";
-
-        protected override long UnitsPerRecord(
-            UnicodePhysicalArtifactParser.NamesListRow row) =>
-            row.CountsSourceRow ? 1 : 0;
-
-        protected override void Compose(
-            UnicodePhysicalArtifactParser.NamesListRow row,
-            SubstrateChangeBuilder builder)
-        {
-            Hash128? value = ContentEmitter.Emit(builder, row.Value, Source);
-            if (value is null) return;
-            if (row.Kind == "Name")
-            {
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    CodepointId(row.Codepoint), UcdProperties.RelTypeHasName,
-                    value.Value, Source, null,
-                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
-                return;
-            }
-
-            Hash128 key = _owner.ClassifierEntity(
-                builder, "unicode/names_list_property", row.Kind);
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasCharacterProperty,
-                value.Value, Source, key,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
-        }
-
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.NamesListRow>
-            ExtractRecordsAsync(
-                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.NamesListAsync(_path, ct);
-    }
-
-    private sealed class NormalizationTestPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.NormalizationTestRow>
-    {
-        private static readonly Mask256[] Forms =
-        [
-            ClaimQualifiers.Of("mapping", "nfc"), ClaimQualifiers.Of("mapping", "nfd"),
-            ClaimQualifiers.Of("mapping", "nfkc"), ClaimQualifiers.Of("mapping", "nfkd"),
-        ];
-        private readonly UnicodeDecomposer _owner;
-        private readonly string _path;
-
-        public NormalizationTestPhase(UnicodeDecomposer owner, string path, int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
-
-        protected override string PhaseLabel => "ucd/NormalizationTest";
-
-        protected override long EstimatedOutputRows(
-            UnicodePhysicalArtifactParser.NormalizationTestRow row) =>
-            checked(Math.Max(8L,
-                (Encoding.UTF8.GetByteCount(row.Source)
-                 + Encoding.UTF8.GetByteCount(row.Nfc)
-                 + Encoding.UTF8.GetByteCount(row.Nfd)
-                 + Encoding.UTF8.GetByteCount(row.Nfkc)
-                 + Encoding.UTF8.GetByteCount(row.Nfkd)
-                 + Encoding.UTF8.GetByteCount(row.Description)) * 4L));
-
-        protected override void Compose(
-            UnicodePhysicalArtifactParser.NormalizationTestRow row,
-            SubstrateChangeBuilder builder)
-        {
-            Hash128? source = ContentEmitter.Emit(builder, row.Source, Source);
-            if (source is null) return;
-            string[] expected = [row.Nfc, row.Nfd, row.Nfkc, row.Nfkd];
-            Hash128? description = row.Description.Length == 0
-                ? null
-                : ContentEmitter.Emit(builder, row.Description, Source);
-            for (int i = 0; i < Forms.Length; ++i)
-            {
-                Hash128? target = ContentEmitter.Emit(builder, expected[i], Source);
-                if (target is null) continue;
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    source.Value, UcdProperties.RelTypeNormalizesTo, target.Value, Source,
-                    contextId: description,
-                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived)
-                    with { QualifierMask = Forms[i] });
-            }
-        }
-
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.NormalizationTestRow>
-            ExtractRecordsAsync(
-                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.NormalizationTestsAsync(_path, ct);
-    }
-
-    private sealed class EmojiTestPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.EmojiTestRow>
-    {
-        private readonly UnicodeDecomposer _owner;
-        private readonly string _path;
-
-        public EmojiTestPhase(UnicodeDecomposer owner, string path, int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
-
-        protected override string PhaseLabel => "emoji/emoji-test";
-
-        protected override long EstimatedOutputRows(
-            UnicodePhysicalArtifactParser.EmojiTestRow row) =>
-            checked(Math.Max(8L,
-                (Encoding.UTF8.GetByteCount(row.Sequence)
-                 + Encoding.UTF8.GetByteCount(row.Name)
-                 + Encoding.UTF8.GetByteCount(row.Group)
-                 + Encoding.UTF8.GetByteCount(row.Subgroup)) * 4L));
-
-        protected override void Compose(
-            UnicodePhysicalArtifactParser.EmojiTestRow row,
-            SubstrateChangeBuilder builder)
-        {
-            Hash128? sequence = ContentEmitter.Emit(builder, row.Sequence, Source);
-            if (sequence is null) return;
-            EmitValue("Emoji_Test_Status", row.Status);
-            EmitValue("Emoji_Test_Version", row.Version);
-            EmitValue("Emoji_Test_Group", row.Group);
-            EmitValue("Emoji_Test_Subgroup", row.Subgroup);
-            Hash128? name = row.Name.Length == 0 ? null : ContentEmitter.Emit(builder, row.Name, Source);
-            if (name is not null)
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    sequence.Value, UcdProperties.RelTypeHasName, name.Value, Source,
-                    contextId: null,
-                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
-
-            void EmitValue(string property, string raw)
-            {
-                if (raw.Length == 0) return;
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    sequence.Value, UcdProperties.RelTypeHasCharacterProperty,
-                    _owner.PropertyValue(builder, property, raw), Source,
-                    contextId: null,
-                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
-            }
-        }
-
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.EmojiTestRow>
-            ExtractRecordsAsync(
-                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.EmojiTestsAsync(_path, ct);
     }
 
     private sealed class MirrorPhase

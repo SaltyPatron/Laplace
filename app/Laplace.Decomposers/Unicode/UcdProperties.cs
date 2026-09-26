@@ -25,9 +25,6 @@ internal sealed class UcdProperties
     public static readonly Hash128 RelTypeHasCaseMapping =
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeHasCaseMapping)));
-    public static readonly Hash128 RelTypeNormalizesTo =
-        RelationTypeRegistry.RelationTypeId(
-            RelationSymbol.CanonicalFromField(nameof(RelTypeNormalizesTo)));
     public static readonly Hash128 RelTypeDecomposesTo =
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeDecomposesTo)));
