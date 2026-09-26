@@ -32,6 +32,10 @@ class UserInstallerTests(unittest.TestCase):
         work.mkdir(parents=True, exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="user-session-", dir=work)
         self.addCleanup(self.temporary.cleanup)
+        # A set-group-ID scratch root would hand its group and bit to the fixture
+        # home; the home belongs to this account's primary group like a real one.
+        os.chown(self.temporary.name, -1, os.getgid())
+        os.chmod(self.temporary.name, 0o700)
         self.home = Path(self.temporary.name) / "home"
         self.home.mkdir(mode=0o700)
         self.uid = os.getuid()
@@ -326,6 +330,15 @@ class UserInstallerTests(unittest.TestCase):
         self.assertNotIn("private content", output.getvalue())
 
 
+    def require_trusted_scratch_chain(self):
+        """An existing credential is validated along its full absolute chain."""
+        try:
+            installer.directory_chain(Path(self.temporary.name), self.uid)
+        except installer.SetupError as error:
+            self.skipTest(f"scratch root {self.temporary.name} is outside this account's "
+                          f"directory trust boundary ({error}); set TMPDIR to a directory "
+                          "whose every ancestor is root- or account-owned and not shared-writable")
+
     def loopback_setup(self, **options):
         with mock.patch.object(installer, "sources", return_value=self.selected):
             return installer.setup(
@@ -334,6 +347,7 @@ class UserInstallerTests(unittest.TestCase):
                 runtime_loader=lambda root: self.runtime, **options)
 
     def test_loopback_generates_once_and_reinstall_preserves_credential(self):
+        self.require_trusted_scratch_chain()
         password = self.home / ".config/laplace/cutechess-session-password"
         with mock.patch.object(installer.secrets, "token_hex", return_value="d" * 64) as generate:
             first = self.loopback_setup()
@@ -351,6 +365,7 @@ class UserInstallerTests(unittest.TestCase):
         self.assertNotIn(str(password), receipt["files"])
 
     def test_loopback_reuses_valid_preexisting_password_without_generation(self):
+        self.require_trusted_scratch_chain()
         password = self.home / ".config/laplace/cutechess-session-password"
         self.write(password, b"e" * 64)
         inode = password.stat().st_ino
@@ -361,6 +376,7 @@ class UserInstallerTests(unittest.TestCase):
         self.assertEqual(password.stat().st_ino, inode)
 
     def test_loopback_preserves_malformed_existing_password(self):
+        self.require_trusted_scratch_chain()
         password = self.home / ".config/laplace/cutechess-session-password"
         for data, mode in ((b"A" * 64, 0o600), (b"a" * 63 + b"\n", 0o600),
                            (b"a" * 64, 0o644), (b"a" * 65, 0o600)):
@@ -417,6 +433,7 @@ class UserInstallerTests(unittest.TestCase):
         self.assertNotIn(secret, output.getvalue())
 
     def test_loopback_failed_install_keeps_preexisting_or_new_credential(self):
+        self.require_trusted_scratch_chain()
         password = self.home / ".config/laplace/cutechess-session-password"
         with mock.patch.object(installer.secrets, "token_hex", return_value="c" * 64) as generate:
             for attempt in range(2):
@@ -454,6 +471,7 @@ class UserInstallerTests(unittest.TestCase):
 
 
     def test_loopback_rejects_symlink_and_hardlink_credentials(self):
+        self.require_trusted_scratch_chain()
         password = self.home / ".config/laplace/cutechess-session-password"
         password.parent.mkdir(parents=True, mode=0o700)
         target = self.home / "operator-secret"
@@ -537,6 +555,7 @@ class UserInstallerTests(unittest.TestCase):
         self.assertTrue(installer.install_files(self.home, self.uid, updated))
 
     def test_update_retains_credential_value_mode_and_inode(self):
+        self.require_trusted_scratch_chain()
         self.loopback_setup()
         password = self.home / ".config/laplace/cutechess-session-password"
         before = (password.read_bytes(), password.stat().st_ino,
@@ -623,6 +642,7 @@ class UserInstallerTests(unittest.TestCase):
 
 
     def test_failed_loopback_update_restores_files_and_retains_credential_inode(self):
+        self.require_trusted_scratch_chain()
         self.loopback_setup()
         password = self.home / ".config/laplace/cutechess-session-password"
         credential = (password.read_bytes(), password.stat().st_ino,

@@ -21,6 +21,9 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+# The provider cache is this checkout's own unless the caller names one; a
+# work-root cache shared with other accounts is host state, not a fixture.
+os.environ.setdefault("LAPLACE_CHESS_PGN_CACHE", str(ROOT / "build/test-chess-pgn-validation"))
 spec = importlib.util.spec_from_file_location("chess_benchmark", ROOT / "scripts/benchmark-chess-environment.py")
 bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)

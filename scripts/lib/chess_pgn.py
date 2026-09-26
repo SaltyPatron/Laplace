@@ -47,6 +47,18 @@ def verify_artifact(path: Path, artifact: dict) -> None:
             f"PGN provider artifact SHA-256 mismatch: {path}")
 
 
+def _creation_mode(mode: int) -> int:
+    """Return the mode an ordinary create would give under the process umask.
+
+    mkstemp and mkdtemp create owner-only entries; a published cache entry keeps
+    the sharing that the cache owner's umask grants, like any other create.
+    """
+    with _lock:
+        mask = os.umask(0)
+        os.umask(mask)
+    return mode & ~mask
+
+
 def acquire(artifact: dict, cache: Path, offline: bool) -> Path:
     target = cache / artifact["filename"]
     if not target.exists():
@@ -64,6 +76,7 @@ def acquire(artifact: dict, cache: Path, offline: bool) -> Path:
                     remaining -= len(block)
                 require(not response.read(1), "PGN provider download exceeds its pinned size")
             verify_artifact(part, artifact)
+            os.chmod(part, _creation_mode(0o666))
             os.replace(part, target)
         finally:
             part.unlink(missing_ok=True)
@@ -139,6 +152,8 @@ def _prepare_runtime(cache: Path, files: dict[str, bytes]) -> Path:
     if not root.exists() and not root.is_symlink():
         staged = Path(tempfile.mkdtemp(prefix=".runtime-", dir=cache))
         try:
+            # The inherited set-group-ID bit keeps the cache group on the runtime tree.
+            staged.chmod(stat.S_IMODE(staged.stat().st_mode) & 0o7000 | _creation_mode(0o777))
             for relative, body in files.items():
                 target = staged / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
