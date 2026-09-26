@@ -238,6 +238,11 @@ static std::string sequence_text(const std::string& raw, const std::string& sepa
 // Record-relative path: "@attr" on the record itself or "Child/.../@attr" on every
 // matching descendant, in source order.
 static void collect(const node& n, const std::string& path, std::vector<std::string>& out) {
+    // "self()": the element's own character data (a PropBank alias's word).
+    if (path == "self()") {
+        if (recipe_has_text(n.text)) out.push_back(recipe_element_text(n.text));
+        return;
+    }
     // "name()": the character data of the child elements of that name.
     if (path.size() > 2 && path.compare(path.size() - 2, 2, "()") == 0 && path.find('/') == std::string::npos) {
         const std::string name = path.substr(0, path.size() - 2);
@@ -1273,7 +1278,8 @@ struct laplace_recipe_stream {
                 break;
             }
             case 0: grouped_fact(rule, subject, relation, special_object ? object : endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
-            case 1: grouped_fact(rule, endpoint(stage, rule, value, attributes), relation, subject, rank, flip, context_value, stage); break;
+            case 1: grouped_fact(rule, endpoint(stage, rule, value, attributes), relation, special_object ? object : subject,
+                                 rank, flip, context_value, stage); break;
             case 2: grouped_fact(rule, trunk(stage, rule, attributes), relation, endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
             default: throw std::runtime_error("unknown subject mode");
             }
@@ -1381,10 +1387,12 @@ struct laplace_recipe_stream {
         else if (record_parts.size() > 1) file_parts.push_back(compose_trunk(stage, record_parts, "SourceRecord"));
         active = true;
     }
-    static std::string split_side(const std::string& text, const std::string& separator, uint32_t side) {
-        const size_t at = text.rfind(separator);
+    // Before (1) or after (2) the last of any separator character: a roleset's number
+    // follows its last "." or, where the source slipped, "-" ("up_creek-13").
+    static std::string split_side(const std::string& text, const std::string& separators, uint32_t side) {
+        const size_t at = text.find_last_of(separators);
         if (at == std::string::npos) return side == 1 ? text : std::string{};
-        return side == 1 ? text.substr(0, at) : text.substr(at + separator.size());
+        return side == 1 ? text.substr(0, at) : text.substr(at + 1);
     }
     // Components for identity parts, in declaration order. A part with no value is
     // absent from the composition (a valence unit with no grammatical function).
@@ -1426,6 +1434,7 @@ struct laplace_recipe_stream {
             const size_t sink_had = sink.size();
             auto close_nested = [&]() {
                 if (!part.nested || inner.empty()) return;
+                if (inner.size() == 1) { out.push_back(inner.front()); return; }
                 laplace_ordered_composition_request_t request{};
                 request.components = inner.data(); request.component_count = inner.size();
                 request.type_id = part.scope_type; request.source_id = current_witness;
@@ -1434,6 +1443,14 @@ struct laplace_recipe_stream {
                 check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "nested identity part");
                 out.push_back(component(result.id, result.coord, result.tier, 0));
             };
+            // "subject()": the record's subject itself (a PropBank argument's role
+            // [roleset, n]).
+            if (part.path == "subject()") {
+                if (!subject_form_known) throw std::runtime_error("subject() part needs a content subject");
+                out.push_back(component(record_subject_form.id, record_subject_form.coord,
+                                        record_subject_form.tier, record_subject_form.atom));
+                continue;
+            }
             std::vector<std::string> values;
             if (!part.literal.empty()) values.push_back(part.literal);
             else if (value_map) {
@@ -1524,6 +1541,8 @@ struct laplace_recipe_stream {
         std::vector<laplace_ordered_component_t> parts;
         compose_parts(stage, route, &element, path, rule.parts, parts);
         if (parts.empty()) return {false, {}};
+        // A composition of one is that one, its atom declaration included.
+        if (parts.size() == 1) return {true, parts.front()};
         laplace_ordered_composition_request_t request{};
         request.components = parts.data(); request.component_count = parts.size();
         request.type_id = rule.entity_type; request.source_id = current_witness;

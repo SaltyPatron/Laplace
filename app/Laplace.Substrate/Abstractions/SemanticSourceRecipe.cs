@@ -298,7 +298,7 @@ public sealed record SourceIdentityPart(
     // composed by its own element composition (a pattern's valence units).
     string? Children = null,
     // The source's own identifier syntax, decoded: the value before or after the last
-    // SplitLast separator ("December.n" -> lemma "December", POS code "n").
+    // SplitLast separator characters ("December.n" -> lemma "December", POS code "n").
     // Side Each: every piece between any of the SplitLast characters is its own
     // component, in order ("run-51.3.2" split on "-." -> [run, 51, 3, 2]).
     string? SplitLast = null,
