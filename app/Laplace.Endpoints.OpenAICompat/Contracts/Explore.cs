@@ -18,11 +18,10 @@ public sealed record ExploreSourceRow(
     [property: JsonPropertyName("stage")] string? Stage,
     [property: JsonPropertyName("layer")] string? Layer,
     [property: JsonPropertyName("role")] string? Role,
-    // The franchise id: attestations key their witness by this, so the roster
-    // endpoint drills by id without re-running the source_counts aggregate.
+    // The source entity id attestations carry; the roster endpoint reads by it.
     [property: JsonPropertyName("id_hex")] string? IdHex = null);
 
-/// <summary>One witnessed assertion on a source's roster — a sampled play.</summary>
+/// <summary>One sampled assertion the source attested, with its observation count.</summary>
 public sealed record SourceRosterRow(
     [property: JsonPropertyName("subject_id")] string SubjectId,
     [property: JsonPropertyName("subject")] string Subject,
@@ -47,8 +46,8 @@ public sealed record ExploreStageSourceRow(
     [property: JsonPropertyName("layer")] string? Layer,
     [property: JsonPropertyName("role")] string? Role,
     [property: JsonPropertyName("links")] string? Links,
-    // The live source this manifest entry resolved to — the drill-down target.
-    // Null = declared in the cadence but not yet ingested (shown honestly).
+    // The admitted source this manifest entry resolves to; null when nothing under
+    // it has been admitted.
     [property: JsonPropertyName("source_key")] string? SourceKey = null,
     [property: JsonPropertyName("evidence")] long? Evidence = null);
 
@@ -68,11 +67,10 @@ public sealed record ExploreEntityPreviewResponse(
     [property: JsonPropertyName("evidence_count")] long EvidenceCount,
     [property: JsonPropertyName("preview_facts")] IReadOnlyList<SalientFactRow> PreviewFacts);
 
-// The not-found explorer: a valid content id that was never witnessed
-// (exists=false) still has a computed anchor on S3, so we return navigable
-// neighbours instead of a dead 404. `neighbors` carries both axes (axis =
-// "geodesic" any-tier position, or "shape" word Frechet); `did_you_mean` is the
-// closest shape peer by surface edit distance, when one is close enough.
+// A reference whose content id was never witnessed (exists=false). Its coordinate,
+// realized curve, and decomposition are computed from content. `neighbors` carries
+// both axes ("geodesic" position, "shape" Fréchet); `did_you_mean` is the nearest
+// existing surface by edit distance.
 public sealed record ExploreNotFoundResponse(
     [property: JsonPropertyName("reference")] string Reference,
     [property: JsonPropertyName("word_id_hex")] string WordIdHex,
@@ -83,8 +81,7 @@ public sealed record ExploreNotFoundResponse(
     [property: JsonPropertyName("suggestions")] IReadOnlyList<ExploreSuggestion> Suggestions,
     [property: JsonPropertyName("did_you_mean")] string? DidYouMean);
 
-// A witnessed word within a small surface edit distance of the typed reference —
-// the exact "did you mean" set, each a live id.
+// An existing surface within edit distance of the typed reference, with its id.
 public sealed record ExploreSuggestion(
     [property: JsonPropertyName("surface")] string Surface,
     [property: JsonPropertyName("id_hex")] string IdHex,
@@ -135,7 +132,8 @@ public sealed record ExploreConstituentRow(
     [property: JsonPropertyName("run_length")] int RunLength,
     [property: JsonPropertyName("flags")] long Flags);
 
-/// <summary>Packed trajectory vertex — identity-space XYZ; M/RLE/flags are paint.</summary>
+/// <summary>Packed trajectory vertex: the stored GeometryZM carrier values and the child id,
+/// run length, and flags they unpack to. The values encode identity, not position.</summary>
 public sealed record ExplorePackedVertexRow(
     [property: JsonPropertyName("ordinal")] int Ordinal,
     [property: JsonPropertyName("x")] double X,
@@ -146,7 +144,7 @@ public sealed record ExplorePackedVertexRow(
     [property: JsonPropertyName("run_length")] int RunLength,
     [property: JsonPropertyName("flags")] long Flags);
 
-/// <summary>Realized curve vertex — child live coords (entity_curve / word_curve).</summary>
+/// <summary>Realized curve vertex: the coordinate of the child at this ordinal.</summary>
 public sealed record ExploreRealizedVertexRow(
     [property: JsonPropertyName("ordinal")] int Ordinal,
     [property: JsonPropertyName("x")] double X,

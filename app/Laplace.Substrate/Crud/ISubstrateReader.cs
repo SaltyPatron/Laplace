@@ -55,25 +55,10 @@ public interface ISubstrateReader
 
     /// <summary>
     /// Batched form of <see cref="HasSourceCompletedAsync"/>: returns the subset of
-    /// <paramref name="sourceIds"/> that have already completed the layer.
-    ///
-    /// Per-file resume (#898) is ON BY DEFAULT for every <c>DecomposerMultiFile</c>, and
-    /// the scalar form is called once per file inside the worker loop. MEASURED on the
-    /// 2026-08-10 knowledge seed: FrameNet spent 561s to deposit 1,042,471 rows across
-    /// 14,900 files -- 1,857 rows/s against OMW's 22,462 on the same run, and 37.7 ms per
-    /// file x 14,900 files = 562s, i.e. essentially the ENTIRE runtime was per-file
-    /// overhead rather than payload. The scalar probe is one round trip per file, and the
-    /// SQL behind it (<c>ops.evidence_count(...) &gt; 0</c>) counts rows to answer an
-    /// existence question.
-    ///
-    /// This is the shape the write path already rejected everywhere else: the substrate
-    /// exposes array-in C primitives (<c>entities_exist_bitmap</c>,
-    /// <c>physicalities_exist_bitmap</c>, <c>tier_batch_existence_probe</c>) precisely so
-    /// membership questions cost one round trip, not N. Resume was added as a scalar and
-    /// never got the same treatment.
-    ///
-    /// The default implementation loops the scalar form so every existing reader keeps
-    /// working unchanged; a store that can answer it in one round trip overrides it.
+    /// <paramref name="sourceIds"/> that have already completed the layer. Resume asks this
+    /// once for the whole enumerated file set. The default loops the scalar form; a store
+    /// that answers set membership in one round trip, as the array-in existence primitives
+    /// do, overrides it.
     /// </summary>
     async Task<IReadOnlySet<Hash128>> HasSourcesCompletedAsync(
         IReadOnlyList<Hash128> sourceIds, int layerOrder, CancellationToken ct = default)
@@ -118,11 +103,9 @@ public interface ISubstrateReader
     Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default);
 
     /// <summary>
-    /// Count every entity identity owned/touched by one source and how many have at least
-    /// one durable physicality. Entity identity has no recipe-specific opt-out from
-    /// realization; source recipes/providers supply the structure and the shared pipeline
-    /// owns persistence. Implementations without durable interpretation storage return an
-    /// empty contract.
+    /// Counts every entity one source's testimony touches and how many of them have at least
+    /// one durable physicality. Every entity is realized; no source recipe opts out. Readers
+    /// without durable physicality storage return (0, 0).
     /// </summary>
     Task<PhysicalityCoverage> PhysicalityCoverageAsync(
         Hash128 sourceId,
@@ -130,8 +113,8 @@ public interface ISubstrateReader
         Task.FromResult(new PhysicalityCoverage(0, 0));
 
     /// <summary>
-    /// Compatibility/scoped diagnostic for callers that explicitly need a type subset.
-    /// This is not the generic ingest-completion law.
+    /// Coverage restricted to the given relation types: a scoped diagnostic, not the
+    /// ingest-completion law.
     /// </summary>
     Task<PhysicalityCoverage> PhysicalityCoverageAsync(
         Hash128 sourceId,
@@ -140,9 +123,10 @@ public interface ISubstrateReader
         Task.FromResult(new PhysicalityCoverage(0, 0));
 
     /// <summary>
-    /// Lawful source retraction used when a durable completion marker belongs to an older
-    /// physicality contract. Production stores override this; the default fails explicitly
-    /// so a reader cannot pretend it repaired stale testimony.
+    /// Retracts one source's testimony, optionally limited to the given relation and marker
+    /// types, when its durable completion marker was written under a different physicality
+    /// contract. The default fails explicitly so a reader cannot report stale testimony as
+    /// repaired.
     /// </summary>
     Task EvictSourceAsync(
         Hash128 sourceId,
@@ -203,8 +187,8 @@ public interface ISubstrateReader
     void MarkProven(IReadOnlyList<Hash128> ids, PresenceCacheScope scope) => MarkProven(ids);
 
     /// <summary>
-    /// Compatibility hint for readers without mutable database-presence caches.
-    /// A generation-aware reader must not publish IDs from this unscoped path.
+    /// Unscoped hint for readers without a mutable database-presence cache.
+    /// A generation-aware reader must not publish IDs from this path.
     /// </summary>
     void MarkProven(IReadOnlyList<Hash128> ids) { }
 
@@ -217,14 +201,11 @@ public interface ISubstrateReader
 
 
     /// <summary>
-    /// Legacy/back-compat: a single flat (ids, parents) probe with no
-    /// tier-by-tier short-circuiting. Prefer
-    /// <see cref="TierBatchExistenceProbeAsync"/> driven round-by-round by
-    /// TierTreeDescent, which is the real replacement for this. `parents`
-    /// is accepted for source compatibility with existing callers but is
-    /// not used to do any tree-walk here -- this default just delegates to
-    /// a flat existence check, which has always been safe (no
-    /// default-present assumption).
+    /// Flat existence probe over <paramref name="ids"/> with no tier-by-tier
+    /// short-circuit; <paramref name="parents"/> is not walked. It has the same
+    /// never-default-present semantics as <see cref="EntitiesExistBitmapAsync"/>.
+    /// The pruned trunk-to-leaf descent is <see cref="TierBatchExistenceProbeAsync"/>
+    /// driven round by round by TierTreeDescent.
     /// </summary>
     Task<byte[]> ContentDescentBitmapAsync(
         IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default)
@@ -239,7 +220,7 @@ public interface ISubstrateReader
         => Task.FromResult<IReadOnlyList<CircuitRelation>>(Array.Empty<CircuitRelation>());
 
     /// <summary>
-    /// OP3 nomination for Phase 5b. It scans existing graph cells whose two
+    /// OP3 nomination. It scans existing consensus cells whose two
     /// endpoints belong to the selected vocabulary and returns each endpoint
     /// pair once. Existing relation kinds are retained as bounded provenance;
     /// they do not corroborate <paramref name="targetTypeId"/>. A new target

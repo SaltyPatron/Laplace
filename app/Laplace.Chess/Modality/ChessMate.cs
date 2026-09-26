@@ -5,13 +5,9 @@ namespace Laplace.Modality.Chess;
 /// <summary>
 /// One mate's local geometry, and the key a mate-pattern table would be indexed by.
 ///
-/// Whether a position is checkmate is decided ENTIRELY by the mated king's neighbourhood: its
-/// square, which of its <=8 adjacent squares are unavailable and why, and the checking piece's
-/// line into it. The rest of the board matters for how the position was reached, never for
-/// whether it is mate. That is what makes the pattern space enumerable when the position space
-/// is not — legal chess positions are ~10^44 and Syzygy is exhaustive only to 7 men (and stores
-/// WDL/DTZ, evaluation, not a mate list), but king square x zone state x checker geometry is
-/// small enough to tabulate.
+/// A mate's pattern is the mated king's neighbourhood: its square, which of its &lt;=8 adjacent
+/// squares are unavailable and why, and the checking piece's line into it. King square x zone
+/// state x checker geometry is small enough to tabulate, where the position space is not.
 /// </summary>
 public readonly record struct ChessMatePattern(
     int KingSquare,
@@ -46,8 +42,8 @@ public static class ChessMate
 
     /// <summary>
     /// Checkmate iff the side to move is in check and has no legal move. Both halves are
-    /// table-driven now (MoveGen.IsSquareAttacked indexes ChessAttacks; Legal uses pin and
-    /// checker masks), so this is a handful of indexed loads rather than a search.
+    /// table-driven (MoveGen.IsSquareAttacked indexes ChessAttacks; Legal uses pin and checker
+    /// masks), so this is a handful of indexed loads, not a search.
     /// </summary>
     public static bool IsMate(Board b, List<ChessMove> pseudoBuf, List<ChessMove> legalBuf)
     {
@@ -63,10 +59,9 @@ public static class ChessMate
     /// <summary>
     /// Describe the mate geometry around the side-to-move's king, or null when not mate.
     ///
-    /// Each of the eight king-zone directions is classified into exactly one of: off the board,
-    /// blocked by the king's OWN piece, or covered by the enemy. A square that is empty and safe
-    /// cannot exist in a mate — if one did the king would have a move — so the three masks
-    /// together always cover all eight directions, which is a useful self-check.
+    /// Each of the eight king-zone directions is classified as exactly one of: off the board,
+    /// blocked by the king's own piece, or covered by the enemy. An empty safe square cannot
+    /// exist in a mate, so the three masks together cover all eight directions.
     /// </summary>
     public static ChessMatePattern? Describe(Board b)
     {
@@ -79,9 +74,8 @@ public static class ChessMate
         int kingBit = (Board.RankOf(kingSq0x88) << 3) | Board.FileOf(kingSq0x88);
         int kf = kingBit & 7, kr = kingBit >> 3;
 
-        // Occupancy WITHOUT the king: a square the king would flee to is still covered if the
-        // checking slider's ray passes through where the king currently stands. Removing it is
-        // what makes "retreat along the ray" correctly illegal.
+        // Occupancy without the king: a flight square stays covered when the checking slider's
+        // ray passes through the king's current square, so retreating along the ray is illegal.
         ulong occNoKing = b.OccupiedBB & ~(1UL << kingBit);
         ulong ourOcc = mover ? b.WhiteBB : b.BlackBB;
 
@@ -93,8 +87,7 @@ public static class ChessMate
             int t = (r << 3) | f;
             if ((ourOcc & (1UL << t)) != 0) { blocked |= (byte)(1 << i); continue; }
             if (AttackedBy(b, t, !mover, occNoKing)) covered |= (byte)(1 << i);
-            // Anything left is an empty, safe square — impossible in a real mate, and the
-            // sanity check below asserts it.
+            // Anything left is an empty safe square, impossible in a mate; checked below.
         }
 
         ulong checkers = AttackersTo(b, kingBit, !mover, b.OccupiedBB);
@@ -113,9 +106,8 @@ public static class ChessMate
     }
 
     /// <summary>
-    /// Name the pattern where the geometry is unambiguous. Deliberately conservative — an
-    /// unnamed mate returns null rather than a guess, because a wrong motif label is worse than
-    /// no label when it becomes attested evidence.
+    /// Names the pattern only where the geometry is unambiguous; otherwise null, so no motif
+    /// label is guessed into testimony.
     /// </summary>
     private static string? Classify(in ChessMatePattern p, Board b, bool mover)
     {

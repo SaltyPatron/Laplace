@@ -6,11 +6,10 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Guards the concurrency contract that monolith segmentation depends on: compose runs
-/// across N record-aligned segments against the SAME decomposer instance, so the
-/// canonical-name readback accumulator is written from many threads at once. A plain
-/// HashSet corrupts here (the ISO639 ingest crash). ConcurrentStringSet must survive it
-/// with exact HashSet semantics — no throw, correct dedup, first-wins Add.
+/// Compose runs record-aligned segments concurrently against one decomposer instance, so
+/// its canonical-name readback set is written from many threads at once.
+/// ConcurrentStringSet keeps exact HashSet semantics under that contention: no throw,
+/// exact dedup, first-wins Add.
 /// </summary>
 public sealed class ConcurrentStringSetTests
 {
@@ -21,8 +20,8 @@ public sealed class ConcurrentStringSetTests
         const int distinct = 5_000;
         const int writers = 32;
 
-        // Every writer races to add the SAME distinct key space — maximum contention,
-        // the exact shape of N segments emitting overlapping canonical names.
+        // Every writer adds the same key space: maximum contention, as when segments
+        // emit overlapping canonical names.
         Parallel.For(0, writers, new ParallelOptions { MaxDegreeOfParallelism = writers }, _ =>
         {
             for (int i = 0; i < distinct; i++)

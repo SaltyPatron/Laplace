@@ -9,16 +9,16 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// The bounded deterministic transition fold: one consensus cell per witnessed
-/// position --MOVE--> position, with each playing retained as evidence context.
-/// It is isolated from ChessAnalysis so an existing corpus can be backfilled without
-/// re-emitting and double-counting the standing calculated testimony.
+/// Deterministic transition testimony: one consensus cell per witnessed
+/// position --MOVE--> position, with each playing as the attestation context. It has its
+/// own completion marker, separate from the analyzer's, so deriving it over recorded games
+/// does not re-emit calculated testimony.
 /// </summary>
 public static class ChessTransitions
 {
-    // Keep the existing completion marker: changing its id before replacing prior
-    // evidence would count the same playing twice. Historical POV repair uses
-    // `evict ChessTransitions --rederive`; see chess-starting-side-outcomes.md.
+    // The version is part of the completion marker id; a new id over evidence already
+    // deposited would count each playing twice. Re-derivation goes through
+    // `evict ChessTransitions --rederive`.
     public const int Version = 1;
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source("ChessTransitions");
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;

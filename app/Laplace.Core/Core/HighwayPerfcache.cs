@@ -4,12 +4,10 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class HighwayPerfcache
 {
-    // Load/unload mutate native state and stay behind the global gate.
-    // LOOKUPS do not: the table is an immutable mmap after load, and the
-    // mask lookup sits on the builder's per-attestation hot path — a global
-    // lock there serialized every compose worker in the process (measured:
-    // one hot core while 23M UD attestations queued behind it). The volatile
-    // flag is published AFTER a successful load inside the gate.
+    // Load/unload mutate native state and stay behind the global gate. Lookups do
+    // not: the table is an immutable mmap after load, and the mask lookup is on the
+    // per-attestation staging path of every compose worker. The volatile flag is
+    // published after a successful load inside the gate.
     private static volatile bool _loaded;
 
     public static void Load(string path)
@@ -74,10 +72,6 @@ public static unsafe class HighwayPerfcache
         float rank;
         byte band;
         // highway_table_relation_by_hash returns 0 on success, -1 on miss.
-        // This line checked rc == 1 from the day it was written, so every mask
-        // this function ever produced was all-zero — the final root cause under
-        // the whole highway_mask saga (Issues 01/29 fixed NULL-vs-zero marshaling
-        // above this, but nothing below it ever set a bit).
         int rc = NativeInterop.HighwayTableRelationByHash(&typeId, &bit, &rank, &band);
         return rc == 0 ? Mask256.Zero.Set(bit) : Mask256.Zero;
     }

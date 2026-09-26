@@ -1,4 +1,3 @@
--- Identity helper: stays in the extension schema (no identity purpose schema).
 -- A relation's id is the content id of its label, from the native relation law.
 CREATE OR REPLACE FUNCTION laplace.relation_type_id(p_name text) RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_relation_type_id'

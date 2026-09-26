@@ -63,7 +63,7 @@ public sealed class ChessCanonicalTests
     [InlineData(50, 60, 0.5, 30, 60, 10, null)]
     // mid-game normal think: no lens adds information
     [InlineData(30, 60, 1.0, 100, 60, 10, null)]
-    // the spent dialect carries no clock: deep never fabricates pressed_think
+    // the spent dialect carries no clock: a deep think never yields pressed_think
     [InlineData(40, 60, 1.5, 0, 0, 0, null)]
     public void ThinkLens_PhaseClockSpent(
         int ply, int plyCount, double tf, double remaining, double medianRemaining,

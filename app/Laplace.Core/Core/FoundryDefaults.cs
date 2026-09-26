@@ -1,15 +1,17 @@
 namespace Laplace.Engine.Core;
 
-/// <summary>Foundry synthesis knobs — constants in code, not env or config files.</summary>
+/// <summary>
+/// Constants of the model-export recipe: how current consensus standing, trajectories,
+/// and geometry are read and written into the exported operator tensors.
+/// </summary>
 public static class FoundryDefaults
 {
     public const int CrawlSeeds = 1000;
     public const int WordTrajs = 400_000;
 
-    /// Faithful writer (restored per #1055; produced the kfix.gguf existence proof).
-    /// Rank band hi is 0.95, NOT the historical 0.85: the relation-rank ladder
-    /// recalibration moved IS_A 0.82→0.90, and 0.85 silently excludes the entire
-    /// hypernym chain (#1055 step 3).
+    /// Faithful writer: per-row cap and the relation-rank band [lo, hi] of the knowledge
+    /// readout plane. The band excludes low-rank order/metadata relation types and must
+    /// include the rank of the hypernym relation.
     public const int FaithfulCap = 128;
     public const double FaithfulRankLo = 0.55;
     public const double FaithfulRankHi = 0.95;
@@ -27,54 +29,41 @@ public static class FoundryDefaults
     public const double MetricBasisGain = 4.0;
     public const double CoordScale = 20.0;
     public const double RelErrTol = 0.0;
-    /// 2026-07-09: block outputs must PERTURB the residual, not bury it — at
-    /// depth 4, gain-1.0 additions (~13/layer) out-accumulate a norm-sqrt(d)
-    /// token 3:1 and the final state goes shared-dominated (cos 0.99 measured).
+    /// Attention and residual block gains (scaled by nLayers^-1/4): block outputs perturb
+    /// the residual stream rather than accumulate over the token embedding.
     public const double AttnGain = 0.5;
     public const double ResidGain = 0.5;
-    /// Conditional-floor synthesis runs: correction layers must ride ON the calibrated
-    /// floor (MaxEnt: log-linear perturbations), not overwrite it — measured
-    /// 2026-07-09: at full scale the layers erased the determiner slot
-    /// (the→close/short became the→before/after; Spearman L0↔full 0.1).
-    /// Gain sweep 2026-07-09 (16-probe likelihood, V=7134): correction planes
-    /// are tail-only — hits@50 flat 0.448 at every gain, MRR never exceeds the
-    /// floor's, mean rank improves monotonically with gain. 0.10 is the Pareto
-    /// knee (mean rank 1675→1430, MRR −2.8%, canary Spearman 0.54).
-    /// Output scales are multiplied by this when embed op == "conditional".
+    /// Layer output scale when the embedding carries the conditional floor (embed op
+    /// "conditional"): correction layers are log-linear perturbations of the calibrated
+    /// floor and do not overwrite it.
     public const double FloorCorrectionGain = 0.10;
-    /// Phase 4 v1b: MaxEnt log-linear sum of the class-transition table into the
-    /// conditional floor (embed op "conditional_pos") — 1.0 is the plain sum.
+    /// Weight of the class-transition table in its log-linear sum into the conditional
+    /// floor (embed op "conditional_pos"); 1.0 is the plain sum.
     public const double PosFloorGain = 1.0;
     public const double GateZ = 6.0;
     public const double CtxQk = 8.0;
     public const double CapFrac = 0.05;
-    /// PPMI is a declared association operator, not an implicit trajectory-export
-    /// policy. Trajectory synthesis must carry the substrate's rated continuation
-    /// evidence unchanged; enabling this silently reweighted it and dropped every
-    /// non-positive PMI edge before target-operator construction (#928).
+    /// PPMI reweighting of the adjacency plane. Off: trajectory synthesis carries the
+    /// rated continuation evidence unchanged; PPMI would drop every non-positive PMI edge
+    /// before operator construction.
     public const bool Ppmi = false;
     public const bool Procrustes = true;
-    /// Plan Phase 0 (2026-07-08 rope-probe verdict: CORRUPTS, 191% drift): synthesized
-    /// QK operators are content-relational; llama-arch RoPE rotates them by absolute
-    /// position. True = write rope.freq_base=1e9, flattening every rotary pair
-    /// except pair 0 (which rotates at frequency 1 regardless of theta — residual
-    /// exposure ~2/headDim of Q·K energy; re-probe each synthesis, gate at 0.15 drift).
+    /// Synthesized QK operators are content-relational, and llama-arch RoPE would rotate
+    /// them by absolute position. True writes rope.freq_base=1e9, flattening every rotary
+    /// pair except pair 0 (which rotates at frequency 1 regardless of theta), and leaves
+    /// rotary pair 0 unfilled when writing heads.
     public const bool DisableRope = true;
-    /// Plan Phase 5 (doc 14 P7): scale of the hilbert content-PE written into the
-    /// trailing capacity dims of the embedding (content dims are row-normalized to 1).
+    /// Scale of the Hilbert content position encoding written into the trailing capacity
+    /// dims of the embedding (content dims are row-normalized to 1).
     public const double HilbertPeScale = 0.25;
-    /// Highway salience bands — the width of doc 18 §2's G stratum (relation-gate
-    /// signals: one indicator direction per band). COUNTED, not chosen: this is the
-    /// row count of converse.relation_band_catalog() (mandate..probationary, bands 0..12), and
-    /// it moves only when the catalog does. Named here rather than inlined so the
-    /// stratum allocator and the catalog cannot silently disagree.
+    /// Highway salience band count — the width of the relation-gate stratum (one indicator
+    /// direction per band). Equals the row count of converse.relation_band_catalog()
+    /// (mandate..probationary, bands 0..12) and changes only with that catalog.
     public const int HighwayBandCount = 13;
     /// Exact normalized SVD factorization. Factor() normalizes the operator by its
     /// leading singular value before splitting each singular ratio across both
-    /// factors. Alpha=1 preserves that normalized operator; historical alpha=0.25
-    /// changed its spectrum and therefore changed the substrate-selected operation.
-    /// Rank truncation remains the declared target-width loss; spectrum retuning is
-    /// not an implicit construction policy (#928).
+    /// factors. Alpha=1 preserves that normalized operator's spectrum; rank truncation
+    /// is the only declared loss to target width.
     public const double FactorSpectrumAlpha = 1.0;
     public static readonly bool CoordOnly = false;
     public const bool CoordDirect = false;

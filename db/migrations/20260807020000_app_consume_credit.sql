@@ -1,8 +1,6 @@
--- app.consume_credit — money-path debit as one installed function (GH #531).
--- Was inline FOR UPDATE + jsonb_set CTE in PostgresBillingEntitlementStore.
--- Behaviour unchanged: pick the active entitlement with the most headroom for
--- the service, lock it, bump used_credits, return (plan_id, remaining, period_end)
--- or zero rows when insufficient / inactive / unknown service.
+-- Debits p_units from the active entitlement with the most headroom for the service under
+-- a row lock and returns (plan_id, remaining, period_end); zero rows when no active
+-- entitlement for the service has enough credit.
 
 CREATE SCHEMA IF NOT EXISTS app;
 

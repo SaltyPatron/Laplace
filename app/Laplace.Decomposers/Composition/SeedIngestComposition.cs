@@ -21,14 +21,14 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Laplace.Decomposers.Composition;
 
 /// <summary>
-/// Shared seed-ingest composition root for CLI + API. Resolve decomposers and
-/// content adapters at the host edge only — never inside per-record handlers.
+/// Seed-ingest composition root shared by CLI and API. Decomposers and content adapters
+/// are resolved at the host edge, never inside per-record handlers.
 /// </summary>
 public static class SeedIngestComposition
 {
     /// <summary>
-    /// Built-in providers remain available when no runtime source generation is
-    /// selected. Explicit configuration routes through the shared recipe decomposer.
+    /// Built-in providers by ingest key, used when no source generation is selected for
+    /// that key; a selected generation routes through the shared recipe decomposer.
     /// </summary>
     internal static readonly (string Key, Type Decomposer)[] Registry =
     [

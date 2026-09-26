@@ -8,8 +8,8 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Cold verification in its own CLI process. Replays authenticated export
-/// inputs through the existing canonical owner; never records or invents games.</summary>
+/// <summary>Verification in a fresh CLI process: replays authenticated export inputs
+/// through the canonical typed replay; records and invents no games.</summary>
 internal static class ChessRecordedFloorWitness
 {
     internal const string Mode = "select-recorded-floor-witness";
@@ -18,8 +18,8 @@ internal static class ChessRecordedFloorWitness
         string InstalledPosition, string InstalledTransition, string Output,
         int MaximumLineBytes = 8 * 1024 * 1024, long MaximumReplayBytes = 128L * 1024 * 1024,
         int SkipEligible = 0);
-    // The inventory owns this Pascal-case retained-record transport. Decode only
-    // its declared fields; canonical chess interpretation stays in the typed replay.
+    // Pascal-case retained-record transport written by the inventory. Only its declared
+    // fields are decoded; chess interpretation stays in the typed replay.
     internal sealed record RetainedPlaying(string PlayingId, string LineId, string StartPositionId,
         string? StartFen, string[] MoveIds, string[] Moves, string Result);
 
@@ -215,8 +215,8 @@ internal static class ChessRecordedFloorWitness
             var ply = replay.Plies[i];
             var key = ChessCompose.TransitionKey(fromId, ids[i]);
             var board = Board.FromFen(fromFen);
-            // A tablebase early return or terminal root would not exercise the API's
-            // ordinary substrate frontier. Keep this acceptance request in that owner.
+            // A tablebase early return or a terminal root would not exercise the ordinary
+            // substrate search frontier, so only such positions are accepted here.
             bool ordinarySearch = board.Squares.Count(piece => piece != Piece.Empty) > 7
                 && new ChessModality().Terminal(new ChessModality().FromFen(fromFen)) is null;
             bool absentPosition = !ChessPositionFloor.TryLookup(fromId, out _, out _, out _, out _, out _, out _, out _);

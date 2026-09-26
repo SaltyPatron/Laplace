@@ -179,9 +179,9 @@ pg_laplace_glicko2_neutral_mu(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_glicko2_neutral_mu_fp());
 }
 
-/* Signed Glicko-2 expectation around neutral, shared by native walks and SQL
- * export. Compatibility SQL overloads may pass historical witness/kappa
- * arguments, but this entry reads only the sufficient folded state. */
+/* Signed Glicko-2 expectation of one consensus cell around neutral: the edge
+ * weight every native walk and SQL read scores with. Reads only the folded
+ * (rating, rd) standing. */
 PG_FUNCTION_INFO_V1(pg_laplace_walk_edge_weight);
 
 Datum
@@ -192,16 +192,9 @@ pg_laplace_walk_edge_weight(PG_FUNCTION_ARGS)
 }
 
 /*
- * Edge strength in [0, 1]: the canonical native Glicko expectation against
- * neutral, shared by foundry, export and web exploration.
- *
- * Same reason walk_edge_weight got a SQL entry: the body lived only in
- * spi_common.h, reachable from C callers alone, so any SQL surface wanting the
- * foundry's notion of strength had to retype the algebra -- which is exactly how
- * consensus_adjacency ended up carrying a second copy of the Glicko-complete
- * formula. Exposing it here means consensus.weight(..., 'strength') dispatches
- * to the same body laplace_edge_strength() serves to foundry_crawl and
- * explore_web, so the four weight modes cannot drift from their C originals.
+ * Edge strength in [0, 1]: the Glicko expectation of one consensus cell against
+ * neutral. SQL weight reads dispatch to the same laplace_edge_strength() body
+ * the native traversals call, so there is one strength algebra.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_edge_strength);
 
@@ -499,21 +492,16 @@ pg_relation_rank(PG_FUNCTION_ARGS)
 
 
 /*
- * Is this relation symmetric? Straight off the compiled law, same shape as
- * pg_relation_rank.
+ * Symmetry of a relation type, read from the compiled relation manifest.
  *
- * A symmetric assertion folds into ONE consensus cell canonically oriented to
- * subject = min(subject, object) (laplace_attestation_orient), so any read that
- * probes subject_id alone can only see such a pair from its lesser-hashed end.
- * Callers that must not manufacture absence need to know which types those are,
- * and the answer belongs to the manifest -- a hand-kept list of "the symmetric
- * ones" in a SQL body is a second copy of the law that agrees until one of them
- * is edited.
+ * A symmetric assertion folds into one consensus cell oriented to
+ * subject = min(subject, object) (laplace_attestation_orient), so a read that
+ * probes subject_id alone sees such a pair only from its lesser-hashed end;
+ * readers use this to probe both ends instead of reporting absence.
  *
- * NULL for a type the static table does not carry (dynamic DEP_/FEAT_/EDEP_
- * families), which is honest: they are absent from the manifest, so the manifest
- * has no symmetry to report. Callers coalesce it to false -- unknown symmetry
- * must not silently widen a read into the reverse direction.
+ * NULL for a type the manifest does not carry (dynamic DEP_/FEAT_/EDEP_
+ * families). Callers coalesce it to false so unknown symmetry never widens a
+ * read into the reverse direction.
  */
 PG_FUNCTION_INFO_V1(pg_relation_is_symmetric);
 
@@ -536,14 +524,12 @@ pg_relation_is_symmetric(PG_FUNCTION_ARGS)
 
 
 
-/* Per-backend memo for the SPI fallback below: without it, a type_id that
- * misses the static table (dynamic DEP_/FEAT_ family members whose family
- * root isn't registered, or a genuinely unranked type) re-walks its
- * unprepared IS_A ancestry on EVERY ranked-read row that touches it. The
- * resolution is a function of the relation manifest + IS_A consensus, both
- * effectively static for a backend's lifetime (matching perfcache
- * semantics); not-found is memoized too — the unresolvable type is exactly
- * the per-row pathological case. */
+/* Per-backend memo for rank resolution of a type the manifest does not carry.
+ * Such a type inherits the rank of its nearest manifest ancestor along the
+ * strongest IS_A consensus chain; the memo keeps that chain walk off every row
+ * of a ranked read. Resolution depends on the manifest and IS_A standing, which
+ * are treated as fixed for a backend's lifetime like the perfcache. Not-found is
+ * memoized too. */
 typedef struct RankMemoEntry
 {
     hash128_t key;

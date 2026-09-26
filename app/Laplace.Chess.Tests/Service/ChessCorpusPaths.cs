@@ -1,19 +1,9 @@
 namespace Laplace.Chess.Service.Tests;
 
 /// <summary>
-/// Where the real chess corpora live, per host.
-///
-/// WHY THIS EXISTS. The corpus-backed tests hardcoded <c>D:\Data\Ingest\…</c>. Every one
-/// of them is a <c>SkippableFact</c> gated on <c>File.Exists</c>, so on the Linux
-/// self-hosted runner — the box CI actually runs on, where the corpora sit under
-/// <c>/vault/Data</c> — they did not fail, they SKIPPED, and the suite reported green.
-/// Three tests whose entire job is to prove the decomposers still read the real corpora
-/// have therefore never executed in CI. A test that cannot run on the machine that runs
-/// the tests is not a gate; it is a comment with a green checkmark.
-///
-/// <c>LAPLACE_DATA_ROOT</c> wins (that is what the ingest scripts honour), then the
-/// platform default. Skipping stays available for a laptop with no corpus, but a
-/// provisioned host now runs them.
+/// Where the admitted chess corpora live on this host: <c>LAPLACE_DATA_ROOT</c> (the root
+/// ingest honours) if set, else the platform default (<c>/vault/Data</c> on Linux).
+/// Corpus-backed tests skip only when the corpus is absent from that root.
 /// </summary>
 internal static class ChessCorpusPaths
 {

@@ -151,11 +151,10 @@ internal sealed class OpenSubtitlesAlignedHandler
         private (Hash128 Id, double[] Coord) StageSequence(
             SubstrateChangeBuilder builder, Hash128[] sentenceIds, double[] sentenceCoords)
         {
-            // Sequence identity is content-only. OpenSubtitles is testimony about
-            // this ordered composition, not an identity namespace for it: another
-            // corpus admitting the same sentence ids in the same order must reach
-            // the same Merkle id and trajectory. Source/language metadata stays on
-            // the entity rows and attestations rather than entering this preimage.
+            // Sequence identity is content only: the Merkle preimage is the ordered
+            // sentence ids, so any source admitting the same sentences in the same order
+            // reaches the same entity and trajectory. Source and language stay on the
+            // entity rows and attestations.
             Hash128[] constituents = sentenceIds;
             Hash128 id = Hash128.Merkle(EntityTier.Document, constituents);
             builder.AddEntity(

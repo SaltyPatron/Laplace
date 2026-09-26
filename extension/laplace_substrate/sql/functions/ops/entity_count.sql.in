@@ -1,4 +1,3 @@
--- BEGIN ATOMIC: GH #764/#1008.
 DROP FUNCTION IF EXISTS laplace.entity_count(bytea);
 DROP FUNCTION IF EXISTS laplace.entity_counts_by_types(bytea[]);
 

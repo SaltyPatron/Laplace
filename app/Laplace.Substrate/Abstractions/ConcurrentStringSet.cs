@@ -5,16 +5,11 @@ using System.Collections.Generic;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Thread-safe string set with <see cref="HashSet{T}"/>-identical ergonomics, backing the
-/// canonical-name readback accumulators decomposers populate during compose.
-///
-/// Compose is no longer serial: a monolithic file is cut into record-aligned segments that
-/// compose concurrently against the SAME decomposer instance (see MonolithSegmenter). Any
-/// mutable side-channel a decomposer touches in its compose path is therefore shared across
-/// threads. A plain HashSet corrupts under concurrent Add — measured as the ISO639 ingest
-/// crash ("A concurrent update was performed on this collection"). This set is the correct
-/// data structure for that job: the accumulation is a content-addressed set-union, so a
-/// concurrent first-wins Add is exactly the serial semantics with no loss.
+/// Thread-safe string set with <see cref="HashSet{T}"/> semantics, for the canonical-name
+/// readback a provider accumulates during compose. Record-aligned segments of one file
+/// compose concurrently against the same provider instance (see MonolithSegmenter), so
+/// this state is shared across threads. The accumulation is a set union, so a concurrent
+/// first-wins Add gives exactly the serial result.
 /// </summary>
 public sealed class ConcurrentStringSet : IReadOnlyCollection<string>
 {

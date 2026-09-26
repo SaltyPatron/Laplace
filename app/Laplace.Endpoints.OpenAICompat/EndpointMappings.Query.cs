@@ -3,12 +3,12 @@ using Laplace.Api.Contracts;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The structural query surface: shapes and bands are published so a client
-/// builds its controls from the substrate, and a read carries its own dials.
+/// Structural query endpoints. Shapes and bands are served from the substrate's own
+/// catalog, and each read carries its own dials.
 /// </summary>
 internal static class QueryEndpoints
 {
-    /// <summary>Shapes served here rather than by the recall responder family.</summary>
+    /// <summary>Shapes that call native entry points directly rather than recall_intent.</summary>
     private static readonly string[] NativeShapes =
         ["band_facts", "beam", "path", "neighbors", "generate"];
 
@@ -70,12 +70,10 @@ internal static class QueryEndpoints
         .WithTags("query")
         .Produces<LeadersResponse>();
 
-        // The storefront leaderboard: top consensus edges per salience band,
-        // fully labeled. Ungated like the catalog — it IS the shop window.
+        // Top consensus edges per salience band, labeled; ungated and rate-limited.
         app.MapGet("/v1/query/leaders", async (string? bands, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            // This anonymous home-page preview has a server-owned work budget.
-            // A client-provided integer must never become an unbounded DB allocation.
+            // An anonymous read, so the per-band limit is bounded server-side.
             if (limit is < 1 or > 20)
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'limit' must be between 1 and 20.");
             var bandIds = (bands ?? "1,2,4,5")
@@ -118,8 +116,7 @@ internal static class QueryEndpoints
                             $"No content is witnessed for '{payload.Topic2.Trim()}'.");
                 }
 
-                // Context ids disambiguate a sense. They are resolved content,
-                // not parsed text — any language reaches the same ids.
+                // Context terms resolve to content ids that disambiguate a sense.
                 byte[][]? contextIds = null;
                 if (payload.Context is { Length: > 0 })
                 {

@@ -8,10 +8,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// through <c>string.Format</c>. A Serilog-style <c>{Name}</c> placeholder is not an argument
 /// index, so the call throws <see cref="FormatException"/> the moment it fires.
 ///
-/// Every one of these sites is a "log it and skip the bad input" path — which means the
-/// handler for the error IS the crash. Twelve shipped at once; the chess.com PGN lane died
-/// on <c>ChessPgnDecomposer</c>'s dropped-game warning, taking a 190k-game corpus with it,
-/// and the same latent fault sat in the model, repo, ConceptNet and shared-spine lanes.
+/// Such sites are usually "log and skip the bad input" paths, so the throw replaces the
+/// skip and aborts the ingest.
 ///
 /// A single-argument call binds the <c>Trace.TraceWarning(string)</c> overload and does no
 /// formatting, so braces are harmless there; this gate fires only when arguments follow.
@@ -45,7 +43,7 @@ public sealed class TraceFormatGateTests
         {
             if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
             if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
-            // This gate's own doc comment names the banned idiom.
+            // This file's own doc comment names the banned idiom.
             if (Path.GetFileName(file).Equals("TraceFormatGateTests.cs", StringComparison.Ordinal)) continue;
 
             var text = File.ReadAllText(file);

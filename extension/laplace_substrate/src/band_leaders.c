@@ -15,9 +15,10 @@ typedef struct {
 
 static SPIPlanPtr edges_plan, labels_plan;
 
-/* Each arena uses the canonical indexed band operation. The selected pages are
- * retained as packed ids, then share one lazy display batch. There are no SQL
- * row-expansion joins or separate render calls for subjects and objects. */
+/* For each requested band, the indexed arena read returns its top `per` consensus
+ * cells (subject, type, object, rating, RD, witnesses). Every subject and object
+ * across all bands is then labelled in one display batch, and each cell is
+ * emitted with its effective mu. */
 PG_FUNCTION_INFO_V1(pg_laplace_band_leaders);
 Datum
 pg_laplace_band_leaders(PG_FUNCTION_ARGS)

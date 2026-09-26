@@ -223,9 +223,7 @@ Knowledge-package grants remain governed by the authority layer. A package may r
 
 ## Roster
 
-This table is the current blob catalog. It is law for *what exists as a
-perfcache class*, not a claim that every row is loaded on the live host.
-Observed install state belongs in CI receipts and `scripts/check-deployed-revision.sh`.
+This table is the blob catalog: the perfcache classes and how each is built and read.
 
 Tier-0 media scalar leaves use the shared Unicode codepoint floor; image/audio/video do not mint arbitrary amplitude/color/sample values as private atoms. Numeric values compose above T0 (digit/punctuation → canonical scalar/number → channel/sample occurrence → higher structure).
 
@@ -234,21 +232,18 @@ codepoint ids.
 
 | Blob | Role | Lookup | Rebuild | Notes |
 |---|---|---|---|---|
-| `laplace_t0_perfcache_<ucd>.bin` | Unicode 0..0x10FFFF: id, UCA order, PointZM, Hilbert, UAX flags, NFC compose/decomp | `records[cp]` | UCD emit (`codepoint_table` / Unicode decomposer) | Format v4 (`LPRF`). Legacy v3/banded geometry is rejected. |
+| `laplace_t0_perfcache_<ucd>.bin` | Unicode 0..0x10FFFF: id, UCA order, PointZM, Hilbert, UAX flags, NFC compose/decomp | `records[cp]` | UCD emit (`codepoint_table` / Unicode decomposer) | Format v4 (`LPRF`); the loader accepts only this format. |
 | `laplace_highway_perfcache.bin` | Relation-law bit plane: canonical name, band, bit, rank | bit test / 256-bit mask | relation-manifest codegen | Does not populate live consensus band counts. |
-| `laplace_modality_number_perfcache.bin` | Canonical integer roots 0..255 | `records[value]` direct index | `modality_number_tables_emit` from T0 | Shared by image/audio/video and any other exact integer consumer. This is the first higher-tier shared scalar ROM, not a modality-private cache. |
+| `laplace_modality_number_perfcache.bin` | Canonical integer roots 0..255 | `records[value]` direct index | `modality_number_tables_emit` from T0 | Shared by image/audio/video and any other exact integer consumer; a higher-tier shared scalar ROM, not a modality-private cache. |
 | `laplace_vocabulary_perfcache.bin` | Governed linguistic vocabularies (UPOS, UD relations and subtypes, features, feature values from `engine/manifest/vocabulary`): content id, coord, Hilbert, tier, append-only code, parent code, label | `(vocabulary, code)` direct index; open-addressed `(vocabulary, id)` index | `laplace_vocabulary_tables_emit` from T0 + manifest | Records equal the ordinary content path (a feature value is the ordered composition `[feature, value]`). One entity may hold codes in several vocabularies. BLAKE3 trailer and source hash. GUC `laplace_substrate.vocabulary_perfcache_path`; served by `laplace.vocabulary*`; `check-deployed-revision.sh` probes that the served NOUN record equals `laplace.content_id('NOUN')`. |
 | `laplace_chess_position_perfcache.bin` | Piece×square vocab and catalog boards | id → coord/hilbert/tier | recorded-floor export | GUC `laplace_substrate.chess_position_perfcache_path`. |
 | `laplace_chess_transition_perfcache.bin` | Deterministic `(from, move) → to` | mmap search | recorded-floor export | Reused by replay/line consumers; not a Glicko dump. |
-| Pixel / patch / region / image ROMs | Deterministic image compositions at successively higher reusable tiers | direct index where dense; deterministic sparse lookup where admitted/hot | image recipe + lower cache generations | Prescribed by compositional cache law; image records are reusable by video/document/multimodal consumers. |
-| Audio sample/window/segment/track ROMs | Deterministic audio scalar/composition tiers | direct index where dense; deterministic sparse lookup where admitted/hot | audio recipe + lower cache generations | Prescribed by compositional cache law; reusable by video and other multimodal consumers. |
-| Factor ROM | Versioned model-factor trajectories | pointer arithmetic | deposited factor physicalities | Designed (#526). Not installed. |
-| Generation-corpus ROM | Cold `walk_text` / generation lane | mmap | generation corpus | Prescribed (#409). Not installed. |
-| Separator-id ROM | Alphabet-bounded separator atoms/clusters | compiled set | T0 + grapheme law | Named in the dated audit `docs/sql-cascade.md` (2026-08-15); re-verify before reuse. |
+| Pixel / patch / region / image ROMs | Deterministic image compositions at successively higher reusable tiers | direct index where dense; deterministic sparse lookup where admitted/hot | image recipe + lower cache generations | Image records are reusable by video/document/multimodal consumers. |
+| Audio sample/window/segment/track ROMs | Deterministic audio scalar/composition tiers | direct index where dense; deterministic sparse lookup where admitted/hot | audio recipe + lower cache generations | Reusable by video and other multimodal consumers. |
+| Factor ROM | Versioned model-factor trajectories | pointer arithmetic | deposited factor physicalities | |
+| Generation-corpus ROM | Cold `walk_text` / generation lane | mmap | generation corpus | |
+| Separator-id ROM | Alphabet-bounded separator atoms/clusters | compiled set | T0 + grapheme law | |
 
 New blobs land only with: a row here, a one-way rebuild path (blob never seeds
 Postgres), determinism/staleness gates, a loader that refuses unknown versions,
 and a serving-process probe that the deployed revision check actually runs.
-
-The 2026-07-18 table in `docs/archive/specs-v1/33_Perfcache_Blob_Law.md` is
-historical. Do not treat its “live/landing” column as current host state.

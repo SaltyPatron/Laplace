@@ -18,11 +18,11 @@ typedef struct {
 #define LAPLACE_VFLAG_HAS_ATOM      (1ULL << 0)
 #define LAPLACE_VFLAG_TIER_SHIFT    1u
 #define LAPLACE_VFLAG_TIER_MASK     0x1FULL
-/* Ordinary content vertices historically carried a five-bit tier in bits 1-5.
- * Deep source composition needs all uint8 floors. Bits 43-46 are unused by
- * atom (bits 31-51), testimony (bits 6-42), and factor (bits 7-42) payloads;
- * the extension marker therefore leaves every legacy payload byte-for-byte.
- * It is emitted only for non-atom, non-special ordinary vertices at tier >31. */
+/* Ordinary content vertices carry a five-bit tier in bits 1-5; deep source
+ * composition needs all uint8 floors, so bits 43-46 extend it. Those bits are
+ * unused by atom (bits 31-51), testimony (bits 6-42), and factor (bits 7-42)
+ * payloads, so a vertex at tier <=31 has the same bytes with or without the
+ * extension. It is emitted only for non-atom, non-special ordinary vertices at tier >31. */
 #define LAPLACE_VFLAG_TIER_EXT_SHIFT 43u
 #define LAPLACE_VFLAG_TIER_EXT_MASK  0x7ULL
 #define LAPLACE_VFLAG_TIER_EXT       (1ULL << 46)
@@ -40,7 +40,7 @@ typedef struct {
 #define LAPLACE_VFLAG_SCORE_MASK    0xFFFFFFFFFULL
 
 // FACTOR vertex class: raw float32 payload channel for per-circuit factor
-// matrices (doc 26 item A). Discriminated by bit 7 with bits 0 and 6 clear —
+// matrices. Discriminated by bit 7 with bits 0 and 6 clear —
 // mutually exclusive with the atom and testimony classes, whose score/atom
 // fields overlap these bit ranges only when their own class bit is set.
 // Payload per vertex: 6 float32 = entity_id.lo (f0|f1), entity_id.hi (f2|f3),

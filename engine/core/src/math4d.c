@@ -61,21 +61,15 @@ void math4d_scale(const double a[4], double s, double out[4]) {
 
 /* ---- canonical constituent order -----------------------------------------
  *
- * Floating-point addition is commutative but NOT associative, so a sum over
- * constituents depends on the order they arrive in. MEASURED 2026-08-12: six
- * permutations of three tier-0 placements produced three distinct bit patterns,
- * grouped by the FINAL addend -- the signature of a left fold. Observed in the
- * substrate as `tac` differing from `cat`/`act` below 1e-12, invisible
- * downstream only because Hilbert quantisation absorbed it. A placement derived
- * from constituents must be reproducible under constituent reordering; the
- * content-addressing law requires it.
+ * Floating-point addition is commutative but not associative, so a sum over
+ * constituents depends on arrival order. A placement derived from constituents
+ * must be reproducible under any reordering of the same constituents, so every
+ * accumulation visits them in one canonical order.
  *
- * Ordering is NUMERIC, component by component, never a memcmp over raw bytes.
- * memcmp is a fine total order on any single host but walks bytes in address
- * order, so little- and big-endian hosts would sort constituents differently and
- * derive different placements from identical inputs. IEEE-754 comparison
- * semantics are identical on both. Content addressing has to be
- * architecture-stable, not merely run-stable.
+ * Ordering is numeric, component by component, never a memcmp over raw bytes:
+ * memcmp walks bytes in address order, so little- and big-endian hosts would sort
+ * differently and derive different placements from identical inputs. IEEE-754
+ * comparison is the same on both, so placement is architecture-stable.
  *
  * Identical entries compare equal and are interchangeable in the sum, so an
  * unstable sort is safe. -0.0 and +0.0 compare equal and sum identically.
@@ -153,9 +147,9 @@ static void laplace_centroid_reduce(const laplace_pt_t* points, size_t count, do
 #define LAPLACE_PT_STACK 64
 
 /* Sorts the constituents into canonical order. Returns stackbuf for small n,
- * a malloc'd block for large n, or NULL on allocation failure. Centroid then
- * uses its allocation-free canonical scan; existing weighted callers retain
- * their separate failure policy. Free with laplace_pts_release. */
+ * a malloc'd block for large n, or NULL on allocation failure. On NULL the
+ * centroid uses its allocation-free canonical scan; weighted callers apply their
+ * own failure policy. Free with laplace_pts_release. */
 static laplace_pt_t* laplace_pts_canonical(const double* points, size_t n_points,
                                            const double* weights,
                                            laplace_pt_t* stackbuf) {
@@ -201,10 +195,10 @@ int math4d_centroid_with_workspace(const double* points, size_t n_points,
     return 0;
 }
 
-/* The historical void surface cannot return an allocation error. Its rare OOM
- * path walks equal-key groups in canonical order without allocating; it never
- * substitutes input-order arithmetic. Bounded callers use the status-returning
- * workspace surface above and do not enter this slower path. */
+/* The void centroid surface cannot return an allocation error. On OOM it walks
+ * equal-key groups in canonical order without allocating; it never substitutes
+ * input-order arithmetic. Bounded callers use the status-returning workspace
+ * surface above and do not enter this slower path. */
 static void laplace_centroid_without_allocation(const double* points, size_t count, double out[4]) {
     const double* previous = NULL;
     double sum[4] = {0.0, 0.0, 0.0, 0.0};
@@ -302,35 +296,9 @@ void math4d_exp_s3(const double base[4], const double tangent[4], double out[4])
     normalize4d(out);
 }
 
-/* Canonical constituent order, for reproducible accumulation.
- *
- * Floating-point addition is commutative but NOT associative, so any sum over
- * constituents depends on the order they arrive in. MEASURED 2026-08-12: six
- * permutations of three tier-0 placements produced three distinct bit patterns
- * from both math4d_centroid and this function, grouped by the FINAL addend --
- * the signature of a left fold. A placement derived from constituents was
- * therefore not reproducible under constituent reordering, which the
- * content-addressing law requires it to be. (Observed in the wild as `tac`
- * differing from `cat`/`act` below 1e-12, absorbed by Hilbert quantisation and
- * so invisible downstream.)
- *
- * Ordering is NUMERIC, component by component, not a memcmp over the raw bytes.
- * memcmp would be a perfectly good total order on any single host, but it walks
- * bytes in address order: little-endian compares mantissa low bytes first,
- * big-endian hits sign/exponent first. Two hosts of different endianness would
- * therefore sort constituents differently, sum in different orders, and derive
- * different placements from identical inputs -- which defeats the point, since
- * content addressing has to be architecture-stable and not merely run-stable.
- * IEEE-754 comparison semantics are identical on both.
- *
- * Identical (point, weight) pairs compare equal and are interchangeable in the
- * sum, so an unstable sort is safe. -0.0 and +0.0 compare equal here and sum
- * identically, so collapsing them is correct rather than merely harmless.
- *
- * Uses the shared laplace_pts_canonical helper defined above math4d_centroid --
- * one ordering rule for every constituent accumulation in this file, so the two
- * means cannot drift apart.
- */
+/* Weighted Karcher mean, accumulated in the canonical constituent order defined
+ * above math4d_centroid (laplace_pts_canonical), so both means follow one
+ * ordering rule. Identical (point, weight) pairs are interchangeable in the sum. */
 
 void math4d_karcher_mean(const double* points, size_t n_points,
                          const double* weights, double tol, int max_iters,
@@ -348,10 +316,10 @@ void math4d_karcher_mean(const double* points, size_t n_points,
     }
 
     /* Establish the canonical visitation order once; every accumulation below
-     * uses it -- the weight total, the seed estimate, and the tangent mean that
-     * is recomputed on each iteration. All three were order-dependent. On
-     * allocation failure the result stays correct but loses reproducibility; it
-     * never becomes wrong. */
+     * uses it -- the weight total, the seed estimate, and the tangent mean
+     * recomputed on each iteration. On allocation failure the constituents are
+     * visited in input order: the mean is still computed, but is not
+     * reproducible under reordering. */
     laplace_pt_t  stackbuf[LAPLACE_PT_STACK];
     laplace_pt_t* pts = laplace_pts_canonical(points, n_points, weights, stackbuf);
 #define LK_P(i) (pts != NULL ? pts[i].p : points + (i) * 4)
@@ -487,9 +455,8 @@ double math4d_hausdorff(const double* a, size_t na, const double* b, size_t nb) 
 
 /*
  * math4d_angular_distance_batch: see math4d.h for the contract. Runtime
- * CPUID-gated AVX2 dispatch, resolved once via a cached function pointer;
- * scalar fallback is always compiled and always correct, AVX2 only changes
- * performance.
+ * CPUID-gated AVX2 dispatch, resolved once via a cached function pointer; the
+ * scalar path is always compiled and AVX2 changes only performance.
  */
 #if defined(_M_X64) || defined(__x86_64__) || defined(_M_AMD64)
 #define LAPLACE_MATH4D_X86 1

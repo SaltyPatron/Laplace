@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Tab-separated correspondence bridges (MapNet frame→LU, WordFrameNet, OMW .tab rows).
-/// Pure extract — yields <see cref="CategoryCorrespondenceRecord"/> rows, no SQL.
+/// Extraction only: yields <see cref="CategoryCorrespondenceRecord"/> rows, no SQL.
 /// </summary>
 public static class TabBridgeHelpers
 {

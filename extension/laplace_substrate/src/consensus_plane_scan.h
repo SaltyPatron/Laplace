@@ -1,8 +1,8 @@
 /* Included by consensus_scan.c after the shared index/identity helpers.
- * This is a physical access plan for typed response planes, not a new graph.
- * An endpoint's next relation is discovered by a B-tree seek. After one plane
- * reaches its cutoff, seek past that exact relation rather than skipping the
- * remainder of the endpoint, which may contain entirely different evidence.
+ * Physical access plan for typed response planes over the consensus face.
+ * An endpoint's next relation type is discovered by a B-tree seek. When one
+ * plane reaches its cutoff, the seek moves past that exact type rather than
+ * the remainder of the endpoint, whose other types are independent planes.
  */
 #ifndef LAPLACE_CONSENSUS_PLANE_SCAN_H
 #define LAPLACE_CONSENSUS_PLANE_SCAN_H

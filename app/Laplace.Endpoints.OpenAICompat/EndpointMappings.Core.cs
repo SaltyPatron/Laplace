@@ -22,9 +22,8 @@ internal static class CoreEndpoints
           .Produces<ReadinessResponse>()
           .Produces<ReadinessResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        // Browser/product surfaces need the same readiness document without turning
-        // an expected not-ready state into a failed resource load in the console.
-        // /health/ready remains the orchestration probe with 503 semantics.
+        // The same readiness document as /health/ready, always with 200; /health/ready
+        // answers 503 when not ready.
         app.MapGet("/health/status", async (ISubstrateClient substrate, CancellationToken ct) =>
             Results.Json(await substrate.ReadinessAsync(ct)))
           .WithTags("core")
@@ -48,10 +47,7 @@ internal static class CoreEndpoints
         app.MapGet("/v1/capabilities", () =>
         {
             var endpoints = new CapabilityEndpoints(
-                // Normal chat and text completion both execute the same canonical
-                // substrate-resident forward program. Keep this metadata tied to
-                // the semantic owner so product discovery cannot regress to stale
-                // recall/template or consensus-completion descriptions (#922).
+                // Chat and text completion both run the native forward program.
                 ChatCompletions: new CapabilityStatus("live", Backend: "converse.forward_turn -> generation.forward_program (native)", Billing: "preflight_quote_required"),
                 Completions: new CapabilityStatus("live", Backend: "converse.forward_turn -> generation.forward_program (native streaming)", Billing: "preflight_quote_required"),
                 Embeddings: new CapabilityStatus("live", Backend: "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)", Billing: "embeddings"),

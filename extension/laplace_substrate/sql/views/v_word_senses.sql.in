@@ -1,10 +1,5 @@
--- Word → sense edges on the unrefuted consensus surface. lexical.senses()/bubble_up own
--- the ranked synset walk; this view is the shared HAS_SENSE join so callers
--- stop re-typing laplace.relation_type_id('HAS_SENSE') + v_consensus_unrefuted.
---
--- PERFORMANCE: inherits v_consensus_unrefuted (filter on consensus) plus a
--- type_id equality. Prefer subject_id / object_id predicates; do not
--- `SELECT * FROM laplace.v_word_senses` without a key.
+-- Unrefuted HAS_SENSE cells as (word_id, sense_id) with standing. Read it
+-- keyed by word_id or sense_id; the ranked sense walk is lexical.senses().
 CREATE OR REPLACE VIEW laplace.v_word_senses AS
 SELECT c.subject_id AS word_id,
        c.object_id  AS sense_id,

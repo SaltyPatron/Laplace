@@ -9,12 +9,10 @@ namespace Laplace.Decomposers.SemLink;
 
 internal static class PredicateMatrixIngest
 {
-    // PredicateMatrix is a DISTINCT resource from SemLink's own JSON maps — it independently
-    // ties VN class + FN frame + PB roleset + WN sense + MCR/ILI per row. Stamping its rows
-    // with this dedicated source (not the SemLink source) lets consensus see PM and SemLink as
-    // two witnesses corroborating the same VN↔FN↔synset links, which is the whole point of the
-    // EVIDENCE layer. Its source id is registered as an entity in SemLinkDecomposer.InitializeAsync
-    // so the attestations' source_id FK is satisfied. See docs/specs/16 §3a.
+    // PredicateMatrix is a resource distinct from SemLink's JSON maps: each row ties a VN class,
+    // FN frame, PB roleset, WN sense and MCR/ILI. Its rows carry their own source id, so
+    // consensus folds PredicateMatrix and SemLink as two witnesses of the same VN↔FN↔synset
+    // links. SemLinkDecomposer.InitializeAsync registers that source entity.
     internal static readonly Hash128 Source = PredicateMatrixSource.SourceId;
     internal static readonly Hash128 TrustClass = PredicateMatrixSource.TrustClass;
 
@@ -63,7 +61,7 @@ internal static class PredicateMatrixIngest
             ct.ThrowIfCancellationRequested();
             if (lineMem.Length == 0) continue;
 
-            // First non-empty line is the column header (same as the old StreamReader path).
+            // The first non-empty line is the column header.
             if (!skippedHeader)
             {
                 skippedHeader = true;
@@ -185,8 +183,8 @@ internal static class PredicateMatrixIngest
 
     private static readonly IngestSourceLayout Layout = new()
     {
-        // Canonical name first: SemLinkDecomposer ingests the FIRST path only, so the
-        // versioned siblings the glob also matches must not outrank PredicateMatrix.txt.
+        // Canonical name first: only the first matched path is ingested, so versioned
+        // siblings the glob also matches must not outrank PredicateMatrix.txt.
         Files = [IngestFileMatch.Name("PredicateMatrix.txt"), IngestFileMatch.Glob("PredicateMatrix*.txt")],
         EcosystemDirs = [".", "instances", Path.Combine("semlink-master", "instances"), .. UnpackDirs],
         RootDirs = UnpackDirs,
@@ -297,9 +295,8 @@ internal static class PredicateMatrixIngest
     {
         private readonly Hash128 _sourceId;
         private readonly double _trust;
-        // DrainInto is deliberately serial for this direct-admission handler. Plain sets avoid
-        // paying ConcurrentDictionary synchronization on every projected field while retaining
-        // run-wide suppression of repeated package projections.
+        // DrainInto is serial for this handler, so plain sets suffice for run-wide
+        // suppression of repeated declarations.
         private readonly HashSet<Hash128> _declarations = new();
         private readonly HashSet<Hash128> _roleEntities = new();
         private readonly HashSet<Hash128> _relations = new();
@@ -310,8 +307,8 @@ internal static class PredicateMatrixIngest
             _trust = trust;
         }
 
-        // Parsing already produced the row's compact projection. All admission is a cheap,
-        // ordered builder drain, so consuming compose-worker slots here would be fake fan-out.
+        // Parsing already produced the row's compact projection and admission is an ordered
+        // builder drain, so there is no compose work to fan out to workers.
         public bool ParallelizeDeferredUnitCreation => false;
 
         public IIngestDeferredUnit CreateDeferredUnit(PredicateMatrixRecord record) =>

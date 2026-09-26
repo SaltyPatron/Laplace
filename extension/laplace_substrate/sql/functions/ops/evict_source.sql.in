@@ -1,56 +1,35 @@
--- evict_source: lawful retraction + refold of one SOURCE's testimony (GH #508).
+-- evict_source: retract one source's testimony and refold what it touched.
+-- The source is the evictable unit: attestations carry no version, and
+-- completion state gates each lane to one derivation, so eviction is the
+-- version transition; re-running the lane re-derives what the cleared
+-- completions gated.
 --
--- The evictable unit is the source. Attestation rows carry no version and their
--- context slot is provenance; versions never coexist (completion state gates each
--- lane to one derivation), so "evict version v" and "evict the source's testimony" are the same
--- operation — eviction IS the version transition: evict, then re-run the lane at
--- Version=N+1 and the hydrator re-derives everything the cleared completions gated.
+-- Order of work, each step committed before the next can lose it:
+--   replay tokens owned by the source are deleted, then its unit/layer
+--   completion rows, then its operational (admission-receipt) rows; then per
+--   relation, per batch, in one transaction:
+--   (a) DELETE a batch of the source's evidence under the relation (a literal
+--       type in EXECUTE so the plan is not generic), queue every touched
+--       endpoint into highway_mask_dirty, and collect the touched cells.
+--   (b) REFOLD each touched cell in place from its SURVIVING evidence through
+--       the consensus_fold aggregate, the SQL face of the native fold ingest
+--       runs, from the neutral prior: all surviving rows form one rating period
+--       from their persisted opponent ratings/RDs, observation counts, and
+--       score sums. (last_observed_at, id) is a deterministic traversal, not a
+--       reconstruction of original period boundaries; the contract is the
+--       grouped fold of surviving evidence, not bit parity with history.
+--   (c) DELETE cells with zero surviving evidence, never zero them: absence is
+--       not refutation.
+--   (d) With p_drain, highway_mask_drain recomputes queued masks from scratch,
+--       which can clear bits that inline deposit only ever sets.
+-- Entities and physicalities are never deleted: content is source-independent
+-- and geometry is a deterministic function of constituents, not testimony.
 --
--- Steps, per relation-type partition, per batch (one transaction each, COMMIT +
--- RAISE LOG progress — modeled on highway_mask_rebuild / highway_mask_drain):
---
---   (a) DELETE the source's evidence rows under the relation (LIST partition pruned
---       via a literal type in EXECUTE — a variable type plans generically and opens
---       every leaf, the attestation_merge lesson), RETURNING the touched cells and
---       the touched entity ids.
---   (b) REFOLD every touched cell in place from its SURVIVING evidence through the
---       consensus_fold AGGREGATE — the SQL surface of the same native scalar the
---       ingest fold runs (glicko2_fold_grouped_period), seeded from the neutral
---       prior. All surviving rows contribute to one rating period using persisted
---       opponent ratings/RDs, observation counts, and score sums before one state
---       transition. Ordering by (last_observed_at, id) is deterministic traversal;
---       timestamps do not reconstruct original rating-period boundaries. Bit-parity
---       with incremental history is not the contract (batch boundaries are not
---       recoverable); the grouped fold of surviving evidence is.
---   (c) Cells with ZERO surviving evidence are DELETED, never zeroed — unattested is
---       not attested-false (the #688/#689 law); a consensus row with no witnesses is
---       a claim nobody makes.
---   (d) Touched entity ids queue into laplace.highway_mask_dirty — the CLEAR case the queue
---       exists for (deposit only OR-accumulates; eviction can remove an entity's
---       last governed edge) — and drain via highway_mask_drain (p_drain), whose
---       refresh recomputes masks from scratch and can therefore clear bits.
---   (e) The source's completion state (laplace.ingest_unit_completion and
---       laplace.ingest_layer_completion rows under its witness id) is cleared before
---       any evidence is deleted, so the lane re-yields every unit at the next run.
---       Content entities are NEVER deleted — content the lane minted (positions,
---       tokens, scalars) is valid shared content under the identity law. Physicalities carry no source attribution
---       by design (geometry is content identity, not testimony): a trajectory
---       linestring is a pure deterministic function of its entity's constituents,
---       stays byte-correct across versions, and re-derivation re-deposits it
---       idempotently — there is nothing epistemic to retract there.
---
--- p_relations NULL = every relation the source has rows under, discovered by one
--- indexed LIMIT-1 probe per leaf partition (plus a DISTINCT scan of the source's
--- rows in the DEFAULT partition, where dynamic relations coexist). Passing the
--- lane's declared relations skips discovery entirely.
---
--- Eviction on a source with zero rows is a NO-OP, not an error (the unseeded law).
--- Idempotent and resumable: every batch commits a consistent snapshot (evidence
--- deleted + its cells refolded in the same transaction), so an interrupted run
--- re-run to completion leaves exactly the state a single run would have.
---
--- No SET clause: a PL/pgSQL procedure carrying one is barred from transaction
--- control (COMMIT), so references are schema-qualified instead.
+-- p_relations NULL discovers the source's relations per attestations leaf.
+-- A source with no rows is a no-op. Resumable: each batch commits evidence
+-- deletion and its refold together, so re-running an interrupted eviction
+-- ends in the state one run would. No SET clause: a procedure carrying one
+-- cannot COMMIT; references are schema-qualified.
 -- Invoke with: CALL ops.evict_source(laplace.source_id('ChessAnalysis'));
 DROP PROCEDURE IF EXISTS laplace.evict_source(bytea, bytea[], bytea[], int, boolean);
 
@@ -80,18 +59,15 @@ DECLARE
     replay_total   bigint := 0;
     t0             timestamptz := clock_timestamp();
 BEGIN
-    -- Plain TEMP table (per-batch COMMIT would drop ON COMMIT DROP); TRUNCATE per
-    -- batch. IF NOT EXISTS + explicit DROP at the end keeps DROP-NOTICE noise out
-    -- of client output.
+    -- Plain TEMP table (per-batch COMMIT would drop ON COMMIT DROP), truncated
+    -- per batch and dropped at the end.
     CREATE TEMP TABLE IF NOT EXISTS _evict_cells (
         subject_id bytea NOT NULL,
         object_id  bytea,
         consensus_leaf oid NOT NULL,
         UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
     TRUNCATE _evict_cells;
-    -- A backend may retain the pre-routing temp-table shape across an extension
-    -- update. Upgrade that shape once without emitting an IF NOT EXISTS notice
-    -- on every ordinary call in the same session.
+    -- A session's existing temp table may lack consensus_leaf; add it once.
     IF NOT EXISTS (
         SELECT 1
         FROM pg_attribute a
@@ -109,12 +85,10 @@ BEGIN
     IF p_relations IS NOT NULL THEN
         rels := p_relations;
     ELSE
-        -- Discover the source's relations: one indexed LIMIT-1 probe per leaf in
-        -- a named relation subtree (every such subtree holds exactly one type),
-        -- DISTINCT inside every leaf descended from the DEFAULT partition
-        -- (dynamic relations share its hash leaves). Checking only a leaf's own
-        -- bound is wrong because the DEFAULT partition is itself subpartitioned:
-        -- its leaves have HASH bounds, not the ancestor's DEFAULT bound.
+        -- Discover the source's relations per attestations leaf: DISTINCT
+        -- type_id in a leaf with a DEFAULT-bound ancestor, otherwise a single
+        -- indexed LIMIT-1 probe. The ancestor check matters because a leaf's
+        -- own bound is its HASH bound, not an ancestor's DEFAULT.
         rels := ARRAY[]::bytea[];
         FOR leaf IN
             SELECT pt.relid
@@ -148,8 +122,8 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Match ConsensusAccumulatingWriter's operational namespace.
-    -- These rows prove admission; they never supply rating observations.
+    -- Operational relation types (the writer's admission receipts) carry no
+    -- rating observations and are retracted separately below.
     operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
 
     SELECT COALESCE(array_agg(candidate ORDER BY ordinal), ARRAY[]::bytea[]) INTO rels
@@ -159,10 +133,8 @@ BEGIN
     RAISE LOG 'evict_source: start — source %, % relation(s)',
         encode(p_source, 'hex'), COALESCE(cardinality(rels), 0);
 
-    -- Deleting a source followed by score replay is invalid for a cell carrying
-    -- a transient-calibration receipt: the numeric model score was intentionally
-    -- never persisted.  Refuse before the first DELETE rather than retaining a
-    -- stale consensus value or fabricating a categorical replacement.
+    -- A cell carrying a transient-calibration receipt cannot be refolded: its
+    -- continuous score was never persisted. Refuse before the first DELETE.
     IF EXISTS (
         SELECT 1
         FROM laplace.attestations source_evidence
@@ -177,11 +149,9 @@ BEGIN
             encode(p_source, 'hex');
     END IF;
 
-    -- Replay claims are applied source state. Keeping them after retraction makes a
-    -- deterministic re-derive silently no-op. Invalidate replay first, before any
-    -- completion row or evidence can be deleted, so an interrupted eviction
-    -- admits repair of every row removed so far. Historical NULL-owned rows cannot
-    -- be attributed safely and intentionally remain untouched.
+    -- Replay tokens are applied source state; left in place they would make a
+    -- re-derive a no-op. Deleted first, so an interrupted eviction can re-admit
+    -- every row removed so far. Tokens with no owning source are not touched.
     DELETE FROM laplace.ingest_flush_journal receipt
     WHERE receipt.source_id = p_source
        OR EXISTS (
@@ -192,19 +162,17 @@ BEGIN
     GET DIAGNOSTICS replay_total = ROW_COUNT;
     IF replay_total > 0 THEN COMMIT; END IF;
 
-    -- Completion state belongs to the witness. Any retraction invalidates it, even
-    -- when p_relations selected only part of the testimony. Commit the invalidation
-    -- before the first evidence deletion: an interrupted later batch must never leave
-    -- a completion row that hides partially retracted output.
+    -- Completion belongs to the witness; any retraction invalidates it, even a
+    -- partial one. Committed before the first evidence deletion, so no
+    -- completion row can hide partially retracted output.
     DELETE FROM laplace.ingest_unit_completion WHERE witness_id = p_source;
     GET DIAGNOSTICS unit_completion_total = ROW_COUNT;
     DELETE FROM laplace.ingest_layer_completion WHERE witness_id = p_source;
     GET DIAGNOSTICS layer_completion_total = ROW_COUNT;
     IF unit_completion_total > 0 OR layer_completion_total > 0 THEN COMMIT; END IF;
 
-    -- Operational rows (file metadata) are owned by the actual decomposer source.
-    -- Retract them even when p_relations selected only rated testimony. No rating
-    -- fold is meaningful.
+    -- Operational rows owned by the source are retracted whatever p_relations
+    -- selects; they have no fold.
     LOOP
         WITH pick AS (
             SELECT a.id, a.type_id, a.subject_id
@@ -268,9 +236,7 @@ BEGIN
             evidence_total := evidence_total + n_del;
 
             -- (b) refold each touched cell in place from surviving evidence:
-            --     one grouped period for all surviving rows, neutral-prior seed.
-            --     The stable (last_observed_at, id) traversal does not create a
-            --     separate state transition for each row.
+            --     one grouped period, neutral-prior seed.
             EXECUTE format($q$
                 INSERT INTO laplace.consensus AS c
                     (id, subject_id, type_id, object_id,
@@ -336,13 +302,10 @@ BEGIN
         END LOOP;
     END LOOP;
 
-    -- Content entities are source-independent and are never deleted by source
-    -- eviction. Sources witness through attestations, which the evidence lanes
-    -- above already remove.
 
 
-    -- (d) drain the mask-repair queue through the existing machinery (refresh
-    -- recomputes from scratch and can CLEAR bits deposit could only OR on).
+    -- (d) drain the mask-repair queue: refresh recomputes from scratch and can
+    -- clear bits.
     IF p_drain THEN
         CALL laplace.highway_mask_drain(p_batch);
     END IF;

@@ -173,7 +173,8 @@ public sealed class OMWLmfTests
         AttestationRow inverse = Assert.Single(isExemplifiedBy.Attestations.Where(row =>
             row.TypeId == usageType && row.SubjectId == memberId && row.ObjectId == domainId));
         Assert.Equal(forward.Id, inverse.Id);
-        // One element, the member HAS_DOMAIN its usage domain, qualified domain/usage.
+        // Forward and inverse forms are one attestation, member → usage domain, carrying
+        // the usage qualifier bits.
         Mask256 usage = RelationTypeRegistry.Resolve("exemplifies").Qualifier;
         Assert.False(usage.IsZero);
         Assert.Equal(usage, forward.QualifierMask & usage);
@@ -230,8 +231,8 @@ public sealed class OMWLmfTests
         return builder.Build();
     }
 
-    // Entity rows are staged in the change's intent stages as well as (legacy) its
-    // managed array; the staged rows are what persists.
+    // Entity rows can sit in the change's managed array or its intent stages; the
+    // staged rows are what persists, so both are collected.
     private static HashSet<(Hash128 Id, Hash128 TypeId)> StagedEntities(SubstrateChange change)
     {
         var rows = change.Entities.Select(static e => (e.Id, e.TypeId)).ToHashSet();

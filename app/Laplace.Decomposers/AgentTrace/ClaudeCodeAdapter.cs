@@ -152,13 +152,10 @@ public sealed class ClaudeCodeAdapter : IAgentTraceAdapter
 
         if (turns.Count == 0) yield break;
 
-        // SIDECHAIN IDENTITY. A subagent transcript (agent-<id>.jsonl) carries its
-        // PARENT's sessionId, so keying on sessionId alone collapses every subagent of a
-        // conversation onto the parent's session entity — and each one then overwrites
-        // the parent's trajectory physicality, so the session's order authority became
-        // whichever sidechain composed last (measured: 19 transcripts, 3 sessionIds).
-        // The file stem is the discriminator the format already provides: a primary
-        // transcript is named for its session, a sidechain is not.
+        // A subagent transcript (agent-<id>.jsonl) carries its parent's sessionId. The file
+        // stem distinguishes it: a primary transcript is named for its session, a sidechain
+        // is not, so the sidechain's key is qualified by its stem and it keeps its own
+        // session entity and trajectory.
         string stem = Path.GetFileNameWithoutExtension(filePath);
         bool sidechain = sessionKey is not null
             && !string.Equals(stem, sessionKey, StringComparison.Ordinal);

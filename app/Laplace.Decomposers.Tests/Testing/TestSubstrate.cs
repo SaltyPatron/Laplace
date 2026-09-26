@@ -6,8 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Laplace.Decomposers.Tests;
 
 /// <summary>
-/// Shared test doubles for decomposer tests. Previously copy-pasted as private
-/// nested classes in every per-source test file.
+/// Shared test doubles for decomposer tests.
 /// </summary>
 internal sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
 {

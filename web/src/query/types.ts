@@ -64,8 +64,7 @@ export const DIAL_DEFAULTS: QueryDials = {
   use_geometry: false,
 };
 
-/** Which dials each shape actually reads. A control that does nothing is worse
- *  than no control, so the panel shows only what the chosen shape consumes. */
+/** Which dials each shape reads; the dial panel shows only these. */
 export const SHAPE_DIALS: Record<string, (keyof QueryDials)[]> = {
   band_facts: ['limit'],
   beam: ['depth', 'breadth', 'limit'],

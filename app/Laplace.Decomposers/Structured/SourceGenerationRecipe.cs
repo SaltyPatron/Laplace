@@ -5,7 +5,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Structured;
 
-/// <summary>Execution configuration around the existing artifact disposition contract.</summary>
+/// <summary>Execution configuration attached to an artifact disposition rule.</summary>
 public sealed record SourceGenerationArtifactRule(
     SourceRecipeArtifact Artifact,
     string? RecipePath,
@@ -14,7 +14,7 @@ public sealed record SourceGenerationArtifactRule(
 
 /// <summary>
 /// A portable selected source generation. Provider configuration chooses native
-/// algorithms; the existing artifact graph and shared writer retain admission authority.
+/// algorithms; admission stays with the artifact graph and the shared writer.
 /// </summary>
 public class SourceGenerationRecipe
 {

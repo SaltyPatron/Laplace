@@ -3,9 +3,8 @@ using Xunit;
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// #540 / #541: the config's declared activation and norm epsilon reach the FFN
-/// operator dispatch; an activation the native operator lacks is reported, never
-/// replaced by another function.
+/// The config's declared activation and norm epsilon reach the FFN operator dispatch;
+/// an activation the native operator lacks is reported, never replaced by another.
 /// </summary>
 public sealed class ModelConfigWitnessTests
 {

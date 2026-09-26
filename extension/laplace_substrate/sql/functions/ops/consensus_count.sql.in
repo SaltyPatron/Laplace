@@ -1,16 +1,12 @@
--- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace.consensus_count(bytea);
 
 CREATE OR REPLACE FUNCTION ops.consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Branch on the optional filter so the provided-type path carries a plain
-    -- equality (consensus_type_btree index-only count) instead of the
-    -- `(p_type IS NULL OR type_id = p_type)` OR-form, which a non-inlined SQL
-    -- function plans generically with p_type unbound and therefore cannot index
-    -- -> full seqscan. Semantics identical: p_type NULL counts every row;
-    -- p_type set counts exactly that type.
+    -- Branch on the optional filter so a given type plans as plain equality
+    -- (an index-only count on consensus_type_btree); the OR-form plans
+    -- generically with p_type unbound and cannot use the index.
     SELECT CASE
         WHEN p_type IS NULL
             THEN (SELECT count(*) FROM laplace.consensus)

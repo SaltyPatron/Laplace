@@ -56,8 +56,8 @@ internal static class FoundryCommands
 
 
             bool grapheme = false;
-            bool faithful = false;   // #1055: restored faithful/LOOKUP writer instead of the pour
-            string? scopeSource = null; // Plan Phase 8: comma-separated source short-names
+            bool faithful = false;   // --faithful: adjacency-factor/lookup write (WriteFaithfulGgufAsync) instead of operator projection
+            string? scopeSource = null; // comma-separated source short names; synthesis reads consensus re-folded over only their attestations
             var positional = new List<string>();
             for (int i = 1; i < args.Length; i++)
             {
@@ -216,9 +216,9 @@ internal static class FoundryCommands
             return null;
         }
 
-        // P6a (plan Phase 3): consensus BPE merges are SHIPPED, not diagnostic.
-        // The merge chains rebuild in-vocab words exactly and route OOV text onto
-        // learned pieces instead of the byte floor (the '#'-garbage class).
+        // Byte-level BPE trained over the selected words (weighted by standing). The
+        // merges ship in tokenizer.json: they rebuild in-vocab words exactly and carry
+        // out-of-vocab text onto learned pieces before the byte floor.
         var bpeMerges = new List<string>();
         var bpeLearned = new List<(string piece, long freq)>();
         if (!grapheme)
@@ -250,8 +250,8 @@ internal static class FoundryCommands
             foreach (var (surface, weight) in sel)
             {
                 float sc = (float)(Math.Log(weight + 1.0) + 1.0);
-                // Finish-line Phase 2: punctuation/symbol pieces attach WITHOUT a
-                // leading space — emit bare only (a "▁," token would demand ' ,').
+                // A piece with no letter or digit is emitted bare only; a "▁"-led form
+                // would require a preceding space.
                 bool punctLike = surface.Length > 0
                     && !surface.Any(ch => char.IsLetterOrDigit(ch));
                 if (punctLike) { pieces.Add((surface, sc, 1)); continue; }
@@ -260,9 +260,8 @@ internal static class FoundryCommands
             }
             Console.WriteLine($"  dual-form: +{aliases:N0} bare-word aliases (sentence-initial match; input-only)");
 
-            // P6a: learned BPE pieces enter the vocab so OOV merge chains resolve to
-            // real tokens instead of falling to the byte floor. Stored in ▁/plain
-            // form; the GGUF writer re-encodes to the byte alphabet uniformly.
+            // Learned BPE pieces enter the vocab so merge chains resolve to real tokens.
+            // Stored in ▁/plain form; the GGUF writer re-encodes to the byte alphabet.
             var present = new HashSet<string>(pieces.Select(p => p.piece), StringComparer.Ordinal);
             int learnedAdded = 0;
             foreach (var (piece, freq) in bpeLearned)
@@ -669,12 +668,10 @@ internal static class FoundryCommands
         var metricForBasis = attnMetric != ""
             ? attnPlane with { Vals = Array.ConvertAll(attnPlane.Vals, v => v * metricBasisGain) }
             : attnPlane;
-        // PositivePart on every basis input, matching the mold path (see the union in
-        // SynthesizeMoldAModelAsync). These planes are SIGNED — walk_edge_weight carries
-        // the sign of (rating - neutral) and layer_rank is positive — so without the
-        // clamp a refuted edge reached the eigenmap as negative weight. It is the basis
-        // affinity that must be nonnegative; the operator planes in planeByOp stay signed
-        // so refutation still reaches attention as negative weight.
+        // The consensus planes are signed (walk_edge_weight carries the sign of
+        // rating − neutral). The eigenmap affinity takes only their positive part; the
+        // operator planes projected below stay signed, so refutation reaches attention
+        // as negative weight.
         var unionGraph = attnMetric != ""
             ? FoundryExport.Union(
                 FoundryExport.PositivePart(sim), FoundryExport.PositivePart(rel),
@@ -1007,8 +1004,7 @@ internal static class FoundryCommands
         RecipeDescriptor desc, string modelDir, string outputPath, string? scopeSource = null)
     {
         Console.WriteLine($"synthesize Mold-A-Model: {desc.Name} ({desc.Structure}) → {outputPath}");
-        // Real wall-clock stage timing (2026-07-09: the old "complete in Xs" timed
-        // only the tensor write — a fake number for a multi-minute synthesis).
+        // Stage() prints each stage's wall time and the cumulative wall time.
         var swTotal = Stopwatch.StartNew();
         var swStage = Stopwatch.StartNew();
         void Stage(string label)
@@ -1083,11 +1079,9 @@ internal static class FoundryCommands
         }
 
 
-        // Plan Phase 8 (Build-A-Bear): a scoped synthesis re-folds ONLY the named sources'
-        // attestations (consensus.scoped_consensus) into pg_temp.consensus on every
-        // physical connection — the temp table shadows laplace.consensus inside all
-        // plane functions (pg_temp resolves first), so the entire synthesis reads the
-        // scoped world with zero plane changes.
+        // --scope-source: every physical connection re-folds only the named sources'
+        // attestations (consensus.scoped_consensus) into pg_temp.consensus. pg_temp
+        // resolves first, so every plane function reads that scoped standing unchanged.
         IReadOnlyList<byte[]>? scopeSourceIds = null;
         if (!string.IsNullOrWhiteSpace(scopeSource))
         {
@@ -1130,8 +1124,8 @@ internal static class FoundryCommands
         }
 
         var planeByOp = new Dictionary<string, FoundryExport.PlaneCoo>(StringComparer.Ordinal);
-        // P3: the 13 salience bands as head-importance priors — relation heads' o_proj
-        // is scaled by the manifest rank (normalized to the strongest rank in use).
+        // Relation-type rank from the manifest, normalized to the strongest rank in use;
+        // it scales a non-continuation head's o_proj write-back.
         var opSalience = new Dictionary<string, double>(StringComparer.Ordinal);
         var trajPlane = FoundryExport.PlaneCoo.Empty;
         foreach (var opKey in opKeys)
@@ -1180,8 +1174,8 @@ internal static class FoundryCommands
             if (t.TokenId < 0 || t.TokenId >= vocab || !t.HasContentCoord) continue;
             anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
         }
-        // P5 split: basis affinity must be nonnegative (Laplacian eigenmap); operator
-        // planes stay signed in planeByOp so refutation reaches attention as negative weight.
+        // Basis affinity is the positive part (Laplacian eigenmap); planeByOp stays
+        // signed so refutation reaches attention as negative weight.
         var unionGraph = FoundryExport.Union(planeByOp.Values.Select(FoundryExport.PositivePart).ToArray());
         if (unionGraph.Nnz == 0) return Fail("no consensus over this vocab for any recipe operator — ingest content first");
 
@@ -1207,10 +1201,9 @@ internal static class FoundryCommands
         FoundryExport.BasisStats basisStats;
         if (conditionalFloor)
         {
-            // Finish-line Phase 3: embed/lm_head = the two factors of the smoothed
-            // LOG-CONDITIONAL table M[x,y] = log P̂(y|x). h(x)·lm(y) ≈ M[x,y] with
-            // Eckart–Young-optimal rank-d error — the synthesized floor IS the table.
-            // NO normalization, NO recentering, NO PE: calibration is the payload.
+            // embed/lm_head are the two √Σ-weighted factors of the truncated SVD of the
+            // log-conditional table M[x,y] = log P̂(y|x), so h(x)·lm(y) ≈ M[x,y] at
+            // rank-d optimal error. The rows are left unnormalized and uncentered.
             if (desc.HiddenSizeAuto)
                 return Fail("embed op 'conditional' requires an explicit hidden_size (the floor's rank IS the budget)");
             var (condPlane, rowDefault) = await FoundryExport.ReadConditionalPlaneAsync(
@@ -1235,11 +1228,9 @@ internal static class FoundryCommands
 
             if (posFloor)
             {
-                // Phase 4 v2 (v1 add-everywhere DEGRADED the head: hits@50 0.448→0.38 —
-                // the class table is a next-word prior and re-ranking SEEN calibrated
-                // bigrams with it is C-5's intent error). Backoff form: only the UNSEEN
-                // mass gets class-differentiated, centered per source class so the
-                // default's mean doesn't move — seen calibration is untouched.
+                // Class correction touches only unseen (backed-off) cells, centered per
+                // source class so the row default's mean is unchanged; witnessed
+                // log-conditionals keep their values.
                 var (tokenClass, T, nClasses) = await FoundryExport.ReadPosCorrectionAsync(ds, tokenSlots, vocab);
                 int known = tokenClass.Count(c => c >= 0);
                 double g = FoundryDefaults.PosFloorGain;
@@ -1320,17 +1311,11 @@ internal static class FoundryCommands
             E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out basisStats,
                 hilbertKeys: hilbertKeys);
         }
-        // 2026-07-08/09 embedding discipline (two measured defects, one block):
-        //   scale mismatch — unit-norm rows (~1.5) sat 10× below block outputs
-        //     (RMSNorm scale ~sqrt(d)); token identity drowned 25:1;
-        //   shared mass — cos(dog,water)=0.86 AT THE EMBED (bias dim alone ≈44%
-        //     of each row after rescale; spectral smoothness adds the rest), so
-        //     every dot product starts mostly shared and layers smooth to 0.99.
-        // Fix = P4a applied at the source: mean-center the CONTENT dims (remove
-        // the DC; bias dim untouched — gate calibration depends on it), THEN
-        // rescale rows to RMS 1. Differential signal becomes the payload.
-        // SKIPPED for the conditional floor: its rows ARE calibrated log-prob
-        // factors — any recentering or rescaling destroys the table.
+        // Mean-center the content dims over live rows (the last dim is the bias dim the
+        // gate calibration reads, left untouched), then rescale each row to RMS 1 so token
+        // identity sits on the scale of block outputs and dot products carry the
+        // differential signal. The conditional floor is skipped: its rows are
+        // log-probability factors.
         if (!conditionalFloor)
         {
             int dC0 = dModel - 1;
@@ -1392,10 +1377,8 @@ internal static class FoundryCommands
         double attnScale = FoundryDefaults.AttnGain * split;
         double layerScale = FoundryDefaults.ResidGain * split * floorGain;
         bool contCompile = desc.ContinuationCompile;
-        // Continuation mode zeroes every operator outside the whitelist. That is a legitimate
-        // thing to ask for, but it must never be silent: say which declared operators are
-        // being dropped, so a recipe census that lists them cannot be mistaken for tensors
-        // that contain them.
+        // compile=continuation zeroes every operator outside the continuation set; the
+        // declared operators it drops are named on stderr.
         if (contCompile)
         {
             var dropped = desc.Layers
@@ -1413,8 +1396,8 @@ internal static class FoundryCommands
         double OpAttnScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : attnScale;
         double OpResidScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : layerScale;
 
-        // Plan Phase 6 (doc 14 P2): highway band membership drives the FFN gate.
-        // Centroids are computed per layer from that layer's INPUT representation.
+        // Highway band membership keys the FFN gate. Without the highway perfcache the
+        // centroids stay empty and the gate is constant.
         if (!HighwayPerfcache.IsLoaded)
         {
             try { HighwayPerfcache.LoadDefault(); }
@@ -1431,7 +1414,7 @@ internal static class FoundryCommands
         const double normEps = 1e-6;
         for (int li = 0; li < nLayers; li++)
         {
-            // Phase 6: band centroids from this layer's input representation R.
+            // Band centroids: unit mean of member rows of this layer's input R (content dims).
             var cents = new double[]?[highwayBands];
             if (HighwayPerfcache.IsLoaded)
             {
@@ -1497,8 +1480,8 @@ internal static class FoundryCommands
                         }
                     });
             }
-            // Context head: trajectory plane for prefix/sequence mixing (doc 14 P7) when
-            // available; identity QK/V remains the fallback when no trajectory edges exist.
+            // Context head projects the trajectory plane when it has edges; otherwise the
+            // head is written as identity QK/V.
             if (trajPlane.Nnz > 0)
             {
                 var ctxM = FoundryExport.ProjectOperator(R, vocab, dModel, trajPlane);
@@ -1508,17 +1491,16 @@ internal static class FoundryCommands
                 fo["context"] = FoundryExport.Factor(ctxResid, dModel, headDim, relTol, transpose: true);
             }
 
-            // P3 (doc 14 M2 write-collision): orthogonalize the layer's head OUTPUT
-            // bases against each other so each head owns a disjoint residual slice.
+            // Orthogonalize the layer's head output bases against each other so each head
+            // writes a disjoint residual slice.
             FoundryExport.BlockOrthonormalizeLeft(
                 lyr.Heads.Where(h => h.Key != "context").Select(h => h.Key).Distinct().ToList(), fo, dModel);
 
             fAttnL.Add(fa); fOvL.Add(fo); fFfnL.Add(ff);
 
-            // P4a (doc 14 M3 oversmoothing): recenter each dimension of the update
-            // across the vocab before the norm — removes the DC/hub component the
-            // summed diffusion power-iterates toward (mean-subtraction = the
-            // Fiedler recentring; RMSNorm below controls norm, not diversity).
+            // Recenter each dimension of the update across the vocab before the norm: this
+            // removes the shared (hub) component that summed diffusion converges toward;
+            // RMSNorm below controls norm, not diversity.
             {
                 var colMean = new double[dModel];
                 for (int t = 0; t < vocab; t++)
@@ -1548,9 +1530,8 @@ internal static class FoundryCommands
         var lmHead = new double[(long)vocab * dModel];
         if (desc.LmHead.Key is "conditional" or "conditional_pos")
         {
-            // Finish-line Phase 3: the calibrated V·√Σ factor from the conditional
-            // SVD IS the lm_head — no idf, no suppression, no normalization; the
-            // rows are log-probability factors and must remain so.
+            // The V·√Σ factor of the conditional SVD is the lm_head as is: no idf,
+            // suppression, or normalization, since its rows are log-probability factors.
             if (lmHeadCond is null)
                 return Fail("lm_head op 'conditional' requires embed op 'conditional' (the two factors come from one SVD)");
             Array.Copy(lmHeadCond, lmHead, lmHeadCond.Length);
@@ -1560,9 +1541,8 @@ internal static class FoundryCommands
         {
             var pl = desc.LmHead.Key == "trajectory" ? trajPlane
                    : planeByOp.TryGetValue(desc.LmHead.Key, out var lp) ? lp : FoundryExport.PlaneCoo.Empty;
-            // Plan Phase 4 (doc 14 C3): compose the tier-2 continuation plane with
-            // the tier-3 sentence-boundary bridge so the lm_head can cross sentence
-            // boundaries (discourse) instead of speaking word adjacency only.
+            // A trajectory lm_head also unions the sentence_order plane, so the readout
+            // continues across sentence boundaries, not only within word adjacency.
             if (desc.LmHead.Key == "trajectory")
             {
                 var bridge = planeByOp.TryGetValue("sentence_order", out var sb) && sb.Nnz > 0
@@ -1584,9 +1564,7 @@ internal static class FoundryCommands
                 long yo = (long)y * dModel, xo = (long)x * dModel;
 
 
-                // 2026-07-09 bisect: E-accumulation REVERTED to R (E variant moved
-                // content ranks only 6081→2989 and is implicated in the 15/16→5/16
-                // behavioral regression; PASS-era config uses R_final).
+                // Accumulates the final layer representation R, not the input embedding E.
                 for (int c = 0; c < dC; c++) lmHead[yo + c] += w * R[xo + c];
                 inDeg[y] += Math.Abs(w);
             }
@@ -1600,9 +1578,8 @@ internal static class FoundryCommands
 
 
 
-            // Finish-line Phase 2: suppress byte rows and bare ALIASES (which have a
-            // space-led twin), but KEEP bare-only pieces — punctuation attaches
-            // without a leading space and must be emittable or sentences can't end.
+            // Zero byte rows and bare aliases (bare pieces with a space-led twin); bare-only
+            // pieces such as punctuation stay emittable.
             var hasSpaceLed = new HashSet<Hash128>();
             foreach (var t in tokens)
                 if (t.Role.HasFlag(TokenRole.LeadingSpace)) hasSpaceLed.Add(t.EntityId);
@@ -1622,26 +1599,10 @@ internal static class FoundryCommands
 
 
 
-            // 2026-07-08 readout calibration (two failures, one lesson):
-            //   unit-norm rows  → 1-edge and 500-edge rows become identical unit
-            //                     vectors; single-hub-source tokens tie exactly
-            //                     (flat +11.328 plateau observed);
-            //   mass-saturated  → rewards promiscuity; "for" collapses everything
-            //                     (hub share 1.0 observed);
-            //   idf-mean, raw   → norm variance again dominates cos ("moment" hub;
-            //                     full-logit-vector corr 1.0 = norm-profile artifact).
-            // Law: DIRECTION carries the ranking (unit rows); evidence mass may only
-            // break ties (small multiplicative bonus), never set magnitude.
-            // 2026-07-09 addendum (mold-d "Agent/Theme" hub finding): the DC/hub
-            // component re-emerges at every altitude it isn't explicitly removed
-            // from — P4a recentering applies to the READOUT too. Subtract the mean
-            // row before unit-norm so cos ranks by DIFFERENTIAL direction; hub rows
-            // (≈ the DC itself) collapse to near-zero and stop winning every prompt.
-            // 2026-07-09: coherence-norm (pre-center norm scaling) REVERTED — it
-            // regressed the behavioral gate 15/16 → 5/16 ("greater" loops; gated
-            // live). PASS-era readout restored: center, then unit-norm + mass
-            // tie-break. The crosstalk residue is a row-GEOMETRY limit (doc 14
-            // §6b) — readout scaling variants cannot fix it; stop trying.
+            // Readout rows: subtract the mean live row, then unit-norm, so ranking is by
+            // differential direction and hub rows (close to the mean) fall toward zero.
+            // Evidence mass (in-degree) only breaks ties: a bounded ≤10% multiplicative
+            // bonus, never the magnitude.
             {
                 var meanRow = new double[dC];
                 int live = 0;
@@ -1683,10 +1644,7 @@ internal static class FoundryCommands
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
-        // 2026-07-09 bisect: synthesized-PairNorm norm weights REVERTED to all-ones —
-        // shipped ungated and implicated in the 15/16→5/16 behavioral regression
-        // (with E-accumulation). The per-dim SNR idea stays documented in doc 14
-        // §6b; it may return only through a gated synthesis.
+        // Every RMSNorm weight is written as all-ones.
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
@@ -1770,16 +1728,13 @@ internal static class FoundryCommands
                                 FoundryExport.FillColsHead(vals, tr, tc, h, headDim, ctxO, layerScale);
                             else if (key == "context")
                                 FoundryExport.FillColsHeadIdentity(vals, tr, tc, h, headDim);
-                            // P3: salience rank scales each head's write-back — but ONLY for
-                            // knowledge-intent heads. Phase-R ablation (2026-07-08): manifest
-                            // ranks hit 0.000 on next-word intent vs 0.889 without — the rank
-                            // table is a knowledge prior and must not suppress continuation ops.
+                            // Relation rank scales the write-back of non-continuation heads
+                            // only; continuation operators keep unit salience.
                             else { double s = OpResidScale(key) * (FoundryExport.IsContinuationOperator(key) ? 1.0 : HeadSalience(key)); if (s > 0) FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
                         }
                         break;
-                    // Phase 6 (kills M1): content-dependent gate — band-block rows keyed
-                    // on salience-band centroids; upGain stays as CALIBRATION (aligned
-                    // token ≈ 1.0×, misaligned ≈ silu(floor)/silu(gateZ) ≈ 0.05×).
+                    // Content-dependent gate: band-block rows keyed on this layer's band
+                    // centroids. upGain = 1/silu(gateZ) makes an aligned token pass ≈1×.
                     case "mlp.gate_proj.weight": if (OpResidScale(layer.Ffn.Key) > 0) FoundryExport.FillGateBanded(vals, tr, tc, gateCentroids[layerIdx], gateZ, 0.5); break;
                     case "mlp.up_proj.weight": { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillRowsRight(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s * upGain); } break;
                     case "mlp.down_proj.weight": { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillCols(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s); } break;
@@ -1826,11 +1781,10 @@ internal static class FoundryCommands
 
     private static int RoundTo64(int x) => Math.Max(64, ((x + 63) / 64) * 64);
 
-    // Restored per #1055 from 36886687 (deleted e04104e6). The LOOKUP/KNOWLEDGE/TRAJORDER
-    // readouts that produced the kfix.gguf existence proof; knobs live in FoundryDefaults
-    // per the env-var retirement doctrine.
-    // no-ops, norms = 1. This is last-token (bigram) order; carrying context across the prompt
-    // is a later layer of work, and the model says so rather than pretend.
+    // Writes a cast whose embed/lm_head carry one adjacency readout and whose layers are
+    // zero (no-op) with all-ones norms, so logits depend on the last token only. Readout
+    // selection comes from FoundryDefaults (adjacency, knowledge band, trajectory order,
+    // lookup).
     private static async Task<int> WriteFaithfulGgufAsync(
         NpgsqlDataSource ds,
         LlamaRecipeExtractor.RecipeInfo recipe,
@@ -1841,24 +1795,18 @@ internal static class FoundryCommands
     {
         int cap = FoundryDefaults.FaithfulCap;
         var sw = Stopwatch.StartNew();
-        // grapheme floor reads the letter-bigram order off the trajectories. The word model has
-        // two readout sources (the LAYERING LAW: severity/eff_mu is not value):
-        //   default     → consensus_adjacency: ALL in-vocab content edges, rank-weighted. Includes
-        //                 the PRECEDES order glue (king→of/was/and) which, being a first-order
-        //                 frequency witness, HUBS on function words under greedy decode.
-        //   --knowledge → consensus_layer_plane gated to the CONTENT rank band [0.55,0.85]: IS_A
-        //                 (king→monarch), HAS_PROPERTY, IS_SYNONYM_OF — ABOVE the 0.36 glue/metadata
-        //                 bucket (PRECEDES, HAS_DOMAIN, HAS_EXAMPLE). The substrate's own
-        //                 relation_rank does the de-hubbing the flat readout threw away.
+        // Readout plane A:
+        //   grapheme  → letter-bigram order read off the trajectories;
+        //   default   → consensus_adjacency: every in-vocab content edge, rank-weighted,
+        //               including PRECEDES order edges;
+        //   knowledge → consensus_layer_plane limited to relation rank [lo,hi], which excludes
+        //               the low-rank order/metadata types (PRECEDES, HAS_DOMAIN, HAS_EXAMPLE).
         bool knowledge = !grapheme && FoundryDefaults.FaithfulKnowledge;
         double rkLo = FoundryDefaults.FaithfulRankLo;
         double rkHi = FoundryDefaults.FaithfulRankHi;
-        // TRAJORDER: the EXACT readout — no folded PRECEDES glue, no flat hub. The rated KNOWLEDGE
-        // band (IS_A/property/synonym, rank∈[lo,hi]) UNION the EXACT trajectory continuation
-        // (P(next word | word) read straight off the witnessed sentence trajectory LineStrings via
-        // word_order, NOT the lossy single-hop folded PRECEDES band that hubs on function words).
-        // Both normalized to comparable scale, then merged. This is the order signal the function-
-        // word loop was missing; it lives in the trajectories, not in type=PRECEDES.
+        // trajOrder: the knowledge band unioned with word continuation read directly off the
+        // witnessed trajectories (word_order) rather than folded PRECEDES consensus; both
+        // planes are normalized before the union.
         bool trajOrder = !grapheme && FoundryDefaults.FaithfulTrajOrder;
         FoundryExport.PlaneCoo A;
         if (grapheme)
@@ -1887,29 +1835,17 @@ internal static class FoundryCommands
         Console.WriteLine($"  FAITHFUL adjacency read in {sw.Elapsed.TotalSeconds:F1}s: {A.Nnz:N0} rank-weighted edges "
             + $"over {subjects.Count:N0}/{vocab:N0} tokens (cap {cap})");
 
-        // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab).
-        // conditional=true (log-odds of the continuation P(Y|X)) for BOTH grapheme and word: it is
-        // the GENERATIVE readout. PPMI is a SIMILARITY transform that inflates rare next-tokens into
-        // a hub — wrong for next-token decode (it is what made the word cast collapse to byte garbage
-        // while the grapheme cast, already conditional, generated).
+        // Factor A at rank dModel into embed (U) and lm_head (V·S) over the conditional
+        // log-odds of continuation P(Y|X), a generative readout rather than a similarity
+        // transform. suppressSelf drops self-continuation for the word model.
         var swSvd = Stopwatch.StartNew();
-        // conditional log-odds (P(Y|X)) for grapheme + word-default; PMI / global-prior-subtraction
-        // (log P(Y|X) − log P(Y)) for the knowledge readout. The plain log-odds matrix has a dominant
-        // Perron-Frobenius top singular direction (same sign for every token) that acts as a global
-        // bias; bf16 rounding in the GGUF erases the smaller differentiating terms, collapsing every
-        // input to that one hub direction in llama.cpp. PMI subtracts log P(Y), removing exactly that
-        // global-frequency hub so the input-specific signal survives (with byte/content suppression
-        // already taming PMI's rare-token inflation).
         FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank, conditional: true, suppressSelf: !grapheme);
         Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
             + $"log-odds-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
 
-        // SUBSTRATE-NATIVE LOOKUP (knowledge, dModel≥vocab): the attestation lookup IS the forward
-        // pass — embed = I, lm_head[Y][X] = log-odds(X→Y). Then logits[Y] = lm_head[Y]·RMSNorm(e_X)
-        // = log-odds(X→Y) EXACTLY. NO SVD, so no Perron-Frobenius global-frequency hub (the and/that/as
-        // direction the SVD injected). This is the design the substrate states outright: "lm_head=A,
-        // embed=I; the GEMM literally is the lookup." Grounded in the source material (a knowledge
-        // graph), not in fluent-LM priors. Falls back to SVD if dModel<vocab (identity impossible).
+        // Lookup (knowledge readout, dModel ≥ vocab): embed = I and lm_head[Y][X] = log-odds(X→Y),
+        // so logits[Y] = lm_head[Y]·RMSNorm(e_X) is the standing lookup itself, with no SVD. When
+        // dModel < vocab the SVD factors above are kept.
         bool lookup = knowledge && FoundryDefaults.FaithfulLookup && dModel >= vocab;
         if (lookup)
         {
@@ -1934,17 +1870,13 @@ internal static class FoundryCommands
         else if (knowledge)
             Console.WriteLine($"  (lookup needs dModel≥vocab; dModel={dModel} vocab={vocab} → SVD fallback, may re-introduce the hub)");
 
-        // A token that nothing precedes (no incoming edge) cannot be a next-token. Such tokens —
-        // the 256 byte floor, specials, off-graph words — have all-zero adjacency rows, so the
-        // truncated SVD assigns them ARBITRARY null-space directions in lm_head that can win the
-        // argmax (king→GJjJj, water→RRRR). Zero their lm_head row so the readout can only emit
-        // witnessed continuations. (embed is left intact — they still tokenize as inputs.)
+        // A token with no incoming edge in A is never a continuation; its lm_head row would be an
+        // arbitrary SVD null-space direction. Zero it so only witnessed continuations are emitted.
+        // embed is left intact, so these tokens still read as inputs.
         {
             var isContinuation = new bool[vocab];
             foreach (var y in A.Cols) if (y >= 0 && y < vocab) isContinuation[y] = true;
-            // For the WORD model, byte/punctuation tokens are valid INPUTS but must never be a
-            // PREDICTED next-token: they are continuation HUBS (<0x49>='I', <0x2E>='.') that
-            // collapse the readout to one direction in llama.cpp. Suppress them; word tokens only.
+            // Word model: byte-level tokens are inputs only and are also zeroed in lm_head.
             var isByte = new bool[vocab];
             if (!grapheme) foreach (var t in tokens) if (t.TokenId >= 0 && t.TokenId < vocab && t.IsByteLevel) isByte[t.TokenId] = true;
             int suppressed = 0;
@@ -1953,12 +1885,10 @@ internal static class FoundryCommands
             Console.WriteLine($"  suppressed {suppressed:N0}/{vocab:N0} non-continuation + byte tokens from lm_head (word continuations only)");
         }
 
-        // ── ACCEPTANCE GATE (in-process, BEFORE the cast) ───────────────────────────────────
-        // The cast's logits[Y|X] rank EXACTLY as lm_head[Y]·embed[X] (the no-op layers pass the
-        // embedding through; the final RMSNorm is a positive per-X scalar that cannot change the
-        // argmax/order over Y). So we can SCORE the model here, without llama.cpp: for each probe
-        // token X, the reconstructed top continuations must reproduce the substrate's own raw
-        // rated adjacency A[X,·] (the ground truth dog→teeth/animal). Overlap is the gate.
+        // In-process check before the cast: with no-op layers, logits[Y|X] rank exactly as
+        // lm_head[Y]·embed[X] (the final RMSNorm is a positive per-X scalar). For each probe token
+        // the reconstructed top-5 is compared against the top edges of A[X,·]; the verdict is
+        // printed, not enforced.
         {
             var id2surf = new string[vocab];
             var surf2id = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -2029,7 +1959,7 @@ internal static class FoundryCommands
                 name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
                 rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
                 cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                dtype = 0;   // F32 only — 14900KS has AVX-512 fused off; bf16 has no fast path and crushes the ~0.02 embed deltas
+                dtype = 0;   // F32: bf16 rounding erases the small embed deltas
             }
             int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
             var vals = new float[(long)tr * tc];   // zero-initialized = the no-op layer fill
@@ -2260,9 +2190,8 @@ internal static class FoundryCommands
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count_kv", (uint)recipe.NumKvHeads);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.vocab_size", (uint)recipe.VocabSize);
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", (float)recipe.RmsNormEps);
-        // Phase 0 rope-probe verdict (2026-07-08): RoPE corrupts synthesized content-QK.
-        // Huge freq_base flattens rotary pairs j>=1; pair 0 rotates regardless
-        // (~2/headDim residual exposure, re-probed per synthesis).
+        // DisableRope writes freq_base 1e9, which flattens rotary pairs j ≥ 1 so synthesized
+        // content QK is not rotated; pair 0 still rotates, which is why content heads skip it.
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",
             FoundryDefaults.DisableRope ? 1e9f : (float)recipe.RopeTheta);
 
@@ -2351,10 +2280,9 @@ internal static class FoundryCommands
         }
         if (byteBpe)
         {
-            // P6a: prefer the TRAINED consensus merges from tokenizer.json (real BPE
-            // chains that rebuild multi-char pieces). The char-bigram reconstruction
-            // below cannot chain past two characters and is kept only as a fallback
-            // for molds whose tokenizer.json carries no merges.
+            // Trained merges from tokenizer.json when present. Otherwise merges are
+            // reconstructed from adjacent character pairs of each piece, which cannot
+            // chain past two characters.
             var mlist = ReadTokenizerMerges(Path.Combine(modelDir, "tokenizer.json"));
             if (mlist.Count > 0)
                 Console.WriteLine($"  byte-level BPE: {mlist.Count:N0} trained merges from tokenizer.json");

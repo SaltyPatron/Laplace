@@ -23,17 +23,16 @@ internal static class IngestExistenceGate
     {
         if (records.Count == 0) return [];
 
-        // This gate owns durable COMPLETION state only. Entity/content presence is
-        // Rule #8 step 5's one whole-working-set trunk->tier descent; doing a root
-        // EntitiesExistBitmapAsync here creates a second novelty decision before that
-        // descent and adds a database crossing that scales outside O(tiers).
+        // This gate reads durable completion receipts only. Content presence is decided by
+        // the one working-set existence descent; a root probe here would be a second
+        // novelty decision and a database crossing outside O(tiers).
         _ = builder;
         _ = probedAbsent;
         var shortcircuited = new List<(TRecord, long)>();
         var removed = new bool[records.Count];
         var perFile = handler as DocumentIngestHandler;
 
-        // Explicit source-unit completions belong to the atomic admission transaction.
+        // Explicit source-unit completion receipts are written in the admission transaction.
         var completionRecords = new List<(int Index, IngestUnitCompletionKey Key)>();
         for (int i = 0; i < records.Count; i++)
         {
@@ -55,10 +54,9 @@ internal static class IngestExistenceGate
             }
         }
 
-        // Per-file document completion is replay state, not an entity-presence
-        // shortcut. Query the completion directly. A completed file necessarily committed
-        // its content in the accepted working set; requiring a separate content-root
-        // presence query before trusting the completion only duplicates step 5's authority.
+        // Per-file document completion is a receipt, not an entity-presence shortcut: a
+        // completed file committed its content in the same working set, so the receipt
+        // alone skips it.
         if (perFile is not null && !perFile.IgnoreCompletedFiles)
         {
             var candidates = new List<(int Index, Hash128 CompletionId)>();
@@ -81,8 +79,7 @@ internal static class IngestExistenceGate
                 }
                 else
                 {
-                    // Preserve the existing invalid-root disposition: a record whose
-                    // canonical root cannot be resolved cannot enter composition.
+                    // A record whose canonical root cannot be resolved cannot enter composition.
                     if (unresolvable)
                     {
                         removed[i] = true;
@@ -130,9 +127,7 @@ internal static class IngestExistenceGate
                 rootId = cr.ContentRootId;
                 return true;
             }
-            // Backward-compatible synthetic records historically stored the content root in
-            // SourceId. New document records keep SourceId for structural provenance and fill
-            // ContentRootId explicitly.
+            // A record without ContentRootId carries its content root in SourceId.
             if (cr.SourceId != default)
             {
                 rootId = cr.SourceId;

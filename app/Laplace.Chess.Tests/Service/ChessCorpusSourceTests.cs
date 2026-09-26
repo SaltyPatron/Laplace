@@ -72,7 +72,7 @@ public sealed class ChessCorpusSourceTests
             var source = await ChessCorpusPreparation.IdentifyAsync(path, default);
             string frame = Assert.Single(PgnGames.StreamGames(path));
             var expected = ChessCorpusPreparation.Describe(1, Parse(frame));
-            // A header change is not an authorized way to create another novel PLAYING.
+            // Changing a header does not make the same game a new playing.
             string changed = frame.Replace("[Site \"", "[Site \"altered-");
             await File.WriteAllTextAsync(path, changed);
             await Assert.ThrowsAsync<InvalidDataException>(() =>
@@ -231,8 +231,8 @@ public sealed class ChessCorpusSourceTests
     [InlineData("cancelled", 123)]
     public void FailedSummaryRetainsPartialWorkButNeverPublishesANumericRate(string status, int sealedGames)
     {
-        // Reporting-only control: these counters are not database or throughput evidence.
-        // A stale successful candidate may exist before late replay/disposal failure.
+        // Reporting only: a failed or cancelled run keeps its partial counters (even with a
+        // successful candidate staged before the failure) but publishes no rate.
         var result = ChessCorpusBenchmark.CreateResult(status, sealedGames, 45, 3000,
             qualifiedWindow: true, targetMet: true, receiptPath: "retained/corpus-recording.json");
         Assert.False(result.Completed);
@@ -269,7 +269,7 @@ public sealed class ChessCorpusSourceTests
     [Fact]
     public async Task NativeAdmissionFailureRetainsDriverDetailsInTheExistingReceiptError()
     {
-        // Synthetic server detail exercises the real pinned driver; no database work runs here.
+        // Synthetic server detail through the pinned driver; no database work runs.
         const string detail = "grant_bytes=3374058598 retained_bytes=1558360586 remaining_bytes=1815698012 "
             + "source_forms=1475833 native_phase=8 native_refusal=5 materialization_grant_bytes=1815698012 "
             + "subowner_grant_bytes=800916049 subowner_retained_bytes=750000000 subowner_peak_bytes=790000000 "
@@ -288,8 +288,8 @@ public sealed class ChessCorpusSourceTests
         Assert.Equal(nameof(global::Npgsql.PostgresException), failure.ErrorType);
         Assert.Equal(postgres.Message, failure.Error);
         Assert.Contains(detail, failure.Error, StringComparison.Ordinal);
-        // MessageText alone would discard the server detail. The actual driver
-        // Message used by both recording receipts already retains that detail.
+        // MessageText alone drops the server detail; the driver's Message, which both
+        // recording receipts use, retains it.
         Assert.DoesNotContain(detail, postgres.MessageText, StringComparison.Ordinal);
         using var retained = JsonDocument.Parse(JsonSerializer.Serialize(failure,
             new JsonSerializerOptions(JsonSerializerDefaults.Web)));

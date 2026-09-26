@@ -17,7 +17,7 @@ public sealed class UnicodeDecomposerTests
 {
     static UnicodeDecomposerTests()
     {
-        // Process-global native state: only the first test class pays the mmap+CRC load.
+        // The codepoint perfcache is process-global; only the first load maps and CRC-checks it.
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
     }
 
@@ -148,14 +148,13 @@ public sealed class UnicodeDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(Context(writer));
 
-        // Layer-0 sources bootstrap vocabulary before physical ingestion, but
-        // license/version testimony is emitted only after the Tier-0 floor is
-        // durably persisted. Initialize must therefore perform exactly one write.
+        // Initialize writes the source's vocabulary bootstrap once; license/version
+        // testimony follows only after the Tier-0 floor is persisted.
         var boot = Assert.Single(writer.Captured);
 
         Assert.Contains(boot.Entities, e =>
             e.Id == UnicodeDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        // A type id is the content id of its label; vocabulary keys are never rows (764bb0bf7).
+        // A type id is the content id of its label; vocabulary keys are never entity rows.
         Assert.DoesNotContain(boot.Entities, e => e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
@@ -169,8 +168,8 @@ public sealed class UnicodeDecomposerTests
     {
         var dec = NewDecomposer();
         var ctx = Context(new NullWriter());
-        // A small deterministic Tier-0 prefix is sufficient to prove the persistence
-        // ordering contract; mapping phases must remain unreachable for any positive cap.
+        // A capped Tier-0 prefix proves the persistence ordering; with any positive cap
+        // the property-mapping phases are not reached.
         var opts = DecomposerOptions.Default with { MaxInputUnits = 64 };
 
         bool sawCodepointEntity = false;
@@ -186,9 +185,8 @@ public sealed class UnicodeDecomposerTests
 
             if (!change.IntentStages.IsDefaultOrEmpty)
             {
-                // Staged COPY rows are the persisted intent surface; direct managed
-                // row arrays may be empty after native stage materialization. Inspect
-                // that persisted surface rather than requiring a duplicate managed row.
+                // Staged COPY rows are what persists; the managed row arrays may be empty
+                // once native staging has materialized them.
                 var entityRows = CopyTupleParser.ParseEntities(
                     change.IntentStages
                         .Select(stage => stage.TupleBuffer(IntentStageTable.Entities))
@@ -215,8 +213,8 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public async Task Deterministic_Intent_Ids_Across_Runs()
     {
-        // Cap → serial spine (MonolithSegmenter.ResolveSegments → 1). Uncapped
-        // working-set segments merge unordered, so IntentId *order* is not a contract.
+        // A cap forces one segment (MonolithSegmenter.ResolveSegments → 1), so IntentId
+        // order is comparable; uncapped segments merge unordered.
         var dec = NewDecomposer();
         var ctx = Context(new NullWriter());
         var opts = DecomposerOptions.Default with { MaxInputUnits = 2048 };
@@ -420,7 +418,8 @@ public sealed class UnicodeDecomposerTests
     [InlineData("USES_SCRIPT_EXTENSION")]
     public void Per_property_unicode_relations_are_retired_into_the_character_property(string retired)
     {
-        // One element per meaning: the property is the object's first part, never a relation.
+        // A character property is the first part of the [property, value] object under one
+        // relation, never a relation of its own.
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => RelationTypeRegistry.Resolve(retired));
         Assert.Contains("retired", ex.Message, StringComparison.Ordinal);
@@ -444,7 +443,7 @@ public sealed class UnicodeDecomposerTests
             builder, "Bidi_Class", "Space_Separator", source));
     }
 
-    // The [property, value] pair a recipe composes: the same identity the C# emitter stages.
+    // The [property, value] composition, with the same identity the emitter stages.
     private static Hash128 PropertyValue(string property, string value)
     {
         Hash128 source = Hash128.OfCanonical("test/unicode/pair");

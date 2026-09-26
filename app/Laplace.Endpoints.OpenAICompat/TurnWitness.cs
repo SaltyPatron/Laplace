@@ -21,9 +21,9 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         });
 
     /// <summary>
-    /// One conversational turn with its full provenance (spec 34): tenant → per-tenant
-    /// source identity, session → context entity on every evidence row, user → session
-    /// attribution. A turn without a tenant/session does not exist on this lane.
+    /// One conversational turn with its provenance: the tenant selects the source identity,
+    /// the session is the context entity on every attestation row, and the user is
+    /// attributed to the session. A turn without a valid tenant and session is refused.
     /// </summary>
     private readonly record struct TurnItem(
         string Tenant, string? UserKey, Hash128 SessionId, string Prompt, string? Reply,
@@ -40,7 +40,7 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         _log = log;
     }
 
-    /// <summary>Record-or-fail: returns false when witness lane is offline (caller → 503).</summary>
+    /// <summary>Enqueues without waiting; false when the writer is offline, the turn is invalid, or the queue is full.</summary>
     public bool TryEnqueueTurn(string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply)
     {
         if (!IsOnline || string.IsNullOrEmpty(prompt) || sessionId == Hash128.Zero)
@@ -99,14 +99,10 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             return;
         }
 
-        // The close sequence — floor gate, accumulating writer, tenant scope cache,
-        // bootstrap-once, attribute-once-per-session, build, apply — lives in the
-        // shared TurnCloser (Laplace.Ingestion). This lane owned a private copy of
-        // it; MCP owned another, and the CLI had a weaker third that skipped tenant
-        // and session entirely. What stays HERE is what is genuinely this lane's:
-        // the bounded single-reader channel (turns serialize, so one turn is one
-        // apply), IsOnline for the record-or-fail 503 contract, and the
-        // consecutive-failure trip.
+        // Turn admission (compose, persist, fold, receipt) is the shared TurnCloser,
+        // the same one MCP and the CLI use. This service adds the bounded
+        // single-reader channel, so turns serialize and each turn is one apply, and
+        // IsOnline, which callers check before recording.
         await using var closer = new TurnCloser(
             _substrate.DataSource, w => _log.LogWarning("turn-witness: {Warning}", w));
         IsOnline = true;
@@ -119,9 +115,8 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             bool deposited = false;
             try
             {
-                // Every turn is a distinct witnessing event: rows dedup by content
-                // address, but the testimony folds again — a repeated utterance IS
-                // another witness (chess parity: every play of a move counts).
+                // Each turn is its own witnessing event: content dedups by id, but a
+                // repeated utterance folds again as another witness.
                 deposited = await closer.CloseAsync(
                     item.Tenant, item.SessionId, item.Prompt, item.Reply, item.UserKey, ct,
                     item.OccurrenceKey, item.Phase);

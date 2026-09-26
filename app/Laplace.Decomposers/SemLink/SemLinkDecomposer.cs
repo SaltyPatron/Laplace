@@ -21,8 +21,8 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
 
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        // PredicateMatrix rides SemLink's seed step but is a distinct witness: register its
-        // source entity so its attestations' source_id FK resolves. See docs/specs/16 §3a.
+        // PredicateMatrix is admitted with SemLink but is a distinct witness: register its
+        // source entity so its attestations' source_id resolves.
         await SourceVocabularyBootstrap.RegisterManifestAsync(
             context, SeedSourceManifest<PredicateMatrixSource>.Instance,
             readbackNames: VocabularyNames, ct: ct);

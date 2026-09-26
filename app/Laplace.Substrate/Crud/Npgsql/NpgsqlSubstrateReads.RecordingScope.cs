@@ -8,8 +8,9 @@ public static partial class NpgsqlSubstrateReads
 {
     public readonly record struct RecordingScopeRow(short Kind, byte[] Id, long ObservationCount);
 
-    /// <summary>Actual committed rows for an explicit bounded measurement scope;
-    /// this bypasses process presence caches and keeps witness type partition pruning.</summary>
+    /// <summary>Committed entity, physicality and witness rows for an explicit id scope, read
+    /// from the database rather than process presence caches; witness types keep the
+    /// attestation partitions pruned.</summary>
     public static Task<IReadOnlyList<RecordingScopeRow>> RecordingScopeAsync(
         NpgsqlDataSource ds, byte[][] entities, byte[][] physicalities,
         byte[][] witnesses, byte[][] witnessTypes, CancellationToken ct) =>

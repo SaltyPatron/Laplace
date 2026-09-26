@@ -301,8 +301,8 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     [Fact]
     public async Task Golden_Chat_UnknownModel()
     {
-        // Exact-id routing (spec 34): unknown model is a 400, never a silent
-        // fallback lane. Rejected before the billing gate, so no quote needed.
+        // Exact-id routing (spec 34): an unknown model is a 400; no other model answers
+        // in its place. Rejected before the billing gate, so no quote is needed.
         using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
         {
             model = "gpt-4o",

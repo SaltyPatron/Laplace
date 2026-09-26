@@ -55,10 +55,9 @@ internal static class FoundryExport
         NpgsqlDataSource ds, PlaneSpec spec,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
-        // Vocab pushdown (2026-07-09): unfiltered consensus-family reads streamed
-        // 27.5M rows per synthesis so this loop could keep ~1%; the vocab probes the
-        // (type_id, subject_id) index server-side instead. Client filter retained
-        // as the correctness net (traj family still returns unfiltered).
+        // The consensus family pushes the vocab down to the (type_id, subject_id) index
+        // server-side; the traj family reads unfiltered. MapWeightedEdges drops any row
+        // outside tokenSlots either way.
         var vocab = VocabArray(tokenSlots);
         try
         {
@@ -155,8 +154,7 @@ internal static class FoundryExport
     {
         var vocab = VocabArray(tokenSlots);
 
-        // rows carry type_id + layer_rank and
-        // fan out into one adjacency per type, not one plane.
+        // Rows carry type_id + layer_rank and fan out into one adjacency per relation type.
         var byType = new Dictionary<Hash128, (double Rank, Dictionary<int, List<(int Col, double W)>> Adj)>();
         try
         {
@@ -204,15 +202,11 @@ internal static class FoundryExport
     {
         var vocab = VocabArray(tokenSlots);
 
-        // the object is a category, not a
-        // token, and the edges are the co-category clique built client-side below.
+        // The object of relationType is a category, usually outside the token vocab, so
+        // the outbound read restricts only the subject. Tokens sharing a category form a
+        // co-category clique built below, weighted by √(w_a·w_b) of their walk_edge_weight.
         var wordCat = new Dictionary<int, Hash128>();
         var wordMu = new Dictionary<int, double>();
-        // Objects are categories (often outside the token vocab) — relation_plane
-        // would drop them. edges_raw per subject keeps the object unrestricted while
-        // retiring the raw laplace.consensus scan. consensus.walk_edge_weight(not eff_mu) —
-        // glicko2.c documents using eff_mu as a sign/gate as the bug that scored
-        // 99.04% of won claims negative.
         var attrRows = await NpgsqlFoundryReads.AttributeOutboundAsync(
             ds, relationType, vocab, degreeCap);
         foreach (var row in attrRows)
@@ -251,10 +245,8 @@ internal static class FoundryExport
                     double muB = wordMu.GetValueOrDefault(b, 1.0);
                     double w = Math.Sqrt(muA * muB);
                     row.Add((b, w));
-                    // Bound the row as we go: a dense co-category is otherwise the
-                    // full N*(N-1) clique resident before CooFromAdj caps it (a large
-                    // POS category is hundreds of millions of tuples). Trimming to the
-                    // top-degreeCap periodically is output-identical (top-k merges).
+                    // Trim during accumulation so a dense category never holds its full
+                    // N·(N−1) clique; top-k merges, so the final row is identical.
                     if (degreeCap > 0 && row.Count >= degreeCap * 2)
                         TrimRowToTopK(row, degreeCap);
                 }
@@ -385,8 +377,8 @@ internal static class FoundryExport
 
 
 
-    /// Plan Phase 5 (doc 14 P7): per-token 128-bit hilbert curve index (packed
-    /// MSB-first; leading octets = coarsest content locality) for content-PE dims.
+    /// Per-token 128-bit Hilbert index of the entity's coordinate (packed MSB-first;
+    /// leading octets = coarsest locality), feeding the content-PE dims.
 
     internal static async Task<Hilbert128?[]> FillHilbertKeysAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
@@ -485,11 +477,9 @@ internal static class FoundryExport
 
 
 
-    /// Finish-line Phase 3 (the conditional theorem): the smoothed log-conditional
-    /// continuation table. Returns the sparse top-cap entries per row plus each
-    /// row's UNSEEN default (NULL-object rows from the SQL) — absent pairs must
-    /// densify to the default, NOT zero (zero = log 1 would rank every unseen
-    /// continuation above every seen one).
+    /// Smoothed log-conditional continuation table log P̂(y|x). Returns the top-cap
+    /// entries per row plus each row's unseen default (the NULL-object rows); absent
+    /// pairs densify to that default, not zero, since zero is log 1.
 
     internal static async Task<(PlaneCoo Plane, double[] RowDefault)> ReadConditionalPlaneAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize,
@@ -521,10 +511,9 @@ internal static class FoundryExport
     }
 
 
-    /// Finish-line Phase 4 v1b: dominant POS class per vocab token + the class
-    /// transition log-conditional table, for the lm_head compose
-    /// M[x,y] += gain * T[class(x),class(y)] (grammatical shaping of the
-    /// unseen mass — the flat row default becomes class-differentiated).
+    /// Dominant POS class per vocab token plus the class-transition log-conditional
+    /// table T; the conditional_pos floor adds gain·T[class(x),class(y)] to unseen cells.
+    /// Missing class pairs take the table's minimum.
 
     internal static async Task<(int[] TokenClass, double[,] T, int NClasses)> ReadPosCorrectionAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
@@ -559,9 +548,8 @@ internal static class FoundryExport
     }
 
 
-    /// Plan Phase 4: sentence-boundary word bridge — last word of sentence i to
-    /// first word of sentence i+1, from tier-4 document trajectories. The
-    /// discourse component of the lm_head (doc 14 C3 correction).
+    /// Sentence-boundary word bridge: last word of sentence i → first word of
+    /// sentence i+1, read from document trajectories. Non-positive weights are dropped.
 
     internal static async Task<PlaneCoo> ReadSentenceOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
@@ -589,9 +577,9 @@ internal static class FoundryExport
         int trajCap = corpusMax > 0 ? corpusMax : 200_000;
         var vocab = VocabArray(tokenSlots);
 
-        // Same SQL as ReadWordOrderAsync, deliberately NOT delegating to it: this
-        // reader warms the catalog lookup, bounds the corpus, keeps the 600s timeout,
-        // tolerates the function being absent and PPMI-reweights the result.
+        // Same read as ReadWordOrderAsync, but this path warms the relation-type lookup,
+        // bounds the corpus, uses a 600 s timeout, tolerates the function being absent,
+        // and PPMI-reweights when FoundryDefaults.Ppmi is set.
         try
         {
             await using var conn = await ds.OpenConnectionAsync();
@@ -704,9 +692,8 @@ internal static class FoundryExport
     }
 
     // Trim a row to its top-degreeCap edges by |weight| desc, Col asc as the
-    // deterministic tie-break — the one ordering every plane reader applies. Top-k
-    // is mergeable, so a caller may trim periodically during accumulation (see the
-    // co-category clique) to bound memory without changing the final set.
+    // deterministic tie-break; every plane reader applies this ordering. Top-k is
+    // mergeable, so trimming during accumulation leaves the final set unchanged.
     internal static void TrimRowToTopK(List<(int Col, double W)> row, int degreeCap)
     {
         row.Sort((a, b) =>
@@ -745,10 +732,9 @@ internal static class FoundryExport
         return p with { Vals = vals };
     }
 
-    /// P5 signed/nonneg split: operator planes carry SIGNED weights (refutation =
-    /// negative attention; ProjectOperator is sign-safe), but the basis union feeds
-    /// the normalized-Laplacian eigenmap, which needs a nonnegative affinity.
-    /// Clamp negatives to zero (drop, not abs — a refuted edge is not affinity).
+    /// Nonnegative part of a signed plane, for the normalized-Laplacian eigenmap
+    /// affinity. Non-positive edges are dropped, not mirrored: a refuted edge is not
+    /// affinity. Operator planes stay signed so refutation reaches attention negatively.
     internal static PlaneCoo PositivePart(PlaneCoo p)
     {
         int kept = 0;
@@ -1063,9 +1049,8 @@ internal static class FoundryExport
         Hilbert128?[]? hilbertKeys = null)
     {
         bool coordOnly = FoundryDefaults.CoordOnly;
-        // Phase 5: when a hilbert content-PE is requested, RESERVE its trailing dims
-        // up front — otherwise a full-rank spectrum (k = dModel-1) leaves peDims = 0
-        // and the PE silently vanishes (observed on the first Path-A synthesis).
+        // Hilbert content-PE reserves its trailing dims before choosing k, so a
+        // full-rank spectrum cannot consume them.
         int peReserve = (hilbertKeys is not null && dModel > 24) ? 8 : 0;
         int k = coordOnly
             ? Math.Min(4, dModel - 1)
@@ -1108,9 +1093,8 @@ internal static class FoundryExport
                 for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
             int gsRc;
             unsafe { fixed (double* p = yt) gsRc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)k, (nuint)vocab); }
-            // Fail closed. This used to be `if (gsRc == 0)` with no else, so a rank-deficient
-            // spectrum silently left the raw eigenmap in place and every downstream step
-            // treated a non-orthonormal basis as orthonormal, with no diagnostic anywhere.
+            // A rank-deficient spectrum is an error: downstream steps assume an
+            // orthonormal basis.
             if (gsRc != 0)
                 throw new InvalidOperationException(
                     $"gram_schmidt_orthonormalize rc={gsRc} (vocab={vocab}, K={k}) — the spectral "
@@ -1220,27 +1204,11 @@ internal static class FoundryExport
                 e[(long)i * dModel + d] = Gaussian(ref s) * capScale;
         }
 
-        // THE ANONYMOUS RESIDUAL STREAM, MEASURED (docs/specs/18 §2, GH #521).
-        //
-        // The loop above is the defect stated in one place: every dim between the
-        // spectral basis and the trailing PE/bias is Gaussian noise. It is capacity,
-        // not representation -- no head reads a named subspace because there are no
-        // named subspaces, which is exactly why `embed = I` was a defensible fallback.
-        // A composed representation needs somewhere to compose INTO.
-        //
-        // Doc 18 §2 allocates d_model into S (surface/positional), W (word/lemma),
-        // C (sense/ILI -- the internal lingua franca every relation plane is defined
-        // over), F (active frames + role bindings) and G (relation-gate signals).
-        // ResidualStrata computes that layout from a census; the widths are counted,
-        // never chosen.
-        //
-        // WHAT IS WIRED HERE: S and W are real -- the PE budget and the word-graph
-        // spectral rank. G is the band count. C is allocated but still noise-filled,
-        // and F is zero because neither a sense-graph eigenmap nor a witnessed-LU
-        // frame census is read on this path yet. So this reports the layout and the
-        // noise fraction rather than pretending the strata are populated: the number
-        // below is how anonymous the stream currently is, and it is the metric the
-        // C/F wiring has to move. Tensor values are unchanged by this block.
+        // Dims between the spectral basis and the trailing PE/bias are seeded Gaussian
+        // capacity. This block reports the ResidualStrata layout of d_model (S surface/PE,
+        // W word spectral rank, C sense, F frames, G relation bands) and the fraction not
+        // carried by S+W. On this path C is noise-filled and F has width zero. Tensor values
+        // are not changed here.
         try
         {
             int peDimsPlanned = (hilbertKeys is not null && dModel > 24) ? Math.Min(8, dModel - 1 - k) : 0;
@@ -1261,9 +1229,8 @@ internal static class FoundryExport
         }
         catch (InvalidOperationException ex)
         {
-            // Fail loud, not closed: the synthesis itself is unaffected (the layout is
-            // diagnostic today), but a d_model that cannot hold the counted ontology is
-            // a real finding and silently swallowing it is how it stays unfixed.
+            // The layout is reported, not applied, so a d_model too small for the census
+            // is printed and synthesis continues.
             Console.WriteLine($"  strata: NOT ALLOCATABLE — {ex.Message}");
         }
 
@@ -1279,9 +1246,8 @@ internal static class FoundryExport
             e[off + dModel - 1] = BiasValue;
         }
 
-        // Plan Phase 5 (doc 14 P7): hilbert content-PE in the trailing capacity dims,
-        // written AFTER row-normalization so every token carries the same fixed-scale
-        // positional fraction (content dims are unit-norm; PE rides at HilbertPeScale).
+        // Hilbert content-PE in the trailing capacity dims, written after row
+        // normalization so every token carries it at the same fixed HilbertPeScale.
         if (hilbertKeys is not null)
         {
             int peCapDims = dModel - 1 - k;
@@ -1348,12 +1314,12 @@ internal static class FoundryExport
 
 
 
-    /// P3 (doc 14 M2): block Gram-Schmidt across per-head OV output bases so each
-    /// head writes an orthogonal residual slice. Rows are orthonormalized jointly
-    /// (earlier heads keep their span; later heads get the complement — native
-    /// Householder QR, deterministic), then each row's ORIGINAL norm is re-applied
-    /// so singular-value energy per head survives; only the overlap is removed.
-    /// Fail-open: on native rc != 0 (rank deficiency) the factors are left as-is.
+    /// Block Gram-Schmidt across the per-head OV output bases so each head writes an
+    /// orthogonal residual slice. Rows are orthonormalized jointly in head order (earlier
+    /// heads keep their span; later heads get the complement), then each row's original
+    /// norm is re-applied so per-head singular-value energy survives. When the native
+    /// routine reports rank deficiency, managed modified Gram-Schmidt zeroes the collinear
+    /// directions.
     internal static void BlockOrthonormalizeLeft(
         IReadOnlyList<string> headKeys, Dictionary<string, Factors> fo, int dModel)
     {
@@ -1384,10 +1350,8 @@ internal static class FoundryExport
         unsafe { fixed (double* p = buf) rc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)total, (nuint)dModel); }
         if (rc != 0)
         {
-            // Rank deficiency here IS doc-14 M2 observed: the heads' output bases are
-            // collinear. Managed modified Gram-Schmidt: orthogonalize sequentially,
-            // ZERO directions that vanish (a later head's collinear component carries
-            // no new information — removing it is the allocation working, not a loss).
+            // Heads' output bases are collinear. Orthogonalize sequentially and zero any
+            // direction that vanishes: a later head's collinear component adds nothing.
             int zeroed = 0;
             for (int a = 0; a < total; a++)
             {
@@ -1448,8 +1412,8 @@ internal static class FoundryExport
         double s0 = k > 0 && s[0] > 0f ? s[0] : 1.0;
         var left = new float[(long)k * d];
         var right = new float[(long)k * d];
-        // spectrum flattening (M3 at operator level): each side carries
-        // (s_r/s0)^(alpha/2) so the reconstructed direction r scales (s_r/s0)^alpha.
+        // Spectrum flattening: each side carries (s_r/s0)^(alpha/2), so the
+        // reconstructed direction r scales as (s_r/s0)^alpha.
         float halfAlpha = (float)(FoundryDefaults.FactorSpectrumAlpha / 2.0);
         for (int r = 0; r < k; r++)
         {
@@ -1508,12 +1472,10 @@ internal static class FoundryExport
 
 
 
-    /// Phase 0 RoPE mitigation, second half: rotary pair 0 (head components 0 and
-    /// hd/2) rotates at frequency 1 REGARDLESS of freq_base, and the factor's
-    /// strongest row otherwise lands exactly there. When skipping, factor row r
-    /// maps to component r+1 (or r+2 past the pair partner) so synthesized content
-    /// operators never occupy the always-rotating plane. Q and K must use the
-    /// SAME mapping (components pair in the dot product); V is not rotated.
+    /// Rotary pair 0 (head components 0 and hd/2) rotates at frequency 1 whatever
+    /// freq_base is. When skipping, factor row r maps to component r+1 (r+2 past the
+    /// pair partner) so content operators stay out of that plane. Q and K use the same
+    /// mapping because their components pair in the dot product; V is not rotated.
     private static int RotarySafeComponent(int r, int headDim, bool skip)
         => !skip ? r : (r + 1 < headDim / 2 ? r + 1 : r + 2);
 
@@ -1605,8 +1567,8 @@ internal static class FoundryExport
         }
     }
 
-    /// Plan Phase 6 (doc 14 P2/M1): per-token highway masks for the content gate.
-/// Plan Phase 6 (doc 14 P2/M1): per-token highway masks for the content gate.
+    /// Per-token highway (relation-band) masks for the content gate. When no stored
+    /// mask is set, consensus.highway_mask_refresh recomputes them and they are re-read.
     internal static async Task<Mask256[]> FillHighwayMasksAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
     {
@@ -1632,10 +1594,8 @@ internal static class FoundryExport
             Console.WriteLine($"  (entity_highway_masks unavailable: {ex.SqlState} — banded gate falls back to constant)");
         }
 
-        // Fallback for DB generations whose entities.highway_mask is unpopulated
-        // (live finding 2026-07-08: 0 of 20.2M entities carry masks): ask the
-        // substrate to recompute them, then re-read. Derivation lives in
-        // consensus.highway_mask_refresh(); this is only a call site.
+        // All-zero masks: consensus.highway_mask_refresh derives them over this vocab,
+        // then they are re-read.
         bool anyStored = false;
         foreach (var m in masks) if (!m.IsZero) { anyStored = true; break; }
         if (!anyStored)
@@ -1661,18 +1621,15 @@ internal static class FoundryExport
     }
 
 
-    /// Plan Phase 6 (doc 14 P2, kills M1): gate rows keyed on per-band embedding
-    /// centroids — FFN block b fires for tokens aligned with salience band b's
-    /// membership centroid. silu(gain·cos + floor): aligned ≈ silu(gain) (the old
-    /// constant), misaligned ≈ silu(floor) (a small leak, no dead tokens). Bands
-    /// with no centroid keep the old constant-open column — strictly no worse.
+    /// Gate rows keyed on per-band centroids: FFN block b opens for tokens aligned with
+    /// band b's membership centroid, silu(gateZ·cos + floorZ). A band with no centroid
+    /// gets a constant-open bias column.
     internal static void FillGateBanded(
         float[] vals, int rows, int cols, double[]?[] bandCentroids, double gateZ, double floorZ)
     {
-        // gateZ/floorZ are LOGIT units. For unit-content rows with bias=1, RMSNorm
-        // gives h ≈ x·sqrt(d/2), so weights scale by 1/sqrt(d/2) — the same
-        // calibration the constant gateCol used. Aligned token: silu(≈gateZ·cos);
-        // any token: at least silu(≈floorZ) via the bias column (no dead tokens).
+        // gateZ/floorZ are logit units. For unit-content rows with bias 1, RMSNorm gives
+        // h ≈ x·√(d/2), so weights scale by 1/√(d/2). Every token gets at least
+        // silu(≈floorZ) through the bias column.
         double s = 1.0 / Math.Sqrt(cols / 2.0);
         int bands = bandCentroids.Length;
         for (int r = 0; r < rows; r++)
@@ -1681,7 +1638,7 @@ internal static class FoundryExport
             var c = bandCentroids[b];
             if (c is null)
             {
-                vals[(long)r * cols + (cols - 1)] = (float)(gateZ * s); // constant-open fallback
+                vals[(long)r * cols + (cols - 1)] = (float)(gateZ * s); // no centroid: constant-open
                 continue;
             }
             for (int j = 0; j < cols - 1 && j < c.Length; j++)

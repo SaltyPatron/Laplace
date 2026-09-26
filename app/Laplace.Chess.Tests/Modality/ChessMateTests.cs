@@ -4,17 +4,16 @@ using Xunit;
 namespace Laplace.Chess.Modality.Tests;
 
 /// <summary>
-/// Mate recognition by GEOMETRY, not by move order. ChessMotifs.DetectNamedTrap matches SAN
-/// sequences from move one, so it can only ever recognise known opening traps; a smothered mate
-/// arriving via an unfamiliar move order is invisible to it. These positions are given as FENs
-/// with no history at all, which is the whole point.
+/// Mate patterns are recognized from board geometry alone, independent of move order (unlike
+/// ChessMotifs.DetectNamedTrap, which matches SAN sequences from move one). Every position is
+/// a FEN with no history.
 /// </summary>
 public class ChessMateTests
 {
     // Black king g8, own pawns f7/g7/h7, white rook delivering check along the 8th.
     private const string BackRank = "R5k1/5ppp/8/8/8/8/8/6K1 b - - 0 1";
-    // Black king h8, own rook g8 and pawns g7/h7, white knight on f7. The knight checks THROUGH
-    // the wall, which is the only way a fully self-blocked king can be mated.
+    // Black king h8, own rook g8 and pawns g7/h7, white knight on f7. Only a knight can check
+    // a king whose every escape is blocked by its own pieces.
     private const string Smothered = "6rk/5Npp/8/8/8/8/8/6K1 b - - 0 1";
     // Not mate: same shape but the king has luft at h7.
     private const string BackRankWithLuft = "R5k1/5pp1/7p/8/8/8/8/6K1 b - - 0 1";
@@ -63,9 +62,9 @@ public class ChessMateTests
     }
 
     /// <summary>
-    /// In a real mate every one of the eight king-zone directions must be off-board, blocked by
-    /// an own piece, or covered by the enemy. An empty safe square would BE a legal king move,
-    /// so the three masks must partition all eight bits exactly — no gaps, no overlaps.
+    /// In a mate each of the eight king-zone directions is off-board, blocked by an own piece,
+    /// or covered by the enemy (an empty safe square would be a legal king move), so the three
+    /// masks partition all eight bits exactly.
     /// </summary>
     [Theory]
     [InlineData(BackRank)]
@@ -82,9 +81,8 @@ public class ChessMateTests
     }
 
     /// <summary>
-    /// The table key must be position-independent: the same geometry reached from a different
-    /// board must produce the same key. Here the back-rank mate is shifted by adding an
-    /// irrelevant white pawn far away — the mate geometry is untouched.
+    /// The pattern key is position-independent: the same mate geometry on a different board
+    /// (here with an unrelated white pawn added) produces the same key.
     /// </summary>
     [Fact]
     public void Key_IsInvariantToIrrelevantMaterial()

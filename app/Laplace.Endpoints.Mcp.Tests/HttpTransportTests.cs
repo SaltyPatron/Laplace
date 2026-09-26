@@ -33,8 +33,7 @@ public sealed class HttpTransportTests
             return Task.FromResult<object?>(null);
         }, budget.Token);
 
-        // entities/consensus are product seed state. A lawful empty DB remains a
-        // healthy installed service as long as schema access and perfcache succeed.
+        // Readiness holds with no entities or consensus, provided both probes succeed.
         Assert.True(ready);
         Assert.Equal(1, inventoryCalls);
         Assert.Equal(1, perfcacheCalls);

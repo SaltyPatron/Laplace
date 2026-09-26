@@ -237,10 +237,9 @@ public sealed record IngestInventory(
     IReadOnlyList<IngestFileSpec> Files,
     /// <summary>
     /// When true, <see cref="FileCount"/> feeds the journal's <c>files_total</c> and the
-    /// runner requires <c>files_done == files_total</c> for status <c>ok</c>. Only
-    /// multi-file lanes that emit a <c>period-boundary/</c> (or <c>file-failed/</c>) per
-    /// file may set this — monoliths / multi-phase compose streams that list files for
-    /// unit estimates must leave it false, or a clean run lies as FrameNet <c>33/14900 ok</c>.
+    /// runner requires <c>files_done == files_total</c> for status <c>ok</c>. Only an
+    /// ingest that writes a <c>period-boundary/</c> (or <c>file-failed/</c>) receipt per file
+    /// may set it; a stream that lists files only for unit estimates leaves it false.
     /// </summary>
     bool TracksFileCompletion = false)
 {
@@ -251,10 +250,9 @@ public sealed record IngestInventory(
     private long _observedFloor;
 
     /// <summary>
-    /// <see cref="TotalInputUnits"/> unless a background exact count has published a
-    /// correction. Sampled estimates over-run or under-run the true denominator (a
-    /// 20 GB corpus with uneven line density read input_pct past 111%); progress and
-    /// INGEST_COMPLETE read this so the denominator self-corrects mid-run.
+    /// <see cref="TotalInputUnits"/> unless an exact total or a larger observed floor has
+    /// been published. Sampled estimates can miss the true denominator either way; progress
+    /// and INGEST_COMPLETE read this so the denominator corrects mid-run.
     /// </summary>
     public long EffectiveTotalInputUnits
     {
@@ -289,12 +287,10 @@ public sealed record IngestInventory(
         }
     }
 
-    // Inventory is deliberately read-bounded. Large-corpus estimates are corrected by
+    // Inventory reads a bounded number of bytes. Large-corpus estimates are corrected by
     // the units the ingest is already extracting (PublishObservedFloor) and, after a
-    // successful uncapped full run, by IngestRunner.PublishExactTotal(InputUnitsDone).
-    // Do NOT launch a second full-file counter beside the real ingest: that used to
-    // reread ConceptNet/Wiktionary and every sampled multi-file corpus concurrently,
-    // doubling storage traffic just to improve a progress denominator.
+    // successful uncapped run, by IngestRunner.PublishExactTotal(InputUnitsDone); no
+    // second full-file counter runs beside the ingest.
 
     public static IngestInventory Single(long units, string unitType = "units") =>
         new(unitType, units, Array.Empty<IngestFileSpec>());
@@ -319,8 +315,8 @@ public sealed record IngestInventory(
     }
 
     /// <param name="tracksFileCompletion">
-    /// True only for <see cref="DecomposerMultiFile{TRecord}"/> lanes that emit one
-    /// period-boundary (or file-failed) per enumerated file.
+    /// True only for a <see cref="DecomposerMultiFile{TRecord}"/> ingest that writes one
+    /// period-boundary (or file-failed) receipt per enumerated file.
     /// </param>
     public static IngestInventory? FromFiles(
         string unitType,
@@ -347,9 +343,8 @@ public sealed record IngestInventory(
     }
 
     /// <summary>
-    /// One input unit per file (XML / document corpora). Do not use
-    /// <see cref="FromFiles"/> here — that newline-samples and invents a fake
-    /// 14M-unit denominator that pins <c>input_pct</c> at 0.0 for the whole run.
+    /// One input unit per file (XML / document corpora), where a newline count
+    /// (<see cref="FromFiles"/>) would not measure the unit.
     /// </summary>
     public static IngestInventory? FromFileUnits(
         string unitType,
@@ -394,8 +389,8 @@ public sealed record IngestInventory(
     }
 
     /// <summary>
-    /// Multi-file CoNLL-U inventory — shared sample budget across the path list
-    /// (same death-by-thousand-cuts guard as <see cref="FromFiles"/>).
+    /// Multi-file CoNLL-U inventory under one read budget across the path list, as
+    /// <see cref="FromFiles"/>.
     /// </summary>
     public static IngestInventory? FromConlluFiles(
         string unitType,
@@ -449,9 +444,9 @@ public interface IIngestArtifactGraphProvider
 public static class EtlInventory
 {
     /// <summary>
-    /// Files at or below this size get an exact newline count. Larger files are
-    /// sampled — inventory is a progress denominator, not a correctness gate, and
-    /// full-scanning ConceptNet (9.5G) / Wiktionary (21G) blocked first-batch for minutes.
+    /// Files at or below this size get an exact newline count; larger files are sampled.
+    /// Inventory is a progress denominator, not a correctness gate, and must not delay
+    /// the first batch.
     /// </summary>
     internal static long ExactScanThresholdBytes =>
         IngestSizing.ResolveSequentialIoBufferBytes();
@@ -461,9 +456,8 @@ public static class EtlInventory
         IngestSizing.ResolveSequentialIoBufferBytes();
 
     /// <summary>
-    /// Cap on total bytes read while building a multi-file inventory. Without this,
-    /// OMW/UD path lists exact-scan every file under <see cref="ExactScanThresholdBytes"/>
-    /// and death-by-thousand-cuts blocks INGEST_START.
+    /// Cap on total bytes read while building a multi-file inventory, so a long list of
+    /// small files under <see cref="ExactScanThresholdBytes"/> cannot delay INGEST_START.
     /// </summary>
     internal static long MultiFileInventoryBudgetBytes =>
         IngestSizing.ResolveSequentialIoBufferBytes();
@@ -535,7 +529,6 @@ public static class EtlInventory
     /// <summary>
     /// Progress-denominator newline estimate. Exact for files ≤
     /// <see cref="ExactScanThresholdBytes"/>; head/mid/tail sample extrapolation above that.
-    /// Name was a lie when this full-scanned multi-GB corpora before INGEST_START.
     /// </summary>
     public static long EstimateNewlineCount(string path, CancellationToken ct = default)
     {
@@ -774,9 +767,9 @@ public static class EtlInventory
         return trimmed;
     }
 
-    // Byte-level equivalent of the former ReadLines pass: a sentence is open once a line
-    // starts with a digit and contains a tab, and closes at a blank line. Valid CoNLL-U
-    // token ids start with ASCII digits, so the byte-range digit test matches char.IsDigit.
+    // Byte-level scan: a sentence is open once a line starts with a digit and contains a
+    // tab, and closes at a blank line. CoNLL-U token ids start with ASCII digits, so a
+    // byte-range digit test suffices.
     public static long CountConlluSentences(string path)
     {
         if (!File.Exists(path)) return 0;
@@ -857,9 +850,8 @@ public static class EtlInventory
     }
 
     /// <summary>
-    /// Inventory for Tatoeba — sample estimates only. The old path full-scanned
-    /// sentences.csv + links.csv (and rebuilt an allow-set) before first batch.
-    /// Language filter, when active, scales the unfiltered estimate by a sampled match rate.
+    /// Inventory for Tatoeba from sample estimates only. An active language filter scales
+    /// the unfiltered estimate by a sampled match rate.
     /// </summary>
     public static Task<IngestInventory> TatoebaAsync(
         string ecosystemPath, LanguageFilter? langs, CancellationToken ct)
@@ -924,8 +916,8 @@ public static class EtlInventory
     }
 
     /// <summary>
-    /// Byte-scan estimate of PGN games (<c>[Event </c> at line start). Exact under
-    /// threshold; sampled above — replaces StreamReader full decode in ChessPgnDecomposer.
+    /// Byte-scan estimate of PGN games (<c>[Event </c> at line start). Exact under the
+    /// threshold; sampled above.
     /// </summary>
     public static long EstimatePgnGameCount(string path, CancellationToken ct = default)
     {

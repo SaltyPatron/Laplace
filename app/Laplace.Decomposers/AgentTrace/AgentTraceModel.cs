@@ -2,10 +2,9 @@ using Laplace.Decomposers.Abstractions;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
-/// Normalized session model every provider adapter parses into. ALL provider metadata
-/// is retained: the typed fields cover the cross-provider universals; anything else a
-/// format carries lands in <see cref="Meta"/> (session) / <see cref="AgentTurn.Meta"/>
-/// (turn) as key=value pairs and is witnessed via HAS_ATTRIBUTE.
+/// Normalized session every provider adapter parses into. Typed fields cover what all
+/// providers share; any other metadata lands in <see cref="Meta"/> (session) or
+/// <see cref="AgentTurn.Meta"/> (turn) and is attested as a [key, value] under HAS_ATTRIBUTE.
 /// </summary>
 public sealed record AgentSession(
     string Provider,
@@ -23,10 +22,9 @@ public sealed record AgentSession(
         System.Collections.Immutable.ImmutableDictionary<string, string>.Empty;
 
     /// <summary>
-    /// Composed-turn count already witnessed by a prior ingest of this session (the
-    /// deepest Agent_Session_Watermark the existence probe confirmed). Turns below it
-    /// stage content only — no testimony — so re-ingesting a GROWN log never inflates
-    /// observation counts for the already-witnessed prefix. 0 = witness everything.
+    /// Composed-turn count already witnessed by a prior ingest (the deepest
+    /// Agent_Session_Watermark the existence probe found). Turns below it stage content
+    /// without attestations, so a grown log does not re-count its prefix. 0 = witness all.
     /// </summary>
     public int WitnessedTurnWatermark { get; init; }
 }
@@ -67,10 +65,9 @@ public sealed record AgentUsage(
 }
 
 /// <summary>
-/// Every relation the lane emits, as typed symbols. The canonical surface name is
-/// DERIVED from the member name (HasRole → HAS_ROLE), so the only spelled-out roster
-/// is <see cref="AgentTraceSource.Relations"/> (the declaration span the vocabulary
-/// law exempts); emit sites never carry ad-hoc name literals (isa-gate g3).
+/// Every relation agent-session ingest attests, as typed symbols. The surface name derives
+/// from the member name (HasRole → HAS_ROLE), so the only spelled-out roster is
+/// <see cref="AgentTraceSource.Relations"/>; emit sites carry no name literals.
 /// </summary>
 public enum AgentRelation
 {
@@ -94,8 +91,7 @@ public static class AgentRelations
 
     public static string Surface(AgentRelation relation) => Canonical[(int)relation];
 
-    // The conversion is not specific to this lane -- every relation added after the
-    // vocabulary baseline froze needs it -- so the body lives in RelationSymbol (§15).
+    // The member-name → surface-name conversion is shared; it lives in RelationSymbol.
     private static string[] BuildCanonical()
     {
         var names = Enum.GetNames<AgentRelation>();

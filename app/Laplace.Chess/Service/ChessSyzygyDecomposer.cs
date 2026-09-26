@@ -7,15 +7,13 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Ingest Syzygy tablebase packaging through the generic multi-file spine.
+/// Provider for Syzygy tablebase packages, admitted through the shared multi-file recipe.
 ///
-/// Every physical <c>.rtbw</c>/<c>.rtbz</c> package file is scheduled independently so the
-/// shared file-content fingerprint, completion marker, restart skip, journal counters and
-/// bounded file-worker pool apply to the complete installed table set. Semantic position graph
-/// expansion is a separate decision: only WDL (<c>.rtbw</c>) tables at or below the configured
-/// exhaustive men ceiling are walked. Larger packages and DTZ files are still durable,
-/// content-addressed ETL inputs and remain available to Fathom for exact lazy probing; they are
-/// not discarded merely because brute-force placement enumeration would be absurd.
+/// Every <c>.rtbw</c>/<c>.rtbz</c> file is an input unit, so the shared content fingerprint,
+/// completion receipt, restart skip and file-worker pool cover the whole table set. Only WDL
+/// (<c>.rtbw</c>) tables at or below the configured men ceiling are expanded into position graph
+/// records; larger packages and DTZ files are fingerprinted and receipted as inputs and stay
+/// available to Fathom for exact lazy probing.
 ///
 /// Run: <c>laplace ingest chess-syzygy [&lt;syzygy-dir&gt;]</c>
 /// </summary>
@@ -96,9 +94,8 @@ public sealed class ChessSyzygyDecomposer
         if (_resolvedDir is null || _prober is null)
             return Array.Empty<(string, string)>();
 
-        // Resolve the COMPLETE package set. The old path filtered by men BEFORE the generic
-        // multi-file driver saw the files, so 4-7 man WDL files had no content fingerprint,
-        // completion marker, journal row or resumable ETL identity; .rtbz was invisible entirely.
+        // Resolve the complete package set; the men ceiling decides expansion per file, not
+        // which files the multi-file driver fingerprints and receipts.
         try
         {
             var all = ChessSyzygyPaths.Packages(_resolvedDir);
@@ -113,9 +110,9 @@ public sealed class ChessSyzygyDecomposer
     }
 
     /// <summary>
-    /// Stable package scheduler. Nothing is removed here. Labels include the extension because
-    /// <c>KQvK.rtbw</c> and <c>KQvK.rtbz</c> are distinct physical package inputs. Repeated
-    /// basenames across nested directories retain their relative path for unique file labels.
+    /// Orders every package file deterministically. Labels include the extension because
+    /// <c>KQvK.rtbw</c> and <c>KQvK.rtbz</c> are distinct inputs; basenames repeated across
+    /// nested directories keep their relative path so labels stay unique.
     /// </summary>
     internal static IReadOnlyList<(string Path, string Label)> SchedulePackages(
         IReadOnlyList<string> paths, string? packageRoot = null)
@@ -148,8 +145,8 @@ public sealed class ChessSyzygyDecomposer
     }
 
     /// <summary>
-    /// Semantic-expansion subset retained for tests/diagnostics. Unlike the old implementation,
-    /// this is NOT the set passed to the multi-file scheduler.
+    /// The expandable subset, for tests and diagnostics. It is not the set the multi-file
+    /// scheduler receives.
     /// </summary>
     internal static IReadOnlyList<string> FilterByMenCeiling(
         IReadOnlyList<string> paths, int maxMen)
@@ -191,10 +188,9 @@ public sealed class ChessSyzygyDecomposer
         int maxMen = SyzygyTableUnpack.ResolveMaxMen();
         if (!ShouldExpandPackage(filePath, maxMen))
         {
-            // Deliberately no semantic row. The generic multi-file boundary still fingerprints
-            // the exact bytes and records unit completion on that content identity, so this file
-            // is independently completed and true-skipped on restart without boiling its state
-            // space into rows. Fathom consumes these mapped files lazily during search/game probes.
+            // No records: the multi-file boundary fingerprints the bytes and receipts completion
+            // on that content identity, so a restart skips the file. Fathom maps it lazily for
+            // search and game probes.
             yield break;
         }
 
@@ -206,8 +202,8 @@ public sealed class ChessSyzygyDecomposer
             ? 1
             : Math.Max(1, IngestTopology.Current.ComposeWorkers);
 
-        // Stream semantic chunks. The prior implementation retained every FEN string for the
-        // material and only composed after the final probe, ballooning resident memory.
+        // Stream chunks as they fill, so resident memory is bounded by one chunk of products,
+        // not the whole material.
         var products = new List<SyzygyProduct>(ChessSyzygy.TransitionsPerChunk);
         var chunks = new List<SyzygyChunkRef>();
         long cap = options.MaxInputUnits;
@@ -239,9 +235,9 @@ public sealed class ChessSyzygyDecomposer
             }
         }
 
-        // An eligible WDL table that produced no exact root transitions is not a successful
-        // package ingest. Usually that means its DTZ partner/package is absent or Fathom cannot
-        // answer the loaded material. Fail the file so no completion marker can hide it.
+        // An expandable WDL table that yields no root transitions fails the file (typically
+        // a missing DTZ partner, or Fathom cannot answer the material), so no completion
+        // receipt is written for it.
         if (chunks.Count == 0)
             throw new InvalidDataException(
                 $"Syzygy WDL package '{fileLabel}' was eligible for semantic expansion but "
@@ -286,10 +282,9 @@ public sealed class ChessSyzygyDecomposer
     }
 
     /// <summary>
-    /// Empty semantic-run triage. No packages at all is dependency-unset. A directory containing
-    /// only WDL tables above the exhaustive ceiling remains `scoped-out` for semantic expansion
-    /// (the files themselves are still fingerprinted/completed by the multi-file lane). Any DTZ
-    /// package or any expandable WDL means a zero-record run is unexpected and remains unexplained.
+    /// Explains a run with zero decoded units. No packages at all is dependency-unset. Only WDL
+    /// tables above the ceiling is `scoped-out` (the files are still fingerprinted and receipted).
+    /// Any DTZ package or expandable WDL table leaves a zero-record run unexplained.
     /// </summary>
     internal static (string Status, string Detail)? ExplainEmptyDirectory(
         string resolvedDir, int maxMen)
@@ -364,8 +359,8 @@ public sealed class ChessSyzygyDecomposer
 }
 
 /// <summary>
-/// One streamed transition chunk, its material root, or a legacy single-position test record.
-/// Physical package receipts live at the generic multi-file boundary, not in this semantic record.
+/// One streamed transition chunk, its material root, or a single-position test record. Package
+/// file receipts are written at the shared multi-file boundary, not in this record.
 /// </summary>
 public sealed record ChessSyzygyRecord : ITrunkRootRecord
 {

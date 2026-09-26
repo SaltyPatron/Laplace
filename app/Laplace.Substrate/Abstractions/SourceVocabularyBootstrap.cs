@@ -10,7 +10,7 @@ public static class SourceVocabularyBootstrap
     /// <summary>
     /// Expand declared relation names through the parent chain (family_root).
     /// Declaring a child pulls every ancestor root so the native attestation path
-    /// never faults on an undeclared family member (HAS_POS class).
+    /// never meets an undeclared family member.
     /// </summary>
     public static IReadOnlyList<string> ExpandRelationsWithFamily(IEnumerable<string> relationNodeNames)
     {
@@ -96,10 +96,9 @@ public static class SourceVocabularyBootstrap
         await context.Writer.ApplyAsync(boot.Build(), ct);
         if (readbackNames is not null)
         {
-            // A decomposer can orchestrate more than one independent witness source
-            // (SemLink + PredicateMatrix). The CLI only knows the outer decomposer, so
-            // every manifest registered through this boundary contributes its own source
-            // key to canonical readback. Types and relations are labelled by the registry.
+            // One decomposer can admit more than one witness source (e.g. SemLink and
+            // PredicateMatrix), so every manifest registered here adds its own source key
+            // to canonical readback. Types and relations are labelled by the registry.
             readbackNames.TryAdd(SubstrateCanonicalKeys.Source(sourceName), 0);
         }
         return boot;
@@ -109,7 +108,7 @@ public static class SourceVocabularyBootstrap
     /// Sealed-Initialize path: register types/relations from an <see cref="ISourceManifest"/>,
     /// then deposit <see cref="ISourceManifest.License"/> as witnessed credit attestations
     /// on the source entity (HAS_LICENSE / HAS_ATTRIBUTION / HAS_SOURCE_URL / HAS_CITATION /
-    /// HAS_VERSION). New relations renumber highway bits — batched into the campaign reseed queue.
+    /// HAS_VERSION).
     /// </summary>
     public static async Task<BootstrapIntentBuilder> RegisterManifestAsync(
         IDecomposerContext context,

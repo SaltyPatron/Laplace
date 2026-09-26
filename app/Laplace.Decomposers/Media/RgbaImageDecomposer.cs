@@ -8,9 +8,9 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Thin multi-file image lane: packaging → RGBA recovery → <see cref="ImageIngestRecord"/>;
-/// <see cref="ImageTierSpine"/> owns codepoint-floor compose/emit. Not named
-/// ImageDecomposer (stub path banned). Not corpus-specific.
+/// Provider for image files: packaging → RGBA recovery → <see cref="ImageIngestRecord"/>.
+/// Composition over codepoint-floor atoms is <see cref="ImageTierSpine"/>; admission is the
+/// shared multi-file recipe. Not specific to any corpus.
 /// </summary>
 public sealed class RgbaImageDecomposer
     : DecomposerMultiFile<ImageIngestRecord, RgbaImageSource, FullScope>, IIngestInventoryProvider

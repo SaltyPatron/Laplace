@@ -1,4 +1,3 @@
--- BEGIN ATOMIC: GH #764/#1008.
 DROP FUNCTION IF EXISTS laplace.consensus_tier_distribution();
 
 CREATE OR REPLACE FUNCTION ops.consensus_tier_distribution()

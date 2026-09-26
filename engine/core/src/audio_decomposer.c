@@ -80,7 +80,7 @@ int laplace_audio_decomposer_run(
     }
     free(sample_idx);
 
-    /* Tier 3 onset-segment placeholders — contiguous window nodes. */
+    /* Tier 3 segments — fixed groups of contiguous window nodes. */
     uint32_t* segment_idx = (uint32_t*)malloc(n_segments * sizeof(uint32_t));
     if (!segment_idx) { free(window_idx); tier_tree_free(tree); return -3; }
     for (size_t s = 0; s < n_segments; ++s) {

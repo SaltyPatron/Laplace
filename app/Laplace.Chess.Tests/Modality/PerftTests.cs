@@ -14,7 +14,7 @@ public class PerftTests
 
     private static long Perft(string fen, int depth) => Laplace.Modality.Chess.Perft.Run(Board.FromFen(fen), depth);
 
-    // Depth ≤4 stays in the default suite. Deeper nodes are Tier=perf (excluded by test-app).
+    // Depth ≤4 runs in the default suite; deeper cases carry Tier=perf and are excluded there.
 
     [Theory]
     [InlineData(1, 20)]

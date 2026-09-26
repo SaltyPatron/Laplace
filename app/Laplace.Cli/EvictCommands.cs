@@ -6,20 +6,17 @@ namespace Laplace.Cli;
 
 /// <summary>
 /// `laplace evict &lt;sourceName&gt; [--relations A,B] [--marker-types X,Y] [--rederive]`
-/// — lawful retraction of one source's testimony (GH #508). ORCHESTRATION ONLY:
-/// eviction is the inverse operator of the fold and runs where the fold's math lives
-/// (the evict_source extension PROCEDURE over the consensus_fold aggregate); this verb
-/// resolves names to content-addressed ids, CALLs the procedure, and optionally
-/// re-runs the lane. Bump the lane's Version first, then `evict --rederive`, and the
-/// hydrator re-derives every unit without double-counting a single witness.
+/// — retraction of one source's testimony. Eviction is the inverse of the consensus fold
+/// and runs in the evict_source extension procedure over the consensus_fold aggregate;
+/// this verb resolves names to content-addressed ids, calls it, and with --rederive re-runs
+/// the lane. With the lane's Version bumped first, re-derivation counts each witness once.
 /// </summary>
 internal static class EvictCommands
 {
     /// <summary>
-    /// The calculated lanes this verb knows how to re-derive: source name → the
-    /// `laplace ingest` key that re-runs the lane, plus the lane's derivation-marker
-    /// entity type (the gate evict_source deletes so the hydrator re-yields every
-    /// unit). Any source can be evicted by name; only listed lanes support
+    /// Calculated lanes that can be re-derived: source name → the `laplace ingest` key that
+    /// re-runs it, plus its derivation-marker entity type (deleted by evict_source so the
+    /// lane re-yields every unit). Any source can be evicted by name; only these support
     /// --rederive and get marker cleanup by default.
     /// </summary>
     private static readonly Dictionary<string, (string IngestKey, string[] MarkerTypes)> KnownLanes =
@@ -65,8 +62,8 @@ internal static class EvictCommands
             return Fail($"evict: --rederive knows no ingest lane for source '{sourceName}' "
                 + $"(known: {string.Join(", ", KnownLanes.Keys)})");
 
-        // Ids resolve through the system's native hash — the same derivations the SQL
-        // helpers source_id()/relation_type_id()/entity_type_id() run.
+        // Ids resolve through the native hash, the same derivation the SQL helpers
+        // source_id()/relation_type_id()/entity_type_id() run.
         var sourceId = SubstrateCanonicalIds.Source(sourceName);
         Hash128[]? relationIds = relationNames?.Select(Hash128.OfCanonical).ToArray();
         Hash128[]? markerTypeIds = markerTypeNames?.Select(Hash128.OfCanonical).ToArray();
@@ -78,14 +75,12 @@ internal static class EvictCommands
             + " ...");
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        // The eviction call and its receipt live on the shared read surface
-        // (NpgsqlSubstrateReader), so this verb stays orchestration and every caller
-        // gets one implementation of the fact.
+        // Eviction and its receipt go through NpgsqlSubstrateReader, shared by every interface.
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var reader = new NpgsqlSubstrateReader(ds);
         await reader.EvictSourceAsync(sourceId, relationIds, markerTypeIds);
 
-        // The receipt: zero surviving evidence rows under the source.
+        // Receipt: evidence rows still under the source (zero unless --relations restricted it).
         long remaining = await reader.CountEvidenceBySourceAsync(sourceId);
         sw.Stop();
         Console.WriteLine(

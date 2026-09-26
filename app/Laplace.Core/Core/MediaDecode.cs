@@ -3,11 +3,11 @@ using System.Runtime.InteropServices;
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// Managed face of <c>laplace_media_decode_*</c> — packaging unpack only.
-/// Returns planar RGBA / mono int16 recovery buffers. The buffers are source
-/// recovery state, not identity by themselves. Their exact numeric values compose
-/// through reusable canonical scalar roots; channel/sample ordinals plus shape/rate/
-/// precision/provenance remain occurrence/reconstruction state (GH #1134).
+/// Managed face of <c>laplace_media_decode_*</c>: unpacks packaging into planar RGBA /
+/// mono int16 recovery buffers. The buffers are source recovery state, not identity;
+/// their exact numeric values compose through reusable canonical scalar roots, and
+/// channel/sample ordinals plus shape/rate/precision are occurrence and reconstruction
+/// state.
 /// </summary>
 public static class MediaDecode
 {

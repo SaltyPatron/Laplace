@@ -4,8 +4,8 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Admission path for human-readable semantic category labels. Opaque source/catalog
-/// keys belong in <see cref="ReferenceAnchor"/> and must not pass through this API.
+/// Admits a readable category label as content. Opaque catalog keys go through
+/// <see cref="ReferenceAnchor"/> instead.
 /// </summary>
 public static class CategoryAnchor
 {

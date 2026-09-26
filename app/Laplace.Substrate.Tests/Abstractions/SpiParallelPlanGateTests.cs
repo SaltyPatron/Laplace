@@ -6,25 +6,17 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// <summary>
 /// A read-only SPI plan must be prepared parallel-eligible.
 ///
-/// SPI_prepare plans with parallelism DISABLED. A parallel plan requires
-/// SPI_prepare_cursor(..., CURSOR_OPT_PARALLEL_OK). Before 2026-08-23 no file in the
-/// extension used it, so every SPI plan in the tree was serial — including the successor
-/// probes, which are GIN containment scans over all 64 hash partitions of
-/// laplace.physicalities (the partition key is `id`, the predicate is on constituents, so
-/// nothing prunes). Standalone the planner picks a Parallel Append with 7 workers at ~42ms;
-/// through SPI_prepare the identical query ran serially. Measured warm after the change:
-/// generation.trajectory_continuations 687ms → 173ms, structural.geometry_successors_batch
-/// 975ms → 127ms, results bit-identical.
-///
-/// This is a whole-class gate on purpose. Fixing the two probes that happened to be
-/// measured would have left thirteen other files silently serial until someone profiled
-/// them one at a time.
+/// SPI_prepare plans with parallelism disabled; a parallel plan requires
+/// SPI_prepare_cursor(..., CURSOR_OPT_PARALLEL_OK). Scans such as the successor probes are
+/// GIN containment scans over every hash partition of laplace.physicalities (partitioned by
+/// id, filtered on constituents, so nothing prunes) and need a Parallel Append. The gate
+/// covers every extension source file, not a chosen few.
 /// </summary>
 public sealed class SpiParallelPlanGateTests
 {
     /// <summary>
-    /// Files whose plans are executed READ-WRITE (SPI_execute_plan with read_only = false).
-    /// Parallelism is not available to them and asking for it would be wrong, not slow.
+    /// Files whose plans execute read-write (SPI_execute_plan with read_only = false);
+    /// parallel plans are not available to them.
     /// </summary>
     private static readonly HashSet<string> ReadWritePlanFiles =
         new(StringComparer.OrdinalIgnoreCase)
@@ -72,10 +64,9 @@ public sealed class SpiParallelPlanGateTests
     }
 
     /// <summary>
-    /// The exemption must stay a real, checkable claim rather than a way to opt out.
-    /// Parse the SPI call's top-level arguments instead of using a flat regex: production
-    /// callers may obtain their plan through a helper such as matched_leaf_plan(...), and
-    /// that nested ')' must not hide the later read_only=false argument from the gate.
+    /// Every exempt file really executes a plan read-write. The SPI call's top-level
+    /// arguments are parsed, so a nested call such as matched_leaf_plan(...) cannot hide the
+    /// read_only=false argument.
     /// </summary>
     [Fact]
     public void ReadWriteExemptions_ActuallyExecuteReadWrite()

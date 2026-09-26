@@ -4,13 +4,10 @@ using Laplace.Engine.Core;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// The Rule #8 client-side consensus fold is only valid if
-/// Glicko2.FoldUniformPeriod (the analytic uniform-period fold the server's
-/// consensus_fold_engine calls) is BIT-EQUAL to expanding the same partial
-/// into per-observation form and running glicko2_update_period — the
-/// equivalence the whole byte-identical-fold verification chain rests on.
-/// Both paths run in the same native laplace_core library in int64 fixed
-/// point, so equality here is exact, not approximate.
+/// Glicko2.FoldUniformPeriod (the analytic uniform-period fold consensus_fold_engine
+/// calls) is bit-equal to expanding the same partial into per-observation form and running
+/// glicko2_update_period, so a consensus cell's standing does not depend on which form
+/// folded its witnesses. Both run in native laplace_core int64 fixed point; equality is exact.
 /// </summary>
 public class Glicko2FoldParityTests
 {
@@ -93,18 +90,15 @@ public class Glicko2FoldParityTests
     [InlineData(new long[] { 30_000_000_000L, 150_000_000_000L, 30_000_000_000L, 200_000_000_000L },
                 new long[] { 3, 1, 5, 2 },
                 new long[] { 2_700_000_000L, 1_000_000_000L, 2_500_000_000L, 1_000_000_000L })]
-    // single row (the evict refold's commonest case: one surviving witness)
+    // single row: one surviving witness
     [InlineData(new long[] { 30_000_000_000L }, new long[] { 4 }, new long[] { 2_000_000_000L })]
     public void AggregateRefold_BitEqualsIncrementalBatchChain(
         long[] phis, long[] games, long[] sums)
     {
-        // evict_source's refold contract (GH #508, annex §2.3/§2.6(5)): a cell built
-        // by N ingest batches — each batch one uniform period folded against the
-        // STORED prior (the consensus_upsert path) — must be bit-equal to the
-        // consensus_fold AGGREGATE's refold of the same N evidence rows in the same
-        // order: Init(neutral prior) + one FoldUniformPeriod per row. Both paths run
-        // the same native scalar; this pins that the seeding/chaining conventions
-        // agree, which is what lets evict_source refold survivors in place.
+        // A cell folded incrementally (each evidence row one uniform period against the
+        // stored prior, as consensus_upsert does) is bit-equal to the consensus_fold
+        // aggregate's refold of the same rows in order from the neutral prior. That
+        // equality is what lets evict_source refold surviving witnesses in place.
         long neutral = Glicko2.NeutralMuFp1e9();
 
         var incremental = Glicko2.AccumulateGames(
@@ -134,10 +128,8 @@ public class Glicko2FoldParityTests
     [Fact]
     public void NeutralMu_MatchesServerConstant()
     {
-        // CONSENSUS_FOLD_NEUTRAL_MU in consensus_fold_math.h — the opponent
-        // rating every server-side fold uses. The client must feed the fold
-        // from the native export, never a managed literal; this pins the
-        // export to the documented value so drift in either direction fails.
+        // The native export equals CONSENSUS_FOLD_NEUTRAL_MU (consensus_fold_math.h),
+        // the opponent rating every fold uses; callers read the export, not a literal.
         Assert.Equal(1_500_000_000_000L, Glicko2.NeutralMuFp1e9());
         Assert.Equal(Glicko2.DefaultRatingFp1e9, Glicko2.NeutralMuFp1e9());
     }

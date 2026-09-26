@@ -4,9 +4,9 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Unpack on-disk audio packaging into mono PCM16 recovery. Native decode: WAV /
-/// MP3 / FLAC / Ogg Vorbis (+ sniff). Recovery only — identity is the
-/// codepoint-floor audio ladder, never blake3(pcm) as T0.
+/// Unpacks on-disk audio packaging (WAV / MP3 / FLAC / Ogg Vorbis, natively decoded and
+/// sniffed) into a mono PCM16 recovery buffer. The buffer is not an identity input: identity
+/// is the audio composition ladder over codepoint-floor atoms.
 /// </summary>
 public static class AudioFileOpen
 {

@@ -17,8 +17,8 @@ public static class IngestUnitCompletion
         => new IngestUnitCompletionKey(ownerSourceId, unitId, layerOrder, contextId).Validate();
 
     /// <summary>
-    /// Call only after the complete unit has composed successfully. The owner is the
-    /// source witness, so source eviction clears this completion with the owned output.
+    /// Call only after the complete unit has composed successfully. The completion is keyed
+    /// to the source witness, so evicting the source clears it with the source's output.
     /// A unit completion never satisfies whole-layer completion.
     /// </summary>
     public static void Emit(

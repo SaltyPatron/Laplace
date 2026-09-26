@@ -34,8 +34,8 @@ public sealed class VerifiedGitRepository
     {
         Root = root; Input = input; Tree = tree; BinarySha256 = binarySha256;
         BuildReceiptSha256 = buildReceiptSha256; Entries = entries;
-        // Deliberately exclude raw origin/config, local private receipt and binary paths,
-        // timestamps and filesystem mtimes from the public, repeatable provenance body.
+        // Raw origin/config, private receipt and binary paths, timestamps and mtimes are
+        // excluded, so the provenance body is public and repeatable.
         ProvenanceUtf8 = JsonSerializer.SerializeToUtf8Bytes(new {
             schema = "laplace.verified-git-corpus.v1", upstream = input.Upstream,
             commit = input.Commit, tree, license = input.License,
@@ -188,8 +188,8 @@ public sealed class VerifiedGitRepository
 
     private static JsonAstCursor LastProperty(JsonAstCursor value, string name)
     {
-        // Preserve the receipt's existing last-occurrence property policy,
-        // including escaped keys; the native JSON cursor decodes those keys.
+        // The last occurrence of a property wins, compared on decoded keys (the native
+        // JSON cursor decodes escapes).
         JsonAstCursor result = default;
         foreach (var (key, field) in value.Pairs())
             if (key == name) result = field;
@@ -206,8 +206,8 @@ public sealed class VerifiedGitRepository
     private static string? RequiredString(JsonAstCursor value, string name)
     {
         var field = RequiredProperty(value, name);
-        // Descriptive public recipe fields historically permit explicit null;
-        // required commit/hash/integrity values still must match their identities.
+        // Descriptive recipe fields may be explicit null; the caller compares commit and
+        // binary hash against the selected identities.
         if (field.Kind == JsonAstKind.Null) return null;
         if (field.Kind != JsonAstKind.String)
             throw new InvalidDataException($"Retained engine build field '{name}' must be a string or null.");

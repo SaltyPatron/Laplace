@@ -4,10 +4,10 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Identity-search law for GH #1398. Exact content-addressed resolution is the
-/// terminal path; bounded fuzzy candidate expansion is reached only after an exact
-/// miss. Response-shape tests alone cannot detect the expensive/contaminating fuzzy
-/// query because both implementations may ultimately render the same exact row.
+/// Identity-search law: exact content-addressed resolution terminates the search;
+/// bounded fuzzy candidate expansion runs only after an exact miss. Pinned in source,
+/// because a fuzzy expansion that still renders the exact row is invisible to
+/// response-shape tests.
 /// </summary>
 public sealed class ChessPlayerExactLookupLawTests
 {
@@ -18,8 +18,8 @@ public sealed class ChessPlayerExactLookupLawTests
         string source = File.ReadAllText(Path.Combine(
             root, "app", "Laplace.Endpoints.OpenAICompat", "SubstrateClient.Chess.cs"));
 
-        // One native operation owns both paths; the previous managed "exact"
-        // call already expanded candidates on a miss, then searched them again.
+        // One native operation (chess_roster.c) runs both paths; the managed client asks
+        // it for exact-only resolution and does no candidate expansion of its own.
         string native = File.ReadAllText(Path.Combine(root,
             "extension/laplace_substrate/src/chess_roster.c"));
         Assert.Contains("if (!SPI_processed && !exact_only)", native);
@@ -31,11 +31,9 @@ public sealed class ChessPlayerExactLookupLawTests
         Assert.DoesNotContain("2000, ct", source);
         Assert.DoesNotContain(".Concat(exact", source, StringComparison.Ordinal);
 
-        // The old exact reader asked generic edges_raw to choose the best OUTCOME edge with
-        // LIMIT 1. OUTCOME is shared, so that can disagree with the roster's canonical
-        // (player, OUTCOME, Chess_Result) standing cell. Exact lookup must use the same
-        // canonical candidate projection as the list, whose SQL exact CTE short-circuits
-        // fuzzy expansion when the content-addressed player exists.
+        // Exact lookup uses the roster's candidate projection, so a player's standing is
+        // the canonical (player, OUTCOME, Chess_Result) cell, not whichever OUTCOME edge
+        // a generic edge read would pick.
         Assert.DoesNotContain("NpgsqlSubstrateReads.ChessFindPlayerAsync(", source, StringComparison.Ordinal);
     }
 

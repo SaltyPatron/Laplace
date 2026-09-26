@@ -121,8 +121,8 @@ public static class SourceEntityIdConventions
 
     /// <summary>
     /// Canonicalizes a complete WordNet sense key without discarding the satellite-head
-    /// fields. Unlike <see cref="NormalizeSenseKey"/>, this is an exact source identity,
-    /// not the deliberately lossy three-field compatibility key used by older bridges.
+    /// fields. Unlike <see cref="NormalizeSenseKey"/>, this keeps the exact source key rather
+    /// than the lossy three-field key.
     /// </summary>
     public static string? NormalizeExactSenseKey(string raw)
     {
@@ -285,9 +285,9 @@ public static class SourceEntityIdConventions
         files.AddRange(weights);
         files.Sort(StringComparer.Ordinal);
 
-        // Open the complete selected file set before hashing any member.  The
-        // source id then names the bytes held by one coherent handle snapshot;
-        // path metadata is neither identity nor a digest cache key.
+        // Open the whole selected file set before hashing any member, so the source id
+        // names the bytes of one consistent set of handles; path metadata is neither
+        // identity nor a digest cache key.
         var opened = new Dictionary<string, FileStream>(files.Count, StringComparer.Ordinal);
         try
         {

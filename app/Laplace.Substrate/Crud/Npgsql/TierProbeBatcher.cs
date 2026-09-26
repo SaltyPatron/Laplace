@@ -4,13 +4,11 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Coalesces concurrent array-in presence probes by their physical routing key. A multi-file
-/// ingest deliberately owns several independent working sets; memory-heavy sources may close
-/// each set after only a handful of records. Without this boundary, every file worker opens a
-/// connection for its own tiny root or tier probe. The unkeyed entity-root path uses one shared
-/// lane; tier descent uses one lane per tier. In both cases the batcher preserves each caller's
-/// positional bitmap while sending one distinct-id array to the native probe for workers that
-/// arrive together.
+/// Coalesces concurrent presence probes that share a routing key into one native array probe.
+/// Working sets composed in parallel each ask which of their ids already exist; requests that
+/// arrive together on a lane are merged into one distinct-id array (bounded by the probe chunk
+/// size), sent once, and the combined bitmap is demultiplexed back into each caller's own
+/// positional bitmap. The entity-root probe uses one lane; tier descent uses one lane per tier.
 /// </summary>
 internal sealed class PresenceProbeBatcher<TKey> where TKey : notnull
 {
@@ -78,8 +76,8 @@ internal sealed class PresenceProbeBatcher<TKey> where TKey : notnull
             {
                 while (true)
                 {
-                    // Yield one scheduler turn so concurrently composing files can join this
-                    // tier without imposing a fixed millisecond delay on every probe.
+                    // Yield one scheduler turn so concurrent callers can join this batch
+                    // without imposing a fixed delay on every probe.
                     await Task.Yield();
 
                     var requests = new List<Request>();

@@ -17,7 +17,7 @@ The PostgreSQL extension persists four primary substrate families under `extensi
 | `attestations` | source-attributed typed testimony/observation |
 | `consensus` | folded proposition standing: rating, RD, volatility, witness count and related state |
 
-Supporting tables/journals include canonical names, repair/dirty state and ingest/index progress. Exact generated counts and partition inventory are intentionally not duplicated here; `docs/INVENTORY.md` is regenerated and CI-gated.
+Everything else (journals, working-set and index bookkeeping) is operational state around these four tables, not knowledge. `docs/INVENTORY.md` is the generated catalog.
 
 Every entity has a physicality; entities are both building blocks and content. Physicality admission records source/unit/time provenance through ordinary attestations only — an attestation recording that an entity has a physicality adds nothing and is not admitted.
 
@@ -34,17 +34,15 @@ identity/content
 
 A content identity does not become true merely because it exists, and testimony does not become content identity merely because many sources repeat it.
 
-### Referential integrity is an implementation obligation
+### Referential integrity
 
-The substrate intentionally avoids conventional per-row foreign keys across its large partitioned/hot write paths. Content addressing makes integrity cheap to check and reason about, but it does **not** make dangling references logically impossible: a buggy/partial writer can still emit an id whose target row is absent.
-
-Therefore absence of FKs trades write-time FK overhead for stronger writer, test, audit and live-proof obligations. Documentation must not claim that a dangling reference is “not expressible.”
+The large partitioned write paths carry no per-row foreign keys. Content addressing lets every writer know a target id before the target row exists, so each writer lands leaves before the compositions, attestations and consensus cells that reference them (leaf → trunk). A reference to an absent id is a writer defect.
 
 ---
 
 ## 2. Executable content identity and recursive composition
 
-The current native composition authority is `engine/core/src/hash_composer.c`, with the Merkle hash law in `engine/core/src/hash128.c`.
+Native composition is `engine/core/src/hash_composer.c`; the Merkle hash law is `engine/core/src/hash128.c`.
 
 For a composed node:
 
@@ -54,22 +52,20 @@ n == 1 -> child identity is preserved
 n > 1  -> hash128_merkle(tier, ordered child ids, n)
 ```
 
-The function signature carries `tier`, but **the current `hash128_merkle` implementation explicitly discards it with `(void)tier`**. The executable id is a BLAKE3-derived hash over the Merkle domain byte plus the ordered child-id sequence. Tier, source, ordinal and container identity are not mixed into that hash.
+The function signature carries `tier`, and `hash128_merkle` discards it. The executable id is a BLAKE3-derived hash over the Merkle domain byte plus the ordered child-id sequence. Tier, source, ordinal and container identity are not mixed into that hash.
 
-So the current native identity law is:
+So the identity law is:
 
 ```text
 same ordered canonical child-id sequence
 -> same composite content id
 ```
 
-regardless of the tier at which that same content is observed/used. Tier remains altitude/floor/storage/occurrence metadata rather than canonical content identity. Single-child promotion collapses to the child id under the current native rule.
-
-This behavior is pinned by `app/Laplace.Core.Tests/Core/ContentAddressingLawTests.cs`, which deliberately composes the same two-child sequence at several tiers so singleton collapse cannot hide a tier-salted hash regression.
+regardless of the tier at which that same content is observed/used. Tier remains altitude/floor/storage/occurrence metadata rather than canonical content identity. A single-child composition is the child id.
 
 Source identity is likewise not part of the canonical content hash, so the same canonical composition admitted from multiple sources converges.
 
-The current executable hash is a BLAKE3-derived 128-bit value. That is a finite implementation address/window, not a mathematical proof of global injectivity over an unbounded family of finite structures. Normal same-content convergence is **content-address convergence**, not a “hash collision”; a true same-id/different-preimage collision is a separate integrity event.
+The executable hash is a BLAKE3-derived 128-bit value. That is a finite address window, not a mathematical proof of global injectivity over an unbounded family of finite structures. Normal same-content convergence is **content-address convergence**, not a “hash collision”; a true same-id/different-preimage collision is a separate integrity event.
 
 The recursive representation itself is larger than the id: exact ordered constituents are retained in the trajectory/composition structure.
 
@@ -85,11 +81,9 @@ These are different things.
 
 The native composer in `engine/core/src/hash_composer.c` calls `math4d_centroid` over child coordinates and then derives the Hilbert address from that parent coordinate.
 
-For child points inside/on the unit 4-ball, the Euclidean centroid remains inside/on that same ball. This is the current native bounded-composition proof used in `INVENTION.md`.
+For child points inside/on the unit 4-ball, the Euclidean centroid remains inside/on that same ball (`INVENTION.md` §2).
 
-Tier-0 atom placement is generated once into the versioned T0 perfcache. DUCET/UCA rank supplies the deterministic atom order, and `super_fibonacci_point_open(rank)` maps that rank onto S³ with a base-2 radical-inverse radial parameter. This deliberately decouples collation order from Hopf latitude: every early rank prefix spreads across the whole shell instead of filling one band. The runtime authority is the mmap'd `laplace_t0_perfcache.bin` record (`id + uca_order + coord + hilbert + segmentation flags`); native/C# consumers read that record rather than independently regenerating Tier-0 geometry. Perfcache format v4 rejects the retired bounded rank/N geometry.
-
-The finite Unicode generation and open-prefix distribution are exercised by `engine/core/tests/test_super_fibonacci.cpp` and `engine/core/tests/test_codepoint_table.cpp`, including exact perfcache-coordinate agreement.
+Tier-0 atom placement is generated once into the versioned T0 perfcache. DUCET/UCA rank supplies the deterministic atom order, and `super_fibonacci_point_open(rank)` maps that rank onto S³ with a base-2 radical-inverse radial parameter. This decouples collation order from Hopf latitude: every rank prefix spreads across the whole shell. The mmap'd `laplace_t0_perfcache.bin` record (`id + uca_order + coord + hilbert + segmentation flags`) is what native and C# consumers read; nothing regenerates Tier-0 geometry independently. Tier-0 codepoints are never re-recorded as ingest novelty.
 
 ### 3.2 packed `trajectory` is an exact manifest, not a spatial path
 
@@ -121,18 +115,15 @@ packed vertex
 -> ST_MakeLine / native equivalent
 ```
 
-`extension/laplace_substrate/sql/functions/structural/entity_curve.sql.in` is one concrete realization surface. Fréchet/Hausdorff/shape operations belong on these realized coordinates, not on mantissa carriers.
+`extension/laplace_substrate/sql/functions/structural/entity_curve.sql.in` realizes curves. Fréchet/Hausdorff/shape operations belong on these realized coordinates, not on mantissa carriers.
 
-The packed 16-bit ordinal/run fields are not global composition-size ceilings. `engine/core/src/trajectory.c` carries logical sequence position and run splitting beyond those local field widths; the native test `LaplaceCoreTrajectory.WiderThanTheOrdinalFieldRoundTrips` exercises a 70,000-constituent sequence.
+The packed 16-bit ordinal/run fields are not global composition-size ceilings. `engine/core/src/trajectory.c` carries logical sequence position and run splitting beyond those local field widths.
 
-### 3.4 current centroid/Karcher divergence
+Contains, precedes and co-occurrence are read from trajectories: `laplace_trajectory_constituent_ids(traj)` is the distinct-id set behind the GIN containment index (`@>`, `&&`); `laplace_trajectory_constituents(traj)` is the full ordinal-ordered sequence. Ordered reads fetch one WKB blob per trajectory and decode vertices natively with `mantissa_unpack`; vertex order in the blob is ordinal order, so no SQL sort or per-vertex unnest is needed.
 
-The repository currently contains two different parent-coordinate laws:
+### 3.4 One coordinate law
 
-- native `hash_composer_compose_node` uses `math4d_centroid`, placing composites generally inside the 4-ball;
-- managed `app/Laplace.Substrate/Abstractions/NgramTrajectory.cs` uses `Math4d.KarcherMean`, explicitly intending to keep composed coordinates on S³. `app/Laplace.Chess/Service/ChessGraph.cs` and at least one model/tokenizer path also use Karcher mean.
-
-Both can obey the weaker bounded-domain invariant when inputs/outputs are valid, but they do **not** encode the same radial meaning and can produce different Hilbert addresses. This is a real as-built architecture divergence, not a documentation preference. Any claim that all composites are “on S³” or that all composites use centroid is currently too strong until the implementation is reconciled/reseeded under one declared rule.
+A composite's coordinate is the Euclidean centroid of its children's coordinates (`math4d_centroid`), and its Hilbert address is derived from that coordinate. Every lane that places a composite — text, chess, code, model, image, audio — uses that same native law.
 
 ---
 
@@ -140,9 +131,9 @@ Both can obey the weaker bounded-domain invariant when inputs/outputs are valid,
 
 `AttestationRow` in `app/Laplace.Substrate/Crud/SubstrateChange.cs` carries the typed proposition/witness state used by the write path. The outcome domain distinguishes refute/draw/confirm rather than treating omission as falsehood.
 
-`engine/core/src/glicko2.c` implements the Glicko-2 fold in fixed-point arithmetic. The write path in `app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs` coalesces batch deltas and dispatches relation/type-scoped fold work so a cell remains on one ordered lane while independent relation/type partitions can progress concurrently.
+`engine/core/src/glicko2.c` implements the Glicko-2 fold in fixed-point arithmetic. A claim is a game series (games plus a score in [0,1]; a draw is 0.5). Consensus is partitioned by `HASH(subject_id)`. Scoring runs once over a source's landed evidence: each touched cell is one rating period over all of its durable evidence.
 
-The current architecture therefore has three distinct evidence stages:
+Evidence moves through distinct stages:
 
 ```text
 source observation / occurrence
@@ -157,26 +148,26 @@ A read may use conservative standing such as `rating - 2*rd`, but that scalar do
 
 ## 5. Ingestion and decomposition
 
-Decomposers live primarily under `app/Laplace.Substrate/Abstractions/` and source/domain projects. The shared abstraction emits `SubstrateChange` state rather than giving each source its own SQL write semantics.
-
-The intended/common ingest shape is:
+Ingest is one generic flow for every source — curated corpora, models, chess, documents, user uploads. A source contributes a recipe; it does not contribute a writer.
 
 ```text
-physical artifact enumeration
--> one-pass source stream
--> typed decomposition
--> working-set dedup / canonical reuse
--> bulk existence / tier work
--> set-sized persistence/COPY
--> evidence fold
--> receipt/journal completion
+source trunk entity
+  -> file trunk entities (one per artifact)
+     -> record content hangs under its file through the file's physicality trajectory
+extraction: every artifact of the source is decomposed (in parallel) into staged
+            compositions (ids + ordered children), claims, and file/source trunks;
+            colliding records converge in staging
+stage 1:    prove novelty trunk-first against the substrate (a present trunk covers
+            its subtree), realize physicalities for novel entities only, land
+            entities / physicalities / attestations leaf -> trunk in bulk
+stage 2:    Glicko-2 scoring of the landed evidence into consensus, once
 ```
 
-`app/Laplace.Substrate/Abstractions/IngestPipeline.cs` provides the generic streaming/worker contract, trunk short-circuiting and deferred/working-set behavior.
+Content shared with another source gains a second parent trajectory; that multi-parent DAG is the provenance. Records, recipe subjects and file layout are packaging, never entities. A recipe maps provider syntax to governed vocabulary (WordNet `%p` → `HAS_PART`, WN-LMF `n` → UPOS `NOUN`) so sources converge; unmapped syntax is explicitly unresolved, never dropped. Structured values (sense keys, frame elements, valence patterns, class ids) are ordered compositions of governed parts, never joined strings.
 
-This common spine is important, but “uses the shared pipeline somewhere” is not sufficient proof that every source obeys the execution-grain law. Source-specific caller loops, per-record probes, private commit loops or per-element managed/native/database crossings remain architecture defects where they exist.
+Locators: `app/Laplace.Substrate/Abstractions/IngestPipeline.cs` (streaming/worker contract), `NativeRecipeCompiler.cs` and `SemanticSourceRecipe.cs` (recipes), `recipes/` (per-source recipe data).
 
-`OperationalDecomposer` admits the selected original invention and binding specification artifacts through the shared full-source native grammar/file pipeline under `SubstrateMandate` trust. The build copies their exact source bytes and preserves their repository paths beneath `seeds/operational/`; grammar, lexical composition and file provenance remain inspectable. This source does not replace the contracts with authored summaries or manufacture lexical instruction aliases. Source admission and execution of an ISA program are separate implementation requirements. See `seeds/operational/README.md` for the selected artifacts and ingestion command.
+`OperationalDecomposer` admits the invention and binding specification artifacts as ordinary content through the same pipeline under `SubstrateMandate` trust. The build copies their exact bytes beneath `seeds/operational/`; see `seeds/operational/README.md`.
 
 ---
 
@@ -199,7 +190,7 @@ native C/C++
 bounded/set result + receipt
 ```
 
-C# and SQL remain orchestration/contract/transport boundaries. They should not become alternate inner-loop runtimes.
+C# and SQL are orchestration/contract/transport boundaries, not inner-loop runtimes.
 
 The architecture is therefore not “C is faster than SQL.” It changes the **grain** of execution. Patterns such as the following are defects when they sit in a hot/repeated loop:
 
@@ -215,7 +206,7 @@ batch API implemented as scalar calls in a loop
 per-value high-level export/materialization
 ```
 
-The intended performance gain has two independent factors:
+The performance gain has two independent factors:
 
 ```text
 less work selected
@@ -233,7 +224,7 @@ Wider SIMD, AVX-512 and GPU providers are additional headroom, not the premise o
 
 ## 7. Relation registry and indexed web
 
-`engine/manifest/relation_types.toml` governs canonical relation identities, aliases, bands/ranks and append-only highway bits. Generated native data is produced by `scripts/codegen-attestation-law.py`.
+`engine/manifest/relation_types.toml` governs canonical relation identities, aliases, bands/ranks and append-only highway bits; `scripts/codegen-attestation-law.py` generates the native tables. A relation bit is one primitive meaning. Direction is an alias flip, never a second bit. Negation is a refute outcome, never a `NOT_` relation. A closed sub-category (part/member/substance) is a qualifier on the attestation; an open one (a property name) goes in the object as the composition `[property, value]`. Governed vocabularies (relations, UPOS, deprels, features, languages, modalities) are perfcache ROMs keyed by content id with stable, append-only bits; entities carry OR-masks (`highway_mask` and its sister masks) deposited from consensus. A mask is a prefilter; a mask miss is never absence.
 
 The substrate is not merely a flat relation table. A canonical entity can simultaneously participate in:
 
@@ -250,42 +241,29 @@ Those independent indexed structures overlap on canonical identities. This is th
 
 ## 8. Query-relative forward execution
 
-The current repository no longer has only disconnected walk helpers. It contains a canonical forward-program surface.
-
-`extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in` defines `generation.forward_program(...)` as one C entry point (`pg_laplace_forward_trace`) whose declared contract includes:
+`generation.forward_program(...)` (`extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in`) is one C entry point, `pg_laplace_forward_trace`, over the whole program:
 
 ```text
-exact prompt admission
-query-relative routing
-candidate adjudication
-obligation closure
-selection
-semantic-act fingerprinting
-working-state extension
-terminal execution receipt
+RESOLVE -> COUPLE -> ORIENT -> ROUTE -> SCAN -> COMPOSE
+        -> PROPOSE -> STEER -> SELECT -> REALIZE -> WITNESS
 ```
 
-Its returned trace/receipt contains fields including root id, candidate/context/channel counts, occurrence coverage, relation families, opposition, support anchor/relation/rating/RD/witness/source/context state, routing round, program id, required/satisfied/remaining obligations, completion/disposition, output fingerprint and semantic-act id.
+- **RESOLVE / Q.** The prompt is admitted as one exact Merkle DAG (codepoints → UAX#29 graphemes → words → sentences → root), probed trunk-first: the whole root or sentence is looked up first, and descent happens only on a miss.
+- **COUPLE / K, QK.** Containment climbs from every node to every containing trajectory with exact ordinals; relation/consensus planes, masks and Hilbert locality respond from the same vertex ids. The response stays typed per plane.
+- **ORIENT.** Joint interpretation over surviving bindings; real ambiguity is kept.
+- **ROUTE / SCAN / COMPOSE / PROPOSE / STEER / SELECT.** Sparse indexed star expansion under hop/fanout budgets; operators (walks, A*, continuation, geometry) run inside it.
+- **V.** The responding trajectories — their other constituents and continuations — plus the consensus cells of those entities.
+- **O / REALIZE / WITNESS.** The receipted fold into bindings, frontier and obligations; each emitted constituent updates the trajectory and the next coupling. Exact witnessed continuation distributions ground output. The turn is witnessed as new content.
 
-`extension/laplace_substrate/sql/functions/generation/walk_text.sql.in` makes `generation.forward_text(...)` invoke that canonical program once and only realize output after a completed semantic act exists. `converse.forward_turn(...)` supplies prior session turn/content identities as ordered discourse state rather than rendering a transcript and reparsing it. The legacy SQL parameter name `p_prior_frontier` is therefore not the semantic type: native `forward_prompt()` binds that array as `DISCOURSE`, separate from prompt semantic seeds. `converse.chat(...)` currently projects the canonical forward-turn surface for normal chat.
+`generation.forward_text(...)` runs that program once and realizes output from the completed semantic act. `converse.forward_turn(...)` passes prior session turns as ordered discourse identities, not re-rendered text; `converse.chat(...)` is the chat surface over it.
 
-Naming, sense and frame connections in the active query evidence resolve candidate identities. They do not establish an instruction or assign request/operand roles. The initial query is constrained only by an explicit caller relation mask.
-
-The explicit bound relation-read reader in `prompt_intent.h` requires source-attributed `CALLS` and `HAS_INPUT` statements about the exact current request root, sharing one source and the invocation context explicitly supplied by the caller. The eleven-argument `generation.forward_program` overload takes that required context and delegates to the same native body as the existing ten-argument entry point. Here `CALLS` declares application of a predicate independently to each member of an input set; its object is a relation ID, not an ISA opcode. This contract does not encode ordered argument slots or repeated instructions. Declared input IDs can be semantic concepts reached through witnessed naming/sense bindings rather than literal surface constituents. The result is computed through the exact declared relation against those semantic IDs. Contract witnesses, source/context, predicate and input bindings participate in the program fingerprint. Competing contracts retain ambiguity, and completion requires the complete declared input identity set to be satisfied, including when distinct inputs share a surface occurrence.
-
-The native COUPLE phase also reads typed `ParseStructure` physicalities through separate type-8 membership and hydration routes. The UD decoder retains the complete ordered token, lemma, feature, dependency, enhanced dependency and multiword-token record. A positively witnessed parse may contribute semantic lemma bindings only after complete alignment to the current occurrences. FrameNet ingestion retains every annotation layer, frame-scoped role, source span and null instantiation; these observations do not independently declare an executable operation.
-
-For ordinary requests, a source may explicitly declare a reusable relation-read task shape. Its canonical trajectory identifies an exemplar parse, predicate and ordered token slots with accepted entity types. Scoped `IS_EXAMPLE_OF`, `CALLS` and the complete `HAS_INPUT` slot set must agree with that trajectory. Native matching preserves all invariant content and structural constraints, binds variable occurrences through witnessed semantic identities and checks their entity types. The selected contract then uses the same relation-read program and execution path. Source JSON declares exact IDs; neither JSON field names nor language words are opcode triggers. The operational source adapter preserves its full native grammar, exact bytes and file provenance alongside the declaration.
-
-A new request need not already have a stored parse. An explicitly reusable template may project its declared structure onto the complete current ordered surface, varying only the declared slots. The program records this as an inference with a projection fingerprint and no current-parse testimony. Supported observed current parses constrain that inference when present. Competing complete bindings remain ambiguous, and incomplete fanout cannot authorize a partial program. Schema v1 requires one occurrence per token slot and at least one invariant lexical token; exemplars requiring multiword-token alignment are explicitly unsupported. See `seeds/operational/README.md` for the source schema and witness contract.
-
-Unicode surfaces and rendered languages retain their own content identities while converging through typed evidence on language-independent concept, predicate and program identities. No default language task mappings are bundled. Lexical naming is not the ISA. The program's coupling field is the typed response of every eligible plane — structure, occurrence, relation, evidence, geometry, discourse, and obligation — before a provider mask freezes the reading.
+The forward program is source-agnostic: it reads attestations, consensus, occurrence, trajectories and geometry as a whole and never decodes any particular source's layout. Recipes state a source's structure as claims; readers do not know which source made them. Language is context on a binding and a realization choice, never a code path.
 
 ---
 
 ## 9. Sparse star execution: hops and fanout
 
-After admission/orientation, the current program exposes explicit hop/fanout parameters. Native/read operators include graph walk, A*/Dijkstra, containment, geometry, continuation and realization surfaces under `extension/laplace_substrate/src/` and the generated SQL catalog.
+After admission/orientation, the program takes explicit hop/fanout parameters. Native/read operators include graph walk, A*/Dijkstra, containment, geometry, continuation and realization surfaces under `extension/laplace_substrate/src/` and the generated SQL catalog.
 
 The useful compute shape is a sequence of indexed star expansions:
 
@@ -300,7 +278,7 @@ active root/frontier
 
 A* or Dijkstra is therefore one operator for one cost/goal contract, not the definition of cognition. The same is true of strongest-walk, n-gram continuation or geometric proximity.
 
-Hops, fanout, candidate/frontier budgets and eligible operator/provider families are also the natural execution/billing dimensions because they bound explicit work over one shared knowledge world rather than selecting a deliberately smaller-knowledge model.
+Hops, fanout, candidate/frontier budgets and eligible operator/provider families are the execution and billing dimensions: they bound work over one shared knowledge world.
 
 ---
 
@@ -331,9 +309,9 @@ Perfcaches are derived accelerators. They may make selected direct addresses eff
 
 `engine/synthesis/` contains checkpoint/tokenizer/tensor readers and model-related native machinery. `engine/dynamics/` contains graph/spectral/algebra operators such as eigenmaps, Procrustes, Gram-Schmidt and related math. Foundry/export code materializes consumer formats such as GGUF under explicit recipes.
 
-A conventional checkpoint is treated as a source/witness/calculation boundary, not as the hidden authority of Laplace cognition. Consumer structures such as layers, heads, Q/K/V/O and FFN roles can be recorded, compared or used as export targets without making them the native ontology of the substrate.
+A conventional checkpoint is a source. A model token is its text entity (the model's `king` is the same content id as any other `king`); the model-local token id is only an ordinal in the vocabulary composition. Tensor values are transient operands: they are read to derive the model's knowledge as trajectories — ordered compositions over decoded token content ids — and are never retained as weights or written as token-pair attestations. A circuit is a coordinate `[model witness, plane, layer, head, …]`. Export is a filtered snapshot of current standing, geometry and selected operators under a recipe.
 
-Export/reconstruction remains subject to the same universal execution-grain law: format correctness does not excuse one-tensor-cell-at-a-time or one-constituent-at-a-time boundary crossings in a hot path.
+Export and reconstruction follow the same execution-grain law: no one-tensor-cell-at-a-time or one-constituent-at-a-time boundary crossings.
 
 ---
 
@@ -341,7 +319,7 @@ Export/reconstruction remains subject to the same universal execution-grain law:
 
 ### Multiscale image DAG versus scratch tier tree
 
-The current `tier_tree_t` is a construction structure with one `parent_idx`. That is suitable for one selected decomposition but cannot itself be the durable ontology for overlapping image windows.
+`tier_tree_t` is a construction structure with one `parent_idx`: it schedules one decomposition. It is not the durable ontology for overlapping image windows.
 
 A canonical 2×2 subpatch can belong to many 3×3, 4×4 and 8×8 occurrences simultaneously. The persistent model is therefore:
 
@@ -351,15 +329,11 @@ canonical subpatch entity P
 + many parent/container occurrences/trajectory references to P
 ~~~
 
-not one copied P per parent.
-
-The current fixed 8×8 image tree only materializes one partition hierarchy and is therefore incomplete relative to the multiscale law. #1711 owns a separate canonical subpatch/cache DAG path rather than overloading `parent_idx` with multiple parents.
+not one copied P per parent. The canonical subpatch DAG is its own structure; `parent_idx` is never overloaded with multiple parents.
 
 ### Compositional perfcache lattice
 
-Current source has several separately wired cache families: T0/codepoint, highway,
-modality-number, chess position/transition, plus process-local memoization. The intended
-architecture is the shared cache registry/dependency lattice in spec 33 and #1711.
+Cache families (T0/codepoint, highway, vocabulary, modality-number, chess position/transition) are members of one cache registry/dependency lattice (spec 33).
 
 Higher deterministic tiers are valid mmap candidates:
 
@@ -372,23 +346,20 @@ image + audio -> video composition
 Dense finite domains may use direct addressing. High-cardinality domains may export
 their finite admitted/hot canonical estate through a deterministic sparse lookup.
 
-The architectural gap is therefore not "image/video lacks its own cache." It is that
-the existing loaders/publication paths are still individually wired and do not yet
-express one dependency manifest/registry through which video can reuse loaded
-image/audio generations.
+Every loader publishes through one dependency manifest, so video reuses loaded image/audio generations.
 
 Cache/native lookup should resolve request-side keys before SQL/SPI queries so ordinary
 database indexes remain eligible.
 
-Selector-scoped modules are part of the intended registry. A deployment may load an ASCII range, an explicit color palette, a generated finite format domain, a speech/filter-bank calculation band, a hot/admitted set or the dependency closure of selected higher roots. These modules preserve global canonical ids/coords; they change residency/acceleration, not knowledge authority.
+Selector-scoped modules are part of the registry. A deployment may load an ASCII range, an explicit color palette, a generated finite format domain, a speech/filter-bank calculation band, a hot/admitted set or the dependency closure of selected higher roots. These modules preserve global canonical ids/coords; they change residency/acceleration, not knowledge authority.
 
 
 
-The as-built architecture must be read together with `docs/CAPABILITIES.md`. Several product capabilities arise only by composing existing substrate mechanisms; they must not be dismissed because no single table/function is named after the product verb.
+Read with `docs/CAPABILITIES.md`: product capabilities arise by composing substrate mechanisms, whether or not a table or function is named after the product verb.
 
 ### Software construction and reuse
 
-Code/repository admission already uses grammar-derived structure. The intended construction direction is the inverse: bind an exact target grammar/toolchain, couple the requirement against known canonical code, reuse/compose existing subtrees where possible, minimally mutate close structures, realize source, run toolchains/tests, witness outcomes, and iterate on the smallest divergent subtree.
+Code/repository admission uses grammar-derived structure. Construction is the inverse: bind an exact target grammar/toolchain, couple the requirement against known canonical code, reuse/compose existing subtrees where possible, minimally mutate close structures, realize source, run toolchains/tests, witness outcomes, and iterate on the smallest divergent subtree.
 
 Exact canonical tier/trajectory composition duplication is identity reuse. AST/CST is a derived projection when useful to a compiler/editor/toolchain; deeper normalized structural/algebraic/behavioral duplication is calculated evidence for consolidation.
 
@@ -406,44 +377,14 @@ Hops/fanout/resources determine cognition depth/breadth over the allowed world. 
 
 ### Machine-cost lane
 
-The current machine-cost analyzer is an implementation foothold, not the architectural limit. The full contract lowers source/bytecode/object/executable state into control/data/dependency structure, binds explicit execution counts plus target ISA/microarchitecture/memory/clock, and derives exact/symbolic cycles/time. Linearized scheduling without control-flow weighting is a bounded partial calculation and must remain labeled as such.
+Source/bytecode/object/executable state lowers into control/data/dependency structure; with explicit execution counts and a target ISA/microarchitecture/memory/clock, it derives exact or symbolic cycles and time. Observed runs are witnesses against that calculation.
 
 ## 12. Build, install and runtime boundaries
 
 Linux delivery is driven by `.github/workflows/laplace.yml` and `scripts/pipeline.sh`; host reconciliation/bootstrap lives in `scripts/setup-host.sh`. Windows entry points live under `scripts/win/`.
 
-The PostgreSQL extension links engine code into the server-side extension build, so engine changes that affect extension behavior require the extension to be rebuilt/reinstalled before installed-regression/live proof is meaningful. `pg_regress` exercises the installed extension, not merely edited `.sql.in` source.
+The PostgreSQL extension links engine code into the server-side extension build, so engine changes that affect extension behavior require the extension to be rebuilt and reinstalled. `pg_regress` exercises the installed extension, not the `.sql.in` sources.
 
 Protocol/product surfaces include the CLI, OpenAI-compatible endpoint, MCP endpoint, chess/UCI surfaces and the web product. These are adapters over the same substrate/operation laws, not separate intelligence implementations.
 
 ---
-
-## 13. Proof and benchmark boundaries
-
-Architecture claims are not all proved the same way.
-
-- Bounded centroid closure is a mathematical invariant of the current native composition rule.
-- Exact mantissa/trajectory round-trip is an executable serialization property.
-- The selected finite **Unicode materialization of the open Tier-0 rank law** can be exhaustively exercised; its finite count is an implementation-generation property, not the Tier-0 mathematical ceiling.
-- Retained-database reconstruction tests prove exact reconstruction for their admitted fixtures/corpora.
-- A populated live substrate is implementation evidence at scale, not a replacement for the theorem.
-- Performance claims require exact revision/artifact/host/provider/workload receipts.
-
-The manual benchmark contract is documented in `docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`.
-
-On a live managed host it now distinguishes **serviceable capacity** from **absolute saturation**. Consuming every schedulable logical CPU and making PostgreSQL/product/runner/control-plane operation unavailable is not a valid serviceable-capacity result. Full saturation belongs to an explicit isolated/saturation profile.
-
----
-
-## 14. Current architecture obligations exposed by this document
-
-This section exists so “architecture as built” does not hide contradictions behind polished prose.
-
-1. **Coordinate-law divergence.** Native composition uses Euclidean centroid; current managed `NgramTrajectory`/some domain paths use Karcher mean. One declared rule/meaning and reseed/migration proof is required if a universal coordinate law is claimed.
-2. **Live recursive closure/integrity proof gate.** Existing unit/reconstruction tests prove important pieces, but the exhaustive live-database gate that resolves every inspected packed constituent, checks bounds/reference closure/RLE counts and emits counterexamples/counts is not yet landed. #1562 owns that executable proof obligation.
-3. **Complete coupling-field acceptance.** A real canonical native forward program exists, but complete “tug every eligible strand and preserve typed response” coverage must be proved channel by channel rather than inferred from the function name.
-4. **Universal execution-grain enforcement.** Native hot operators exist, but legacy/decomposer/export/analysis/domain paths can still violate the coarse native/set law. Such violations are implementation debts, not evidence that the architecture requires RBAR.
-5. **Managed-host serviceable-capacity evidence.** The benchmark suite now enforces reserved default CPU headroom and explicit saturation opt-in; a fresh managed-host serviceable run still owes the empirical receipt proving that the configured reserve keeps required runner/database/product/control-plane health available.
-6. **Query/cognition work receipts.** #1561 owns the database-backed benchmark obligation to measure hops/fanout/responders/typed work and preflight-vs-actual cost instead of reducing rich indexed operations to output tokens alone.
-
-These are implementation obligations. None narrows the invention stated in `INVENTION.md`.

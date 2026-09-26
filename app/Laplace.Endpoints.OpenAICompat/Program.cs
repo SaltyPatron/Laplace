@@ -111,9 +111,8 @@ forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
 forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeaders);
 
-// Published identity and billing links have one configured authority. Apply it
-// before authentication constructs an OIDC callback so a reverse proxy cannot
-// lose a non-default external port (for example :8443) from the redirect URI.
+// A configured public origin rewrites scheme and host before authentication, so OIDC
+// callbacks and billing links carry the external authority, including a non-default port.
 var publicOrigin = app.Services.GetRequiredService<BrowserAuthSettings>().PublicOrigin;
 if (publicOrigin is not null)
 {
@@ -122,9 +121,8 @@ if (publicOrigin is not null)
         : new HostString(publicOrigin.Host, publicOrigin.Port);
     app.Use((context, next) =>
     {
-        // ForwardedHeaders has already established whether the reverse proxy
-        // received HTTPS. Never promote a direct plaintext request merely
-        // because a public origin is configured.
+        // Only requests ForwardedHeaders established as HTTPS are rewritten; a direct
+        // plaintext request keeps its own scheme and host.
         if (context.Request.IsHttps)
         {
             context.Request.Scheme = publicOrigin.Scheme;
@@ -155,8 +153,8 @@ app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.BillingAccountBoundaryMiddleware>();
-// Exact-model dispatch belongs before the generic OpenAI endpoint. A code request
-// can never drift into the prose walk simply because both share the same URL.
+// laplace-code-001 requests on /v1/chat/completions are dispatched here, before the
+// endpoint that runs the forward turn.
 app.UseMiddleware<CodeModelChatMiddleware>();
 
 app.MapPrometheusScrapingEndpoint();

@@ -17,8 +17,8 @@ internal static class ChessRuntimeConfiguration
     {
         var environment = Environment.GetEnvironmentVariable(key);
         if (!string.IsNullOrWhiteSpace(environment)) return environment.Trim();
-        // A caller selecting another source checkout must not inherit the old
-        // deployed binary path. An explicit executable still wins above.
+        // A caller selecting another source checkout does not inherit the deployed
+        // binary path; an explicit executable still wins above.
         if (key == "LAPLACE_STOCKFISH"
             && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_STOCKFISH_SOURCE")))
             return null;

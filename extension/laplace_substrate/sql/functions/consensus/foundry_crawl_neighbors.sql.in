@@ -4,7 +4,6 @@
 -- stays here rather than widening the core.
 DROP FUNCTION IF EXISTS laplace.foundry_crawl_neighbors(bytea, int, bytea[]);
 DROP FUNCTION IF EXISTS laplace.foundry_crawl_neighbors(bytea[], int, bytea[]);
--- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.foundry_crawl_neighbors(
     p_subjects bytea[],
     p_limit    int,

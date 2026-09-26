@@ -3,23 +3,13 @@ using System.Numerics;
 namespace Laplace.Modality.Chess;
 
 /// <summary>
-/// A tactical motif reduced to the part that RECURS, and nothing else.
+/// A tactical motif reduced to its position-independent part. Positions rarely recur, but a
+/// motif ("knight forks king and rook") is drawn from a small closed alphabet, so a consensus
+/// cell keyed on the motif accumulates witnesses from every game that exhibits it.
 ///
-/// The position a fork occurs in is almost always unique — MEASURED: 92.0% of MOVE consensus
-/// cells have witness_count = 1. Conditioning an outcome query on the position is therefore
-/// conditioning on a sample of one. But the MOTIF is drawn from a tiny closed alphabet:
-/// "knight forks king and rook" is the same claim in every game it ever appears in, so its cell
-/// accumulates thousands of witnesses while the positions underneath it each appear once.
-///
-///   (this exact position, OUTCOME, win)     witness_count = 1        meaningless
-///   (knight-fork-king-rook, OUTCOME, win)   witness_count = 10,000s  a real statistic
-///
-/// That is what makes single-witness positions disposable rather than merely expensive: their
-/// content is the motifs they exhibit plus the movetext for exact replay.
-///
-/// Detection is two instructions over the attack tables, so this costs essentially nothing at
-/// ingest — a fork is popcount(attacks &amp; valuable_enemies) >= 2, a pin is
-/// between(king, slider) &amp; occupancy holding exactly one piece.
+/// Detection is a few attack-table operations: a fork is
+/// popcount(attacks &amp; valuable_enemies) >= 2; a pin or skewer is a slider line whose
+/// between-mask holds exactly one piece.
 /// </summary>
 public readonly record struct ChessTacticPattern(
     TacticKind Kind,
@@ -28,10 +18,9 @@ public readonly record struct ChessTacticPattern(
     Piece Victim2)
 {
     /// <summary>
-    /// Position-independent cell subject. Piece types are colour-normalised so a white knight
-    /// forking a black king+rook and the mirror image are ONE claim, and victims are ordered by
-    /// value so (king, rook) and (rook, king) do not split the witnesses in half — the same
-    /// canonical-ordering rule identity claims need.
+    /// Position-independent cell subject. Piece types are colour-normalised so a pattern and its
+    /// colour mirror are one claim, and victims are ordered by value so (king, rook) and
+    /// (rook, king) are one key.
     /// </summary>
     public long Key =>
         ((long)Kind << 24)
@@ -58,8 +47,7 @@ public enum TacticKind
 
 public static class ChessTacticGeometry
 {
-    // Only used to order victims canonically and to decide what is worth forking. Not an
-    // evaluation — the fold supplies value; this is just a stable ordering.
+    // Orders victims canonically and decides what is worth forking; not an evaluation.
     private static int Value(Piece p) => Board.TypeOf(p) switch
     {
         Piece.WPawn => 1, Piece.WKnight => 3, Piece.WBishop => 3,
@@ -69,8 +57,7 @@ public static class ChessTacticGeometry
     /// <summary>
     /// Every fork <paramref name="byWhite"/> currently has: one piece attacking two or more
     /// enemy pieces at least as valuable as itself (or the king, which is always worth it).
-    /// The attacker-value test is what separates a fork from an ordinary double attack on
-    /// pawns, which is not a motif anyone plays for.
+    /// The value test separates a fork from a double attack on lesser pieces.
     /// </summary>
     public static List<ChessTacticPattern> Forks(Board b, bool byWhite)
     {
@@ -107,10 +94,8 @@ public static class ChessTacticGeometry
     }
 
     /// <summary>
-    /// Pins and skewers share one geometry — slider, single blocker, target behind — and differ
-    /// only in which end is worth more. Front more valuable than back is a SKEWER (the valuable
-    /// piece must move and exposes the lesser); back more valuable is a PIN (the lesser piece
-    /// cannot move without exposing the greater).
+    /// Pins and skewers share one geometry (slider, single blocker, target behind) and differ
+    /// only in which end is worth more: front more valuable is a skewer, back more valuable a pin.
     /// </summary>
     public static List<ChessTacticPattern> PinsAndSkewers(Board b, bool byWhite)
     {
@@ -129,7 +114,7 @@ public static class ChessTacticGeometry
             if (!isRookLine && !isBishopLine) continue;
             var slider = b.Squares[Board.Sq(s & 7, s >> 3)];
 
-            // Targets this slider would reach on an EMPTY board — blockers must not hide them.
+            // Targets this slider would reach on an empty board, so blockers do not hide them.
             ulong reach = (isRookLine ? ChessAttacks.Rook(s, 0) : 0UL)
                         | (isBishopLine ? ChessAttacks.Bishop(s, 0) : 0UL);
             ulong targets = reach & victimSide;

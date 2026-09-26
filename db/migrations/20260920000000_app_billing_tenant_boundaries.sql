@@ -1,5 +1,5 @@
--- Billing and credentials are workspace-owned state. These tables predate the
--- durable identity catalog, so bind them to real Laplace tenants now.
+-- Billing and credentials are workspace-owned state: each table's tenant column is a
+-- foreign key into app.tenants.
 DO $migration$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'billing_quotes_tenant_fk'

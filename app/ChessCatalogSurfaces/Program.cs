@@ -3,9 +3,10 @@ using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 
 /// <summary>
-/// BUILD INPUT PREP — peer of extracting UCDXML before native emit.
-/// 1) tier-2 board surfaces for position floor
-/// 2) (from,move)→to transition floor — chess state→state dedupe ROM
+/// Build-time input for the chess perfcaches, produced before native emit:
+/// 1) the tier-2 board surfaces of the position floor;
+/// 2) the (from, move) → to transition map, a read-only map over position identities.
+/// Also dispatches the recorded-floor and GUI-evidence export modes.
 /// </summary>
 static class Program
 {

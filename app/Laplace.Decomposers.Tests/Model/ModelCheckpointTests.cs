@@ -61,9 +61,8 @@ public sealed class ModelCheckpointTests
             var left = Stage(a);
             var right = Stage(b);
 
-            // Same ordered header, different literal weight bytes: one physical
-            // source structure. Values can only become evidence after calibrated
-            // token-to-token contraction, never checkpoint entities.
+            // Same ordered header, different weight bytes: one physical source
+            // structure. Literal values enter no identity and emit no attestation.
             Assert.Equal(left.Root, right.Root);
             Assert.Empty(left.Change.Attestations);
             Assert.Empty(right.Change.Attestations);
@@ -124,9 +123,9 @@ public sealed class ModelCheckpointTests
             var (root, change) = Stage(dir);
             var stage = Assert.Single(change.IntentStages);
 
-            // Header structure is carried by staged entity/physicality tuples, not
-            // by the old structural-attestation scaffold. Four tensor headers plus
-            // their checkpoint parent require at least five native compositions.
+            // Header structure is carried by staged entities and physicalities, with no
+            // attestations: four tensor headers plus their checkpoint parent are at
+            // least five compositions.
             Assert.NotEqual(default, root);
             Assert.Equal(0, stage.AttestationCount);
             Assert.True(stage.PhysicalityCount >= 5);

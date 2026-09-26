@@ -40,7 +40,7 @@ const WORKSPACE_PREFETCH: Partial<Record<string, () => Promise<unknown>>> = {
   chat: loadChat, explore: loadExplore, data: loadData, chess: loadChess, operator: loadOperator,
 };
 
-/** Six places. Each owns the addresses beneath it, so deep links keep their tab lit. */
+/** Six tabs; each lists the route prefixes that keep it lit on a deep link. */
 const TABS: { id: string; label: string; path: string; owns: string[] }[] = [
   { id: 'home', label: 'Home', path: '/', owns: [] },
   { id: 'chat', label: 'Chat', path: '/chat', owns: ['/chat', '/forward-proof'] },

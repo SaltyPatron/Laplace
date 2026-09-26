@@ -48,17 +48,16 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
 
     protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
     {
-        // GH #520: hard-fail with the rest of the ILI mesh; warn-and-drop left
-        // ConceptNet synset anchors silently unmeshed.
+        // Synset anchors resolve through the CILI map, so ingest fails without it.
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
         return Task.CompletedTask;
     }
 
-    // Extraction only. assertions.csv is already
-    // `assertion-uri <TAB> /r/Relation <TAB> /c/lang/start <TAB> /c/lang/end <TAB> {json}`
-    // — no container to unpack, so no tree-sitter. Stream UTF-8 lines, tab-split managed,
-    // parse the concept URIs, apply the language filter, yield a record carrying the
-    // assertion weight. Content-address, dedup, bulk COPY, fold are the shared pipeline.
+    // Extraction only. assertions.csv rows are
+    // `assertion-uri <TAB> /r/Relation <TAB> /c/lang/start <TAB> /c/lang/end <TAB> {json}`:
+    // stream UTF-8 lines, split on tabs, parse the concept URIs, apply the language filter,
+    // and yield a record carrying weight and source count. Compose, converge, bulk persist
+    // and fold are the shared recipe.
     protected override async IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
         string filePath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
@@ -75,8 +74,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         }
     }
 
-    // Mirrors the former ConceptNetGrammarWitness.WalkRow field logic; all span work stays
-    // in this synchronous helper so no ref-struct span is alive across the iterator's yield.
+    // All span work stays in this synchronous helper so no ref-struct span is alive across
+    // the iterator's yield.
     private static bool TryExtract(
         ReadOnlySpan<byte> line, LanguageFilter? langs, out RelationTripleRecord record)
     {
@@ -88,41 +87,32 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (ConceptNetUri.IsExternalUrlRelation(rel)) return false;
         if (!ConceptNetRelations.TryResolveType(rel, out var typeName, out bool flipEdge, out bool negated))
             return false;
-        // A Not* row denies the relation it maps to, and the sign of the magnitude IS the
+        // A Not* row denies the relation it maps to, and the sign of the magnitude is the
         // outcome: laplace_score_fp(v, m) = 0.5*(1 + v/(m+|v|)) scores below 0.5 for v < 0,
-        // which folds a Refute against the very cell the positive form asserts. ConceptNet's
-        // own weight carries through as the strength of the denial.
+        // so it folds as a refutation into the cell the positive form confirms, with
+        // ConceptNet's weight as its strength.
         double weight = ConceptNetUri.ParseWeight(meta);
         if (negated) weight = -weight;
         long sourceCount = ConceptNetUri.ParseSourceCount(meta);
-        // Capture the POS ConceptNet encodes in the concept URI (/c/en/dog/n). Previously
-        // discarded (out _); now folded onto the unified POS hub via HAS_POS. The /wn/ synset
-        // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See docs/specs/16 §4.
+        // The concept URI carries a POS (/c/en/dog/n), attested via HAS_POS, and may carry a
+        // /wn/ synset suffix, which resolves to the WordNet/CILI synset identity.
         if (!ConceptNetUri.TryParseConceptUri(startUri, out var startLang, out var startTerm, out var startPos, out var startWn)) return false;
         if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out var endWn)) return false;
         if (langs?.MatchesAllUtf8(startLang, endLang) == false) return false;
         if (startTerm.IsEmpty || endTerm.IsEmpty) return false;
 
-        // Language scope. The URI's /c/<lang>/ segment was parsed and then DISCARDED,
-        // which left every edge language-free — most damagingly Synonym, which is
-        // cross-lingual by design and maps into the HAS_SENSE family, so unscoped
-        // translations competed as lexical.senses(the same defect OMWGrammarWitness fixed
-        // for GH #867: an English copula electing "ice" from Danish witnesses).
-        // The handler already emits HAS_LANGUAGE from these ids; the edge's context
-        // is the SUBJECT's language — the claim is made about the subject surface,
-        // exactly as OMW scopes lemma->synset by the file's language.
+        // Language scope: the attestation's context is the subject's language, since the
+        // claim is about the subject surface. Without it, cross-lingual rows such as Synonym
+        // (HAS_SENSE family) would compete with same-language senses in one cell.
         Hash128? startLangId = LangId(startLang);
         Hash128? endLangId = LangId(endLang);
 
-        // The generic handler uses the resolved synset ids as the semantic edge endpoints
-        // where present, while retaining these surfaces as lexical routes into those hubs.
-        // A sense-bearing /c/en/bank/n/wn/... assertion must not flatten back onto the shared
-        // text root for "bank" and then rely on side metadata to recover its meaning.
+        // Where a synset id resolves, it is the attestation endpoint and the surface stays a
+        // lexical route to it, so /c/en/bank/n/wn/... does not collapse onto the text "bank".
         //
-        // dbpedia's subject order is not the manifest's: it says (France, capital, Paris)
-        // while AT_LOCATION reads "subject is located at object". Flipping HERE, at record
-        // construction, keeps every downstream stage order-agnostic -- the alternative is a
-        // flip flag riding through the pipeline for one lane's benefit.
+        // dbpedia relations state (France, capital, Paris) while AT_LOCATION reads "subject is
+        // located at object"; the endpoints are swapped here, at record construction, so no
+        // later step carries an order flag.
         if (flipEdge)
         {
             record = new RelationTripleRecord(
@@ -149,15 +139,10 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         return true;
     }
 
-    // Per-row language resolution with NO per-row allocation on the hot path: codes
-    // of <= 8 bytes (every ConceptNet code that matters — "en", "fr", "zh") pack into
-    // one ulong key, so the row cost is a span pack + one lock-free dictionary hit.
-    // Longer codes ("zh-classical") take the string-keyed memo. Either way the
-    // canonicalization walk (Trim/ToLower/alias in LanguageReference.ResolveCode)
-    // runs once per DISTINCT code (~300 in the corpus), not once per row, and the
-    // factory feeds the readback roster (fix for LanguageNames being declared and
-    // never populated). Unresolved codes map to "und" inside LanguageReference —
-    // never default — so null here means only an empty span.
+    // Per-row language resolution without per-row allocation: codes of at most 8 bytes pack
+    // into one ulong key; longer codes ("zh-classical") use a string-keyed memo. Resolution
+    // (LanguageReference.Resolve) and readback tracking run once per distinct code.
+    // Unresolved codes map to "und", so null here means only an empty span.
     private static readonly ConcurrentDictionary<ulong, Hash128> LangIdByPackedCode = new();
     private static readonly ConcurrentDictionary<string, Hash128> LangIdByRawCode =
         new(StringComparer.Ordinal);

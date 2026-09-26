@@ -1,19 +1,10 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Canonical relation names DERIVED from a C# symbol, so an emit site never carries a
-/// name literal.
-///
-/// The vocabulary law (isa-gate g3) is that a governed relation name may be spelled in
-/// exactly one place per source: the source's <c>Relations</c> roster, which is the
-/// declaration span the gate exempts. Its baseline froze on 2026-08-03 and is shrink-only,
-/// so a relation added after that date cannot introduce a new literal at a query site --
-/// it has to reach the registry some other way.
-///
-/// The AgentTrace lane solved this first, privately, by deriving the surface from an enum
-/// member name (HasRole -> HAS_ROLE). That conversion is not specific to agent traces and
-/// every future relation needs it, so it lives here and that lane calls it (§15: one body
-/// for one truth).
+/// Canonical relation names derived from a C# symbol, so an emit site never carries a
+/// name literal. A governed relation name is spelled in one place per source, its
+/// <c>Relations</c> roster; every other site derives the surface from a symbol name
+/// (HasRole -> HAS_ROLE) and resolves it through the registry.
 /// </summary>
 public static class RelationSymbol
 {

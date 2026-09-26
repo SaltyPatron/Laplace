@@ -7,9 +7,9 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Phase D campaign helper: from a playable state, emit self-play LINE products for
-/// legal moves whose successor position id is not in <paramref name="exploredTargets"/>.
-/// Deposits games/lines through the shared spine — not a fourth oracle.
+/// From a playable state, composes one-ply lines for legal moves whose successor position
+/// is not yet among the explored targets, staged into the caller's change for the shared
+/// ingest recipe.
 /// </summary>
 public static class ChessExpandUnexplored
 {
@@ -17,9 +17,9 @@ public static class ChessExpandUnexplored
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
 
     /// <summary>
-    /// Compose one-ply lines (from→after) for each unexplored legal move. Returns how
-    /// many lines were staged. Caller owns batching into the ingest spine and may pass
-    /// a live set of already-known successor position ids for this from-position.
+    /// Composes a one-ply line (from→after: move trajectory and position projection) for
+    /// each legal move whose successor id is not in <paramref name="exploredTargets"/>, adding
+    /// each staged successor to that set. Returns the number of lines staged.
     /// </summary>
     public static int AppendUnexploredOnePly(
         SubstrateChangeBuilder b,

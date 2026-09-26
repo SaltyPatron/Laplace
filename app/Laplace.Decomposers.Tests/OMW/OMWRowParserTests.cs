@@ -81,8 +81,8 @@ public sealed class OMWRowParserTests
         }
     }
 
-    // OMW ships its own retractions -- 3,279 REMOVED rows across 26 <lang>-changes.tab
-    // files -- and they were never globbed, so membership could only ever accumulate.
+    // OMW ships retractions as REMOVED rows in <lang>-changes.tab files, which the data
+    // globs exclude; they are enumerated separately so membership can be refuted.
     [Fact]
     public void EnumerateChangesFiles_FindsRetractionsTheDataGlobsExclude()
     {
@@ -108,9 +108,9 @@ public sealed class OMWRowParserTests
         }
     }
 
-    // The retraction row is a data row with two extra leading fields, so slicing past the
-    // second tab must yield exactly what the data tab would have produced -- otherwise the
-    // refutation lands on a different triple than the assertion and never contests it.
+    // A retraction row is a data row with two leading action fields; sliced past the second
+    // tab it parses to the same triple as the data row, so the refutation lands on the
+    // consensus cell the assertion confirmed.
     [Fact]
     public void ChangesRow_SlicedPastActionFields_ParsesAsTheDataRowItRetracts()
     {
@@ -133,8 +133,8 @@ public sealed class OMWRowParserTests
         Assert.Equal(Encoding.UTF8.GetString(bv), Encoding.UTF8.GetString(av));
     }
 
-    // wn-freq-*.tab is the only per-row magnitude OMW ships -- 4,981 rows -- and the data
-    // globs never matched it, so the corpus's own usage evidence was dropped whole.
+    // wn-freq-*.tab carries OMW's per-row usage magnitude; the data globs exclude it, so it
+    // is enumerated on its own.
     [Fact]
     public void EnumerateFreqFiles_FindsTheMagnitudeFileTheDataGlobsExclude()
     {
@@ -168,8 +168,8 @@ public sealed class OMWRowParserTests
         Assert.Equal("keahlian", Encoding.UTF8.GetString(value));
     }
 
-    // The row exists only to carry the count; a missing or non-positive one must not
-    // silently become a magnitude of 1 and pass for evidence.
+    // The row exists only to carry the count; a missing or non-positive count is
+    // refused rather than read as a magnitude of 1.
     [Theory]
     [InlineData("00001740-a\tkeahlian")]
     [InlineData("00001740-a\tkeahlian\t")]

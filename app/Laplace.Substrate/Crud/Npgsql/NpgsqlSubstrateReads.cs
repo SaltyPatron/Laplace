@@ -6,16 +6,12 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Typed callers over a handful of installed substrate functions that used to be
-/// hand-written independently in each consumer (SubstrateClient.Mesh/.Pulse/.Matchup —
-/// see doc 41, SQL standardization). The SQL text now lives here, the one sanctioned
-/// home (<see cref="ReadPathArchitectureGateTests"/> in Laplace.Substrate.Tests); a
-/// consumer names the function and gets rows back, never a string to maintain.
+/// Typed readers over the installed substrate operations. Every surface (web, API, MCP,
+/// CLI) reads through these, so one operation has one statement and one row shape;
+/// consumers name the operation and receive rows.
 ///
-/// Every method takes an optional <see cref="NpgsqlRead.ErrorTranslator"/> so a caller
-/// keeps its own exception vocabulary (SubstrateQueryException, SubstrateUnavailableException,
-/// ...) without this assembly needing to know it exists — see <see cref="NpgsqlRead"/>'s
-/// own remark on why translation is a delegate and not a fixed type here.
+/// Every method takes an optional <see cref="NpgsqlRead.ErrorTranslator"/> that maps
+/// database failures into the caller's own exception types.
 /// </summary>
 public static partial class NpgsqlSubstrateReads
 {
@@ -107,7 +103,7 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary><c>ops.entity_type_counts_approx()</c> — MCV×reltuples type census (GH #813).</summary>
+    /// <summary><c>ops.entity_type_counts_approx()</c> — type census estimated from planner statistics (MCV × reltuples).</summary>
     public static Task<IReadOnlyList<(string Type, long EntitiesApprox)>> EntityTypeCountsApproxAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
@@ -118,7 +114,7 @@ public static partial class NpgsqlSubstrateReads
             static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.IsDBNull(1) ? 0L : r.GetInt64(1)),
             ct: ct, label: "entity_type_counts_approx", onError: onError);
 
-    /// <summary><c>ops.partition_pressure()</c> — partition skew via reltuples (GH #813).</summary>
+    /// <summary><c>ops.partition_pressure()</c> — each partition's share of its parent, from reltuples.</summary>
     public static Task<IReadOnlyList<(string Parent, string Partition, decimal? Pct)>> PartitionPressureAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
@@ -133,8 +129,8 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "partition_pressure", onError: onError);
 
     /// <summary>
-    /// <c>laplace.perfcache_receipt()</c> — checksum of the exact mmap'd T0 ROM.
-    /// SQL exposes the native receipt only; no Tier-0 geometry is reconstructed here.
+    /// <c>laplace.perfcache_receipt()</c> — checksum of the mapped Tier-0 perfcache image,
+    /// read from the native receipt without reconstructing any geometry.
     /// </summary>
     public static async Task<string?> PerfcacheReceiptHexAsync(
         NpgsqlDataSource dataSource, CancellationToken ct,
@@ -147,7 +143,7 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary><c>laplace.atom_census()</c> — tier-0 window invariant (GH #813).</summary>
+    /// <summary><c>laplace.atom_census()</c> — Tier-0 entity count against the admitted atom window.</summary>
     public static async Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
     {
@@ -160,7 +156,7 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary><c>ops.source_tier_census(source)</c> — entities by tier for a lane (GH #813).</summary>
+    /// <summary><c>ops.source_tier_census(source)</c> — entities by tier under one source.</summary>
     public static Task<IReadOnlyList<(short Tier, long Entities)>> SourceTierCensusAsync(
         NpgsqlDataSource dataSource, byte[] sourceId, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -173,7 +169,7 @@ public static partial class NpgsqlSubstrateReads
             p => p.AddWithValue("source", sourceId),
             ct: ct, label: "source_tier_census", onError: onError);
 
-    /// <summary><c>ops.surface_sample(source, tier, limit)</c> — ranked surfaces (GH #813).</summary>
+    /// <summary><c>ops.surface_sample(source, tier, limit)</c> — a source's surfaces at one tier, ranked by observations.</summary>
     public static Task<IReadOnlyList<(string Surface, string TypeName, long Observations)>> SurfaceSampleAsync(
         NpgsqlDataSource dataSource, byte[] sourceId, short tier, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -192,7 +188,7 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "surface_sample", onError: onError);
 
-    /// <summary><c>ops.arena_counts()</c> — per-relation consensus mass (GH #764 callers).</summary>
+    /// <summary><c>ops.arena_counts()</c> — consensus cells and witnesses per relation type.</summary>
     public static Task<IReadOnlyList<(string Type, long Relations, long Witnesses)>> ArenaCountsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
@@ -554,10 +550,8 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct SalientFactRow(string Type, string Fact, decimal EffMu, long Witnesses);
 
     /// <summary>
-    /// <c>consensus.salient_facts(id, relation_type, limit)</c> — typed relations ranked by
-    /// eff_mu. Shared by SubstrateClient.Matchup, the CLI's neighbors command and the MCP
-    /// facts tool — the exact 9-function cluster doc 33/41 name as the highest-duplication
-    /// read surface.
+    /// <c>consensus.salient_facts(id, relation_type, limit)</c> — an entity's typed consensus
+    /// relations ranked by effective rating.
     /// </summary>
     public static Task<IReadOnlyList<SalientFactRow>> SalientFactsAsync(
         NpgsqlDataSource dataSource, byte[] id, int limit, CancellationToken ct,
@@ -596,9 +590,9 @@ public static partial class NpgsqlSubstrateReads
         string? Relation, string? Plane, decimal? Mu, long? Usage, double? Geodesic, string? Verdict);
 
     /// <summary>
-    /// <c>consensus.relation_summary(x, y)</c> — the slow path/verdict half of a matchup.
-    /// Measured 6-14s under an active seed; give it a generous timeout rather than the
-    /// default serving budget.
+    /// <c>consensus.relation_summary(x, y)</c> — relation, plane, standing, geodesic and
+    /// verdict between two entities. Path search makes this slow, so it runs with a
+    /// 120-second timeout instead of the default serving budget.
     /// </summary>
     public static async Task<RelationSummaryRow?> RelationSummaryAsync(
         NpgsqlDataSource dataSource, byte[] x, byte[] y, CancellationToken ct,
@@ -645,9 +639,9 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("lim", limit);
             }, timeoutSeconds: 30, ct: ct, label: "source_roster", onError: onError);
 
-    // --- Catalog / inventory (Cluster 2: substrate_counts, consensus_stats*, source_counts*) ---
-    // Connection overloads exist because Audit/Explore open one connection and run several
-    // of these in sequence (TEMP scopes, statement-budget fallbacks).
+    // --- Catalog / inventory: substrate_counts, consensus stats, source counts ---
+    // Connection overloads let a caller run several of these on one connection, sharing
+    // session state such as TEMP scopes.
 
     public readonly record struct MetricCountRow(string Metric, long Value);
 
@@ -721,8 +715,8 @@ public static partial class NpgsqlSubstrateReads
             timeoutSeconds: timeoutSeconds, ct: ct, label: "source_counts", onError: onError);
 
     /// <summary>
-    /// A source is its content tree; its rendered label is one realization. When
-    /// no realization exists the source still stands under its id.
+    /// A source's label is one realization of its entity; when none exists the row is
+    /// labeled with the source id instead of being dropped.
     /// </summary>
     private static string SourceLabel(NpgsqlDataReader r, int label, int idHex) =>
         !r.IsDBNull(label) ? r.GetString(label) : r.IsDBNull(idHex) ? "" : r.GetString(idHex);
@@ -747,8 +741,8 @@ public static partial class NpgsqlSubstrateReads
             timeoutSeconds: timeoutSeconds, ct: ct, label: "multi_source_entity_count", onError: onError);
 
     /// <summary>
-    /// Connection-scoped <c>consensus.salient_facts</c> — same SQL as the datasource overload;
-    /// Explore keeps one open connection across entity facets.
+    /// Connection overload of <c>consensus.salient_facts</c>, same statement as the
+    /// datasource overload, for callers reading several facets on one connection.
     /// </summary>
     public static Task<IReadOnlyList<SalientFactRow>> SalientFactsAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
@@ -775,8 +769,8 @@ public static partial class NpgsqlSubstrateReads
         "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents FROM ops.entity_physicalities(@id) p";
 
     /// <summary>
-    /// <c>ops.entity_physicalities(id)</c> — every form for one entity, ordered by type.
-    /// The shared <c>entity_form</c> reader Cluster 5 of doc 41 consolidates onto.
+    /// <c>ops.entity_physicalities(id)</c> — every physicality of one entity, ordered by
+    /// physicality type.
     /// </summary>
     public static Task<IReadOnlyList<EntityPlacementRow>> EntityPhysicalitiesAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
@@ -795,7 +789,7 @@ public static partial class NpgsqlSubstrateReads
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "entity_physicalities", onError: onError);
 
-    /// <summary>Lowest-type form only — the embedding / visualization anchor.</summary>
+    /// <summary>The entity's lowest-type physicality only, used as its placement anchor.</summary>
     public static async Task<EntityPlacementRow?> EntityPrimaryFormAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null)
@@ -812,8 +806,8 @@ public static partial class NpgsqlSubstrateReads
         long Ordinal, double X, double Y, double Z, double M, double Radius, int Constituents);
 
     /// <summary>
-    /// First form per id for a batch — one round-trip via <c>unnest … LATERAL</c>.
-    /// Ordinals are 1-based (Postgres WITH ORDINALITY).
+    /// Lowest-type physicality per id for a batch in one round trip. Ordinals are
+    /// 1-based input positions (WITH ORDINALITY); ids with no physicality have no row.
     /// </summary>
     public static Task<IReadOnlyList<OrdinalPlacementRow>> EntityPrimaryFormsBatchAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
@@ -842,7 +836,8 @@ public static partial class NpgsqlSubstrateReads
         double X, double Y, double Z, double M, double Radius,
         int Constituents, string HilbertHex);
 
-    /// <summary>Hilbert-stratified stored-physicality coverage for Constellation.</summary>
+    /// <summary><c>structural.constellation_sample(limit)</c> — stored physicalities sampled
+    /// across Hilbert order.</summary>
     public static Task<IReadOnlyList<ConstellationSampleRow>> ConstellationSampleAsync(
         NpgsqlConnection conn, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -913,9 +908,8 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "evidence_receipt", onError: onError);
 
     /// <summary>
-    /// Eval ingest-fidelity positives — synonym-grounded pairs scored on a plane relation.
-    /// Vocab via installed <c>subjects_of_type</c>; score cells via <c>consensus_id</c> PK
-    /// (same shape as <see cref="NpgsqlConsensusCell"/>).
+    /// <c>ops.eval_ingest_fidelity_positives</c> — consensus scores on
+    /// <paramref name="relation"/> for pairs that <paramref name="groundTruth"/> asserts.
     /// </summary>
     public static Task<IReadOnlyList<double>> IngestFidelityPositiveScoresAsync(
         NpgsqlDataSource dataSource, string relation, string groundTruth, int n,
@@ -930,7 +924,8 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("n", n);
             }, ct: ct, label: "eval_ingest_fidelity_pos", onError: onError);
 
-    /// <summary>Eval ingest-fidelity negatives — random half-vocab pairs on the same plane.</summary>
+    /// <summary><c>ops.eval_ingest_fidelity_negatives</c> — consensus scores on
+    /// <paramref name="relation"/> for random vocabulary pairs.</summary>
     public static Task<IReadOnlyList<double>> IngestFidelityNegativeScoresAsync(
         NpgsqlDataSource dataSource, string relation, string groundTruth, int n,
         CancellationToken ct = default, NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -1595,8 +1590,8 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "evidence_for_target", onError: onError);
 
     /// <summary>
-    /// Readiness probe via <c>ops.substrate_counts()</c> — no raw table EXISTS.
-    /// Estimates can lag; a freshly empty DB still reports zero.
+    /// Readiness probe from the entity and consensus estimates in
+    /// <c>ops.substrate_counts()</c>. Estimates can lag behind recent writes.
     /// </summary>
     public static async Task<(bool EntitiesExist, bool ConsensusExist)> EntitiesAndConsensusExistAsync(
         NpgsqlConnection conn, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
@@ -1683,18 +1678,10 @@ public static partial class NpgsqlSubstrateReads
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
 
     /// <summary>
-    /// The exact top-k edges by salience band x eff_mu. This is the LABELING layer
-    /// over <c>consensus.top_relations</c> and nothing else.
-    ///
-    /// It used to hand-roll the ranking instead, on the stated grounds that
-    /// top_relations ran "full-table consensus.edge_rank() measured &gt;9 minutes live". That
-    /// defect was fixed extension-side (Issue 52: exact indexed edge rank via
-    /// consensus_edge_rank_btree) and the copy here was
-    /// never retired — so the API kept serving the superseded shape, with a scalar
-    /// label_or_hex per row on top of it. On 2026-08-06 that query held AccessShareLock
-    /// for 2h08m, queued an ALTER EXTENSION behind it, and wedged the whole read
-    /// surface. Rank in the installed core, label ONCE after the limit — the same
-    /// rank-then-label rule consensus.edges() follows.
+    /// Top-k consensus edges by salience band and effective rating. Ranking and limiting
+    /// happen in <c>consensus.top_relations</c>; this statement only labels the result,
+    /// realizing all endpoint labels in one <c>realize.batch</c> call after the limit
+    /// (rank, then label).
     /// </summary>
     public static Task<IReadOnlyList<TopRelationEdgeRow>> TopRelationsAsync(
         NpgsqlConnection conn, int limit, CancellationToken ct,
@@ -1753,9 +1740,9 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct EntityFacetRow(short Tier, string Type, string Label, bool Exists);
 
     /// <summary>
-    /// <c>ops.entity_facets(id)</c> — no rows for an unwitnessed id, which the caller
-    /// falls back to <see cref="LabelOrHexAsync"/> for (safe to call after: the reader here
-    /// is fully drained and disposed before this returns, so there is no Npgsql MARS conflict).
+    /// <c>ops.entity_facets(id)</c> with tier, type label, label and existence; null for an
+    /// id with no facets. The reader is drained and disposed before returning, so the
+    /// caller can follow up with <see cref="LabelOrHexAsync"/> on the same connection.
     /// </summary>
     public static async Task<EntityFacetRow?> EntityFacetsAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
@@ -1813,8 +1800,9 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "constituents", onError: onError);
 
     /// <summary>
-    /// Packed trajectory vertices: ST_DumpPoints XYZM + mantissa_unpack.
-    /// Identity-space fold for the Packed glome pane — not geometry for Frechet.
+    /// One vertex of a packed trajectory: the raw XYZM carrier values and what they unpack
+    /// to (child id, ordinal, run length, flags). The XYZM values encode the manifest; they
+    /// are not the child's position and are not geometry for curve comparison.
     /// </summary>
     public readonly record struct PackedTrajectoryVertexRow(
         int Ordinal, double X, double Y, double Z, double M,
@@ -1847,8 +1835,8 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "packed_trajectory_vertices", onError: onError);
 
     /// <summary>
-    /// Realized curve vertices — same join as word_curve / entity_curve
-    /// (child live coords by constituent ordinal). Placement glome ribbon.
+    /// One vertex of a realized curve: each constituent's own coordinate physicality,
+    /// read in constituent ordinal order.
     /// </summary>
     public readonly record struct RealizedTrajectoryVertexRow(
         int Ordinal, double X, double Y, double Z, double M,
@@ -1881,20 +1869,13 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct ConsensusInLabeledRow(
         string SubjectIdHex, string TypeLabel, string SubjectLabel, decimal EffMu, long Witnesses);
 
-    /// <summary><c>consensus.consensus_in(id, limit)</c> — the inbound half of a matchup.</summary>
+    /// <summary><c>consensus.consensus_in(id, limit)</c> — inbound consensus cells with labeled subjects.</summary>
     public static Task<IReadOnlyList<ConsensusInLabeledRow>> ConsensusInLabeledAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        // MEASURED 2026-08-21, Carlsen (1d4e1926...), 40 rows, warm backend, and the
-        // reason this projection is tier-gated: the previous label chain ended in
-        // realize.render_text_fast(subject, 8), and this surface's in-neighbours are
-        // game LINES -- tier 4, 100-231 move constituents. Rendering a game's whole
-        // composition tree per row is a constituents_closure per id: 14.9s for the 40
-        // rows (22.8s mean over 13 calls in pg_stat_statements), which is the warehouse
-        // page's "Explore entity query failed" whenever it tips past the 30s serving
-        // timeout. Depth 3 alone: still 6.2s. realize.batch on the same ids: 25.4s.
-        // A composition is not a surface: render only low tiers and abstain on the rest.
-        // This shape: 269ms cold, 33ms warm.
+        // Subject labels are tier-gated: a witnessed name if one exists, else rendered
+        // text only for tier <= 3. A high-tier subject is a whole composition (e.g. a
+        // game line), and rendering its constituent closure per row is not a label.
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(c.subject_id, 'hex'),
                    lexical.type_label(c.type_id),
@@ -1920,8 +1901,10 @@ public static partial class NpgsqlSubstrateReads
         long WitnessCount, double CompleteWeight, bool Refuted);
 
     /// <summary>
-    /// Native SPI web expansion (pg_laplace_explore_web) — one connection, undirected
-    /// consensus probe, at most <paramref name="fanout"/> new nodes per frontier parent.
+    /// <c>consensus.explore_web</c> — native sparse star expansion from <paramref name="seed"/>
+    /// over consensus in both directions, up to <paramref name="hops"/> hops, at most
+    /// <paramref name="fanout"/> new nodes per frontier parent and <paramref name="maxNodes"/>
+    /// in total.
     /// </summary>
     public static Task<IReadOnlyList<ExploreWebEdgeRow>> ExploreWebAsync(
         NpgsqlConnection conn, byte[] seed, int hops, int fanout, int maxNodes, int timeoutSeconds,
@@ -1977,11 +1960,9 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct FastLabelRow(string IdHex, string? Label, short? Tier);
 
     /// <summary>
-    /// Batch label + tier, one round trip. Resolve names for the entire survivor set and
-    /// render the bounded (tier &lt;= 3) subset once. This preserves the actual substrate
-    /// labels/text without returning to the former scalar-per-node composition walk: a
-    /// graph may contain high-tier games/documents, but those are named rather than
-    /// recursively reconstructed inside the visualization response.
+    /// Label and tier for a batch of ids in one round trip. Labels come from canonical
+    /// names, then resolved names, then rendered text for the tier &lt;= 3 subset, rendered
+    /// in one batch. Higher-tier compositions are named, never reconstructed, here.
     /// </summary>
     public static Task<IReadOnlyList<FastLabelRow>> LabelsFastAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
@@ -2031,9 +2012,9 @@ public static partial class NpgsqlSubstrateReads
         long Rating, long Rd, long WitnessCount);
 
     /// <summary>
-    /// <c>consensus.edges_raw(subject, direction, types, limit, refuted, rank)</c> — the one
-    /// consensus edge scan. Prefer this (or labeled <c>consensus.edges()</c>) over hand-joining
-    /// <c>laplace.consensus</c>.
+    /// <c>consensus.edges_raw(subject, direction, types, limit, refuted, rank)</c> — the
+    /// installed consensus edge scan around one subject (labeled form:
+    /// <c>consensus.edges()</c>).
     /// </summary>
     public static Task<IReadOnlyList<EdgesRawRow>> EdgesRawAsync(
         NpgsqlDataSource dataSource, byte[] subject,
@@ -2063,10 +2044,8 @@ public static partial class NpgsqlSubstrateReads
         byte[] SubjectId, byte[] ObjectId, decimal EffMu, long WitnessCount);
 
     /// <summary>
-    /// Per-subject strongest outbound edge of one type — <c>unnest</c> ×
-    /// <c>consensus.edges_raw(..., limit 1, rank eff_mu)</c>. Replaces
-    /// <c>FROM consensus WHERE subject_id = ANY(...) AND type_id = …</c> batch scans
-    /// that then max-by-eff_mu in the client (ProvenanceExtractor circuit ENCODES).
+    /// Strongest outbound edge of one type per subject: <c>consensus.edges_raw</c> with
+    /// limit 1 ranked by effective rating, run for every subject in one statement.
     /// </summary>
     public static Task<IReadOnlyList<BestOutboundRow>> BestOutboundBySubjectsAsync(
         NpgsqlDataSource dataSource, byte[][] subjects, byte[] typeId,
@@ -2134,12 +2113,9 @@ public static partial class NpgsqlSubstrateReads
                 r.GetInt32(0), r.GetString(1), r.GetDecimal(2), r.GetDecimal(3), r.GetInt64(4)),
             p =>
             {
-                // Explicit types: a DBNull with no NpgsqlDbType leaves the wire type
-                // undetermined and the whole statement fails with 42P08 ("could not
-                // determine data type of parameter $1") the moment any of the three
-                // is null — which is every call, since prompt and entity are
-                // mutually exclusive. The surface never worked; measured live
-                // 2026-08-13 via the MCP walk tool.
+                // Explicit types: a DBNull without an NpgsqlDbType leaves the parameter
+                // type undetermined (42P08), and at least one of prompt/entity is always
+                // null because they are mutually exclusive.
                 p.Add(new NpgsqlParameter("p", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)prompt ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("e", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)entityHex ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("t", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)relationType ?? DBNull.Value });
@@ -2148,9 +2124,8 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "walk_branches", onError: onError);
 
     /// <summary>
-    /// One installed operation. <paramref name="Kind"/> is load-bearing, not
-    /// descriptive: a procedure is invoked with CALL and a function with SELECT, so
-    /// a caller that cannot tell them apart issues the wrong statement.
+    /// One installed operation. <paramref name="Kind"/> decides the statement: a
+    /// procedure is invoked with CALL, a function with SELECT.
     /// </summary>
     public readonly record struct ApiCatalogRow(string Name, string? Args, string? Returns, string? Kind);
 
@@ -2170,9 +2145,8 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "api_catalog", onError: onError);
 
     /// <summary>
-    /// A health metric. <paramref name="Value"/> is NULLABLE on purpose: a metric the
-    /// health pass did not measure reports null, which is a different fact from zero and
-    /// must survive to the caller rather than throwing or defaulting.
+    /// A health metric. <paramref name="Value"/> is null for a metric the health pass did
+    /// not measure, which is a different fact from zero or false.
     /// </summary>
     public readonly record struct HealthMetricRow(string Metric, string? Value);
 
@@ -2184,13 +2158,11 @@ public static partial class NpgsqlSubstrateReads
         double? ThroughputBaselineRowsPerS, double? ThroughputSlowdownRatio);
 
     /// <summary>
-    /// <c>ops.source_status()</c> — is a source ingested, and how do we know.
-    ///
-    /// Exists so that no caller ever assembles this again. Every hand-rolled version got
-    /// it wrong differently: an evidence test reports the content-only document lane as
-    /// absent, a typed source name returns zero rows when the spelling is off, and the run
-    /// journal is ops metadata that does not survive a restore. Asking with a name always
-    /// returns exactly one row, so absence is an answer instead of an empty result.
+    /// <c>ops.source_status()</c> — whether a source is known and ingested, with the
+    /// evidence, entity and last-run facts behind that answer. A source with only content
+    /// and no evidence still reads as ingested through <c>HasEntities</c>. Asking with a
+    /// name always returns exactly one row, so an unknown source is an answer
+    /// (<c>Known = false</c>), not an empty result.
     /// </summary>
     public static Task<IReadOnlyList<SourceStatusRow>> SourceStatusAsync(
         NpgsqlDataSource dataSource, string? source, CancellationToken ct,
@@ -2233,10 +2205,8 @@ public static partial class NpgsqlSubstrateReads
                                  ('surface_present', h.surface_present::text),
                                  ('registry_relations', h.registry_relations::text)) x(metric, value)
             """,
-            // GetString on a NULL column THROWS. identity_violations is null by design when
-            // deep_checked is false, so `laplace health` did not report a skipped deep check
-            // -- it died with "Column 'value' is null". A null metric is an answer ("not
-            // measured"), never an error.
+            // identity_violations is null when deep_checked is false; a null value maps
+            // to a null metric ("not measured") rather than a GetString exception.
             static r => new HealthMetricRow(r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1)),
             ct: ct, label: "substrate_health", onError: onError);
 
@@ -2519,8 +2489,9 @@ public static partial class NpgsqlSubstrateReads
             timeoutSeconds: 60);
 
     /// <summary>
-    /// Ordered content containment and witnessed names, ranked and paged natively.
-    /// The same operation owns exact lookup, the canonical standing and final labels.
+    /// <c>chess.search_page</c> — player candidates found by content containment of the
+    /// query and by witnessed names, with exact lookup, standing, ranking, paging and
+    /// labels all computed in the one native operation.
     /// </summary>
     public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayerSearchCandidatesAsync(
         NpgsqlDataSource dataSource, IReadOnlyList<string> queries, int limit, CancellationToken ct,
@@ -2554,7 +2525,9 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// Name → player via <c>chess_player_id</c> + OUTCOME cell through <c>edges_raw</c>.
+    /// Name → player via <c>chess.player_id</c>, with standing from the strongest OUTCOME
+    /// consensus cell through <c>edges_raw</c> (neutral rating and initial deviation when
+    /// the player has none).
     /// </summary>
     public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessFindPlayerAsync(
         NpgsqlDataSource dataSource, string name, CancellationToken ct,
@@ -2618,9 +2591,9 @@ public static partial class NpgsqlSubstrateReads
         string SubjectIdHex, string Relation, string Value);
 
     /// <summary>
-    /// Profile facts for a player and its directly asserted identity peers. Relation filtering
-    /// happens before rendering, so thousands of game/outcome cells can never crowd profile
-    /// data out or turn a career read into a broad neighborhood traversal.
+    /// Profile facts for a player and its directly asserted identity peers, from
+    /// <c>chess.player_profile_edges</c>. Relations are filtered to profile relations before
+    /// anything is rendered, and relation and value labels are rendered in one batch each.
     /// </summary>
     public static Task<IReadOnlyList<ChessProfileEdgeRow>> ChessPlayerProfileEdgesAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
@@ -2737,9 +2710,9 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct ContentCarrierVertex(
         byte[] ParentId, int ConstituentCount, long Ordinal, byte[] ChildId, long RunLength, long Flags);
 
-    /// <summary>Exact canonical Content carriers for an admitted entity/physicality set.
-    /// Native code unpacks the complete ordinal/run/flag payload; the id/type predicate
-    /// excludes alternate physicality lanes. Context consumers compare their own recipe.</summary>
+    /// <summary>Content trajectory carriers for exactly the given (entity, physicality) pairs,
+    /// unpacked natively into child id, ordinal, run length and flags. Only the named
+    /// physicalities are read, never another physicality of the same entity.</summary>
     public static Task<IReadOnlyList<ContentCarrierVertex>> CanonicalContentVerticesAsync(
         NpgsqlDataSource ds, byte[][] entityIds, byte[][] physicalityIds, CancellationToken ct)
         => NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("content.carrier_vertices_selected"), static r => new ContentCarrierVertex((byte[])r[0], Convert.ToInt32(r.GetValue(1)),
@@ -2750,7 +2723,7 @@ public static partial class NpgsqlSubstrateReads
                 p.Add("physicalities", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = physicalityIds;
             }, ct: ct, label: "canonical_content_vertices_batch");
 
-    /// <summary>Losslessly unpack ordered typed record trajectories for a batch of entities.</summary>
+    /// <summary>Ordered constituents of each entity's Content trajectory, for a batch of entities.</summary>
     public static Task<IReadOnlyList<TrajectoryConstituentRow>> TrajectoryConstituentsAsync(
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -2770,7 +2743,7 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "trajectory_constituents", onError: onError,
             timeoutSeconds: 60);
 
-    /// <summary>Unpack several physicality lanes for a batch in one round trip.</summary>
+    /// <summary>Ordered constituents of several physicality types' trajectories for a batch, in one round trip.</summary>
     public static Task<IReadOnlyList<TypedTrajectoryConstituentRow>>
         TypedTrajectoryConstituentsAsync(
             NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType[] types,
@@ -2794,7 +2767,7 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "typed_trajectory_constituents", onError: onError,
             timeoutSeconds: 60);
 
-    /// <summary>Unpack one explicitly typed parallel trajectory for a batch of entities.</summary>
+    /// <summary>Ordered constituents of one physicality type's trajectory for a batch of entities.</summary>
     public static Task<IReadOnlyList<TrajectoryConstituentRow>> TrajectoryConstituentsAsync(
         NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType type,
         CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -2850,7 +2823,7 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct NestedTrajectoryConstituentRow(
         byte[] ParentId, int NodeOrdinal, byte[] NodeId, int FieldOrdinal, byte[] FieldId);
 
-    /// <summary>Unpack position→typed-atom→byte-atom trajectories in one batched query.</summary>
+    /// <summary>Two-level trajectory unpack for a batch: each entity's constituents, and each constituent's own constituents, with both ordinals.</summary>
     public static Task<IReadOnlyList<NestedTrajectoryConstituentRow>>
         NestedTrajectoryConstituentsAsync(
             NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
@@ -2890,10 +2863,8 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct EntityTypeCountRow(byte[] TypeId, long Count);
 
     /// <summary>
-    /// Count entities per requested type_id through the installed
-    /// <c>entity_counts_by_types</c>. Every requested type comes back, including
-    /// the ones with no rows — a 0 count and an absent row are different answers
-    /// and the installed function keeps them apart.
+    /// <c>ops.entity_counts_by_types</c> — entity count per requested type_id. Every
+    /// requested type returns a row, zero included.
     /// </summary>
     public static Task<IReadOnlyList<EntityTypeCountRow>> EntityCountsByTypesAsync(
         NpgsqlDataSource dataSource, byte[][] typeIds, CancellationToken ct,
@@ -2914,8 +2885,8 @@ public static partial class NpgsqlSubstrateReads
         byte[] Id, int NConstituents, int PathIndex, double X, double Y, double Z, double M);
 
     /// <summary>
-    /// Recursive constituent walk of a document via <c>v_word_points</c> +
-    /// <c>laplace_trajectory_constituent_ids</c>, dumping trajectory vertices.
+    /// Walks a document's composition tree through trajectory constituent ids and returns
+    /// every trajectory vertex of every entity in it.
     /// </summary>
     public static Task<IReadOnlyList<TrajectoryDumpPointRow>> TrajectoryTreeDumpPointsAsync(
         NpgsqlDataSource dataSource, byte[] documentId, CancellationToken ct,
@@ -2942,14 +2913,13 @@ public static partial class NpgsqlSubstrateReads
             p => p.AddWithValue("doc", documentId),
             ct: ct, label: "trajectory_tree_dump", onError: onError);
 
-    /// <summary>One stored move object: its id and its five atom ids.</summary>
+    /// <summary>One stored move entity: its id and its Content constituent ids.</summary>
     public readonly record struct ChessMoveEntityRow(byte[] MoveId, byte[][] Atoms);
 
     /// <summary>
-    /// Every stored tier-2 move object with its atom constituents. The move vocabulary is
-    /// content-addressed and BOUNDED (7,797 entities over 1.6M games, measured 2026-08-21),
-    /// so this is a small read; callers decode the atoms via ChessPositionIdentity's
-    /// reverse index and look cells up in consensus — no fold, no replay.
+    /// Every entity of <paramref name="moveTypeId"/> with its Content constituent ids. Moves
+    /// are content-addressed, so the set is bounded by distinct moves, not by games; callers
+    /// decode the constituents and read consensus cells without replaying any game.
     /// </summary>
     public static Task<IReadOnlyList<ChessMoveEntityRow>> ChessMoveEntitiesAsync(
         NpgsqlDataSource dataSource, byte[] moveTypeId, CancellationToken ct,
@@ -2972,10 +2942,8 @@ public static partial class NpgsqlSubstrateReads
     /// <summary>
     /// <c>chess.learned_moves(p_games)</c> joined to each move's Content trajectory.
     ///
-    /// The atoms come back with the row because a move id is decodable -- piece, from,
-    /// to, flags, promotion -- so a caller projecting onto piece-square cells needs no
-    /// board and no replay. Lives here rather than in the chess service because the
-    /// read-path gate is right: one implementation, one place.
+    /// The move's constituent ids come back with each row; they decode to the move's
+    /// parts, so a caller can project onto piece-square cells without a board or replay.
     /// </summary>
     public static Task<IReadOnlyList<ChessLearnedMoveRow>> ChessLearnedMovesAsync(
         NpgsqlDataSource dataSource, int games, CancellationToken ct,
@@ -3063,31 +3031,18 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// Every (terminal position, name, eco) from the openings catalog's named line
-    /// trajectories, for the board-identity opening matcher. One bounded read of a few
-    /// thousand rows at Initialize, not a query per record — the caller probes the result
-    /// in memory. The terminal position is structure recovered from the ordered line; the
-    /// catalog does not duplicate OPENING_NAME/HAS_ECO testimony onto that board.
-    ///
-    /// Lives here rather than in the chess lane because ReadPathArchitectureGateTests
-    /// forbids hand-written SQL in a consumer, and it is right to: one implementation, one
-    /// place, every caller the same. It caught this exact query inline in
-    /// ChessOpeningIndex.cs.
+    /// Every (terminal position, name, ECO) from the source's named line trajectories, in
+    /// one set read that the caller probes in memory. The name and ECO testimony is on the
+    /// line; the terminal position is recovered as the last vertex of the line's
+    /// projection trajectory, not testified separately.
     /// </summary>
     public static Task<IReadOnlyList<(byte[] Position, byte[] Name, byte[]? Eco)>>
         OpeningCatalogAsync(
             NpgsqlDataSource dataSource, byte[] openingNameType, byte[] hasEcoType,
             byte[] sourceId, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
-        // ORDER BY is load-bearing, not cosmetic. The consumer takes FIRST-WINS when a
-        // position carries several names, so without an ordering the name a position gets
-        // is whatever the plan happened to emit — it could change after a replan, a vacuum
-        // or a parallel scan, which is non-deterministic naming in a content-addressed
-        // system. Rank by what the fold produced (eff_mu over the name cell), with the
-        // name object id as the next tiebreak. Several equal-priority rows can still
-        // name the same position with different ECOs, so finish with the ECO object id,
-        // absent values last. This makes the selected name/ECO pair reproducible.
-        // consensus.eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
-        // what g1_weight_literalism exists to reject.
+        // The ORDER BY makes naming deterministic: the consumer keeps the first row per
+        // position, so rows are ranked by the name cell's folded standing
+        // (consensus.eff_mu), then name id, then ECO id with absent ECOs last.
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH named AS MATERIALIZED (
                 SELECT n.subject_id AS line_id,
@@ -3130,21 +3085,15 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "opening_catalog", onError: onError);
 
     /// <summary>
-    /// The ORDERED CONSTITUENT SURFACES of composed documents, rejoined with a space —
-    /// one query for the whole batch.
+    /// Each document's ordered trajectory constituents realized and joined with a space,
+    /// for a batch in one query.
     ///
-    /// <c>render_text_batch</c> concatenates a composition's constituents with NO
-    /// separator, which is lossy for any content whose tokens were split ON a separator:
-    /// a chess movetext reads back as <c>1.d4d52.c4dxc43…</c> and no parser can tokenize
-    /// it. This returns each document rebuilt from its trajectory, the way its own
-    /// tokenizer split it, which is the only join that round-trips.
+    /// <c>render_text_batch</c> concatenates constituents with no separator, which loses
+    /// token boundaries for content that was split on a separator (movetext would read
+    /// <c>1.d4d52.c4dxc43…</c>). Rejoining the trajectory's tokens restores the split.
     ///
-    /// BATCHED ON PURPOSE. The first cut took one round trip per document; hydrating a
-    /// 6,365-line corpus meant 6,365 queries and did not finish in ten minutes. The token
-    /// ids of every document in the chunk are gathered, realized ONCE over the DISTINCT
-    /// set — ply tokens repeat ferociously, there are only a few thousand distinct SAN
-    /// strings in all of chess — and rejoined per document. Render is the last operation
-    /// and it runs once.
+    /// Constituent ids from every document are realized once over their distinct set,
+    /// since tokens recur across documents, and then rejoined per document.
     /// </summary>
     public static async Task<Dictionary<string, string>> TrajectoryTokenTextBatchAsync(
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
@@ -3349,9 +3298,9 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// Keyset page of governed chess players that have no content physicality. Names are
-    /// resolved only for the already-bounded page; a nameless row is returned with NULL so
-    /// the caller still advances its keyset instead of looping on it forever.
+    /// Keyset page of player entities lacking a physicality of
+    /// <paramref name="physicalityType"/>. Names are resolved only for the bounded page;
+    /// a nameless row comes back with a null name so the caller's keyset still advances.
     /// </summary>
     public static Task<IReadOnlyList<ChessPlayerPlacementRow>> ChessPlayersMissingPhysicalityPageAsync(
         NpgsqlDataSource dataSource, byte[] playerTypeId, short physicalityType,

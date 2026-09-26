@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION consensus.subjects_with(
         p_relation text, p_members bytea[], p_limit integer DEFAULT 100)
     RETURNS TABLE(subject_id bytea, bundle_id bytea,
                   eff_mu numeric, rd bigint, witness_count bigint)
--- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+-- No SET search_path: the clause blocks inlining and the consensus index path.
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     SELECT c.subject_id, c.object_id,

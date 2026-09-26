@@ -1,8 +1,7 @@
 ENGINEERING RULESET
 ===================
 
-This file is normative. GitHub owns work status; archived reports own historical
-measurements. The rules below describe the implementation shape that must remain true.
+This file is normative. The rules below describe the implementation shape.
 
 Rule #1 — Managed and SQL layers orchestrate; native code computes
 ------------------------------------------------------------------

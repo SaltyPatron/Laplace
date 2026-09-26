@@ -3,10 +3,8 @@ CREATE OR REPLACE FUNCTION laplace.entities_stored_bitmap(ids bytea[])
     AS 'EXECUTION_LIBRARY', 'pg_laplace_entities_stored_bitmap'
     LANGUAGE C STABLE;
 
--- Compatibility overload. Canonical entity storage is id-only/HASH(id): tier is
--- an interpretation projection and cannot participate in presence. Keep the
--- historical two-array call shape so mixed-version clients fail neither install
--- nor apply, but deliberately route to the same id-only stored-row primitive.
+-- Two-array call shape. Entity storage is HASH(id) and tier is altitude, not
+-- identity, so tiers are ignored and presence is the id-only probe.
 CREATE OR REPLACE FUNCTION laplace.entities_stored_bitmap(ids bytea[], tiers smallint[])
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL RESTRICTED

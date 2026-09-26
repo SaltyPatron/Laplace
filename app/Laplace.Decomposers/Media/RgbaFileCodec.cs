@@ -5,7 +5,7 @@ using System.Text;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Canonical on-disk image packaging for the witnessed image ladder (no codec deps):
+/// Planar RGBA image packaging with no codec dependency:
 /// magic <c>RGBA</c>, uint32 LE width, uint32 LE height, then width×height×4 bytes.
 /// Absent-alpha RGB sources must already have been expanded with A=0xFF by the producer.
 /// </summary>

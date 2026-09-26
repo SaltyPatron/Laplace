@@ -10,9 +10,9 @@ using Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Deposits deterministic target-machine analysis as calculated testimony.  The
-/// calculation identity is the exact analyzer/toolchain + artifact + target +
-/// execution-count manifest; the result is a separately content-addressed witness.
+/// Deposits target-machine analysis as a versioned calculation. The calculation's identity
+/// is its analyzer/toolchain, artifact, target, and execution-count manifest; the result is
+/// its own content-addressed witness.
 /// </summary>
 internal sealed class MachineCostWitnessService(SubstrateClient substrate)
 {

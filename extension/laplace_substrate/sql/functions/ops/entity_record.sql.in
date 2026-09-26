@@ -1,10 +1,8 @@
--- An EXACT entity's verdict record: direct subject-side consensus cells grouped
--- by the canonical confirmed / contested / refuted / thin law. This deliberately
--- does not call converse.epistemic_status_core: that operation is a lexical summary
--- which expands a word through its elected senses and accepts a caller limit.
--- Explore's entity header is an identity inspection surface, so it must be both
--- subject-exact and uncapped. The verdict thresholds remain byte-identical to the
--- lexical operation below; only the operand set differs.
+-- One entity's verdict record: every direct subject-side consensus cell it
+-- owns, grouped confirmed / contested / refuted / thin by the same thresholds
+-- and structural exclusions as converse.epistemic_status_core. Unlike that
+-- lexical operation it neither expands a word through its senses nor caps the
+-- operand set: the record is subject-exact and complete.
 DROP FUNCTION IF EXISTS laplace.entity_record(bytea);
 
 CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
@@ -12,15 +10,6 @@ CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
     LANGUAGE sql STABLE
 
 BEGIN ATOMIC
-    -- Exact entity record. The old implementation called
-    -- epistemic_status_core(p_id, 500), which intentionally expands a lexical word
-    -- through lexical.senses() and then truncates the result. The Explore header
-    -- therefore reported a sense-expanded TOP-500 sample as if it were this
-    -- entity's complete verdict record (for sell: 16 confirmed + 484 thin = 500).
-    --
-    -- Keep the same verdict law and the same non-verdict structural exclusions,
-    -- but count every direct consensus cell owned by p_id and nothing owned by a
-    -- sense/synset reached from it.
     WITH direct AS (
         SELECT c.rating, c.rd, c.volatility, c.witness_count
         FROM laplace.consensus c

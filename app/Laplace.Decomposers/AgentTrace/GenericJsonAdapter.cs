@@ -5,10 +5,9 @@ using Laplace.Decomposers.Abstractions;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
-/// Last-resort adapter so no role-shaped log is ever omitted: any .json/.jsonl whose
-/// records carry role+content (directly, under "message", or as a document with a
-/// "messages"/"history" array — the OpenAI chat-export family). Runs LAST in the
-/// registry; a file a specific adapter claims never reaches it.
+/// Parses any .json/.jsonl whose records carry role+content (directly, under "message",
+/// or as a document with a "messages"/"history" array, as in OpenAI chat exports). It is
+/// last in the registry, so a file a specific adapter claims never reaches it.
 /// </summary>
 public sealed class GenericJsonAdapter : IAgentTraceAdapter
 {

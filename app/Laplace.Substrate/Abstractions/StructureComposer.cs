@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// A structured source value is an ordered composition of its parts, never a joined
-/// string (INVENTION §3). The composition's identity is Merkle over the ordered child
+/// string. The composition's identity is Merkle over the ordered child
 /// ids; it is admitted with a physicality whose trajectory is the exact ordered
 /// constituent manifest and whose coordinate is the Karcher mean of its parts.
 /// A single part collapses to itself.

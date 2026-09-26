@@ -30,7 +30,7 @@ laplace_sync_payload() {
 
 # Share byte-identical immutable payloads when the filesystem permits it, while
 # remaining correct when protected_hardlinks rejects a donor owned by another
-# service identity. The fallback pass omits only --link-dest arguments: files
+# service identity. The second pass omits only --link-dest arguments: files
 # already linked by the first pass remain unchanged, and denied entries become
 # private copies.
 laplace_sync_link_deduplicated_payload() {
@@ -133,7 +133,7 @@ laplace_current_runtime_dir() {
 # second copy of framework/native dependencies before the stable pointer can move.
 #
 # Priority is the currently selected immutable runtime, then the exact bootstrap-owned
-# legacy MCP runtime, then newest retained immutable/partial releases. Rsync accepts at
+# mcp-runtime directory, then newest retained immutable/partial releases. Rsync accepts at
 # most 20 --link-dest directories; duplicates are removed before that bound is applied.
 laplace_runtime_reference_dirs() {
   local app_dir="$1" service="$2" stable_link="$3"
@@ -148,10 +148,9 @@ laplace_runtime_reference_dirs() {
     count=$((count + 1))
   fi
 
-  # The pre-managed MCP deployment is itself a complete runtime closure in the
-  # bootstrap-owned mcp-runtime directory. Current deploy never mutates that
-  # directory. Accept it only when the stable link resolves to its exact apphost;
-  # a similarly named directory or arbitrary symlink is not a migration source.
+  # The bootstrap-owned mcp-runtime directory is a complete runtime closure that
+  # deploy never mutates. It is a donor only when the stable link resolves to its
+  # exact apphost; a similarly named directory or arbitrary symlink is not.
   if [[ "$service" == "mcp" && "$count" -lt 20 && -L "$stable_link" \
      && -d "$app_dir/mcp-runtime" && ! -L "$app_dir/mcp-runtime" ]]; then
     target="$(readlink -f "$stable_link" 2>/dev/null || true)"
@@ -194,11 +193,8 @@ laplace_release_in_use() {
   return 1
 }
 
-# A pre-lease release can only be called complete if all three managed apphosts and
-# the UCI closure exist. This is deliberately stricter than "directory exists": a
-# failed rsync that filled the filesystem during the first service copy is provably
-# not a usable legacy release and must not become immortal just because it predates
-# the runtime-lease marker.
+# A release without a runtime-lease marker is complete only when all three managed
+# apphosts and the UCI closure exist; a directory left by a failed rsync is not.
 laplace_legacy_release_complete() {
   local candidate="$1" suffix
   [[ -x "$candidate/mcp/Laplace.Endpoints.Mcp" ]] || return 1
@@ -228,8 +224,8 @@ laplace_release_tree_writable() {
 # pre-lease releases are retained because their process ownership cannot be proved by
 # an unprivileged runner. Incomplete pre-lease directories are reclaimed only when the
 # publishing identity can delete the entire tree atomically enough to avoid damaging
-# an older root/service-owned layout. Inaccessible legacy debris is retained but does
-# not abort scanning later releases, allowing runner-owned failed stages to be reclaimed.
+# an older root/service-owned layout. An inaccessible directory is retained without
+# aborting the scan, so runner-owned failed stages are still reclaimed.
 laplace_prune_unreferenced_releases() {
   local app_dir="$1" releases="$1/releases" candidate reclaimed=0 retained=0
   [[ -d "$releases" && ! -L "$releases" ]] || return 0
@@ -400,9 +396,8 @@ laplace_stage_managed_runtimes() {
     test -s "$uci_stage/laplace-uci.$suffix" || return 1
   done
   install -d -m 2775 "$app_dir/releases" || return 1
-  # Reclaim mechanically unreferenced immutable runtimes BEFORE allocating/copying
-  # another closure. The old path only collected later, so a full LV could fail
-  # during rsync even though reclaimable failed/leased releases already existed.
+  # Reclaim mechanically unreferenced immutable runtimes before allocating another
+  # closure, so reclaimable releases never cause ENOSPC during rsync.
   laplace_prune_unreferenced_releases "$app_dir" >&2 || return 1
   release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
 
@@ -435,7 +430,6 @@ laplace_stage_managed_runtimes() {
 
 
 # Stage only the UCI closure through the same immutable-payload and lease owners.
-# The ordinary three-service publisher above keeps its existing behavior.
 laplace_stage_uci_runtime() {
   local app_dir="$1" uci_stage="$2" release suffix
   test -x "$uci_stage/laplace-uci" || return 1

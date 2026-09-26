@@ -10,13 +10,10 @@ namespace Laplace.Migrations;
 
 internal static class Program
 {
-    // Spectre.Console.Cli entrypoint (GH #603), same shape as Laplace.Cli but proportionally
-    // smaller: no banner, four verbs. The DbUp helpers (RunUp/RunStatus/RunReset/RunNuke,
-    // ResolveConnectionString, Confirmed) are unchanged — the commands just route to them, and
-    // the connection string is still resolved from the raw process args (so --database /
-    // --connection-string / --yes behave exactly as before, independent of Spectre parsing).
-    // A registrar-less CommandApp is deliberate: no command constructor-injects anything (ops
-    // logging is written directly via LaplaceLogging), so a DI bridge here would be unused.
+    // Spectre.Console.Cli entrypoint with four verbs routed to the DbUp helpers (RunUp,
+    // RunStatus, RunReset, RunNuke). The connection string and --yes are resolved from the raw
+    // process args, independent of Spectre parsing. The CommandApp has no registrar because no
+    // command takes constructor dependencies.
     public static int Main(string[] args)
     {
         var app = new CommandApp<UpCommand>();
@@ -41,9 +38,9 @@ internal static class Program
         return app.Run(Rewrite(args));
     }
 
-    // Route on the verb, hand the raw arguments to the existing resolver untouched. A leading
-    // flag (no verb) means the default 'up' — Spectre needs the explicit token for that. `--`
-    // keeps Spectre from binding --database/--connection-string it does not model.
+    // Route on the verb and hand the raw arguments to the resolver untouched. A leading flag
+    // (no verb) means the default 'up', which Spectre needs as an explicit token. `--` keeps
+    // Spectre from binding --database/--connection-string, which it does not model.
     private static readonly string[] Verbs = { "up", "status", "reset", "nuke" };
     private static string[] Rewrite(string[] args)
     {
@@ -55,8 +52,8 @@ internal static class Program
         return new[] { verb, "--" }.Concat(rest).ToArray();
     }
 
-    // The connection string is resolved from the ORIGINAL process args (exe stripped), exactly
-    // as the pre-Spectre Main did — Spectre routing does not touch it.
+    // The connection string is resolved from the original process args (exe stripped);
+    // Spectre routing does not touch it.
     private static int Dispatch(string command, Func<string, int> run)
     {
         var raw = Environment.GetCommandLineArgs().Skip(1).ToArray();
@@ -107,9 +104,8 @@ internal static class Program
 
     private static int RunUp(string connectionString)
     {
-        // FileOnly (not ConsoleAndFile): the human-facing report already goes to stdout
-        // below; this is the queryable audit trail (which migration applied, when) in the
-        // shared ops sink — ops.app_log, GH #602. Console output stays as-is.
+        // File sink only: the human-facing report goes to stdout below; this is the
+        // queryable record of which migration applied when, read through ops.app_log.
         using var loggerFactory = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
         var log = loggerFactory.CreateLogger("up");
 

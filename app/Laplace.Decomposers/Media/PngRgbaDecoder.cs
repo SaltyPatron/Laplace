@@ -5,12 +5,10 @@ using System.IO.Compression;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Minimal PNG → planar RGBA decoder for the image lane. Supports 8-bit non-interlaced
-/// RGB (color type 2) and RGBA (color type 6). Absent alpha becomes 0xFF.
-/// PACKAGING ONLY: the decoded RGBA is a recovery buffer, never an identity input.
-/// Identity comes from the codepoint-floor ladder root (digit → number → channel →
-/// pixel → … compose) — neither the PNG container bytes NOR the raw RGBA bytes are
-/// ever hashed as identity (modality-ladder-law.md).
+/// Minimal PNG → planar RGBA decoder: 8-bit non-interlaced RGB (color type 2) and RGBA
+/// (color type 6); absent alpha becomes 0xFF. The RGBA is a recovery buffer, not an identity
+/// input: identity is the composition ladder (digit → number → channel → pixel → …) over
+/// codepoint-floor atoms.
 /// </summary>
 public static class PngRgbaDecoder
 {

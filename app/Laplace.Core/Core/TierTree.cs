@@ -128,7 +128,7 @@ public sealed class TierTree : SafeHandle
     // bytes, same id). This collapses through the grapheme tier too -- a
     // single-codepoint UAX29 cluster is in-memory scaffold only; the tier-0
     // codepoint leaf is the stored identity. Mirrors collapse_idx() in
-    // engine/core/src/content_witness_batch.c -- keep the two in lockstep.
+    // engine/core/src/content_witness_batch.c; the two rules are one identity law.
     public uint CollapseIndex(uint idx)
     {
         ThrowIfDisposed();

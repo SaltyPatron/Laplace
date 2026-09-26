@@ -28,8 +28,8 @@ internal static class CopyTupleParser
         /// <summary>Structural tier of the staged entity row; presence is keyed
         /// by id alone, never by tier.</summary>
         public readonly List<short> Tiers = new();
-        /// <summary>Observed type interpretation and deterministic compatibility
-        /// representative key for canonical entity COPY.</summary>
+        /// <summary>Type interpretation carried in the entity COPY row; it is not
+        /// part of the content-addressed id.</summary>
         public readonly List<Hash128> TypeIds = new();
         public readonly List<StagedRowRef> Rows = new();
     }
@@ -186,10 +186,8 @@ internal static class CopyTupleParser
                 double residual = 0;
                 bool hasResidual = false, hasSourceDim = false;
                 long observedAtPgUs = 0;
-                // This is the million-row document hot path. WalkRow's capturing
-                // callback allocated one closure/delegate for every physicality;
-                // the parser only needs three fixed fields, so extract them in
-                // one allocation-free pass over the same validated COPY row.
+                // Physicality rows are parsed inline rather than through WalkRow's
+                // capturing callback, so the pass allocates no delegate per row.
                 if (off + 2 > len)
                     throw Corrupt("physicalities", off, "truncated field count");
                 int fields = (p[off] << 8) | p[off + 1];
@@ -256,8 +254,9 @@ internal static class CopyTupleParser
         return result;
     }
 
-    /// <summary>Complete entity transport for APIs that return managed rows.
-    /// Keep the writer's compact verification parser above unchanged.</summary>
+    /// <summary>Decodes every staged entity row into a managed <see cref="EntityRow"/>
+    /// for callers that return rows; the writer's verification parse above extracts
+    /// only what presence verification needs.</summary>
     internal static unsafe List<EntityRow> DecodeEntityRows(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
     {
         var result = new List<EntityRow>();
@@ -291,7 +290,7 @@ internal static class CopyTupleParser
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<AttestationRow>? decoded)
         => ParseAttestationsCore(blobs, decoded, true);
 
-    // The generated-evidence fold needs full rows, but no second merge index.
+    // Full decoded rows for the fold, without building the merge index.
     public static void DecodeAttestations(
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<AttestationRow> decoded)
         => ParseAttestationsCore(blobs, decoded, false);
@@ -505,9 +504,10 @@ internal static class CopyTupleParser
         new($"COPY tuple stream corrupt in '{table}' at offset {off}: {why}");
 
     /// <summary>
-    /// Pack kept rows into one contiguous PGCOPY body (no header/trailer).
-    /// Callers that open the COPY stream only after packing match the MEASURED
-    /// Npgsql peak (~591k rows/s) instead of packing while the stream is open.
+    /// Packs kept rows into one contiguous PGCOPY body (no header/trailer), so the
+    /// COPY stream is opened only after packing is done. A row whose patched count is
+    /// &gt;= 0 gets its observation_count and sum_score_fp1e9 rewritten and, when fold
+    /// replayable, its outcome reclassified from those totals.
     /// </summary>
     public static byte[] PackFiltered(
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs,
@@ -555,10 +555,10 @@ internal static class CopyTupleParser
 
     private static void PatchAggregatedOutcome(Span<byte> row, long games, long sum)
     {
-        // Count/score patches collapse attestation tuples. Retaining one
-        // representative's outcome would disagree with the combined evidence
-        // and make the stored category depend on worker completion order.
-        // Decode wire offsets here; the native attestation law owns classification.
+        // A count/score patch collapses several attestation rows into one. Keeping
+        // one representative's outcome would disagree with the combined evidence
+        // and depend on worker completion order, so the outcome is reclassified
+        // from the combined totals; classification itself is native.
         if (BinaryPrimitives.ReadInt16BigEndian(row) != AttestationFields)
             throw new InvalidOperationException("aggregate patch requires an attestation tuple");
         int offset = 2, outcomeOffset = -1;

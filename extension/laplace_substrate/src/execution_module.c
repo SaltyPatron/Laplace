@@ -1,6 +1,6 @@
-/* Execution has no postmaster hooks, GUC registration or independent cache.
- * The installed substrate host owns those resources. Versioned SQL bindings
- * select this implementation; the PostgreSQL process remains running. */
+/* The execution module registers no hooks, GUCs or caches; the substrate host
+ * library owns them. Versioned SQL bindings name this library, so a new build is
+ * selected by the catalog while the server keeps running. */
 #include "postgres.h"
 #include "fmgr.h"
 PG_MODULE_MAGIC;

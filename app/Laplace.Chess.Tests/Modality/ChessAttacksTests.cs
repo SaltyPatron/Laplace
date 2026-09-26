@@ -4,16 +4,13 @@ using Xunit;
 namespace Laplace.Chess.Modality.Tests;
 
 /// <summary>
-/// Equivalence gate for the precomputed attack tables.
+/// The precomputed attack tables agree bit for bit with a ray walk on every square under every
+/// relevant occupancy. The reference walk is written here, independent of MoveGen, so a bug
+/// shared with MoveGen cannot mask itself.
 ///
-/// The tables exist to replace runtime ray-walking, so the only thing that matters is that they
-/// agree with the walk they replace — BIT FOR BIT, on every square, under every relevant
-/// occupancy. This is checked against an independent walk written here rather than against
-/// MoveGen, so a shared bug in one implementation cannot hide behind the other.
-///
-/// Sliding pieces are checked over EVERY subset of each square's relevant-occupancy mask
-/// (carry-rippler enumeration), which is exhaustive for the tables' whole index domain:
-/// 5,248 bishop entries + 102,400 rook entries. Not a sample — the complete table.
+/// Sliders are checked over every subset of each square's relevant-occupancy mask
+/// (carry-rippler enumeration): the tables' whole index domain, 5,248 bishop entries and
+/// 102,400 rook entries.
 /// </summary>
 public class ChessAttacksTests
 {
@@ -86,9 +83,8 @@ public class ChessAttacksTests
     }
 
     /// <summary>
-    /// Occupancy OUTSIDE the relevant mask must not change the answer — that is the entire
-    /// justification for excluding edge squares from the index, and getting it wrong is how a
-    /// slider table silently returns a stale attack set in the middlegame.
+    /// Occupancy outside the relevant mask does not change the answer, which is what lets edge
+    /// squares stay out of the slider index.
     /// </summary>
     [Fact]
     public void Sliders_IgnoreOccupancyOutsideTheRelevantMask()
@@ -116,7 +112,7 @@ public class ChessAttacksTests
     }
 
     [Theory]
-    // Corner, edge and centre — the three cases leaper tables get wrong by wrapping files.
+    // Corner, edge and centre: the cases where a leaper table could wrap across files.
     [InlineData(0, 2)]    // a1 knight: b3, c2
     [InlineData(27, 8)]   // d4 knight: full 8
     [InlineData(7, 2)]    // h1 knight: f2, g3

@@ -1,19 +1,15 @@
 #pragma once
 
 /*
- * Chess compose-floor blob — GH #822 / docs/specs/33_Perfcache_Blob_Law.md
+ * Chess compose-floor blob (docs/specs/33_Perfcache_Blob_Law.md).
  *
  * Deterministic lossless geometry ROM for typed chess structure:
  *   tier 1 — typed binary chess state atoms
  *   tier 2 — bounded move objects and catalog positions composed as typed trajectories
  *
- * Record: id → coord / hilbert / n / tier. No Glicko, attestations, or
- * observation counts. NOT Syzygy. NOT ECO-as-universe. NOT a managed
- * ConcurrentDictionary / File.ReadLines presented as the ROM.
- *
- * Emit peers ucd_tables_emit (native pack from declared typed inputs).
- * Postgres remains SoR for testimony. Rebuild is one-way. Never seed DB
- * from this file.
+ * Record: id → coord / hilbert / n / tier. It carries no consensus, testimony, or
+ * observation counts; PostgreSQL holds those. The blob is a derived read-only map
+ * emitted natively like the UCD tables; the database is never seeded from it.
  */
 
 #include <stdint.h>

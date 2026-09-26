@@ -25,9 +25,9 @@ function token(name: string, fallback: string): string {
 }
 
 /**
- * Three.js and force-graph cannot consume CSS custom properties directly. Resolve
- * the visualization-specific UI tokens once at the renderer boundary instead of
- * carrying a second hard-coded purple/yellow/blue palette in WebGL code.
+ * Three.js and force-graph cannot consume CSS custom properties directly, so the
+ * visualization tokens are resolved here at the renderer boundary; WebGL code carries
+ * no palette of its own.
  */
 export function visualizationPalette(): VisualizationPalette {
   return {

@@ -4,11 +4,9 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Tests;
 
-// Golden-id pins for every decomposer's SourceId/TrustClassId, so refactors of the
-// id-minting call paths (base classes, helper extraction) never change a content-addressed
-// id. A trust class id is the content id of its label (engine/manifest/trust_classes.toml,
-// 631bbdf9a); a source id is minted from the DB side (realize.canonical_id()). If this test
-// fails, substrate identity has drifted — do not update the constants without an owner decision.
+// Pins every decomposer's SourceId and TrustClassId. A trust class id is the content id of
+// its label (engine/manifest/trust_classes.toml). A failure here means a content-addressed
+// source or trust-class identity changed.
 public class SourceIdPinTests
 {
     public static readonly TheoryData<Func<IDecomposer>, string, string> Pins = new()

@@ -5,25 +5,27 @@
 #include "utils/array.h"
 #include "laplace/core/hash128.h"
 
-/* Membership is a set filter, not an ordinal/gap predicate. Datum storage is
- * valid only during the callback. Consumers retain their own selected data. */
+/* Receives each matching physicality row: physicality id, owning entity, and
+ * trajectory geometry. A match is set membership of constituent ids, not order
+ * or adjacency. Datums are valid only during the callback. */
 typedef void (*LaplaceContentMembershipConsumer)(Datum physicality, Datum entity,
                                                 Datum geometry, void *context);
-/* The same indexed operator with an explicit physicality domain and work
- * envelope. Returns false when a matching row exceeds max_rows (0 = unbounded).
- * A bounded prefix is candidate evidence, never a complete interpretation. */
+/* Occurrence read: physicalities of one type whose trajectory constituents
+ * overlap members (contain all of them with require_all), through that type's
+ * GIN index. Returns false when more than max_rows rows match (0 = unbounded);
+ * a bounded read is a prefix of the containers, not all of them. */
 bool laplace_typed_membership_read(ArrayType *members, bool require_all,
     int16 physicality_type, uint64 max_rows,
     LaplaceContentMembershipConsumer consume, void *context);
-/* Intersect the original predicate with containment of required_members in
- * the same GIN scan, before max_rows is consumed. NULL/empty requirements add
- * no constraint. The existing entry point retains its original semantics. */
+/* Additionally requires containment of required_members, applied in the same
+ * GIN scan before max_rows is counted. NULL or empty adds no constraint. */
 bool laplace_typed_membership_read_with_required(ArrayType *members, bool require_all,
     ArrayType *required_members, int16 physicality_type, uint64 max_rows,
     LaplaceContentMembershipConsumer consume, void *context);
+/* Unbounded read over content trajectories (physicality type 1). */
 void laplace_content_membership_read(ArrayType *members, bool require_all,
     LaplaceContentMembershipConsumer consume, void *context);
-/* Complete, distinct identities in byte order, shared by SQL and native callers. */
+/* Every distinct entity whose content trajectory matches, in byte order. */
 hash128_t *laplace_content_membership_entities(ArrayType *members, bool require_all,
                                               int *count);
 #endif

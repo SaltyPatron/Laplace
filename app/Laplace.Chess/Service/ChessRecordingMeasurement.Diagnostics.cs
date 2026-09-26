@@ -263,8 +263,8 @@ internal sealed partial class ChessRecordingMeasurement
         }
     }
 
-    // One standalone benchmark owns this logger. The benchmark attaches only its
-    // current admission receipt; setup/selection logs cannot enter a fresh/replay window.
+    // One benchmark run holds this logger and attaches only its current admission
+    // receipt, so setup/selection logs cannot enter a fresh/replay window.
     internal sealed class WriterDiagnosticLogger : ILogger<NpgsqlSubstrateWriter>, ILogger<ConsensusAccumulatingWriter>
     {
         internal ChessRecordingMeasurement? Measurement { get; set; }

@@ -5,9 +5,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// ISA gate G2: row-producing and looped realization is forbidden. IDs are
-/// selected/ranked first, then resolved through an aligned batch. Scalar calls
-/// remain legal only for exact, documented singleton values.
+/// SQL realization runs after selection: ids are selected and ranked first, then resolved
+/// through one aligned batch. No SQL function realizes per output row or per loop element;
+/// scalar realization is allowed only at the listed singleton sites.
 /// </summary>
 public sealed class RenderBeforeSelectGateTests
 {
@@ -39,9 +39,9 @@ public sealed class RenderBeforeSelectGateTests
     ];
 
     /// <summary>
-    /// Exact scalar sites that execute once per function invocation, never once
-    /// per output row or loop element. Counts are equality-pinned: additions and
-    /// removals both require reviewing this classification.
+    /// Scalar realization sites that execute once per function invocation, never per
+    /// output row or loop element. Counts are pinned exactly: any added or removed site
+    /// must be classified here.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, int> SingletonSites =
         new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -143,16 +143,8 @@ public sealed class RenderBeforeSelectGateTests
         Assert.True(changed.Count == 0,
             "singleton scalar counts changed; classify every changed site:\n  "
             + string.Join("\n  ", changed));
-        // 17 -> 16: taxonomy/synset_gloss.sql.in no longer realizes a scalar at all
-        // (measured 0 matches), so its exception was deleted above and the pinned
-        // total shrinks with it. Shrink-only is the point — this number may fall as
-        // sites migrate to a batch surface, and may not rise without classifying the
-        // new site in SingletonSites first.
-        //
-        // 16 -> 15: chess/chess_game.sql.in realized one game document — the stored
-        // PGN movetext. #1258 stopped storing PGN and this change removed the dead
-        // column, so the site is gone rather than exempted. The mainline is now the
-        // line's typed move trajectory, rendered by replay outside SQL.
+        // The total may fall as sites move to a batch surface; it may not rise without
+        // classifying the new site in SingletonSites.
         Assert.Equal(15, actual.Values.Sum());
     }
 
@@ -214,8 +206,7 @@ public sealed class RenderBeforeSelectGateTests
             FunctionsRoot(repoRoot), "readback", "constituents_closure.sql.in"));
         Assert.Contains("p_max_depth integer DEFAULT 0", closure, StringComparison.Ordinal);
 
-        // Cycle termination, exact bytes and scalar/batch depth behavior execute
-        // against PostgreSQL in NpgsqlContentReconstructorTests. Native plan caching
-        // and traversal implementation are not specified by source-string assertions.
+        // Cycle termination, exact bytes and scalar/batch depth are proven against
+        // PostgreSQL in NpgsqlContentReconstructorTests, not by source-string assertions.
     }
 }

@@ -18,10 +18,9 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
     internal static long UnresolvedLinks;
 
     /// <summary>
-    /// id -> content root, populated as a FREE side effect of phase 1 (the sentence lane
-    /// already composes every root) and read by phase 2. Discarded with the run: a Tatoeba
-    /// row number is ingest scaffolding, not knowledge, so it gets no entity, no geometry
-    /// and no trajectory.
+    /// Row id → content root, recorded while sentences.csv composes each root and read when
+    /// links.csv resolves. Discarded with the run: the row number is packaging, so it gets no
+    /// entity, geometry or trajectory.
     /// </summary>
     private readonly TatoebaIdMap _ids = new();
 
@@ -35,11 +34,10 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
     /// <summary>
-    /// sentences.csv is the ENTITY file; links.csv is the ATTESTATION file. They run as two
-    /// PHASES because the second needs what the first resolved — not as parallel files with a
-    /// prelude that resolves everything twice (see TatoebaPhase for the measurement that
-    /// killed that shape). Each phase is single-file, so MonolithSegmenter still gives it
-    /// intra-file parallelism.
+    /// sentences.csv composes the sentence roots; links.csv attests translations between
+    /// them. The link file runs after the sentence file is composed and persisted because it
+    /// resolves through the id map the sentence file fills. Each is a single-file phase, so
+    /// MonolithSegmenter still parallelizes within it.
     /// </summary>
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options,
@@ -55,16 +53,15 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
                            "tatoeba/sentences", sentencesPath, ct))
             yield return c;
 
-        // The id map is complete once composition finishes, but the link phase also
-        // references sentence entities durably. Make that dependency a real persistence
-        // barrier rather than relying on producer order ahead of the apply consumer.
+        // The id map is complete once composition finishes; the link attestations also
+        // reference the sentence entities, so the sentences must be persisted first. The
+        // apply barrier enforces that rather than relying on producer order.
         await foreach (SubstrateChange barrier in ApplyBarrierAsync(
                            "tatoeba/sentences-persisted", ct).ConfigureAwait(false))
             yield return barrier;
 
-        // Phase 2 only ever runs after phase 1 has been fully composed, so the map is
-        // complete by construction. If it is empty the corpus would silently lose every
-        // translation — the failure class IngestRunner already refuses to call success.
+        // The map is complete here; an empty map would drop every translation, so it fails
+        // the run.
         if (_ids.Count == 0)
             throw new InvalidOperationException(
                 "Tatoeba link phase reached with an empty id map: sentences.csv was missing or "

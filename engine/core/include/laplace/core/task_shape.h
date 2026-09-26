@@ -22,8 +22,8 @@ typedef struct {
     hash128_t schema, slot_schema, end;
 } laplace_task_shape_markers_t;
 
-/* Separate extended ABI: callers of the original marker function retain the
- * original allocation size, even when mapped against an upgraded core. */
+/* Separate extended ABI: callers of the v1 marker function keep the v1
+ * allocation size. */
 typedef struct {
     hash128_t schema, slot_schema, end;
     hash128_t schema_v2, slot_schema_v2, end_v2;
@@ -47,7 +47,7 @@ void laplace_task_shape_markers_extended_init(laplace_task_shape_markers_extende
 /* 0 success; -1 unsupported schema; -2 malformed; -3 allocation failure. */
 int laplace_task_shape_decode(const hash128_t *flat, size_t count,
                               laplace_task_shape_t *out);
-/* Version-aware API. The original decode API continues to accept v1 only. */
+/* Version-aware API. The decode API above accepts v1 only. */
 int laplace_task_shape_decode_view(const hash128_t *flat, size_t count,
                                    laplace_task_shape_view_t *out);
 

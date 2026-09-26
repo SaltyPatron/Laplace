@@ -5,18 +5,16 @@ import { queryHomeLeaders } from '../query/api';
 import type { BandLeaders } from '../query/types';
 import styles from './Leaderboards.module.css';
 
-/** The content bands shown on the landing — the arenas with real semantics. */
+/** Salience bands whose leaders the landing shows. */
 const HOME_BANDS = [1, 2, 4, 5];
 
 /**
- * League leaders. Every consensus edge is a rated competitor in its arena — a
- * salience band — so the landing shows who's on top of each, live, exactly the
- * way a sports front page leads with the leaderboard rather than attendance
- * totals. Each row links to the subject entity in Explore.
+ * Band leaders: the highest-standing consensus cells in each salience band, read
+ * live from /v1/query/leaders/home. Each row links to its subject entity in Explore.
  *
- * The API currently supplies conservative standing (rating - 2*RD) and witness
- * count. Do not relabel those coordinates as the underlying rating or as games:
- * generic relation witnesses may come from any admitted source/modality.
+ * Rows carry conservative standing (rating - 2*RD) and witness count; they are
+ * labelled as such, never as a rating or as games, since relation witnesses come
+ * from any admitted source or modality.
  */
 export function Leaderboards() {
   const [bands, setBands] = useState<BandLeaders[] | null>(null);
@@ -28,7 +26,7 @@ export function Leaderboards() {
       .catch(() => setFailed(true));
   }, []);
 
-  if (failed) return null; // the landing stands without it; no error chrome here
+  if (failed) return null; // the landing renders without leaders
 
   return (
     <section className={styles.leaders} aria-label="League leaders">

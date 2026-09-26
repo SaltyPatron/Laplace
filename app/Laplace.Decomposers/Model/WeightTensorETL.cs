@@ -40,10 +40,9 @@ public static class WeightTensorETL
         int dtype = SynInterop.TensorDtypeFromName(tref.Dtype);
         if (dtype < 0)
         {
-            // O10 — record-don't-interpret. Unknown / block-quant dtypes are witnessed as
-            // undecodable (empty payload); inventing zeros was the prior defect, refusing
-            // the whole ingest pushed operators onto GGUF. Callers that need floats must
-            // treat Length == 0 as "no numeric interpretation available".
+            // Unknown and block-quantized dtypes are recorded as undecodable (empty
+            // payload), never as zeros; callers treat Length == 0 as "no numeric
+            // interpretation available".
             return Array.Empty<float>();
         }
 

@@ -4,8 +4,11 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD;
 
 /// <summary>
-/// Deferred content batching for imperative-compose lanes. All tree build,
-/// O(tiers) existence, and Merkle emit delegate to <see cref="ContentTierSpine"/>.
+/// Collects canonical content for one working set, keyed by the BLAKE3 of its canonical
+/// bytes, with every source that observed it. The flush probes root and per-tier existence
+/// once for the whole set, then emits each tree's composition and physicality observations
+/// into the intent stage once per observing source. Tree build, existence descent and
+/// Merkle emit are <see cref="ContentTierSpine"/>.
 /// </summary>
 public sealed class ContentBatch : IDisposable
 {

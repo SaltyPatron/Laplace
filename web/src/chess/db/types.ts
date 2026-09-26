@@ -1,7 +1,6 @@
 /**
- * The chess read surface, as the API serves it. Ids are content hashes, so every
- * id here is also a substrate entity id — the same one /explore/entity/:id will
- * explain down to its witnesses.
+ * Chess read responses. Every id is a content address, so each one also opens at
+ * /explore/entity/:id as the same entity with its witnesses.
  */
 
 /**

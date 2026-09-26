@@ -177,8 +177,8 @@ public sealed class IngestSizingTests
     [Fact]
     public void EstimateApplyGateBytes_ZeroSurcharge_MatchesTupleBill()
     {
-        // Surcharge must stay 0: MEASURED chess regress when non-zero (shared
-        // present att ids re-merged per small apply). Gate bytes = tuple bill.
+        // With a zero attestation surcharge, gate bytes equal the per-row estimate
+        // plus staged bytes.
         Assert.Equal(0, IngestSizing.AttestationApplySurchargeBytes);
         long gated = IngestSizing.EstimateApplyGateBytes(
             10, 20, 100, trajectoryBytes: 0, intentStageTupleBytes: 500, intentStageAttestationCount: 50);
@@ -190,8 +190,7 @@ public sealed class IngestSizingTests
     [Fact]
     public void Resolve_ChessPgnProfile_AllowsParallelIntentsOn12CoreBudget()
     {
-        // Hart-server-shaped: 12 apply partitions, 11 compose workers, 4 GiB WS.
-        // The retired 4_000_000 EstBytesPerRecord collapsed this to max_intents=1.
+        // 12 apply partitions, 11 compose workers, 4 GiB working set.
         var plan = IngestSizing.Resolve(
             performanceCoreCount: 12,
             fileWorkers: 10,
@@ -207,8 +206,7 @@ public sealed class IngestSizingTests
     [Fact]
     public void ResolveMaxIntentsPerCommit_SmallCommitAboveTwoBatches_NotSerializedToOne()
     {
-        // commit_rows=429, batch=256: old formula → 429/(256*8)=0 → max_intents=1.
-        // Pin the post-fix floor: a commit that holds ≥2 batches must not serialize to 1.
+        // A commit that holds at least two batches allows at least two intents.
         int n = IngestSizing.ResolveMaxIntentsPerCommit(256, 429);
         Assert.True(n >= 2);
     }
@@ -231,8 +229,7 @@ public sealed class IngestSizingTests
         Assert.Equal((512L << 20) / MemoryTopology.ConsensusMaskPairResidentBytes,
             plan.MaskPairCapacity);
 
-        // A resource equation may legitimately evaluate to any integer, including
-        // a power of two. Pin the equation, not a blacklist of the retired literal.
+        // Chunk cells scale linearly with the flush envelope.
         var halfEnvelope = IngestSizing.ResolveConsensusFold(
             applyPartitions: 12,
             workingSetBudgetBytes: 4L << 30,

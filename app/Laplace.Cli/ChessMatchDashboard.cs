@@ -6,11 +6,10 @@ using Spectre.Console.Rendering;
 namespace Laplace.Cli;
 
 /// <summary>
-/// Terminal dashboard for engine-vs-engine matches (GH #604): drives the existing
-/// ChessLabService cutechess job and renders its live ChessLabEvent stream — the SAME
-/// stream the web lab UI consumes — as a board + progress + metrics + log tail via
-/// AnsiConsole.Live. Games stream into the substrate through the job's own re-ingestion
-/// (ChessLabRunners.RunCutechessAsync → ChessPgnIngestor); this surface only watches.
+/// Terminal view of an engine-vs-engine match: drives the ChessLabService cutechess job and
+/// renders its ChessLabEvent stream (the stream the web interface also reads) as board,
+/// progress, metrics and log tail via AnsiConsole.Live. The job itself admits the games
+/// (ChessLabRunners.RunCutechessAsync → ChessPgnIngestor); this view only watches.
 /// </summary>
 internal static class ChessMatchDashboard
 {

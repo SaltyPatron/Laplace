@@ -164,9 +164,8 @@ internal static class ReportEndpoints
 
             return await RunGatedReportAsync(request, billing, "explain.trace", ct, async gateQuote =>
             {
-                // This is the same native forward execution consumed by normal
-                // generation. depth/beam retain the public report spelling but
-                // bind directly to semantic hops/fanout; no walk_branches replay.
+                // The native forward pass that generation runs, traced. depth and beam
+                // bind to hops and fanout.
                 var trace = await substrate.ForwardTraceAsync(
                     payload.Prompt.Trim(),
                     steps: payload.Steps,

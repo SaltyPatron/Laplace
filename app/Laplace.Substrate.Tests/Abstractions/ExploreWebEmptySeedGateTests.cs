@@ -5,8 +5,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// <summary>
 /// An unresolved/thin prompt can legitimately compile to an empty routed seed set.
 /// PostgreSQL represents '{}'::bytea[] with zero dimensions, while non-empty bytea[]
-/// operands are one-dimensional. The native crawl must treat both representations as
-/// the same typed cardinality law: zero seeds means zero work, not an internal error.
+/// operands are one-dimensional. The native crawl treats both as a seed count: zero seeds
+/// means zero work, not an internal error.
 /// NULL and true multidimensional arrays remain invalid.
 /// </summary>
 public class ExploreWebEmptySeedGateTests

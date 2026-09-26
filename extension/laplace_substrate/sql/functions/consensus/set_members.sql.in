@@ -15,7 +15,7 @@
 CREATE OR REPLACE FUNCTION consensus.set_members(p_subject bytea, p_relation text)
     RETURNS TABLE(bundle_id bytea, member_id bytea, ord bigint,
                   eff_mu numeric, rd bigint, witness_count bigint)
--- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+-- No SET search_path: the clause blocks inlining and the consensus index path.
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     SELECT c.object_id, m.id, m.ord,

@@ -79,18 +79,17 @@ public sealed class SyzygyNativeProber : ISyzygyProber
 }
 
 /// <summary>
-/// Syzygy tablebase ingest. Fathom decodes package entries into exact optimal transitions;
-/// the substrate stores them as content-addressed position → typed move → position graph
-/// segments with WDL/DTZ on the vertices. The local mapped package is the decoding/search
-/// perfcache, not the persisted knowledge model. The v2 single-position method remains for
-/// already-recorded game evidence; material packages use the compact graph format.
+/// Syzygy tablebase admission. Fathom decodes package entries into exact optimal transitions,
+/// composed as content-addressed position → typed move → position trajectory segments with
+/// WDL/DTZ on the vertices. The mapped package is a decoding/search perfcache, not the
+/// admitted knowledge. Recorded games use the per-position path; material packages use the
+/// compact graph path.
 /// </summary>
 public static class ChessSyzygy
 {
     public const int Version = 2;
-    // v2 pins material roots to canonical placement-order chunks. v1 grouped parallel
-    // probe completion order, so worker timing changed chunk boundaries and a re-run minted
-    // a different graph behind the same material physicality identity.
+    // Material roots are chunked in canonical placement order, never probe completion
+    // order, so chunk boundaries and the material graph are deterministic across runs.
     public const int MaterialGraphVersion = 2;
 
     public const string SourceName = "ChessSyzygy";
@@ -245,11 +244,10 @@ public static class ChessSyzygy
             verdicts.Add(new SyzygyPositionVerdict(
                 from.Position.Id, product.Wdl, product.Dtz));
 
-            // A packed transition is an index over reusable Laplace objects, not an
-            // opaque sidecar.  Persist every referenced position/move and the bounded
-            // atom vocabulary that physically composes it in the SAME change as the
-            // chunk.  The builder deduplicates repeated atoms and transpositions within
-            // the chunk; content identity deduplicates them across chunks/materials.
+            // A packed transition indexes reusable entities, so every referenced
+            // position/move and the atoms that compose it are staged in the same change as
+            // the chunk. The builder dedups within the chunk; content identity converges
+            // them across chunks and materials.
             AddGraphNode(nodes, from.Position, ChessVocabulary.PositionType);
             AddGraphNode(nodes, to.Position, ChessVocabulary.PositionType);
             AddGraphNode(nodes, move.Move, ChessVocabulary.MoveType);
@@ -277,11 +275,10 @@ public static class ChessSyzygy
         foreach (var graphNode in chunk.Nodes)
             DeriveGraphNode(b, graphNode, nowUs);
 
-        // The vertex flags are the compact exact-read accelerator.  They do not replace
-        // governed, source-separable position-grain testimony: consensus and ordinary
-        // substrate reads must see the tablebase verdict without decoding a projection.
-        // Emit each small value vocabulary once per chunk, then attach the resolved typed
-        // facts to every pre-state.  Repeated values and reruns converge by content/id.
+        // Vertex flags accelerate exact reads; the verdict is also attested per position
+        // under this source, so consensus and ordinary reads see it without decoding a
+        // projection. Each value is composed once per chunk and attached to every pre-state;
+        // repeats and reruns converge by content identity.
         var wdlValues = new Dictionary<int, Hash128>();
         var dtzValues = new Dictionary<int, Hash128>();
         foreach (var verdict in chunk.Verdicts)

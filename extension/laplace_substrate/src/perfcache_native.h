@@ -27,13 +27,12 @@ bool laplace_highway_ready(void);
 /* The governed vocabulary ROM (laplace_vocabulary_perfcache.bin). */
 bool laplace_vocabulary_ready(void);
 
-/* GH #822 — chess position_id → coord floor (laplace_chess_position_perfcache.bin). */
+/* Chess position id -> coordinate map (laplace_chess_position_perfcache.bin). */
 bool laplace_chess_position_ready(void);
 
-/* Eager warm-up for shared_preload_libraries: mmap + CRC-validate
- * perfcache blobs and build the codepoint reverse index in the POSTMASTER,
- * so forked backends inherit everything copy-on-write and never pay the
- * multi-second first-call load. No-op unless preloading. */
+/* Under shared_preload_libraries: map and validate the perfcache blobs and
+ * build the codepoint reverse index in the postmaster so forked backends
+ * inherit them copy-on-write. No-op unless preloading. */
 void laplace_substrate_perfcache_prewarm(void);
 
 

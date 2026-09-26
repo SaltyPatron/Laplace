@@ -9,9 +9,8 @@ const GamePage = lazy(() => import('./GamePage').then((m) => ({ default: m.GameP
 const LaplaceGames = lazy(() => import('./LaplaceGames').then((m) => ({ default: m.LaplaceGames })));
 
 /**
- * The chess database — the read half of the chess pillar. Play and Lab drive a
- * board; this browses what the substrate already witnessed, master into detail:
- * roster → career → game → the other player's career.
+ * Routes the witnessed chess reads, master into detail: roster → player → game →
+ * the opponent. Every id in the path is a content address of a substrate entity.
  */
 export function ChessDbView() {
   return (

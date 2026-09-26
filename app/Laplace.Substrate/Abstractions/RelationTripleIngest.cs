@@ -15,36 +15,23 @@ public sealed class AsyncEnumerableRecordStream<T>(IAsyncEnumerable<T> source) :
 }
 
 /// <summary>
-/// The one generic record every relation-triple source emits: two already-canonical
-/// (underscore-normalized) content phrases and the edge between them. A decomposer's
-/// ONLY job is to yield these; everything downstream — perfcache tier-tree build,
-/// working-set descent dedup, bulk COPY, Glicko fold — is the shared pipeline
-/// (IngestBatchPipeline working-set mode driving RelationTripleHandler). Magnitude
-/// carries a source-supplied edge weight (1.0 when the source has none).
+/// The record every relation-triple provider yields: two canonical (underscore-normalized)
+/// content phrases and the relation between them. Tier-tree composition, working-set
+/// dedup, bulk COPY and the consensus fold are the shared pipeline (IngestBatchPipeline
+/// driving <see cref="RelationTripleHandler"/>). Magnitude is the source's weight for the
+/// testimony (1.0 when the source states none).
 /// </summary>
 public readonly record struct RelationTripleRecord(
     byte[] SubjectCanonical,
     string RelationType,
     /// <summary>
-    /// NULL means the SOURCE stated that no object exists for this (subject, relation) --
-    /// not that one was omitted. Spec 05 separates those: an absent row is UNKNOWN, but a
-    /// corpus that explicitly says "no tail" has given evidence, and dropping it discards a
-    /// witness. ATOMIC2020 says exactly that on 147,608 of 1,331,113 rows (11.09%) with the
-    /// literal tail "none"; every one folded as a CONFIRM toward the entity `none` instead,
-    /// asserting the head DOES stand in that relation to something.
-    ///
-    /// Null is the meaning, not a flag beside it: NativeAttestation.Categorical already
-    /// takes `Hash128? obj` and treats null as object-null, and laplace.attestations already
-    /// holds 7,929 such cells. This is that same nullability one layer up.
-    ///
-    /// NOT a sentinel filter, and it must never become one. `none` is a real word with a
-    /// real content-addressed identity that WordNet and OMW legitimately witness, and it is
-    /// the SAME entity when ATOMIC names it -- same content, same hash. Only the source knows
-    /// its own grammar spells absence that way, so only the source may pass null; the spine
-    /// folds an object-null REFUTE, which is a different cell from any edge to `none`.
-    ///
-    /// An EMPTY array is distinct again: the object failed to parse, which stays unknown
-    /// and stays dropped.
+    /// Null means the source stated that no object exists for this (subject, relation), not
+    /// that one was omitted: absence of a row is unknown, but a stated absence is testimony.
+    /// The handler folds it as an object-null refutation of the (subject, relation) cell,
+    /// matching <c>NativeAttestation.Categorical</c>'s nullable object. Only the provider knows
+    /// how its grammar spells absence, so only the provider passes null; no content value is
+    /// ever filtered as a sentinel. An empty array means the object failed to parse; that
+    /// record stays unknown and is dropped.
     /// </summary>
     byte[]? ObjectCanonical,
     Hash128? ContextId = null,
@@ -58,21 +45,17 @@ public readonly record struct RelationTripleRecord(
     string? ContextAnchorKey = null,
     Hash128? ContextCategoryTypeId = null,
     /// <summary>
-    /// Independent witnesses the source claims for this triple. Sources that state it --
-    /// ConceptNet lists a "sources" array, 96,831 rows of which name two or more -- had it
-    /// discarded: every row folded at 1, so an edge 465 sources agree on folded exactly as
-    /// hard as one asserted once. Defaults to 1, so a source that says nothing is unchanged.
+    /// Independent witnesses the source states for this triple (e.g. the length of
+    /// ConceptNet's "sources" array); the fold counts them as observations. Defaults to 1.
     /// </summary>
     long ObservationCount = 1);
 
 /// <summary>
-/// The single ingestion handler for ALL relation-triple sources. Each record becomes a
-/// two-tree deferred unit: the subject and object phrases are content-decomposed and
-/// descent-deduped independently (IMultiTreeIngestDeferredUnit), then the folding
-/// Categorical edge is emitted between their semantic anchors when the source supplied
-/// them, otherwise between the content-addressed roots. Written once;
-/// atomic, conceptnet, and any future triple source share it verbatim and differ only
-/// in how they extract records.
+/// Ingest handler shared by every relation-triple provider. Each record becomes a two-tree
+/// deferred unit: subject and object phrases are composed and deduped independently
+/// (IMultiTreeIngestDeferredUnit), then the categorical attestation is emitted between
+/// their semantic anchors when the source supplied them, otherwise between the content
+/// roots. Providers differ only in how they extract records.
 /// </summary>
 public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleRecord>
 {
@@ -92,13 +75,13 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
     public IIngestDeferredUnit CreateDeferredUnit(RelationTripleRecord record) =>
         new TripleDeferredUnit(record, _sourceId, _sourceTrust, _sourceNodeDeclarations);
 
-    // Emission happens in the unit's DrainInto (it owns both trees + the edge); nothing to add here.
+    // Emission happens in the unit's DrainInto, which holds both trees and the attestation.
     public void WalkWitness(RelationTripleRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
 
     /// <summary>
-    /// Existence-gate short-circuit: both phrases are proven present, so neither tier tree
-    /// needs recomposing — but the record's testimony (edge + POS/synset/language facts)
-    /// must still be emitted, exactly as DrainInto would have.
+    /// Existence-gate path: both phrases are already present, so neither tier tree is
+    /// recomposed, but the record's testimony (relation plus POS/synset/language facts) is
+    /// still emitted exactly as DrainInto would.
     /// </summary>
     internal void WitnessPresentPair(
         in RelationTripleRecord record, Hash128 subjectRoot, Hash128 objectRoot,
@@ -107,9 +90,8 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             builder, in record, subjectRoot, objectRoot,
             _sourceId, _sourceTrust, _sourceNodeDeclarations);
 
-    // The record's full attested payload given both content roots — shared verbatim by the
-    // deferred unit's DrainInto (composed roots) and the existence-gate short-circuit
-    // (roots resolved without compose).
+    // The record's attestations given both content roots; used by DrainInto (composed
+    // roots) and by the existence-gate path (roots resolved without composing).
     private static void EmitTripleFacts(
         SubstrateChangeBuilder builder, in RelationTripleRecord record,
         Hash128 subjectRoot, Hash128 objectRoot, Hash128 sourceId, double sourceTrust,
@@ -119,9 +101,8 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             ? ss : subjectRoot;
         Hash128 objectEndpoint = record.ObjectSynsetId is { } os && os != default
             ? os : objectRoot;
-        // An explicitly asserted absence is a witness, not a missing row: fold it as an
-        // object-null REFUTE against the (subject, relation) cell. Runs before the paired
-        // arm because there is no object endpoint to pair with, by construction.
+        // A stated absence is testimony: an object-null refutation of the (subject, relation)
+        // cell. It precedes the paired arm because there is no object endpoint.
         if (subjectEndpoint != default && record.ObjectCanonical is null)
         {
             builder.AddAttestation(NativeAttestation.Categorical(
@@ -143,8 +124,8 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
                 observationCount: record.ObservationCount));
         }
 
-        // Fold source-encoded POS onto the unified POS hub (n/v/a/r/s → canonical via the
-        // WordNet tagset). POS entities are foundation-seeded, so this is FK-safe.
+        // Source-encoded POS (n/v/a/r/s) maps to the canonical POS entity through the
+        // WordNet tagset; POS entities are seeded with the foundation, so the reference exists.
         if (subjectRoot != default && record.SubjectPos is { } sp)
             EmitPosDeclaration(
                 builder, subjectRoot, sp, sourceId, sourceTrust, sourceNodeDeclarations);
@@ -227,9 +208,8 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             _sourceId = sourceId;
             _sourceTrust = sourceTrust;
             _sourceNodeDeclarations = sourceNodeDeclarations;
-            // Built here on purpose: CreateDeferredUnit is the fanned-out P-core stage,
-            // so the CPU-heavy tier-tree build parallelizes instead of running in the
-            // sequential drain. Defensive — a malformed phrase yields a null tree, not a throw.
+            // Trees are built here because CreateDeferredUnit runs in the parallel stage,
+            // not the sequential drain. A malformed phrase yields a null tree, not a throw.
             _subjectTree = TryBuild(record.SubjectCanonical);
             _objectTree = TryBuild(record.ObjectCanonical);
             _trees = [_subjectTree, _objectTree];
@@ -253,7 +233,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             }
         }
 
-        // Base (single-tree) surface — unused on the multi path, present for the contract.
+        // Single-tree interface member; the multi-tree path does not use it.
         public TierTree? TreeForBatchProbe => _subjectTree;
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>

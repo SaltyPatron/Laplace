@@ -16,11 +16,8 @@ internal sealed partial class SubstrateClient
         int candidateCapacity,
         CancellationToken ct)
     {
-        // A canonical id is already resolved. Do not decompose its hexadecimal spelling
-        // into text and then search the name lane for those characters: that would turn a
-        // direct address into an unrelated content query. The endpoint still uses the same
-        // Browse result shape, but the candidate member set is empty and only the direct
-        // canonical entity arm can match.
+        // A 32-hex query is the entity id itself: its spelling is not decomposed into
+        // members, so only the direct-id arm can match.
         var directId = LooksLikeEntityHex(query);
         var rootHex = directId ? query.ToLowerInvariant() : queryRootIdHex.ToLowerInvariant();
         var root = TryParseIdHex(rootHex)

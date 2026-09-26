@@ -8,9 +8,8 @@ public static partial class NpgsqlSubstrateReads
     public sealed record ResolvedRefRow(byte[] Id, string Label);
 
     /// <summary>
-    /// Resolve one external reference and materialize its display label in the same
-    /// server command. This is the set-wise replacement for leasing one connection,
-    /// resolving through a second connection, then returning to the first for labeling.
+    /// RESOLVE for one external reference, returning the entity id and its display label
+    /// from one server command.
     /// </summary>
     public static async Task<ResolvedRefRow?> ResolveRefWithLabelAsync(
         global::Npgsql.NpgsqlDataSource dataSource,

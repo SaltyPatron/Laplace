@@ -1,7 +1,6 @@
--- Native positive-confirmation core. It already treats malformed-width values as
--- absent while preserving input ordinals. Keep this binding separate so the public
--- surface can map SQL NULL elements to the same explicit absent sentinel without a
--- PL/pgSQL/RBAR loop or another database crossing.
+-- Native positive-confirmation core: malformed-width ids read absent and input
+-- ordinals are preserved. The SQL wrapper maps NULL elements to the same absent
+-- sentinel in one array operation, with no per-element loop.
 CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap_native(ids bytea[])
     RETURNS bytea
     AS 'EXECUTION_LIBRARY', 'pg_laplace_physicalities_exist_bitmap'
@@ -15,11 +14,7 @@ BEGIN ATOMIC
         array_replace(ids, NULL::bytea, ''::bytea));
 END;
 
--- The (ids, hilberts) keyed overload is GONE (2026-08-04). It pruned each probe
--- to the RANGE(hilbert_index) band holding the row; physicalities is now
--- HASH(id), where a hilbert key names no partition at all. A probe that reports
--- a stored row absent is not a slow path — COPY has no ON CONFLICT, so it aborts
--- the ingest (see the novel-by-construction post-mortem in NpgsqlWorkingSetApply).
--- The id-only probe above needs no partition hint: HASH(id) routes on the id it
--- is already given.
+-- Physicalities are HASH(id), so the id routes the probe and a hilbert key
+-- names no partition; the (ids, hilberts) form is dropped. A stored row must
+-- never read absent: bulk COPY has no ON CONFLICT and would abort.
 DROP FUNCTION IF EXISTS laplace.physicalities_exist_bitmap(bytea[], bytea[]);

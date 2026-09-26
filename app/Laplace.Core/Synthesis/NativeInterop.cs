@@ -142,11 +142,9 @@ public static partial class NativeInterop
         IntPtr tmpl, IntPtr recipe, TensorSpec* outSpecs, nuint cap);
 
     /// <summary>
-    /// Bounded ABI form retained for native-parity callers. The C ABI reports the
-    /// required count when <paramref name="cap"/> is too small and intentionally does
-    /// not populate <paramref name="outSpecs"/> in that case. Managed callers historically
-    /// treated any positive result as populated data, so translate capacity shortfall to
-    /// a fail-loud status instead of handing them a default/zero manifest.
+    /// Bounded ABI form. The C ABI reports the required count when <paramref name="cap"/>
+    /// is too small and does not populate <paramref name="outSpecs"/> in that case, so a
+    /// capacity shortfall is returned as -2 rather than as a positive count over unfilled specs.
     /// </summary>
     public static unsafe int ArchTemplateRequiredTensors(
         IntPtr tmpl, IntPtr recipe, TensorSpec* outSpecs, nuint cap)

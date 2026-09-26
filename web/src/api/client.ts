@@ -25,9 +25,9 @@ export interface ApiOptions {
   signal?: AbortSignal;
 }
 
-// The shell supplies the server-confirmed workspace, not a browser identity.
-// This header asserts request intent so a workspace switch in another tab cannot
-// silently apply a stale form to the newly selected company.
+// Workspace the shell received from the server. Sent as X-Laplace-Workspace (an
+// explicit tenant wins) so the server can refuse a request formed under a
+// workspace that another tab has since switched away from.
 let browserWorkspace: string | null = null;
 export function setApiWorkspace(tenant: string | null): void { browserWorkspace = tenant; }
 
@@ -72,7 +72,7 @@ async function parseError(res: Response): Promise<never> {
   throw new ApiError(res.status, message, res.headers.get('x-request-id') ?? undefined);
 }
 
-/** One transport/error/cancellation contract for every product surface. No implicit retries. */
+/** Shared web transport to the machine's operations: same-origin credentials, typed failures, caller-owned cancellation, no implicit retries. */
 async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Promise<T> {
   const headers = new Headers(laplaceHeaders(opts));
   if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));

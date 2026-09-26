@@ -5,8 +5,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// <summary>
 /// The Explore 2-D and 3-D force renderers mutate their graphData objects in place.
 /// A shared object graph lets the 2-D simulation write planar coordinates that the
-/// 3-D simulation later inherits. Three/WebGL colors also belong to the UI palette;
-/// renderer-local legacy colors must not survive a product reskin.
+/// 3-D simulation later inherits, so each dimension gets its own copy. Three/WebGL colors
+/// come from the UI palette, not renderer-local constants.
 /// </summary>
 public class ExploreVisualizationGateTests
 {

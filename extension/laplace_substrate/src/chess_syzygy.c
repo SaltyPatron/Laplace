@@ -15,13 +15,13 @@
 /*
  * chess.syzygy_transition(position)
  *
- * SQL owns only the indexed candidate reduction: the projection-constituent
- * GIN finds Syzygy chunks containing the requested position.  C owns the
- * ordered trajectory decode and adjacency operation.  The previous SQL body
- * expanded every point through ST_DumpPoints/laplace_mantissa_unpack, built a
- * materialized vertex relation, and self-joined it twice; a single live lookup
- * exceeded 20 seconds on a 6,144-vertex chunk.  One WKB row plus a linear native
- * scan is the same boundary used by geometry_successors and continuations.
+ * Reads one recorded transition out of trajectory structure. The trajectory
+ * membership index selects the manifests, attested by the ChessSyzygy source,
+ * that contain the position; C then scans each manifest in ordinal order for a
+ * (position, move, successor) run with roles 0, 1, 2 (flags bits 8-9) and
+ * returns the move, the successor, the 3-bit result class (flags bits 10-12) and
+ * the zigzag-coded DTZ (flags bits 16+) of the position vertex. The first match
+ * ends the read.
  */
 static const char *SYZYGY_CHUNK_QUERY =
     "SELECT public.ST_AsBinary(p.trajectory) "

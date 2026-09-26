@@ -1,4 +1,4 @@
--- BEGIN ATOMIC: full scan over canonical entity structural floors.
+-- Exact entity count per type_id: a full scan of entities.
 DROP FUNCTION IF EXISTS laplace.entity_type_counts();
 CREATE OR REPLACE FUNCTION ops.entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)

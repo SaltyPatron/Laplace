@@ -73,10 +73,9 @@ public sealed class ConsensusMutationRoutingTests
         var sql = Read("extension", "laplace_substrate", "sql", "functions",
             "chess", "repair_player_ratings.sql.in");
 
-        // The old repair inferred debt only from a missing/stale witness count or
-        // timestamp. The runaway incident proved a corrupt rating can retain both,
-        // so deployment must reconstruct the whole chess player rating surface from
-        // authoritative testimony regardless of the current consensus values.
+        // A corrupt rating can keep a plausible witness count and timestamp, so the repair
+        // rebuilds every player rating from durable testimony without reading the current
+        // consensus values.
         Assert.DoesNotContain("IF NOT FOUND THEN\n        RETURN", sql,
             StringComparison.Ordinal);
         Assert.Contains("pg_laplace_repair_player_ratings_batch", sql, StringComparison.Ordinal);
@@ -108,9 +107,9 @@ public sealed class ConsensusMutationRoutingTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        // Eviction retains its explicit keyed replacement/culling owner. Refold
-        // now delegates to the same native evidence owner as atomic admission;
-        // restoring a second SQL writer would split that lock/snapshot contract.
+        // Eviction is the only SQL writer of laplace.consensus (keyed replacement); refold
+        // goes through the native evidence route atomic admission uses, so both share one
+        // lock/snapshot contract.
         Assert.Equal([
             "extension/laplace_substrate/sql/functions/ops/evict_source.sql.in",
         ], writers);

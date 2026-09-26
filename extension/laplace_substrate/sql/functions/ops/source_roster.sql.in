@@ -1,11 +1,6 @@
--- A source's roster: a bounded SAMPLE of what this witness asserts, fully
--- labeled. By id (the per-leaf source_id indexes make it ~1s cold); "top"
--- would demand an unbounded sort over millions of rows — a sample is the
--- honest bounded read.
---
--- String body on purpose (not BEGIN ATOMIC): extension upgrades recreate
--- v_attestation_readable in the same script; parse-time resolution fails with
--- "relation does not exist" mid-upgrade (GH #764).
+-- A source's roster: an unordered bounded sample of what this witness
+-- asserts, fully labeled, read through the per-leaf source_id indexes. A ranked
+-- "top" would need an unbounded sort over the source's rows.
 DROP FUNCTION IF EXISTS laplace.source_roster(bytea, int);
 
 CREATE OR REPLACE FUNCTION ops.source_roster(p_source bytea, p_limit int DEFAULT 40)
@@ -19,9 +14,8 @@ BEGIN ATOMIC
            a.observation_count
     FROM laplace.v_attestation_readable a
     WHERE a.source_id = p_source
-      -- Every source bootstraps the shared relation law first. Those rows have
-      -- relation-type subjects and otherwise consume the whole bounded sample,
-      -- making every source appear to hold the same content.
+      -- Relation-law rows (relation-type subjects) are shared by every source
+      -- and would otherwise fill the sample.
       AND consensus.relation_canonical(a.subject_id) IS NULL
     LIMIT p_limit;
 END;

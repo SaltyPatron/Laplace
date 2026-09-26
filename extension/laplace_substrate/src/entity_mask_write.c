@@ -73,11 +73,9 @@ static bool mask_missing(Datum datum, bool isnull, const laplace_mask256_t *delt
     return changed;
 }
 
-/* This storage operation performs a direct executor UPDATE and therefore may
- * bypass no UPDATE policy. The canonical-identity admission trigger is
- * INSERT-only and does not participate in highway-mask maintenance, so it is
- * explicitly compatible. Reject rules, generated stored columns, row security,
- * or any UPDATE trigger before writing rather than silently bypassing them. */
+/* The write is a direct executor UPDATE, which would bypass rules, UPDATE
+ * triggers, stored generated columns, and row security; storage carrying any of
+ * them is refused. INSERT-only triggers do not fire on this path. */
 static void check_storage(Relation relation)
 {
     TriggerDesc *triggers = relation->trigdesc;
@@ -92,14 +90,12 @@ static void check_storage(Relation relation)
         elog(ERROR,"entity mask write cannot bypass row security");
 }
 
-/* Incremental Highway masks are rebuildable acceleration, never semantic
- * authority. If an ingest-time accretion would wait behind another tuple owner,
- * retain that canonical entity id for the existing authoritative refresh lane
- * instead of letting a performance structure block or deadlock canonical ingest.
- *
- * The caller already owns one SPI connection. Keep recovery set-sized and ordered;
- * entities.mask_dirty performs DISTINCT + ON CONFLICT and the later refresh reads
- * current consensus, so multiple missed deltas collapse safely to one recompute. */
+/* The highway mask is a derived map over consensus, rebuildable from current
+ * standing. An OR deposit that would wait on another transaction's row lock
+ * queues the entity id here instead, so mask maintenance never blocks or
+ * deadlocks ingest. entities.mask_dirty deduplicates, and the refresh reads
+ * current consensus, so several missed deltas become one recompute. Runs on the
+ * caller's SPI connection. */
 static void retain_dirty_ids(Datum *ids, int count)
 {
     static SPIPlanPtr dirty_plan;
@@ -224,9 +220,8 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
     int64 updated=0;
     if(recompute)
     {
-        /* Freeze exactly the existing physical target set before opening the
-         * incident snapshot. Later-created entities/tiers are not replacement
-         * targets; their ordinary deposits remain intact. */
+        /* Lock every existing target before recompute opens its snapshot.
+         * Entities or tiers created later are not replaced. */
         for(uint64 i=0;i<n;++i)
         {
             CHECK_FOR_INTERRUPTS();
@@ -289,11 +284,9 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
     return updated;
 }
 
-/* Accumulation and authoritative refresh share tuple routing, permissions and
- * index maintenance. Incremental accretion never waits on a contended tuple:
- * it defers that entity to the authoritative dirty-refresh queue because the
- * Highway mask is an accelerator. Replacement/bit-clearing remains blocking
- * and authoritative. Empty replacement means NULL, not an absent request. */
+/* apply ORs deltas in and never waits on a locked row: that entity is queued
+ * for refresh instead. replace writes desired masks and waits on locks; an
+ * all-zero replacement stores NULL. */
 int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count)
 {
     return entity_masks_write(deltas,count,false,NULL,NULL);
@@ -304,8 +297,8 @@ int64 laplace_entity_masks_replace(const LaplaceEntityMaskDelta *masks, int coun
     return entity_masks_write(masks,count,true,NULL,NULL);
 }
 
-/* Recompute only after all captured entity tuples are locked. The callback
- * owns its fresh incident snapshot and restores it before returning. */
+/* recompute runs only after every target row is locked; it owns its fresh
+ * snapshot and restores the previous one before returning. */
 int64 laplace_entity_masks_refresh(const LaplaceEntityMaskDelta *masks, int count,
                                   LaplaceEntityMaskRefresh recompute, void *context)
 {

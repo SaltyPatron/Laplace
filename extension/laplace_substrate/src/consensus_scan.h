@@ -38,27 +38,28 @@ extern void laplace_consensus_scan(
     LaplaceConsensusConsumer consume, void *context,
     LaplaceConsensusScanStats *stats);
 
-/* The physical DEFAULT partition carries relation types without a named
- * partition. Used by the existing highway-mask neighbor read contract. */
+/* Scan only the DEFAULT partition, which carries relation types without a
+ * named partition. */
 extern void laplace_consensus_scan_default(
     ArrayType *subjects, ArrayType *objects,
     LaplaceConsensusConsumer consume, void *context,
     LaplaceConsensusScanStats *stats);
 
-/* Binary-neighbor projection: the consumer must discard unary cells. This
- * permits using a canonical object-IS-NOT-NULL partial index. Without an exact
- * endpoint/effective-mu index, storage falls back to the complete batch scan.
- * Its cutoff covers the entire endpoint range, across relation types. */
+/* Binary-neighbor projection: the consumer must discard unary cells, which
+ * permits the object-IS-NOT-NULL partial index. Cells arrive per endpoint in
+ * descending effective mu, and the cutoff covers that endpoint's whole range
+ * across relation types. Without an endpoint/effective-mu index the complete
+ * keyed scan is used and the cutoff is not applied. */
 extern void laplace_consensus_scan_ranked(
     ArrayType *subjects, ArrayType *objects, ArrayType *types, bool default_only,
     LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff, void *context,
     LaplaceConsensusScanStats *stats);
 
-/* Independently ordered response planes for every eligible exact relation.
- * Cutoff ends only the current endpoint/type range; later types still respond.
- * Types are discovered by indexed seeks, never a source-specific roster or a
- * mask whose absence could erase evidence. Missing typed rank indexes select
- * the complete endpoint-indexed read without cutoff. No SQL per candidate. */
+/* COUPLE's typed response planes: each (endpoint, relation type) range is read
+ * in descending effective mu, and the cutoff ends only that range; later types
+ * still respond. Types present at an endpoint are discovered by index seeks,
+ * so no roster or mask decides which planes exist. Without the typed rank
+ * index the complete endpoint-indexed read is used without cutoff. */
 extern void laplace_consensus_scan_ranked_planes(
     ArrayType *subjects, ArrayType *objects, ArrayType *types, bool default_only,
     LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff, void *context,

@@ -111,11 +111,8 @@ public class IntentStageTests
     [Fact]
     public void AddAttestation_DefaultQualifierMaskEmits32ZeroBytesNotNull()
     {
-        // Regression test for the IsZero-vs-unset bug: a caller that doesn't pass
-        // qualifierMask (or passes an explicitly all-zero Mask256) gets Mask256.Zero,
-        // which is a legitimately meaningful 32-byte mask (no qualifiers
-        // matched), not "no mask was computed." Before the fix, AddAttestation's
-        // `mask.IsZero ? null : ...` collapsed both cases to a NULL column write.
+        // An omitted or all-zero qualifier mask is Mask256.Zero, a real 32-byte mask
+        // (no qualifier flags set), and is written as 32 zero bytes, never NULL.
         using var s = IntentStage.New(1);
         var h = Hash128.Zero;
         s.AddAttestation(h, h, h, null, h, null,

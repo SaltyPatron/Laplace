@@ -1,34 +1,33 @@
--- Authoritative Highway-mask recomputation is a durable obligation whenever an
--- existing cached value may differ from current consensus. This includes
--- bit-clearing after source eviction/refolding and incremental accretion that
--- deliberately skips a contended entity row so the accelerator cannot block
--- canonical ingest. A crash must not erase either class of work.
+-- highway_mask is a derived cache of which relation types an entity stands in.
+-- An id lands here whenever its cached mask may differ from current consensus:
+-- bits to clear after eviction/refold, or an inline deposit that skipped a
+-- contended entity row so the cache never blocks canonical ingest. LOGGED, so
+-- a crash does not lose the recompute obligation.
 CREATE TABLE IF NOT EXISTS highway_mask_dirty (
     id bytea PRIMARY KEY
 );
 ALTER TABLE laplace.highway_mask_dirty SET LOGGED;
 
--- Exact deposit backlog. Persist already-known pairs when the registry is
--- unavailable instead of rediscovering them with a later consensus scan.
+-- Exact (entity, relation type) deposits not yet applied to highway_mask, kept
+-- when the relation registry cannot resolve a bit so they are applied later
+-- without rescanning consensus.
 CREATE TABLE IF NOT EXISTS highway_mask_pending (
     entity_id bytea NOT NULL CHECK (octet_length(entity_id) = 16),
     type_id   bytea NOT NULL CHECK (octet_length(type_id) = 16),
     PRIMARY KEY (entity_id, type_id)
 );
 
--- Existing data needs one historical population pass. Subsequent writes use
--- native inline deposit when uncontended; deferred dirty identities and pending
--- pairs remain repairable independently of canonical substrate completion.
+-- Singleton: whether highway_mask has been populated over all consensus that
+-- existed before inline deposit. Later writes deposit inline when uncontended;
+-- dirty ids and pending pairs are repaired independently of this flag.
 CREATE TABLE IF NOT EXISTS highway_mask_population_state (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     complete boolean NOT NULL DEFAULT false,
     completed_at timestamptz
 );
--- On a greenfield database this table is installed before corpus admission, so
--- the historical estate is already complete: there is no pre-existing consensus
--- to repair, and every subsequent accepted pair is deposited inline. An upgrade
--- that creates this state over an existing populated consensus estate remains
--- incomplete and may be repaired only by an explicit operator action.
+-- Complete iff consensus is empty when the state row is first created: every
+-- later pair is deposited inline. Over existing consensus the flag stays false
+-- until an explicit population run sets it.
 INSERT INTO highway_mask_population_state(singleton, complete, completed_at)
 SELECT true,
        NOT EXISTS (SELECT 1 FROM laplace.consensus),

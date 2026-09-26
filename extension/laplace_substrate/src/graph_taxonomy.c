@@ -34,13 +34,11 @@ tax_find(const hash128_t *ids, int n, const hash128_t *key)
 }
 
 /*
- * The frontier is expanded ONE SPI round trip per BFS level, not one per
- * dequeued node: the walk was 19.7k sequential SPI calls for a hub word
- * (emperor's depth-7 closure = 8,225 nodes) and dominated the ~14s matchup
- * tape. unnest WITH ORDINALITY + ORDER BY u.ord makes the batched rows arrive
- * in exactly the per-node order the old loop produced, so parent assignment,
- * dedup, and output order are unchanged. consensus_taxonomy_edges stays the
- * single owner of the edge truth table.
+ * One set read per BFS level: the whole frontier is passed as an array and
+ * each frontier id's consensus edges of the requested types come back tagged
+ * with its ordinal. ORDER BY u.ord keeps rows in frontier order, which fixes
+ * parent assignment and output order. consensus_taxonomy_edges is the one
+ * owner of which edges stand.
  */
 static SPIPlanPtr tax_edges_plan = NULL;
 
@@ -65,10 +63,8 @@ ensure_tax_edges_plan(void)
     }
 }
 
-/* id -> node-index map, replacing the O(n) tax_find scan over the BFS node
- * array. Node ids are unique (dedup on insert), so the map is 1:1 and returns
- * exactly the index the linear scan would have — BFS order and output are
- * unchanged. */
+/* id -> node-index map over the walk's nodes; ids are deduplicated on insert,
+ * so the map is 1:1. */
 typedef struct TaxIdxEntry
 {
     char key[16];
@@ -197,11 +193,10 @@ tax_bfs_up_weighted(const hash128_t *seeds,
         queue[tail++] = n++;
     }
 
-    /* Level-synchronous BFS: FIFO order already visits nodes in
-     * non-decreasing depth, so expanding a whole level in one batched query —
-     * rows ordered by frontier position — replays exactly the per-node
-     * sequence the old loop produced. One SPI round trip per depth level
-     * (≤ max_depth total) instead of one per node. */
+    /* Level-synchronous BFS: one set read per depth level, rows in frontier
+     * order. A node already reached at a shallower depth is kept; at equal
+     * depth the wider bottleneck mu takes the parent; a deeper node is
+     * re-parented to the shallower path and re-queued. */
     {
         int level_begin = 0;
         int level_end = tail;
@@ -842,10 +837,8 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
         n_nodes = tax_bfs_up(&seed, 1, max_depth, up_types, 2, &nodes);
     }
 
-    /* Batch the label + gloss resolution: the per-node spi_realize +
-     * spi_gloss_for pair was 2 unprepared parse/plan/execute round trips per
-     * emitted node. realize_batch resolves every id in 6 fixed round trips;
-     * the gloss set-query is one more. */
+    /* REALIZE the emitted ancestors as one set: labels through
+     * spi_realize_batch, glosses through one ordered array read. */
     {
         int    n_emit = 0;
         int   *emit_idx = (int *) palloc(sizeof(int) * (n_nodes > 0 ? n_nodes : 1));

@@ -16,8 +16,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     public SubstrateClient()
     {
         _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
-        // Server-enforced read-only. Individual commands own their exact timeout;
-        // a datasource-wide statement_timeout would silently override that budget.
+        // Read-only is enforced by the server session. Each command sets its own
+        // timeout; a datasource-wide statement_timeout would override it.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
             dsb.ConnectionStringBuilder.CommandTimeout =
@@ -61,11 +61,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// Tenant-isolated converse.converse(spec 34, opt-in): re-fold the tenant's own witnessed
-    /// world via scoped_consensus into pg_temp.consensus, which shadows
-    /// laplace.consensus for every unqualified read on THIS connection (the Build-A-
-    /// Bear scoped-pour mechanism), then run the same session read. One connection
-    /// per request; Npgsql's pool reset (DISCARD ALL) drops the temp table on return.
+    /// Folds consensus over only <paramref name="scopeSources"/> into pg_temp.consensus,
+    /// which shadows laplace.consensus for every unqualified read on this connection, then
+    /// runs the same forward pass. The fact rows are unchanged; only the standing the pass
+    /// reads is scoped. Npgsql's pool reset (DISCARD ALL) drops the temp table on return.
     /// </summary>
     public async Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
         string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct)
@@ -99,9 +98,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// Multi-turn call shape kept for interface parity with older stateless clients;
-    /// session state is substrate-resident here (spec 34), so only the newest turn
-    /// is consumed — same rule RecallSessionAsync's comment documents.
+    /// Sends only the newest user turn. Earlier turns are already witnessed under
+    /// <paramref name="session"/> in the substrate.
     /// </summary>
     public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
@@ -111,8 +109,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         NpgsqlConnection conn, string prompt, byte[]? session,
         ConverseOptions options, CancellationToken ct)
     {
-        // The endpoint transports the canonical program's result. An empty pass
-        // remains empty; phrase recall must not manufacture a successful chat reply.
+        // Shape, bands, or elaborate select the inspecting chat read; otherwise the
+        // forward turn runs. An empty result stays empty; nothing substitutes a reply.
         bool inspection = !string.IsNullOrWhiteSpace(options.Shape)
             || options.Bands is { Length: > 0 } || options.Elaborate;
         var reply = inspection
@@ -237,9 +235,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                     EvidenceRows: evidence[i]));
             }
 
-            // This endpoint is physicality geometry. Consensus edges belong to
-            // Explore's belief/web projection, not to a fabricated graph over a
-            // spatial coverage sample.
+            // The nodes are a spatial sample of physicality coordinates. Edges between
+            // sampled nodes are not implied by that sample, so none are returned.
             return new SubstrateVisualizationGraph(output, []);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
@@ -311,11 +308,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// Exact consensus.stats() is a full count(*) over attestations plus a full aggregate
-    /// over consensus — measured minutes at 135M/124M rows live. Attempt it within a
-    /// bounded budget, then fall back to consensus.stats_approx() (planner
-    /// estimates; avg/max witnesses come back NULL — that nullness IS the approximation
-    /// signal in the contract).
+    /// consensus.stats() scans every attestation and consensus row, so it runs under
+    /// <paramref name="exactBudgetSeconds"/>; on timeout consensus.stats_approx() answers
+    /// from planner estimates, with null avg/max witnesses marking the estimate. Null when
+    /// both time out.
     /// </summary>
     private static async Task<ConsensusHealth?> ReadConsensusHealthAsync(
         NpgsqlConnection conn, int exactBudgetSeconds, CancellationToken ct)
@@ -338,7 +334,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
-            // exact variant blew its budget — fall through to the approx variant
+            // The exact read timed out; the planner estimate answers below.
         }
 
         try
@@ -353,19 +349,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// ops.multi_source_entity_count() is a GROUP BY over ALL attestations with a
-    /// count(DISTINCT source_id) — 169M rows and growing, with no bound and no index that
-    /// helps. Durable fix is a calculated-layer stat maintained post-ingest (doc 02, Issue 52).
-    ///
-    /// OFF BY DEFAULT ON THE SERVING PATH. A budget is not a bound: the query still burns
-    /// its FULL budget of cache-cold random I/O before being cancelled, and then returns
-    /// null anyway. MEASURED 2026-08-03: observed running 6m31s in DataFileRead against a
-    /// live ingest on a disk that was already the constraint, then discarded. Paying that
-    /// to compute nothing is strictly worse than not asking.
-    ///
-    /// Null already means "not computed" and every response contract tolerates it, so
-    /// declining costs the caller a field it was going to lose on timeout regardless.
-    /// Set LAPLACE_AUDIT_MULTISOURCE=1 to opt in when the substrate is idle.
+    /// ops.multi_source_entity_count() groups every attestation by count(DISTINCT
+    /// source_id) with no bounding index; a timeout spends the whole budget in I/O and
+    /// still yields nothing. It runs only when LAPLACE_AUDIT_MULTISOURCE=1; otherwise the
+    /// field is null, which the contract reads as "not computed".
     /// </summary>
     private static bool MultiSourceCountEnabled =>
         Environment.GetEnvironmentVariable("LAPLACE_AUDIT_MULTISOURCE") == "1";
@@ -398,10 +385,9 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     };
 
     /// <summary>
-    /// consensus.top_relations(@limit, NULL) avoids both historical failures: it
-    /// neither sorts the full consensus table nor guesses a raw-eff_mu pool. The
-    /// exact governed edge-rank expression is indexed on every consensus leaf, so
-    /// PostgreSQL performs one bounded merge instead of a type-by-leaf probe matrix.
+    /// consensus.top_relations(@limit, NULL) reads the governed edge-rank expression
+    /// index on every consensus leaf, so the top edges come from one bounded merge
+    /// rather than a sort of the consensus table.
     /// </summary>
     private static async Task<IReadOnlyList<VisualizationEdge>> ReadTopRelationsAsync(NpgsqlConnection conn, int limit, CancellationToken ct)
     {
@@ -422,9 +408,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
-        // Provenance receipts: deduped (type, object) claims with named sources — not
-        // consensus.consensus_out(that duplicates chat/salient-facts) or raw attestations_out
-        // (one row per source/context cartesian product).
+        // Provenance receipts: one row per deduped (type, object) claim with its source
+        // labels and witness count, not one row per source/context attestation.
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -433,7 +418,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             string? entityLabel = null;
             var items = new List<Laplace.Api.Contracts.LabeledEvidenceItem>(limit);
 
-            // GH #575: FEN → composed position hex before resolve_ref.
+            // A FEN resolves as the id of its composed position.
             target = ChessPositionRef.RewriteFenToHex(target) ?? target;
             foreach (var r in await NpgsqlSubstrateReads.EvidenceForTargetAsync(conn, target.Trim(), limit, ct))
             {
@@ -487,7 +472,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             long entities = 0, consensus = 0;
             foreach (var row in await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, ct))
             {
-                // Metric keys from ops.substrate_counts — relation roles, not Brand.table.
+                // Metric keys are ops.substrate_counts labels.
                 if (row.Metric.Equals("entities(ESTIMATE)", StringComparison.Ordinal))
                     entities = Math.Max(entities, row.Value);
                 else if (row.Metric.Equals("consensus(ESTIMATE)", StringComparison.Ordinal))
@@ -514,9 +499,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 detail = pg.MessageText;
             }
 
-            // PostgreSQL mapping T0 is not the same as this process loading T0.
-            // The API native library and the extension backend can disagree after
-            // a partial prefix install.
+            // The PostgreSQL backend and this process load the T0 perfcache
+            // independently; readiness requires both.
             bool processPerfcacheReady = CodepointPerfcache.IsLoaded;
             if (!processPerfcacheReady)
             {
@@ -566,7 +550,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             EmbeddingForm? form = null;
             var meaning = new List<MeaningNeighbor>();
 
-            // GH #575: FEN → composed position hex before resolve_ref.
+            // A FEN resolves as the id of its composed position.
             input = ChessPositionRef.RewriteFenToHex(input) ?? input;
             var rows = await NpgsqlSubstrateReads.EmbeddingLookupAsync(
                 conn, input.Trim(), Math.Max(0, meaningLimit), includeMeaning, ct);
@@ -613,24 +597,17 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         try
         {
             var requestedTimeout = InstalledOpInvoker.RequestedCommandTimeout(timeoutSeconds);
-            // Ops on the explicit write allow-list need a connection that is not
-            // default_transaction_read_only; everything else keeps the read-only
-            // posture. Without this branch a write op resolves from the catalog
-            // and then fails at execution, which is how the ingest-run gate ended
-            // up only clearable by hand against the database.
+            // Ops on the write allow-list run on the writable datasource; every
+            // other op runs under default_transaction_read_only.
             var dataSource = InstalledOpInvoker.IsWritable(name)
                 ? _dataSource
                 : _dataSourceReadOnly;
             return await InstalledOpInvoker.InvokeAsync(
                 dataSource, name, args, maxRows, requestedTimeout, ct).ConfigureAwait(false);
         }
-        // A PostgresException outside the availability classes is the OPERATION
-        // answering — a RAISE, a bad argument, a failed precondition — not the
-        // cluster being down. Reporting it as 503 "unreachable" sent callers
-        // hunting a connectivity fault while the real cause sat unread in
-        // MessageText (generation.model_forward raising "no APPEARS_IN circuit
-        // slices" surfaced as substrate_unavailable). Return it as an op error so
-        // the endpoint answers 400 with the message the function actually wrote.
+        // A PostgresException outside the availability classes is the operation's
+        // own answer (a RAISE, a bad argument, a failed precondition). It returns as
+        // an op error carrying the function's message, not as unavailability.
         catch (PostgresException pg) when (!IsAvailabilitySqlState(pg.SqlState))
         {
             return new InstalledOpInvoker.OpResult(
@@ -645,9 +622,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     /// <summary>
     /// SQLSTATE classes that mean the cluster rather than the query, and so must stay
     /// 503: 08 connection_exception, 53 insufficient_resources, 57 operator_intervention,
-    /// 58 system_error. 53000 is load-bearing here — that is the fd-exhaustion
-    /// "could not open shared memory segment" that genuinely IS unavailability.
-    /// PostgresException derives from NpgsqlException, so this must be tested first.
+    /// 58 system_error (53000 covers fd exhaustion, "could not open shared memory
+    /// segment"). PostgresException derives from NpgsqlException, so this is tested first.
     /// </summary>
     private static bool IsAvailabilitySqlState(string? sqlState) =>
         sqlState is { Length: >= 2 } && sqlState[..2] is "08" or "53" or "57" or "58";
@@ -659,19 +635,16 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// The serving budget. Kept as an alias so the existing call sites
-    /// (SubstrateClient.Explore, Middleware's 503 envelope text) keep reading one
-    /// value — the policy itself now lives with the datasource that applies it.
+    /// Serving command timeout, as applied by <see cref="LaplaceDataSource"/>.
     /// </summary>
     internal const int DefaultCommandTimeoutSeconds = LaplaceDataSource.ServingCommandTimeoutSeconds;
 
     /// <summary>
-    /// The one exception-translation rule every read in this client applies, now shared
-    /// with <see cref="Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads"/> callers via
-    /// its <c>onError</c> delegate: a rejected query (<see cref="PostgresException"/>)
-    /// is a client mistake worth naming (bad SQL state, a where-clause); anything else
-    /// NpgsqlRead offers to translate (plain <see cref="NpgsqlException"/>,
-    /// <see cref="TimeoutException"/>) means the server itself was unreachable.
+    /// Exception translation passed as the <c>onError</c> delegate to
+    /// <see cref="Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads"/>: a
+    /// <see cref="PostgresException"/> is the query's own rejection and is named with its
+    /// SQL state; a plain <see cref="NpgsqlException"/> or <see cref="TimeoutException"/>
+    /// means the server was unreachable.
     /// </summary>
     private static Exception TranslateSubstrateError(Exception failure, string label) =>
         failure is PostgresException pg

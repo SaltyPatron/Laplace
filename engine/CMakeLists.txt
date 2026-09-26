@@ -13,23 +13,19 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
     add_compile_options(-Wall -Wextra)
-    # The engine is portable C/C++ on standard functions (getenv/fopen/strncpy);
-    # MSVC's CRT "unsafe" deprecations are vendor-specific and already silenced
-    # this same way in extension/. Keep parity.
+    # The engine uses standard C functions (getenv/fopen/strncpy); MSVC CRT
+    # deprecations are silenced as in extension/.
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
-    # /Qfma- deliberately overrides the FMA contraction /fp:precise would allow
-    # (determinism gate: no fused-multiply-add). icx's driver warns about that
-    # exact override; the override is the point, so silence only that diagnostic.
+    # /Qfma- overrides the FMA contraction /fp:precise would allow: identity and
+    # geometry arithmetic must round identically on every host. icx warns about
+    # that override, so only that diagnostic is silenced.
     set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma- -Wno-overriding-option)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options(-Wall -Wextra -Wpedantic)
     set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
-    # GCC/Clang spell the same deterministic floating-point contract differently.
-    # Feeding Intel driver flags to the system compiler made the documented GCC
-    # toolchain impossible to build, so local/CI validation never reached the
-    # extension being changed.
+    # The same deterministic floating-point contract in GCC/Clang spelling.
     set(LAPLACE_ENGINE_FP_FLAGS -fno-fast-math -ffp-contract=off)
 endif()
 
@@ -37,17 +33,12 @@ endif()
 # native crash (access violation / heap fail-fast) symbolizes to function+line instead
 # of a bare module+offset. /Z7 embeds CodeView in each .obj (Ninja-parallel-safe, no
 # mspdbsrv serialization); /DEBUG makes the linker emit the .pdb; /OPT:REF,ICF keep the
-# release binary size. Optimization level is UNCHANGED — this only adds symbols. Guarded
-# to Release/RelWithDebInfo because Debug already carries its own /Zi (mutually exclusive
-# with /Z7).
+# release binary size. Optimization level is unaffected; this only adds symbols. Limited
+# to Release/RelWithDebInfo because Debug carries /Zi, which is exclusive with /Z7.
 if(WIN32)
-    # /Z7 embeds CodeView ONLY on C translation units. Applying it to the Eigen-heavy C++
-    # math (dynamics/gram_schmidt.cpp etc.) blew icx's compile memory past an internal
-    # crash (ICE) under the clean parallel build. The ingest corruptor and every observed
-    # native crash live in C code (intent_stage.c, content_witness_batch.c, chess) — so
-    # C-only debug info covers exactly what needs symbolizing, deterministically avoiding
-    # the C++ template ICE. C++ frames still resolve to function names via the linker's
-    # public-symbol table; only per-line info is absent for them.
+    # /Z7 applies to C translation units only; on the Eigen-heavy C++ translation units
+    # it exhausts icx compile memory. C++ frames still resolve to function names through
+    # the linker's public-symbol table, without per-line info.
     add_compile_options($<$<AND:$<CONFIG:Release,RelWithDebInfo>,$<COMPILE_LANGUAGE:C>>:/Z7>)
     # icx forwards linker flags ONLY via /Qoption,link,<flag>; a bare /DEBUG hits the
     # compiler driver and is silently dropped (never reaches link → no PDB). /OPT:REF,ICF
@@ -159,16 +150,10 @@ message(STATUS "Laplace UCD: version=${LAPLACE_UNICODE_VERSION} xml=${LAPLACE_UC
 message(STATUS "Laplace UCA: version=${LAPLACE_UCA_VERSION} ducet=${LAPLACE_DUCET_FILE}")
 
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
-    # Do NOT restore the old advice here. This said "git submodule update --init
-    # external/eigen ..." long after 391d9be7 deleted all 311 submodules and moved
-    # the deps to a PINS.tsv-driven cache, so the remedy it printed could not work
-    # and the operator was sent to a dead command. It is also the wrong diagnosis
-    # in the common case: the tree is usually fine and the CACHED path is stale.
-    # LAPLACE_EXTERNAL is a CACHE PATH, so an env var does not override it once a
-    # build directory exists -- when /opt/laplace/external became a 16 GB LV and
-    # external moved to /build (44962ae4), every pre-existing build/ kept pointing
-    # at the dead location and failed here with a submodule error that had nothing
-    # to do with submodules. Say where it looked and how to repoint it.
+    # External dependencies come from the PINS.tsv-driven cache, not submodules.
+    # LAPLACE_EXTERNAL is a CACHE PATH, so an environment variable does not override
+    # it in an existing build directory; the message names the path it checked and
+    # how to repoint it.
     message(FATAL_ERROR
         "Eigen not found under LAPLACE_EXTERNAL.\n"
         "  looked for: ${LAPLACE_EXTERNAL}/eigen/Eigen/Dense\n"
@@ -182,11 +167,9 @@ if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
         "      sudo bash scripts/setup-host.sh\n")
 endif()
 
-# The vendored Syzygy prober is provisioned like every other external dep:
-# sync-external.sh materializes every .gitmodules entry into $LAPLACE_EXTERNAL and
-# build-system-deps.sh builds what needs building, both fingerprinted to no-op when
-# current. So an absent prober means PROVISIONING FAILED, and saying so beats
-# silently emitting a substrate whose probe lane does not exist.
+# The Syzygy prober is provisioned like every external dependency (sync-external.sh
+# into $LAPLACE_EXTERNAL, build-system-deps.sh), so its absence is a provisioning
+# failure and configuration stops rather than building without the prober.
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
     message(FATAL_ERROR
         "external/fathom not present in ${LAPLACE_EXTERNAL}. Run:\n"
@@ -229,11 +212,10 @@ if(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM"
     endif()
 endif()
 
-# Vendored third-party: not ours to warn about (same policy as tree_sitter_rt
-# below). CMAKE_WARN_DEPRECATED is scoped off around the add_subdirectory so
-# blake3's pre-3.10 cmake_minimum_required doesn't emit a deprecation warning.
-# Must be the CACHE entry — cmake_minimum_required ignores the directory-scope
-# variable (verified against this CMake version); restored to ON right after.
+# Vendored third-party code compiles without warnings. CMAKE_WARN_DEPRECATED is off
+# around the add_subdirectory so blake3's pre-3.10 cmake_minimum_required does not warn;
+# it must be the CACHE entry because cmake_minimum_required ignores the directory-scope
+# variable.
 set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 set(_blake3_binary_dir "${CMAKE_BINARY_DIR}/_deps/blake3")
 if(UNIX)
@@ -253,11 +235,8 @@ target_compile_options(blake3 PRIVATE -w)
 
 
 
-# Vendored third-party: Fathom Syzygy WDL/DTZ prober (MIT; pinned submodule
-# c9c6fef0dddc05d2e242c183acf5833149ab676d — the pin is recorded in
-# engine/core/src/syzygy.c and enforced by the submodule gitlink). Compiled as
-# its own static lib with warnings off, same policy as blake3/tree_sitter_rt:
-# vendored code is not ours to warn about.
+# Vendored Fathom Syzygy WDL/DTZ prober (MIT; pin c9c6fef0dddc05d2e242c183acf5833149ab676d,
+# recorded in engine/core/src/syzygy.c). A static library compiled without warnings.
 add_library(fathom_tb STATIC "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
 target_include_directories(fathom_tb SYSTEM PUBLIC "${LAPLACE_EXTERNAL}/fathom/src")
 set_target_properties(fathom_tb PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -16,7 +16,7 @@ public readonly struct SemLinkSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
         [
             "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO",
-            // Annotated SemLink 2 instances, not merely its aggregate JSON maps.
+            // Relations of the annotated SemLink 2 instances.
             "APPEARS_IN", "HAS_ROLE", "HAS_SENSE",
             "IS_INSTANCE_OF", "EVOKES_FRAME",
         ];
@@ -47,7 +47,7 @@ public readonly struct SemLinkSource : ISeedSource
     public static IngestSourceProfile Profile => IngestSourceProfile.Default;
 }
 
-/// <summary>Distinct witness registered beside SemLink during SemLink Initialize.</summary>
+/// <summary>PredicateMatrix source identity, a distinct witness registered when SemLink initializes.</summary>
 public readonly struct PredicateMatrixSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =

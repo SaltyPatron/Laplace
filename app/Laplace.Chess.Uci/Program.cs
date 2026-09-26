@@ -2,9 +2,9 @@ using Laplace.Chess.Uci;
 using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
-// stdout is the UCI wire protocol — diagnostics go to the CSV ops sink ONLY (FileOnly),
-// never to stdout or stderr, so cutechess sees nothing but UCI. Read back via ops.app_log
-// (GH #602). Engine-level messages still ride the protocol as `info string` lines.
+// stdout is the UCI wire protocol, so diagnostics go only to the ops file sink (read back
+// through ops.app_log), never to stdout or stderr. Engine messages ride the protocol as
+// `info string` lines.
 using var loggerFactory = LaplaceLogging.FileOnly("uci");
 var log = loggerFactory.CreateLogger("session");
 log.LogInformation("uci session started");

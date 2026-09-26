@@ -89,8 +89,8 @@ public class ConsensusAccumulatingWriterTests
         long observations = writer.ObservationsAccumulated;
         long cells = writer.CellsFolded;
 
-        // A different scheduling plan, process, timestamp or API entry point
-        // must not turn existing five-tuples into additional witnesses.
+        // A different schedule, process, timestamp or entry point does not turn the same
+        // observation (subject, relation, object, source, context) into another witness.
         var later = first with { LastObservedAtUnixUs = first.LastObservedAtUnixUs + 1_000_000 };
         await writer.ApplyAsync(Change(src, "replay-scalar", later));
         await writer.ApplyManyAsync([Change(src, "replay-batch", second)]);
@@ -189,8 +189,8 @@ public class ConsensusAccumulatingWriterTests
             Change(src, "bulk-fold-a", Obs(H(930), subj, relType, o1, src, 900_000_000)));
         await accumulator.ApplyWorkingSetAsync(
             Change(src, "bulk-fold-b", Obs(H(931), subj, relType, o2, src, 900_000_000)));
-        // Bulk-run folds are queued behind the apply lane; completing the run
-        // drains the pipeline, so both cells must be folded and visible here.
+        // Bulk-run folds trail the apply; completing the run drains them, so both cells
+        // are folded and visible here.
         var completionPhases = new List<BulkRunCompletionPhase>();
         await accumulator.CompleteBulkRunAsync(completionPhases.Add);
 

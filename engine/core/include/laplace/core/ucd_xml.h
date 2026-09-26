@@ -9,12 +9,10 @@ extern "C" {
 
 /* SAX2-shaped element events over UCD flat XML (and documents like it).
  *
- * UCD nounihan flat is a property TABLE (~67MB, millions of shallow elements),
- * not a nested container. A full tree-sitter AST of that input peaks at
- * multiple GiB and fails under ordinary build memory pressure — so this path
- * streams tags and fires callbacks without materializing a tree. Nested
- * containers (code, JSON, …) still unpack via the vendored tree-sitter
- * grammars; this is the table-grain reader for the same SAX shape.
+ * UCD nounihan flat is a property table (millions of shallow elements), not a
+ * nested container, so this path streams tags and fires callbacks without
+ * materializing a tree. Nested containers (code, JSON, …) unpack through the
+ * tree-sitter grammars.
  *
  * Element names + attribute values are passed through verbatim (no entity
  * expansion; the UCD attribute set we read contains none).

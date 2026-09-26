@@ -33,14 +33,15 @@ internal static class PgBinaryCopy
     internal const int MaxCopyDataPayloadBytes = 0x3FFF_FFFA;
 
 
-    // All concurrently active COPY connections together receive one flush envelope
-    // of unmanaged-to-managed streaming windows. No independent 8 MiB window remains.
+    // One working-set flush envelope is divided across the apply partitions, so all
+    // concurrently active COPY connections together stay within that envelope when
+    // streaming native memory into managed windows.
     public static readonly long StreamWindowBytes = Math.Max(1,
         IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
         / Math.Max(1, IngestTopology.Current.ApplyPartitions));
 
-    // Machine-derived throughput sizing remains authoritative, but the wire protocol
-    // is a hard upper bound regardless of how large a future machine envelope becomes.
+    // The machine-derived window is clamped by the CopyData payload ceiling and the
+    // managed array limit: the wire protocol bounds it however large the envelope is.
     internal static readonly int WriteWindowBytes = checked((int)Math.Max(1L,
         Math.Min(Math.Min(StreamWindowBytes, (long)MaxCopyDataPayloadBytes),
             (long)Array.MaxLength)));

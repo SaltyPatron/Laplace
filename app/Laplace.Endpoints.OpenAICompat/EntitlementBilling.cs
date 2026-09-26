@@ -40,8 +40,8 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
     private readonly Dictionary<string, long> _versions = new(StringComparer.Ordinal);
     private readonly object _gate = new();
 
-    // Existing non-provider callers explicitly choose these monthly boundaries.
-    // Provider callbacks use ApplySubscriptionAsync with Stripe's actual period.
+    // Non-provider callers get a one-month period from the activation time; provider
+    // callbacks use ApplySubscriptionAsync with the provider's period.
     public Task<BillingEntitlement> ActivatePlanAsync(string tenant, BillingPlan plan,
         string? stripeCustomerId, string? stripeSubscriptionId, DateTimeOffset activatedAt, CancellationToken ct) =>
         ApplySubscriptionAsync(plan, new(tenant, stripeSubscriptionId ?? "", stripeCustomerId,

@@ -4,15 +4,9 @@ namespace Laplace.Decomposers.ConceptNet;
 
 internal static class ConceptNetRelations
 {
-    // Bucketed by relation-name LENGTH. The flat array this replaced was scanned linearly,
-    // so every row of assertions.csv cost up to RelMap.Count SequenceEqual calls — and the
-    // rows that resolve to nothing paid the full scan before being dropped. Length is a free
-    // discriminator (the span is already in hand) and ConceptNet's names spread thinly across
-    // lengths, so a bucket holds one or two entries: ~1 comparison instead of ~39.
-    //
-    // A byte-keyed dictionary was the other option and is rejected on allocation: hashing a
-    // ReadOnlySpan<byte> against a Dictionary<byte[],_> needs either a per-row GetString or a
-    // custom alternate-lookup comparer, and this path runs tens of millions of times.
+    // Bucketed by relation-name length: the span length is free, and ConceptNet's names
+    // spread thinly across lengths, so a lookup is about one SequenceEqual per row with no
+    // allocation (a byte[]-keyed dictionary would need a per-row string or custom comparer).
     private static readonly (byte[] RelUtf8, string TypeName, bool Negated)[]?[] ByLength = BuildByLength();
 
     /*
@@ -55,10 +49,9 @@ internal static class ConceptNetRelations
 
     /// <summary>
     /// <paramref name="negated"/> is set for the Not* relations, which map onto the
-    /// relation they DENY. The caller negates the row's magnitude so it folds as a Refute
-    /// against that relation's cell instead of into a separate positive NOT_* type where
-    /// it could never contest anything. Carried in the lookup table so the hot path costs
-    /// no allocation and no second comparison.
+    /// relation they deny; the caller negates the row's magnitude so it folds as a
+    /// refutation into that relation's cell. The flag sits in the lookup table, so it
+    /// costs no second comparison.
     /// </summary>
     public static bool TryResolveType(
         ReadOnlySpan<byte> relationUri, out string typeName, out bool flip, out bool negated)

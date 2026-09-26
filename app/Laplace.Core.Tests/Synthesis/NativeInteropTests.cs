@@ -31,9 +31,7 @@ public class NativeInteropTests
 
         try
         {
-            // #1054's production failure shape: native needs 309 slots, while the
-            // historical C# call sites supplied a fixed 300 and treated any positive
-            // return as populated data. The bounded managed ABI must now fail closed.
+            // A 300-slot buffer for a 309-tensor manifest returns -2 and writes nothing.
             var bounded = new TensorSpec[300];
             int boundedRc;
             fixed (TensorSpec* p = bounded)
@@ -70,8 +68,7 @@ public class NativeInteropTests
         Assert.NotNull(manifest);
         AssertCompleteManifest(manifest.Specs, manifest.Count, expected);
 
-        // Dispose is deliberately idempotent: every production early-return path may
-        // leave through a using scope without duplicating native ownership logic.
+        // Dispose is idempotent; the using scope disposes again.
         manifest.Dispose();
     }
 

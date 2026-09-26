@@ -10,8 +10,8 @@ public sealed record AgentRequest(
     double? Temperature = null);
 
 /// <summary>
-/// What came back, with the provenance a caller needs to attribute it: which
-/// route ran, which model answered, why it stopped, and what it cost.
+/// An external reply with the fields needed to attribute it: route, provider,
+/// model, stop reason, token usage, latency and attempt count.
 /// </summary>
 public sealed record AgentReply(
     string Agent,
@@ -26,16 +26,14 @@ public sealed record AgentReply(
     string? Note);
 
 /// <summary>
-/// Request shaping and response reading for the installed wires. Pure and static so
-/// the shapes are testable without a socket — every past LLM-client bug in this
-/// class of code is a body field or a response path, not the transport.
+/// Request shaping and response reading for each <see cref="AgentWire"/>. Pure and
+/// static, so body fields and response paths are testable without a socket.
 /// </summary>
 public static class AgentWireFormat
 {
     /// <summary>
-    /// Anthropic requires max_tokens and counts thinking against it; Claude Opus 5
-    /// thinks by default, so a small cap truncates the answer rather than the
-    /// reasoning. 16000 is the documented non-streaming default.
+    /// max_tokens sent on the Anthropic wire when neither request nor alias sets one;
+    /// that wire requires the field.
     /// </summary>
     public const int AnthropicDefaultMaxTokens = 16000;
 
@@ -67,9 +65,7 @@ public static class AgentWireFormat
                 messages.Add(new JsonObject { ["role"] = "user", ["content"] = request.Prompt });
 
                 var body = new JsonObject { ["model"] = target.Model, ["messages"] = messages };
-                // OpenAI renamed the cap to max_completion_tokens and rejects the old
-                // name on its reasoning models; every clone kept max_tokens. The field
-                // name is provider data, not a branch here.
+                // The cap's field name is provider data (max_tokens or max_completion_tokens).
                 if (maxTokens is { } mt) body[target.Provider.MaxTokensField] = mt;
                 if (temperature is { } t) body["temperature"] = t;
                 return body;
@@ -101,9 +97,8 @@ public static class AgentWireFormat
                     }),
                 };
                 if (!string.IsNullOrWhiteSpace(system)) body["system"] = system;
-                // Sampling parameters are REJECTED (400) on Claude Opus 4.7 and later,
-                // so nothing is sent unless a caller or an alias asked for it by name.
-                // An unrequested default here would break every current Anthropic model.
+                // Temperature is sent only when a caller or alias set it; no sampling
+                // default is injected.
                 if (temperature is { } t) body["temperature"] = t;
                 return body;
             }
@@ -137,10 +132,9 @@ public static class AgentWireFormat
     }
 
     /// <summary>
-    /// Credential placement is the target's <see cref="AgentAuth"/>, not the wire's:
-    /// Anthropic takes a key on <c>x-api-key</c> and an OAuth token on
-    /// <c>Authorization: Bearer</c>, on the identical request body. Protocol headers
-    /// that are not credentials (anthropic-version) ride the wire regardless.
+    /// Places the credential per the target's <see cref="AgentAuth"/>, adds the wire's
+    /// non-credential protocol headers, then applies configured headers last so they
+    /// replace anything set above.
     /// </summary>
     public static void ApplyAuth(HttpRequestMessage message, AgentTarget target)
     {
@@ -155,8 +149,6 @@ public static class AgentWireFormat
         if (target.Provider.Wire == AgentWire.AnthropicMessages)
             message.Headers.TryAddWithoutValidation("anthropic-version", AnthropicVersion);
 
-        // Applied last so an operator can correct anything above — an SSO gateway
-        // that wants its own version pin is a configuration, not a code change.
         if (target.Headers is null) return;
         foreach (var (header, value) in target.Headers)
         {
@@ -166,10 +158,8 @@ public static class AgentWireFormat
     }
 
     /// <summary>
-    /// Read a 2xx body. Text is returned EMPTY rather than as an exception when the
-    /// model declined or was cut off — a refusal and a truncation are outcomes with
-    /// a stop reason attached, and collapsing them into a thrown error loses the
-    /// reason the caller needs to decide what to do next.
+    /// Read a 2xx body. A refusal or truncation returns empty text with its stop
+    /// reason and a note; only an error body or a missing choice/candidate throws.
     /// </summary>
     public static (string Text, string? FinishReason, long? InputTokens, long? OutputTokens, string? Note)
         ParseResponse(AgentTarget target, JsonNode? root)
@@ -268,8 +258,7 @@ public static class AgentWireFormat
         string? note = null;
         if (stop == "refusal")
         {
-            // HTTP 200 with an empty content array. Code that reads content[0]
-            // unconditionally breaks here, which is why stop_reason is read first.
+            // A refusal arrives as 200 with an empty content array.
             var category = AsString(root["stop_details"]?["category"]);
             note = "the model's safety classifiers declined this request" +
                    (category is null ? "" : $" (category: {category})");
@@ -305,9 +294,8 @@ public static class AgentWireFormat
     }
 
     /// <summary>
-    /// OpenAI-compatible content is a string on most hosts and a content-part array
-    /// on some (and null on a filtered or truncated turn). All three are read here
-    /// so a working provider is not reported as an empty answer.
+    /// OpenAI-compatible content may be a string, a content-part array, or null;
+    /// all three are read.
     /// </summary>
     private static string ReadContent(JsonNode? content) => content switch
     {

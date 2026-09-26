@@ -4,17 +4,12 @@ using Laplace.Engine.Core;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// GH #904 item 2. The tier-floor collapse rule exists twice — <c>TierTree.CollapseIndex</c>
-/// and <c>collapse_idx()</c> in <c>engine/core/src/content_witness_batch.c</c> — and it
-/// decides WHICH NODE IS THE STORED IDENTITY: a single-child, span-identical wrapper is
-/// its child, same bytes and same id. The C# comment said "keep the two in lockstep",
-/// which is prose, not a gate; a drift on either side changes which entity gets minted
-/// for content that has not changed.
-///
-/// These pin every clause of the rule separately, so a partial edit (dropping the span
-/// check, stopping at tier 1, collapsing multi-child nodes) fails a specific test rather
-/// than being absorbed. The C twin is <c>laplace_tier_tree_collapse_index</c> via
-/// <see cref="NativeInterop.TierTreeCollapseIndex"/>; each clause also asserts C# == C.
+/// The collapse rule decides which node is the stored identity: a single-child,
+/// span-identical wrapper is its child (one-child composition is the child). It is
+/// implemented by <c>TierTree.CollapseIndex</c> and natively by
+/// <c>laplace_tier_tree_collapse_index</c> (<see cref="NativeInterop.TierTreeCollapseIndex"/>).
+/// Each clause (span check, walk to tier 0, multi-child stop) has its own test, and each
+/// asserts the managed and native results agree.
 /// </summary>
 public class CollapseIndexParityTests
 {
@@ -25,7 +20,7 @@ public class CollapseIndexParityTests
     }
 
     /// <summary>tier-0 leaf 'A', wrapped by a span-identical grapheme, wrapped again by a
-    /// span-identical word: the chain the ingest actually produces for one-codepoint text.</summary>
+    /// span-identical word: the tree one-codepoint text composes to.</summary>
     private static TierTree SingleCodepointChain()
     {
         var t = TierTree.New(4);
@@ -39,9 +34,8 @@ public class CollapseIndexParityTests
     [Fact]
     public void Collapse_WalksChainOfSpanIdenticalWrappersToTheTier0Leaf()
     {
-        // The whole point: a single-codepoint word IS the codepoint. Stopping anywhere
-        // above leaf 0 mints a tier-1 or tier-2 entity row carrying the codepoint's id
-        // with the wrong stored tier — the exact defect the `tier <= 1` stop caused.
+        // A single-codepoint word is the codepoint: the walk ends at the tier-0 leaf,
+        // not at an intermediate wrapper.
         using var t = SingleCodepointChain();
         Assert.Equal(0u, t.CollapseIndex(2));
         Assert.Equal(0u, t.CollapseIndex(1));
@@ -77,8 +71,7 @@ public class CollapseIndexParityTests
     public void Collapse_DoesNotCollapseWhenTheChildSpanDiffers()
     {
         // One child, but the parent covers more text than the child does, so the parent
-        // is NOT the same content and must keep its own identity. Dropping this clause
-        // is the subtle half of the rule and the easiest to lose in a refactor.
+        // is not the same content and keeps its own identity.
         var t = TierTree.New(4);
         t.AddLeaf(0, 65, 0, 1);
         t.AddNode(1, 0, 1, 0, 2);   // single child, span [0,2) against the child's [0,1)

@@ -7,16 +7,14 @@ using Xunit;
 namespace Laplace.Modality.Chess.Tests;
 
 /// <summary>
-/// A stored move id is decodable without a board. ChessReplay resolves one by generating
-/// every legal action and hashing each (~35 per ply) because it treats the id as opaque;
-/// a fold over games that already happened does not need to search for them.
+/// A stored move id decodes to piece, from and to through the atom reverse index, without a
+/// board and without generating and hashing every legal move.
 /// </summary>
 public sealed class MoveAtomDecodeTests
 {
     /// <summary>
-    /// The id of 1.e4 as it is actually stored in this substrate, read out of a real game's
-    /// move trajectory (game aa651769..., ply 1). Pinning it here means the decode is checked
-    /// against the corpus, not against a fixture this test invented.
+    /// The stored id of 1.e4, read from a recorded game's move trajectory (ply 1), so the
+    /// decode is checked against a real stored id rather than one computed by the test.
     /// </summary>
     private const string StoredE4 = "fe6ea447874e7e473a3cda37b881d579";
 

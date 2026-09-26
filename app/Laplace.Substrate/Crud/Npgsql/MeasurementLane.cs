@@ -7,17 +7,16 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// <summary>
 /// Run a measurement only when the substrate is observably quiet.
 ///
-/// Measurements are diagnostic work. They must never stop ingestion or serving in
-/// order to manufacture a quiet benchmark. A measurement refuses to start when live
-/// ingest is observed and invalidates itself if ingest starts before it finishes.
-/// Product work always wins.
+/// A measurement takes no lock and never makes ingest or serving wait. It refuses to
+/// start when live ingest is observed and is rejected after the fact if ingest is live
+/// when it finishes.
 /// </summary>
 public static class MeasurementLane
 {
     /// <summary>
-    /// Compatibility entry point retained for existing callers. The old implementation
-    /// acquired an exclusive advisory lock that forced ingestion to wait. This implementation
-    /// never acquires that lock: it verifies quiet before and after the child instead.
+    /// Runs <paramref name="file"/> with <paramref name="args"/> as a child process,
+    /// verifying quiet before it starts and again after it exits. Despite the name, no
+    /// lock is taken; exclusivity is observed, not enforced.
     /// </summary>
     public static async Task<int> RunExclusiveAsync(
         string file, IReadOnlyList<string> args, CancellationToken ct = default)
@@ -111,9 +110,8 @@ public static class MeasurementLane
             throw new InvalidOperationException(
                 $"measurement refused: ingest advancing — {string.Join(", ", advancing)}");
 
-        // A non-advancing running row may be a corpse or a run between batches. Do not
-        // block product work on it; report that the measurement is proceeding without a
-        // claim of enforced exclusivity.
+        // A running row that did not advance may be abandoned or between working sets.
+        // The measurement proceeds with a warning that it is not exclusive.
         if (a.Count > 0)
             Console.Error.WriteLine(
                 $"::warning::{a.Count} journal row(s) read 'running' but did not advance in "

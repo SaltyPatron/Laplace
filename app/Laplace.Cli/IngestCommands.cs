@@ -161,13 +161,7 @@ internal static partial class IngestCommands
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
                         + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
-                        // ASK THE REGISTRY. This line used to hand-list the sources, and it
-                        // lied in both directions: it advertised `image` and `audio`, which
-                        // no dispatch route can reach, and omitted every chess lane plus
-                        // omw-probe and recipe. The authority is two lines below in the same
-                        // method — TryDispatch's own table, already used for the unknown-source
-                        // error — so help and error can never again disagree about what this
-                        // binary supports.
+                        // Source list comes from the dispatch table TryDispatch routes through.
                         + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
                         + "  --langs: language scope for this run\n"
                         + "  chain: run several ingests sequentially in ONE process; Unicode admits its\n"
@@ -186,8 +180,8 @@ internal static partial class IngestCommands
     /// `ingest` argument vector ("wordnet", "document D:\\data\\text",
     /// "wiktionary --langs en"). Runtime accelerators are loaded only when their
     /// prerequisite foundation has been admitted.
-    /// Specs split on whitespace — a path containing spaces needs its own
-    /// single-source invocation. First nonzero exit stops the chain.
+    /// Specs split on whitespace, so a path containing spaces needs its own
+    /// single-source invocation. The first nonzero exit stops the chain.
     /// </summary>
     private static async Task<int> IngestChainAsync(string[] specs)
     {
@@ -358,9 +352,8 @@ internal static partial class IngestCommands
         if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
             return Fail($"ingest document: path not found: {cli.Path}");
 
-        // Pillar 0: the document lane's completion is PER FILE (PerFileCompletion), so the
-        // runner's source-level guard is skipped by capability, not by flag — and the
-        // terminal source-level marker now mints, satisfying layer ordering.
+        // The document decomposer records completion per file; skipSourceCompletion stays
+        // false so the terminal source-level marker is also written for layer ordering.
         return await IngestViaRunnerAsync(
             CliRuntime.Decomposers.Resolve("document"),
             Path.GetFullPath(cli.Path),
@@ -397,17 +390,11 @@ internal static partial class IngestCommands
     private static string? ResolveRequiredIngestPath(string? cliPath)
         => string.IsNullOrWhiteSpace(cliPath) ? null : Path.GetFullPath(cliPath);
 
-    // code/repo/tabular/parquet are multi-invocation, path-parameterized sources —
-    // the CLI's own <path> argument means "run this again against something new"
-    // is the intended usage (validate one file, then ingest the full corpus; feed
-    // one repo today and another tomorrow). The default source-completion marker
-    // is for genuinely one-shot global corpora (wordnet, conceptnet, ...) where a
-    // second run over the SAME dataset would double-witness identical bootstrap
-    // testimony; it has no such meaning here, since content-addressing already
-    // makes re-running against different (or even the same) content safe. Without
-    // skipSourceCompletion: true, the FIRST successful run of any of these silently
-    // no-ops every later call regardless of path — measured 2026-07-23: a 19-repo
-    // batch ingest ran as 19 back-to-back 0-row short-circuits after the first.
+    // code/repo/agents/tabular/parquet are path-parameterized: each invocation admits
+    // whatever the path names, and content addressing makes a re-run over the same or
+    // different content converge. They pass skipSourceCompletion: true, because the
+    // source-level completion marker would turn every later run into a no-op regardless
+    // of path. That marker belongs to fixed global corpora (wordnet, conceptnet, ...).
 
     internal static async Task<int> IngestCodeAsync(IngestCliArgs cli)
     {
@@ -474,9 +461,8 @@ internal static partial class IngestCommands
     }
 
     /// <summary>
-    /// Line-delimited formats where the mean line length IS the record size. Deliberately a
-    /// whitelist: measuring an XML or Parquet file this way yields a number with no relation
-    /// to a record, and sizing a batch from it would be worse than the declared constant.
+    /// Line-delimited formats, where mean line length is the record size. Other formats
+    /// (XML, Parquet, ...) keep the declared EstBytesPerRecord.
     /// </summary>
     private static readonly string[] LineDelimitedExtensions =
         [".jsonl", ".ndjson", ".csv", ".tsv", ".tab", ".conllu", ".txt"];
@@ -531,28 +517,15 @@ internal static partial class IngestCommands
                 + $"round_trips={p.RoundTrips:N0} elapsed_s={p.Elapsed.TotalSeconds:F0}"
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
-        // LAPLACE_INGEST_MAX_UNITS caps INPUT VOLUME (smoke/bench scoping — an
-        // operator decision, like --langs). It is not a machine-sizing knob:
-        // batch/commit sizing stays owned by IngestSizing/MemoryTopology and
-        // deliberately has no env override.
+        // LAPLACE_INGEST_MAX_UNITS caps input volume (an operator scope, like --langs).
+        // Batch/commit sizing comes from IngestSizing/MemoryTopology only.
         long maxUnits =
             long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_MAX_UNITS"),
                 out var mu) && mu > 0 ? mu : 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
-        // MEASURE the record size from the file in hand instead of trusting the per-source
-        // constant. EstBytesPerRecord is the denominator of the per-worker memory
-        // calculation, so a wrong value silently shrinks or expands every batch.
-        //
-        // The constants are demonstrably wrong, and worse, one constant cannot be right for
-        // one source: MEASURED 2026-08-01, WiktionaryDecomposer ingests BOTH
-        // raw-wiktextract-data.jsonl at 6,158 bytes/record AND
-        // kaikki.org-dictionary-English.jsonl at 26,719 -- a 4.3x spread behind a single
-        // IngestSourceProfile.Wiktionary. Whatever number sits in that constant is badly
-        // wrong for one of the two files. Only the file itself knows.
-        //
-        // Guarded to line-delimited formats: for XML or Parquet the mean LINE length is not
-        // the record size, and sizing from it would be worse than the constant. Anything
-        // else keeps the declared profile untouched.
+        // EstBytesPerRecord is the denominator of the per-worker memory budget. For a
+        // line-delimited input file it is measured from that file, since one source can
+        // admit files with very different record sizes; otherwise the declared profile stands.
         profile = ApplyMeasuredRecordSize(profile, ecosystemPath, sourceName);
         var sized = IngestSizing.ResolveForSource(profile);
         sized.Log(sourceName);
@@ -567,10 +540,9 @@ internal static partial class IngestCommands
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
-            // Suppressing completion and bypassing its pre-run guard are different
-            // operations. Incremental lanes deliberately own their own completion
-            // protocol; --force merely re-runs an ordinary source and must still
-            // record its terminal layer completion.
+            // Suppressing completion and bypassing its pre-run guard are separate:
+            // path-parameterized sources suppress the marker, while --force only bypasses
+            // the guard and still records terminal layer completion.
             SkipSourceCompletion = skipSourceCompletion,
             BypassSourceCompletionGuard = cli?.Force ?? false,
             EcosystemPath = ecosystemPath,
@@ -587,10 +559,9 @@ internal static partial class IngestCommands
         IDecomposer dec, string? ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
     {
-        // T0 ROM is an accelerator (round-trip / bit-bang), not the populate
-        // path. Unicode admission still reads UCD and writes T0 rows into
-        // Postgres as the FK anchor. Unloading the blob here made content
-        // witness throw and blocked the floor.
+        // The codepoint perfcache is a read-only map over admitted Tier-0; content
+        // witnessing composes through it, so it is loaded for every source, including
+        // Unicode, whose admission still writes the Tier-0 rows from UCD.
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
         var topo = IngestTopology.EnsureReady();
@@ -654,9 +625,8 @@ internal static partial class IngestCommands
                         + $"from {((IConsensusFoldMetrics)writer).ObservationsAccumulated:N0} observations "
                         + "(queued folds drained before success)");
 
-        // Zero-novel re-ingest: ANALYZE + validation counts are multi-second (or hang) on a
-        // populated box and are not part of the fold. Skip them so process exit matches the
-        // ingest envelope (measured hang after "done:" on OTB 2025 re-ingest).
+        // ANALYZE and validation counts are not part of the fold; they run only when the
+        // ingest added rows.
         long novelRows = result.EntitiesInserted + result.PhysicalitiesInserted
             + result.AttestationsInserted;
         if (novelRows > 0)
@@ -687,8 +657,8 @@ internal static partial class IngestCommands
     }
 
     // Close a cut-off journal row ('running' with no live process) through the
-    // installed op. The op refuses non-running rows; the operator owes the
-    // liveness check first — never close a run another process still owns.
+    // installed op. The op refuses non-running rows; it does not check liveness, so
+    // the caller must know no other process still owns the run.
     public static async Task<int> CloseRunAsync(string runId, string status)
     {
         if (!Guid.TryParse(runId, out var run))
@@ -710,10 +680,9 @@ internal static partial class IngestCommands
         return 0;
     }
 
-    // Verify a source's relation-law bootstrap rows landed (#760's positive
-    // control) through the installed op. The law relation is the OPERATOR's
-    // declaration, supplied at invocation (G3: production code embeds no
-    // governed vocabulary). Exit 0 present, 1 absent.
+    // Checks through the installed op that a source's relation-law bootstrap rows are
+    // present. The law relation is supplied by the caller, not embedded here.
+    // Exit 0 present, 1 absent.
     public static async Task<int> SourceBootstrapAsync(string sourceName, string lawRelation)
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
@@ -727,9 +696,8 @@ internal static partial class IngestCommands
     public static async Task<int> RebuildPhysIndexesAsync()
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        // Always EnsureIndexesAsync (Copilot #859): an early return on "any
-        // secondary index exists" skips newly-added defs on a partially-recovered
-        // database. DDL is CREATE INDEX IF NOT EXISTS, so re-running is cheap.
+        // Every definition is issued each time (CREATE INDEX IF NOT EXISTS), so a
+        // partially-indexed database gets whatever is missing.
         Console.WriteLine("ensuring physicalities indexes (CREATE IF NOT EXISTS) ...");
         var sw = Stopwatch.StartNew();
         await SecondaryIndexPolicy.EnsureIndexesAsync(ds, SchemaPhysIndexDefs, CancellationToken.None);
@@ -738,26 +706,11 @@ internal static partial class IngestCommands
         return 0;
     }
 
-    // Mirrors extension/laplace_substrate/sql/indexes/*.sql.in for the recovery command
-    // that rebuilds physicalities indexes on an existing database. Keep in sync with the
-    // extension — it is the deployment unit and the authority. radius_origin and
-    // alignment_residual were removed 2026-07-28 (0 scans; see those .sql.in files).
-    //
-    // physicalities_hilbert_btree belongs here. It was in this list before the schema had
-    // a .sql.in for it, and that was CORRECT rather than drift: the primary key used to be
-    // (hilbert_index, id), so hilbert was covered by the PK's leading column and a separate
-    // btree would have been redundant in the schema while this recovery path still had to
-    // create it. Repartitioning to HASH(id) forced the PK to (id) and silently removed the
-    // only hilbert coverage, which broke structural.anagrams_of()'s equality join into a sequential
-    // scan of all 64 partitions. The index is now declared in the schema too
-    // (indexes/physicalities_hilbert_btree.sql.in), so both agree.
-    //
-    // physicalities_traj_first_id_btree IS in the schema and was missing here, so a
-    // recovery run left the database short an index it is supposed to have.
-    //
-    // Drift in this list is not cosmetic: the command exists to restore the schema's index
-    // set, so whatever is wrong here gets written to a live database as if it were the
-    // schema.
+    // The physicalities secondary index set declared by
+    // extension/laplace_substrate/sql/indexes/*.sql.in, which is the authority. This
+    // recovery command writes exactly this list to a live database, so it must match the
+    // extension. The Hilbert btree serves Hilbert-locality equality joins (e.g.
+    // structural.anagrams_of) under a primary key of (id).
     private static readonly string[] SchemaPhysIndexDefs =
     [
         "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
@@ -794,10 +747,9 @@ internal static partial class IngestCommands
         await using var conn = await ds.OpenConnectionAsync();
         var phase = Stopwatch.StartNew();
 
-        // Immediately after a bulk COPY ingest the just-loaded tables can still carry
-        // pre-load planner statistics (autoanalyze has not necessarily caught up). Refresh
-        // the columns used by the UI and read paths. Column-scoped so we skip the
-        // minutes-long PostGIS ND-stats on physicalities.coord/trajectory.
+        // After bulk COPY the planner statistics may predate the load. Refresh the columns
+        // the read paths use; column-scoped so PostGIS ND-stats on
+        // physicalities.coord/trajectory are not recomputed.
         await NpgsqlIngestOps.AnalyzePostIngestValidationAsync(conn);
         long analyzeMs = phase.ElapsedMilliseconds;
         phase.Restart();
@@ -823,14 +775,8 @@ internal static partial class IngestCommands
             $"LAPSIGHT_POST_INGEST analyze_ms={analyzeMs} "
             + $"summary_ms={summaryMs} exact_source_validation={exactSourceValidation.ToString().ToLowerInvariant()}");
 
-        // Keep automatic ingest completion bounded. The stats refresh above is necessary
-        // for the UI and planner, and the GIN drain protects the first reader. Exact
-        // source-content attribution is a diagnostic scan, not part of committing an
-        // ingest. MEASURED 2026-08-19: ChessPgn finished 655,255 games in 3,655s, then
-        // ops.content_count(source) read for another 815s until cancelled; the journal and
-        // workflow were already waiting on a successful ingest. The workflow's decomposer
-        // gate proves the indexed witness relations. Operators can request the unbounded
-        // exact diagnostic explicitly with `laplace stats <cli-source>`.
+        // Exact per-source content attribution is an unbounded diagnostic scan, not part of
+        // committing an ingest; after an ingest it is deferred to `laplace stats <cli-source>`.
         if (decomposer is not null && !exactSourceValidation)
         {
             Console.WriteLine(
@@ -841,11 +787,8 @@ internal static partial class IngestCommands
 
         if (decomposer is null)
         {
-            // ops.source_counts() joins a count(DISTINCT physicalities) per source —
-            // unbounded at 135M attestations; `stats` hung for minutes (Issue 52). The
-            // evidence half alone walks attestations_source_btree in ~30s live. Content
-            // per source stays exact via `stats <source>` (content_count is per-source
-            // bounded).
+            // All-source view reads evidence per source only (attestations_source_btree),
+            // bounded by a 120 s timeout. Per-source content is `stats <source>`.
             Console.WriteLine("  witnesses (evidence per source; content: run `stats <source>`):");
             try
             {
@@ -865,10 +808,8 @@ internal static partial class IngestCommands
         bool layerOk = await NpgsqlIngestOps.LayerCompletedAsync(conn, decomposer.LayerOrder, decomposer.SourceId);
         Console.WriteLine($"  witness [{srcKey}] L{decomposer.LayerOrder}: {att:N0} attestations, {content:N0} content, layer_complete={layerOk}");
 
-        // Executable source-content receipt. This is generated from the SAME static/runtime
-        // manifest Initialize registered, then counted by the source id actually stamped on
-        // evidence. It therefore exposes declared-but-empty relations as evidence=0 instead
-        // of letting a broad source total or a hand-picked smoke relation stand in for them.
+        // Source-content receipt: every relation the decomposer declares, counted under the
+        // source id stamped on its evidence, so a declared-but-empty relation prints evidence=0.
         foreach (string relation in decomposer.DeclaredRelations.Distinct(StringComparer.Ordinal))
         {
             long evidence = await RelationEvidenceForSourceId(relation, decomposer.SourceId);
@@ -877,9 +818,8 @@ internal static partial class IngestCommands
                 + $"relation={relation} evidence={evidence}");
         }
 
-        // Predicate Matrix is a distinct witness carried by the SemLink seed operation.
-        // Reporting only SemLinkDecomposer hid 641k PM attestations and made it impossible
-        // to distinguish "SemLink ran" from "the matrix was actually admitted".
+        // Predicate Matrix is a distinct witness admitted by the SemLink seed operation;
+        // its relations are receipted under its own source id.
         if (srcKey == "SemLinkDecomposer")
         {
             foreach (string relation in PredicateMatrixSource.Relations.Distinct(StringComparer.Ordinal))
@@ -895,10 +835,8 @@ internal static partial class IngestCommands
 
         if (decomposer.LayerOrder == 10)
         {
-            // A model's witness is the content hash of its snapshot. It deposits
-            // MERGES_WITH, per-circuit Projection trajectories, and the graded pair
-            // evidence its circuits' significance contract admits; model-local token
-            // ids are ordinals of the vocabulary trajectory, not attestations.
+            // A model's source id is the content hash of its snapshot; its evidence is
+            // counted per relation under that id, alongside circuit trajectories.
             byte[] srcId = decomposer.SourceId.ToBytes();
             Task<long> Rel(string rel) =>
                 NpgsqlIngestOps.EvidenceCountForRelationAndSourceIdAsync(conn, rel, srcId);

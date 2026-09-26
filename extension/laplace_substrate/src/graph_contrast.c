@@ -18,18 +18,14 @@
 #include "spi_nested.h"
 #include "graph_taxonomy.h"
 
-/* Initial sizing only — the fact table grows as needed. The old fixed cap
- * hard-errored ("contrast row cap exceeded") once hub words' ancestor sets
- * outgrew it at live scale. */
+/* Initial capacity of the fact table; it doubles as facts arrive. */
 #define CONTRAST_FEAT_INITIAL 512
 
 PG_FUNCTION_INFO_V1(pg_laplace_contrast);
 
 /*
- * The subject frontier is passed as one ordered array. The old implementation
- * re-executed consensus_subject_edges once per anchor/synset, hiding RBAR behind
- * a prepared scalar statement. One set query preserves side ordinality while
- * allowing PostgreSQL to plan and execute the whole frontier together.
+ * The whole subject frontier (x, x's synsets, y, y's synsets) is read in one
+ * set query. Ordinality tells which side each consensus edge came from.
  */
 static SPIPlanPtr subject_edges_batch_plan = NULL;
 
@@ -62,9 +58,7 @@ typedef struct {
     bool      from_y;
 } ContrastRow;
 
-/* (type_id, object_id) -> row-index map, replacing the O(n) linear scan that
- * turned hub-word fact accumulation (10^4 rows post-cap-removal) into an
- * O(n^2) pass. Same first-wins index the scan returned; output unchanged. */
+/* (type_id, object_id) -> index of the fact row first created for that pair. */
 typedef struct ContrastIdxEntry
 {
     char key[32];
@@ -129,10 +123,8 @@ contrast_add_fact(HTAB *rowmap, ContrastRow **rows_io, int *n, int *cap,
         rows[idx].mu = mu;
 }
 
-/* left(encode(id,'hex'),16) — the display convention every other read surface
- * uses as the genuine last resort, so every claim still shows even when
- * realize_batch/type_label cannot produce a label. The serving contract is
- * non-null type/fact (SubstrateClient.TapeAsync reads them unguarded). */
+/* left(encode(id,'hex'),16): the id's own name when no label realizes, so the
+ * type and fact columns are never NULL. */
 static Datum
 hash128_hex16_text(const hash128_t *h)
 {
@@ -162,6 +154,11 @@ contrast_type_allowed(const hash128_t *type_id, const hash128_t *feat_types, int
     return false;
 }
 
+/* Contrasts two entities over the consensus web. Each endpoint plus its synsets
+ * seeds an IS_A/IS_INSTANCE_OF ancestor closure; ancestors and consensus edges of
+ * the feature relations (and the HAS_POS family) become facts keyed by
+ * (type, object), tagged both / x-only / y-only, carrying the strongest
+ * effective mu seen. */
 Datum
 pg_laplace_contrast(PG_FUNCTION_ARGS)
 {
@@ -297,10 +294,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
         }
     }
 
-    /* Batch label resolution for the emitted window: the per-row
-     * spi_realize + spi_type_label pair was 2 unprepared round trips per
-     * emitted row (up to lim=80). realize_batch resolves the facts in 6
-     * fixed round trips; type labels come back in one set query. */
+    /* The emitted window is realized as sets: objects through realize_batch,
+     * relation type labels in one ordered query. */
     {
         int    n_emit = n_rows < lim ? n_rows : lim;
         Datum *facts = NULL, *type_lbls = NULL;

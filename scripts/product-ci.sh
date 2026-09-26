@@ -685,6 +685,11 @@ run_publish() {
   esac
 
   require_built_revision
+  # The API's environment is part of the revision it serves: reconcile it from
+  # the delivery configuration before the publish restarts the API.
+  case "$scope" in
+    api|api-web|full|all) bash scripts/pipeline.sh api-env ;;
+  esac
   case "$scope" in
     web) bash scripts/publish-applications.sh web-deploy ;;
     api) bash scripts/publish-applications.sh api-deploy ;;

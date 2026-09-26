@@ -1,9 +1,6 @@
--- Legacy/back-compat entry point. The real trunk-to-leaf, tier-by-tier
--- descent is now driven entirely by the C# orchestrator (TierTreeDescent.cs)
--- via repeated tier_batch_existence_probe() rounds -- `parents` here is
--- validated for shape only and otherwise unused; there is no native
--- tree-walk or default-present assumption left in this function. See
--- pg_laplace_content_descent_bitmap() in laplace_substrate.c.
+-- Id presence bitmap. The trunk-to-leaf descent is scheduled by the caller
+-- (TierTreeDescent) through tier_batch_existence_probe() rounds; `parents` is
+-- validated for shape only. See pg_laplace_content_descent_bitmap().
 CREATE OR REPLACE FUNCTION laplace.content_descent_bitmap(ids bytea[], parents int[])
     RETURNS bytea
     AS 'EXECUTION_LIBRARY', 'pg_laplace_content_descent_bitmap'

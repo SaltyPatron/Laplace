@@ -4,11 +4,10 @@ using Laplace.Decomposers.Abstractions;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
-/// One provider's on-disk session format. Adapters are PURE parsers: file → normalized
-/// <see cref="AgentSession"/> stream. No SQL, no batching, no substrate types — the
-/// shared spine and <see cref="AgentTraceEmitter"/> own everything downstream. JSON is
-/// navigated through the registered grammar route (<see cref="JsonAstDocument"/>), never
-/// a hand-rolled parser.
+/// One provider's on-disk session format. An adapter only parses: file → normalized
+/// <see cref="AgentSession"/> stream, with no SQL, batching or substrate types; composition
+/// is <see cref="AgentTraceEmitter"/> and admission is the shared ingest recipe. JSON is
+/// read through the registered grammar (<see cref="JsonAstDocument"/>).
 /// </summary>
 public interface IAgentTraceAdapter
 {
@@ -27,8 +26,8 @@ public interface IAgentTraceAdapter
 public static class AgentTraceAdapters
 {
     /// <summary>
-    /// Ordered registry: specific formats first, the generic JSON/JSONL fallback last so
-    /// no role-shaped log is ever omitted. First CanHandle wins.
+    /// Ordered registry: specific formats first, the generic JSON/JSONL adapter last.
+    /// First CanHandle wins.
     /// </summary>
     public static IReadOnlyList<IAgentTraceAdapter> All { get; } =
     [
@@ -116,9 +115,8 @@ internal static class AdapterJson
 
     /// <summary>
     /// Up to <paramref name="count"/> leading lines for format sniffs. A Claude Code
-    /// transcript can OPEN with summary/file-history-snapshot records that carry none of
-    /// the envelope keys, so single-line sniffs misroute real files (measured: this
-    /// session's own transcript fell through to the generic adapter).
+    /// transcript can open with summary/file-history-snapshot records that carry none of
+    /// the envelope keys, so a one-line sniff is not enough.
     /// </summary>
     internal static IEnumerable<string> FirstLines(string filePath, int count, int maxBytes = 65536)
     {

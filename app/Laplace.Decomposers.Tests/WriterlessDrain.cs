@@ -22,8 +22,8 @@ internal static class WriterlessDrain
 }
 
 /// <summary>
-/// A change carries its rows in its native intent stages as well as (for legacy emitters)
-/// its managed arrays; the staged rows are what persists, so a test reads both.
+/// A change can carry rows in its native intent stages and in its managed arrays; the
+/// staged rows are what persists, so a test reads both.
 /// </summary>
 internal static class StagedRows
 {

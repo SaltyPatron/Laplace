@@ -4,19 +4,9 @@ using Xunit;
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// A recipe that names an operator must get that operator in the emitted tensors.
-///
-/// RecipeDescriptor.Parse used to infer `compile` from `lm_head`:
-///     compile = lmHead.Key == "trajectory" ? "continuation" : "full";
-/// and lm_head itself defaults to "trajectory". So a recipe that explicitly declared
-/// relation:IS_A heads and said nothing about `compile` -- a field with no visible
-/// connection to those heads -- selected continuation mode, and FoundryCommands then
-/// applied OpAttnScale = OpResidScale = 0 to every operator outside the whitelist
-/// (context, trajectory, sentence_order, relation:PRECEDES).
-///
-/// The planes were still read and their edge counts still printed, so the census said the
-/// capability was present while the artifact had it removed. Continuation-only must be
-/// requested, never inferred.
+/// A recipe that names an operator gets that operator in the emitted tensors.
+/// Continuation compile (which zeroes every operator outside the continuation set) is
+/// selected only by an explicit <c>compile</c> field, never inferred from <c>lm_head</c>.
 /// </summary>
 public sealed class RecipeCompileDefaultTests
 {
@@ -39,7 +29,7 @@ public sealed class RecipeCompileDefaultTests
     {
         var desc = RecipeDescriptor.Parse(KnowledgeRecipe);
 
-        // The condition that used to flip this on is still present and still true.
+        // lm_head defaults to "trajectory"; that alone does not select continuation.
         Assert.Equal("trajectory", desc.LmHead.Key);
         Assert.False(
             desc.ContinuationCompile,

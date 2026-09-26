@@ -27,10 +27,9 @@ int hash_composer_run(
  * caller-owned physical resource grant and never participates in identity.
  * Every parent starts only after its complete child frontier has joined.
  *
- * The resolver supplied here must be safe for concurrent calls. The scalar
- * hash_composer_run entry remains the compatibility/oracle path for arbitrary
- * resolvers and is also the exact fallback when native parallel execution is
- * unavailable. */
+ * The resolver supplied here must be safe for concurrent calls. One worker, a
+ * tree with no more nodes than workers, Windows, or a scratch allocation failure
+ * run the serial hash_composer_run, which yields the same ids. */
 int hash_composer_run_workers(
     tier_tree_t*                   tree,
     hash_composer_atom_resolver_fn resolver,

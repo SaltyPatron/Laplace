@@ -79,10 +79,9 @@ function hash32(text: string): number {
 }
 
 /**
- * Deterministic point on a 3-D shell. ForceGraph mutates graphData coordinates,
- * so this seed is intentionally regenerated from identity whenever the 3-D
- * renderer gets its own copy. A prior 2-D simulation can therefore never hand
- * 3-D a set of z=0 nodes and trap the force system in a planar symmetry.
+ * Deterministic point on a 3-D shell, hashed from the entity id with radius scaled by hop.
+ * Regenerated whenever the 3-D renderer gets its own copy, so a 2-D simulation's z=0
+ * coordinates never seed the 3-D force system into a planar symmetry.
  */
 function volumetricSeed(id: string, hop: number): [number, number, number] {
   const u = (hash32(`${id}\0u`) + 0.5) / 0x100000000;
@@ -99,9 +98,8 @@ function volumetricSeed(id: string, hop: number): [number, number, number] {
 }
 
 /**
- * react-force-graph mutates both node coordinates and link endpoints in place.
- * Never give the 2-D and 3-D engines the same objects: toggling dimensions used
- * to leave the 3-D engine starting from the 2-D sheet it had just inherited.
+ * A fresh node and link copy for one render dimension. react-force-graph mutates node
+ * coordinates and link endpoints in place, so the 2-D and 3-D engines never share objects.
  */
 export function graphForDimension(base: GraphData, dim: Dim, centerId: string): GraphData {
   const spectral = base.nodes.filter((n) =>
@@ -160,12 +158,8 @@ export function graphForDimension(base: GraphData, dim: Dim, centerId: string): 
 }
 
 /**
- * A node's name, drawn as a camera-facing sprite.
- *
- * The 3-D web previously carried labels only in the hover tooltip, so the graph
- * opened as an unreadable constellation of dots — you had to hunt with the
- * pointer to learn what anything was, while the 2-D projection labelled itself
- * once zoomed in. Names are drawn for real so the web is legible on arrival.
+ * 3-D node names are camera-facing sprites. Past MAX_VISIBLE_LABELS nodes, the center,
+ * then walk nodes, then the heaviest by visual mass carry the labels.
  */
 const LABEL_FONT_PX = 44;
 const MAX_VISIBLE_LABELS = 48;
@@ -283,8 +277,7 @@ function labelSprite(
   const texture = new CanvasTexture(canvas);
   texture.minFilter = LinearFilter;
   // Labels keep one on-screen size at every zoom (sizeAttenuation off, scale in
-  // viewport units). A world-sized label grows with the camera, so in the dense belief
-  // cluster every name stacked into one unreadable pile; now zooming in separates them.
+  // viewport units), so zooming into a dense cluster separates names instead of enlarging them.
   const material = new SpriteMaterial({
     map: texture, transparent: true, depthWrite: false, sizeAttenuation: false,
   });
@@ -545,9 +538,7 @@ export function ConsensusGraph({
     const t = setTimeout(() => {
       if (dim !== '2d') {
         configureForces3d();
-        // Padding is in screen px around the fitted bounds. At 140 a 20-node
-        // web sat as a faint speck in the middle of a large panel; enough room
-        // that labels do not clip, not so much that the graph is unreadable.
+        // Padding in screen px around the fitted bounds: room for labels without shrinking the web.
         ref3d.current?.zoomToFit(500, 24);
       } else {
         ref2d.current?.zoomToFit(400);

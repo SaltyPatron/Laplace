@@ -5,17 +5,13 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Live proof for the default conversational forward path. The generation eval used
-/// to call converse.infer(), which is a ranked predictor and is not the default
-/// generation.forward_text() path used by converse.chat(). A green infer probe could
-/// therefore coexist with a broken or disconnected dynamic forward pass.
-///
-/// This test executes the canonical traceable native forward program, the production
-/// forward-receipt client used by /v1/explain/report, its normal text projection, and
-/// the public SubstrateClient conversation path against the same witnessed prompt.
-/// The receipt assertions ensure a non-empty answer cannot hide a disconnected
-/// query/evidence path. Tier=live is intentional: correctness depends on the standing
-/// seeded substrate rather than a miniature fixture.
+/// Live: one witnessed prompt through <c>generation.forward_trace</c> (the traceable
+/// forward program), <c>SubstrateClient.ForwardTraceAsync</c> (the receipt read behind
+/// /v1/explain/report), <c>generation.forward_text</c>, and
+/// <c>SubstrateClient.ConverseAsync</c>. Every receipt row carries a root, candidates
+/// and ordered context, and the expected answer is emitted with IS_ANTONYM_OF support,
+/// so a non-empty reply cannot hide a disconnected evidence path. The answer depends on
+/// the seeded substrate's standing.
 /// </summary>
 [Trait("Tier", "live")]
 public sealed class ForwardPassLiveTests
@@ -99,8 +95,7 @@ public sealed class ForwardPassLiveTests
             string.Equals(row.Entity, Expected, StringComparison.OrdinalIgnoreCase)
             && row.AntonymSupport);
 
-        // The production client behind /v1/explain/report must observe the same
-        // canonical forward execution, not the retired consensus.walk_branches replay.
+        // The receipt read behind /v1/explain/report observes the same forward execution.
         await using var client = new SubstrateClient();
         var productTrace = await client.ForwardTraceAsync(
             Prompt,

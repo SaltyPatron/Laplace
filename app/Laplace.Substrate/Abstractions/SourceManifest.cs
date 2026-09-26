@@ -3,9 +3,8 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Instance membrane used by sealed InitializeAsync bootstrap. Etl and other
-/// runtime-configured sources build this from their config rather than lying
-/// about static abstracts.
+/// Instance form of a source descriptor, read by the sealed InitializeAsync bootstrap.
+/// Runtime-configured sources build it from their config instead of static abstracts.
 /// </summary>
 public interface ISourceManifest
 {

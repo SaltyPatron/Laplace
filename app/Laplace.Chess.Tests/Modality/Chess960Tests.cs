@@ -5,19 +5,12 @@ using Xunit;
 namespace Laplace.Modality.Chess.Tests;
 
 /// <summary>
-/// Chess960 ("Freestyle"), which chess.com exports with X-FEN/Shredder castling.
+/// Chess960 ("Freestyle"), exported with X-FEN/Shredder castling fields.
 ///
-/// These games were refused outright until now — 1,866 across the corpora, 0.8%, and up to
-/// 18.8% of an individual chess.com archive. The refusal was deliberate and correct at the
-/// time: <c>Board.FromFen</c> threw on a castling field it could not model, because
-/// replaying such a game from the standard array records a game that was never played.
-///
-/// THE FIRST GROUP IS THE POINT OF THE WHOLE CHANGE. Position identity embeds
-/// <c>CastleString()</c> (PositionContent.Surface -> "cr:"), so if supporting rook files
-/// altered that string for ordinary chess, every position id in the substrate would move
-/// and the corpus would need a reseed. It does not: the rook files default to the standard
-/// ones and CastleString emits the classic KQkq whenever they hold. These tests are that
-/// claim, executable.
+/// Position identity embeds <c>CastleString()</c> (PositionContent.Surface → "cr:"). Rook
+/// files default to the standard ones and CastleString emits classic KQkq whenever they hold,
+/// so an ordinary-chess position has the same content, and the same id, whichever castling
+/// notation it was read from. The first group of tests pins that.
 /// </summary>
 public class Chess960Tests
 {
@@ -31,9 +24,8 @@ public class Chess960Tests
         => Assert.Equal("KQkq", Board.FromFen(Startpos).CastleString());
 
     /// <summary>
-    /// The same board written in Shredder notation is the SAME position — same castling
-    /// field, therefore the same content surface, therefore the same id. A corpus recorded
-    /// before this change and one recorded after must collide, not diverge.
+    /// The same board written in Shredder notation is the same position: same castling
+    /// field, same content surface, same id.
     /// </summary>
     [Fact]
     public void ShredderNotationOfStandardBoard_ProducesIdenticalIdentity()
@@ -54,9 +46,8 @@ public class Chess960Tests
     // ---- the shapes ordinary chess cannot produce -------------------------------------
 
     /// <summary>
-    /// The king castles WITHOUT MOVING: it already stands on g1, and only the rook travels.
-    /// The generic mover would have deleted it — `Squares[To] = moving; Squares[From] =
-    /// Empty` with To == From clears the square it just wrote.
+    /// The king castles without moving: it already stands on g1 and only the rook travels.
+    /// A generic mover (write To, then clear From) would erase the king when To == From.
     /// </summary>
     [Fact]
     public void KingSide_KingAlreadyOnDestination_CastlesWithoutMoving()
@@ -71,9 +62,8 @@ public class Chess960Tests
     }
 
     /// <summary>
-    /// King and rook SWAP: the king's destination (c1) is the rook's square and the rook's
-    /// destination (d1) is the king's. The generic mover would have scored the king's move
-    /// as capturing its own rook.
+    /// King and rook swap: the king's destination (c1) is the rook's square and the rook's
+    /// destination (d1) is the king's; the castle is not a capture of the own rook.
     /// </summary>
     [Fact]
     public void QueenSide_RookOnKingDestination_ResolvesBothPieces()
@@ -86,8 +76,8 @@ public class Chess960Tests
         Assert.Equal(Piece.WRook, b.Squares[Board.Sq(3, 0)]);   // rook c1 -> d1
     }
 
-    /// <summary>Make/Unmake must be exact for castling, or perft and the analyzer's replay
-    /// diverge from each other in ways that only show up deep in a search.</summary>
+    /// <summary>Make/Unmake restore the exact position across Chess960 castling, so perft and
+    /// replay agree at any depth.</summary>
     [Theory]
     [InlineData("1rqkbbnr/pppppppp/8/8/8/8/PPPPPPPP/6KR w H - 0 1", true)]
     [InlineData("1rqkbbnr/pppppppp/8/8/8/8/PPPPPPPP/2RKBBNR w C - 0 1", false)]
@@ -101,8 +91,8 @@ public class Chess960Tests
         Assert.Equal(before, b.ToFen());
     }
 
-    /// <summary>A king that never stood on e1 still loses its rights when it moves. The old
-    /// rights table switched on the literal squares 0/4/7/112/116/119.</summary>
+    /// <summary>A king that never stood on e1 still loses its castling rights when it moves:
+    /// rights follow the actual king and rook squares, not fixed standard squares.</summary>
     [Fact]
     public void KingMoveOffAnyStartSquare_ClearsBothRights()
     {
@@ -119,12 +109,12 @@ public class Chess960Tests
         Assert.Equal(fen, Board.FromFen(fen).ToFen());
     }
 
-    // ---- the corpus this was blocking -------------------------------------------------
+    // ---- real Chess960 games ----------------------------------------------------------
 
     /// <summary>
-    /// The eight Chess960 games in a real chess.com archive, replayed end to end. A wrong
-    /// castling rule derails SAN resolution within a few moves, so a 153-ply game finishing
-    /// is stronger evidence than any single constructed position.
+    /// The eight Chess960 games in a chess.com archive replay end to end. A wrong castling
+    /// rule derails SAN resolution within a few moves, so completing long games checks the
+    /// rules more broadly than constructed positions do.
     /// </summary>
     [SkippableFact]
     public async Task RealChessComFreestyleGames_AllReplay()
@@ -216,14 +206,10 @@ public class Chess960Tests
         => Assert.Null(Chess960Positions.TryNumber("RNBQKBNQ"));   // two queens, no king
 
     /// <summary>
-    /// THE RULE IS THE AUTHORITY, NOT THE LIST. Double Fischer Random gives White and Black
-    /// different back ranks — legal under the format, and absent from Scharnagl's
-    /// enumeration, which only numbers symmetric arrays. Such a game must still PARSE,
-    /// still CASTLE, and simply carry no board number.
-    ///
-    /// The list is somebody else's; the rules are the format's. Refusing a position for
-    /// being unnumbered would be the EXISTS-collapses-the-distinction error again —
-    /// unattested is not attested-false.
+    /// The castling rules decide legality, not the numbered list. Double Fischer Random gives
+    /// White and Black different back ranks, which Scharnagl's enumeration (symmetric arrays
+    /// only) does not number. Such a game parses and castles, and carries no board number:
+    /// being unnumbered is absence, not falsity.
     /// </summary>
     [Fact]
     public void AsymmetricStart_PlaysFine_AndSimplyHasNoNumber()
@@ -243,8 +229,8 @@ public class Chess960Tests
         Assert.Equal(20, legal.Count);   // 16 pawn + 4 knight moves from any 960 array
     }
 
-    /// <summary>A START position reports its number; a MID-GAME one reports none, because it
-    /// has none — which is why the engine keys on rook files, not on this.</summary>
+    /// <summary>A start position reports its number; a mid-game position reports none, so
+    /// castling keys on rook files, not on the number.</summary>
     [Fact]
     public void OnlyStartingArraysHaveANumber()
     {
@@ -256,14 +242,10 @@ public class Chess960Tests
     }
 
     /// <summary>
-    /// In Chess960 a CASTLE and an ordinary king move can share (from, to). Found on a real
-    /// game — DenLaz_chesscom.pgn, white king d1, rooks a1/f1 — where the source writes
-    /// "Kc1" for the ordinary step d1->c1, and the queen-side castle also ends on c1. The
-    /// resolver matched both, called it ambiguous, and dropped a 58-ply game.
-    ///
-    /// Standard chess cannot produce this: the king starts on e1, castling lands it two
-    /// squares away, and "Kc1" from e1 is not a legal king move. A castle is only ever
-    /// spelled O-O / O-O-O, so a piece-move SAN must never match one.
+    /// In Chess960 a castle and an ordinary king move can share (from, to): with the king on
+    /// d1 and rooks a1/f1 (DenLaz_chesscom.pgn), "Kc1" is the step d1→c1 and the queen-side
+    /// castle also ends on c1. A castle is spelled only O-O / O-O-O, so piece-move SAN never
+    /// resolves to a castle and the move is not ambiguous.
     /// </summary>
     [Fact]
     public void KingMove_SharingItsSquareWithACastle_IsNotAmbiguous()
@@ -289,8 +271,8 @@ public class Chess960Tests
     // ---- the collision, enumerated rather than stumbled on --------------------------
 
     /// <summary>
-    /// Half the arrays can spell a castle and a king move with the same (from, to). This is
-    /// the census; the resolver rule is tested above on the real game that exposed it.
+    /// Exactly half the arrays let a castle and a king move share (from, to); the SAN
+    /// resolver rule for that case is tested above.
     /// </summary>
     [Fact]
     public void HalfOfAllArraysCanCollideACastleWithAKingMove()
@@ -308,8 +290,8 @@ public class Chess960Tests
         Assert.Equal(480, either);          // exactly half of 960
     }
 
-    /// <summary>Ordinary chess cannot produce it — both destinations are two squares from
-    /// e1, so no legal king move reaches them. That is why it went unseen.</summary>
+    /// <summary>Standard chess (SP 518) never has the collision: both castle destinations are
+    /// two squares from e1, beyond a king step.</summary>
     [Fact]
     public void StandardChessCannotCollide()
     {
@@ -320,7 +302,7 @@ public class Chess960Tests
         Assert.False(g.CanCollideWithKingMove);
     }
 
-    /// <summary>The array from the game that actually broke: SP 664, king on d1.</summary>
+    /// <summary>SP 664 (king on d1) has the queen-side collision.</summary>
     [Fact]
     public void TheArrayThatExposedIt_IsFlagged()
     {
@@ -331,8 +313,8 @@ public class Chess960Tests
         Assert.False(g.KingSideSharesDestinationWithKingMove);
     }
 
-    /// <summary>Geometry agrees with what FromFen derives, for every one of the 960 — the
-    /// table and the parser must not drift.</summary>
+    /// <summary>The castling geometry table agrees with what FromFen derives for all 960
+    /// arrays.</summary>
     [Fact]
     public void GeometryMatchesWhatTheParserDerives_ForAll960()
     {

@@ -15,8 +15,8 @@ internal sealed class ChessCorpusEvidence
         ChessCorpusPreparation.FileIdentity? ChunkManifest, ChessCorpusScopeMerge.Result? ExactScopeState,
         bool Completed, string Scope);
 
-    // These are our serialized evidence envelopes, paired with AppendAsync below.
-    // Source PGN still belongs to its existing registered grammar/decomposer.
+    // Serialized benchmark evidence envelopes, written by AppendAsync below. Source PGN
+    // goes through its registered grammar, never through these records.
     internal sealed record ChunkBody(string Schema, int Index, int FirstSelectedGame,
         ChessRecordingMeasurement.GameIdentity[] Games, int NewlyRecordedGames,
         WriterReceipt Writer, ChessRecordingMeasurement.ScopeObservation[] Scopes);

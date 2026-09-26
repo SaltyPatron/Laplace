@@ -28,10 +28,10 @@ internal sealed record McpHttpOptions(string Token, string Origin, int Port = 51
 }
 
 /// <summary>
-/// MCP 2025-06-18 Streamable HTTP: POST replies use application/json; server-push
-/// GET is explicitly unsupported (405), not the retired /sse transport. A session
-/// owns the SAME dispatcher and tool surface used by STDIO. Requests in one session
-/// serialize because the native writer and TurnCloser are not thread-safe.
+/// MCP 2025-06-18 Streamable HTTP: POST replies are application/json; GET returns 405.
+/// Each session owns an <see cref="McpServer"/> over the same tool set the stdio
+/// transport dispatches to. Requests in one session serialize on its gate because the
+/// native writer and TurnCloser are not thread-safe.
 /// </summary>
 internal static class McpHttpHost
 {
@@ -43,8 +43,8 @@ internal static class McpHttpHost
         options.Validate();
         var database = toolsFactory is null || readiness is null ? ManagedServiceDatabase.Resolve() : null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
-        // HTTP stays on loopback. The existing nginx terminates LAN TLS; no
-        // ASPNETCORE_URLS override can accidentally publish the backend directly.
+        // Kestrel binds loopback explicitly, so no ASPNETCORE_URLS override can expose
+        // it; TLS terminates in front of it.
         builder.WebHost.ConfigureKestrel(k =>
         {
             k.Listen(IPAddress.Loopback, options.Port);
@@ -78,10 +78,8 @@ internal static class McpHttpHost
     {
         await using var db = LaplaceDataSource.Create(SubstrateAccess.Serving, database);
         await using var connection = await db.OpenConnectionAsync(ct);
-        // Deployment readiness proves that the service can open the installed
-        // substrate schema and load the native perfcache. An empty database after
-        // a lawful recreate is healthy lifecycle state, not a failed MCP process.
-        // Seed/product capability is proved later by Tier=live smoke and eval.
+        // Ready means the installed schema opens and the native perfcache loads; an
+        // empty admitted world is still a ready process.
         return await ReadyFromProbesAsync(
             token => NpgsqlSubstrateReads.EntitiesAndConsensusExistAsync(connection, token),
             token => NpgsqlSubstrateReads.PerfCacheProbeAsync(connection, token), ct);
@@ -92,10 +90,9 @@ internal static class McpHttpHost
         Func<CancellationToken, Task<object?>> perfcache, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        // The inventory probe is still required: it exercises the installed core
-        // relations and fails if migration/extension synchronization is incomplete.
-        // Its booleans describe seed state and deliberately do not decide service
-        // readiness. The perfcache probe proves the native runtime dependency.
+        // The inventory probe must succeed (it touches the core relations, so a schema
+        // out of sync with the extension throws), but its booleans do not gate readiness.
+        // The perfcache probe exercises the native runtime.
         _ = await inventory(ct);
         await perfcache(ct);
         return true;
@@ -105,8 +102,8 @@ internal static class McpHttpHost
     {
         var request = context.Request;
         context.Response.Headers.CacheControl = "no-store";
-        // Reject foreign and opaque origins, including on preflight. Do not enable
-        // wildcard CORS. Non-browser MCP clients normally omit Origin altogether.
+        // Any Origin other than the configured one is refused, preflight included;
+        // clients that send no Origin pass this check.
         if (request.Headers.TryGetValue("Origin", out var origins)
             && (origins.Count != 1 || !string.Equals(origins[0], options.Origin, StringComparison.Ordinal)))
         {
@@ -200,8 +197,8 @@ internal static class McpHttpHost
         {
             if (session.Closed) { context.Response.StatusCode = 404; return; }
             session.Touch();
-            // A client disconnect is NOT cancellation of an accepted MCP tool.
-            // Let the canonical handler finish; never release its writer gate early.
+            // A client disconnect does not cancel an accepted call: the handler runs to
+            // completion before the session's writer gate is released.
             string? reply;
             try { reply = await Task.Run(() => session.Server.Handle(message.ToJsonString())); }
             catch (Exception ex)

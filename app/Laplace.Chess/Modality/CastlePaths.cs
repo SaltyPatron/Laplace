@@ -2,25 +2,20 @@ namespace Laplace.Modality.Chess;
 
 /// <summary>
 /// Precomputed castling geometry: for every (king file, rook file) pair, which squares of
-/// the home rank must be EMPTY and which the king TRAVERSES. Two table reads and one AND,
-/// instead of walking squares per call.
+/// the home rank must be empty and which the king traverses: two table reads and one AND
+/// per castle.
 ///
-/// WHY THIS IS A TABLE. Castling destinations are fixed — king to g/c, rook to f/d — in
-/// Chess960 exactly as in chess. So once you know where the king and its rook START, every
-/// square either of them crosses is determined, forever. That is a pure function of two
-/// files, i.e. 64 entries, computed once. The first cut walked those squares with a loop on
-/// every generated move; this is the same answer as a lookup, which is what the legal-move
-/// bitmask machinery next door (<see cref="Bitboards"/>) already does for everything else.
+/// Castling destinations are fixed (king to g/c, rook to f/d) in Chess960 as in chess, so
+/// every square either piece crosses is a pure function of the two starting files: 64
+/// entries, computed once.
 ///
-/// KEYED ON FILES, NOT ON THE 960. The obvious index is the position number, and it is the
-/// wrong one: it would cover only the standard enumeration. Double Fischer Random gives the
-/// two sides different arrays and has no position number at all, and any source may ship an
-/// arrangement nobody numbered. The RULES are the authority — a king somewhere between two
-/// rooks — so the key is what the rules actually constrain. 64 entries cover all 960, all
-/// 921,600 DFRC pairs, and anything off-list.
+/// Keyed on files, not on a Chess960 position number: Double Fischer Random gives the two
+/// sides different arrays with no position number, and a source may ship an unnumbered
+/// arrangement. The rules constrain only the king and rook files, so 64 entries cover every
+/// legal arrangement.
 ///
-/// ONE RANK, SO ONE BYTE. Everything castling touches is on the mover's home rank, so a
-/// file mask is eight bits, not a 64-bit board mask. The occupancy test is
+/// Everything castling touches is on the mover's home rank, so a file mask is one byte, not
+/// a 64-bit board mask. The occupancy test is
 /// <c>(occupiedFiles &amp; mustBeEmpty) != 0</c>.
 /// </summary>
 internal static class CastlePaths
@@ -49,16 +44,13 @@ internal static class CastlePaths
             byte kingSpan = Span(king, kingTo);
             byte rookSpan = Span(rook, rookTo);
 
-            // The two castling pieces do not block each other — they both move — so their
-            // own starting files come out of the emptiness requirement. Everything else on
-            // either path must be clear.
+            // The two castling pieces do not block each other (both move), so their own
+            // starting files are excluded from the emptiness requirement.
             int occupied = (kingSpan | rookSpan) & ~(1 << king) & ~(1 << rook);
             MustBeEmpty[king, rook] = (byte)occupied;
 
-            // The king may not start in, pass through, or land on check. Its origin is
-            // included: the caller would otherwise have to test it separately, and a king
-            // that castles without moving (origin == destination) has exactly one square
-            // to check.
+            // The king may not start in, pass through, or land on check, so its origin is
+            // included; a king that castles without moving has exactly one square to check.
             KingTraverses[king, rook] = kingSpan;
         }
     }

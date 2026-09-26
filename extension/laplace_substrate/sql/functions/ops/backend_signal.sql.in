@@ -1,31 +1,18 @@
--- ops.cancel_backend / ops.terminate_backend — stopping work that is already
--- running, as a named operation rather than a raw pg_cancel_backend() call.
+-- ops.cancel_backend / ops.terminate_backend: stop running work as a named
+-- operation. ops.ingest_run_close edits the journal row only; these signal the
+-- backend itself.
 --
--- The operator console could start long work and could not stop it: the only
--- cut-off it had was ops.ingest_run_close, which edits the JOURNAL ROW and
--- leaves the backend running — the journal says cancelled while the ingest keeps
--- writing. That is worse than no cancel at all, because the pipeline gate then
--- reports clear. These two signal the process; the journal row follows.
+-- Both return what they acted on, captured before the signal; reading after
+-- would race the backend's teardown. Three refusals, because the pid is free
+-- text from a caller:
+--   * a pid on another database (pg_cancel_backend is cluster-wide);
+--   * this backend's own pid (the call would abort itself and report nothing);
+--   * a pid that is not there (signalling it returns false, which would read
+--     as a refusal).
 --
--- Both RETURN WHAT THEY ACTED ON, captured BEFORE the signal. pg_cancel_backend
--- returns a bare boolean, so a caller who only has that cannot answer "what did
--- I just kill?" — and on an operator surface with no authentication that is the
--- one question an audit needs. Reading it after the signal races the backend's
--- own teardown.
---
--- THREE REFUSALS, all because the pid is free text from a UI:
---   * a pid on another database — pg_cancel_backend is cluster-wide, so a typo
---     reaches a neighbouring database's backend, which is not this operator's to
---     touch;
---   * this backend's own pid — cancelling the connection executing the cancel
---     aborts the call and reports nothing;
---   * a pid that is not there at all — signalling a dead pid returns false and
---     is indistinguishable from "refused", so it is named.
---
--- Cancel is the first move: it ends the running statement and leaves the session
--- alive to roll back cleanly. Terminate drops the connection and is for a
--- backend that ignored a cancel (uninterruptible wait) — an in-flight ingest
--- batch loses its open transaction, which is the point.
+-- Cancel ends the running statement and leaves the session to roll back.
+-- Terminate drops the connection, for a backend that ignored a cancel; its
+-- open transaction is lost.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN

@@ -11,9 +11,8 @@ namespace Laplace.Decomposers.Abstractions;
 /// plain text uses the content root itself. <see cref="FileId"/> is the containing
 /// content-plus-metadata composition, not a fixed tier category.</para>
 ///
-/// <para><see cref="SourceId"/> is retained as the historical source/root slot so older
-/// record producers stay binary/source compatible. New document records fill the explicit
-/// ids and the deferred content emitter uses <see cref="DocumentId"/> as the nearest trunk.</para>
+/// <para>The deferred unit stages content under <see cref="DocumentId"/> as its trunk when
+/// set, else under <see cref="SourceId"/>, else under the handler's source.</para>
 /// </summary>
 public readonly record struct ContentIngestRecord(
     byte[] CanonicalUtf8,
@@ -81,9 +80,9 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
             if (_tree is null)
                 _tree = ContentTierSpine.BuildTree(_canonical);
             if (_tree is null) return default;
-            // A document can own its native rows under its content root rather
-            // than the corpus registry id. Carry the producer's declared prior
-            // with that exact owner; witness weights are not source priors.
+            // Rows are staged under the document trunk rather than the corpus source id,
+            // so the producer's declared prior is carried under that same owner; witness
+            // weights are not source priors.
             if (_sourceTrust is { } trust) builder.DeclareSourcePrior(_sourceId, trust);
             return ContentTierSpine.EmitTree(
                 builder, _tree, _sourceId, descentBitmap ?? ReadOnlySpan<byte>.Empty, out var rootId)

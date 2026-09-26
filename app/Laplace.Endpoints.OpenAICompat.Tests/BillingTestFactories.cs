@@ -13,8 +13,9 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// AppComposition loads STRIPE_* from process env / deploy/secrets. Contract and
-/// golden tests must not call live Stripe or inherit host checkout URLs / price ids.
+/// Overrides the STRIPE_* options AppComposition reads from the environment and
+/// deploy/secrets, so contract and golden tests never reach live Stripe or inherit host
+/// checkout URLs and price ids.
 /// </summary>
 internal static class TestBillingOptions
 {
@@ -58,10 +59,8 @@ internal sealed class StrictWebhookFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
         {
-            // Webhook-path tests never touch the substrate: without these the
-            // factory booted the production composition — a real
-            // NpgsqlDataSource plus CatalogPrewarmService firing the explore
-            // catalog load against whatever DB the runner .env points at.
+            // Webhook tests never reach the substrate: the client is unreachable and
+            // hosted services (catalog prewarm) are removed.
             services.RemoveAll<ISubstrateClient>();
             services.AddSingleton<ISubstrateClient, UnreachableSubstrateClient>();
             services.RemoveAll<Microsoft.Extensions.Hosting.IHostedService>();
@@ -92,8 +91,8 @@ internal sealed class UnconfiguredWebhookFactory : WebApplicationFactory<Program
 
 internal static class WebhookTestEvents
 {
-    // Positive checkout fixtures must establish the same persisted binding that
-    // a successful checkout provider creates. No handler or approval is replaced.
+    // Persists the quote-to-session binding a successful checkout creates; the
+    // handler and approval path run unchanged.
     public static async Task BindCheckoutAsync(IServiceProvider services, string quoteId, string sessionId)
     {
         var store = services.GetRequiredService<IBillingQuoteStore>();
@@ -139,8 +138,8 @@ internal static class WebhookTestEvents
         });
 }
 
-// Only the external provider read is controlled. The production webhook handler,
-// quote binding, event deduplication, period handling and credit store all execute.
+// Stands in for the external provider read only. The webhook handler, quote binding,
+// event deduplication, period handling and credit store all execute.
 internal sealed class TestStripeSubscriptions : IStripeSubscriptionGateway
 {
     private readonly ConcurrentDictionary<string, Subscription> _subscriptions = new(StringComparer.Ordinal);

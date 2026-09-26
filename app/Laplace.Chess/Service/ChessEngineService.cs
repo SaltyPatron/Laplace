@@ -84,9 +84,8 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Production composition: pure chess inference borrows an existing server-enforced
-    /// read-only serving datasource. The live host factory is retained only for operations
-    /// that explicitly cross the recording/training boundary.
+    /// Chess reads run on an existing server-enforced read-only serving datasource; the live
+    /// host factory is used only by operations that record or train.
     /// </summary>
     public ChessEngineService(
         double witnessWeight,

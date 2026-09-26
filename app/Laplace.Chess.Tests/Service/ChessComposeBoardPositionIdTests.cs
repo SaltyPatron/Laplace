@@ -71,8 +71,8 @@ public sealed class ChessComposeBoardPositionIdTests
             for (int i = 0; i < 10; i++) _ = ChessCompose.Position(board);
             long missBytes = GC.GetAllocatedBytesForCurrentThread() - start;
 
-            // A fixture containing the actual native-derived position, serialized in
-            // the existing floor format and authenticated by its native body hash.
+            // Fixture: the native-derived position serialized in the floor format and
+            // authenticated by its native body hash.
             byte[] body = new byte[128 + 80];
             BinaryPrimitives.WriteUInt32LittleEndian(body, 0x5048434c);
             BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4), 1);

@@ -1,6 +1,5 @@
--- Diagnostic table-agnostic presence wrapper. The concrete fixed surfaces own the
--- set operations; this function only dispatches between them. Caller-side batching
--- owns concurrency, so the wrapper is PARALLEL RESTRICTED with its callees.
+-- Diagnostic dispatch to the per-table presence functions by table name.
+-- PARALLEL RESTRICTED like its callees; the caller owns batching.
 CREATE OR REPLACE FUNCTION laplace.table_present_ordinals(p_table text, p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL RESTRICTED

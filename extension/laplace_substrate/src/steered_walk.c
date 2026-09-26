@@ -1,23 +1,18 @@
 /*
- * steered_walk.c — the converse_walk WALK phase, natively.
+ * steered_walk.c: a seeded, weighted walk over a caller-supplied ordered
+ * stream of ids (with per-position steering weights), emitting the chosen id
+ * sequence. Pure computation over the arguments; no SPI.
  *
- * Replaces the plpgsql trigram->bigram backoff loop that re-scanned the whole
- * token stream with generate_subscripts per step (O(steps × n) plpgsql
- * evaluation, hex-string visited set). Here: intern tokens once, build
- * trigram/bigram postings once, then each step is a postings-list scan with a
- * hashed visited set. Pure computation over the arguments — no SPI.
- *
- * Arithmetic parity with the plpgsql it replaces (converse_walk):
- *   - LCG: rng = (rng * 1103515245 + 12345) % 2147483647, advanced once before
- *     the random seed pick and once per WALK step.
- *   - candidate score: weight[pos+k] * (|rng + pos*2654435761| % 100000) with
- *     pos the 1-BASED stream position; first maximum wins scanning positions
- *     ascending (matches the bounded top-1 sort keeping the incumbent on ties).
- *   - the trigram path excludes visited (a,b,c) value-triples; the bigram path
- *     excludes nothing (the plpgsql compared a pair-concat against triple
- *     concats — inert by construction; parity preserved deliberately).
- *   - a SENT successor past minlen ends the walk; before minlen it is marked
- *     visited and the step is consumed without advancing (a,b).
+ * Ids are interned once and (a,b)->next and b->next postings are built once;
+ * each step then scans one postings list with a hashed visited set.
+ *   - LCG: rng = (rng * 1103515245 + 12345) % 2147483647, advanced once for
+ *     the seed pick and once per step.
+ *   - candidate score: weight[pos+k] * (|rng + pos*2654435761| % 100000), pos
+ *     the 1-based stream position; the first maximum in ascending position
+ *     order wins.
+ *   - the (a,b) path excludes visited (a,b,c) triples; the b-only path does not.
+ *   - a sentence-sentinel successor at or past minlen ends the walk; before
+ *     minlen it is marked visited and the step is consumed without advancing.
  */
 #include "postgres.h"
 
@@ -291,14 +286,10 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
     }
 
     /* ---- SEED ----
-     * The core backbone anchors the opening, but the ENTRY OFFSET into it is
-     * the caller's rng's to choose. Seeding from core_elems[0],[1]
-     * unconditionally made every core-bearing prompt a deterministic replay
-     * of its gloss chain — byte-identical across seeds (GH #751: dog/water/
-     * king variance 1/3 while core-less prompts varied through the starts
-     * path below). One LCG advance, offset into the backbone: still anchored
-     * in the definitional material, but the seed decides where the walk
-     * enters it and therefore what it recombines toward. */
+     * With a core sequence, the opening pair is an adjacent pair of it at an
+     * offset chosen by one LCG advance, so the seed decides where the walk
+     * enters the core. Without one, a start id is picked by the seed and its
+     * best-scoring non-sentinel stream successor completes the pair. */
     if (core_n >= 2)
     {
         int core_off;
@@ -373,7 +364,7 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
     out[out_n++] = b;
     emitted = 2;
 
-    /* ---- WALK: steered trigram->bigram backoff ---- */
+    /* ---- WALK: (a,b)->next, else b->next ---- */
     for (int step = 0; step < steps; step++)
     {
         int32 nxt = -1;

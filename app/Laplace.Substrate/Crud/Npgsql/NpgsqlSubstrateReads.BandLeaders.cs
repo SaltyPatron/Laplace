@@ -11,9 +11,9 @@ public static partial class NpgsqlSubstrateReads
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
 
     /// <summary>
-    /// Bounded leaders with immutable band naming in the same set-wise command.
-    /// Band names come from <c>converse.relation_band_catalog()</c>; the live
-    /// <c>converse.relation_bands()</c> census is deliberately not on this request path.
+    /// Top consensus cells per relation band, with band names, in one set command.
+    /// Band names come from the fixed <c>converse.relation_band_catalog()</c>, not the
+    /// live <c>converse.relation_bands()</c> census.
     /// </summary>
     public static Task<IReadOnlyList<NamedBandLeaderRow>> BandLeadersNamedAsync(
         NpgsqlDataSource dataSource, int[] bands, int perBand, CancellationToken ct,

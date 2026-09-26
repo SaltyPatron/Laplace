@@ -1,6 +1,7 @@
-/* S7: typed standing over the intersection of candidates and the live frontier.
- * PostgreSQL owns cells and MVCC; consensus_scan owns native batch access;
- * walk_score.h owns edge scoring. SQL only binds operands and returns rows. */
+/* STEER: scores each proposed candidate by the consensus cells joining it to
+ * the live frontier. Both endpoints are bound, so the consensus face is read
+ * only at the candidate x frontier intersection; each cell is scored by
+ * walk_edge_score and summed per (candidate, frontier) pair. */
 #include "postgres.h"
 #include <math.h>
 #include "catalog/pg_type.h"
@@ -127,9 +128,9 @@ laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
     }
     pfree(elems);
     pfree(nulls);
-    /* Omitting a family restriction selects all families; it does not make
-     * directed claims symmetric. Only canonical symmetric relations admit
-     * reverse traversal, including the default forward-pass invocation. */
+    /* Omitting a type restriction selects all types; it does not make
+     * directed claims symmetric. Only symmetric relation types are read in
+     * the candidate -> frontier orientation. */
     laplace_consensus_scan(frontier, candidates, types, steer_cell, &state, stats);
     state.reverse = true;
     ArrayType *reverse_types = laplace_symmetric_relation_types_in(types);
@@ -150,7 +151,7 @@ laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
     hash_seq_init(&seq, state.candidates);
     while ((owner = hash_seq_search(&seq)) != NULL)
     {
-        /* Preserve the existing S7 score while replacing storage access.
+        /* A positive score is amplified by 1 + ln(covered frontier members).
          * Unattested and refuted candidates stay distinct through edges. */
         if (owner->covered > 1 && owner->steer > 0.0)
             owner->steer *= 1.0 + log((double) owner->covered);

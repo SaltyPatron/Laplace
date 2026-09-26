@@ -94,15 +94,9 @@ public static class ConceptNetUri
         ContentTierSpine.TryStageUnderscoredIntoBuilder(b, termUnderscored, sourceId, out rootId);
 
     /// <summary>
-    /// How many source records ConceptNet lists for an assertion -- the count of objects in
-    /// its "sources" array. That is the corpus's own statement of how much independent
-    /// support a triple has, and it went nowhere: every row entered the fold at
-    /// observationCount 1, so an edge 465 sources agree on folded exactly as hard as one
-    /// asserted once. 96,831 rows (5.4%) list two or more.
-    ///
-    /// Counts ARRAY ELEMENTS rather than distinct contributor strings: it is the source's
-    /// own grain, and it costs no allocation on a 34M-row hot path. Returns at least 1 so a
-    /// row with no sources block folds exactly as before.
+    /// Number of source records ConceptNet lists for an assertion (objects in its "sources"
+    /// array), used as the record's observation count. Counts array elements, the corpus's
+    /// own grain, without allocating; nested objects are not counted. Returns at least 1.
     /// </summary>
     public static long ParseSourceCount(ReadOnlySpan<byte> json)
     {
@@ -140,9 +134,8 @@ public static class ConceptNetUri
         return 1;
     }
 
-    /// <summary>Pull ConceptNet's assertion "weight" out of the metadata JSON column
-    /// (defaults to 1.0). Shared by the lean managed lane and the retired grammar
-    /// witness so the magnitude carried into the fold has one definition.</summary>
+    /// <summary>ConceptNet's assertion "weight" from the metadata JSON column (1.0 when
+    /// absent): the magnitude the record carries into the fold.</summary>
     public static double ParseWeight(ReadOnlySpan<byte> json)
     {
         if (json.IsEmpty) return 1.0;

@@ -7,13 +7,11 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
-/// `agents` source: batch ingest of AI-agent session logs from EVERY provider format the
-/// adapter registry knows (Claude Code, Codex, Gemini/Qwen, Antigravity, Copilot,
-/// Cursor, generic role-shaped JSON). Witness-unit lane: an explicit path (file or
-/// directory) is the boundary; with no path it discovers the current user's provider
-/// roots under $HOME. One session = one record; the shared multi-file spine owns
-/// parallelism, working sets, batching, and per-file resume (a re-run true-skips
-/// unchanged log files by content identity).
+/// Provider for agent session logs in every format the adapter registry parses. An explicit
+/// path (file or directory) bounds the input; with none, the current user's provider roots
+/// under $HOME are enumerated. Each parsed session goes through the shared multi-file
+/// recipe (compose, persist in bulk, fold, per-file receipt); an unchanged log file is
+/// skipped by content identity.
 /// </summary>
 public sealed class AgentTraceDecomposer
     : ComposeDecomposerMultiFile<AgentSession, AgentTraceSource, FullScope>, IIngestInventoryProvider
@@ -36,8 +34,8 @@ public sealed class AgentTraceDecomposer
 
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        // Tenant witness identities (spec 34): UserPrompt@/Response@/ToolResult@ per
-        // provider whose files the run will touch, registered before any turn composes.
+        // Registers the UserPrompt@/Response@/ToolResult@ witness sources of every provider
+        // whose files this run touches, before any turn composes.
         foreach (var provider in DiscoverProviders(context.EcosystemPath))
         {
             if (!BootstrappedProviders.TryAdd(provider, 0)) continue;
@@ -86,10 +84,10 @@ public sealed class AgentTraceDecomposer
     }
 
     /// <summary>
-    /// Grown-log protection: probe the session's Agent_Session_Watermark prefixes in ONE
-    /// batched existence bitmap and mark the deepest witnessed prefix, so Compose skips
-    /// re-witnessing testimony the substrate already holds. A probe miss only ever
-    /// re-witnesses (safe); a hit is only possible for a byte-identical turn prefix.
+    /// Probes all of the session's Agent_Session_Watermark prefix ids in one batched
+    /// existence check and records the deepest present one, so compose stages the prefix
+    /// as content without re-attesting it. A hit requires a byte-identical turn prefix;
+    /// a miss only re-witnesses.
     /// </summary>
     private async ValueTask<AgentSession> ResolveWatermarkAsync(AgentSession session, CancellationToken ct)
     {
@@ -132,8 +130,8 @@ public sealed class AgentTraceDecomposer
     {
         if (string.IsNullOrWhiteSpace(ecosystemPath) || ecosystemPath == "auto")
         {
-            // Path-less run: this user's provider roots. Only format-specific adapters
-            // claim files here — the generic fallback needs an explicit path.
+            // No path: enumerate this user's provider roots with the format-specific
+            // adapters only; the generic JSON adapter needs an explicit path.
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             foreach (var adapter in AgentTraceAdapters.All)
             {

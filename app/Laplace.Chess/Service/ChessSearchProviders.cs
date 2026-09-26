@@ -311,9 +311,9 @@ public sealed class ChessSearchConfiguration
 }
 
 /// <summary>
-/// Shared, pre-move-clock provider state for API Play, Lichess and UCI. Bounded atom, learned-PST
-/// and tactical-pattern state is prepared in <see cref="SubstrateBoardEvaluator"/> so every
-/// substrate-enabled Search consumes the same provider set instead of route-private approximations.
+/// Provider state prepared before the move clock and shared by API Play, Lichess and UCI.
+/// Atom, learned-PST and tactical-pattern state is prepared in <see cref="SubstrateBoardEvaluator"/>,
+/// so every substrate-enabled Search reads the same provider set.
 /// </summary>
 public sealed class ChessSearchProviders
 {

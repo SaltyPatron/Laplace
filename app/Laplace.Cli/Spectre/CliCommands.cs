@@ -3,18 +3,14 @@ using Spectre.Console.Cli;
 
 namespace Laplace.Cli.Spectre;
 
-// Spectre command layer for the Laplace CLI (GH #603).
+// Spectre command layer for the Laplace CLI.
 //
-// SAFE EXECUTION: the entrypoint injects a `--` after the command token, so every real
-// argument lands in ctx.Remaining.Raw verbatim and is handed to the EXISTING command
-// method unchanged — the battle-tested parsers in IngestCommands/QueryCommands/ChessCommands/
-// … stay the single source of truth, so behavior is byte-identical to the pre-Spectre switch
-// (a naive Spectre passthrough silently drops interleaved flags — proven — which is why we do
-// not let Spectre bind the real args). The settings classes model the documented options for
-// `--help` display and command discovery ONLY; they are intentionally not read at execution.
-//
-// Each Execute mirrors exactly the old Program.cs switch arm, sourcing from Raw(ctx)/Joined(ctx)
-// where the arm used args[1..] / string.Join(' ', args[1..]).
+// The entrypoint injects a `--` after the command token, so every argument lands in
+// ctx.Remaining.Raw verbatim and is handed to the command method's own parser
+// (IngestCommands/QueryCommands/ChessCommands/…); Spectre binding would drop interleaved
+// flags. The settings classes model the documented options for `--help` and command
+// discovery only and are not read at execution. Raw(ctx) is the argument tail;
+// Joined(ctx) is the tail as one string.
 
 internal abstract class ForwardCommand<TSettings> : AsyncCommand<TSettings>
     where TSettings : CommandSettings
@@ -85,7 +81,7 @@ internal sealed class SynthesizeCommand : ForwardCommand<TailSettings>
         => FoundryCommands.SynthesizeAsync(Raw(ctx));
 }
 
-// ---- text / query lane (join the tail into one string, as the old switch did) ---------------
+// ---- text / query (the tail joined into one string) ----------------------------------------
 
 [Description("Decompose text into the substrate's record stream (no DB write).")]
 internal sealed class DecomposeCommand : ForwardCommand<TailSettings>
@@ -143,7 +139,7 @@ internal sealed class AttestCommand : ForwardCommand<TailSettings>
         => QueryCommands.AttestAsync(Raw(ctx));
 }
 
-// ---- chess (self-dispatching subcommands, unchanged) ----------------------------------------
+// ---- chess (self-dispatching subcommands) ---------------------------------------------------
 
 [Description("Chess lab. Subcommands: measure-corpus (authentic PGN recording/readback/replay evidence), match (engine-vs-engine, live terminal board), selfplay, move, fetch, substrate-test, ladder, review, learned-pst, learned-eval-test, tactics, lichess. Run 'chess' for the full flag reference.")]
 internal sealed class ChessCommand : ForwardCommand<TailSettings>

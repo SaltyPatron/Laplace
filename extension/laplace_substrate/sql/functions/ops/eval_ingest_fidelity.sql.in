@@ -1,17 +1,8 @@
--- Ingest-fidelity eval scores, installed (GH #909 item 4).
---
--- Both bodies lived as CTE strings in C# (NpgsqlSubstrateReads), scanning consensus
--- directly and re-deriving a symmetric edge score with two correlated subselects per
--- row. They composed installed pieces, but the table reads, the per-row subselects
--- and the sampling rule were all defined client-side, where no gate sees them and
--- the definition of "how a plane scores a pair" can drift from the read path's.
---
--- SYMMETRIC BY CONSTRUCTION. A plane relation may be attested in either direction
--- for a given pair, so the score is the stronger of the two orientations; that is a
--- property of the eval, stated here once instead of copy-pasted into each caller.
--- Unattested reads 0 rather than absent: these feed a positives/negatives score
--- distribution where every sampled pair must contribute a number, the same
--- deliberate tri-state collapse consensus_pair_scores documents.
+-- Ingest-fidelity eval: how a relation plane scores pairs a ground-truth
+-- relation grounds together versus unrelated pairs from the same vocabulary.
+-- A pair's score is the stronger of its two orientations, since the plane may
+-- be attested either way. Unattested scores 0 so every sampled pair
+-- contributes a number; that is the eval's convention, not a refutation.
 DROP FUNCTION IF EXISTS laplace.eval_pair_plane_score(bytea, bytea, bytea);
 DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_positives(text, text, int);
 DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_negatives(text, int);
@@ -24,10 +15,8 @@ CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
 BEGIN ATOMIC
 
     SELECT GREATEST(
-        -- type_id and subject_id are the partition keys and both are in hand. Filtering
-        -- on c.id alone prunes nothing across the 216 leaves; with them it is one leaf
-        -- and the primary key (id, type_id, subject_id). Measured on consensus.cell,
-        -- the same shape: 97.1ms -> 21.0ms. This runs once per evaluated pair.
+        -- The full PK (id, type_id, subject_id) is in hand, so each probe
+        -- prunes to one leaf; id alone would probe every leaf.
         COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
                   FROM laplace.consensus c
                   WHERE c.id = laplace.consensus_id(p_w1, p_type, p_w2)
@@ -39,15 +28,12 @@ BEGIN ATOMIC
 ;
 END;
 
--- POSITIVES: pairs the ground-truth relation grounds together (two surfaces sharing
--- a sense), scored on the plane relation. p_relation names the plane; p_ground_truth
--- names the relation whose shared object makes two surfaces a true pair.
+-- Positives: pairs that share an object under p_ground_truth (two surfaces
+-- sharing a sense), scored on the p_relation plane.
 CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_positives(
     p_relation text, p_ground_truth text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    -- Sampling is intentionally fresh per call. random() changes on every call,
-    -- so this wrapper must make the same promise rather than presenting planner-
-    -- unsound transaction-constant behavior over a changing sample.
+    -- VOLATILE: the sample is drawn with random() on every call.
     LANGUAGE sql VOLATILE
 
 BEGIN ATOMIC
@@ -63,8 +49,7 @@ BEGIN ATOMIC
           AND c.object_id IS NOT NULL
     ),
     pairs AS (
-        -- a.w < b.w gives each unordered pair once; the score is symmetric anyway,
-        -- so the ordering here is deduplication and not a direction claim.
+        -- a.w < b.w yields each unordered pair once; not a direction claim.
         SELECT DISTINCT a.w AS w1, b.w AS w2
         FROM syn a JOIN syn b ON a.sense = b.sense AND a.w < b.w
     )
@@ -74,17 +59,13 @@ BEGIN ATOMIC
 ;
 END;
 
--- NEGATIVES: pairs drawn with no grounding relation between them, from the same
--- vocabulary, on the same plane -- the null distribution the positives are measured
--- against. The half-vocabulary offset pairs each sampled row with the one half a
--- shuffled vocabulary away, which draws unrelated pairs without ever asserting that
--- a pair is NOT related: an unattested edge is unattested, and scoring it 0 here is
--- the eval's convention, not a claim of refutation.
+-- Negatives: the null distribution. Each row of a shuffled vocabulary pairs
+-- with the row half the vocabulary away, drawing arbitrary pairs on the same
+-- plane without asserting that any pair is unrelated.
 CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_negatives(
     p_relation text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    -- Both the shuffled vocabulary and final bounded sample use random(); preserve
-    -- that deliberate per-call behavior with an explicit changing declaration.
+    -- VOLATILE: the shuffle and the sample use random().
     LANGUAGE sql VOLATILE
 
 BEGIN ATOMIC

@@ -53,9 +53,8 @@ public static class ChessVocabulary
     public static readonly Hash128 PlayerType = EntityTypeRegistry.Id("Chess_Player");
     public static readonly Hash128 PlayedByType = RelationTypeRegistry.RelationTypeId("PLAYED_BY");
     public static readonly Hash128 HasRatingType = RelationTypeRegistry.RelationTypeId("HAS_RATING");
-    // The manifest's tail keeps the two chess-specific family roots in stable order. Reuse
-    // that governed spelling instead of adding a second C# vocabulary literal; the ISA g3
-    // ratchet is shrink-only by design.
+    // The manifest's tail holds the two family roots in stable order; their ids come from
+    // that declared spelling rather than a second literal.
     public static readonly Hash128 CorrespondsToType = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.Relations[^2]);
     public static readonly Hash128 ExternalIdType = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.Relations[^4]);
     public static readonly Hash128 FeatureType = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.Relations[^3]);
@@ -69,10 +68,8 @@ public static class ChessVocabulary
 
 
 
-    // GH #736: the game CONTENT entity — the LINE, content-addressed from the ordered
-    // position ids it passes through (ChessCompose.LineId). One entity per distinct line
-    // ever played, no matter who played it or when. The type name stays Chess_Game: the
-    // game-as-content IS the line.
+    // The game as content is the line: content-addressed from its ordered constituents
+    // (ChessCompose.LineId), one entity per distinct line regardless of who played it or when.
     public static readonly Hash128 GameType = EntityTypeRegistry.Id("Chess_Game");
     // Chess_Event = the tournament / named event (many games).
     public static readonly Hash128 EventType = EntityTypeRegistry.Id("Chess_Event");
@@ -173,11 +170,10 @@ public static class ChessVocabulary
     }
 
     /// <summary>
-    /// Project a governed player identity onto its witnessed display-name content. The player
-    /// handle is not the content hash of the name, so a one-child trajectory must NOT be type
-    /// Content (which would collapse to the name root). The name root itself owns the complete
-    /// text DAG down through graphemes/codepoints; this Projection only places the governed
-    /// identity at that content-derived coordinate.
+    /// Places a governed player identity at the coordinate of its witnessed display-name
+    /// content. The player id is not the content hash of the name, so the one-child trajectory
+    /// is a Projection, not Content (which would collapse to the name root); the name's text
+    /// composition down to codepoints is the name root's own.
     /// </summary>
     public static void AppendPlayerPhysicality(
         SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,

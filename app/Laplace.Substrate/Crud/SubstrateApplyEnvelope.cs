@@ -1,10 +1,11 @@
 namespace Laplace.SubstrateCRUD;
 
 /// <summary>
-/// Keeps source input alive from decomposition through the transaction that
-/// admits the resulting change. Each queued change owns one retained lease;
-/// the runner releases it only after the change has succeeded or permanently
-/// left the apply pipeline.
+/// Reference-counted lease that keeps source input alive from composition through
+/// the transaction that persists the resulting change. Each emitted change holds
+/// one lease; the apply releases it once the change has committed or permanently
+/// left the pipeline. The last release disposes the input. Its pre-commit verifier
+/// runs inside the persist transaction before commit.
 /// </summary>
 public sealed class SubstrateApplyEnvelope : IDisposable
 {

@@ -3,7 +3,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Thin alias — all tier existence orchestration lives in <see cref="ContentTierSpine"/>.</summary>
+/// <summary>Forwards tier-tree existence checks to <see cref="ContentTierSpine"/>.</summary>
 public static class TierTreeContainmentProbe
 {
     public static Task<byte[]?> ProbeNodeEmitBitmapAsync(

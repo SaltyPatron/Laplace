@@ -14,25 +14,17 @@ public enum PhysicalityType : short
 
     ProjectionOutput = 4,
 
-    // An UNORDERED set of member ids packed into a trajectory. Distinct from Content so the
-    // three partial indexes that read text trajectories -- physicalities_constituents_gin,
-    // physicalities_traj_first_id_btree, physicalities_traj_probe, all WHERE type = 1 -- are
-    // not silently widened by a shape whose vertex order carries no sequence meaning.
-    // Constituents are sorted ascending by id before packing, which is what makes the merkle
-    // id of a set well-defined and therefore deduplicating (docs/specs/38).
+    // An unordered set of member ids packed into a trajectory. Kept apart from Content so
+    // the partial indexes over content trajectories (physicalities_constituents_gin,
+    // physicalities_traj_first_id_btree, physicalities_traj_probe, all WHERE type = 1)
+    // never read a vertex order that carries no sequence meaning. Members are sorted
+    // ascending by id before packing, so equal sets share one Merkle id.
     Set = 5,
 
-    // An ORDERED structural encoding: a flat vertex list carrying sentinels and
-    // (role, value) pairs rather than a content sequence. Distinct from Content for
-    // exactly the reason Set is -- the partial indexes that read text trajectories are
-    // all WHERE type = 1, and a structure whose vertices are head refs, deprels,
-    // annotation keys and end markers is not a sequence anyone means to walk.
-    //
-    // Measured 2026-08-23, before this existed: 2,132,050 of 46,542,360 type=1
-    // physicalities were UD parse structures, so generation.trajectory_continuations
-    // returned annotation entities as continuations of words -- hot -> ud/misc-key/...
-    // at weight 544, outranking hot -> water at 502, and New -> substrate/pos/X/v1 at
-    // 1475 outranking New -> Zealand at 1336.
+    // An ordered structural encoding: a flat vertex list of sentinels and (role, value)
+    // pairs rather than a content sequence. Kept apart from Content for the same reason
+    // as Set: its vertices (head refs, relation labels, annotation keys, end markers)
+    // must not surface as continuations in trajectory reads over type = 1.
     ParseStructure = 8,
 
     // Exact canonical descriptor manifest with the native literal-identifier
@@ -46,8 +38,9 @@ public enum PhysicalityType : short
     // never enter text-continuation indexes.
     Range = 10,
 
-    // Sparse, ordinal-aligned chess source annotations. These are parallel sequences on
-    // the PLAYING, not per-ply testimony rows and not part of move/position identity.
+    // Sparse, ordinal-aligned source annotations (comments, glyphs) carried as parallel
+    // sequences on a game trajectory. They are not testimony rows and not part of the
+    // identity of the moves or positions they annotate.
     ChessComment = 6,
     ChessAnnotation = 7,
 }

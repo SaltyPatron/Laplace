@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// Call an installed substrate operation by name (catalog allow-list).
-/// Parity with MCP <c>op</c> — GH #812.
+/// Calls an installed substrate operation by name from the catalog allow-list; the same
+/// call as MCP <c>op</c>.
 /// </summary>
 public sealed record OpRequest(
     [property: JsonPropertyName("name")] string? Name,

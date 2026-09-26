@@ -6,25 +6,23 @@ using System.Runtime.CompilerServices;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The one process-wide authority for <c>realize.register_canonicals</c>. Bulk decomposers,
-/// CLI closeout and in-process Chess lanes all submit sets here; the datasource-scoped state
-/// collapses repeated sets before a connection is opened. Built on <see cref="NpgsqlRead"/>
-/// so the command and its pool ownership also have one implementation.
+/// Process-wide entry to <c>realize.register_canonicals</c>. Every writer submits name sets
+/// here; datasource-scoped state drops names already registered before a connection is
+/// opened. The command runs through <see cref="NpgsqlRead"/>.
 /// </summary>
 public static class NpgsqlCanonicalRegistry
 {
     private static readonly ConditionalWeakTable<NpgsqlDataSource, RegistrationState> States = new();
 
     /// <summary>
-    /// Registers a set of canonical names once for the lifetime of a datasource. All writers,
-    /// decomposers and live ingest hosts sharing that datasource share this authority, so a
-    /// completed file, the CLI closeout and a parallel sibling cannot each repeat the same SQL.
-    /// The database remains authoritative: names enter the process cache only after the set
-    /// statement succeeds.
+    /// Registers a set of canonical names once per datasource lifetime. Names enter the
+    /// process cache only after the set statement succeeds, so the database stays
+    /// authoritative.
     ///
-    /// This registry is a readback dictionary for governed canonical keys/labels. It is not a
-    /// payload store. JSON documents, raw multiline text and numeric scalar content belong in
-    /// the tier/content spine and must be reconstructed from their content roots instead.
+    /// The registry is a readback dictionary for governed canonical keys and labels, not a
+    /// payload store: values that look like JSON, contain line breaks or NUL, or parse as
+    /// numbers are dropped here, since that content is composed in the tier spine and
+    /// realized from its content root.
     /// </summary>
     public static Task<CanonicalRegistrationResult> RegisterCanonicalsAsync(
         NpgsqlDataSource dataSource, IReadOnlyCollection<string> names, CancellationToken ct = default)

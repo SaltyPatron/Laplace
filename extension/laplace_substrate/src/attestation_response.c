@@ -1,6 +1,9 @@
-/* Scoped witness support over a batch of exact subjects and one relation.
- * Standing is explicitly pooled; source/context filters select support, never
- * silently claim a source-only Glicko refold. */
+/* Support and standing of the cells of one relation type over a batch of
+ * subjects. The evidence read counts distinct supporting sources per
+ * (subject, object) cell, optionally narrowed by filters; the consensus scan
+ * then attaches each cell's one pooled rating and RD. Filters narrow the support
+ * count only, never the standing. Cells without standing are dropped; each
+ * subject's cells are ordered by rating - 2 RD and limited per subject. */
 #include "postgres.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"

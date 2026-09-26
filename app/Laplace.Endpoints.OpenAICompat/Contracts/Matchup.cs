@@ -38,9 +38,8 @@ public sealed record TapeRow(
     [property: JsonPropertyName("eff_mu")] decimal? EffMu);
 
 /// <summary>
-/// Source-observed chess career facts. These are deliberately separate from relation Glicko
-/// standing: an Elo tag like 2690 is source testimony, while consensus eff_mu rates a substrate
-/// edge and must never be presented as the player's chess Elo.
+/// Source-observed chess career facts. A source Elo tag is testimony carried on the game
+/// headers; it is distinct from consensus eff_mu, which rates an edge.
 /// </summary>
 public sealed record ChessMatchupSide(
     [property: JsonPropertyName("peak_source_elo")] int? PeakSourceElo,
@@ -56,21 +55,20 @@ public sealed record MatchupSide(
     [property: JsonPropertyName("label")] string Label,
     [property: JsonPropertyName("record")] EntityRecordResponse Record,
     [property: JsonPropertyName("top_facts")] IReadOnlyList<SalientFactRow> TopFacts,
-    // These coordinates are deliberately separate. Generic consensus standing is NOT a
-    // source chess Elo, and calling one the other produced the Spassky/Karpov mismatch.
+    // Source-tagged ratings, kept apart from the consensus standing in Record.
     [property: JsonPropertyName("entity_type")] string? EntityType = null,
     [property: JsonPropertyName("source_rating_peak")] int? SourceRatingPeak = null,
     [property: JsonPropertyName("source_rating_observations")] long SourceRatingObservations = 0,
     [property: JsonPropertyName("chess")] ChessMatchupSide? Chess = null);
 
-/// <summary>The fast half of a matchup: both sides' cards plus the tape.</summary>
+/// <summary>A matchup's two side cards and the tape.</summary>
 public sealed record MatchupResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("x")] MatchupSide X,
     [property: JsonPropertyName("y")] MatchupSide Y,
     [property: JsonPropertyName("tape")] IReadOnlyList<TapeRow> Tape);
 
-/// <summary>The slow half: the witnessed path and the substrate's verdict.</summary>
+/// <summary>The relation verdict between the two sides, read separately from the cards.</summary>
 public sealed record MatchupVerdictResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("relation")] string? Relation,

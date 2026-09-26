@@ -6,10 +6,10 @@ using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 namespace Laplace.Decomposers.Model;
 
 /// <summary>
-/// Valet over the NATIVE safetensors header parser
+/// Managed entry to the native safetensors header parser
 /// (engine/synthesis/src/safetensors_parser.cpp). This type resolves files and shapes
-/// the result into <see cref="TensorReference"/> records; it does not parse the
-/// container itself — one parser for the format, in C++, per the layer law.
+/// the result into <see cref="TensorReference"/> records; the container is parsed only
+/// in native code.
 /// </summary>
 public sealed class SafetensorsContainerParser
 {

@@ -3,10 +3,9 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// A player's record over the games the corpus witnessed him in. Wins, draws and
-/// losses are counted from the game headers; <c>Unscored</c> is games whose source
-/// never asserted a result — abstentions, reported rather than folded into the
-/// score. <c>Score</c> is the chess convention (wins + draws/2) over scored games.
+/// A player's record over witnessed games. Wins, draws, and losses are counted from game
+/// headers; <c>Unscored</c> counts games whose source asserted no result, which are kept
+/// out of <c>Score</c> (wins + draws/2 over scored games). Absence is not a loss.
 /// </summary>
 public sealed record ChessRecord(
     [property: JsonPropertyName("games")] long Games,
@@ -17,11 +16,9 @@ public sealed record ChessRecord(
     [property: JsonPropertyName("score")] double? Score);
 
 /// <summary>
-/// One row of the roster: a player as the rated competitor he is. <c>Games</c> is the fold's
-/// own witness count, <c>Rating</c>/<c>Rd</c> the Glicko-2 pair, <c>EffMu</c> the conservative
-/// estimate everything ranks by. Not a win percentage — Glicko-2 weighs who you beat, and RD
-/// says how sure the corpus is, neither of which a ratio can express. The W/D/L split is a
-/// different question and lives on the career page.
+/// One roster row: the player's folded standing cell. <c>Games</c> is its witness count,
+/// <c>Rating</c>/<c>Rd</c> the Glicko-2 pair, <c>EffMu</c> the conservative estimate that
+/// ranks it. The W/D/L split is on <see cref="ChessPlayerResponse"/>.
 /// </summary>
 public sealed record ChessPlayerRow(
     [property: JsonPropertyName("rank")] long Rank,
@@ -33,8 +30,8 @@ public sealed record ChessPlayerRow(
     [property: JsonPropertyName("eff_mu")] double EffMu);
 
 /// <summary>
-/// A page of the sortable roster, or the relevance-ranked hits for a search. The roster is
-/// a read of folded cells, so there is no cached ranking to bound and no hidden search depth.
+/// A page of the sortable roster, or the relevance-ranked hits for a search, read directly
+/// from folded standing cells.
 /// </summary>
 public sealed record ChessPlayersResponse(
     [property: JsonPropertyName("object")] string Object,
@@ -48,10 +45,9 @@ public sealed record ChessRatingRow(
     [property: JsonPropertyName("games")] long Games);
 
 /// <summary>
-/// A head-to-head line, read from the folded pairing cell: every meeting between two players
-/// lands on one cell, so <c>Games</c> is its witness count and <c>EffMu</c> how that rivalry
-/// actually went. Ranked by eff_mu so a long even series against a strong opponent outranks a
-/// short lopsided one.
+/// A head-to-head line read from the folded pairing cell: every meeting between two players
+/// folds into one cell, so <c>Games</c> is its witness count and <c>EffMu</c> its
+/// conservative standing, which orders the list.
 /// </summary>
 public sealed record ChessOpponentRow(
     [property: JsonPropertyName("id")] string IdHex,
@@ -77,9 +73,8 @@ public sealed record ChessIdentityProfile(
     [property: JsonPropertyName("facts")] IReadOnlyDictionary<string, string> Facts);
 
 /// <summary>
-/// The career page. <c>Overall</c>, <c>AsWhite</c> and <c>AsBlack</c> come from one
-/// pass over the same evidence (SQL GROUPING SETS), so the splits can never
-/// disagree with the total.
+/// A player's career. <c>Overall</c>, <c>AsWhite</c>, and <c>AsBlack</c> are rows of one
+/// record read over the same evidence, so the splits agree with the total.
 /// </summary>
 public sealed record ChessPlayerResponse(
     [property: JsonPropertyName("object")] string Object,
@@ -95,8 +90,8 @@ public sealed record ChessPlayerResponse(
 
 /// <summary>
 /// One line of a game log. <c>Outcome</c> is this player's result in the substrate's
-/// own enum — 2 win, 1 draw, 0 loss, null when the source never scored the game —
-/// bit-identical to PlyOutcome.
+/// outcome encoding (2 win, 1 draw, 0 loss, same values as PlyOutcome); null when the
+/// source did not score the game.
 /// </summary>
 public sealed record ChessGameRow(
     [property: JsonPropertyName("id")] string IdHex,
@@ -116,10 +111,9 @@ public sealed record ChessGamesResponse(
     [property: JsonPropertyName("games")] IReadOnlyList<ChessGameRow> Games);
 
 /// <summary>
-/// One ply of a replayed game. <c>PositionId</c> is the composed content address of the
-/// board AFTER the move — a real Chess_Position entity, not a client-side artefact — so
-/// every ply is a door into the rated MOVE web around that board. <c>ClockSeconds</c> is
-/// the clock reading the source recorded, present only when it recorded one for every ply.
+/// One ply of a replayed game. <c>PositionId</c> is the content id of the board after the
+/// move, the same entity that carries that position's relations and standing.
+/// <c>ClockSeconds</c> is the source's clock reading, present only when every ply has one.
 /// </summary>
 public sealed record ChessPlyRow(
     [property: JsonPropertyName("ply")] int Ply,
@@ -131,9 +125,8 @@ public sealed record ChessPlyRow(
     [property: JsonPropertyName("position_id")] string PositionId);
 
 /// <summary>
-/// A recorded game replayed into the board sequence it describes. <c>Truncated</c> is
-/// non-null when a token would not resolve: the walk stops there rather than skipping it,
-/// because boards after an unplayable move are fiction.
+/// A recorded game replayed into its board sequence. <c>Truncated</c> is non-null when a
+/// move does not resolve or the stored structure is inconsistent; the replay stops there.
 /// </summary>
 public sealed record ChessGamePliesResponse(
     [property: JsonPropertyName("object")] string Object,

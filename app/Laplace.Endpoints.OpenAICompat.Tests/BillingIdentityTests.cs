@@ -85,7 +85,7 @@ public sealed class KeyModeEnforcementTests : IClassFixture<KeyModeFactory>
         Assert.Equal("authentication_required", error.GetProperty("code").GetString());
     }
 
-    // GH #489 / C04: /chess/* sits outside /v1 and was skipped by the middleware.
+    // /chess/* sits outside /v1; key enforcement covers it too.
     [Fact]
     public async Task Chess_Playing_Surface_Requires_Authentication()
     {

@@ -7,14 +7,10 @@ using Xunit;
 namespace Laplace.Decomposers.Wiktionary.Tests;
 
 /// <summary>
-/// wiktextract computes a per-sense association weight, `_dis1`, and ships it on every
-/// member of nine of the twelve relation blocks — measured on
-/// kaikki.org-dictionary-English.jsonl: 100% of members in translations, synonyms,
-/// hypernyms, hyponyms, meronyms, derived, related, coordinate_terms and holonyms.
-///
-/// ReadWordArray read only `word`, so every Wiktionary edge folded at the categorical
-/// constant and all senses of a lemma folded identically — 38.5% of entries have two or
-/// more senses. Wiktionary had 3 emit sites and none of them scored.
+/// wiktextract ships a per-sense association weight, <c>_dis1</c>, on members of the
+/// translations, synonyms, hypernyms, hyponyms, meronyms, derived, related,
+/// coordinate_terms and holonyms blocks. It is read per member so senses of one lemma
+/// fold with their own weights.
 /// </summary>
 public sealed class WiktionaryDis1Tests
 {
@@ -35,12 +31,11 @@ public sealed class WiktionaryDis1Tests
         Assert.NotNull(syn);
         Assert.Equal(3, syn!.Count);
 
-        // Numeric and string forms both carry through: the corpus uses both.
+        // The corpus writes _dis1 both as a number and as a string; both are read.
         Assert.Equal(0.9, syn.Single(m => m.Word == "depository").Dis1, 6);
         Assert.Equal(0.25, syn.Single(m => m.Word == "vault").Dis1, 6);
 
-        // A member with no _dis1 must stay 0 — "the source computed no association" is
-        // not the same claim as 1.0, and promoting it would manufacture evidence.
+        // A member with no _dis1 stays 0: "no association computed" is not a weight of 1.0.
         Assert.Equal(0.0, syn.Single(m => m.Word == "unscored").Dis1);
 
         Assert.Equal(0.75, Assert.Single(e.Translations!).Dis1, 6);

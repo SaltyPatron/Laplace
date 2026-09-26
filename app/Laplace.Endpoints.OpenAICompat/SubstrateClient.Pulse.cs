@@ -4,11 +4,8 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The live scoreboard + modality reads. Thin callers over the installed
-/// ops.substrate_pulse() / ops.modality_counts() — the set logic lives in the
-/// extension (one implementation; the MCP server reads the same functions),
-/// C# only maps rows. The SQL itself lives in
-/// <see cref="NpgsqlSubstrateReads"/> (doc 41).
+/// Pulse and per-modality counts over ops.substrate_pulse() and ops.modality_counts().
+/// The extension computes both, as for every other interface; this maps rows.
 /// </summary>
 internal sealed partial class SubstrateClient
 {

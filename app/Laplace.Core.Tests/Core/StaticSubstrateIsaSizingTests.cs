@@ -9,9 +9,8 @@ public sealed class StaticSubstrateIsaSizingTests
     [Fact]
     public void OneWorkingSet_OwnsItsWholeAlreadyAccountedMemoryShare()
     {
-        // WorkingSetBudgetBytes is already one owner's share of the client-memory
-        // domain. The apply/fold fan divides that share. MemoryTopology must not
-        // divide it by the same fan before the plan sees it (the former 1/p^2 bug).
+        // WorkingSetBudgetBytes is already one owner's share; the flush envelope equals
+        // it, and only the apply/fold plan divides it across connections.
         Assert.Equal(
             MemoryTopology.WorkingSetBudgetBytes,
             MemoryTopology.WorkingSetFlushEnvelopeBytes);
@@ -37,8 +36,8 @@ public sealed class StaticSubstrateIsaSizingTests
             * MemoryTopology.AttestationMergeTransitBytesPerRow
             * plan.Connections;
 
-        // Integer division may leave less than one row's worth per lane unused,
-        // but the live fan must consume essentially the whole envelope, not 1/p of it.
+        // The fan consumes the whole envelope, less at most one row per connection
+        // lost to integer division.
         Assert.InRange(
             envelope - probeResidency,
             0,

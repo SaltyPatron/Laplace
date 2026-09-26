@@ -15,30 +15,14 @@
 #include <string.h>
 
 /*
- * lexical.word_case_variants(word) -> bytea[] : the orthographic case-variant word ids
- * of a word (itself + witnessed lower/upper/title surfaces minted back to word
- * ids). This is the native, batched replacement for the SQL trio
- * word_case_variant_ids -> word_case_map_surface (x3) -> grapheme_case_target,
- * which fanned a single lexical lookup into O(3 * graphemes) non-inlinable
- * consensus LIMIT-1 subqueries plus O(graphemes) render_text calls -- the RBAR
- * on the hot lexical_peers -> senses/define/bubble_up path.
- *
- * OUTPUT-IDENTICAL BY DELEGATION. Every semantic decision is still made by the
- * exact same function the SQL used:
- *   - case-map selection: one batched DISTINCT ON (subject, case) ... ORDER BY
- *     subject, case, consensus.eff_mu(rating, rd) DESC over HAS_CASE_MAPPING cells of
- *     v_consensus_unrefuted, the case being the testimony's mapping qualifier -- the
- *     same view, same eff_mu ordering, same "highest eff_mu wins, NULL/absent
- *     object => no mapping" semantics as grapheme_case_target's LIMIT 1;
- *   - grapheme rendering: realize.render_text (depth 32), identical to the
- *     scalar render_text the SQL surface builder called;
- *   - word minting: laplace.word_id, the same content hash;
- *   - existence gate: laplace.entity_exists, identical predicate.
- * The C code only (a) walks the grapheme trajectory once and (b) reproduces
- * word_case_map_surface's string assembly verbatim (title => title map on the
- * first grapheme, lower on the rest; per-grapheme COALESCE(realize.render(target),
- * realize.render(child)) with run_length repetition; string_agg's skip-NULL semantics),
- * collapsing the fan-out to a fixed handful of batched SPI round trips.
+ * Case peers of a word, read from its trajectory. Each constituent grapheme's
+ * unrefuted HAS_CASE_MAPPING cells, selected by the mapping/lower, upper and
+ * title qualifiers of their attestations, give the highest effective-mu target
+ * per slot. The lower, upper and title surfaces are assembled from the rendered
+ * targets (the grapheme's own rendering where no target renders) with run-length
+ * repetition, minted back to content ids, and kept only when that entity already
+ * exists. The word is always its own peer. Each stage is one set statement per
+ * call, not one per grapheme.
  */
 
 #define CM_LOWER 0
@@ -114,10 +98,10 @@ render_lookup(HTAB *r, const char *key16)
 	return found ? e->text : NULL;
 }
 /*
- * One relation per meaning: a grapheme's case mappings are HAS_CASE_MAPPING cells,
- * and which case a target is (mapping/lower, upper, title) is the qualifier of the
- * testimony behind the cell (engine/manifest/qualifiers.toml). Fills cm with the
- * eff_mu winner per (grapheme, slot); a slot with no witnessed target stays 0.
+ * A grapheme's case mappings are HAS_CASE_MAPPING cells; which case a target is
+ * (mapping/lower, upper, title) is the qualifier of the attestation behind the
+ * cell. Fills cm with the effective-mu winner per (grapheme, slot); a slot with
+ * no witnessed target stays 0.
  */
 static void
 fetch_case_mappings(HTAB *cm, Datum *subjects, int n_subjects, const char *caller)
@@ -179,11 +163,9 @@ fetch_case_mappings(HTAB *cm, Datum *subjects, int n_subjects, const char *calle
 
 
 /*
- * The per-grapheme base string for a map slot, matching
- * COALESCE(realize.render_text(grapheme_case_target(child, slot)), realize.render_text(child)):
- * realize.render(target) if a non-NULL-rendering target exists, else realize.render(child).
- * Returns NULL only when realize.render(child) itself is NULL (string_agg then skips
- * the whole grapheme).
+ * The per-grapheme base string for a map slot: the rendering of its mapped
+ * target when that renders, else the grapheme's own rendering. NULL only when
+ * the grapheme itself does not render; the surface then skips that grapheme.
  */
 static char *
 piece_base(HTAB *cm, HTAB *r, const char *gkey, int slot)
@@ -206,8 +188,9 @@ piece_base(HTAB *cm, HTAB *r, const char *gkey, int slot)
 	return render_lookup(r, gkey);
 }
 
-/* Shared by the scalar and multiword surfaces: reproduce the three attested
- * lower/upper/title compositions without collapsing their identities. */
+/* Lower and upper map every grapheme through their own slot; title maps the
+ * first grapheme's first repetition through title and everything else through
+ * lower. Each slot yields a distinct surface, NULL when nothing rendered. */
 static void
 assemble_case_surfaces(GraphemeItem *graphemes, int n_graphemes,
 					   HTAB *cm, HTAB *rmap, char *surf[CM_SLOTS])
@@ -423,7 +406,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 
 	fetch_case_mappings(cm, subj, n_subj, "word_case_variants");
 
-	/* --- 4. ONE batched render of every id any surface can need. --- */
+	/* --- 3. ONE batched render of every id any surface can need. --- */
 	memset(&ctl, 0, sizeof(ctl));
 	ctl.keysize = 16;
 	ctl.entrysize = sizeof(RenderEntry);
@@ -432,7 +415,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 	render_cap = n_graphemes * (CM_SLOTS + 1) + 1;
 	render_ids = (Datum *) palloc(sizeof(Datum) * render_cap);
 
-	/* p_word (for the IS DISTINCT FROM realize.render_text(p_word) filter). */
+	/* p_word's own rendering, against which each surface is compared. */
 	{
 		bool         found;
 		RenderEntry *e = (RenderEntry *) hash_search(rmap, pword_key, HASH_ENTER,
@@ -510,11 +493,11 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		}
 	}
 
-	/* --- 5. Assemble the three surfaces exactly as word_case_map_surface. --- */
+	/* --- 4. Assemble the three case surfaces. --- */
 	render_pword = render_lookup(rmap, pword_key);
 	assemble_case_surfaces(graphemes, n_graphemes, cm, rmap, surf);
 
-	/* --- 6. Filter surfaces, mint word ids, gate on existence. --- */
+	/* --- 5. Drop surfaces equal to the word's own, mint ids, gate on existence. --- */
 	surv = (Datum *) palloc(sizeof(Datum) * CM_SLOTS);
 	for (int m = 0; m < CM_SLOTS; m++)
 	{
@@ -522,7 +505,6 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 
 		if (surf[m] == NULL)
 			continue;
-		/* surface IS DISTINCT FROM realize.render_text(p_word) */
 		distinct = (render_pword == NULL) ? true
 										  : (strcmp(surf[m], render_pword) != 0);
 		if (!distinct)
@@ -554,7 +536,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 			bool  dup = false;
 
 			if (isnull || !datum_key16(wid, wkey))
-				continue;			/* q.id IS NOT NULL */
+				continue;
 			for (int j = 0; j < n_vids; j++)
 				if (memcmp(wkey, vkey[j], 16) == 0)
 				{
@@ -600,7 +582,6 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 			if (isnull || !datum_key16(idd, ikey))
 				continue;
 			exists = DatumGetBool(SPI_getbinval(tup, td, 2, &isnull));
-			/* (q.id = p_word OR entity_exists(q.id)) */
 			if (memcmp(ikey, pword_key, 16) == 0 || (!isnull && exists))
 			{
 				bool dup = false;
@@ -620,7 +601,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		}
 	}
 
-	/* --- 7. DISTINCT, sorted ascending (array_agg(DISTINCT id ORDER BY id)). --- */
+	/* --- 6. Distinct ids, bytewise ascending. --- */
 	for (int a = 0; a < n_keep; a++)
 		for (int b = a + 1; b < n_keep; b++)
 			if (memcmp(keep + 16 * a, keep + 16 * b, 16) > 0)
@@ -652,12 +633,10 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 }
 
 /*
- * lexical.word_case_variants_batch(words[])
- *
- * The scalar operator batches work within one word. Calling it from a token
- * frontier is still RBAR: hundreds of words independently unpack trajectories,
- * resolve the same grapheme mappings, render the same atoms, mint ids, and probe
- * existence. This set operator shares every stage across the complete array.
+ * Set form over a whole frontier of words: one trajectory unpack, one mapping
+ * read over every distinct grapheme, one render, one mint and one existence
+ * bitmap for the complete array. With classes_only it emits each word's lower
+ * surface instead of minted variants.
  */
 static Datum
 word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
@@ -721,8 +700,8 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 	if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
 		elog(ERROR, "word_case_variants_batch: SPI_connect failed");
 
-	/* One containment/unpack statement for every input word. DISTINCT ON mirrors
-	 * realize.constituents(): the lowest physicality id owns the read. */
+	/* One trajectory unpack for every input word. DISTINCT ON takes the lowest
+	 * physicality id per entity, the same trajectory realize.constituents() reads. */
 	{
 		Datum     *word_datums = (Datum *) palloc(sizeof(Datum) * n_words);
 		ArrayType *word_array;
@@ -914,8 +893,8 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 								cm, rmap, surf);
 			if (classes_only)
 			{
-				/* The historical class is the witnessed lower surface, not a
-				 * locale category or a minted/existing variant identity. */
+				/* The class is the assembled lower surface as text: no locale
+				 * category, no minted or existence-gated identity. */
 				Datum values[2] = {
 					make_bytea16(words[w].key),
 					surf[CM_LOWER] == NULL ? (Datum) 0 :
@@ -1047,15 +1026,11 @@ pg_laplace_word_case_classes_batch(PG_FUNCTION_ARGS)
 }
 
 /*
- * lexical.lexical_peers_batch(words[])
- *
- * Native orchestration for the hot lexical classification path.  The former
- * PL/pgSQL body materialized three CTEs and, for every unresolved input row,
- * ran a correlated array_agg/unnest subplan.  Classification is one indexed
- * SPI read here and every unresolved case family is widened by the existing
- * native word_case_variants_batch operator in one call.  Input multiplicity,
- * order, NULL rows, exact-sense short circuiting, and bytewise peer ordering
- * are unchanged.
+ * Lexical peers of every input word, one row per input position (NULL inputs
+ * yield NULL rows). A word that is itself the subject of a HAS_SENSE-family
+ * consensus cell is its own only peer; every other word is widened to its
+ * case variants by one word_case_variants_batch call. One indexed read
+ * classifies the whole set; peers are emitted in bytewise order.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_lexical_peers_batch);
 

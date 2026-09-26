@@ -9,8 +9,8 @@ public static class SenseAnchor
     private static readonly Hash128 CompatibilityTypeId = EntityTypeRegistry.SourceReference;
 
     /// <summary>
-    /// Resolves the historical three-field compatibility key. This key is intentionally
-    /// many-to-many for adjective satellites and must not be used as native PWN identity.
+    /// Resolves the three-field sense key. It is many-to-many for adjective satellites, so
+    /// it never stands for an exact PWN sense.
     /// </summary>
     public static Hash128? Id(string? rawSenseKey)
     {

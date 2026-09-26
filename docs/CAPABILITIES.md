@@ -1,9 +1,5 @@
 # Laplace capability synthesis
 
-This document is a binding synthesis of consequences already implied by the invention laws in `INVENTION.md`, `INVENTIONS.md`, the forward-pass/ISA specs, and current inventor direction. It exists because isolated implementation rules, tests, gates, historical audits, and issue bodies have repeatedly hidden the actual product behind its proof machinery.
-
-A test, gate, benchmark, issue, plan, audit, branch, or receipt proves or tracks a capability. It does **not** redefine the capability downward. When a local document conflicts with this synthesis or the higher-authority invention, repair the local document and implementation rather than narrowing the invention.
-
 ## One world, three independent boundaries
 
 Laplace keeps these axes separate:
@@ -56,7 +52,7 @@ EXECUTE
 DELEGATE
 ```
 
-The current tenant owner/admin/member roles remain workspace administration. Knowledge authority is a richer RBAC/ReBAC/capability layer over the substrate.
+Tenant owner/admin/member roles are workspace administration. Knowledge authority is a richer RBAC/ReBAC/capability layer over the substrate.
 
 ## Governance does not erase knowledge
 
@@ -162,7 +158,7 @@ Numeric values follow the same content-addressed reuse law as words, code compos
 
 The root is created/reused as content. Audio samples, image channels, model coordinates, measurements and other uses add typed occurrences around that root. Repeating an exact amplitude a million times does not record the scalar a million times.
 
-The current dense 0..255 number perfcache is only an accelerator for common integer roots; it is not the numeric universe. Long finite constants such as pi prefixes are just wider ordered compositions.
+The dense 0..255 number perfcache is an accelerator for common integer roots; it is not the numeric universe. Long finite constants such as pi prefixes are just wider ordered compositions.
 
 ## Deterministic machine-cost derivation
 
@@ -335,19 +331,3 @@ shared Laplace world
 Knowledge packages can therefore be purchased, assigned by a school, granted by an employer, delegated by role, or temporarily activated without copying opaque weights.
 
 “I know kung fu” is the product verb: grant or materialize an authorized, receipted portion of the existing witnessed world.
-
-## Implementation priority
-
-When these consequences are in accepted scope, an implementation agent must implement and exercise the real capability. Tests, gates, audits, plans and issue edits are supporting proof/anti-regression work.
-
-Non-success includes:
-
-- stopping after writing prose/spec/issues when executable work is in scope;
-- implementing a toy vertical slice instead of the common machine;
-- replacing grammar-constrained canonical construction with token-ish code generation;
-- replacing whole-application structural mutation with file-by-file regeneration;
-- treating duplicate-code findings as reports without wiring reuse/consolidation into construction;
-- hiding compile/test/runtime failures instead of witnessing them;
-- using final-output redaction when unauthorized knowledge already influenced cognition;
-- replacing measured compute depth/breadth with smaller/dumber model tiers;
-- reducing machine-cost derivation to benchmark averages when exact/symbolic derivation is available.

@@ -62,8 +62,8 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
             Assert.Equal(await CanonicalAsync(connection,cell),actual);
             if (first is null) first=actual; else Assert.Equal(first,actual);
 
-            // The exact same A IDs and bodies are replayed. The direct evidence
-            // route is idempotent even if an orchestration caller repeats it.
+            // Replaying the same attestation ids and bodies is idempotent on the direct
+            // evidence route.
             await InsertAsync(connection,cell,rows);
             Assert.Equal(1L,await FoldAsync(connection,cell,rows));
             Assert.Equal(actual,await ReadAsync(connection,cell));
@@ -196,8 +196,8 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         Assert.Equal(await DeltaMathAsync(connection,neutral,exact[0]),first);
         Assert.NotEqual((await DeltaMathAsync(connection,neutral,transient[0])).Rating,first.Rating);
 
-        // A later replayable witness still cannot replace the earlier exact
-        // continuous update with a categorical all-A refold.
+        // A later replayable witness does not replace the earlier continuous update with
+        // a categorical refold of all attestations.
         Witness[] later=[new(1,3,0)];
         await InsertAsync(connection,cell,later);
         await FoldAsync(connection,cell,later);
@@ -260,9 +260,9 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
     [Fact]
     public async Task ProductionEvidenceQueryPreservesWholeCellsOrdinalsAndEveryObservation()
     {
-        // Execute the SQL owned by the C route with the installed native aggregate.
-        // Missing and duplicate requested cells are query-level cases; the public
-        // mutating route separately owns missing-evidence/duplicate-target refusal.
+        // Runs the C route's evidence query with the installed native aggregate. Missing
+        // and duplicate requested cells are handled by the query; the mutating route
+        // refuses missing evidence and duplicate targets separately.
         string name = "query-guard-" + Guid.NewGuid().ToString("N");
         var good = Target(name + "/good");
         var mixed = Target(name + "/mixed") with { Type = good.Type };
@@ -340,8 +340,8 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
             Assert.Empty(await ReadQueryAsync([]));
         }
 
-        // Production disallows NULL flags; do not silently fabricate a nullable
-        // storage contract to exercise the window's SQL three-valued logic.
+        // The replayable flag is NOT NULL; a NULL is refused rather than fed to the
+        // window's three-valued logic.
         await ExecuteAsync(connection, "SAVEPOINT null_replayable");
         await using (var invalid = Command(connection,
             "UPDATE laplace.attestations SET fold_replayable=NULL "

@@ -11,10 +11,10 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Transport receipt for the existing play → PGN → shared writer → native readback route.
-/// Timing is deliberately separate from the canonical experiment witness. Commit measures
-/// ApplyManyAsync, including its consensus continuation, rather than PostgreSQL COMMIT alone.
-/// No durable-success flag is set from the ingestor's Parsed/Novel/Applied counters.
+/// Receipt for play → PGN → shared writer → native readback. Timing is kept apart from the
+/// experiment witness. Commit time measures ApplyManyAsync including its consensus fold,
+/// not PostgreSQL COMMIT alone. No durable-success flag derives from the ingestor's
+/// Parsed/Novel/Applied counters.
 /// </summary>
 internal sealed partial class ChessRecordingMeasurement(string? experimentId, int requestedGames, bool retainedPgn = false)
 {
@@ -243,8 +243,8 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
                     carriers.Select(p => p.EntityId.ToBytes()).ToArray(), carriers.Select(p => p.Id.ToBytes()).ToArray(), ct));
             ValidateCarriers(games, carrierVertices);
 
-            // The existing hydrator owns native trajectory decoding, line identity, start
-            // board identity and legal full-line replay. This consumer compares the batch.
+            // The hydrator decodes native trajectories and checks line identity, start board
+            // identity and legal full-line replay; this compares the hydrated batch.
             var hydrated = await MeasureReadbackAsync(ReadbackOperation.HydrationAndLegalReplay,
                 () => ChessWitnessHydrator.TryHydrateChunkAsync(ds, playingIds.ToArray(), ct));
             var whiteByPlaying = expected.Where(a => ChessVocabulary.IsSide(a, ChessVocabulary.WhiteSide))

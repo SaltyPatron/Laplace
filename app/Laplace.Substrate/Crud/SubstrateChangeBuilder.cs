@@ -28,9 +28,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
     private bool _partialTrajectory;
     private bool _disposed;
 
-    // The canonical member order for a set composition. memcmp of the 16-byte host layout,
-    // which is exactly hash128_compare — the same order the native side and the substrate's
-    // id ranges use, so a set composed here and one composed in C agree.
+    // Canonical member order for a set composition: memcmp of the 16-byte layout, the same
+    // order as native hash128_compare and stored id ranges, so a set composed here and one
+    // composed natively get the same Merkle id.
     private readonly struct Hash128Bytewise : IComparer<Hash128>
     {
         public int Compare(Hash128 x, Hash128 y) => x.CompareToBytewise(y);
@@ -122,9 +122,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
             return this;
         }
 
-        // TrySeeEntity is used when a native stage already owns the entity tuple.
-        // In that case do not manufacture a managed duplicate merely because a
-        // managed caller observes the same identity.
+        // An id already marked through TrySeeEntity is carried by a native stage;
+        // a managed row for the same identity would be a duplicate.
         if (!_seenEntities.Add(row.Id)) return this;
 
         _entityIndex[row.Id] = _entities.Count;
@@ -132,8 +131,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
         return this;
     }
 
-    // A managed entity observation converges directly onto the canonical row.
-    // Semantic plurality belongs in attestations.
+    // A repeated id converges onto one row: the lower tier wins, and at equal tier
+    // the bytewise-smaller type id. Differing readings of the entity are attestations.
     public SubstrateChangeBuilder AddEntity(
         Hash128 id, byte tier, Hash128 typeId) =>
         AddEntity(new EntityRow(id, tier, typeId));
@@ -142,8 +141,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
-        // A physicality exists because its entity exists: one row per
-        // PhysicalityId(entity, type). A repeated sighting adds nothing.
+        // One row per PhysicalityId(entity, type); a repeated sighting adds nothing.
         int values = row.TrajectoryXyzm?.Length ?? 0;
         _partialTrajectory |= values % 4 != 0;
         if (!_seenPhysicalities.Add(row.Id)) return this;
@@ -153,10 +151,11 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     /// <summary>
-    /// Stage one closed contiguous range as the native ordered composition [first,last].
-    /// The range identity uses the shared composition kernel; its physicality is typed Range
-    /// and carries only the two endpoints. Membership is derived from the endpoint domain law,
-    /// never expanded into one stored edge or trajectory vertex per member.
+    /// Stage one closed contiguous range as the ordered composition [first,last] through the
+    /// shared composition kernel. Its physicality is typed Range and its trajectory carries only
+    /// the two endpoints; membership follows from the endpoints' ordinal domain and is never
+    /// expanded into one row or vertex per member. A range whose endpoints are equal is that
+    /// endpoint.
     /// </summary>
     public Hash128 StageRange(
         OrderedCompositionComponent first,
@@ -194,30 +193,23 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     /// <summary>
-    /// Stage the composition entity for an unordered SET of member ids and return the id a
-    /// set-valued attribute should point at, so the attribute costs ONE attestation rather than
-    /// one per member.
+    /// Stage the composition entity for an unordered set of member ids and return its id, so a
+    /// set-valued attribute is one attestation pointing at the set rather than one per member.
     /// </summary>
     /// <remarks>
-    /// Members are sorted ascending by id and deduplicated before composition, so the returned id
-    /// is a function of the SET and not of the order it arrived in. Re-staging the same member set
-    /// therefore re-derives the same id and adds no rows.
+    /// Members are sorted ascending by id and deduplicated before composition, so the id is a
+    /// function of the set, not of arrival order; re-staging the same set adds no rows.
     ///
-    /// Composition runs through <see cref="HashComposer.ComposeNode"/> — the compiled kernel that
-    /// every compose path shares — and not through a second C# expression of the same arithmetic
-    /// (INVENTION §15). Three consequences come from the kernel rather than from this method:
-    /// a ONE-MEMBER set collapses to the member's own id and stages nothing (the tier-floor
-    /// collapse law, <c>hash128.c:22</c>), so a degenerate "set" of one tag remains a direct edge
-    /// to that tag; the merkle domain byte is the kernel's; and the coordinate is the centroid of
-    /// the members' LIVE coordinates, hilbert-encoded.
+    /// Composition runs through <see cref="HashComposer.ComposeNode"/>, the shared native kernel.
+    /// From it: a one-member set is the member itself and stages nothing; the Merkle domain is
+    /// the kernel's; the coordinate is the Hilbert-encoded centroid of the members' coordinates.
     ///
     /// Member coordinates are read from physicalities already staged in this builder. A member
-    /// with no staged physicality throws rather than defaulting: composing a point from absent
-    /// constituents is the "content ids with no constituents behind them" defect INVENTION §15
-    /// names, and it would mint a coordinate that no witness supports.
+    /// with no staged physicality throws: a centroid over absent constituents would be a
+    /// coordinate no witness supports.
     ///
-    /// <paramref name="tier"/> is recorded on the entity row as the collection's floor. It is not
-    /// an input to the id — <c>hash128_merkle</c> discards its tier argument by law.
+    /// <paramref name="tier"/> is recorded on the entity row. It is not an input to the id;
+    /// <c>hash128_merkle</c> ignores its tier argument.
     /// </remarks>
     public Hash128 StageCollection(
         ReadOnlySpan<Hash128> members, byte tier, Hash128 typeId, Hash128 sourceId,
@@ -258,8 +250,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
 
     /// <summary>
     /// <see cref="StageCollection(ReadOnlySpan{Hash128}, byte, Hash128, Hash128, long)"/> with the
-    /// members' live coordinates supplied by the caller — for lanes whose members were emitted in
-    /// an earlier batch and are therefore not in this builder's staged rows.
+    /// members' coordinates supplied by the caller, for members staged in an earlier change and
+    /// therefore absent from this builder's rows.
     /// </summary>
     /// <remarks>
     /// memberCoordsXyzm is four doubles per member, in the SAME order as <paramref name="members"/>;
@@ -277,9 +269,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
                 "memberCoordsXyzm must hold exactly four doubles per member",
                 nameof(memberCoordsXyzm));
 
-        // Sort an index permutation so each member keeps its own coordinate through the
-        // canonical reorder. Sorting ids alone and then reading coords positionally is the
-        // silent-corruption shape this exists to avoid.
+        // Sort an index permutation alongside the ids so each member keeps its own
+        // coordinate through the canonical reorder; sorting ids alone would misalign them.
         Span<int> order = members.Length <= 32
             ? stackalloc int[members.Length] : new int[members.Length];
         for (int i = 0; i < members.Length; i++) order[i] = i;
@@ -313,8 +304,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
         Span<double> centroid = stackalloc double[4];
         (Hash128 id, Hilbert128 hb) = HashComposer.ComposeNode(tier, sorted, coords, centroid);
 
-        // n == 1 -> the kernel returned the member's own id. Staging a Set physicality for it
-        // would claim the member IS a collection; the tier-floor law says it is just itself.
+        // n == 1: the kernel returned the member's own id. A one-child composition is the
+        // child, so no Set physicality is staged for it.
         if (n == 1) return id;
 
         AddEntity(id, tier, typeId);
@@ -325,17 +316,16 @@ public sealed class SubstrateChangeBuilder : IDisposable
                 Type: PhysicalityType.Set,
                 CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
                 HilbertIndex: hb,
-                // Constituent IDENTITY, mantissa-packed — never coordinates (INVENTION §9, the
-                // trajectory law). Positions move as witnesses re-adjudicate; identity does not.
+                // The trajectory packs constituent ids, never their coordinates; a realized
+                // curve reads each member's coordinate from its own physicality.
                 TrajectoryXyzm: Trajectory.Build(sorted), NConstituents: n,
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: observedAtUnixUs));
         return id;
     }
 
-    // Entity -> index into _physicalities, extended from a watermark rather than maintained on
-    // every AddPhysicality. The compose path stages ~2,380 physicalities per chess game to keep
-    // ~222 and its measured cost is row construction, so it pays nothing for this until a caller
-    // actually composes a set; the scan is then amortised O(1) per staged row.
+    // Entity -> index into _physicalities, extended lazily from a watermark instead of on every
+    // AddPhysicality, so builders that never compose a set pay nothing; the scan is amortised
+    // O(1) per staged row.
     private void IndexStagedPhysicalities()
     {
         for (; _physIndexWatermark < _physicalities.Count; _physIndexWatermark++)
@@ -348,8 +338,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
         return _seenEntities.Add(id);
     }
 
-    /// <summary>Mark a placement already carried by a native source stage.
-    /// This cannot establish that another physicality body has been observed.</summary>
+    /// <summary>Marks a physicality id as already carried by a native stage so no managed row is
+    /// added for it. It says nothing about any other physicality of the entity.</summary>
     public void NoteStagedPhysicalityPlacement(Hash128 id)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -364,8 +354,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
         return this;
     }
 
-    /// <summary>Attach a stage whose complete native physicality row set has one
-    /// explicitly declared source. Mixed-source stages carry their own append ranges.</summary>
+    /// <summary>Attach a stage and record every one of its physicality rows under
+    /// <paramref name="sourceId"/>. Mixed-source stages record their own ranges.</summary>
     public SubstrateChangeBuilder AddIntentStage(IntentStage stage, Hash128 sourceId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -380,14 +370,13 @@ public sealed class SubstrateChangeBuilder : IDisposable
     public ContentBatch? DeferredContent => _deferredContent;
 
     /// <summary>
-    /// Read-only presence oracle for the batch being composed: "has this id already been proven
-    /// present by a COMMITTED apply?" Populated from the pipeline's containment reader.
+    /// Read-only presence reader for convergence while composing: has this id been proven
+    /// stored by a committed apply?
     ///
-    /// A positive result proves only the queried entity is present. It may suppress
-    /// that entity row, but does not prove descendant entities, physicality forms or
-    /// observations from the current source are complete. Skipping those requires
-    /// their own presence or exact completion proof. Unknown IDs remain eligible
-    /// for staging; admission resolves already-present canonical entities.
+    /// A positive answer proves only the queried entity is stored. It may suppress that
+    /// entity row, but not its descendants, its physicality forms, or this source's
+    /// observations of it; skipping those needs their own presence or completion proof.
+    /// Unknown ids stay eligible for staging; persist resolves entities already stored.
     /// </summary>
     public ISubstrateReader? PresenceOracle { get; private set; }
 
@@ -429,9 +418,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     /// <summary>
-    /// Staged bytes held by this builder — native COPY-tuple buffers plus a
-    /// coarse per-row estimate for managed rows. Drives the working-set
-    /// memory budget valve; an estimate, not an accounting.
+    /// Staged bytes held by this builder: native COPY buffers plus a coarse
+    /// per-row estimate for managed rows. Drives the working-set memory
+    /// budget; an estimate, not an accounting.
     /// </summary>
     public long StagedBytesEstimate
     {
@@ -525,9 +514,10 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     /// <summary>
-    /// Adds a native-calibration score for atomic, in-memory consensus folding.
-    /// The paired attestation must be a non-replayable categorical receipt; the
-    /// score itself never enters durable evidence or the intent identity.
+    /// Adds a versioned calculation's score to fold into consensus in the same
+    /// transaction as its attestation. The paired attestation must be a
+    /// non-replayable categorical receipt; the score is never stored as evidence.
+    /// The intent id binds only the attestation and calculation receipt ids.
     /// </summary>
     public SubstrateChangeBuilder AddEphemeralFold(EphemeralFoldInput input)
     {
@@ -542,9 +532,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     /// <summary>
-    /// Records that this change completes one source unit. The completion row commits
-    /// in the control transaction that accepts this change's evidence. Call only after
-    /// the complete unit has been staged.
+    /// Records that this change completes one source unit. The completion receipt commits
+    /// in the transaction that persists this change's evidence. Call only after the
+    /// complete unit has been staged.
     /// </summary>
     public SubstrateChangeBuilder RecordUnitCompletion(IngestUnitCompletionKey key)
     {

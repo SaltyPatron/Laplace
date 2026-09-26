@@ -1,18 +1,9 @@
--- ops.index_health — the invalid-index question as a permanent surface.
---
--- Born 2026-08-13: the cycle-shell incident left all 28 partitioned-parent
--- secondaries as empty invalid shells while every row count read green, and
--- the diagnosis was ad-hoc psql against pg_index — typed by hand, thrown
--- away, re-typed. A health question this load-bearing must be an installed
--- operation reachable from every surface (CLI, API, MCP `op`, psql), not a
--- query someone has to know to write. check-substrate-floor.sh calls this
--- operation rather than carrying a second pg_catalog implementation.
---
--- Returns one row per NON-VALID index in the extension's schemas (empty set =
--- healthy), plus leaf coverage for partitioned parents so a shell (leaves=0)
--- is distinguishable from a mid-build (indisvalid=false, leaves>0).
--- BEGIN ATOMIC per G12: pg_catalog relation OIDs are stable for the cluster's
--- life, and the regnamespace literals name schemas this extension guarantees.
+-- ops.index_health: every non-valid index in the extension's schemas (empty
+-- set = healthy), with leaf coverage for partitioned parents so an empty shell
+-- (leaves = 0) is distinguishable from a build in progress (indisvalid = false,
+-- leaves > 0). One installed operation for every surface; floor checks call it.
+-- BEGIN ATOMIC: pg_catalog oids are stable and the regnamespace literals name
+-- schemas this extension guarantees.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -22,9 +13,8 @@ BEGIN
         DROP FUNCTION ops.index_health();
     END IF;
 END $upgrade_shape$;
--- schema_name is appended last, not inserted: it was added for ops.reindex_invalid,
--- which cannot issue REINDEX without it (an index name alone is ambiguous across
--- the four substrate schemas), and appending leaves any positional reader intact.
+-- schema_name is the last column: ops.reindex_invalid needs it because an index
+-- name alone is ambiguous across the substrate schemas.
 CREATE OR REPLACE FUNCTION ops.index_health()
     RETURNS TABLE(index_name text, table_name text, valid boolean,
                   is_partitioned_parent boolean, leaf_count bigint,

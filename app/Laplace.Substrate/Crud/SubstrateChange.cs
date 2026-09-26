@@ -16,13 +16,13 @@ public sealed record SubstrateChange(
     public bool CountsAsUnit { get; init; } = true;
     public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
     public IngestApplyBarrier? ApplyBarrier { get; init; }
-    /// <summary>Explicit priors for the source owners of this unit's physicalities.
-    /// This is producer metadata, not a trust inferred from entity identity,
-    /// relation weight, or the first selected placement.</summary>
+    /// <summary>Declared prior per source of this unit's physicalities, in [0,1]. It is
+    /// supplied by the producer, never inferred from entity identity, relation weight,
+    /// or which placement was selected first.</summary>
     public ImmutableDictionary<Hash128, double> PhysicalitySourcePriors { get; init; } =
         ImmutableDictionary<Hash128, double>.Empty;
-    /// <summary>Source units this change completes. Operational state written in the
-    /// control transaction that accepts this change's evidence; never testimony.</summary>
+    /// <summary>Source units this change completes: operational receipts written in the
+    /// same transaction that persists this change's evidence; never testimony.</summary>
     public ImmutableArray<IngestUnitCompletionKey> UnitCompletions { get; init; } = [];
     /// <summary>Source layers this change completes (a full successful extraction).</summary>
     public ImmutableArray<IngestLayerCompletionKey> LayerCompletions { get; init; } = [];
@@ -58,9 +58,9 @@ public sealed record SubstrateChange(
 }
 
 /// <summary>
-/// One completed source unit: the source witness that owns it, the unit's identity,
-/// the ingest layer, and the unit's recipe/generation digest where the unit is
-/// versioned. Recorded in laplace.ingest_unit_completion, never as an attestation.
+/// Receipt of one completed source unit: the source witness, the unit's identity, the
+/// ingest layer, and the unit's recipe/generation digest where the unit is versioned.
+/// Recorded in laplace.ingest_unit_completion, never as an attestation.
 /// </summary>
 public readonly record struct IngestUnitCompletionKey(
     Hash128 WitnessId, Hash128 UnitId, int Layer, Hash128? Digest = null)
@@ -167,8 +167,8 @@ public sealed record PhysicalityRow(
         if (trajectoryXyzm.Length % 4 != 0)
             throw new InvalidOperationException("physicality trajectory is not an XYZM vertex sequence");
 
-        // Every trajectory type owes an exact logical constituent count. Only Content
-        // additionally owns the identity of that ordered manifest.
+        // Every trajectory type must declare its exact logical constituent count. Only
+        // for Content is the ordered manifest's Merkle id the entity id itself.
         Hash128 manifestId = Trajectory.ContentIdentity(trajectoryXyzm, out int logicalCount);
         if (logicalCount != nConstituents)
             throw new InvalidOperationException(

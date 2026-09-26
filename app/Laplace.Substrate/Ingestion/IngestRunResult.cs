@@ -14,14 +14,11 @@ public sealed record IngestRunResult(
     long TotalRoundTrips,
     TimeSpan WallClock,
     IReadOnlyList<IngestFailure> Failures,
-    // The run's OWN final file count, so the terminal journal write and DeriveRunStatus
-    // read the same number. Without it the row kept whatever the last periodic progress
-    // flush left: OMW derived ok from 1226 == 1226 in memory while the ledger held
-    // files_done 1225 of 1226, and the row is the only surviving artifact of a run.
+    // The run's final file count, so the terminal journal write and DeriveRunStatus read
+    // the same number rather than the last periodic progress flush.
     int FilesDone = 0,
-    // The exact terminal extraction counters. Periodic observability is deliberately
-    // throttled, so fast sources can finish before their last heartbeat reaches the
-    // journal. The result is the authoritative handoff from the runner to LapSight.
+    // Exact terminal extraction counters. Periodic observability is throttled, so these,
+    // not the last heartbeat, are what the runner hands to LapSight.
     long InputUnitsDone = 0,
     long InputUnitsTotal = 0,
     // Initialization rows are included in the totals above, but split out so LapSight

@@ -5,15 +5,12 @@ using Laplace.Engine.Core;
 namespace Laplace.Ops;
 
 /// <summary>
-/// Starts the canonical <c>Laplace.Cli ingest</c> lane without teaching every
-/// operator surface a second source registry. The CLI remains the authority for
-/// source names, defaults, argument validation and ingest semantics.
+/// Starts <c>Laplace.Cli ingest</c> as a child process, so every interface drives the one
+/// ingest recipe and the CLI stays the authority for source names, defaults and argument
+/// validation.
 ///
-/// Processes started by this host are retained only while they are alive so the
-/// operator surface can recover them after navigation/reload and stop the actual CLI
-/// process rather than merely rewriting a journal receipt. We intentionally never
-/// attach to arbitrary PIDs: that avoids PID-reuse races and keeps process control
-/// scoped to children this host started.
+/// Children this host started are retained while alive, so a caller can find and stop the
+/// real process later. It never attaches to arbitrary PIDs, which avoids PID-reuse races.
 /// </summary>
 public static class IngestProcessRunner
 {
@@ -139,8 +136,7 @@ public static class IngestProcessRunner
             if (process.HasExited)
                 return new StopReceipt(processId, Found: true, WasRunning: false, StopRequested: false);
 
-            // Kill the process tree because the CLI may own workers whose continued
-            // writes would make a journal-only cancellation actively misleading.
+            // Kill the whole tree: the CLI's workers would otherwise keep writing.
             process.Kill(entireProcessTree: true);
             return new StopReceipt(processId, Found: true, WasRunning: true, StopRequested: true);
         }
@@ -175,9 +171,8 @@ public static class IngestProcessRunner
 
     private static IEnumerable<string> Candidates(string root, string exeName)
     {
-        // ReadyToRun is the production ingest binary when present; normal build output
-        // remains a development fallback. Keep discovery here so MCP/HTTP/other operator
-        // clients cannot drift into different binaries.
+        // ReadyToRun output first, then ordinary build output; every caller resolves
+        // the binary through this one list.
         foreach (var config in new[] { "Release", "Debug" })
         {
             yield return Path.Combine(root, "app", "bin", "Laplace.Cli", config, "net10.0-r2r", exeName);

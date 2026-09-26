@@ -1,10 +1,7 @@
--- Positive control for the roster's bootstrap filter (#760): does this source
--- carry its relation-law bootstrap rows? The writer emits name-alias rows
--- whose subjects are relation-type ids. The law relation arrives as an id
--- parameter — vocabulary is the caller's declaration (G3: no relation-name
--- literals in SQL bodies) — so the probe prunes to that type's partition and
--- walks only the source's rows there; EXISTS short-circuits on the first
--- bootstrap row; no renders, no per-row scan of content partitions.
+-- Does this source carry its relation-law rows (attestations of p_law_type
+-- whose subject is a relation type)? The law relation arrives as an id, so the
+-- probe prunes by type and source and EXISTS stops at the first row; nothing
+-- is realized.
 DROP FUNCTION IF EXISTS laplace.source_bootstrap_present(bytea);
 DROP FUNCTION IF EXISTS laplace.source_bootstrap_present(bytea, bytea);
 

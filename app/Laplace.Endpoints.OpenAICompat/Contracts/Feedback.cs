@@ -3,9 +3,8 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// Gödel-engine feedback (doc 15 G3): confirm/refute either a token chain
-/// (PRECEDES pairs — the generation walk's own edges) or one explicit
-/// (subject, relation, object) consensus triple.
+/// Confirm/refute testimony on either a token chain (consecutive PRECEDES pairs) or one
+/// explicit (subject, relation, object) triple.
 /// </summary>
 public sealed record FeedbackRequest(
     [property: JsonPropertyName("verdict")] string? Verdict,

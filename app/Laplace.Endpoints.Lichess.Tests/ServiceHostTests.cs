@@ -51,8 +51,7 @@ public sealed class ServiceHostTests
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
 
-        // The process is configured and serving even before the upstream account
-        // stream connects. Connectivity remains visible in the typed receipt.
+        // Ready before the upstream stream connects; connectivity shows in the body.
         using var disconnected = await client.GetAsync("/health/ready");
         Assert.Equal(HttpStatusCode.OK, disconnected.StatusCode);
         Assert.Contains("\"connected\":false", await disconnected.Content.ReadAsStringAsync());

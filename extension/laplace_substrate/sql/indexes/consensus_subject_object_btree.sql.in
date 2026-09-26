@@ -1,6 +1,5 @@
--- S7 steering binds candidates AND frontier identities. Its native batch scan
--- must intersect those endpoint sets in the index, before reading standing from
--- the heap. A subject-only index reads every outgoing edge of every frontier
--- member again at each forward step, including unrelated high-degree neighbors.
+-- STEER binds both candidate and frontier ids; the native batch scan
+-- intersects those endpoint sets in the index before reading standing from the
+-- heap, instead of re-reading every outgoing edge of each frontier member.
 CREATE INDEX IF NOT EXISTS consensus_subject_object_btree ON consensus
     (subject_id, object_id, type_id) WHERE object_id IS NOT NULL;

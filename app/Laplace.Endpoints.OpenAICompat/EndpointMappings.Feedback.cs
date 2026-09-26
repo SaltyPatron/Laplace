@@ -5,10 +5,9 @@ using Laplace.Engine.Core;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Gödel-engine feedback lane (doc 15 G3). Confirm/refute deposits go through
-/// the SAME implementation as the CLI attest command (FeedbackContent — one
-/// implementation per fact) and fold into consensus immediately, so the very
-/// next walk reads the updated graph.
+/// Confirm/refute testimony on a PRECEDES token chain or one (subject, relation, object)
+/// triple. Deposits go through <c>FeedbackContent</c>, as the CLI's attest does, and fold
+/// into consensus in the same apply, so the next read sees the new standing.
 /// </summary>
 internal static class FeedbackEndpoints
 {

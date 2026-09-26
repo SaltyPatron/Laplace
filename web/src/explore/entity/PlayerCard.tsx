@@ -8,11 +8,10 @@ import type { ExploreEntityPreviewResponse } from '../types';
 import styles from './PlayerCard.module.css';
 
 /**
- * The entity as the rated competitor it literally is. Glicko-2 rates every one
- * of its edges; this card keeps source Elo and witnessed game records separate
- * from relation-scoped Laplace standing. It also shows
- * the verdict record — confirmed / contested / refuted / thin — from the
- * substrate's canonical epistemic_status logic, never re-derived client-side.
+ * The entity's standing card. For any entity, the record read: its Glicko-2 standing over
+ * its relations and its verdict counts (confirmed / contested / refuted / thin) as the
+ * server's epistemic_status computes them. A Chess_Player reads its witnessed game record
+ * and peak source Elo instead, kept apart from relation standing.
  */
 export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse }) {
   const [record, setRecord] = useState<EntityRecord | null>(null);

@@ -108,7 +108,7 @@ public sealed class WordNetDecomposerTests
 
             Assert.NotEqual(exactA, exactB);
             Assert.Equal(compatibility, SenseAnchor.Id(uninhibited));
-            // Sense keys are content entities; the claims below say what each one is.
+            // Sense keys are content entities; the attestations below say what each one is.
             Assert.Contains(typed, e => e.Id == exactA);
             Assert.Contains(typed, e => e.Id == exactB);
             Assert.Contains(typed, e => e.Id == compatibility);

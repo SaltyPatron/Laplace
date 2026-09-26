@@ -1,12 +1,8 @@
 # Design specification index
 
-These files describe binding behavioral/architectural parts of the invention. They are **not** evidence that a feature is implemented and they do not override a later explicit inventor correction or the canonical invention statement in `docs/INVENTION.md` / `INVENTIONS.md`.
+These files are binding contracts for parts of the invention. They are read under `docs/INVENTION.md` and `docs/INVENTIONS.md`; where a spec disagrees with them, the spec is corrected.
 
-Read `docs/INVENTION.md` first. `AGENTS.md` then governs how implementation work applies that invention. When a lower/current spec contradicts higher authority, repair the spec rather than narrowing the invention around stale wording.
-
-Historical annotated versions are preserved under [`docs/archive/specs-v1/`](../archive/specs-v1/README.md) and are non-authoritative historical evidence.
-
-Current specification set:
+Specifications:
 
 - `05_Substrate_Invariants.txt` — identity, tiers, physicality, evidence, consensus.
 - `06_Engineering_Ruleset.txt` — implementation and operational constraints.
@@ -19,12 +15,10 @@ Current specification set:
 - `36_Laplace_Forward_Pass.md` — canonical stateful forward program, including `RESOLVE → COUPLE → ORIENT → ROUTE → ...`.
 - `37_Substrate_Operation_ISA.md` — typed operation algebra; stable opcode ids are names, not execution-order numbers (`OP10 COUPLE` executes after `OP0 RESOLVE` in unconstrained cognition).
 - `38_Collections_Are_Compositions.md` — set-valued facts as one composition entity plus one attestation.
-- `39_Personality_Firmware.md` — personality firmware: the versioned, content-addressed program over the ISA that parameterizes the forward program without changing knowledge, truth or authority; the OODA loop and the Gödel extension lane; open conflicts for the inventor.
-
-Numbering gaps (01–04, 07, 10, 13, 17, 20–32, 35) belong to the superseded `specs-v1` generation preserved in [`docs/archive/specs-v1/`](../archive/specs-v1/README.md); the files `14/15/16/18/19` in this directory are relocation pointers into that archive. The OODA/self-witnessing design record behind `15` is reconciled into `39_Personality_Firmware.md`.
+- `39_Personality_Firmware.md` — personality firmware: the versioned, content-addressed program over the ISA that parameterizes the forward program without changing knowledge, truth or authority; the OODA loop and the Gödel extension lane.
 
 The common physical implementation law applies across all of them: repeated algorithmic work belongs in coarse native/set execution, while PostgreSQL owns durable indexed state/set access and SQL/C# remain orchestration/contract boundaries.
 
 ## Capability synthesis
 
-Binding operation specs are read with [`../CAPABILITIES.md`](../CAPABILITIES.md). Specs define executable contracts for the integrated product; they must not be interpreted as isolated gates that narrow away structural software construction, knowledge authority/governance, repair learning, machine-cost derivation or repository-root mutation.
+Binding operation specs are read with [`../CAPABILITIES.md`](../CAPABILITIES.md). Each spec is one part of the integrated machine, not an isolated component: structural software construction, knowledge authority/governance, repair learning, machine-cost derivation and repository-root mutation all run through the same contracts.

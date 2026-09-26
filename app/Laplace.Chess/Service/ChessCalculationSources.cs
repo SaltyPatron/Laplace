@@ -3,9 +3,9 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>The chess lanes that calculate rather than observe: engine analysis and
-/// evaluation, and outcome/transition tallies derived from recorded games. Their claims
-/// carry derivation/calculation from the moment this module loads.</summary>
+/// <summary>Registers the chess sources whose testimony is versioned calculation rather than
+/// recorded observation (analysis, trajectory, opening match, transition and outcome tallies,
+/// engine evaluation), at module load.</summary>
 internal static class ChessCalculationSources
 {
     [ModuleInitializer]

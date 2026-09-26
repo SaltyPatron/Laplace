@@ -20,10 +20,9 @@ public static class ContentEmitter
     }
 
     /// <summary>
-    /// Stage canonical text through the shared content spine and return the exact
-    /// natural-root component required by native ordered composition. This is the
-    /// common bridge for structures whose identity is made from witnessed content
-    /// constituents; callers must not replace it with a formatted-string hash.
+    /// Stages canonical text through the shared content spine and returns its natural-root
+    /// component for native ordered composition, so a structure's identity is composed
+    /// from content constituents rather than a formatted-string hash.
     /// </summary>
     public static OrderedCompositionComponent? StageComponent(
         SubstrateChangeBuilder b, string surface, Hash128 sourceId)
@@ -55,9 +54,9 @@ public static class ContentEmitter
 
     /// <summary>
     /// A named property's value as content: the ordered composition [property, value]
-    /// ([hidden_size, 2048], [stop_reason, end_turn]) staged by the native ordered-
-    /// composition kernel. A claim states it under one relation (HAS_ATTRIBUTE); the
-    /// property is never a relation of its own and never a joined "key=value" string.
+    /// (e.g. [hidden_size, 2048]) staged by the native ordered-composition kernel. It is
+    /// attested under one relation (HAS_ATTRIBUTE); the property is never a relation of
+    /// its own and never a joined "key=value" string.
     /// </summary>
     public static Hash128? StagePropertyValue(
         SubstrateChangeBuilder b, string property, string value, Hash128 sourceId)

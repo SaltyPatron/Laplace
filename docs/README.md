@@ -52,4 +52,4 @@ occurrence / testimony / calculation / consensus
 
 Repeated work crosses SQL, SPI, and managed/native boundaries at the set, not at the element. PostgreSQL persists and indexes. Native code runs the loops. C# and SQL orchestrate.
 
-Guides under [`guides/`](guides/) describe how to operate that machine. They do not define another one. [`plan/`](plan/) records mechanism contracts for ingest, conversation, and delivery. [`INVENTORY.md`](INVENTORY.md) is the generated catalog.
+Guides under [`guides/`](guides/) describe how to operate that machine. They do not define another one. [`plan/`](plan/) states mechanism contracts for ingest, conversation, model ingestion, and delivery. [`INVENTORY.md`](INVENTORY.md) is the generated catalog.

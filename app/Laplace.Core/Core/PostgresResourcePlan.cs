@@ -4,7 +4,7 @@ namespace Laplace.Engine.Core;
 /// One PostgreSQL resource equation. Values describe simultaneously live owners;
 /// they are not a pile of independent clamps. The four memory domains are PostgreSQL
 /// shared cache, PostgreSQL private backends, the ingest/client process, and the OS
-/// page cache. Changing CPU/RAM changes the plan without crossing a hidden machine cap.
+/// page cache. Each receives one quarter of physical RAM (the OS cache the remainder).
 /// </summary>
 public sealed record PostgresResourcePlan(
     long TotalPhysicalBytes,
@@ -58,36 +58,17 @@ public sealed record PostgresResourcePlan(
         int logical = Math.Max(p, logicalProcessors);
         int maintenance = Math.Max(1, parallelMaintenanceWorkers);
 
-        // The ingest run's observability owners. These are NOT optional and they are
-        // NOT part of the COPY/fold fan: NpgsqlIngestObservability holds the run
-        // liveness advisory-lock connection CHECKED OUT for the entire run, and the
-        // file-journal pump and the run-journal writer each open one more while the
-        // fans are already at full width. Omitting them made 1 + 2p exactly equal to
-        // the fan population, so the pool had zero slack and those three owners could
-        // only wait the 15s Timeout and throw "connection pool has been exhausted"
-        // (seed runs 32417964629, 32441233524, 32502815485). Per-file progress
-        // publication did not create this; it made an already-zero-slack pool ask
-        // every 2s per running file instead of once per file.
+        // The ingest run's observability owners, outside the COPY/fold fans: the run
+        // liveness advisory-lock connection held for the whole run, the file-journal
+        // pump, and the run-journal writer, all live while the fans are at full width.
         const int observabilityConnections = 3;
-        // The fold's slack, provisioned HERE rather than subtracted from the fold's own
-        // width. It covers the renters the pool equation does not enumerate per-owner:
-        // the run-journal/progress writer, replay-journal and route probes, finalize, and
-        // a batch retry re-entering while the failed batch's folds still hold connections.
-        //
-        // It used to be taken out of the fold instead (IngestSizing.ConsensusFoldPoolHeadroom
-        // subtracted from applyPartitions), which paid for pool slack with fold THROUGHPUT.
-        // Measured on the 2026-08-23 foundation seed, scoped to the laplace database and
-        // top-level statements: consensus.upsert_type cost 3,189s against 1,121s for the
-        // whole apply side (COPY attestations 639s + physicalities 354s + entities 128s).
-        // The fold is 2.8x its producer and was given p-2 connections against the COPY
-        // fan's p. A consumer both dearer per unit and narrower than its producer
-        // accumulates backlog monotonically, and DrainFoldsAsync is where that debt is
-        // finally paid: CILI spent 272s of 334s there, WordNet 204s of 287s, and the drain
-        // was 34.8% of total seed wall-clock.
+        // Pool slack provisioned beside the fold rather than taken from its width, so the
+        // fold runs as wide as the COPY fan it consumes. It covers renters the equation does
+        // not enumerate per owner: replay-journal and route probes, finalize, and a batch
+        // retry re-entering while the failed batch's folds still hold connections.
         const int foldPoolHeadroom = 2;
         // One control connection plus simultaneous COPY and fold fans, plus the
-        // observability owners above. This is the actual
-        // IngestRunner/NpgsqlWorkingSetApply/NpgsqlIngestObservability ownership graph.
+        // fold slack and observability owners above.
         int ingestConnections = checked(1 + 2 * p + foldPoolHeadroom + observabilityConnections);
         // Request concurrency follows schedulable logical processors. Queueing beyond
         // that only creates more backend memory owners without adding CPU throughput.

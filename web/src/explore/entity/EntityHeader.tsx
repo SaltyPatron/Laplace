@@ -42,10 +42,8 @@ export function EntityHeader({
       </div>
       <div className={styles.actions}>
         {/*
-          The substrate view and the chess view are two readings of one row, not
-          two copies, so an entity the chess modality knows how to present offers
-          the crossing explicitly — the same content hash, read as a career or as
-          a game instead of as an entity.
+          A chess player or game page is another presentation of this same entity:
+          the link carries the same content hash.
         */}
         {chessRoute(preview.type) ? (
           <Button asChild>

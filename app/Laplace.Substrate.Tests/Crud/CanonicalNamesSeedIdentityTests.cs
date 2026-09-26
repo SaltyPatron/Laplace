@@ -15,10 +15,9 @@ public sealed class CanonicalNamesSeedIdentityTests
             "canonical_names_seed.sql.in");
         var sql = File.ReadAllText(seedPath);
 
-        // GH #959: canonical ids are BLAKE3(name). Re-running the manifest must
-        // skip the exact same canonical NAME, while a different name deriving an
-        // already-owned id must still reach PostgreSQL's unique-id constraint and
-        // fail loudly. Generic ON CONFLICT cannot distinguish those two cases.
+        // Canonical ids are BLAKE3(name). Re-running the seed skips an identical name,
+        // while a different name deriving an existing id reaches the unique-id constraint
+        // and fails; a generic ON CONFLICT could not tell the two apart.
         Assert.DoesNotContain("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WHERE existing.name = v.name", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("WHERE existing.id =", sql, StringComparison.OrdinalIgnoreCase);

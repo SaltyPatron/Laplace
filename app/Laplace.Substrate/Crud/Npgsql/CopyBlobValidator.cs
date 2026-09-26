@@ -5,12 +5,9 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 internal static unsafe class CopyBlobValidator
 {
-    // Default ON. Walking the native COPY blobs each CollectBlobs pass turns silent heap
-    // corruption into a loud error AT the corrupting phase instead of a fail-fast 6MB
-    // downstream in CopyTupleParser. The cost is negligible against a multi-hour seed, and
-    // a correctness check that catches memory corruption must never be opt-in — the safe
-    // path is the default. Explicit opt-out (LAPLACE_COPY_BLOB_VALIDATE=0) exists only for
-    // clean-run micro-benchmarking, never for production seeds.
+    // On unless LAPLACE_COPY_BLOB_VALIDATE=0. Walking the native COPY blobs at each
+    // checkpoint turns heap corruption into an error at the phase that caused it, before
+    // the bytes reach CopyTupleParser or the database.
     public static readonly bool Enabled =
         EnvFlag.IsSet("LAPLACE_COPY_BLOB_VALIDATE", whenUnset: true);
 
@@ -33,15 +30,10 @@ internal static unsafe class CopyBlobValidator
         }
     }
 
-    // Walk the native COPY-tuple buffer IN PLACE with long offsets. The buffer is the
-    // IntentStage's UNMANAGED tuple arena, so there is no GC pin required and no 2 GiB
-    // ceiling: a large working-set apply (a monolithic UD/ConceptNet/chess flush is tens of
-    // millions of rows / multiple GiB in one buffer) is validated directly. The previous
-    // implementation copied the whole buffer into a managed byte[] via
-    // GC.AllocateUninitializedArray(checked((int)len)) — which (a) threw OverflowException
-    // the instant a single stage buffer crossed int.MaxValue, aborting the entire lane with
-    // committed=0, and (b) doubled resident memory by cloning every multi-GiB buffer on
-    // every apply. Neither is acceptable for a correctness check.
+    // Walks the IntentStage's unmanaged COPY-tuple arena in place with long offsets: no GC
+    // pin, no managed copy, and no 2 GiB ceiling on a working set's buffer. Each row is a
+    // big-endian int16 field count followed by int32-length-prefixed fields (-1 = NULL);
+    // the walk must consume exactly the buffer and exactly the stage's row count.
     public static void Validate(IntPtr ptr, long len, int expectedFields, string tableName, int rowCount)
     {
         if (ptr == IntPtr.Zero || len <= 0) return;
@@ -88,9 +80,8 @@ internal static unsafe class CopyBlobValidator
     {
         // The window must be wider than one row or it cannot contain the fault. A full
         // attestation/physicality row is ~188 bytes (10 fields, six hash128 + int2 + two
-        // int8 + a 32-byte mask), so the old +/-160 dump was guaranteed to start PAST the
-        // previous row's header -- it showed the operator bytes that could never identify
-        // which field desynced. 512 covers two full rows on each side.
+        // int8 + a 32-byte mask); 512 covers two full rows on each side, including the
+        // previous row's header.
         long winStart = Math.Max(0, rowStart - 512);
         long winEnd = Math.Min(len, rowStart + 512);
         var sb = new StringBuilder();
@@ -121,9 +112,7 @@ internal static unsafe class CopyBlobValidator
         // The desync is always introduced by the row BEFORE the one that failed to parse:
         // that row's declared field lengths summed to fewer (or more) bytes than it
         // physically occupies, so the walk lands off the next row's header. Dumping its
-        // per-field length table names the offending field directly instead of leaving the
-        // operator to reverse-engineer it from hex. Without this, every attestation-side
-        // corruption report is unactionable.
+        // per-field length table names the offending field directly.
         var prevReport = new StringBuilder();
         if (prevRowStart >= 0)
         {

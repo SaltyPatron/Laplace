@@ -4,8 +4,8 @@ using Laplace.Endpoints.Mcp;
 using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
-// No arguments remains the deployed STDIO contract. HTTP is a separate process
-// owned by laplace-mcp.service, never a listener added to an existing client.
+// No arguments: stdio transport. --http: the Streamable HTTP host, run as its own
+// process.
 if (args.SequenceEqual(new[] { "--http" }))
 {
     await using var app = McpHttpHost.Build(McpHttpOptions.FromEnvironment());
@@ -18,13 +18,10 @@ if (args.Length != 0)
     return 2;
 }
 
-// MCP stdio server over the substrate's typed operation surface. Same shape as
-// Laplace.Chess.Uci: a Console.ReadLine loop speaking a line protocol —
-// here JSON-RPC 2.0, newline-delimited, per the MCP stdio transport.
-// Protocol state and tool dispatch live in McpServer; substrate access in
-// SubstrateTools. stdout carries protocol frames ONLY; diagnostics go to the CSV
-// ops sink (FileOnly — read back via ops.app_log, GH #602), never to a stream a
-// client might read: the JSON-RPC error reply below is how the caller learns of a fault.
+// MCP stdio transport: newline-delimited JSON-RPC 2.0 read from stdin, dispatched by
+// McpServer onto SubstrateTools, the same machine operations every other interface
+// calls. stdout carries protocol frames only; diagnostics go to the CSV ops sink
+// (ops.app_log), and a fault reaches the caller as a JSON-RPC error reply.
 
 using var loggerFactory = LaplaceLogging.FileOnly("mcp");
 var log = loggerFactory.CreateLogger("server");

@@ -20,35 +20,10 @@
 
 #include "perfcache_native.h"
 
-/*
- * Native keyed-probe routing (2026-07-21). Attestations is
- * LIST(type_id) -> HASH(subject_id). The caller already computed every
- * attestation id FROM (subject, type, object, source, context), so it holds the
- * exact partition keys -- the probe is a routing problem, and routing belongs in
- * C, not in the SQL planner (binding law; GH #565).
- *
- * The failed SQL forms all tried to make the PLANNER reconstruct the routing:
- * a column-ref join hash-joined against an Append of all 1,304 leaves (a full
- * 8.79M-row table scan to match a batch); a runtime variable pruned LIST but not
- * the HASH sublevel; only a BOUND LITERAL prunes LIST at plan time. The literal
- * form also forced a plpgsql temp-table-loop rebuilt on every call
- * (CREATE TEMP TABLE + CREATE INDEX + ANALYZE per probe chunk), and marking that
- * STABLE even crashed with 0A000.
- *
- * This routes it directly: group the batch by type in C, then per type execute a
- * SESSION-CACHED prepared plan whose type is a hex literal in the query text.
- * Plan-time LIST pruning happens once per type and is cached across every chunk
- * and every apply in the backend; runtime HASH pruning picks the one leaf per
- * row. One index descent per id, no temp table, no re-plan, no volatility trap.
- */
-
-/* Entities are LIST(tier), with tier 2 further HASH(id).  The keyed entity
- * probes used to hand their arrays to a PL/pgSQL function which created and
- * indexed a temp table on every call, then looped over distinct tiers.  Tier
- * cardinality is tiny and the native caller already owns the parallel tier
- * array, so cache one literal-tier plan per backend instead.  A literal tier
- * prunes the LIST parent at plan time; the id value runtime-prunes tier 2's
- * HASH child. */
+/* Entities are LIST(tier), tier 2 also HASH(id). One plan per tier is cached
+ * for the backend with the tier as a literal in the query text: a literal
+ * prunes the LIST parent at plan time, and the id equality runtime-prunes tier
+ * 2's HASH children. */
 typedef struct EntityTierPlan
 {
     int32      tier;            /* fixed-width hash key; avoids struct padding */
@@ -148,25 +123,10 @@ spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
 }
 
 /*
- * Shared batch-presence core used by both laplace_entities_present_bitmap()
- * and laplace_tier_batch_existence_probe(). `bm` is assumed pre-zeroed by
- * the caller (palloc0'd result buffer) -- this function only ever SETS bits
- * for ids it can positively confirm present, via:
- *   1. a perfcache fast-path lookup (tier-0 codepoints resolve without a
- *      DB round-trip at all), applied uniformly to every candidate
- *      regardless of what tier it's actually at -- codepoint ids simply
- *      won't match for tier>0 candidates, so this is a pure accelerant,
- *      never a special case; then
- *   2. exactly one SPI batch query for everything the perfcache fast path
- *      didn't resolve.
- * No default-present assumption, no tree-walk, no short-circuiting based on
- * an unconfirmed guess -- a bit is 1 iff this function actually confirmed
- * that id has a committed row in the probed table.
- *
- * `ordinals_sql` selects which table's present-ordinals probe answers the
- * batch query. `use_perfcache` gates the tier-0 codepoint fast path: valid
- * only when probing `entities` (a codepoint id IS an entity id by axiom);
- * other tables' ids derive differently and must always hit the real query.
+ * Shared presence core. Bits are set only for confirmed ids: first through the
+ * tier-0 perfcache (a codepoint id is an entity id, so use_perfcache is valid
+ * only for entities), then one set probe for the rest -- native HASH(id)
+ * routing when identity_relation is given, else ordinals_sql.
  */
 static int identity_presence_core(ArrayType *ids_array, uint8_t *bm,
     int candidate_count, const char *relation_name, const char *ordinals_sql);
@@ -291,10 +251,10 @@ static void
 mark_identity_presence(TupleTableSlot *slot, AttrNumber id, void *opaque);
 
 /*
- * Attestation presence. Attestations are HASH(subject_id); an attestation id is
- * the content hash of its five-tuple and unique. Each candidate routes by its
- * subject to the one leaf that can hold it, and each touched leaf answers its
- * whole id set in one native primary-key array scan. No SQL, no per-type plan.
+ * Attestation presence. Each candidate routes by its subject to the one
+ * HASH(subject_id) leaf that can hold it, and each touched leaf answers its
+ * whole id set in one native primary-key array scan under the caller's
+ * snapshot.
  */
 int
 laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_ids_array,
@@ -404,9 +364,9 @@ static int
 identity_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
                        const char *relation_name, const char *ordinals_sql)
 {
-    /* One physical implementation for every HASH(id) presence operation.
-     * Route the complete set with PostgreSQL's partition hash support, then
-     * perform native array index scans under the caller's MVCC snapshot. */
+    /* Presence over a HASH(id)-partitioned relation: route the whole set with
+     * PostgreSQL's partition hash support, then one native array index scan
+     * per touched leaf under the caller's MVCC snapshot. */
     if (candidate_count <= 0) return SPI_OK_SELECT;
     Oid root_oid = get_relname_relid(relation_name, get_namespace_oid("laplace", false));
     Relation root = table_open(root_oid, AccessShareLock);
@@ -419,8 +379,9 @@ identity_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
     int n, *owners, *counts, *offsets, *next;
     int rc = SPI_OK_SELECT;
 
-    /* Older layouts retain the existing generic semantics. Read the live
-     * descriptor each call: a cached partition count cannot own routing. */
+    /* A root that is not HASH(id) partitioned, not readable by the role, or
+     * under RLS is answered by ordinals_sql. The partition descriptor is read
+     * each call so routing follows the live layout. */
     if ((pg_class_aclcheck(root_oid, GetUserId(), ACL_SELECT) != ACLCHECK_OK &&
          pg_attribute_aclcheck(root_oid, get_attnum(root_oid, "id"),
                                GetUserId(), ACL_SELECT) != ACLCHECK_OK) ||
@@ -433,8 +394,9 @@ identity_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
             ordinals_sql, false, NULL);
     }
     desc = RelationGetPartitionDesc(root, false);
-    /* Parent grants need not be repeated on children. Keep the parent query
-     * for those roles, and for children whose own RLS would change its result. */
+    /* Grants on the parent need not exist on the leaves: a leaf the role
+     * cannot read directly, or under its own RLS, sends the batch through the
+     * root query. */
     for (int p = 0; p < desc->nparts; p++)
     {
         Oid leaf = desc->oids[p];
@@ -538,24 +500,19 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
 int
 laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
-    /* Perfcache fast path deliberately OFF: this probe answers "is there a
-     * committed entities ROW", not "is this id resolvable". The write lane's
-     * in-transaction verification is what makes tier-0 codepoint rows stored
-     * in the first place (the unicode seed) -- answering their presence
-     * axiomatically here would subtract them from the write list and the
-     * rows would never land. */
+    /* Perfcache off: this answers whether a committed row exists. Tier-0
+     * codepoint rows are written through the path that consults this probe;
+     * counting them present by resolution would drop them from the write. */
     return batch_presence_core(ids_array, bm, candidate_count,
                                laplace_sql_query_text("entities.present_ordinals_fallback"),
                                false, "entities");
 }
 
 /*
- * Tier-keyed batch presence: ids plus a parallel int2[] of tiers. The
- * per-tier ordinals overload prunes LIST(tier) at plan time; entities' t2
- * HASH(id) leaves prune per row via the id equality. Joint remap keeps the
- * three-way alignment when a malformed id is skipped. `use_perfcache`
- * retains the tier-0 codepoint fast path where the caller's semantics are
- * resolvability (descent), and stays off for stored-row semantics.
+ * Tier-keyed presence: ids plus a parallel int2[] of tiers, grouped by tier and
+ * probed through the cached literal-tier plan. remap keeps each probe row
+ * aligned to its input ordinal when a malformed id is skipped. use_perfcache
+ * applies the codepoint path for resolvability, not for stored-row semantics.
  */
 static int
 batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
@@ -624,8 +581,8 @@ batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
         goto done;
     }
 
-    /* Sort only integer positions, leaving the deconstructed Datums owned by
-     * their input arrays.  O(N log N), then one plan execution per tier. */
+    /* Sort positions only, leaving the Datums owned by their input arrays;
+     * then one plan execution per tier. */
     qsort_arg(order, probe_n, sizeof(int), cmp_probe_by_tier, probe_tiers);
 
     for (i = 0; i < probe_n; )
@@ -700,9 +657,9 @@ done:
 }
 
 /*
- * Pair-keyed batch presence: ids plus one parallel bytea[] key column
- * (physicalities: hilbert_index, the RANGE partition key). No perfcache
- * (physicality ids are never codepoint ids).
+ * Pair-keyed presence: ids plus one parallel bytea[] partition key
+ * (physicalities: hilbert_index, RANGE). No perfcache: physicality ids are
+ * never codepoint ids.
  */
 static int
 batch_presence_core_pair(ArrayType *ids_array, ArrayType *keys_array,
@@ -799,7 +756,7 @@ int
 laplace_entities_stored_bitmap_keyed(ArrayType *ids_array, ArrayType *tiers_array,
                                      uint8_t *bm, int candidate_count)
 {
-    /* Stored-row semantics: perfcache OFF (see 1-arg comment). */
+    /* Stored-row semantics: perfcache off. */
     return batch_presence_core_tiered(ids_array, tiers_array, bm, candidate_count,
                                       false);
 }
@@ -808,7 +765,7 @@ int
 laplace_tier_batch_existence_probe_keyed(ArrayType *ids_array, ArrayType *tiers_array,
                                          uint8_t *bm, int candidate_count)
 {
-    /* Descent resolvability semantics: perfcache ON (identical to 1-arg). */
+    /* Descent resolvability semantics: perfcache on. */
     return batch_presence_core_tiered(ids_array, tiers_array, bm, candidate_count,
                                       true);
 }

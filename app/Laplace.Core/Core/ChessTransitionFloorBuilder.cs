@@ -97,8 +97,8 @@ public sealed class ChessTransitionFloorBuilder : IDisposable
             FlushRun(ct);
             int pass = 0;
             long runCount = _initialRuns;
-            // Names and scalar counts identify all runs. The number of input games/runs
-            // never creates a growing in-memory collection of file metadata.
+            // Names and scalar counts identify all runs, so the number of inputs or runs
+            // never grows an in-memory collection of file metadata.
             while (runCount > 1)
             {
                 long consumed = 0, produced = 0;

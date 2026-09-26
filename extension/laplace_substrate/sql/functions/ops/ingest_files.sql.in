@@ -1,6 +1,5 @@
--- Physical artifact inventory and admitted-file lifecycle for one ingest run.
--- Actionable admitted states sort first; explicit non-selected dispositions remain
--- readable after completed files instead of disappearing during source selection.
+-- One run's enumerated artifacts and each admitted file's lifecycle. Admitted
+-- actionable states sort first; non-selected dispositions follow completed files.
 DROP FUNCTION IF EXISTS laplace.ingest_files(uuid, int);
 
 CREATE OR REPLACE FUNCTION ops.ingest_files(p_run_id uuid, p_limit int DEFAULT 200)

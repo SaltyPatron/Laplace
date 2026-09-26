@@ -11,14 +11,13 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Reads the witnessed chess layer from Postgres and streams playings missing a calculated
-/// lane's version marker. GH #736 grains: the witnessed record is (event, PLAYS_LINE, line)
-/// plus header facts subjected on the LINE with ctx = the EVENT, so the hydrator navigates
-/// event → line → context-grouped headers. Two stream grains, matching the two marker
-/// grains: per EVENT (analyzer — per-playing testimony) and per LINE (trajectory/stockfish —
-/// pure functions of the line). A line's lossless Content manifest is the exact Merkle preimage
-/// [start-position, ordered typed moves]; playings carry only occurrence-specific annotation
-/// lanes. SAN and the subsequent board walk are deterministic realizations of that stored identity.
+/// Reads recorded playings and streams those missing a calculation witness's version marker.
+/// A playing is (event, PLAYS_LINE, line) plus header attestations on the line with the event
+/// as context, so hydration walks event → line → context-grouped headers. Two stream grains
+/// match the two marker grains: per event (per-playing testimony) and per line (functions of
+/// the line alone). A line's Content manifest is its exact Merkle preimage [start position,
+/// ordered typed moves]; playings carry only occurrence-specific annotations. SAN and the board
+/// walk are deterministic realizations of that identity.
 /// </summary>
 internal static class ChessWitnessHydrator
 {
@@ -319,8 +318,8 @@ internal static class ChessWitnessHydrator
     /// <summary>
     /// Strict inputs for the position-outcome version transition: the complete line,
     /// its start position, and the literal recorded result for every selected playing.
-    /// Annotation, clock and engine-evaluation lanes do not participate in this recipe.
-    /// Unknown/missing/conflicting recorded inputs refuse before source eviction.
+    /// Annotation, clock and engine-evaluation trajectories do not participate. Unknown, missing
+    /// or conflicting recorded inputs are refused before source eviction.
     /// </summary>
     internal static async Task<IReadOnlyList<ChessWitnessedGame>> HydratePositionOutcomeInputsAsync(
         NpgsqlDataSource ds, IReadOnlyList<Hash128> playingIds, long maximumMaterializedBytes,
@@ -380,8 +379,8 @@ internal static class ChessWitnessHydrator
 
         var resultIds = wanted.Select(w => w.Meta.ResultObj).Distinct().ToArray();
         var resultText = await ReadStrictResultsAsync(ds, resultIds, budget, ct).ConfigureAwait(false);
-        // Reserve actual encoded geometry and native-expanded work before the common
-        // hydrator requests expanded constituents or constructs replay/board arrays.
+        // Reserve the encoded geometry and native-expanded work before constituents are
+        // expanded or replay/board arrays are built.
         var lineShape = await NpgsqlSubstrateReads.ChessContentShapeAsync(ds, lines.Select(id => id.ToBytes()).ToArray(),
             budget, 4096, ct).ConfigureAwait(false);
         var lineMultiplicity = wanted.GroupBy(row => row.Line).ToDictionary(group => group.Key, group => group.Count());
@@ -516,7 +515,7 @@ internal static class ChessWitnessHydrator
     }
 
     /// <summary>Replay the complete typed input after the strict reader has reserved its
-    /// checked expanded work. The existing UI default remains independent of admission.</summary>
+    /// checked expanded work; the UI replay window does not apply.</summary>
     internal static ChessReplayResult ReplayAdmittedLine(IReadOnlyList<Hash128> moveIds, string? startFen)
         => ChessReplay.Replay(moveIds, startFen, maxPlies: moveIds.Count);
 

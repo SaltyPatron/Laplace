@@ -252,8 +252,7 @@ public sealed class ModelTokenEdgeETL
     /// distribution in this circuit, and only pairs at z >= sqrt(2 ln N) are
     /// written. Every written pair confirms, graded by its departure; a low or
     /// negative score is absence of evidence and is never written as refutation.
-    /// Whether another source already holds the pair does not matter: the
-    /// model's evidence stands on its own witness.
+    /// Existing testimony from other sources does not affect what the model attests.
     /// </summary>
     private IEnumerable<SubstrateChange> EmitSignificantClaims(
         Hash128 typeId,

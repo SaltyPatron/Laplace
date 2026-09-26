@@ -34,12 +34,9 @@ public sealed class TextEntityBuilderEmissionTests
     [Fact]
     public void GeneratedLargeDocument_InMemory_RoundtripsFromPhysicalities()
     {
-        // Keep the large-document DAG/reconstruction path in every DEV/BAT run.
-        // The physical Galileo corpus is useful additional evidence when mounted,
-        // but a developer/CI machine must not lose this law merely because that
-        // external corpus is absent. Diverse separators, Unicode, paragraph
-        // boundaries, repeated phrases and unique ordinals exercise the same
-        // document/sentence/word/grapheme composition and trajectory reconstruction.
+        // A generated document runs without any external corpus. Mixed separators,
+        // Unicode, paragraph boundaries, repeated phrases and unique ordinals exercise
+        // document/sentence/word/grapheme composition and reconstruction from trajectories.
         var text = new StringBuilder(180_000);
         for (int i = 0; i < 768; i++)
         {
@@ -134,9 +131,8 @@ public sealed class TextEntityBuilderEmissionTests
     [Fact]
     public void ContentWitness_Builds_DAG_Without_Distributional_Attestations()
     {
-        // Pillar-3a: text emits NO PRECEDES/CONTAINS distributional attestations — sequence is the
-        // trajectory geometry and containment is containers_of; PRECEDES is a MODEL relation. The
-        // content DAG (entities + physicalities) is still built; the distributional stream is empty.
+        // Text composition emits entities and physicalities but no PRECEDES/CONTAINS
+        // attestations: order is the trajectory and containment is read from containers.
         byte[] bytes = Encoding.UTF8.GetBytes("Brave whales chase tiny boats. Second sentence holds more words.");
         Assert.True(TextEntityBuilder.TryBuildContentWitness(bytes, Src, 1.0,
             out var ents, out _, out var atts, out var rootId, out _));
@@ -282,7 +278,7 @@ public sealed class TextEntityBuilderEmissionTests
             Assert.Equal(firstRoot, physicality.EntityId);
             Assert.Equal(UserPromptContent.Source, physicality.SourceId);
             Assert.Equal(SourceTrust.UserPrompt, change.RequireSourcePrior(physicality.SourceId));
-            Assert.Empty(change.Attestations); // HAS evidence is the normal writer's later native admission.
+            Assert.Empty(change.Attestations); // Occurrence evidence is admitted later by the writer's native path.
         }
     }
 

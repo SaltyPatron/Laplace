@@ -1,12 +1,11 @@
--- Persistent per-run ingest ledger. One row per IngestRunner run, inserted as
--- 'running' at run start and driven to a terminal status on every exit path.
--- A row still 'running' with no live ingest process is the diagnosable
--- signature of a cut-off run — the counts and files_done say how far it got.
--- Ops metadata, not substrate content: rows are never folded, never walked,
--- and (flush-journal precedent) not preserved across dump/restore.
+-- Per-run ingest ledger: one row per run, inserted 'running' at start and driven
+-- to a terminal status on every exit path. A 'running' row with no live ingest
+-- process is a cut-off run; its counts and files_done say how far it got.
+-- Operational state, not substrate content: rows are never folded, never
+-- walked, and not preserved across dump/restore.
 --
--- STATUS VOCABULARY. Ordinary terminal states are ok / failed / cancelled,
--- plus capped (a deliberate MaxInputUnits smoke run), skipped-complete (a run
+-- Status vocabulary. Terminal states are ok / failed / cancelled, plus capped
+-- (an input-unit cap was set), skipped-complete (a run
 -- short-circuited by a completion marker), and empty-noop (declared input,
 -- applied none, could not account for it — the runner throws on this one).
 --
@@ -14,15 +13,12 @@
 -- a run that legitimately applied nothing.
 --   already-present   novelty gate proved every record already in the substrate
 --   already-complete  marker-gated backfill with nothing left to do
---   dependency-unset  optional dependency absent (syzygy tablebases)
+--   dependency-unset  optional dependency absent
 --
--- THIS CHECK IS A WRITE GATE, NOT DOCUMENTATION. A status the C# side emits
--- and this list omits does not degrade to an unrecognised-but-stored value:
--- the UPDATE raises 23514, the writer logs INGEST_RUN_JOURNAL_WRITE_FAILED and
--- (correctly) does not abort the ingest, and the row stays 'running' forever —
--- indistinguishable from a killed run, and the journal verifier then fails a
--- run that succeeded. Adding a status to DeriveRunStatus or to an explainer
--- means adding it here in the same change.
+-- The CHECK is a write gate: a status the writer emits and this list omits
+-- raises 23514, the writer logs INGEST_RUN_JOURNAL_WRITE_FAILED without aborting
+-- ingest, and the row stays 'running' like a killed run. A status added to
+-- DeriveRunStatus or an explainer is added here too.
 CREATE TABLE IF NOT EXISTS ingest_run_journal (
     run_id             uuid         PRIMARY KEY,
     source_name        text         NOT NULL,
@@ -100,10 +96,9 @@ ALTER TABLE ingest_run_journal
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);
 
--- Accepted baseline and observed measurement are separate authority. A run may
--- produce a perfectly valid measurement without anyone having accepted that
--- measurement as the comparison standard. CI/readers fail closed on that state;
--- only ops.ingest_throughput_accept() may establish or move the accepted baseline.
+-- Accepted baseline per source. An observed run rate is a measurement, not an
+-- accepted standard; only ops.ingest_throughput_accept() establishes or moves a
+-- baseline, and a source without one reads 'unbaselined'.
 CREATE TABLE IF NOT EXISTS ingest_throughput_baseline (
     source_name          text PRIMARY KEY,
     baseline_rows_per_s  double precision NOT NULL CHECK (baseline_rows_per_s > 0),
@@ -118,11 +113,9 @@ CREATE TABLE IF NOT EXISTS ingest_throughput_baseline (
     last_observed_at     timestamptz
 );
 
--- Migrate the repository's previously accepted corpus measurements into the
--- substrate on first install/upgrade. NpgsqlIngestObservability persists the same
--- IngestRunner WallClock used by the historical INGEST_COMPLETE elapsed_s record,
--- so these baselines and all new production samples share one timing boundary.
--- ON CONFLICT DO NOTHING preserves any baseline already accepted in this DB.
+-- Seed baselines for known decomposers, measured on the runner wall clock that
+-- journal samples also use. ON CONFLICT DO NOTHING keeps any baseline already
+-- accepted in this database.
 INSERT INTO ingest_throughput_baseline
     (source_name, baseline_rows_per_s, baseline_rows, baseline_elapsed_ms, established_at)
 VALUES
@@ -138,10 +131,9 @@ VALUES
     ('WordNetDecomposer',      26620.8, 3540569, 133000, now())
 ON CONFLICT (source_name) DO NOTHING;
 
--- One terminal journal update is the shared ingest boundary for CLI, console,
--- UI, API, OpenAI-compatible and MCP entry points. Derive the measurement here,
--- not in an Actions parser, so every surface records the same verdict even when
--- no workflow or log scraper is involved.
+-- Fires on the run's terminal transition, the one boundary every ingest entry
+-- point crosses, and derives the throughput sample and its verdict against the
+-- accepted baseline (slow above 1.5x slowdown).
 CREATE OR REPLACE FUNCTION ops.ingest_throughput_apply()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -153,18 +145,15 @@ DECLARE
     v_baseline double precision;
     v_slowdown double precision;
 BEGIN
-    -- Only a clean completed ingest is a throughput sample. Marker skips,
-    -- capped smoke runs, failures and cancellations retain not-measured.
+    -- Only a clean completed run is a sample; every other status keeps
+    -- not-measured.
     IF NEW.status <> 'ok' OR NEW.ended_at IS NULL THEN
         RETURN NEW;
     END IF;
 
     v_rows := NEW.entities + NEW.physicalities + NEW.attestations;
-    -- The managed runner supplies IngestRunResult.WallClock here: exactly the
-    -- Stopwatch boundary emitted as INGEST_COMPLETE elapsed_s and used by the
-    -- accepted historical runner-clock baselines. Direct SQL/manual journal
-    -- transitions have no runner stopwatch, so only those fall back to the
-    -- journal timestamp window.
+    -- Elapsed is the runner's wall clock when it supplied one, else the
+    -- journal's started_at..ended_at window.
     v_elapsed_ms := COALESCE(
         NULLIF(NEW.throughput_elapsed_ms, 0),
         round(extract(epoch FROM (NEW.ended_at - NEW.started_at)) * 1000.0)::bigint);
@@ -186,10 +175,8 @@ BEGIN
      WHERE b.source_name = NEW.source_name;
 
     IF NOT FOUND THEN
-        -- A measurement is evidence, not authority to accept itself. Record the
-        -- exact run rate in the journal and fail closed until an operator accepts
-        -- a baseline explicitly. This prevents a catastrophically slow first run
-        -- from normalizing the regression it should reveal.
+        -- No accepted baseline: record the rate, compare nothing. A run never
+        -- accepts itself as the standard.
         NEW.throughput_baseline_rows_per_s := NULL;
         NEW.throughput_slowdown_ratio := NULL;
         NEW.throughput_compared := false;
@@ -223,10 +210,8 @@ FOR EACH ROW
 WHEN (OLD.status = 'running' AND NEW.status <> 'running')
 EXECUTE FUNCTION ops.ingest_throughput_apply();
 
--- Deliberate baseline authority. The latest measured clean run may be slow or
--- may be the first measurement for a new source; accepting it is an explicit
--- operator action, never something a run or a red gate can do to itself.
--- CI `check` is read-only and never calls this function.
+-- Accepts the source's latest measured clean run as its baseline. Explicit
+-- operator action; no run or read path calls it.
 DROP FUNCTION IF EXISTS ops.ingest_throughput_accept(text);
 CREATE OR REPLACE FUNCTION ops.ingest_throughput_accept(p_source text)
 RETURNS TABLE(source_name text, baseline_rows_per_s double precision, accepted_run_id uuid)
@@ -275,12 +260,8 @@ BEGIN
 END
 $$;
 
--- The CREATE TABLE above is IF NOT EXISTS, so on any database that already has this
--- table the status list frozen at its creation is the list that is enforced — a new
--- status added above would be rejected on every box except a freshly created one.
--- Re-assert the constraint from the schema of record on every install. This is the
--- .sql.in doing its job (idempotent, versioned, applied by install-extensions), not a
--- hand-ALTER against a live database.
+-- CREATE TABLE is IF NOT EXISTS, so the status CHECK is re-asserted on every
+-- install; otherwise an installed table enforces the list it was created with.
 DO $$
 BEGIN
     ALTER TABLE ingest_run_journal DROP CONSTRAINT IF EXISTS ingest_run_journal_status_check;

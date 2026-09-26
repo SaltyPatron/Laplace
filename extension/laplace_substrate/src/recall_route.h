@@ -1,10 +1,6 @@
-/* Structural read intent for the recall responder family.
- *
- * The intent, the relation type and both topics arrive as ARGUMENTS — they are
- * never inferred from the surface form of a prompt. The English pattern ladder
- * that used to derive them here was removed: it made a language-agnostic
- * substrate answer only to English rhetoric, and the caller (UI, MCP, HTTP)
- * always knew the shape of the read it wanted anyway.
+/* Structural read intent for recall. The intent, relation type and both
+ * topics arrive as arguments; none is inferred from the surface form of the
+ * observation.
  */
 
 #ifndef LAPLACE_RECALL_ROUTE_H
@@ -31,8 +27,7 @@ extern char *trim_dup(const char *s);
 extern bool  str_empty(const char *s);
 extern char *lower_dup(const char *s);
 
-/* Canonical intent vocabulary. converse.query_shapes() publishes it to callers
- * so a UI can build its controls from the substrate instead of hardcoding. */
+/* Membership in the recall intent vocabulary (see route_intents). */
 extern bool  route_intent_known(const char *intent);
 
 extern void route_free(RouteResult *r);

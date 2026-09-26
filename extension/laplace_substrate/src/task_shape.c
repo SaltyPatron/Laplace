@@ -117,8 +117,9 @@ shape_receive_structure(Datum physicality, Datum entity, Datum geometry, void *o
         elog(ERROR, "task shape: trajectory decode failed");
     pfree(aligned);
     pfree(wkb);
-    /* A parse is either the schema-v1 flat structure (unflagged constituents) or the
-     * recipe layout: the token forms, each a PARSE vertex, identified by its units. */
+    /* A parse trajectory is either flat (unflagged constituents, Merkle id) or
+     * vertex-flagged: every constituent a PARSE vertex, re-identified from its
+     * units and kept only when that id equals the entity id. */
     bool vertex_layout = count > 0, flat_layout = true;
     for (size_t i = 0; i < count; ++i)
     {
@@ -161,7 +162,8 @@ shape_receive_structure(Datum physicality, Datum entity, Datum geometry, void *o
         hash128_merkle(4, flat, count, &canonical);
     if (!flat_layout || read->vertex_only || !hash128_eq(&canonical, &id))
     {
-        /* Passed over by the vertex read, a structure stays readable by the typed reads. */
+        /* The vertex-only read drops what it does not keep so a later typed read
+         * can still admit the same entity. */
         if (read->vertex_only) hash_search(read->structures, &id, HASH_REMOVE, NULL);
         pfree(flat);
         MemoryContextSwitchTo(previous);
@@ -201,7 +203,7 @@ shape_receive_witness(int ordinal, int16 role, const LaplaceObservation *row, vo
         ShapeStructure *record = hash_search(read->structures, &row->object, HASH_FIND, NULL);
         hash128_t unnamed;
         hash128_zero(&unnamed);
-        /* A recipe-layout parse names no sentence; its HAS_PARSE subject is the sentence. */
+        /* A vertex-flagged parse names no sentence; its HAS_PARSE subject is the sentence. */
         if (role != 2 || !record || !record->is_parse ||
             (!hash128_eq(&record->parse.sentence_id, &unnamed) &&
              !hash128_eq(&record->parse.sentence_id, &row->subject))) return;
@@ -301,8 +303,8 @@ shape_structure_ids(ShapeRead *read, bool parses)
                  construct_empty_array(BYTEAOID);
 }
 
-/* One fixed prepared read for the entire already coupled semantic estate.
- * Stored entity typing supplies slot compatibility; labels never do. */
+/* One prepared set read of the stored entity types of every COUPLE binding.
+ * Slot compatibility is decided by these types, never by labels. */
 static void
 shape_read_entity_types(ShapeRead *read)
 {
@@ -410,8 +412,9 @@ shape_recipe_count(StringInfo bytes, uint32 count)
     appendBinaryStringInfo(bytes, (const char *) encoded, 4);
 }
 
-/* A derived request projection is a calculation recipe, never a fabricated
- * HAS_PARSE observation. Morphological lemmas are not guessed from concept IDs. */
+/* With no supported parse of the observation, the operation's current parse is
+ * a calculated recipe id over shape, exemplar, observation forms with their
+ * origins, and the chosen inputs. No HAS_PARSE observation is written. */
 static hash128_t
 shape_projection_id(const ShapeRead *read, const ShapeStructure *shape,
                      const SlotChoices *choices, const int *selected)
@@ -517,9 +520,9 @@ shape_instantiate(ShapeRead *read, const ShapeStructure *shape, const ShapeStruc
         choices[slot].ids = palloc((Size) Max(read->fanout, 1) * sizeof(hash128_t));
         if (shape->shape.slot_stride == 4 && hash128_eq(fields + 3, &markers.current_form))
         {
-            /* The source contract selects the representation at this exact
-             * occurrence. Naming alternatives stay in COUPLE; they are not
-             * inputs to a current-form slot and receive no ranking preference. */
+            /* A current-form slot takes the observed form at the matched
+             * occurrence itself, if it carries the slot type; bindings to that
+             * occurrence are not candidates. */
             const hash128_t *form = read->intent->structure->forms + ordinals[slot];
             ShapeEntityType key = {*form, fields[2]};
             if (hash_search(read->entity_types, &key, HASH_FIND, NULL))
@@ -590,9 +593,10 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
     read.witnesses = shape_table("task shape observations", sizeof(hash128_t), sizeof(LaplaceObservation), read.owner);
     read.cells = shape_table("task shape standing", sizeof(LaplaceObservationCell), sizeof(ShapeCell), read.owner);
     read.entity_types = shape_table("task shape entity types", sizeof(ShapeEntityType), sizeof(ShapeEntityType), read.owner);
-    /* These are the declared fields of the source-shape protocol. Resolve
-     * registry metadata once at the boundary; no rendered cue or output label
-     * supplies a relation, and aliases cannot silently change this schema. */
+    /* The shape protocol relations must resolve to exactly these canonical
+     * registry entries; an alias resolving elsewhere is an error. A protocol
+     * relation outside the caller's hard relation-type constraint ends
+     * compilation with no operations. */
     static const char *const protocol_relations[] = {
         "IS_EXAMPLE_OF", "CALLS", "HAS_INPUT", "HAS_PARSE"
     };
@@ -616,15 +620,14 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
     laplace_ud_markers_t parse_markers;
     laplace_ud_markers_init(&parse_markers);
     ArrayType *required = hash128_array_from_ids(&parse_markers.schema_v1, 1);
-    /* Count only the structural domain this compiler can consume. The schema
-     * requirement is a second indexed AND condition, never another ANY cue. */
+    /* Trajectories containing an observation form AND the parse schema
+     * constituent; exceeding fanout marks the compile budget exhausted. */
     read.failed = !laplace_typed_membership_read_with_required(members, false,
         required, 8, fanout, shape_receive_structure, &read);
     pfree(required);
-    /* Recipe-layout parses carry no schema constituent; their parse-ness is in the
-     * vertex flags. This read only adds such exemplars: the structures it passes over
-     * (sentences sharing a form) are not this compiler's domain, so its bound is not
-     * the schema domain's completeness. */
+    /* Vertex-flagged parses carry no schema constituent. This second read only
+     * adds those; other structures sharing a form are dropped, so its fanout
+     * bound does not mark the budget exhausted. */
     read.vertex_only = true;
     (void) laplace_typed_membership_read_with_required(members, false,
         NULL, 8, fanout, shape_receive_structure, &read);
@@ -732,7 +735,7 @@ done:
     if (read.failed)
     {
         intent->budget_exhausted = true;
-        /* No retained prefix is a smaller declaration or a completed program. */
+        /* A truncated operation set is discarded whole. */
         intent->relation_count = 0;
     }
     if (intent->relation_count > 0)

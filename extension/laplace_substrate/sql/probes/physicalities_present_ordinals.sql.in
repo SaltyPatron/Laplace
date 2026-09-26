@@ -1,7 +1,5 @@
--- Physicalities are HASH(id); id is the routing key. The old hilbert-keyed
--- overload describes the retired RANGE(hilbert_index) schema and has no live
--- caller. Keep one fixed set operation and do not spawn a second PostgreSQL
--- parallel fan underneath caller-owned batching.
+-- Physicalities are HASH(id); the id is the routing key. PARALLEL RESTRICTED:
+-- batching and concurrency belong to the caller.
 CREATE OR REPLACE FUNCTION laplace.physicalities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL RESTRICTED

@@ -6,9 +6,8 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// The league surface: pulse (live scoreboard), leaders (per-band leaderboards),
-/// entity record, and the head-to-head matchup. Shapes and status codes over the
-/// FakeSubstrateClient — the same contract the SPA consumes.
+/// League reads over <c>FakeSubstrateClient</c>: pulse, per-band leaders, entity record
+/// and head-to-head matchup — shapes and status codes of the contract the SPA consumes.
 /// </summary>
 public sealed class LeagueContractTests : IClassFixture<ExploreFactory>
 {

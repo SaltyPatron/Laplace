@@ -4,10 +4,10 @@ using System.Text.Json;
 namespace Laplace.Decomposers.Composition;
 
 /// <summary>
-/// One source-generation selection authority. Checked-in recipes, an optional host
-/// cookbook, and explicit manifest paths all feed the same resolver. Discovery never
-/// enables a draft manifest: only an explicit path or `"selected": true` may replace
-/// a legacy source implementation.
+/// Selects source-generation recipes. Checked-in recipes, an optional host cookbook
+/// (LAPLACE_COOKBOOK_PATH) and explicit manifest paths (LAPLACE_SOURCE_GENERATIONS) feed one
+/// resolver. A discovered manifest is used only with <c>"selected": true</c>; an explicit
+/// path is always selected. A selected recipe takes the place of the built-in provider.
 /// </summary>
 public sealed class SourceGenerationCatalog
 {
@@ -19,9 +19,8 @@ public sealed class SourceGenerationCatalog
         string? explicitSelection = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_GENERATIONS");
         var candidates = new Dictionary<string, bool>(StringComparer.Ordinal);
 
-        // Repository/deployment cookbook is part of the product, not an environment
-        // variable. This makes checked-in recipes executable by default while the
-        // selected bit remains the deliberate cut-over switch for each source.
+        // Checked-in recipes are always candidates; each is used only if it carries
+        // "selected": true.
         foreach (string path in BuiltInRecipeManifests())
             candidates.TryAdd(path, false);
 

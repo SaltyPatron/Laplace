@@ -7,18 +7,12 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
-    -- Dedup and rank by (member, lang) id pair, never by rendered surface (the
-    -- old GROUP BY realize.render_text(member) conflated homographs). The user-supplied
-    -- language reference is text, so it is resolved at the INPUT boundary: each
-    -- DISTINCT candidate language is matched once against the reference (by
-    -- label or definition surface), instead of re-rendering per member row.
-    -- render_text runs above the sort, streaming until p_limit rows survive.
-    -- object_id IS NOT NULL is load-bearing, not defensive: src_langs feeds a
-    -- NOT IN below, and SQL NOT IN against a set containing one NULL evaluates
-    -- to NULL for every row, dropping the entire result. HAS_LANGUAGE is emitted
-    -- unary (null object) in some paths, so a single such row silently zeroes
-    -- every translate_to call while language_coverage — same synset_members
-    -- source, no NOT IN — keeps working.
+    -- Dedup and rank by (member, lang) id pair, never by rendered surface.
+    -- The text language reference is resolved at the input boundary: each
+    -- distinct candidate language is matched once by label or definition
+    -- surface. render_text runs above the sort, only until p_limit rows survive.
+    -- object_id IS NOT NULL is load-bearing: src_langs feeds a NOT IN, and one
+    -- NULL (a unary HAS_LANGUAGE cell) would make NOT IN drop every row.
     WITH src_langs AS (
         SELECT c.object_id AS id FROM laplace.consensus c
         WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
@@ -33,17 +27,9 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     ),
-    -- Definition surfaces for the CANDIDATE languages, rendered ONCE in a fenced
-    -- CTE. This used to sit inside the lang_match predicate as
-    -- `lower(realize.render_text(d.object_id)) = w.name`, i.e. a render evaluated per
-    -- probed edge purely to classify it -- the render-to-classify defect the read
-    -- law names, in the one position the law calls out. Same accept set, rendered
-    -- a bounded number of times.
-    --
-    -- eff_mu > 0 is the tri-state guard: the old EXISTS matched on bare row
-    -- presence, so a HAS_DEFINITION edge the fold had REFUTED still admitted the
-    -- language. consensus carries no outcome column; refutation is a non-positive
-    -- fold, the same test the walk uses to dead-end an edge.
+    -- Definition surfaces of the candidate languages, realized once in a
+    -- fenced CTE, never per probed edge inside a predicate. eff_mu > 0 keeps a
+    -- refuted HAS_DEFINITION cell from admitting its language.
     lang_def_names AS MATERIALIZED (
         SELECT d.subject_id AS lang, lower(realize.render_text(d.object_id)) AS dname
         FROM laplace.consensus d, want w0
@@ -53,18 +39,14 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
           AND consensus.eff_mu(d.rating, d.rd) > 0
     ),
     lang_match AS (
-        -- No-filter call (name IS NULL): pass every candidate language through with
-        -- ZERO rendering — Postgres does not guarantee OR short-circuit, so the old
-        -- single-WHERE shape could evaluate realize.label()/realize.render_text() even when no
-        -- language filter was supplied (the common call).
+        -- No language filter: every candidate language passes with no
+        -- realization (PostgreSQL does not guarantee OR short-circuit).
         SELECT l.lang
         FROM (SELECT DISTINCT lang FROM agg) l, want w
         WHERE w.name IS NULL
         UNION ALL
-        -- Named filter: label rendered ONCE per candidate language as a fenced
-        -- projection (not re-evaluated inside a predicate); the definition-surface
-        -- fallback renders only for languages whose label missed. Accept set is
-        -- identical to the old matcher.
+        -- Named filter: label realized once per candidate language as a
+        -- projection; definition surfaces are consulted when the label misses.
         SELECT s.lang
         FROM (
             SELECT l.lang, lower(realize.label(l.lang)) AS lbl

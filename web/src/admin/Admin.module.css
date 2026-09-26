@@ -52,8 +52,8 @@
 
   .gateNote { margin: 0; font-size: var(--text-sm); }
 
-  /* Operational tables wrap human-readable text but keep numeric/action cells compact.
-     Horizontal scrolling is a fallback, not the primary layout. */
+  /* Operational tables wrap human-readable text but keep numeric/action cells compact;
+     they scroll horizontally only when a row still overflows. */
   .tableWrap {
     max-width: 100%;
     overflow: auto;
@@ -234,8 +234,8 @@
 
   .foot { margin-top: var(--space-3); font-size: var(--text-xs); white-space: normal; }
 
-  /* Two-column operator surfaces only stay split when each side has enough room to
-     remain usable. A sidebar + browser chrome makes 900px too optimistic. */
+  /* Two-column operator grids stay split only while each side keeps its minimum
+     width; the breakpoint allows for the sidebar. */
   .opGrid {
     display: grid;
     grid-template-columns: minmax(320px, .85fr) minmax(480px, 1.15fr);

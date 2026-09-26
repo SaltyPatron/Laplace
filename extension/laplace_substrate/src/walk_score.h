@@ -1,19 +1,10 @@
 /*
- * walk_score.h — the walk's per-edge score, in ONE place.
+ * walk_score.h — the per-edge score every walk and STEER step reads off a
+ * consensus cell: relation rank times the Glicko-2 signed edge weight of the
+ * cell's folded rating and deviation.
  *
- * `consensus.relation_rank(type) * laplace_walk_edge_weight(rating, rd)`
- * is the Glicko-complete signed weight (doc 15 §3Ca, glicko2.h) and is the SAME
- * formula consensus_adjacency uses on the Foundry export side. It was previously
- * a file-static in generate_walk.c, which meant S7 (steer_candidates.c) could
- * only have it by copying — two bodies for one quantity, agreeing until one of
- * them is edited, which is precisely the divergence the implementation law names.
- *
- * Header-inline rather than a new translation unit: it is a table lookup and a
- * multiply, it is called per edge inside the beam, and the extension links the
- * engine statically, so there is nothing to gain by putting it out of line.
- *
- * Unresolvable type: rank 0.0, so the edge can never win a beam slot over a
- * resolvable candidate. Deliberately NOT an 8-hop SPI parent-chain walk per row.
+ * A relation type the manifest registry cannot resolve ranks 0.0, so its edge
+ * never outscores a resolvable one.
  */
 #ifndef LAPLACE_WALK_SCORE_H
 #define LAPLACE_WALK_SCORE_H
@@ -34,12 +25,9 @@ walk_relation_rank(hash128_t type_id)
 }
 
 /*
- * Relation rank is read-time salience. Content relations (associative and
- * above in relation_types.toml [ranks]) ground a prompt occurrence; lexical
- * glue, scalar values and standards metadata (HAS_POS, HAS_LANGUAGE, HAS_NAME,
- * HAS_EXTERNAL_ID...) remain retained evidence but cannot cover or satisfy an
- * occurrence by themselves. The floor is the firmware image's ROUTE policy
- * (engine/manifest/firmware.toml, spec 39).
+ * Relation rank is read-time salience. A relation whose rank reaches the
+ * firmware ROUTE salience floor can ground an occurrence; one below it stays
+ * standing evidence but cannot cover or satisfy an occurrence by itself.
  */
 static inline bool
 walk_relation_salient(hash128_t type_id)

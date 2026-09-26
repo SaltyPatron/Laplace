@@ -12,9 +12,8 @@ public readonly record struct OmwRow(
 
 internal static class OMWEmitter
 {
-    // One spelling for the membership relation: the wn-data row asserts it and the
-    // <lang>-changes.tab retraction refutes the SAME triple, so the two must never be
-    // able to drift onto different relations.
+    // One spelling for the membership relation: the wn-data row confirms it and the
+    // <lang>-changes.tab retraction refutes the same triple, in the same consensus cell.
     private const string MembershipRelation = "IS_SYNONYM_OF";
 
     internal static void Emit(
@@ -34,33 +33,19 @@ internal static class OMWEmitter
         switch (row.Type)
         {
             case OmwType.Freq:
-                // wn-freq-ind.tab is the only per-row magnitude OMW ships -- 4,981 rows of
-                // "this lemma was observed N times for this synset" -- and the glob list
-                // never matched it, so the corpus's own usage evidence was dropped whole.
-                //
-                // It witnesses the SAME membership the wn-data row asserts, so it folds
-                // into that cell as a second, SCORED witness: laplace_score_fp(n, 1.0)
-                // rises with n, so a lemma observed 50 times outranks one observed once
-                // instead of both entering at the categorical constant.
+                // A wn-freq row ("this lemma was observed N times for this synset") testifies
+                // to the same membership the wn-data row asserts and folds into that cell as
+                // a scored witness: laplace_score_fp(n, 1.0) rises with n.
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, MembershipRelation, synId, OMWDecomposer.Source, TC.AcademicCurated,
                     magnitude: row.Magnitude, arenaScale: 1.0, contextId: langId));
                 break;
             case OmwType.Lemma when row.Removed:
-                // OMW ships its own retractions in <lang>-changes.tab and they were never
-                // globbed: 3,279 REMOVED rows across 26 files, each saying this lemma is no
-                // longer a member of this synset. Dropping them meant the substrate could
-                // only ever accumulate membership -- a corpus that took a word back had no
-                // way to say so.
-                //
-                // This refutes the SAME triple the wn-data lemma row asserts, in the same
-                // language context, so the retraction meets the assertion in one consensus
-                // cell and contests it instead of landing somewhere it can never be seen.
-                // outcome is the field for that; confirm:false is a Refute (score 0.0).
-                //
-                // MODIFIED rows (129) are deliberately NOT touched: the action says the
-                // entry changed, not that the membership is withdrawn, and guessing which
-                // half changed would be inventing testimony the source did not give.
+                // A REMOVED row in <lang>-changes.tab says this lemma is no longer a member
+                // of this synset. It refutes (confirm:false, score 0.0) the same triple the
+                // wn-data lemma row confirms, in the same language context, so it contests
+                // that consensus cell. MODIFIED rows are not acted on: they say the entry
+                // changed, not that the membership was withdrawn.
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, MembershipRelation, synId, OMWDecomposer.Source, langId,
                     TC.AcademicCurated, confirm: false));
@@ -70,19 +55,9 @@ internal static class OMWEmitter
 
 
 
-                // contextId = langId. OMW reads one file per language, so the
-                // language of every lemma->synset membership is known here and was
-                // being discarded. HAS_DEFINITION and HAS_EXAMPLE below already pass
-                // langId; these two did not, and the cross-lingual edge is the one
-                // that most needs the scope.
-                //
-                // MEASURED 2026-08-04, before this fix: the surface "is" gained
-                // IS_SYNONYM_OF -> "ice" with 9 witnesses (Danish/Norwegian/Dutch for
-                // ice) against 1 witness for English "is". With a NULL context no
-                // reader could tell which language attested the edge — the language
-                // lives on the surface but not on the sense and not on the edge — so
-                // the English copula elected "ice" and election_correctness fell from
-                // 5/6 to 2/6, with four of six probes answering "ice". GH #867.
+                // Membership carries the file's language as context: one surface can be a
+                // member of a synset in one language and not another (Danish "is" = ice),
+                // so a reader scopes the attestation by the language that testified it.
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, MembershipRelation, synId, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 // HAS_LANGUAGE keeps a null context: the object IS the language, so a

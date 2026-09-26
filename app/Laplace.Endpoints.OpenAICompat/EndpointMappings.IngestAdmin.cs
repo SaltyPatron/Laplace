@@ -4,10 +4,9 @@ using Laplace.Ops;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Operator control for the canonical CLI ingest lane. The API does not duplicate
-/// the CLI source registry or ingest implementation: it starts <c>Laplace.Cli ingest</c>
-/// and the normal ingest journal remains the authority for progress, completion and failure.
-/// Process control is restricted to CLI children started by this server instance.
+/// Starts and stops <c>laplace ingest</c> processes. Source selection and admission are the
+/// CLI's; progress, completion, and failure are read from the ingest journal. Only CLI
+/// children started by this server process can be stopped.
 /// </summary>
 internal static class IngestAdminEndpoints
 {

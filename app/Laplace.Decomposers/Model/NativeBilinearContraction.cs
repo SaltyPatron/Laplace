@@ -8,9 +8,9 @@ internal readonly record struct SignificantPairPage(
     int[] Rows, int[] Cols, long[] ScoresFp1e9, int NextRow, double Threshold);
 
 /// <summary>
-/// Owns one transient native circuit arena while its complete candidate pages
-/// are consumed. The opaque context contains only canonical-entity factors;
-/// tokenizer aliases have already been aggregated as sets by native code.
+/// Holds one transient native circuit arena while its candidate pages are consumed.
+/// The opaque context holds only canonical-entity factors; native code has already
+/// aggregated tokenizer aliases as sets.
 /// </summary>
 internal sealed class NativeBilinearContraction : IDisposable
 {

@@ -5,29 +5,25 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Multi-phase source whose externally selected units are physical artifacts.
-///
-/// The generic multi-file lane already owns the file-resume contract. Multi-phase
-/// sources need the same contract without inventing a second scheduler: each selected
-/// artifact is claimed exactly once, its content identity owns resume/completion, a
-/// marker-complete artifact true-skips before its parser opens, and a completion marker
-/// is emitted only after an uncapped full artifact execution.
+/// Multi-phase provider whose selected units are physical artifacts. It uses the shared
+/// multi-file ingest's resume and receipt semantics and worker pool: each selected artifact
+/// is claimed once, its content identity keys resume and completion, an artifact with a
+/// completion marker is skipped before its parser opens, and a completion marker is
+/// emitted only after an uncapped run over the whole artifact.
 /// </summary>
 public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDecomposer
 {
     /// <summary>
-    /// Re-declare the interface on this derived base so the runner sees per-file
-    /// completion rather than the default interface implementation inherited through
-    /// <see cref="DecomposerMultiPhase"/>.
+    /// Re-declared here so the runner sees per-file completion instead of the default
+    /// interface implementation inherited through <see cref="DecomposerMultiPhase"/>.
     /// </summary>
     public bool PerFileCompletion => true;
     bool IDecomposer.PerFileCompletion => true;
 
     /// <summary>
-    /// Execute independent heterogeneous artifact phases through the same shared bounded
-    /// ingest worker pool used by ordinary multi-file decomposers. Full runs schedule
-    /// larger artifacts first to avoid a one-file serial tail. Capped diagnostic runs
-    /// remain single-worker so MaxInputUnits still names an exact deterministic prefix.
+    /// Runs independent artifact phases on the shared bounded ingest worker pool. Uncapped
+    /// runs schedule the largest artifacts first so no single file forms a serial tail;
+    /// capped runs use one worker so MaxInputUnits names an exact deterministic prefix.
     /// </summary>
     protected async IAsyncEnumerable<SubstrateChange> RunArtifactPhasesAsync<TArtifact>(
         IReadOnlyList<TArtifact> artifacts,
@@ -78,10 +74,9 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
         string Path);
 
     /// <summary>
-    /// Execute a source's semantic dependency DAG as parallel peer levels separated by
-    /// real apply barriers. A level is not "the next loop in C#": the following level
-    /// cannot begin until every change from the prior level is committed by the shared
-    /// writer. Within one level, artifacts use the common bounded worker scheduler.
+    /// Runs a dependency DAG as levels of peer artifacts separated by apply barriers: a
+    /// level starts only after the shared writer has committed every change of the level
+    /// before it. Within a level, artifacts run on the shared worker pool.
     /// </summary>
     protected async IAsyncEnumerable<SubstrateChange> RunArtifactDependencyLevelsAsync(
         IReadOnlyList<IReadOnlyList<ArtifactPhaseWork>> levels,
@@ -119,7 +114,7 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
     }
 
     /// <summary>
-    /// File-backed phase using the same content-root resume and completion semantics as
+    /// Runs one file-backed phase with the content-root resume and completion receipts of
     /// <see cref="IngestBatchPipeline.RunMultiFileAsync{TRecord}"/>.
     /// </summary>
     protected new async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(
@@ -135,10 +130,9 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
             && !context.SelectedArtifacts.Any(artifact => string.Equals(
                 Path.GetFullPath(artifact.Path), fullPath, StringComparison.Ordinal)))
         {
-            // The manifest explicitly knows this physical file but did not admit it.
-            // Do not open it and do not claim completion. Conversely, any admitted file
-            // that the source never reaches is caught by DecomposerMultiPhase's terminal
-            // selected-artifact closure check.
+            // The manifest knows this file but did not admit it: it is neither opened nor
+            // marked complete. An admitted file the source never reaches is caught by
+            // DecomposerMultiPhase's closing selected-artifact check.
             yield break;
         }
 
@@ -215,9 +209,8 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
             records, entities, physicalities, attestations,
             resumeFingerprint: fileRoot);
 
-        // A diagnostic/capped run is not proof that the physical artifact reached EOF.
-        // Never publish its durable completion marker even if the cap happened to land
-        // on an artifact boundary; a later full run will safely re-observe that file.
+        // A capped run does not prove the artifact reached EOF, so no completion marker is
+        // emitted even when the cap lands on an artifact boundary.
         if (options.MaxInputUnits > 0)
         {
             yield return IngestBatchPipeline.BuildCancelledBoundary(phase.SourceId, fileLabel);
@@ -235,8 +228,8 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
             yield break;
         }
 
-        // No readable content identity means no resumable completion claim. Preserve the
-        // accounting boundary, but do not manufacture a file marker from a path/name.
+        // Without a content identity there is no completion claim: only the period
+        // boundary is emitted, never a marker keyed by path or name.
         yield return IngestBatchPipeline.BuildPeriodBoundary(phase.SourceId, fileLabel);
     }
 }

@@ -218,10 +218,9 @@ add_custom_command(
 )
 add_custom_target(laplace_attestation_codegen DEPENDS "${LAPLACE_CODEGEN_STAMP}")
 
-# zlib for in-process ZIP inflate (unicode_seed reads the UCD .zip without a
-# tar/unzip shell-out). Inflate is deterministic, so the system/PG zlib is
-# rock-safe. On Windows, PostgreSQL ships zlib -- locate it via PGBIN (env.cmd's
-# single toolchain source), never a hardcoded literal.
+# zlib inflates the UCD .zip in process. Inflate output is deterministic, so any
+# system or PostgreSQL zlib yields the same T0 input. On Windows it is located
+# through PGBIN.
 if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     get_filename_component(_laplace_pg_root "$ENV{PGBIN}" DIRECTORY)
     set(ZLIB_ROOT "${_laplace_pg_root}")
@@ -284,10 +283,10 @@ add_custom_command(
     VERBATIM
 )
 
-# Emit is generate-then-install, not every default ninja. Isolated:
+# Perfcache emit is an explicit target, not part of the default build:
 #   ninja laplace_t0_perfcache laplace_highway_perfcache
-# then cmake --install. T0 rows in Postgres are a later execute (UnicodeDecomposer),
-# not this blob and not ALL-on-every-SHA.
+# then cmake --install. The blob is a derived map; Tier-0 rows in PostgreSQL are
+# admitted separately by UnicodeDecomposer.
 add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  DEPENDS laplace_attestation_codegen)
 
@@ -479,8 +478,8 @@ if(UNIX AND LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
         list(APPEND CMAKE_INSTALL_MANIFEST_FILES \${_chess_manifest_files})
     ")
 else()
-    # Preserve native-only and Windows seed installation until their pair activation
-    # mechanism is explicitly verified; recorded-corpus activation above is UNIX-only.
+    # Without the recorded-corpus pair activation above (UNIX only), the native seed
+    # blobs install directly.
     add_custom_target(laplace_chess_position_perfcache DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})
     install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
         DESTINATION share/laplace RENAME "laplace_chess_position_perfcache.bin"
@@ -493,10 +492,9 @@ else()
     endif()
 endif()
 
-# Canonical number ROM (dense 0..255) — spec 33 / compositional perfcache law.
-# Always emits from T0; no corpus path. Shared by image, audio, video and every
-# consumer of these exact integer roots. #1711 generalizes the same build/load
-# pattern to selector-scoped and higher-tier pixel/patch/region/image/audio ROMs.
+# Canonical number ROM (dense 0..255): each integer is the composition of its T0 digit
+# atoms, emitted from T0 alone. Any modality that reuses these integers reads the same
+# roots from it.
 add_subdirectory(tools/modality_number_tables_emit)
 set(LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN
     "${LAPLACE_PERFCACHE_DIR}/laplace_modality_number_perfcache.bin"
@@ -521,7 +519,7 @@ install(FILES ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}
 
 # Governed vocabulary ROM: UPOS, universal relations and their subtypes, features and
 # feature values (engine/manifest/vocabulary, generated from their authorities), each
-# composed from T0 by the same kernels a recipe uses. Spec 33 / compositional law.
+# composed from T0 by the same kernels a recipe uses.
 add_subdirectory(tools/vocabulary_tables_emit)
 set(LAPLACE_VOCABULARY_PERFCACHE_BIN
     "${LAPLACE_PERFCACHE_DIR}/laplace_vocabulary_perfcache.bin"
@@ -589,12 +587,9 @@ if(NOT WIN32)
     target_link_libraries(laplace_core PRIVATE Threads::Threads)
 endif()
 
-# Syzygy probe kernel — its OWN library, deliberately NOT part of laplace_core.
-# laplace_core is linked into the laplace_substrate extension, i.e. loaded into
-# every PostgreSQL backend; a tablebase prober has no business there. Syzygy is
-# decomposition/validation tooling that runs at INGEST (the ChessStockfish
-# pattern), so it ships as a separate library the ingest side loads and the
-# database never sees.
+# The Syzygy prober is a separate shared library, not part of laplace_core (which is
+# loaded into every PostgreSQL backend through laplace_substrate). It is loaded by the
+# ingest side as a calculation witness and never by the database.
 add_library(laplace_syzygy SHARED src/syzygy.c)
 target_include_directories(laplace_syzygy
     PUBLIC

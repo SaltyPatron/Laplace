@@ -7,17 +7,12 @@ import {
 import styles from './Admin.module.css';
 
 /**
- * Diagnosis and repair.
+ * Index health and repair through installed operations: `ops.index_health` lists
+ * invalid indexes, including partitioned parents left as shells with no valid
+ * leaves, and reindex, ANALYZE and VACUUM act on the same database from here.
  *
- * ops.index_health made the 2026-08-13 cycle-shell class visible from every
- * surface — 28 partitioned-parent secondaries left as empty invalid shells while
- * every row count read green. The fix stayed a hand-typed psql session, which is
- * the same gap one step later: an operator who can see the damage here and must
- * leave to act on it will eventually act on the wrong cluster.
- *
- * Every button here is long-running and therefore cancellable rather than
- * bounded — the Activity tab is the stop button, and each operation commits
- * incrementally so cancelling keeps the work already done.
+ * Each operation is long-running and cancellable from the Activity tab rather than
+ * bounded; each commits incrementally, so cancelling keeps completed work.
  */
 export function Repair() {
   const { tenant } = useAppStore();

@@ -32,12 +32,10 @@ typedef struct
 
 #include "utils/array.h"
 
-/* Joint-evidence hash entry: key must be first for HASH_BLOBS.
- *
- * INVENTION §7 rules out deciding a ranking on a single-token scalar, so the
- * election key is the rating tuple summed over the joint edges. `degree` holds
- * trajectory co-occurrence and is consulted only when the consensus graph
- * between the candidates is empty. */
+/* Joint evidence for one candidate span: witness count and rating summed, and
+ * minimum rd, over consensus cells whose both endpoints are candidates of the
+ * same observation. `degree` counts shared trajectory containers and is filled
+ * only when no such cell exists. Key first for HASH_BLOBS. */
 typedef struct
 {
     hash128_t key;
@@ -47,9 +45,9 @@ typedef struct
     int64     degree;
 } joint_degree_entry;
 
-/* Container -> which candidates sit inside it. first_candidate is the last
- * candidate seen, used only to avoid double-counting one candidate's own
- * repeated rows; n_candidates > 1 means the container is joint evidence. */
+/* Container -> how many distinct candidates its trajectory contains.
+ * first_candidate is the last candidate counted, so one candidate's repeated
+ * rows count once; n_candidates > 1 makes the container joint evidence. */
 typedef struct
 {
     hash128_t key;
@@ -57,23 +55,15 @@ typedef struct
     int       n_candidates;
 } container_owner_entry;
 
-/* Bounded per-candidate container fan-out. LIMIT must be a bound parameter:
- * the plan is kept process-wide, so a literal would pin the first caller's
- * value (containers_of.c, measured 3,245ms -> 40.4ms). */
+/* Containers read per candidate. */
 #define RESOLVE_CONTAINER_PROBE_LIMIT 64
 
 /*
- * MEASURED live 2026-08-14: this probe executes in 14ms on a hit and 25.6ms on
- * a miss, but PLANS in 33ms. SPI_execute_with_args re-plans on every call, so
- * planning dominated and scaled with the candidate count on a path every
- * surface calls through converse.resolve. Kept plan, same idiom as
- * generate_walk.c's ensure_edge_plan.
- *
- * LIMIT stays a bound parameter precisely BECAUSE the plan is kept -- and the
- * bound is what lets the Append short-circuit: on a hit, EXPLAIN shows
- * partitions h02..h63 "never executed". laplace.physicalities is HASH(id) over
- * 64 partitions and this joins by trajectory content, so nothing prunes; the
- * LIMIT is the only bound there is.
+ * Containers of one candidate: word trajectories whose constituent ids include
+ * it, via a single-key GIN probe. The plan is kept per backend; LIMIT is a
+ * bound parameter because it is the only bound: physicalities is HASH(id)
+ * partitioned and this reads by trajectory content, so no partition prunes,
+ * and the LIMIT lets the Append stop early on a hit.
  */
 static const char *RESOLVE_CONTAINER_QUERY =
     "SELECT w.id FROM laplace.v_word_points w "
@@ -89,9 +79,8 @@ ensure_resolve_container_plan(void)
     if (resolve_container_plan == NULL)
     {
         Oid argtypes[2] = { BYTEAOID, INT4OID };
-        /* PARALLEL_OK, not bare SPI_prepare: a read-only plan prepared without
-         * it is planned serial for the life of the backend, and this one is
-         * kept. SpiParallelPlanGateTests enforces this repo-wide. */
+        /* PARALLEL_OK: a kept read-only plan prepared without it stays serial
+         * for the life of the backend. */
         SPIPlanPtr plan = SPI_prepare_cursor(RESOLVE_CONTAINER_QUERY, 2, argtypes,
                                              CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
@@ -104,16 +93,11 @@ ensure_resolve_container_plan(void)
 }
 
 /*
- * The election graph, as resolve_phrase's own spec states it: edges with BOTH
- * endpoints inside the candidate set, credited per endpoint, in ONE query over
- * the set rather than one probe per candidate.
- *
- * Per-candidate truncation cannot express an intersection. 64 containers drawn
- * from a 39,793,705-row posting list ('a') and 64 from a 3,207-row one ('wolf')
- * do not meet, so the joint term reads zero for the content word and the
- * leftmost-longest tie-break re-elects the interrogative — the exact defect §7
- * names. The projection is the rating tuple: §7 rules out a scalar key and §5
- * orders ranked reads by belief.
+ * Joint consensus among candidate spans: every cell with both endpoints in the
+ * candidate set, credited to each endpoint, in one set read. Per-candidate
+ * truncated reads cannot express this intersection; a candidate with a huge
+ * posting list and one with a small list would never meet. Credit is the
+ * rating tuple, not a scalar.
  */
 static const char *RESOLVE_JOINT_EDGE_QUERY =
     "WITH cand AS (SELECT unnest($1::bytea[]) AS id), "
@@ -139,8 +123,7 @@ ensure_resolve_joint_edge_plan(void)
     if (resolve_joint_edge_plan == NULL)
     {
         Oid argtypes[1] = { BYTEAARRAYOID };
-        /* Same gate: the joint-edge election is a read-only scan over
-         * laplace.consensus and must stay parallel-eligible. */
+        /* PARALLEL_OK for the same reason as the container plan. */
         SPIPlanPtr plan = SPI_prepare_cursor(RESOLVE_JOINT_EDGE_QUERY, 1, argtypes,
                                              CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
@@ -168,9 +151,9 @@ word_seg_emit(void *ctx_, uint32_t ordinal,
     tuplestore_putvalues(ctx->rsinfo->setResult, ctx->rsinfo->setDesc, values, nulls);
 }
 
-/* RESOLVE exposes the canonical observation before any evidence election.
- * Every node, including whitespace, punctuation and unknown content, survives.
- * Offsets address the canonical tree text, never a case-folded lookup label. */
+/* RESOLVE: the canonical composition tree of one observation, every node
+ * (whitespace, punctuation and unknown content included) with its parent, tier,
+ * id and span. Offsets address the tree's normalized text. */
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_tree);
 
 typedef struct PromptOperand
@@ -195,11 +178,10 @@ prompt_seed_order(const void *a, const void *b)
     return memcmp(a, b, sizeof(hash128_t));
 }
 
-/* The native tree already owns parent links, tiers, positions and identities.
- * Build execution operands directly from those arrays, without materializing
- * every ancestor's text or joining the tree back to itself in PostgreSQL.
- * Repeated lexical occurrences remain repeated ordered operands. Probe seeds
- * alone are deduplicated; they do not replace the ordered observation. */
+/* Operands of the observation are read straight from the native tree arrays.
+ * The ordered occurrence cut keeps repeated occurrences as repeated operands;
+ * only the probe seed set (root plus every node at or above the cut) is
+ * deduplicated. */
 
 static void
 prompt_input_release(void *argument)
@@ -242,9 +224,7 @@ laplace_prompt_input(text *input)
     tier_tree_t *tree;
     int rc;
     if (VARSIZE_ANY_EXHDR(input) == 0) return NULL;
-    /* The native entry is callable directly in a fresh backend. Composition
-     * must initialize its own shared Unicode floor, rather than depending on
-     * a preceding word_id/inspection call to have loaded it. */
+    /* Composition needs the Tier-0 perfcache mapped in this backend. */
     if (!laplace_perfcache_ready())
         ereport(ERROR,
                 (errmsg("prompt composition requires the T0 perfcache"),
@@ -417,20 +397,14 @@ pg_laplace_word_segment(PG_FUNCTION_ARGS)
 
 typedef struct
 {
-    uint32_t *off;   /* tree-text (post-NFC) offsets — see #1039 note below */
+    uint32_t *off;   /* offsets into the tree's normalized text */
     uint32_t *len;
     int       n;
     int       cap;
 } phrase_ctx;
 
-/* Word spans collected from the TREE, in the tree's own post-NFC offset
- * space (#1039). The previous collector derived offsets by pointer
- * arithmetic against the CALLER's buffer (word_utf8 - base) — valid only
- * while segmentation spans aliased the input, which stopped being true when
- * the tier tree took ownership of its normalized text; on any NFC-changed
- * input the offsets were garbage even before that. Same word set as
- * laplace_content_word_segment: tier-2 nodes, non-empty, not all-whitespace,
- * ascending by offset. */
+/* Tier-2 spans of the tree in its normalized-text offset space: non-empty,
+ * not all White_Space, ascending by offset. */
 static int
 phrase_collect_from_tree(const tier_tree_t *tree,
                          const uint8_t *norm, size_t norm_len,
@@ -472,8 +446,7 @@ phrase_collect_from_tree(const tier_tree_t *tree,
         ctx->n++;
     }
 
-    /* The decomposer appends words in ascending offset order; keep the
-     * contract explicit with an insertion check rather than assuming it. */
+    /* Callers slice contiguous runs by offset; reject an unordered tree. */
     for (int i = 1; i < ctx->n; i++)
         if (ctx->off[i] < ctx->off[i - 1])
             return -1;
@@ -506,10 +479,8 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     base = (const uint8_t *) VARDATA_ANY(t);
     memset(&ctx, 0, sizeof(ctx));
 
-    /* Build the tier tree ONCE and collect spans in ITS offset space; the
-     * tree's text is the post-NFC bytes those offsets index (#1039). The
-     * tree is freed as soon as pass 1 has computed the sub-span root ids —
-     * before SPI connects — so no native allocation crosses an elog. */
+    /* The tree is freed once every sub-span root id is computed, before SPI
+     * connects, so no native allocation crosses an elog. */
     tier_tree_t   *tree = NULL;
     const uint8_t *norm = NULL;
     size_t         norm_len = 0;
@@ -534,21 +505,13 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     }
 
     /*
-     * The candidate span set is fixed and content_root_id is native (no SPI),
-     * so compute every span's root id in C up front, then answer "which of
-     * these ids are stored entities" in ONE batch query instead of an O(n^2)
-     * storm of single-row EXISTS round-trips. The winning span is then chosen
-     * in C using the IDENTICAL nested-loop order (L = n..1 outer, i ascending
-     * inner, first match wins), so the selected id is bit-identical to the old
-     * per-span probe.
+     * Every contiguous span of words is a candidate; root ids are computed
+     * natively and presence is one set read against laplace.entities.
+     * Candidates enumerate by length descending, then position ascending.
      *
-     * The membership query targets the laplace.entities table directly and is
-     * deliberately NOT entity_exists(): that helper also answers true for any
-     * valid codepoint via the perfcache axiom, and under the tier-blind
-     * content law (same content = same hash; tier is a floor) a single-letter
-     * word IS its codepoint — the axiom would let stopwords like 'a' hijack
-     * phrase resolution ahead of real lexical matches. "Is this segment known
-     * content" is the stored-row question.
+     * Presence reads stored entities, not entity_exists(): that helper is true
+     * for every Tier-0 codepoint, so a one-codepoint word would always count
+     * as known content.
      */
     {
         int         n_span = ctx.n * (ctx.n + 1) / 2;
@@ -558,10 +521,8 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
         int         n_elems = 0;
         int         s;
 
-        /* Pass 1: compute each span's content_root_id in canonical order.
-         * Sub-span bytes slice the tree's normalized text — contiguous runs
-         * across words INCLUDING the inter-word bytes, exactly as before,
-         * just in the correct (post-NFC) space. */
+        /* A span's bytes are the normalized text from its first word's start
+         * to its last word's end, inter-word bytes included. */
         s = 0;
         for (int L = ctx.n; L >= 1; L--)
         {
@@ -627,17 +588,10 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
             }
 
             /*
-             * Pass 2 elects jointly, per the election law: no ranking may be
-             * decided on a single-token scalar, because the discriminating
-             * information lives in the graph BETWEEN a prompt's tokens. A span
-             * that shares consensus edges with the other candidate spans of the
-             * same prompt is the topic; a span with no edges to any of them is
-             * glue, however it ranks alone. Position and length are tie-breaks
-             * only, never the criterion — leftmost-longest is what elected the
-             * interrogative in "What is a wolf?".
-             *
-             * One SPI query over the candidate set, not per candidate: edges
-             * with BOTH endpoints inside the set, counted per endpoint.
+             * SELECT among present spans by joint evidence within this
+             * observation: consensus shared with the other candidates decides,
+             * not any span's standing alone. Length and position only break
+             * ties.
              */
             {
                 Datum     *pres_elems = (Datum *) palloc(sizeof(Datum) * n_span);
@@ -715,25 +669,16 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
                         joint_from_consensus = true;
                     }
 
-                    /* Trajectory co-occurrence is the fallback, never the
-                     * primary: it is raw frequency, and raw frequency elects
-                     * whatever appears everywhere. */
+                    /* With no consensus among the candidates, joint evidence
+                     * is trajectory co-occurrence. */
                     if (!joint_from_consensus)
                     {
                     /*
-                     * Co-occurrence comes from the TRAJECTORY, not from
-                     * attestations. Word-adjacency PRECEDES/CONTAINS were drained
-                     * on purpose (13,497,079 rows, 34% of attestations, consumed by
-                     * no read path) because the ordered constituent sequence already
-                     * holds containment, co-occurrence and order losslessly. So the
-                     * joint evidence for a candidate is: how many of ITS containers
-                     * also contain another candidate from the same prompt.
-                     *
-                     * Single-key GIN probe per candidate against a kept plan, and
-                     * LIMIT as a bound parameter — the multi-key `&&` form makes the
-                     * planner abandon the index (850ms, 873,366 rows rechecked), and
-                     * a fetch-count cap skips no bitmap work (3,245ms vs 40.4ms).
-                     * See containers_of.c for both measurements.
+                     * A candidate's degree is how many of its containers also
+                     * contain another candidate: containment and co-occurrence
+                     * are read from trajectories, not attestations. One kept
+                     * single-key GIN probe per candidate; a multi-key `&&` probe
+                     * makes the planner abandon the index.
                      */
                     HTAB      *owners;
                     HASHCTL    octl;
@@ -751,8 +696,7 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 
                     ensure_resolve_container_plan();
 
-                    /* One probe per candidate. Containers are kept so scoring
-                     * reads memory instead of re-querying. */
+                    /* Containers are retained so scoring reads memory. */
                     for (int c = 0; c < n_pres; c++)
                     {
                         int qrc2;
@@ -826,10 +770,9 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
                 }
 
                 /*
-                 * Elect: highest joint degree wins. Length then position break
-                 * ties, preserving the previous deterministic order for the
-                 * degenerate case where the graph says nothing (single-token
-                 * prompts, or a set with no edges between its members).
+                 * Order: summed witnesses, summed rating, lower minimum rd,
+                 * co-occurrence degree; the first span in length-descending,
+                 * position-ascending order wins ties.
                  */
                 {
                     int64 best_w = 0, best_r = 0, best_rd = 0, best_d = 0;
@@ -885,22 +828,17 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 }
 
 /*
- * pg_laplace_word_segment_resolved — word breaks, then a stored entity decides
- * where a word ends inside a run the text gave no boundary for.
+ * pg_laplace_word_segment_resolved: word breaks, then stored entities decide
+ * where words end inside a run the text gave no boundary for.
  *
- * UAX #29 keeps Latin, Cyrillic, Arabic, and Hangul words whole. It does not
- * dictionary-segment Han, Hiragana, Katakana, Thai, Lao, or Khmer, so those
- * tier-2 nodes arrive as characters. This function joins a maximal
- * byte-contiguous run when the joined span is a stored entity. Whitespace is
- * a boundary and is not crossed: "hot dog" stays two tier-2 words under a
- * tier-3 composition. The rule names no script.
+ * UAX #29 leaves scripts without spaces (and without dictionary segmentation)
+ * as one tier-2 node per character. A maximal byte-contiguous run of tier-2
+ * nodes is covered by the longest, then leftmost, sub-spans that are stored
+ * entities; uncovered nodes are emitted as themselves. Whitespace is excluded
+ * from the spans, so it always separates runs. The rule names no script.
  *
- * Stores nothing. Precedence and containment stay views over the trajectory.
- * The membership probe is tier-blind and is not consensus.entity_exists():
- * that helper is true for every perfcache codepoint, and a single letter
- * would hijack the join.
- *
- * When no multi-node span is stored, the run is returned as its tier-2 nodes.
+ * Stores nothing. Presence reads stored entities, not entity_exists(), which
+ * is true for every Tier-0 codepoint.
  */
 typedef struct
 {
@@ -969,14 +907,13 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
         return (Datum) 0;
     }
 
-    /* The emitted surfaces are slices of the tree's normalized text, and the
-     * tree must be released before SPI so no native allocation crosses an
-     * elog (same contract as resolve_phrase). Copy the bytes we still need. */
+    /* Emitted surfaces slice the normalized text; copy it so the tree can be
+     * freed before SPI and no native allocation crosses an elog. */
     norm = (uint8_t *) palloc(norm_len > 0 ? norm_len : 1);
     memcpy(norm, tree_text, norm_len);
 
-    /* Maximal runs of byte-contiguous tier-2 nodes. A gap means the text
-     * supplied a boundary -- whitespace, punctuation -- and it is kept. */
+    /* Maximal runs of byte-contiguous tier-2 nodes; a byte gap is a boundary
+     * the text supplied. */
     runs = (run_t *) palloc(sizeof(run_t) * ctx.n);
     {
         int i = 0;
@@ -995,9 +932,8 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
         }
     }
 
-    /* Candidates: every sub-span of every run of length >= 2. Length-1 spans
-     * need no probe -- they are the fallback and are always emitted if nothing
-     * covers them. */
+    /* Candidates: every sub-span of length >= 2 of every run. A node no chosen
+     * span covers is emitted alone without a probe. */
     n_cand_max = 0;
     for (r = 0; r < n_runs; r++)
     {
@@ -1009,7 +945,7 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
 
     if (n_cand_max == 0)
     {
-        /* Nothing to resolve: identical to converse.word_segment. */
+        /* No run to resolve: output equals converse.word_segment. */
         tier_tree_free(tree);
         goto emit;
     }
@@ -1053,7 +989,7 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
     tier_tree_free(tree);
     tree = NULL;
 
-    /* One batched membership question for every candidate in the prompt. */
+    /* One set read for the presence of every candidate. */
     {
         HTAB      *present;
         HASHCTL    hctl;
@@ -1103,12 +1039,10 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
         }
 
         /*
-         * Covering, per run: longest span first, leftmost wins, then repeat on
-         * what is still uncovered. Candidates are already enumerated L
-         * descending then i ascending, so one forward pass is that order.
-         * Fewest constituents is the tier-floor law doing the work a tuned
-         * length penalty would otherwise do -- a longer resolved span is a
-         * higher composition, which is what the ladder is for.
+         * Covering per run: longest span first, leftmost wins, repeated on the
+         * uncovered remainder. Candidates are enumerated in that order, so one
+         * forward pass skipping overlaps computes it. Fewest constituents means
+         * the highest stored composition.
          */
         for (s = 0; s < n_cand; s++)
         {

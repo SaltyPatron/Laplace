@@ -4,9 +4,8 @@ using Laplace.Cli;
 namespace Laplace.Cli.Tests;
 
 /// <summary>
-/// GH #521 / docs/specs/18 §2. Pins the two properties that make typed strata worth having:
-/// the layout is EXACT (every dim owned by exactly one stratum, no slack) and the widths are
-/// COUNTED (they follow the census, and structural strata are never squeezed to make room).
+/// Residual strata allocation: the layout is exact (every dim owned by exactly one stratum)
+/// and the widths are counted (they follow the census; structural strata are never cut).
 /// </summary>
 public class ResidualStrataTests
 {
@@ -42,8 +41,7 @@ public class ResidualStrataTests
     [Fact]
     public void StructuralWidths_FollowTheCensusExactly()
     {
-        // S, F and G are counts of things that exist. If these drift from the census the
-        // layout has started choosing instead of counting, which is the defect.
+        // S, F and G are counts of things that exist and must equal the census.
         var layout = ResidualStrata.Allocate(Census(pe: 8, frames: 1221, bands: 13));
         Assert.Equal(8, layout.S.Width);
         Assert.Equal(1221, layout.F.Width);
@@ -82,8 +80,7 @@ public class ResidualStrataTests
     [Fact]
     public void Allocation_FailsClosed_WhenDModelCannotHoldTheOntology()
     {
-        // 64 dims against 100 frames. The old anonymous stream would have silently produced
-        // dead directions; this is a configuration error and says so.
+        // 64 dims cannot hold 100 frames plus the other strata; Allocate throws.
         var c = Census(dModel: 64, pe: 8, wordRank: 16, senseRank: 16, frames: 100, bands: 13);
         var ex = Assert.Throws<InvalidOperationException>(() => ResidualStrata.Allocate(c));
         Assert.Contains("cannot hold the counted strata", ex.Message);

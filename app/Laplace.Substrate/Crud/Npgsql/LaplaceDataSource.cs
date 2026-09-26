@@ -4,14 +4,13 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// How a consumer intends to use the substrate. This is NOT cosmetic — the two
-/// policies differ in ways that decide whether a slow query surfaces as an error
-/// or hangs a caller forever.
+/// How a consumer intends to use the substrate. The two policies decide whether a
+/// slow command surfaces as a bounded error or runs until completion.
 /// </summary>
 public enum SubstrateAccess
 {
     /// <summary>
-    /// Request/response paths: HTTP endpoints, MCP tools, UCI/live-game hosts.
+    /// Request/response surfaces: HTTP, MCP, UCI and live-game hosts.
     /// Bounds the command timeout. Typed hot commands prepare themselves explicitly.
     /// </summary>
     Serving,
@@ -24,36 +23,23 @@ public enum SubstrateAccess
 }
 
 /// <summary>
-/// The one place a Laplace <see cref="NpgsqlDataSource"/> is built.
-///
-/// Before this existed there were four wrappers around
-/// <c>LaplaceInstall.PostgresConnectionString()</c> — SubstrateClient's (bounded +
-/// auto-prepared, with a documented rationale), CliRuntime's (bare), and
-/// ChessEngineService's (bare) — which meant the serving policy was applied in
-/// exactly one of the three places that needed it. Chess's live-game and UCI hosts
-/// are serving paths and were silently inheriting the ingest CLI's
-/// <c>Command Timeout=0</c>, the precise failure SubstrateClient's comment warns of.
-///
-/// The fix is not one connection string. It is one place where the CHOICE is
-/// named, so a consumer must say which it is.
+/// The one place a Laplace <see cref="NpgsqlDataSource"/> is built. Every consumer
+/// names its <see cref="SubstrateAccess"/> policy, and the policy's pool, timeout
+/// and prepare settings are applied over the installed connection string.
 /// </summary>
 public static class LaplaceDataSource
 {
     /// <summary>
-    /// Upper bound for a serving command. The canonical conversational forward pass
-    /// performs a deliberately complete stateful emission sequence and is regression-
-    /// gated against shrinking that work to satisfy a timeout. On the seeded product
-    /// estate it can legitimately exceed the former 30-second generic bound, which
-    /// made a healthy substrate surface as HTTP 503 after exactly that budget. Keep
-    /// serving bounded, but give the complete product operation enough room to finish;
-    /// individual commands may still choose tighter budgets.
+    /// Upper bound for a serving command. It is sized so one complete forward pass
+    /// (RESOLVE through WITNESS) can finish as a single serving operation rather than
+    /// being cut short to fit a timeout; individual commands may choose tighter budgets.
     /// </summary>
     public const int ServingCommandTimeoutSeconds = 120;
 
     // Ingest fans out briefly, then spends long CPU-only intervals composing the next
-    // unit. Keep surplus pooled owners short-lived even though a live serving command
-    // may now run longer; idle-pool retention and an in-flight command budget are
-    // different resource laws. MinPoolSize=0 means the pool owns no permanent sessions.
+    // unit, so surplus pooled sessions are pruned quickly. Idle-pool retention and an
+    // in-flight command budget are separate limits. MinPoolSize=0 means the pool holds
+    // no permanent sessions.
     public const int PoolIdleLifetimeSeconds = 30;
     public const int PoolPruningIntervalSeconds = 5;
 
@@ -66,22 +52,10 @@ public static class LaplaceDataSource
         var basis = baseConnectionString ?? LaplaceInstall.PostgresConnectionString();
         if (access == SubstrateAccess.Ingest)
         {
-            // The hot ingest probes and folds explicitly prepare their fixed statements.
-            // Do not place a heuristic LRU between the code and PostgreSQL: the former
-            // `MaxAutoPrepare=50, AutoPrepareMinUsages=2` was unrelated to the operation
-            // inventory, connection count, memory, or workload and silently recycled the
-            // 51st statement.
-            //
-            // MEASURED 2026-08-01 on physicalities_present_ordinals, the tier-descent probe:
-            //   Planning Time   28.622 ms   (Buffers: shared hit=10660)
-            //   Execution Time   7.108 ms
-            // Four times more expensive to PLAN than to run, and the planning is where the
-            // buffers go: physicalities is RANGE-partitioned into ~130 leaves, so the planner
-            // opens every leaf's catalog and index metadata to build the Append, then prunes
-            // to almost nothing at runtime. The same run recorded 131,686,449 buffer HITS
-            // against only 59,163 disk reads across 67 probe calls -- ~2M buffer touches per
-            // call, none of it I/O, all of it re-derivation.
-            //
+            // The hot ingest probes and folds prepare their fixed statements explicitly;
+            // no auto-prepare LRU sits between them and PostgreSQL to evict a statement.
+            // Planning a probe over the partitioned physicality relation opens every
+            // leaf's metadata before runtime pruning, so re-planning is the dominant cost.
             var ing = new NpgsqlConnectionStringBuilder(basis)
             {
                 MaxPoolSize = PostgresResourcePlan.Current.IngestConnectionOwners,
@@ -99,16 +73,15 @@ public static class LaplaceDataSource
         b.ConnectionIdleLifetime = PoolIdleLifetimeSeconds;
         b.ConnectionPruningInterval = PoolPruningIntervalSeconds;
 
-        // LAPLACE_DB carries `Command Timeout=0` (unbounded) for the ingest CLI. A
-        // request/response path must never inherit it: a slow substrate query would
-        // hang the caller forever instead of surfacing a bounded error envelope.
-        // Individual commands may still set a tighter per-command budget.
+        // The installed connection string may carry `Command Timeout=0` (unbounded) for
+        // ingest. A serving path never inherits it: a slow query surfaces as a bounded
+        // error instead of holding the caller. Commands may still set a tighter budget.
         if (b.CommandTimeout <= 0 || b.CommandTimeout > ServingCommandTimeoutSeconds)
             b.CommandTimeout = ServingCommandTimeoutSeconds;
 
-        // Typed serving reads prepare their fixed statements explicitly. Disable any
-        // inherited auto-prepare setting so an environment connection string cannot
-        // restore the arbitrary LRU/usage thresholds behind this policy boundary.
+        // Typed serving reads prepare their fixed statements explicitly. Any inherited
+        // auto-prepare setting is disabled so an environment connection string cannot
+        // reintroduce an LRU of prepared statements.
         b.MaxAutoPrepare = 0;
 
         return b.ConnectionString;

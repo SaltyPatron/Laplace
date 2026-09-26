@@ -1,8 +1,4 @@
--- structural.entities_at_depth — tier slice of entities (geometry/structure
--- family). Old names dropped (#532).
--- One canonical row per matching content identity. Returned tier/type columns
--- remain compatibility summaries; ops.entity_facets exposes all interpretations.
--- BEGIN ATOMIC: GH #764.
+-- structural.entities_at_depth: the entity rows at one tier (altitude).
 DROP FUNCTION IF EXISTS laplace.laplace_entities_at_depth(smallint);
 DROP FUNCTION IF EXISTS laplace.laplace_entities_at_depth(smallint);
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.

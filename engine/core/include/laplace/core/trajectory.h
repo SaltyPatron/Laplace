@@ -50,7 +50,7 @@ int laplace_physicality_manifest_validate(const hash128_t* entity_id, int16_t ty
     const double* trajectory_xyzm, size_t n_points, int32_t n_constituents);
 
 /* Visit stored vertices without expanding runs. Ordinals are the logical
- * prefix sum; a legacy zero run denotes one constituent. */
+ * prefix sum; a stored run of zero denotes one constituent. */
 typedef int (*trajectory_vertex_visitor_t)(void* context, size_t ordinal,
     const hash128_t* entity_id, size_t run_length, uint64_t flags);
 int trajectory_visit_vertices(const double* trajectory_xyzm, size_t n_points,

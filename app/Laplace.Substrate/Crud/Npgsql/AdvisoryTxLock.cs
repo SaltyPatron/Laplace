@@ -87,11 +87,10 @@ internal static class AdvisoryTxLock
 
     /// <summary>
     /// Begin a transaction, apply trusted transaction-local GUCs, and when requested take
-    /// a named advisory lock. `laplace_apply_batch` is deliberately lock-free: the writer
-    /// already performs an in-transaction set presence verification immediately before
-    /// COPY, and concurrent content-addressed races are re-probed through the ingest retry
-    /// policy. A global mutex here made every apply process-wide serial and defeated the
-    /// parallel decomposition/COPY/fold architecture.
+    /// a named advisory lock. <c>laplace_apply_batch</c> takes no lock: the writer verifies
+    /// set presence inside the transaction immediately before COPY, and concurrent landings
+    /// of the same content-addressed id are re-probed through the ingest retry policy, so
+    /// working sets persist in parallel.
     /// </summary>
     internal static async Task<NpgsqlTransaction> BeginWithLockAsync(
         NpgsqlConnection conn, string lockName, string setLocalGucs, ILogger log, CancellationToken ct)

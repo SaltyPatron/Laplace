@@ -8,11 +8,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Code;
 
 /// <summary>
-/// Generic Parquet decomposer — witnesses an arbitrary Parquet file/dataset by
-/// stripping the container (row groups / columns) and recording each cell exactly as
-/// the CSV <see cref="TabularDecomposer"/> records a table. Parquet is packaging; the
-/// column schema carries the semantics. No target/outcome interpretation — this is
-/// pure RECORDING of witnessed structure.
+/// Provider for arbitrary Parquet files/datasets. The container (row groups, columns) is
+/// packaging; each cell is recorded with the same column/value grammar as
+/// <see cref="TabularDecomposer"/>. Cells are recorded observations, with no
+/// target/outcome interpretation.
 ///
 /// Column names and cell values are ordinary decomposed content. A tabular value is
 /// the native ordered composition [column-content, value-content], so its identity,
@@ -132,8 +131,7 @@ public sealed class ParquetDecomposer
             case bool bo:
                 return bo ? "true" : "false";
             case byte[]:
-                // Opaque binary column — not a value token; witnessing raw blobs as
-                // string tokens would balloon content with non-semantic bytes.
+                // Opaque binary cells are not value tokens and are not composed.
                 return null;
             case DateTime dt:
                 return dt.ToString("O", CultureInfo.InvariantCulture);

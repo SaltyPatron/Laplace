@@ -2,7 +2,7 @@
 
 Laplace is one invention: a deterministic, content-addressed, recursively compositional knowledge and cognition substrate in which exact structure, observations, evidence, uncertainty, geometry, computation and realization remain inspectable parts of one machine.
 
-This document states the intended invention. It is intentionally stronger than transient implementation status. When code, tests, an issue, a plan, or a deployed system falls short of this document, that is an implementation or proof obligation; the lower layer does not silently redefine the invention. `docs/ARCHITECTURE.md` records architecture as built, and GitHub issues track remaining acceptance.
+This document states the invention. Code implements it. Where code, a test, an issue, a plan or a deployed system disagrees with this document, the code is changed to match it.
 
 ---
 
@@ -38,7 +38,7 @@ A* = union(n >= 0) A^n.
 
 ### Open Tier-0 rank law; finite observation/materialization
 
-Tier-0 itself is not defined by Unicode's current finite population. The abstract address law is open-ended:
+Tier-0 is not defined by Unicode's finite population. The abstract address law is open-ended:
 
 ```text
 T0 = { p(n) | n in N }
@@ -93,7 +93,7 @@ concept/entity
 
 Distinct knowledge may occupy the same coordinate or region; identity and path structure keep it distinct. Consequently finite geometric extent does not impose one-object-per-point occupancy. The geometry supplies locality and measurable routes through the central knowledge system; the full Laplace object supplies identity, order, semantics, evidence and provenance.
 
-### Current bounded placement
+### Bounded placement
 
 Let the selected geometric frame be the closed unit ball
 
@@ -101,7 +101,7 @@ Let the selected geometric frame be the closed unit ball
 B^d = { x in R^d : ||x|| <= 1 }.
 ```
 
-Assume every admitted child placement `p_i` lies in `B^d`. The current native composer uses the Euclidean centroid
+Assume every admitted child placement `p_i` lies in `B^d`. The native composer uses the Euclidean centroid
 
 ```text
 c = (1/n) * sum_i p_i.
@@ -117,10 +117,7 @@ Therefore `c` also lies in `B^d`.
 
 By induction on finite composition depth, every centroid-composed entity remains inside or on the same fixed bounded ball.
 
-The current implementation of that native rule is in:
-
-- `engine/core/src/hash_composer.c`
-- `engine/core/src/math4d.c`
+The centroid rule lives in `engine/core/src/hash_composer.c` and `engine/core/src/math4d.c`.
 
 ### Realized curves remain bounded too
 
@@ -128,11 +125,7 @@ A realized trajectory resolves each packed constituent identity to the constitue
 
 So for every finite composition admitted under this placement law, both its parent coordinate and the piecewise-linear realized constituent curve remain inside the same fixed bounded domain.
 
-The packed trajectory itself is serialization, not this realized spatial line. See:
-
-- `engine/core/src/trajectory.c`
-- `engine/core/src/mantissa.c`
-- `extension/laplace_substrate/sql/functions/structural/entity_curve.sql.in`
+The packed trajectory itself is serialization, not this realized spatial line. Packing is in `engine/core/src/trajectory.c` and `engine/core/src/mantissa.c`; curve realization is in `extension/laplace_substrate/sql/functions/structural/entity_curve.sql.in`.
 
 ### The theorem is radix-independent
 
@@ -147,7 +140,7 @@ phi_b(n) = sum_k a_k b^-(k+1).
 
 Canonical finite base-`b` expansions map distinct naturals to distinct radical inverses. Other bounded atom-placement laws can be radix-free entirely.
 
-Binary64, Hash128 and the current Unicode generation are executable choices. They are not the mathematical theorem.
+Binary64, Hash128 and the selected Unicode generation are executable choices. They are not the mathematical theorem.
 
 ### What is and is not claimed
 
@@ -163,7 +156,7 @@ This is a claim about unbounded families of **finite describable compositions**,
 
 Canonical identity answers: **what exact admitted structure is this?**
 
-Current executable identities use BLAKE3-derived 128-bit ids. That is a finite machine address space, not a proof that a fixed 128-bit function is globally injective over an unbounded mathematical domain. A true cryptographic hash collision is distinct from normal content convergence and must never be used as the term for “two sources admitted the same canonical content.”
+Executable identities are BLAKE3-derived 128-bit ids. That is a finite machine address space, not a proof that a fixed 128-bit function is globally injective over an unbounded mathematical domain. A true cryptographic hash collision is distinct from normal content convergence and must never be used as the term for “two sources admitted the same canonical content.”
 
 The governing behavior is **content-address convergence**:
 
@@ -173,9 +166,9 @@ same canonical content -> same executable identity
 
 under the selected identity generation.
 
-Composite identity is Merkle-style over the ordered child identities under the selected recipe/domain separation. Single-child collapse may preserve the child identity where the recipe declares that law.
+Composite identity is Merkle-style over the ordered child identities under the selected recipe/domain separation. A single-child composition is the child.
 
-The current native composition path is implemented in `engine/core/src/hash_composer.c`.
+Native composition lives in `engine/core/src/hash_composer.c`.
 
 ### Tier is altitude, not semantic identity
 
@@ -199,7 +192,7 @@ They do not create another content identity.
 
 The same law applies recursively to every modality. A 2x2 pixel composition occurring inside an 8x8 region is the same canonical 2x2 entity when it appears in another region, another image, a video frame, or as a standalone selected structure. Higher structures reference it through their physicality/trajectory/occurrence structure.
 
-Current executable hash128_merkle intentionally ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton may collapse to its child under the current recipe.
+`hash128_merkle` ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton collapses to its child.
 
 This is the fundamental deduplication law:
 
@@ -300,7 +293,7 @@ For example:
 
 The resulting scalar root is reusable canonical content. Re-observing the same exact scalar in audio, image, model, measurement or other domains reuses that root; the new information is its occurrence/role/ordinal/channel/time/precision in the containing structure.
 
-A finite prefix of pi is the same mechanism at larger width: one ordered composition over existing digit/punctuation atoms, not one new atom per digit or one new atom per numeric value. The current trajectory implementation treats packed ordinal/run fields as local carrier fields rather than composition-width ceilings.
+A finite prefix of pi is the same mechanism at larger width: one ordered composition over existing digit/punctuation atoms, not one new atom per digit or one new atom per numeric value. Packed ordinal/run fields are local carrier fields, not composition-width ceilings.
 
 Analog phenomena enter only through finite digital observations. The source's exact quantization/precision is part of the recipe/reconstruction contract; Laplace does not claim an infinite-precision real has been physically stored.
 
@@ -316,7 +309,7 @@ Identity, physicality, packed trajectory and realized curve are different coordi
 
 A physicality gives a typed realization, including a coordinate. A content trajectory gives the exact ordered constituent manifest. A realized curve resolves those constituent identities back into physical coordinates.
 
-### Why the current implementation uses four binary64 components
+### Why four binary64 components
 
 Each binary64 component contributes 53 reversible carrier bits when the exponent is fixed and the sign plus 52-bit mantissa are used as payload.
 
@@ -335,9 +328,9 @@ One GeometryZM vertex therefore carries exactly:
 
 `engine/core/src/mantissa.c` distributes and reconstructs this complete payload exactly.
 
-This is an implementation reason 4D is convenient, not a theorem that bounded recursive representation requires exactly four dimensions.
+This is why 4D is convenient; bounded recursive representation does not require exactly four dimensions.
 
-A 3D binary64 carrier has 159 such payload bits: enough for the current 128-bit constituent id plus 31 additional bits. A 2D carrier has 106 and therefore cannot hold the current complete Hash128 in one such vertex without changing the carrier mechanism. That is an executable-format trade, not an impossibility result for bounded 2D composition.
+A 3D binary64 carrier has 159 such payload bits: enough for a 128-bit constituent id plus 31 additional bits. A 2D carrier has 106 and therefore cannot hold a complete Hash128 in one such vertex without changing the carrier mechanism. That is an executable-format trade, not an impossibility result for bounded 2D composition.
 
 ### Packed trajectory is not realized geometry
 
@@ -354,9 +347,7 @@ packed trajectory vertex
 -> build realized curve
 ```
 
-That distinction is visible in the current source and SQL realization functions.
-
-The 16-bit packed ordinal and run-length fields are carrier fields, not global composition-size limits. `engine/core/src/trajectory.c` retains logical sequence position and splits long runs as needed. The native test `LaplaceCoreTrajectory.WiderThanTheOrdinalFieldRoundTrips` exercises 70,000 constituents.
+The 16-bit packed ordinal and run-length fields are carrier fields, not global composition-size limits. `engine/core/src/trajectory.c` retains logical sequence position and splits long runs as needed.
 
 ### Same-space occupancy is intentional
 
@@ -386,7 +377,7 @@ An attestation records a typed proposition and that witnessing occurred. Confirm
 
 Consensus folds evidence about one proposition into standing. The intended standing state includes strength, uncertainty, volatility and witness breadth rather than one opaque confidence scalar.
 
-Glicko-2 is used because it naturally provides a strength estimate plus uncertainty and surprise/volatility behavior. The exact source/opponent/trust semantics are implementation obligations and must be proved against the current fold; historical constants or issue prose do not redefine the invention.
+Glicko-2 is used because it provides a strength estimate plus uncertainty and surprise/volatility behavior. A claim is a game series: games plus a score in [0,1], where a draw is 0.5. Source semantics and relation identity are inputs to that fold.
 
 The important separation is:
 
@@ -617,7 +608,7 @@ The performance objective has two factors:
 less work selected  x  less overhead per selected unit
 ```
 
-This law is reflected in `AGENTS.md`, the operation ISA, the native extension sources and the SQL cohesion audit.
+The operation ISA (`docs/specs/37_Substrate_Operation_ISA.md`) and the native extension sources under `extension/laplace_substrate/src/` carry this law.
 
 ---
 
@@ -780,7 +771,7 @@ realization/output budget
 
 Where work is billable, the same physical plan that governs execution should support preflight cost estimation, reservation, hard ceilings, execution receipts and reconciliation of unused allowance.
 
-That is why `EXPLAIN`, work receipts, benchmark calibration and hop/fanout accounting are product architecture rather than billing decoration.
+`EXPLAIN` over the physical plan, hop/fanout accounting and per-operation work receipts are therefore part of execution, not billing decoration.
 
 ---
 
@@ -812,89 +803,59 @@ Standing and permission are distinct. Consensus estimates support/uncertainty fo
 
 Red Spear / Blue Shield / White Judge are security roles over this same model: adversarial boundary exploration, runtime enforcement, and explicit policy/authority adjudication with receipts rather than a hidden judge model.
 
-## 17. Proof: mathematics, executable construction and witness
+## 17. Invariants
 
-Laplace's strongest claims should be separated by proof type.
+### 17.1 Mathematics
 
-### 17.1 Mathematical proof
+The bounded-space law follows from the centroid/convexity argument in Section 2 plus induction over finite composition depth.
 
-The bounded-space claim is established by the centroid/convexity argument in Section 2 for the current native composition rule, plus induction over finite composition depth.
+The unbounded-family law follows from countability of finite strings/finite recursive descriptions over a finite or countable basis.
 
-The unbounded-family claim follows from countability of finite strings/finite recursive descriptions over a finite or countable basis.
+Neither depends on hash width, Unicode size, radix, CPU ISA or database row count.
 
-Neither proof depends on the current hash width, Unicode size, radix, CPU ISA or database row count.
+### 17.2 Tier-0 placement
 
-### 17.2 Executable proof of the current atom generation
+Tier-0 placement is the open Super-Fibonacci law `t = radicalInverse(rank), r = sqrt(t), cap = sqrt(1 - t)`, implemented in `engine/core/src/super_fibonacci.c`. Every point is on the unit glome, placement is injective, and a realized prefix never moves when the prefix grows. The codepoint perfcache stores UCA/DUCET order explicitly and carries exactly the native open-placement coordinates; the loader accepts only that format.
 
-`engine/core/tests/test_super_fibonacci.cpp` contains tests including:
+### 17.3 Carrier and trajectory
 
-```text
-LaplaceCoreSuperFibonacci.UnitNormHoldsToFourUlpAcrossTheCodespace
-LaplaceCoreSuperFibonacci.OpenPlacementIsPrefixStableWhereBoundedIsNot
-LaplaceCoreSuperFibonacci.OpenPlacementIsInjectiveAndOnTheGlome
-LaplaceCoreSuperFibonacci.OpenPrefixOccupiesEveryRadialBand
-LaplaceCoreSuperFibonacci.HandlesUnicodeCodepointScale
-LaplaceCoreCodepointTable.PerfcacheCarriesCanonicalOpenPlacement
-LaplaceCoreCodepointTable.RejectsLegacyBandedPerfcacheFormat
-```
+A GeometryZM vertex round-trips the complete 128-bit child id, ordinal, run length and flags exactly. A trajectory round-trips its full constituent sequence, including sequences wider than the 16-bit packed ordinal field.
 
-The full selected Unicode codepoint window is an executable finite generation and can be exhaustively checked. The v4 generator stores DUCET/UCA order explicitly and uses open Super-Fibonacci placement; early prefixes are gated to occupy every radial band, and runtime perfcache samples must equal the native open-placement coordinates byte-for-byte. Legacy v3/banded blobs are rejected by the loader.
+### 17.4 Reconstruction
 
-### 17.3 Exact carrier and trajectory proof
+Where a recipe declares exact reconstruction, reading the packed trajectories of a content root back from the substrate reproduces the admitted (NFC-canonical) source bytes.
 
-Relevant native tests include:
+### 17.5 Substrate integrity
 
-```text
-LaplaceCoreMantissa.FullHashRoundTripsExactly
-LaplaceCoreTrajectory.BuildThenConstituentsRoundTrips
-LaplaceCoreTrajectory.WiderThanTheOrdinalFieldRoundTrips
-```
+Every stored state satisfies:
 
-These prove properties of the current executable serialization/trajectory implementation, including complete Hash128 recovery and a sequence wider than the packed 16-bit ordinal field.
+- every physicality coordinate is inside the bounded domain;
+- every packed trajectory constituent id resolves to an entity;
+- logical ordinal/run expansion matches the declared constituent count;
+- realized curves are built from resolved child coordinates, never from packed carriers;
+- attestation and consensus endpoints resolve;
+- lanes with a reconstructor reconstruct their content;
+- coordinate/Hilbert equality is never read as content identity.
 
-### 17.4 Recursive reconstruction proof
+### 17.6 Work accounting
 
-`app/Laplace.Substrate.Tests/Crud/GutenbergRetainedDbTests.cs` ingests a selected physical Gutenberg edition into a retained isolated database, reads the packed file trajectory, reconstructs the content root from the substrate, NFC-canonicalizes the source and byte-compares the reconstructed content. It separately reconstructs and checks the metadata root and writes a machine-readable receipt.
-
-That is an executable witness that recursive trajectories can retain and reconstruct substantial real content, not merely a unit-test-sized string.
-
-### 17.5 Live-world proof
-
-A populated database is empirical/executable evidence that the construction works at scale. Live gates should attempt to falsify at least:
-
-- every inspected physicality coordinate is inside the admitted bounded domain;
-- every packed trajectory constituent id resolves;
-- logical ordinal/RLE expansion matches declared constituent count;
-- realized curves are built from resolved child coordinates rather than packed carriers;
-- referenced entity/evidence/consensus endpoints satisfy the selected integrity contract;
-- canonical reconstruction works for lanes with a decoder/reconstructor;
-- geometric/locality collisions are not misinterpreted as content identity.
-
-A live database witness does not replace the mathematical theorem, and a theorem does not prove that every row in one deployed database is free of implementation defects. Both forms of evidence are required for their respective claims.
-
-### 17.6 Performance evidence
-
-`.github/workflows/benchmark-evidence.yml` binds a benchmark to an exact repository revision and exact built artifacts, records host/hardware provenance, executes versioned suites and uploads receipts.
-
-The current native composition benchmark reports codepoints/s, 4-character BPE-equivalent input units/s and tier-tree nodes/s. The BPE-equivalent rate is a normalization; the underlying work is recursive structural composition.
-
-Performance claims should name the workload, host, revision, artifact, thread/core count, database/accelerator participation and receipt. Unlike workloads must not be silently called equivalent simply because both are written as “tokens/s.”
+Throughput is reported in the work actually performed — codepoints, recursive structural nodes, candidates, evidence cells, relations — with the workload, host, revision, artifact, thread count and database participation named. A token-per-second figure is a normalization of that work, not its unit.
 
 ---
 
-## 18. Current executable windows are not invention limits
+## 18. Executable windows are not invention limits
 
-The current implementation includes finite choices such as:
+The executable machine has finite choices:
 
 - binary64 GeometryZM carriers;
-- 128-bit executable content ids;
+- 128-bit content ids;
 - fixed-size metadata fields in the carrier;
 - a selected Unicode/UCD generation;
 - finite CPU memory, database storage and resource budgets.
 
-These choices can limit one implementation generation. They do not falsify the bounded-composition theorem or imply that one fixed schema is the only possible realization.
+These bound one executable generation. They do not bound the invention.
 
-Conversely, mathematical extensibility does not excuse an implementation from detecting collisions, enforcing referential integrity, preserving exact reconstruction or reporting resource exhaustion honestly.
+The executable machine still detects hash collisions, enforces referential integrity, preserves exact reconstruction and reports resource exhaustion.
 
 ---
 
@@ -912,20 +873,16 @@ The invention constrains how the code is organized.
 
 **Typed state stays typed.** Do not flatten geometry, evidence, standing, contradiction, role compatibility, source dependence and path cost into one scalar merely because one priority queue needs an ordering key.
 
-**Determinism is proved, not declared.** Hashing, composition, folds, parsers, provider generations and execution recipes each need explicit deterministic boundaries and parity tests where determinism is claimed.
+**Determinism is explicit.** Hashing, composition, folds, parsers, provider generations and execution recipes each declare their deterministic boundary.
 
-**Status prose is never the finish line.** Issues/plans/comments may describe implementation work; they do not narrow the invention. Delivery requires the actual code/test/deploy/readback evidence for the accepted behavior.
+**Prose does not narrow the machine.** Issues, plans and comments never define a smaller Laplace. The machine is the running operation.
 
 ---
 
-## 20. What Laplace is trying to replace
+## 20. What Laplace replaces
 
-The claim is not “a faster transformer.”
+Laplace is a reinvention of the generative pre-trained transformer that performs its functions without a GPU, stays compatible with conventional AI, and consumes it.
 
-The architectural bet is that many functions conventionally purchased with dense repeated parameter computation can be obtained from explicit reusable structure, sparse indexed response, uncertainty-bearing evidence and native execution over one live world.
+Functions conventionally purchased with dense repeated parameter computation are obtained from explicit reusable structure, sparse indexed response, uncertainty-bearing evidence and native execution over one live world. The OpenAI-compatible endpoint and MCP serve that same machine to existing tools; conventional checkpoints enter as witnesses.
 
-If that succeeds end to end, the economic advantage does not come from doing the same number of FLOPs slightly faster. It comes from refusing to do most of those FLOPs in the first place, reusing already admitted structure, and paying only for the hops, fanout and operators the active problem actually requires.
-
-That replacement claim is ultimately an empirical systems claim and must be earned through quality, latency, throughput, energy and cost benchmarks over completed behavior.
-
-The bounded recursive representation, exact carrier/trajectory construction and related mathematical invariants are separately testable and provable today.
+The economic advantage does not come from doing the same number of FLOPs faster. It comes from not doing most of those FLOPs: reusing already admitted structure and paying only for the hops, fanout and operators the active problem requires.

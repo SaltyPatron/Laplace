@@ -30,12 +30,9 @@ public sealed class IliMap
 
 
 
-    // The ili-map-pwn30.tab is a fast-parse CACHE generated from the authoritative RDF that
-    // ships in the CILI distribution (ili-map-wn30.ttl; pwn30 == wn30). A stale or failed
-    // regeneration silently truncated it to a single line, dropping WordNet's ENTIRE
-    // synset->ILI crosswalk (445k misses / 3 hits, 6k attestations, lexical.senses()==0). A .tab
-    // below this many entries is treated as broken and the authoritative .ttl is loaded
-    // instead — one source of truth, self-healing, no silent WordNet collapse.
+    // ili-map-pwn30.tab is a fast-parse derivative of the RDF crosswalk shipped with CILI
+    // (ili-map-wn30.ttl; pwn30 == wn30). A .tab with fewer entries than this is treated as
+    // truncated, and the .ttl is loaded when it yields more entries.
     private const int HealthyMinEntries = 1_000;
     private const string TtlSourceFileName = "ili-map-wn30.ttl";
 

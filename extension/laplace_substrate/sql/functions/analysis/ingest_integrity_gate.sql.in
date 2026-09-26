@@ -1,11 +1,7 @@
--- Integrity is referential: each physicality must reference a retained entity.
--- A run may create new forms around existing entities, so journal entity and
--- physicality totals neither prove nor quantify missing references.
---
--- Return the actual offending physicality and referenced identity. p_since
--- filters the physicality's observed_at; this surface does not attribute rows
--- to ingest runs because the journal does not retain that provenance.
--- BEGIN ATOMIC records the real table dependencies at CREATE time.
+-- Referential integrity of the physical face: every physicality must reference
+-- a retained entity. Entity and physicality counts neither prove nor quantify
+-- a missing reference, so the offending rows themselves are returned. p_since
+-- filters the physicality's observed_at, not an ingest run.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN

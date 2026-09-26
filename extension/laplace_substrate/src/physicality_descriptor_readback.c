@@ -22,9 +22,12 @@
 PG_FUNCTION_INFO_V1(pg_laplace_physicality_descriptor_read);
 PG_FUNCTION_INFO_V1(pg_laplace_physicality_forms);
 
-/* One statement snapshot, one indexed batch per required typed frontier.
- * Descriptor bodies are decoded by the existing native owner. This reader
- * does not select historical child geometry or realize a V curve. */
+/* Reads an entity's typed physicalities (coordinate, Hilbert index, trajectory,
+ * constituent count, residual, source dimension) back from their stored
+ * descriptor trees under one registered statement snapshot. The native decoder
+ * names the nodes it still needs; each round hydrates that frontier in one
+ * indexed batch. Bytes, logical work, and database operations are charged to
+ * the caller's grants. Child coordinates are not read and no curve is realized. */
 typedef struct ReadState {
     MemoryContextCallback cleanup;
     size_t maximum_bytes, bytes, peak, maximum_work, work;
@@ -210,8 +213,8 @@ static void hydrate(ReadState *s,const hash128_t *ids,size_t count) {
     size_t reservation=plus(8192,times(unique,2*BLCKSZ+2048));read_charge(s,reservation);
     s->reads.maximum_scratch_bytes=reservation;
     s->callback_first=s->node_count;size_t start=s->node_count;
-    /* New retention manifests are independent of selected child geometry.
-     * Hydrate legacy Content only for identities with no retention row. */
+    /* Nodes are read under the retention physicality type first; only
+     * identities with no retention row are then read under type 1. */
     for (int pass=0;pass<2;++pass) {
         s->hydration_type=pass==0?PHYSICALITY_DESCRIPTOR_RETENTION_TYPE:1;
         s->reads.maximum_leaf_reads=s->maximum_operations-s->operations;
@@ -234,9 +237,8 @@ static void hydrate(ReadState *s,const hash128_t *ids,size_t count) {
 static void decode(ReadState *s) {
     for(;;) {
         physicality_descriptor_limits_t limits={s->maximum_bytes-s->bytes};
-        /* Exact catalog identities are authenticated once in discovery and
-         * again in complete replan verification. Charge the second pass only
-         * when the decoder reports a complete body. */
+        /* Catalog identities are verified in discovery and again when the
+         * decoder completes a body; the second pass is charged only then. */
         work(s,s->child_count);
         if(s->child_count>s->maximum_work-s->work)read_limit("complete catalog verification exceeds logical-work grant");
         physicality_descriptor_status_t status=physicality_descriptor_readback_prepare(
@@ -288,8 +290,8 @@ static void discover(ReadState *s,ArrayType *wanted,bytea *cursor,int32 page) {
         else ++s->rejected;
     }
     s->root_count=kept;
-    /* Incidental schema containment is not a typed node catalog. Exclude
-     * rejected roots, including legitimate singleton forms, before decoding. */
+    /* A candidate that contains the schema tag but does not root a wanted
+     * entity's descriptor is not decoded; its hydrated nodes are dropped. */
     size_t retained=0;
     for(size_t i=0;i<s->node_count;++i)
         if(bsearch(&s->nodes[i].id,s->roots,s->root_count,sizeof(hash128_t),compare_id))s->nodes[retained++]=s->nodes[i];

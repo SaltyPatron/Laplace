@@ -6,10 +6,8 @@ using Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The structural read surface. Every dial the native functions accept is a
-/// parameter here — the previous surface accepted the same arguments and then
-/// pinned them to constants in C#, which is why the app could only ever ask for
-/// one shape of read.
+/// Shape-dispatched structural reads. Every dial the native functions accept is passed
+/// through from the caller's <see cref="QueryDials"/>.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
@@ -42,22 +40,19 @@ internal sealed partial class SubstrateClient
     /// <summary>Resolve a word or a 32-hex id to a content id, with its label.</summary>
     public async Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct)
     {
-        // GH #575: FEN → composed position id (not word_id of the FEN string).
+        // A FEN resolves as the id of its composed position, not as the id of its text.
         if (ChessPositionRef.TryComposeId(reference, out var posId))
             return (posId.ToBytes(), Convert.ToHexString(posId.ToBytes()).ToLowerInvariant());
 
-        // Identity resolution and display materialization are one server operation.
-        // Do not hold one idle connection while ResolveRefAsync leases another and
-        // then return to the first connection for LabelOrHexAsync.
+        // Resolution and display label come back from one server call on one connection.
         var resolved = await NpgsqlSubstrateReads.ResolveRefWithLabelAsync(
             _dataSource, reference, ct, TranslateReadError).ConfigureAwait(false);
         return resolved is null ? null : (resolved.Id, resolved.Label);
     }
 
     /// <summary>
-    /// A shape-dispatched read. Shapes the responder family covers go through
-    /// recall_intent; the walk, path and generation shapes go to their native
-    /// entry points with the caller's dials applied.
+    /// A shape-dispatched read. band_facts, beam, path, neighbors, and generate call their
+    /// native entry points with the caller's dials; every other shape goes to recall_intent.
     /// </summary>
     public async Task<IReadOnlyList<QueryRow>> QueryAsync(
         string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
@@ -90,9 +85,8 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Every edge of a topic inside the selected bands, both directions, ranked
-    /// by eff_mu. Selecting bands is how a read narrows without naming a single
-    /// relation type and without naming a language.
+    /// Every edge of a topic inside the selected bands, both directions, ranked by
+    /// eff_mu. Bands narrow the read without naming a relation type or a language.
     /// </summary>
     private async Task<IReadOnlyList<QueryRow>> BandFactsAsync(
         byte[] topic, int[]? bands, int limit, CancellationToken ct)
@@ -103,17 +97,14 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Beam search over the consensus graph. The band selection becomes the
-    /// highway intent mask — the same bit surface walk_branches already gates
-    /// on, so narrowing the lens narrows the scan rather than filtering after it.
+    /// Beam search over consensus. The band selection is the intent mask walk_branches
+    /// gates its scan on, so bands narrow the scan itself rather than filter its output.
     /// </summary>
     private async Task<IReadOnlyList<QueryRow>> BeamAsync(
         byte[] topic, string? relationType, int[]? bands, QueryDials dials, CancellationToken ct)
     {
-        // An unfiltered walk_branches call Append-scans every relation-type
-        // partition (~24s, measured — see recall_walk_response). A band lens or
-        // a named relation type keeps the scan bounded; with neither, take the
-        // greedy single chain instead of the beam.
+        // Without a band or relation type, walk_branches would scan every relation-type
+        // partition; the read takes the greedy strongest chain instead.
         var haveLens = !string.IsNullOrWhiteSpace(relationType) || (bands is { Length: > 0 });
         if (!haveLens)
         {

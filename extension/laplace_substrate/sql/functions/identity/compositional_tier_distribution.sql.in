@@ -1,4 +1,4 @@
--- BEGIN ATOMIC: distribution of canonical compositional entity floors.
+-- Entity count per tier over the compositional text types.
 CREATE OR REPLACE FUNCTION laplace.compositional_tier_distribution()
 RETURNS TABLE(tier smallint, n bigint)
 LANGUAGE sql

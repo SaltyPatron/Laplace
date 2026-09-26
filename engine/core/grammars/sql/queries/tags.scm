@@ -1,4 +1,4 @@
-;; Laplace SQL structural tags (#765 / W3).
+;; SQL structural tags.
 ;; Capture names must match grammar_tags.c tag_type_of:
 ;;   @name, @definition.function, @reference.call, @reference.type
 ;;

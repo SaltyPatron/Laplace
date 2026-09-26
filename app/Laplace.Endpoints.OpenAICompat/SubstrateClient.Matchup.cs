@@ -6,10 +6,9 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The league surface: per-band leaderboards, entity verdict records, and the
-/// head-to-head matchup. The generic graph remains the default, but a Chess_Player
-/// matchup must not pretend lexical contrast is a chess comparator or label generic
-/// consensus standing as source Elo.
+/// Per-band leaderboards, entity verdict records, and head-to-head matchups over consensus.
+/// The comparator is chosen from each entity's stored type: two Chess_Player entities are
+/// compared by their result standing and pairing cell; everything else by contrast.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
@@ -27,9 +26,8 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// The entity's record: its edges scored by the canonical verdict logic.
-    /// epistemic_status IS that logic — the counts are grouped server-side and
-    /// never re-derived from raw μ in a client.
+    /// The entity's edges counted by verdict class. epistemic_status assigns the classes
+    /// and groups the counts server-side; nothing is re-derived from μ here.
     /// </summary>
     public async Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
     {
@@ -51,8 +49,7 @@ internal sealed partial class SubstrateClient
         var xHex = Convert.ToHexString(x.Value.Id).ToLowerInvariant();
         var yHex = Convert.ToHexString(y.Value.Id).ToLowerInvariant();
 
-        // Type is content state, not a route hint. Determine it from the entity itself before
-        // selecting the comparator; two chess players must not fall into lexical contrast().
+        // The comparator follows each entity's stored type, read before the tape is built.
         var xChessTask = IsChessPlayerAsync(x.Value.Id, ct);
         var yChessTask = IsChessPlayerAsync(y.Value.Id, ct);
         await Task.WhenAll(xChessTask, yChessTask).ConfigureAwait(false);
@@ -125,10 +122,8 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Player-vs-player comparison over chess-owned folds. This is intentionally small and exact:
-    /// source Elo, career result, and their already-folded pairing cell. It replaces the empty
-    /// lexical contrast result without inventing a second chess database. Rich opening/time/book
-    /// planes can join this same typed comparator as their ingest folds land.
+    /// Player-vs-player tape: each side's source ratings and career result, plus the
+    /// folded head-to-head pairing cell when the two have met.
     /// </summary>
     private async Task<IReadOnlyList<TapeRow>> ChessTapeAsync(
         byte[] x, string xLabel, byte[] y, string yLabel, CancellationToken ct)
@@ -195,9 +190,8 @@ internal sealed partial class SubstrateClient
 
     private async Task<long> ChessMeetingsAsync(byte[] x, byte[] y, CancellationToken ct)
     {
-        // Pairing evidence was historically stored under the badly named PLAYED_BY relation.
-        // Treat it according to its actual chess grain here (player met opponent), never as an
-        // English assertion that the opponent somehow "played" the player.
+        // Pairing cells are keyed by PlayedByType in either direction; each means the two
+        // players met, and the count is the larger witness count of the two cells.
         var xId = Hash128.FromBytes(x);
         var yId = Hash128.FromBytes(y);
         var xy = ConsensusKeys.EdgeId(xId, ChessVocabulary.PlayedByType, yId);
@@ -211,9 +205,8 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Domain-specific verdicts must use the domain's witnessed evidence. Sending Chess_Player
-    /// through lexical relation_summary produced "no witnessed conceptual path" even for players
-    /// with directly witnessed games against one another.
+    /// The relation verdict between two references. Two Chess_Player entities are answered
+    /// from their pairing cells; any other pair from relation_summary.
     /// </summary>
     public async Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct)
     {

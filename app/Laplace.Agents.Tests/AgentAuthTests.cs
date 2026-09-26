@@ -4,9 +4,8 @@ using Xunit;
 namespace Laplace.Agents.Tests;
 
 /// <summary>
-/// Credential placement and minting. The failure these guard against is a
-/// perfectly-shaped request rejected as unauthenticated because the token went on
-/// the header the provider does not read.
+/// Credential placement per <see cref="AgentAuth"/>, token-command minting, and argv
+/// splitting.
 /// </summary>
 public sealed class AgentAuthTests
 {
@@ -36,9 +35,8 @@ public sealed class AgentAuthTests
     }
 
     /// <summary>
-    /// An Anthropic OAuth profile token is rejected on x-api-key — it has to ride
-    /// Authorization: Bearer, with the oauth beta header alongside it. Both are
-    /// configuration here, so the OAuth path needs no code change.
+    /// Configured bearer auth plus a configured header put the credential on
+    /// Authorization, keep anthropic-version, and send the extra header.
     /// </summary>
     [Fact]
     public void Bearer_auth_moves_the_credential_and_keeps_the_protocol_header()
@@ -98,9 +96,8 @@ public sealed class AgentAuthTests
     // ---- minting -----------------------------------------------------------
 
     /// <summary>
-    /// `dotnet --version` stands in for `ant auth print-credentials --access-token`:
-    /// a command on every box that runs these tests, exiting 0 with one line on
-    /// stdout — the exact contract a token printer has to satisfy.
+    /// `dotnet --version` satisfies the token-printer contract (exit 0, one stdout
+    /// line) on every test host.
     /// </summary>
     [Fact]
     public void Token_command_output_becomes_the_credential()
@@ -167,9 +164,8 @@ public sealed class AgentAuthTests
     }
 
     /// <summary>
-    /// The routing table is polled by the operator UI. Minting a token per row per
-    /// refresh would turn an inventory into a login storm, so Describe reports the
-    /// source and runs nothing — proven here by a command that could only fail.
+    /// Describe reports a token command as the credential source without running it;
+    /// the configured command could only fail if executed.
     /// </summary>
     [Fact]
     public void Describe_reports_a_token_command_without_executing_it()

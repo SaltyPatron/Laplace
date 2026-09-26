@@ -76,8 +76,8 @@ public sealed class ChessRecordedSelection
                     throw new InvalidDataException("selected export did not produce every retained game");
                 await writer.FlushAsync(ct);
             }
-            // Re-read through the same production framer/parser used by measure-corpus.
-            // This checks that concatenation preserves every complete game boundary.
+            // Re-read through the framer/parser measure-corpus uses, to check that
+            // concatenation preserves every complete game boundary.
             int checkedGames = 0;
             foreach (string text in PgnGames.StreamGames(pending, requireUtf8: true))
             {
@@ -220,8 +220,8 @@ public sealed class ChessRecordedSelection
                 entries.Add(entry);
             }
         }
-        // Reuse the canonical framing/hash owner. The native identity/legal-line check
-        // is performed by the ordinary recorded verifier, not a second PGN parser.
+        // Framing and hashing are the canonical ones; the native identity and legal-line
+        // check is the recorded verifier's, not a second PGN parser.
         int frames = 0;
         foreach (string _ in ChessCorpusPreparation.ReadSelected(source.Path, entries, ct)) frames++;
         if (frames != selected) throw new InvalidDataException("recorded source selection is incomplete");

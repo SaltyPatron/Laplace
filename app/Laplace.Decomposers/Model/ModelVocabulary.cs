@@ -3,7 +3,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>Shared model-lane vocabulary (types + relations). Per-model SourceId is runtime.</summary>
+/// <summary>Types and relations shared by all model ingest; each model's SourceId is derived at runtime.</summary>
 public static class ModelVocabulary
 {
     public static readonly Hash128 TrustClass =

@@ -6,14 +6,12 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 public static partial class NpgsqlSubstrateReads
 {
-    // The code adapter does not own a reduced cognition path. The canonical native
-    // forward program owns RESOLVE -> ... -> WITNESS over the shared substrate.
-    // The SQL ABI still calls the final array prior_frontier, but the native
-    // forward program assigns it the DISCOURSE operand role. These are ordered
-    // witnessed feedback roots from earlier attempts, not semantic-seed
-    // candidates and not a private replacement knowledge graph.
-    // Model checkpoints, code corpora, or any other source family are optional
-    // testimony discovered by COUPLE/ROUTE, never prerequisites selected here.
+    // Code is produced by the shared forward program: generation.forward_text runs
+    // RESOLVE -> ... -> WITNESS natively over the whole substrate. The final array
+    // (prior_frontier in the SQL signature) carries ordered, witnessed feedback roots
+    // from earlier attempts, which the program takes as its DISCOURSE operand. No
+    // source family is selected here; COUPLE and ROUTE find whatever testimony bears
+    // on the prompt.
     internal const string ForwardCodeSql = """
         SELECT g.step, g.entity, g.stride_used
         FROM generation.forward_text(

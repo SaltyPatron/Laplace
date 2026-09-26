@@ -13,12 +13,10 @@ typedef struct LaplaceContinuation
     int stride;
 } LaplaceContinuation;
 
-/* Physicality is more than a next-token stream. One packed manifest witnesses
- * containment, membership, predecessor/successor order and co-occurrence in the
- * same exact observation. Exact whole-observation continuation is retained as a
- * separate route because an ordered multi-constituent match is stronger state
- * than an isolated one-hop successor. These flags stay separate from semantic
- * testimony: they are structural facts derived from stored trajectories. */
+/* Structural relations read from one packed trajectory: container,
+ * constituent, predecessor, successor, co-occurrence, and exact continuation of
+ * a whole ordered context (a stronger fact than a one-hop successor). They are
+ * trajectory facts, not attested testimony. */
 enum LaplaceStructuralRelation
 {
     LAPLACE_STRUCTURAL_CONTAINER    = 1u << 0,
@@ -33,47 +31,51 @@ typedef struct LaplaceStructuralCandidate
 {
     hash128_t source;
     hash128_t id;
-    /* One retained route bit per row. Different structural routes that reach
-     * the same target remain separate responses with independent occurrence
-     * and gap state; they are never OR-folded before COUPLE. */
+    /* One route bit per row. Routes reaching the same target stay separate
+     * candidates with their own occurrence and gap state into COUPLE. */
     uint32 relation_mask;
     int64 occurrences;
     uint64 nearest_gap;
 } LaplaceStructuralCandidate;
 
-/* A request-snapshot projection of observed operands and their witnessed
- * context roots. This is candidate support, never a claim that sharing
- * a context (which may be a language) proves co-occurrence or agreement. */
+/* Request-scoped trajectory set: the observation context roots of the
+ * operands, each loaded once as packed WKB under the request snapshot, plus the
+ * occurrence positions the request is advancing through. Sharing a root
+ * nominates candidates; it is not co-occurrence or agreement. */
 typedef struct LaplaceTrajectoryScope LaplaceTrajectoryScope;
 LaplaceTrajectoryScope *laplace_trajectory_scope_create(void);
 void laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operands);
-/* Admit physical observations containing the complete declared member set.
- * Containment discovers roots; the shared ordered matcher establishes sequence.
- * This needs no semantic attestation for each member. Empty means no roots. */
+/* Adds the trajectories of stored entities whose membership contains every
+ * member. Containment nominates; order is established by the ordered matcher.
+ * No per-member attestation is read. Empty members add nothing. */
 void laplace_trajectory_scope_extend_containing(LaplaceTrajectoryScope *scope, ArrayType *members);
-/* Establish full-input occurrences at every canonical tree altitude before
- * the first election. Membership nominates; exact native ordinals bind. */
+/* Binds the whole input: for each distinct tier cut of its tree, highest
+ * altitude first, membership nominates trajectories and the exact matcher
+ * records every occurrence of the complete cut. The ordinals after those
+ * occurrences become the scope's live positions and the scope advances. */
 void laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
     const LaplacePromptInput *input);
-/* Retain only witnessed occurrences supporting the selection, then advance
- * their ordinals. Exhausted observations end; they do not restart at a suffix. */
+/* Keeps the positions whose successor is the selected id and advances each by
+ * one ordinal (ordered=false drops all). An exhausted trajectory ends; it is
+ * not re-matched at a suffix. */
 void laplace_trajectory_scope_select(LaplaceTrajectoryScope *scope, Datum selected,
                                     bool ordered);
 LaplaceContinuation *laplace_trajectory_continuations_scoped(
     ArrayType *context, bool suffix_backoff, LaplaceTrajectoryScope *scope, int *count);
 
-/* Enumerate exact structural crossings for active source identities over the
- * trajectories already retained in the request scope. RLE multiplicity and
- * logical ordinals are decoded natively; no SQL relation synthesis and no
- * trajectory-as-geometry shortcut. Results are deduplicated by exact
- * source/target/route identity. Occurrence counts and nearest gaps are folded
- * only within that route, so convergent routes remain independently visible to
- * COUPLE. Occurrence-level prompt provenance remains the caller's responsibility. */
+/* Structural crossings of the source ids over the scope's trajectories. Each
+ * trajectory's constituents are decoded natively, runs expanded to logical
+ * ordinals. Rows are keyed by source/target/route; occurrences sum and the
+ * nearest ordinal gap is kept within a route, so routes reaching one target
+ * stay separate for COUPLE. Which input occurrence a source came from is the
+ * caller's to carry. */
 LaplaceStructuralCandidate *laplace_trajectory_structural_candidates(
     LaplaceTrajectoryScope *scope, ArrayType *sources, uint32 relation_mask, int *count);
 
-/* Complete successor set, allocated in the caller's memory context. Exact
- * reads and longest-suffix proposal share this indexed native operation. */
+/* Successors of the context over stored trajectories at the greatest exact
+ * stride, ordered by occurrence count, allocated in the caller's context.
+ * suffix_backoff lets shorter context suffixes propose when the full context
+ * has no successor. */
 LaplaceContinuation *laplace_trajectory_continuations(
     ArrayType *context, bool suffix_backoff, int *count);
 

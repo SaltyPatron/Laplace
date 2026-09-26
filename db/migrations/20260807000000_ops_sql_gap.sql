@@ -1,8 +1,5 @@
--- ops.sql_gap — every accepted MCP `sql` hatch use is a gap report (GH #814).
--- The MCP process appends RFC 4180 rows to laplace-sql-gap.csv under
--- LaplaceInstall.OpsLogDirectory; this exposes that file through file_fdw so
--- `op(name => 'sql_gap')` / `SELECT * FROM ops.sql_gap()` is the queryable ledger.
--- No substrate table for logs; same file_fdw server as ops.app_log.
+-- ops.sql_gap exposes laplace-sql-gap.csv (LaplaceInstall.OpsLogDirectory), one RFC 4180
+-- row per accepted MCP `sql` call, through the ops_log_files file_fdw server.
 
 CREATE SCHEMA IF NOT EXISTS ops;
 CREATE EXTENSION IF NOT EXISTS file_fdw;
@@ -51,7 +48,7 @@ BEGIN
         RETURN QUERY SELECT f.log_time, f.duration_ms, f.result_chars, f.is_error, f.query
                      FROM ops.sql_gap_ft f;
     EXCEPTION WHEN OTHERS THEN
-        -- file absent until the first accepted sql hatch use — empty ledger.
+        -- A missing file reads as an empty ledger.
         NULL;
     END;
 END;

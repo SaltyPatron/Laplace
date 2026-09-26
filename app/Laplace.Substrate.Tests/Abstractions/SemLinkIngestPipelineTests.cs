@@ -50,11 +50,11 @@ public sealed class SemLinkIngestPipelineTests
             await foreach (var change in phase.DecomposeAsync(ctx, options))
                 changes.Add(change);
 
-            // No descent into the JSON packaging. The roles and rolesets are semantic
-            // content, and admitting content probes existence like any other content.
+            // No descent into the JSON packaging; roles and rolesets are content and are
+            // admitted through the ordinary existence probe.
             Assert.Equal(0, reader.LegacyContentDescentCalls);
-            // The JSON packaging is never composed. The rolesets, verb classes and roles it
-            // carries are semantic structures and own their physicalities; the document does not.
+            // The JSON document is packaging and gets no physicality; the rolesets, verb
+            // classes and roles it carries are the composed structures.
             AssertNoPackagingPhysicality(changes);
             Assert.True(AttestationCount(changes) > 0);
         }

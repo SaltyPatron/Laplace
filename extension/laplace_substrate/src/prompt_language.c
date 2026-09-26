@@ -1,52 +1,13 @@
 /*
- * prompt_language — which language a prompt is written in.
- *
- * WHY THIS IS C. The SQL form used converse.prompt_state() as a table source (a per-row SRF)
- * and called consensus.eff_mu() per row over a partitioned consensus join. That is
- * replaced here by one indexed range read plus an O(1) hash probe per edge, the
- * same shape used by prompt_coherence.c and recall.c.
- *
- * WHAT IT IS FOR, AND WHAT IT IS NOT FOR. This substrate is omniglottal by
- * construction: a concept is language-free and its SURFACES are a family
- * spanning every language that witnesses it, converging on one ILI hub. That
- * mesh is the universal-translator property and must not be filtered away.
- *
- *   CONCEPT  language-free. The election chooses among CONCEPTS.
- *   SURFACE  language-bearing. Rendering chooses among SURFACES.
- *
- * So this returns a RANKED TALLY, never a single winner and never a filter
- * predicate. A caller BIASES with it; a caller that hard-filtered on it would
- * delete the translator to fix a ranking bug, and would break a genuinely
- * cross-lingual prompt.
- *
- * WHAT IT COMPUTES. Sum eff_mu over EVERY HAS_LANGUAGE edge carried by the
- * prompt's entities, at every tier that has one.
- *
- * Deliberately NOT converse.word_language() per token -- that is LIMIT 1, one language
- * per word, which discards the distribution and makes a token shared across
- * languages ("chat" English/French, "die" English/German, "a" in a dozen) look
- * monolingual. Summing lets genuinely ambiguous tokens contribute to every
- * tally they belong to and be settled by the tokens that are decisive, which
- * is how a reader disambiguates too.
- *
- * TIER-AGNOSTIC BY CONSTRUCTION: it tallies whatever the prompt resolved to,
- * so a sentence-root HAS_LANGUAGE counts alongside word-tier evidence rather
- * than being invisible to a word-only scan. Nothing here assumes which tier
- * answered, which is what makes it work for a modality that is not text.
- *
- * A DOUBLE-COUNT THE SQL FORM HAD. converse.prompt_state() returns one row per
- * (ord, id) and an id that exists at two tiers appears TWICE -- measured on
- * "What is a glacier?": 7 rows, 5 distinct ids, because the tier-collision
- * seam (GH #752) puts single-character surfaces at tier 0 and tier 2. The SQL
- * body joined consensus per ROW, so those tokens' language edges were counted
- * once per tier. Collecting ids and probing with `= ANY($1)` is a semi-join:
- * each edge counts once, whatever the fan-out. Measured effect on the same
- * prompt: English 12260 -> 8553, Irish 8364 -> 5149. The ranking is unchanged
- * (English still leads); the magnitudes were inflated.
- *
- * NO FLOOR, NO MINIMUM MARGIN, NO TOP-K: the fold already carries confidence,
- * ties break on the id for determinism, and a prompt with no language evidence
- * returns zero rows -- the honest answer when the prompt does not say.
+ * Language standing of one observation. Every entity the prompt resolved to,
+ * at whatever tier, contributes the consensus of each HAS_LANGUAGE cell it is
+ * the subject of; masses are summed per language by effective mu and emitted
+ * as a ranked distribution over language ids, never a single winner or a
+ * filter. A surface witnessed in several languages adds to each of them, and
+ * the surfaces that are decisive settle the ranking. The ids are probed as one
+ * set (= ANY), so an entity present at two tiers or occurring twice counts its
+ * cells once. No floor or top-k; ties break on the language id; an observation
+ * with no language evidence yields no rows.
  */
 
 #include "postgres.h"
@@ -121,14 +82,9 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
         int    rc;
 
         /*
-         * prompt_words, NOT prompt_state. Only p.id is read here, and the two
-         * agree on it exactly -- prompt_state is prompt_words plus a resolved
-         * language column. Reading prompt_state for a column it does not use
-         * inverts the layering: a token's language is resolved AGAINST this
-         * tally (prompt_state.sql.in), so prompt_state -> prompt_language ->
-         * prompt_state is a cycle that terminates in "stack depth limit
-         * exceeded". The tally is over token IDENTITIES; it must sit below
-         * anything that assigns a language.
+         * prompt_words carries only the resolved ids. prompt_state assigns a
+         * token's language against this tally, so reading it here would
+         * recurse without end.
          */
         args[0] = PointerGetDatum(prompt);
         rc = SPI_execute_with_args(
@@ -226,8 +182,7 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
                                             HASH_ENTER, &found);
                 if (!found)
                     e->mass = 0.0;
-                /* Conservative ranking key via the one native implementation
-                 * (laplace_effective_mu_fp) — not a per-row SQL eff_mu call. */
+                /* Effective mu: rating minus twice the deviation. */
                 e->mass += (double) laplace_effective_mu_fp(rating, rd);
             }
             SPI_freetuptable(SPI_tuptable);

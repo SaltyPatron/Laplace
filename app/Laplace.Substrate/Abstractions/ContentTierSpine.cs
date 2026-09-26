@@ -7,12 +7,12 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// THE centralized content path for every source. UTF-8 → UAX #29 tier tree
-/// (native TextDecomposer + perfcache-backed HashComposer) → O(tiers)
-/// trunk-to-leaf batch existence (at most <see cref="MaxContentTier"/> + 1
-/// round trips per probe batch, tiers 4 down to 0; tier-0 hits perfcache before
-/// Postgres) → Merkle-DAG emit via <c>merkle_dedup_trunk_shortcircuit</c>.
-/// Decomposers yield records; this spine owns compose, existence, and staging.
+/// The shared text content path of the ingest recipe. Compose: UTF-8 → UAX #29 tier tree
+/// (native TextDecomposer + perfcache-backed HashComposer). Converge: trunk-to-leaf batch
+/// existence, at most <see cref="MaxContentTier"/> + 1 round trips per probe batch (tiers
+/// 4 down to 0; tier 0 answers from the perfcache before PostgreSQL). Stage: Merkle-DAG
+/// emit via <c>merkle_dedup_trunk_shortcircuit</c>. Providers hand records in; every
+/// source's text reaches the same identities through this path.
 /// </summary>
 public static class ContentTierSpine
 {
@@ -30,17 +30,16 @@ public static class ContentTierSpine
     /// <summary>Leaf-to-trunk compose: UAX #29 segmentation + Merkle ids (CPU only).</summary>
     public static TierTree? BuildTree(ReadOnlySpan<byte> canonicalUtf8)
     {
-        // Identity reconstruction is a valid cold-process entry point. Keep
-        // the shared text composer self-sufficient just as GrammarRowComposer
-        // is, rather than requiring every reader to have ingested first.
+        // Composing an identity is valid in a cold process, so the codepoint
+        // perfcache is loaded here rather than assumed from a prior ingest.
         CodepointPerfcache.LoadDefault();
         return IntentStage.BuildContentTree(canonicalUtf8);
     }
 
     /// <summary>
-    /// Leaf-to-trunk source compose. The tier law is unchanged; only Unicode
-    /// normalization is disabled so authored source can round-trip byte-exactly.
-    /// Parser/grammar structure is separate evidence over this canonical trajectory.
+    /// Leaf-to-trunk compose of authored source bytes. The tier law is the same; only
+    /// Unicode normalization is off, so the source round-trips byte-exactly. Parser or
+    /// grammar structure is separate evidence over this trajectory.
     /// </summary>
     public static TierTree? BuildSourceTree(ReadOnlySpan<byte> sourceUtf8)
     {
@@ -60,9 +59,8 @@ public static class ContentTierSpine
 
     /// <summary>Root id without building a full tree when the native fast path applies.</summary>
     /// <remarks>
-    /// Contract is nullable success — never throw for content the native path rejects
-    /// (malformed encoding / rc&lt;0). Callers that must skip a bad file (document extract,
-    /// GH #596) depend on null rather than an exception killing the batch.
+    /// Returns null, never throws, for content the native path rejects (malformed
+    /// encoding, rc&lt;0), so a caller can skip one bad file without failing the batch.
     /// </remarks>
     public static Hash128? ResolveRoot(ReadOnlySpan<byte> canonicalUtf8)
     {
@@ -157,10 +155,9 @@ public static class ContentTierSpine
         stage.EmitContentTree(tree, sourceId, existenceBitmap, out rootId);
 
     /// <summary>
-    /// Stage authored source bytes through the source-preserving tier ladder.
-    /// This is the source analogue of <see cref="TryStageIntoBuilder"/>: the
-    /// constituent/trajectory law is shared, while NFC normalization is intentionally
-    /// disabled so exact source representation remains reconstructable.
+    /// Stages authored source bytes through the source-preserving tier ladder: the same
+    /// constituent/trajectory law as <see cref="TryStageIntoBuilder"/>, with NFC
+    /// normalization off so the exact source stays reconstructable.
     /// </summary>
     public static bool TryStageSourceIntoBuilder(
         SubstrateChangeBuilder builder,

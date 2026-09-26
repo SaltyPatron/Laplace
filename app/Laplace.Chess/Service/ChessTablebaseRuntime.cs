@@ -35,9 +35,8 @@ public static class ChessTablebaseRuntime
     public static ISyzygyProber? Prober => Largest > 0 ? new SyzygyNativeProber() : null;
 
     /// <summary>
-    /// Select one deterministic table set for an in-process test host before first use.
-    /// This is intentionally internal: deployed processes retain ChessLabPaths as the sole
-    /// configured/data-root authority, and child processes do not inherit this selection.
+    /// Select one table set for an in-process test host before first use. Deployed processes
+    /// resolve tables only through ChessLabPaths; child processes do not inherit this selection.
     /// </summary>
     internal static void ConfigureTestTableSet(string path)
     {

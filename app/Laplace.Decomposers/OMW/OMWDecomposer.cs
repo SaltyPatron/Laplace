@@ -68,17 +68,17 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
             labeled.Add((path, $"omw/{i}/{lang}"));
         }
 
-        // The corpus's retractions, ingested through the same per-file spine so they
-        // resume and journal like any other file. Labelled distinctly because their rows
-        // carry two extra leading fields and must not be read as data rows.
+        // Retraction files go through the same per-file ingest (resume, receipt) as any
+        // other file, under their own label because their rows carry two extra leading
+        // fields and must not be read as data rows.
         var changesFiles = OMWTabFiles.EnumerateChangesFiles(wnsDir)
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
         for (int i = 0; i < changesFiles.Count; i++)
             labeled.Add((changesFiles[i], $"{ChangesLabelPrefix}{i}"));
 
-        // The corpus's only per-row magnitude. Its rows are synset \t lemma \t count,
-        // not the data tabs' synset \t lang:type \t value, so it needs its own label.
+        // Frequency files carry per-row magnitude. Their rows are synset \t lemma \t count,
+        // not the data tabs' synset \t lang:type \t value, so they get their own label.
         var freqFiles = OMWTabFiles.EnumerateFreqFiles(wnsDir)
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();

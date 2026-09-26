@@ -64,9 +64,8 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
             ct.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(response)) continue;
 
-            // A missing language grammar does not erase an observed response.
-            // Keep its complete text through the native document grammar; this
-            // does not claim a code AST for an unsupported programming language.
+            // A response in a language with no registered grammar composes whole through the
+            // document grammar; no code AST is claimed for it.
             string modality = ResolveModality(lang) ?? "markdown";
 
             byte[] codeBytes = Encoding.UTF8.GetBytes(response);
@@ -82,9 +81,8 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
     }
 
     /// <summary>
-    /// Exact inventory from parquet metadata (row-group headers, no data
-    /// decode). Without this the runner logs input_units=0 and a 118MB shard
-    /// ingests blind — "intents=0/N pct=0.0" with no denominator for hours.
+    /// Exact input-unit inventory from Parquet metadata (row-group headers only, no data
+    /// decode), giving the ingest receipt its denominator.
     /// </summary>
     public async Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

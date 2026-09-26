@@ -9,8 +9,9 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_grammar_source_id);
 
-/* The SQL boundary transports bytes and the declared grammar. Parsing and
- * composition are the same native operation used by source admission. */
+/* The root composition id of source bytes under a declared grammar, computed by
+ * the same native parse and compose that source admission runs. Nothing is
+ * persisted; NULL when the grammar does not parse the input. */
 Datum
 pg_laplace_grammar_source_id(PG_FUNCTION_ARGS)
 {
@@ -27,9 +28,8 @@ pg_laplace_grammar_source_id(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("unknown source grammar: %s", modality)));
 
-    /* Source composition resolves every lexical codepoint through the same T0
-     * table as managed ingestion. Never allow an unloaded backend to choose a
-     * fallback or produce a process-dependent source root. */
+    /* Every codepoint resolves through the Tier-0 perfcache that ingest composes
+     * with; without it the root would not be the canonical identity. */
     if (!laplace_perfcache_ready())
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("grammar_source_id requires the T0 perfcache")));

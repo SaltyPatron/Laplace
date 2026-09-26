@@ -6,9 +6,8 @@ using Xunit;
 namespace Laplace.Decomposers.AgentTrace.Tests;
 
 /// <summary>
-/// Long-tail adapters, fixtures transcribed from each project's cited serialization
-/// source (see per-adapter headers): Aider, OpenCode, Cline/Roo, Goose, Amp,
-/// Continue, Crush, Zed, Droid.
+/// Parser tests for the Aider, OpenCode, Cline/Roo, Goose, Amp, Continue, Crush, Zed
+/// and Droid adapters; each fixture follows that tool's serialization format.
 /// </summary>
 public sealed class AgentTraceLongTailAdapterTests : IDisposable
 {
@@ -99,7 +98,7 @@ public sealed class AgentTraceLongTailAdapterTests : IDisposable
         Assert.NotEqual(sessions[0].SessionKey, sessions[1].SessionKey);
     }
 
-    // ── OpenCode (SQLite era) ─────────────────────────────────────────────────────
+    // ── OpenCode (SQLite) ─────────────────────────────────────────────────────────
 
     [Fact]
     public async Task OpenCode_Parses_Sqlite_Session_Message_Part()
@@ -185,7 +184,7 @@ public sealed class AgentTraceLongTailAdapterTests : IDisposable
         Assert.True(s.Turns[0].TimestampUnixUs > 0);
     }
 
-    // ── Goose (legacy JSONL) ──────────────────────────────────────────────────────
+    // ── Goose (JSONL) ─────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Goose_Parses_Legacy_Jsonl()
@@ -354,7 +353,7 @@ public sealed class AgentTraceLongTailAdapterTests : IDisposable
         Assert.Equal("edited", Assert.Single(reply.ToolCalls).ResultText);
     }
 
-    // ── routing sanity across the widened registry ────────────────────────────────
+    // ── registry routing ──────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Registry_Still_Routes_Specifics_Before_Generic()

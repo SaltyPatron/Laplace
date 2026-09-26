@@ -115,8 +115,8 @@ public static unsafe class OrderedComposition
                 ranges[i] = new PhysicalitySourceRange(
                     checked((int)nativeResults[i].FirstPhysicalityRow),
                     checked((int)nativeResults[i].EmittedPhysicalityRows), requests[i].SourceId);
-            // The native owner preserves legacy selected-row order, then appends
-            // additional raw forms. Requests therefore need not arrive in row order.
+            // The native stage emits selected rows first and appends additional raw forms
+            // after them, so source ranges are ordered by first row, not request order.
             Array.Sort(ranges, static (left, right) => left.FirstRow.CompareTo(right.FirstRow));
             stage.RecordPhysicalitySourceRanges(ranges);
         }

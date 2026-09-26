@@ -123,8 +123,8 @@ public sealed class VerifiedGitRepositoryTests : IDisposable
         document["recipe"]!["cpu"] = null;
         document["recipe"]!["compiler_version"] = "compilér Δ 🚀";
         string receipt = document.ToJsonString();
-        // The original reader selected the final decoded property name. An
-        // earlier decoy must not replace a later exact identity or leak publicly.
+        // The receipt reader takes the last decoded occurrence of a property; an
+        // earlier decoy must neither win nor appear in the captured provenance.
         receipt = "{\"recipe\":{},\"binary_sha256\":\"earlier-invalid-hash\"," + receipt[1..];
         int finalKey = receipt.LastIndexOf("\"binary_sha256\"", StringComparison.Ordinal);
         receipt = receipt[..finalKey] + "\"\\u0062inary_sha256\"" + receipt[(finalKey + "\"binary_sha256\"".Length)..];

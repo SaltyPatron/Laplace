@@ -194,9 +194,8 @@ public sealed class SearchTests
     [Fact]
     public void ExactTablebaseDraw_NeutralizesApparentMaterialAdvantage()
     {
-        // Deliberately give White a queen so classical evaluation says "winning", then make
-        // the selected exact provider say the root is a draw. Exact WDL must define the root's
-        // draw stance instead of static material manufacturing contempt for a proven draw.
+        // White has a queen, so classical evaluation says winning, but the exact provider says
+        // the root is a draw: the exact WDL sets the root's draw stance, not static material.
         var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
         var search = new Search(tablebase: _ => new SearchTablebaseVerdict(Wdl: 2, Dtz: 0));
         var result = search.Think(board, new Search.Limits(MaxDepth: 2));
@@ -208,8 +207,8 @@ public sealed class SearchTests
     [Fact]
     public void InsufficientMaterialRoot_IsAlreadyTerminalDraw()
     {
-        // Classical material sees a bishop, but chess law has already closed K+B v K as a draw.
-        // Search must not manufacture a move or contempt score after the game is terminal.
+        // K+B v K is a draw by rule, so the position is terminal: search returns no move and
+        // no contempt score despite the extra bishop.
         var board = Board.FromFen("7k/8/8/8/8/8/5B2/4K3 w - - 0 1");
         var result = new Search().Think(board, new Search.Limits(MaxDepth: 2));
 

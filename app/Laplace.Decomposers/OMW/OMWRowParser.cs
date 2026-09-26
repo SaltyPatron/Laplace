@@ -18,9 +18,8 @@ public static class OMWRowParser
 
     /// <summary>
     /// wn-freq-*.tab: synset-pos \t lemma \t frequency. A different shape from the data
-    /// tabs (whose second field is lang:type), so it gets its own entry point rather than
-    /// a flag threaded through the shared one. The language comes from the filename; the
-    /// frequency becomes the membership's magnitude.
+    /// tabs (whose second field is lang:type), so it has its own entry point. The language
+    /// comes from the filename; the frequency becomes the membership's magnitude.
     /// </summary>
     public static bool TryParseFreqRow(
         ReadOnlySpan<byte> line, string fileLang, out OmwRow row, out ReadOnlySpan<byte> valueUtf8)
@@ -38,8 +37,8 @@ public static class OMWRowParser
         if (dash < 0 || dash + 1 >= synStr.Length) return false;
         if (!long.TryParse(synStr.AsSpan(0, dash), out long offset)) return false;
 
-        // A malformed or absent count must not silently become a magnitude of 1 and pass
-        // for evidence -- the row exists only to carry the count, so drop it.
+        // The row exists only to carry the count; a malformed or absent count drops the
+        // row rather than becoming a magnitude of 1.
         if (!long.TryParse(Encoding.UTF8.GetString(freq), out long n) || n <= 0) return false;
 
         valueUtf8 = lemma;

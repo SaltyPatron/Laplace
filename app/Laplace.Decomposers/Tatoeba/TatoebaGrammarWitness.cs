@@ -49,21 +49,17 @@ internal sealed class TatoebaEmitter
         VocabularyNames.TrackResolvedLanguage(TatoebaDecomposer.LanguageNames, iso3);
         b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId));
 
-        // The content root is the REAL sentence entity — content-addressed, UAX-tiered,
-        // shared with any other source that ingests the same text (OpenSubtitles, a UAX
-        // parse). See docs/specs/16 §2a.
+        // The content root is the sentence entity: content-addressed, UAX-tiered, and the
+        // same entity any other source reaches for the same text.
         if (!ContentTierSpine.TryStageIntoBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
 
-        // What Tatoeba actually asserts about a sentence row: this text exists, and it is in
-        // this language. Attested ONCE, at the root, which is the tier the source asserts it
-        // at (docs/specs/16). The row NUMBER is not attested at all — see TatoebaIdMap.
+        // A sentence row testifies that this text is in this language, attested once on
+        // the root. The row number is not attested.
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
 
-        // The link phase's whole input. FREE here — the root is already composed — which is
-        // the point of doing this in phase 1 instead of a prelude that resolves all 13.26M
-        // roots a second time before the pipeline emits anything.
+        // Record row id → root for link resolution; the root is already composed here.
         _ids.Set(record.FirstId, emitted);
 
         _allowedIds?.TryAdd(record.FirstId, 0);
@@ -71,20 +67,10 @@ internal sealed class TatoebaEmitter
 
     private void WalkLink(TatoebaIngestRecord record, SubstrateChangeBuilder b)
     {
-        // links.csv is an ATTESTATION file, not an entity file. What Tatoeba asserts is
-        // "this sentence is a translation of that sentence" — a fact between two CONTENT
-        // ROOTS. The ids are scaffolding: they exist only because the links file cannot
-        // inline the text, so they are resolved here and never stored.
-        //
-        // This lane used to mint a `tatoeba/sentence/{id}` entity per side and attest
-        // between those. That is source-keyed identity — a row number promoted to an entity
-        // id — which is exactly the entity-resolution table content addressing abolishes,
-        // and it made every translation a read-side join across HAS_EXTERNAL_ID. MEASURED
-        // at ~1.56 entity rows per link, the largest row category of the link phase.
-        //
-        // A link naming a sentence absent from sentences.csv is DROPPED, not grounded on a
-        // synthetic node: an edge between two ids we cannot resolve to text asserts nothing
-        // about language, and a bare anchor is an unattested node pretending otherwise.
+        // A links.csv row testifies that one sentence translates another: an attestation
+        // between two content roots. The row ids are packaging, resolved here and never
+        // stored. A link naming an id absent from sentences.csv is dropped, not attached to
+        // a synthetic entity: it names no text, so it asserts nothing.
         if (!_ids.TryGet(record.FirstId, out var rootA)
             || !_ids.TryGet(record.SecondId, out var rootB))
         {

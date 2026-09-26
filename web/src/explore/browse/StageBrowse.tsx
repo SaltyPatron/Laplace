@@ -7,10 +7,9 @@ import type { ExploreStageRow } from '../types';
 import styles from './Browse.module.css';
 
 /**
- * A cadence stage as a division landing: its law, then its sources as cards —
- * each the drill-down into a live franchise page when ingested, and an honest
- * dashed "not yet ingested" card when the cadence declares it but the substrate
- * doesn't hold it yet.
+ * One catalog stage: its law, then its declared sources as cards. A source with a
+ * `source_key` links to its source page with its attestation count; one without is shown
+ * as not yet ingested.
  */
 export function StageBrowse() {
   const { stageId } = useParams();

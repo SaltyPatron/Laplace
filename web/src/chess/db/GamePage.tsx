@@ -7,13 +7,11 @@ import type { ChessGamePliesResponse, ChessGameResponse } from './types';
 import styles from './ChessDb.module.css';
 
 /**
- * One game, as its source recorded it. Both players link back out to their own
- * careers, which is what closes the loop: roster → player → game → the other
- * player → his games, forever, with no dead ends.
+ * One game entity: its source headers, both players linked to their player pages, the
+ * game itself linked to its entity page, and the replayed ply trajectory.
  *
- * Movetext is reconstructed from the typed move trajectory stored for the game's
- * line. Source headers remain source testimony; generated SAN is deliberately not
- * presented as a byte-for-byte copy of the provider's original PGN.
+ * Headers are source testimony. Movetext is reconstructed from the stored move trajectory,
+ * so its SAN is not presented as a byte copy of the source PGN.
  */
 export function GamePage() {
   const { idHex } = useParams();
@@ -32,8 +30,7 @@ export function GamePage() {
     chessGame(idHex)
       .then((g) => { if (!stale) setGame(g); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
-    // The replay is a second read on purpose: the headers paint immediately while the
-    // engine walks the movetext, so a 200-ply game never delays the page.
+    // Plies are a separate read so the headers render without waiting for the replay.
     chessGamePlies(idHex)
       .then((p) => { if (!stale) setPlies(p); })
       .catch((e) => { if (!stale) setPliesErr(e instanceof Error ? e.message : String(e)); });

@@ -55,12 +55,8 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
         using var conn = SqliteSniff.OpenReadOnly(dbPath);
         if (conn is null) yield break;
 
-        // One ordered join streams the complete container. The old shape issued one
-        // message query per session and then one part query per message (and attempted
-        // those part queries while the message reader was still open). Large OpenCode
-        // histories therefore paid O(sessions + messages) SQLite commands before any
-        // substrate work began. Group the joined rows here; SQLite owns the scan/order
-        // once and the codec only reconstructs its nested JSON records.
+        // One ordered join streams the whole container; rows are grouped here into
+        // sessions, messages and parts, so decode is one SQLite command.
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT s.id, s.title, s.time_created, s.time_updated, "

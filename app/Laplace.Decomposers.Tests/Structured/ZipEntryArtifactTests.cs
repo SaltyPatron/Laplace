@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Tests.Structured;
 
 public class ZipEntryArtifactTests
 {
-    // A zip artifact's declared entries are each parsed as their own file (UCA's
+    // Each declared entry of a zip artifact is parsed as its own file (e.g. UCA's
     // CollationTest.zip holds the NON_IGNORABLE and SHIFTED orderings).
     [Fact]
     public async Task Declared_zip_entries_are_each_parsed()

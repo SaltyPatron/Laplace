@@ -174,10 +174,9 @@ emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
     reply_buf_add(buf, CStringGetTextDatum(msg), (Datum) 0, (Datum) 0, false, true, true);
 }
 
-/* Sense-disambiguation context for the gloss responders: the other resolvable
- * tokens the caller supplied. Structural callers pass ids directly; the text
- * entry points derive them from the prompt via converse.prompt_state(). Either way this
- * is pure id resolution — no grammar is consulted. */
+/* Sense context for the gloss reads: the observation's other resolved ids,
+ * excluding the topic (converse.recall_context_exclude). Pure id resolution;
+ * no grammar is consulted. */
 static Datum
 spi_context_ids(const char *prompt, Datum topic)
 {
@@ -314,10 +313,8 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
     }
 }
 
-/* The default read shape when a caller supplies no intent. A bare prompt says
- * nothing structural about what is being asked, so answering it means showing
- * what is witnessed about the topic: gloss first, then the strongest chain.
- * Every other shape is selected explicitly by the caller. */
+/* The read shape used when no intent is supplied: the topic's witnessed
+ * gloss, else its strongest outgoing chain. */
 #define ROUTE_DEFAULT_INTENT "fallback"
 
 static void respond_routed(const char *prompt, Datum context, bool ctx_null,
@@ -336,10 +333,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
     respond_routed(prompt, context, ctx_null, &route, &bind, buf);
 }
 
-/* Intents whose reply is the uniform single-argument shape:
- * recall_<intent>_response(topic), with a label fallback when the substrate has
- * witnessed nothing. One table + one helper instead of N copy-pasted if-arms
- * that each re-typed the same Oid/args/forward/fallback boilerplate. */
+/* Intents answered by recall_<intent>_response(topic) alone; when no
+ * consensus answers, the reply names the topic and what is unwitnessed. */
 static const struct {
     const char *intent;
     const char *sql;
@@ -377,9 +372,8 @@ respond_single_arg_intent(ReplyBuf *buf, const char *intent, Datum topic)
     return false;
 }
 
-/* The routed body: takes an intent plus already-resolved ids. recall_session
- * shares it so session_record_prompt and the reply resolve the topic once.
- * Owns route: frees it on every path. */
+/* Dispatch one recall intent over already-resolved ids and buffer the reply
+ * rows (text, effective mu, witness count). Takes ownership of route. */
 static void
 respond_routed(const char *prompt, Datum context, bool ctx_null,
                RouteResult *routep, const RouteBind *bind, ReplyBuf *buf)
@@ -552,9 +546,8 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
     }
     else
     {
-        /* Unknown intent. converse.recall_intent() rejects these before dispatch, so
-         * reaching here means an internal caller passed something outside the
-         * published vocabulary; answer with the gloss rather than nothing. */
+        /* An intent outside the vocabulary (recall_intent rejects these before
+         * dispatch) is answered as define. */
         Oid   types[2] = { BYTEAOID, BYTEAARRAYOID };
         Datum args[2] = { topic, bind->ctx_ids };
         char  nulls[3] = "  ";
@@ -611,17 +604,11 @@ define_cand_cmp(const void *a, const void *b)
 }
 
 /*
- * Native replacement for the lexical.define()/lexical.senses()/lexical.lexical_peers() SQL composition
- * chain. That chain was measured taking 48+ seconds and 2.27M shared-buffer
- * hits for a single word, root-caused to: (1) every function in the chain
- * uses a CTE, which PostgreSQL cannot inline for set-returning functions --
- * each nested call is planned and executed as an opaque black box with zero
- * cross-function optimization, and (2) realize.render_text() was being called on
- * every candidate row before the final ORDER BY/LIMIT trimmed the result to
- * p_limit. This function does the whole thing as a small, fixed number of
- * explicitly sequenced SPI calls instead: fetch lexical peers once (not the
- * 2-3x redundant calls the SQL chain made), fetch bounded candidate sets via
- * indexed ANY(array) joins, rank in C, and realize.render_text() only the winners.
+ * Glosses for an entity, ranked by consensus standing. Reads the entity's
+ * lexical peers once, then the unrefuted HAS_SENSE -> HAS_DEFINITION cells
+ * and direct HAS_DEFINITION cells over the whole peer set, adds the standing of
+ * any cells from the context ids to each gloss, ranks in C, and realizes text
+ * only for the top p_limit.
  */
 static void
 define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *buf)
@@ -733,11 +720,10 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
         args[0] = PointerGetDatum(cand_arr);
         args[1] = PointerGetDatum(p_context_arr);
 
-        /* Hash-index the candidates by definition id: the old per-row linear
-         * scan was O(results × candidates) bytea compares. Duplicate ids are
-         * chained (built back-to-front so chains run in ascending index
-         * order) because the linear scan credited EVERY matching candidate,
-         * not just the first. */
+        /* Candidates indexed by definition id. One gloss can be reached by
+         * several routes, so duplicates are chained (built back to front, so
+         * chains run in ascending index) and every route gets the context
+         * credit. */
         {
             typedef struct DefineCandIdxEntry
             {
@@ -869,19 +855,14 @@ shape_cand_cmp(const void *a, const void *b)
 }
 
 /*
- * Native replacement for word_shape_peers()'s KNN stage. Root cause
- * (verified via EXPLAIN on the decomposed CTEs): the original query's
- * `ORDER BY p2.coord <<->> me.coord LIMIT 500`, where me.coord came from an
- * outer CTE (a correlated column reference, not a literal/bound parameter),
- * was NOT eligible for GiST KNN index-ordered scanning -- Postgres fell back
- * to a full hash join against ALL of entities (~1.9M rows via 4 parallel
- * workers) followed by a top-N heapsort over ~785K joined rows, touching
- * ~72K buffer pages just for a "bounded" 500-row scan. Fetching the anchor
- * coordinate first and passing it as a genuine SPI bound parameter to the
- * second query restores real GiST index usage. Also drops the original's
- * `entity_exists(n.entity_id)` filter, which is structurally always true
- * here (n comes from physicalities JOIN entities, so the FK already
- * guarantees the entities row exists) and was pure dead weight.
+ * Geometric neighbors of a composition by shape: the 500 nearest coordinates,
+ * kept when they share the anchor's entity type, constituent count and case
+ * class, admitted by Frechet distance of their constituent curves, ordered by
+ * angular distance then Frechet, capped at 48.
+ *
+ * The anchor coordinate is read first and bound as a parameter: a KNN
+ * ORDER BY against a correlated column is not eligible for the GiST
+ * index-ordered scan, a bound parameter is.
  */
 static Datum
 word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
@@ -898,14 +879,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     ShapeCandidate *survivors;
     int    n_survivors = 0;
 
-    /* Issue 51: the Frechet gate must run on GEOMETRY. physicalities.trajectory
-     * vertices are mantissa-packed child IDENTITIES (exponent pinned 0x3FF) --
-     * feeding them to the DP measured hash bits, behaving as a rough aligned
-     * sequence-identity test. structural.word_curve() rebuilds the constituent COORD curve
-     * (ST_MakeLine ORDER BY ordinal) -- the same metric word_shape_distance uses.
-     * The anchor curve is fetched once here and passed as a bound parameter;
-     * candidate curves build inside the batched call below (STABLE functions in
-     * filters run per row -- the anchor must never be recomputed per candidate). */
+    /* The Frechet gate compares realized curves: structural.word_curve()
+     * unpacks the trajectory's child ids and reads each child's coordinate in
+     * ordinal order. The packed trajectory values are identities, not
+     * positions. The anchor curve is built once and bound as a parameter so
+     * it is not recomputed per candidate. */
     rc = SPI_execute_with_args(
         "SELECT structural.word_curve($1), w.coord, w.n_constituents "
         "FROM laplace.v_word_points w "
@@ -925,8 +903,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         me_coord   = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 2, &n1));
         me_nconst  = DatumGetInt32(SPI_getbinval(me_tup, me_td, 3, &n2));
         geom_oid   = SPI_gettypeid(me_td, 2);
-        /* word_curve is NULL when the word has no constituent coords -- no
-         * shape to gate on; empty result, same contract as a missing anchor. */
+        /* No realized curve means no shape to compare: empty result. */
         if (n0)
             return PointerGetDatum(construct_empty_array(BYTEAOID));
     }
@@ -985,13 +962,9 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     }
 
     /*
-     * Batch the per-candidate post-filter into a small, fixed number of SPI
-     * calls instead of up to 3 * n_raw individual round-trips -- each SPI
-     * call pays real parse/plan/executor overhead regardless of how little
-     * work it does, so N individual calls cost far more than one call over
-     * an N-element array (unnest ... WITH ORDINALITY zips a position index
-     * back onto each row so results can be scattered back to the right
-     * candidate in C).
+     * Each filter runs as one SPI call over the whole candidate array;
+     * unnest ... WITH ORDINALITY carries the position so results scatter back
+     * to their candidate in C.
      */
     survivors = (ShapeCandidate *) palloc(sizeof(ShapeCandidate) * (n_raw + 1));
     {
@@ -1068,12 +1041,8 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                 double *cand_xyzm = (double *) palloc0(sizeof(double) * (size_t) n_matched * 4);
                 double me_xyzm[4] = {0, 0, 0, 0};
 
-                /* Frechet stays SQL-computed (order-sensitive, variable-length DP
-                 * recurrence -- doesn't batch across candidates the same way a
-                 * fixed-width angular distance does). Issue 51: it now runs over
-                 * structural.word_curve(entity) -- the constituent COORD curve, word_shape_
-                 * distance's metric -- never the mantissa-packed identity
-                 * trajectory, whose vertices are hash bits, not S3 shape. */
+                /* Frechet over each candidate's realized constituent curve
+                 * against the anchor's, computed by laplace_frechet_4d. */
                 {
                     Oid   ftypes[2] = { BYTEAARRAYOID, geom_oid };
                     Datum fargs[2] = { PointerGetDatum(eid_array), me_curve };
@@ -1099,11 +1068,9 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                     }
                 }
 
-                /* Angular distance: SQL only extracts raw coordinate components
-                 * (no distance math) -- laplace_substrate doesn't link liblwgeom,
-                 * so this is the actual Datum-to-double boundary; the distance
-                 * computation itself is math4d_angular_distance_batch, native,
-                 * AVX2-batched. See engine/core/src/math4d.c. */
+                /* SQL only extracts XYZM components (this module does not link
+                 * liblwgeom); the angular distance itself is
+                 * math4d_angular_distance_batch over the whole set. */
                 {
                     Oid   mtypes[1] = { geom_oid };
                     Datum margs[1] = { me_coord };
@@ -1166,11 +1133,10 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                     int i = matched_raw_idx[p];
 
                     if (!ok_by_pos[p]) continue;
-                    /* Frechet is the sole admission gate -- it's order-sensitive, unlike
-                     * angular/centroid distance, which is mathematically order-INSENSITIVE
-                     * (centroid = average of constituent points, and averaging is commutative),
-                     * so it can never discriminate anagrams and must not be an independent OR
-                     * admission branch. Kept only as the ang-first ORDER BY tie-break below. */
+                    /* Frechet alone admits: it is order-sensitive. The coordinate
+                     * is a centroid of the constituents, so angular distance cannot
+                     * tell permutations of the same children apart; it only orders
+                     * the admitted set. */
                     if (fr_by_pos[p] > p_frechet_max) continue;
                     survivors[n_survivors].entity_id = raw[i].entity_id;
                     survivors[n_survivors].fr = fr_by_pos[p];
@@ -1219,9 +1185,8 @@ pg_laplace_word_shape_peers_fast(PG_FUNCTION_ARGS)
 
     result = word_shape_peers_fast_impl(word, frechet_max);
 
-    /* The implementation constructs both empty and nonempty arrays in SPI's
-     * context. Copy into the original caller while the bytes are still live;
-     * SPI_finish releases the implementation's work, not the returned value. */
+    /* The result array lives in SPI's context; copy it to the caller before
+     * SPI_finish releases that context. */
     MemoryContext previous = MemoryContextSwitchTo(caller);
     result = datumCopy(result, false, -1);
     MemoryContextSwitchTo(previous);
@@ -1231,9 +1196,8 @@ pg_laplace_word_shape_peers_fast(PG_FUNCTION_ARGS)
 
 /* converse.recall_intent(p_intent, p_topic, p_topic2, p_type_name, p_lang, p_context_ids)
  *
- * The structural read entry point: the caller names the shape of the read and
- * supplies resolved content ids. Nothing about the answer depends on the
- * language the question was asked in, because no question text is consulted. */
+ * Recall over resolved ids: the caller names the read shape. No observation
+ * text is consulted. */
 Datum
 pg_laplace_recall_intent(PG_FUNCTION_ARGS)
 {
@@ -1262,9 +1226,7 @@ pg_laplace_recall_intent(PG_FUNCTION_ARGS)
         bind.topic2 = PG_GETARG_DATUM(2);
     if (!PG_ARGISNULL(3))
         route.type_name = text_to_cstring(PG_GETARG_TEXT_PP(3));
-    /* p_lang carries the target language for the translate shape. It names a
-     * language, it does not parse one — any language can be asked for from any
-     * language. */
+    /* p_lang names the target language of the translate shape. */
     if (!PG_ARGISNULL(4))
         route.phrase2 = text_to_cstring(PG_GETARG_TEXT_PP(4));
     if (!PG_ARGISNULL(5))
@@ -1398,8 +1360,8 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             iargs[1] = CStringGetTextDatum(prompt);
             iargs[2] = bind.topic;
 
-            /* This deposits the prompt as a conversational-provenance witness;
-             * a silent failure would drop the turn from the record. */
+            /* Records the observation as a conversational-provenance witness
+             * of the session; failure raises rather than dropping the turn. */
             int rec_rc = SPI_execute_with_args(
                 "SELECT generation.session_record_prompt($1, $2, $3)",
                 3, itypes, iargs, bind.topic == (Datum) 0 ? "  n" : NULL, false, 0);
@@ -1407,9 +1369,8 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
                 elog(ERROR, "recall_session: session_record_prompt failed (SPI rc %d)",
                      rec_rc);
 
-            /* Reuse the topic just resolved for session_record_prompt instead
-             * of resolving again inside respond_impl — respond_routed takes
-             * ownership of route. */
+            /* The topic resolved for the session record answers the read;
+             * respond_routed takes ownership of route. */
             respond_routed(prompt, context, ctx_null, &route, &bind, &buf);
         }
         laplace_spi_finish(spi_top);

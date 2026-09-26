@@ -35,9 +35,9 @@ internal static class OMWLmfEmitter
             ["similar"] = new(OmwRelation.IsSimilarTo),
             ["participle"] = new(OmwRelation.IsParticipleOf),
             ["pertainym"] = new(OmwRelation.PertainsTo),
-            // WN-LMF usage-domain relations correspond to Princeton -u / ;u.
-            // Textual examples are emitted separately from Example elements.
-            // Like domain_topic/domain_region: the member states its (usage) domain.
+            // WN-LMF usage-domain relations correspond to Princeton -u / ;u; like
+            // domain_topic/domain_region, the member states its usage domain. Textual
+            // examples are emitted separately from Example elements.
             ["exemplifies"] = new(OmwRelation.HasDomainUsage),
             ["is_exemplified_by"] = new(OmwRelation.IsDomainUsageMember),
         };

@@ -28,18 +28,14 @@
 #endif
 
 /*
- * Native highway-mask primitives. The prior SQL implementations were the
- * canonical Rule #1 violation: laplace_highway_popcount computed POPCNT by
- * casting each byte to bit(8)::text and string-replacing '0's inside a
- * generate_series loop, and laplace_highway_match ran a per-row bytea AND
- * through the SQL executor. Both are hot-path predicates for plane selection
- * over 256-bit masks; here they are a handful of uint64 ops.
+ * Highway masks: a 256-bit set per entity of the governed relation bits it
+ * takes part in as a consensus subject or object. The mask is a derived index
+ * over the consensus face; plane selection in COUPLE and ROUTE tests it with a
+ * few uint64 ops instead of reading cells.
  *
- * Byte-order contract: a highway mask travels as 32 raw bytes of the
- * lasting in-memory representation (intent_stage.c writes the C#/native
- * Mask256 struct memory verbatim; laplace_mask256_t is uint64 w[4] on the
- * same little-endian targets). memcpy between bytea and laplace_mask256_t is
- * therefore the identity mapping used everywhere else in this codebase.
+ * Byte order: a mask travels as the 32 raw bytes of laplace_mask256_t
+ * (uint64 w[4], little-endian), bit b at byte b/8, value 1 << (b%8). memcpy
+ * between bytea and laplace_mask256_t is the identity mapping.
  */
 
 #define HIGHWAY_MASK_BYTES 32
@@ -128,9 +124,8 @@ ctz32(unsigned int v)
 
 PG_FUNCTION_INFO_V1(pg_laplace_highway_match);
 
-/* (mask bytea, band_mask bytea) -> bool; NULL input -> false (matches the
- * prior SQL's explicit NULL handling, so WHERE-clause semantics are
- * unchanged). Length mismatch is an error, as the SQL `&` operator's was. */
+/* (mask bytea, band_mask bytea) -> bool: any shared bit. NULL input -> false,
+ * so a NULL mask never passes a WHERE filter. Length mismatch is an error. */
 Datum
 pg_laplace_highway_match(PG_FUNCTION_ARGS)
 {
@@ -177,7 +172,7 @@ pg_laplace_highway_match(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_highway_popcount);
 
-/* (mask bytea) -> int4; NULL -> 0 (matches the prior SQL's COALESCE). */
+/* (mask bytea) -> int4 set-bit count; NULL -> 0. */
 Datum
 pg_laplace_highway_popcount(PG_FUNCTION_ARGS)
 {
@@ -209,12 +204,10 @@ pg_laplace_highway_popcount(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_bits);
 
-/* (mask bytea) -> int4[] of set bit positions; NULL -> NULL. This is the
- * indexable representation of a mask: a GIN index over these arrays serves
- * bit-overlap queries (bits && band_bits) with compressed posting lists that
- * handle massive key duplication properly -- the structural replacement for
- * the removed highway_hash indexes, whose overflow chains cost ~700 buffer
- * hits per write on a 66-distinct-value column (Issue 36). */
+/* (mask bytea) -> int4[] of set bit positions, ascending; NULL -> NULL. The
+ * indexable form of a mask: a GIN index over these arrays answers bit overlap
+ * (bits && band_bits), and its posting lists absorb the heavy key duplication
+ * of a 256-value domain. */
 Datum
 pg_laplace_highway_mask_bits(PG_FUNCTION_ARGS)
 {
@@ -252,16 +245,10 @@ pg_laplace_highway_mask_bits(PG_FUNCTION_ARGS)
 PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_from_bits);
 
 /*
- * (bits int4[]) -> bytea(32): the inverse of laplace_highway_mask_bits. Build a
- * 256-bit mask by setting one bit per position, LSB-first within each byte
- * (mask[b>>3] |= 1 << (b&7)) -- byte-identical to the prior plpgsql set_bit()
- * loop, whose numbering PostgreSQL defines as 1 << (n % 8) at byte n / 8, and
- * exactly the numbering laplace_highway_mask_bits decodes via ctz. Out-of-range
- * (or NULL) positions are skipped. NULL input -> NULL; a mask with no bits set
- * -> NULL (the plpgsql any_set contract), so an empty or all-skipped array
- * yields NULL, never a zero mask. Used by the batched bit-clearing repair;
- * ingest deposits masks directly. The round trip
- * mask_bits(mask_from_bits(x)) = sorted(x) and emitted bytes are preserved.
+ * (bits int4[]) -> bytea(32): inverse of laplace_highway_mask_bits, same bit
+ * numbering (PostgreSQL set_bit order). NULL and out-of-range positions are
+ * skipped. NULL input, or no bit set, -> NULL, never a zero mask.
+ * mask_bits(mask_from_bits(x)) = sorted distinct x.
  */
 Datum
 pg_laplace_highway_mask_from_bits(PG_FUNCTION_ARGS)
@@ -317,10 +304,10 @@ require_highway_table(const char *fn)
                          "(install-extensions.cmd stages and configures it).")));
 }
 
-/* Availability is a routing decision for recoverable writes. The loader has
- * no SQL side effects: catch only its configuration failure, retain the exact
- * work, and leave cancellation, allocation and database errors untouched.
- * Read operators that require a registry still use require_highway_table. */
+/* Whether the highway registry perfcache is mapped. Only its configuration
+ * error is caught (the loader has no SQL side effects); cancellation,
+ * allocation and database errors propagate. Writers use this to retain work
+ * when the registry is absent; readers call require_highway_table. */
 static bool
 highway_registry_available(void)
 {
@@ -349,16 +336,17 @@ highway_registry_available(void)
 
 PG_FUNCTION_INFO_V1(pg_laplace_highway_ready);
 
-/* () -> bool: availability, not authorization to discard a deposit. */
+/* () -> bool: registry availability. A deposit made while false is retained,
+ * not discarded. */
 Datum
 pg_laplace_highway_ready(PG_FUNCTION_ARGS)
 {
     PG_RETURN_BOOL(highway_registry_available());
 }
 
-/* One prepared, set-sized SPI write, only on the unavailable-registry path.
- * PostgreSQL persists the already-known pairs; it computes no Highway bits.
- * Pair order prevents opposite unique-index acquisition by overlapping callers. */
+/* Without a registry, the (entity, relation) pairs are persisted as pending in
+ * one set write; no bits are computed. Inserting in pair order keeps
+ * overlapping callers from taking unique-index locks in opposite order. */
 static void
 deposit_retain_pending(ArrayType *entities, ArrayType *types)
 {
@@ -371,8 +359,7 @@ deposit_retain_pending(ArrayType *entities, ArrayType *types)
         elog(ERROR, "highway_mask_deposit: pending SPI_connect failed");
     if (!pending_plan)
     {
-        /* This is an INSERT: explicitly retain write-plan options, not
-         * CURSOR_OPT_PARALLEL_OK. The family SELECT below is independent. */
+        /* An INSERT plan: no CURSOR_OPT_PARALLEL_OK. */
         SPIPlanPtr plan = SPI_prepare_cursor(
             laplace_sql_query_text("entities.mask_pending"), 2, argtypes, 0);
         if (!plan || SPI_keepplan(plan) != 0)
@@ -386,14 +373,13 @@ deposit_retain_pending(ArrayType *entities, ArrayType *types)
     laplace_spi_finish(spi_top);
 }
 
-/* Both incremental deposits and authoritative refresh use this one native
- * relation-to-mask law. Canonical slots are memory lookups; unresolved dynamic
- * relation families are fetched together through one prepared SPI operation. */
+/* Relation id -> mask bit, shared by deposit and refresh. A governed relation
+ * is a registry lookup in memory. A relation not in the registry takes the bit
+ * of the registered family it IS_A in consensus, read for all misses in one
+ * prepared set read. `types` must be sorted by id. */
 static void
 deposit_resolve_types(highway_deposit_type *types, int n_types, bool *spi_top)
 {
-    /* Canonical relations resolve without SQL. Only misses can be dynamic
-     * family members and need the single IS_A consensus probe below. */
     {
         int n_missing = 0;
         for (int i = 0; i < n_types; i++)
@@ -482,12 +468,11 @@ deposit_resolve_types(highway_deposit_type *types, int n_types, bool *spi_top)
 }
 
 /*
- * Native deposit lane. Pair reduction and all highway-table work stay in C;
- * SPI is used for durable pending pairs when unavailable, dynamic-relation
- * family lookup and one indexed target read. The shared native writer locks
- * and updates those physical tuples in bytewise identity/tier order,
- * rechecking masks after lock waits. The caller owns the apply_write_epoch
- * bump -- this function deliberately does not advance it.
+ * (entities bytea[], types bytea[]) -> int8: fold the relation bit of each
+ * zipped (entity, relation) pair into the entity's mask during ingest. Pairs
+ * reduce in memory to one 256-bit delta per entity; the shared native writer
+ * locks and updates rows in bytewise id order and rechecks masks after lock
+ * waits. Returns entity masks updated. The caller advances apply_write_epoch.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_deposit);
 
@@ -526,9 +511,8 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
                  errmsg("highway_mask_deposit: entity/type arrays must share length (%d vs %d)",
                         n_entities, n_types_in)));
 
-    /* Validate before lookup OR retention. An unavailable registry must not
-     * change the identity contract or silently truncate a zipped batch.
-     * NULL elements contribute no pair, on either execution path. */
+    /* Every id is validated before either path, so both apply the same
+     * identity contract. A pair with a NULL side contributes nothing. */
     for (int i = 0; i < n_entities; i++)
         if (!entity_nulls[i])
         {
@@ -547,7 +531,7 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
     if (!highway_registry_available())
     {
         deposit_retain_pending(entity_arr, type_arr);
-        /* Zero means no entity masks updated, not zero retained work. */
+        /* Zero masks updated; the pairs are retained as pending. */
         PG_RETURN_INT64(0);
     }
 
@@ -578,8 +562,8 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
 
     deposit_resolve_types(types, n_types, &spi_top);
 
-    /* Map the zipped arrays and collapse duplicate entities to one 256-bit
-     * delta. qsort is bytea's memcmp order, matching the writer and lock ORDER. */
+    /* One OR-ed delta per entity, sorted in bytea memcmp order: the order the
+     * writer locks in. */
     deposits = (highway_deposit_entity *)
         palloc0(sizeof(*deposits) * n_entities);
     for (int i = 0; i < n_entities; i++)
@@ -631,11 +615,10 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(updated);
 }
 
-/* Authoritative population/clearing is native too. PostgreSQL only selects the
- * incident identity/type set. Pages bound marshalling, not coverage: the cursor
- * is consumed to exhaustion and each distinct relation is resolved once for
- * the whole request. Every requested entity has a zero-initialized result even
- * when it has no remaining cells; those zeros explicitly clear stale masks. */
+/* Refresh recomputes each requested entity's mask from every consensus cell
+ * incident to it, as subject or object. The cursor is read in pages to bound
+ * marshalling, to exhaustion; each distinct relation resolves once per
+ * request. An entity with no incident cells gets a zero mask, which clears it. */
 #define HIGHWAY_REFRESH_PAGE 8192
 
 typedef struct highway_refresh_pair
@@ -654,10 +637,10 @@ typedef struct HighwayRefreshContext
     bool *spi_top;
 } HighwayRefreshContext;
 
-/* The physical writer has already locked its complete captured target set.
- * A readonly SPI cursor otherwise inherits the outer statement's older
- * snapshot, including time spent waiting for those locks. Refresh it only at
- * READ COMMITTED, and restore the caller's snapshot on success or error. */
+/* Called by the writer after it has locked the whole target set. A read-only
+ * SPI cursor would otherwise see the outer statement's snapshot, taken before
+ * those lock waits, so a fresh snapshot is pushed (READ COMMITTED only) and
+ * popped on success or error. */
 static void
 highway_refresh_recompute(void *value)
 {
@@ -732,7 +715,7 @@ highway_refresh_recompute(void *value)
                     memcpy(missing[missing_count++].id, pairs[i].type, HASH128_BYTES);
                 }
             }
-            /* Never retain SPI tuple pointers across the nested family query. */
+            /* Tuples are freed before the nested family read reuses SPI. */
             SPI_freetuptable(SPI_tuptable);
             if (missing_count)
             {
@@ -890,7 +873,7 @@ pg_laplace_highway_band_mask(PG_FUNCTION_ARGS)
 PG_FUNCTION_INFO_V1(pg_laplace_relation_highway_bit);
 
 /* (type_id bytea) -> int4 bit position, or NULL if the relation is not in the
- * highway table (i.e. not a governed canonical). */
+ * governed registry. */
 Datum
 pg_laplace_relation_highway_bit(PG_FUNCTION_ARGS)
 {
@@ -924,8 +907,8 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_relation_type_id);
 
-/* (name text) -> bytea: the content id of a relation label, from the native relation
- * law. A dynamic label that is not a single word composes through the Tier-0 spine. */
+/* (name text) -> bytea: a relation label's content id from the native relation
+ * law; a label outside the registry composes through Tier-0 like any content. */
 Datum
 pg_laplace_relation_type_id(PG_FUNCTION_ARGS)
 {
@@ -985,9 +968,9 @@ pg_laplace_entity_type_registry(PG_FUNCTION_ARGS)
 }
 
 /*
- * A type id's display label: the governed relation or entity-type registry's label,
- * read natively (HAS_PART -> "has part"). A type is a registry code, never content to
- * render; an id neither registry declares has no label (NULL).
+ * A type id's label from the relation or entity-type registry: the canonical
+ * name lowercased with '_' as ' '. A type is a registry code, not content, so
+ * an id neither registry declares has no label (NULL).
  */
 static text *
 type_label_text(Datum id_datum)
@@ -1060,10 +1043,10 @@ pg_laplace_type_label_batch(PG_FUNCTION_ARGS)
 PG_FUNCTION_INFO_V1(pg_laplace_relation_registry);
 
 /*
- * laplace.relation_registry(): the governed relation registry, one row per
- * assigned highway bit, read from the compiled relation law and the highway
- * perfcache. Relations are registry bits, not substrate entities, so readers
- * that need "every relation type" enumerate this instead of scanning entities.
+ * laplace.relation_registry(): one row per assigned highway bit, from the
+ * compiled relation law and the highway perfcache: bit, type id, name, band,
+ * rank, symmetry, family root, parent. Relations are registry bits, not
+ * entities; enumerating relation types reads this, not the entity table.
  */
 Datum
 pg_laplace_relation_registry(PG_FUNCTION_ARGS)
@@ -1113,16 +1096,11 @@ pg_laplace_relation_registry(PG_FUNCTION_ARGS)
 }
 
 /*
- * consensus.band_edges(band, min_eff_mu, limit): every unrefuted consensus
- * edge whose relation type belongs to the given salience band, strongest
- * first. This is the plane-selection primitive the foundry/synthesis and any
- * band-scoped reader should use.
- *
- * Shape follows the define_fast pattern: the band's relation-type id set is
- * computed entirely in memory from the highway table (no DB round trip —
- * bit -> canonical name -> BLAKE3 type id via the static relation law), then
- * ONE indexed SPI query does the fetch. consensus_type_btree carries the
- * type_id = ANY($1) filter; the eff_mu expression index carries the ordering.
+ * consensus.band_edges(band, min_eff_mu, limit): consensus cells with an
+ * object, not refuted, whose relation is in the given salience band, strongest
+ * conservative standing (rating - 2 rd) first. The band's relation ids come
+ * from the highway table in memory; one kept, indexed set read fetches the
+ * cells, each relation contributing at most `limit` before the merged limit.
  */
 static SPIPlanPtr band_edges_plan = NULL;
 
@@ -1153,8 +1131,7 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
 
     require_highway_table("consensus_band_edges");
 
-    /* Collect the band's relation-type ids from the highway table: at most
-     * 256 bit slots, resolved in memory with zero DB round trips. */
+    /* The band's relation ids, from at most 256 registry bits. */
     type_ids = (Datum *) palloc(sizeof(Datum) * 256);
     for (int bit = 0; bit < 256; bit++)
     {

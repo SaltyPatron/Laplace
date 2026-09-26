@@ -4,9 +4,8 @@ using Xunit;
 namespace Laplace.Agents.Tests;
 
 /// <summary>
-/// Routing and credential resolution. Every case here is a wrong answer this lane
-/// can give without failing: the wrong vendor billed, a key read from the wrong
-/// variable, or a secret written somewhere the deploy publishes.
+/// Routing and credential resolution: which provider serves a reference, which
+/// variable supplies its key, and that the config file never holds a secret.
 /// </summary>
 public sealed class AgentCatalogTests
 {
@@ -63,9 +62,8 @@ public sealed class AgentCatalogTests
     }
 
     /// <summary>
-    /// OpenRouter's own model ids are vendor/model. Splitting on every slash would
-    /// route 'openrouter/anthropic/claude-x' to Anthropic directly — a different
-    /// vendor, a different bill, and a key that is probably not set.
+    /// A qualified reference splits on the first slash only, so a provider whose model
+    /// ids contain a slash keeps them intact.
     /// </summary>
     [Fact]
     public void Qualified_reference_splits_once_so_nested_vendor_ids_survive()
@@ -90,8 +88,8 @@ public sealed class AgentCatalogTests
     }
 
     /// <summary>
-    /// A dozen hosts serve llama. Inferring one would silently bill the wrong
-    /// vendor, so the ambiguity is an error that names the way out.
+    /// A bare model name with no vendor prefix is not inferred; the error names how to
+    /// qualify it.
     /// </summary>
     [Fact]
     public void Ambiguous_bare_name_is_refused_with_the_qualified_form_in_the_message()
@@ -170,10 +168,7 @@ public sealed class AgentCatalogTests
     }
 
     /// <summary>
-    /// The deploy syncs agents.json into /opt/laplace/app; laplace-api.env is
-    /// excluded from that payload precisely because it holds secrets. A key pasted
-    /// into the config would ride the publish, so the parse refuses it outright
-    /// rather than working and being wrong later.
+    /// An inline api_key in agents.json is refused at parse.
     /// </summary>
     [Fact]
     public void Inline_api_key_in_the_config_is_refused()
@@ -223,9 +218,8 @@ public sealed class AgentCatalogTests
     }
 
     /// <summary>
-    /// The silent version of this loses every alias and reports the catalog as
-    /// merely empty — which reads as "my agents disappeared", and then routes the
-    /// call to a different model than the one that was configured.
+    /// A missing explicit LAPLACE_AGENTS_CONFIG path throws instead of continuing the
+    /// search.
     /// </summary>
     [Fact]
     public void Explicit_config_path_that_does_not_exist_is_an_error_not_a_fall_through()

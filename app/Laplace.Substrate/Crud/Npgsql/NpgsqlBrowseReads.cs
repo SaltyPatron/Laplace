@@ -5,9 +5,9 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Product-browse reads. SQL here only orchestrates installed substrate operators and
-/// batch realization; candidate generation/ranking remains in the extension so web,
-/// API, CLI and direct SQL do not grow separate search laws.
+/// Browse page read. The installed <c>browse.page</c> operator generates, ranks and pages
+/// candidates; this class binds that call and realizes labels and type labels for the
+/// selected page in one batch, so every surface reads the same ranking.
 /// </summary>
 public static class NpgsqlBrowseReads
 {
@@ -52,8 +52,7 @@ public static class NpgsqlBrowseReads
             }, ct: ct, label: "browse_named_entities", onError: onError);
         if (rows.Count == 0) return [];
 
-        // Transport the already-selected page to the canonical batch realizers.
-        // Selection and ordering remain native; no per-row database calls.
+        // One batch realizes the page's labels and type labels in page order.
         var labels = await NpgsqlRead.ReadBatchRowsAsync(conn,
             SqlCatalog.Get("display.labels"),
             p => p.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = rows.Select(r => r.Id).ToArray(),

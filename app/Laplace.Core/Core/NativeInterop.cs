@@ -6,11 +6,9 @@ public static unsafe partial class NativeInterop
 {
     private const string Library = "laplace_core";
 
-    // The Syzygy prober is INGEST-SIDE tooling in its own library — deliberately not
-    // laplace_core, which the laplace_substrate extension links into every PostgreSQL
-    // backend. It is also OPTIONAL: absent the vendored prober the library is not
-    // built, and callers see DllNotFoundException, which the lane treats exactly like
-    // a missing tablebase directory (SyzygyNative.Available).
+    // The tablebase prober is a separate library, not laplace_core, so it is never linked
+    // into PostgreSQL backends through the laplace_substrate extension. It is built only
+    // when the vendored prober is present; otherwise calls raise DllNotFoundException.
     private const string SyzygyLibrary = "laplace_syzygy";
 
     [LibraryImport(Library, EntryPoint = "laplace_core_version")]
@@ -35,8 +33,8 @@ public static unsafe partial class NativeInterop
     internal static partial void Hash128Zero(Hash128* outHash);
 
     // Syzygy tablebase probe kernel (engine/core/src/syzygy.c over the vendored
-    // Fathom prober, built as the separate laplace_syzygy library). Init/free/
-    // root-probe are serialized natively; WDL probes are lock-free once initialized.
+    // Fathom prober, built as the separate laplace_syzygy library). Callers serialize
+    // every entry point on SyzygyNative's mapping gate.
     [LibraryImport(SyzygyLibrary, EntryPoint = "laplace_syzygy_init", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int SyzygyInit(string path);
 
@@ -79,7 +77,7 @@ public static unsafe partial class NativeInterop
     // The draw threshold and the outcome rule live in attestation_engine.c and are
     // called, not restated. SuppressGCTransition: both are leaf integer functions
     // with no allocation, no callback and no blocking, so the full GC transition
-    // costs more than the work — this is on the per-cell merge path.
+    // costs more than the work on the per-cell merge path.
     [LibraryImport(Library, EntryPoint = "laplace_attestation_outcome_from_totals_fp")]
     [System.Runtime.InteropServices.SuppressGCTransition]
     internal static partial int LaplaceAttestationOutcomeFromTotalsFp(
@@ -148,7 +146,7 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "codepoint_table_copy_receipt")]
     internal static partial int CodepointTableCopyReceipt(Hash128* outReceipt);
 
-    // GH #822 — chess position floor (native only; peer of codepoint_table_load_perfcache).
+    // Game-position perfcache map, loaded and read natively like the codepoint perfcache.
     [LibraryImport(Library, EntryPoint = "chess_position_table_load", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int ChessPositionTableLoad(string path);
 
@@ -657,9 +655,8 @@ public static unsafe partial class NativeInterop
         nuint len,
         Hash128* outRootId);
 
-    // GH #904 — C twin of PhysicalityId.Compute / TierTree.CollapseIndex.
-    // Layout and collapse rule are identity axioms; these entry points exist so
-    // tests pin C# against the live native definitions instead of prose.
+    // Native definitions of PhysicalityId.Compute / TierTree.CollapseIndex. Layout and
+    // collapse rule are identity axioms; the managed forms are checked against these.
     [LibraryImport(Library, EntryPoint = "laplace_physicality_id_compute")]
     internal static partial void PhysicalityIdCompute(
         Hash128 entityId,
@@ -716,11 +713,8 @@ public static unsafe partial class NativeInterop
     }
 
     // --- Modality ladders above shared codepoint T0 (packaging buffers in, compose out) ---
-    // Identity is digit→number→… trajectories (docs/invention/modality-ladder-law.md).
-    // RGBA / PCM16 here are recovery inputs only — never forged T0 leaf mints.
-    // #1711 generalizes runtime acceleration beyond the current scalar ROM: compatible
-    // pixel/patch/region/image and audio cache modules can short-circuit lower compose,
-    // and video reuses those same modules rather than owning private cache identities.
+    // Identity is the digit→number→… composition trajectory. RGBA / PCM16 are recovery
+    // inputs only; they never mint Tier-0 leaves.
 
     [LibraryImport(Library, EntryPoint = "laplace_image_tree_build")]
     internal static partial int ImageTreeBuild(

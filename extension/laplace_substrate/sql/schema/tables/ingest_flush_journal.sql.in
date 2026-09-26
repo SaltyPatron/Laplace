@@ -11,15 +11,11 @@ CREATE TABLE IF NOT EXISTS ingest_flush_journal (
     applied_at      timestamptz  NOT NULL DEFAULT now()
 );
 
--- Existing installations predate source ownership. Those historical NULL rows stay
--- conservative (they cannot be attributed safely); every new working set records the
--- decomposer source so source eviction can retract its replay claims along with its data.
--- Replay-token v2 includes semantic row payloads and native intent-stage digests. The
--- writer checks a change's legacy v1 token before claiming v2, so upgrading cannot
--- silently reapply historical additive evidence. Because v1 cannot prove semantic
--- payload equality, that hit is an explicit reconciliation-required failure rather
--- than accepted replay. The historical claim remains untouched until a governed
--- source reconciliation can migrate or rebuild it with a provable v2 token.
+-- source_id names the decomposer source of the working set so source eviction
+-- retracts its replay tokens with its evidence. A NULL source_id cannot be
+-- attributed and is never retracted by eviction. The writer checks both token
+-- versions before claiming one; a hit on a token that cannot prove payload
+-- equality fails as reconciliation-required instead of replaying.
 ALTER TABLE ingest_flush_journal
     ADD COLUMN IF NOT EXISTS source_id bytea
     CHECK (source_id IS NULL OR octet_length(source_id) = 16);
@@ -37,10 +33,9 @@ CREATE INDEX IF NOT EXISTS ingest_flush_journal_source
     ON ingest_flush_journal (source_id)
     WHERE source_id IS NOT NULL;
 
--- A working set may be one atomic analysis over several independent witnesses.
--- The receipt owns all participating sources while each evidence row retains its
--- actual source_id.  The nullable scalar above remains the compatible fast path
--- for historical and single-source receipts.
+-- A working set may be one atomic analysis over several witnesses: the receipt
+-- owns every participating source while each evidence row keeps its own
+-- source_id. The scalar source_id above covers single-source receipts.
 CREATE TABLE IF NOT EXISTS ingest_flush_journal_sources (
     working_set_id bytea NOT NULL
         REFERENCES ingest_flush_journal(working_set_id) ON DELETE CASCADE,

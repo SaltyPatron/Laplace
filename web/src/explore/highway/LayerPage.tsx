@@ -8,12 +8,9 @@ import { findLayer } from './layers';
 import styles from './Highway.module.css';
 
 /**
- * One division of the highway.
- *
- * Standings are real rated edges from /v1/query/leaders for the band that
- * carries this layer, each side clickable through to the entity it names — the
- * roster, not a picture of one. A layer with no API read renders its gap
- * explicitly instead of an empty table.
+ * One highway layer. Standings are the rated consensus cells from /v1/query/leaders for the
+ * layer's band, each endpoint linking to its entity. A layer with `readGap` renders that gap
+ * instead of a table.
  */
 export function LayerPage() {
   const { slug } = useParams();
@@ -85,9 +82,7 @@ export function LayerPage() {
         </Panel>
       ) : (
         <Panel title="Standings — strongest witnessed edges in this division">
-          {/* A layer whose relations are spread across bands has no single
-              leaders read; say that rather than spinning on a fetch that the
-              effect never starts. */}
+          {/* No band means no leaders read; the effect never fetches for it. */}
           {bandNo == null ? (
             <Muted>
               This division&rsquo;s relations span several salience bands, so there is no single

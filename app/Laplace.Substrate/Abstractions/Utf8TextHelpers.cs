@@ -1,8 +1,7 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Generic UTF-8 span helpers shared by streaming line-oriented decomposers
-/// (extracted from CILIDecomposer; nothing here is CILI-specific).
+/// UTF-8 span helpers shared by streaming line-oriented providers.
 /// </summary>
 public static class Utf8TextHelpers
 {

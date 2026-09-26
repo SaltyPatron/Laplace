@@ -5,9 +5,9 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Live product smoke for the seeded conversation surface. This is deliberately
-/// Tier=live, not Tier=db: database health does not imply that lexical/knowledge
-/// seeds are resident or that the conversational forward path is ready.
+/// Live: a conversation turn under a canonical session id returns rows from the seeded
+/// substrate. Tier=live, not Tier=db: database health does not imply the seeds the
+/// forward pass reads are resident.
 /// </summary>
 [Trait("Tier", "live")]
 public sealed class RecallSessionLiveTests

@@ -38,14 +38,11 @@ export interface ChatChunk {
 
 
 /**
- * One SSE `data:` frame into a chunk — or a throw.
+ * One SSE `data:` payload into a chunk, or a throw.
  *
- * A failing substrate does not close the stream: the endpoint answers 200,
- * writes `data: {"error":{…}}`, then `data: [DONE]`. Parsed blindly as a
- * ChatChunk that frame has no `choices` and no `laplace`, so every render
- * branch skips it and the turn ends with empty content and no error — the
- * reply silently disappears in front of the user. Error frames are raised
- * here so the one catch in the caller reports them like any other failure.
+ * A failure after the 200 status arrives in-stream as `data: {"error":{…}}`
+ * followed by `[DONE]`. That frame has no `choices`, so it is raised here as
+ * PaymentRequiredError or ApiError rather than yielded as an empty chunk.
  */
 function parseFrame(data: string, status: number): ChatChunk {
   let parsed: unknown;
@@ -77,8 +74,8 @@ export async function* streamChat(
     body: JSON.stringify(payload),
     signal,
   });
-  // The session key arrives on the response headers before the stream body —
-  // capture it so the next turn continues the same substrate session.
+  // The session key is in the response headers, before any body frame; the
+  // caller keeps it so its next turn is admitted into the same session.
   const sessionKey = res.headers.get('X-Laplace-Session');
   if (sessionKey && onSession) onSession(sessionKey);
   if (!res.ok) {

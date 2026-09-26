@@ -6,10 +6,9 @@ using static Laplace.Decomposers.Abstractions.Tests.IngestPipelineTestHelpers;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Rule #8 working-set mode: one builder spans the stream, exactly one
-/// SubstrateChange is emitted, each distinct id is probed at most once per
-/// working set, and stage witness-dedup collapses repeated content to one
-/// staged row regardless of how many records carried it.
+/// Working-set mode: one builder spans the stream, exactly one SubstrateChange is
+/// emitted, each distinct id is probed at most once per working set, and stage dedup
+/// converges repeated content to one staged row however many records carried it.
 /// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class WorkingSetPipelineTests
@@ -55,12 +54,10 @@ public sealed class WorkingSetPipelineTests
         Assert.Single(wsChanges);
         Assert.Equal(20, wsChanges[0].Metadata.InputUnitsConsumed);
 
-        // Cross-batch stage dedup is the point of working-set mode: the 20
-        // texts share words ("working", "set", ...) that batch mode
-        // re-stages once per builder (its per-stage witness set resets every
-        // 4 records) and working-set mode stages exactly once. A single
-        // batch-mode builder spanning all rows has the same dedup scope and
-        // must match exactly; the multi-batch run must be strictly larger.
+        // The 20 texts share words ("working", "set", ...). Batch mode re-stages them
+        // once per builder (its witness set resets every 4 records); working-set mode
+        // stages them once. A single batch-mode builder over all rows has the same dedup
+        // scope and must match exactly; the multi-batch run must be strictly larger.
         var singleBuilderBaseline = await RunAsync(records, DefaultConfig(
             new ProbeTrackingReader(present: false), batchSize: records.Count, probeChunk: 8));
         Assert.Equal(ContentEntityCount(singleBuilderBaseline), ContentEntityCount(wsChanges));
@@ -208,8 +205,8 @@ public sealed class WorkingSetPipelineTests
         Assert.Equal(24576, shared.WorkingSetRecordCap);
         Assert.Equal(24576, config.WorkingSetRecordCap);
 
-        // The cap controls when the working set closes; it no longer preallocates
-        // that whole population into every file-local builder.
+        // The cap decides when the working set closes; it does not size every
+        // file-local builder's preallocation.
         var capacities = shared.ResolveBuilderCapacities();
         Assert.Equal(40, capacities.Entities);
         Assert.Equal(32, capacities.Physicalities);

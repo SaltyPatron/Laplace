@@ -227,28 +227,19 @@ public class CpuTopologyTests
 
         Assert.True(snap.LogicalProcessorCount >= 1);
 
-        // Detect() reports the machine's REAL topology (hybrid-aware, via sysfs).
-        // On a hybrid CPU under a cgroup/affinity cap it legitimately exceeds the
-        // process-visible Environment.ProcessorCount — e.g. a 12-core quota on a
-        // 32-thread hybrid box (14900KS: 8 P + 16 E) gives Detect()=32 but
-        // ProcessorCount=12. So do NOT assert equality with the process count (a
-        // false invariant across machines); assert usable + internally consistent.
+        // Detect() reads host topology from sysfs, which can exceed the process-visible
+        // Environment.ProcessorCount under a cgroup or affinity cap, so only internal
+        // consistency is asserted.
         Assert.True(snap.LogicalProcessorCount >= snap.PerformanceCoreCount);
 
     }
 
-    // GH #986. TryDetectLinuxSysfsPools keys on /sys/devices/cpu_core/cpus, which the
-    // kernel publishes only for hybrid P/E parts -- it was written against a 14900KS. On a
-    // non-hybrid CPU that file is absent, the detector returns false SILENTLY (the catch
-    // only fires on an exception), and detection fell through to
-    // Uniform(Environment.ProcessorCount): SMT threads reported as physical cores, with
-    // every ingest pool sized from a doubled base. Measured live on hart-server, an
-    // i7-6850K with 6 cores / 12 threads: p_physical=12.
+    // On a non-hybrid Linux CPU (no /sys/devices/cpu_core/cpus) the generic sysfs
+    // detector still succeeds and counts physical cores, not SMT threads.
     [Fact]
     public void NonHybridLinux_ReportsPhysicalCores_NotSmtThreads()
     {
-        // Not a skip framework here: on a non-Linux host there is nothing to assert and
-        // the detector is not reachable, so the test is vacuously satisfied.
+        // Vacuous off Linux: the detector is unreachable there.
         if (!OperatingSystem.IsLinux() || !File.Exists("/sys/devices/system/cpu/present")) return;
 
         Assert.True(CpuTopology.TryDetectLinuxGenericSysfsPools(out var pools),
@@ -257,8 +248,7 @@ public class CpuTopologyTests
         Assert.False(pools!.IsHybrid);
         Assert.True(pools.PhysicalPCores >= 1);
 
-        // A physical core is never MORE numerous than the logical processors it hosts.
-        // The old fallback reported exactly logicalCount, which is the bug.
+        // Physical cores never outnumber the logical processors they host.
         Assert.True(pools.PhysicalPCores <= pools.LogicalCount,
             $"physical {pools.PhysicalPCores} exceeds logical {pools.LogicalCount}");
 
@@ -268,10 +258,8 @@ public class CpuTopologyTests
             Assert.Contains(i, allowed);
     }
 
-    // sysfs describes the HOST. A container under a cpuset still sees every host CPU in
-    // /sys/devices/system/cpu/present, so sizing from `present` would give a 2-CPU
-    // container the pools of a 64-core machine. Cpus_allowed_list is what the process may
-    // actually run on, and it is what the detector reads.
+    // The detector reads Cpus_allowed_list (what this process may run on), not sysfs
+    // `present`, which lists every host CPU even inside a cpuset-limited container.
     [Fact]
     public void AllowedCpus_ComeFromTheProcessAffinityMask()
     {
@@ -283,15 +271,8 @@ public class CpuTopologyTests
         Assert.Equal(allowed.OrderBy(x => x), allowed);
     }
 
-    // The REPORTED core count, not the detector's. GH #986 survived a first fix because
-    // DetectPlatform discarded pools.PhysicalPCores on any non-hybrid CPU and returned
-    // Environment.ProcessorCount -- the LOGICAL count -- as the physical one. Detection
-    // resolved 6 primaries on this i7-6850K and the reported value was 12 regardless.
-    //
-    // Every pool derives from PerformanceCoreCount, and the entire suite passed at BOTH
-    // values, so nothing in it could tell 6 from 12. This can: where sysfs says a core has
-    // more than one thread sibling, physical MUST be strictly below logical. Verified to
-    // fail on the pre-fix body with "got physical=12 logical=12".
+    // The reported CpuTopology.PerformanceCoreCount, from which every pool is sized, is
+    // strictly below LogicalProcessorCount whenever sysfs shows cpu0 with SMT siblings.
     [Fact]
     public void ReportedPhysicalCores_AreCoresNotThreads()
     {

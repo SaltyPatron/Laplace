@@ -12,10 +12,9 @@ extern "C" {
 
 #define LAPLACE_PERFCACHE_MAGIC 0x4652504Cu
 /*
- * v4 changes the canonical tier-0 placement law: DUCET/UCA rank still names the
- * atom ordering, but coordinates use prefix-stable open Super-Fibonacci
- * (radical-inverse radius) rather than bounded rank/N latitude.  Reject v3
- * blobs so the old banded geometry can never be mistaken for the current floor.
+ * Version 4 tier-0 placement: DUCET/UCA rank orders the atoms and coordinates use
+ * prefix-stable open Super-Fibonacci (radical-inverse radius), so admitting more
+ * atoms never moves an existing one. A blob with any other version is rejected.
  */
 #define LAPLACE_PERFCACHE_VERSION 4u
 #define LAPLACE_PERFCACHE_RECORD_COUNT 1114112u

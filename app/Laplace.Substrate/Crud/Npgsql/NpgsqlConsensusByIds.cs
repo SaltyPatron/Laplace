@@ -5,21 +5,14 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// <c>consensus.by_ids($1, $2)</c> — a batch consensus lookup keyed by a
-/// caller-built edge-id array plus one relation type (the partition prune). Four
-/// Chess call sites (<c>LearnedPst</c>, <c>SubstrateRootBias</c>,
-/// <c>SubstrateStateValuer</c>, <c>SubstrateTurnHost</c>) each hand-wrote this exact
-/// open-connection/create-command/bind-two-params/read/build-dictionary block —
-/// identical but for which columns they happened to project and whether they awaited.
-/// One implementation, both sync (engine search calls this off the hot path but
-/// still synchronously) and async (the two call sites already on an async chain).
+/// <c>consensus.by_ids($1, $2)</c>: folded standing for a set of edge ids under one
+/// relation type, the type being the partition key that prunes the read. Synchronous and
+/// asynchronous forms bind the same statement.
 /// </summary>
 public static class NpgsqlConsensusByIds
 {
     /// <summary>
-    /// A row of <c>consensus_by_ids</c>. All four callers want <see cref="EffMu"/> and
-    /// <see cref="Witnesses"/>; only one also wants <see cref="Rd"/> — cheap enough to
-    /// always project rather than keep two SQL strings in sync.
+    /// One consensus cell's effective rating, deviation and witness count.
     /// </summary>
     public readonly record struct Row(double EffMu, double Rd, double Witnesses);
 
@@ -32,7 +25,7 @@ public static class NpgsqlConsensusByIds
         SELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)
         """;
 
-    /// <summary>Synchronous — for the engine search path, which is not async.</summary>
+    /// <summary>Synchronous read for callers inside non-async search.</summary>
     public static Dictionary<Hash128, Row> Read(
         NpgsqlDataSource dataSource, IReadOnlyCollection<Hash128> edgeIds, Hash128 relationType)
     {
@@ -48,9 +41,8 @@ public static class NpgsqlConsensusByIds
     }
 
     /// <summary>
-    /// Read two independently partition-pruned relation batches in one database command.
-    /// Chess root evaluation needs exact state transitions and typed move outcomes together;
-    /// opening two connections and paying two client/server turns for one decision is needless.
+    /// Reads two relation batches, each pruned to its own partition, in one command and one
+    /// round trip; the leading discriminator column routes each row to its batch.
     /// </summary>
     public static (Dictionary<Hash128, Row> First, Dictionary<Hash128, Row> Second) ReadPair(
         NpgsqlDataSource dataSource,

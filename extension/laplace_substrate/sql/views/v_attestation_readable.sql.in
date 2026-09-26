@@ -1,12 +1,7 @@
--- Attestations with the four endpoint labels resolved once. The inspect
--- attestation family kept re-joining entities / calling label_or_hex per
--- column. label_or_hex owns the id-display decision (hex fallback); this view
--- does not invent a second renderer.
---
--- PERFORMANCE CONTRACT: each row pays up to five label_or_hex calls. Use ONLY
--- with a selective predicate and LIMIT (inspect/UI). Never as the base of a
--- bulk fold, ingest, or unbounded join — that turns a cheap scan into a render
--- storm.
+-- Attestations with their five endpoint ids realized through label_or_hex,
+-- the one id-display rule. Each row pays five realizations: read it only under
+-- a selective predicate and LIMIT, never as the base of a fold, ingest, or
+-- unbounded join.
 CREATE OR REPLACE VIEW laplace.v_attestation_readable AS
 SELECT a.id,
        a.subject_id,

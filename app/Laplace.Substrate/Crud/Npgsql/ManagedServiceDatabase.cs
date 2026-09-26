@@ -4,10 +4,11 @@ using global::Npgsql;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Managed Linux services never inherit a TCP/password database route from an
-/// optional environment file. Authentication still depends on the host's peer
-/// HBA/map; this is a connection-route guard, not a least-privilege role claim.
-/// STDIO, CLI and existing Windows clients retain their installed configuration.
+/// Database route for managed services: only the local peer socket route
+/// (<c>/var/run/postgresql</c>:5432, <c>laplace_admin</c>, database <c>laplace</c>, no
+/// password or passfile) is accepted, so a TCP/password route from an environment file
+/// is refused. Authentication is the host's peer HBA/map; this guards the route, not
+/// the role's privileges.
 /// </summary>
 public static class ManagedServiceDatabase
 {

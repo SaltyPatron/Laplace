@@ -10,30 +10,16 @@ namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
 /// PostgreSQL stores shared_buffers, effective_cache_size, temp_buffers and wal_buffers in
-/// BLOCK_SIZE units (8kB by default). A value that is not a multiple of 8kB is rounded, so
-/// the live setting never equals what was asked.
-///
-/// setup-host.sh compares the live setting against the machine-sized expectation, so it
-/// could NEVER pass:
-///
-///   emitted 32949791kB -> 4118723.875 blocks -> PG stores 32949792kB  X shared_buffers
-///   emitted 65899582kB -> 8237447.75  blocks -> PG stores 65899584kB  X effective_cache_size
-///
-/// Both were reported as "want machine-sized; not pending alone" on a host where the tuning
-/// HAD applied correctly, and the script's verdict was "Tuning NOT fully live" against a
-/// healthy cluster, every run.
-///
-/// This reads the emitter's own output rather than reimplementing the arithmetic, so it
-/// fails if any future block-unit GUC is added unaligned.
+/// BLOCK_SIZE units (8kB by default) and rounds any other value, so a live setting equals
+/// the emitted one only when the emitter aligns it. Runs <c>laplace cpu-topology
+/// --pg-tuning</c> and checks every emitted block-unit GUC is a multiple of 8kB.
 /// </summary>
 public sealed class PgTuningBlockAlignmentTests
 {
     private readonly ITestOutputHelper _out;
     public PgTuningBlockAlignmentTests(ITestOutputHelper o) => _out = o;
 
-    // PostgreSQL GUCs whose unit is BLOCK_SIZE. work_mem / maintenance_work_mem /
-    // autovacuum_work_mem are kB-unit and must NOT be aligned -- aligning them would be a
-    // different bug, silently shrinking them.
+    // GUCs whose unit is BLOCK_SIZE. The *_work_mem settings are kB-unit and not aligned.
     private static readonly string[] BlockUnitGucs =
         ["shared_buffers", "effective_cache_size", "temp_buffers", "wal_buffers"];
 
@@ -63,7 +49,7 @@ public sealed class PgTuningBlockAlignmentTests
     public void EveryBlockUnitGuc_IsAMultipleOfTheBlockSize()
     {
         string sql = EmitTuning();
-        // Emitting nothing must fail, not pass: a gate with no input verifies nothing.
+        // Empty emitter output fails rather than passing vacuously.
         Assert.Contains("ALTER SYSTEM", sql);
 
         int checkedGucs = 0;

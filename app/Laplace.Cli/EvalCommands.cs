@@ -18,9 +18,8 @@ internal static class EvalCommands
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
-        // Positive and negative fidelity populations are independent reads over the
-        // same pinned evaluation boundary. Do not serialize two server scans through
-        // one caller await chain; the datasource owns their bounded connection leases.
+        // Positive and negative fidelity populations are independent reads over the same
+        // evaluation boundary and run concurrently on separate pooled connections.
         var posTask = NpgsqlSubstrateReads.IngestFidelityPositiveScoresAsync(ds, relation, gt, n);
         var negTask = NpgsqlSubstrateReads.IngestFidelityNegativeScoresAsync(ds, relation, gt, n);
         await Task.WhenAll(posTask, negTask).ConfigureAwait(false);
@@ -44,10 +43,9 @@ internal static class EvalCommands
         return 0;
     }
 
-    // W5 seed-variance measurement through the installed surface
-    // (generation.probe): both lanes over one prompt and a seed set,
-    // one row per (lane, seed). Replay — the failure converse_compose's header
-    // gates wiring on — shows up mechanically as distinct==1 for a lane.
+    // Seed-variance measurement through generation.probe: both lanes over one prompt and
+    // a seed set, one row per (lane, seed). A lane that replays one output for every seed
+    // shows distinct==1.
     private static async Task<int> GenerationAsync(string[] args)
     {
         string prompt = args.Length > 1 ? args[1] : "dog";

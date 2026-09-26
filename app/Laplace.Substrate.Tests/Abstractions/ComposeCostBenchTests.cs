@@ -9,13 +9,10 @@ using Xunit.Abstractions;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Measures the per-surface cost of the compose-stage staging path
-/// (ContentTierSpine.TryStageIntoBuilder) at the sizes Wiktionary actually
-/// stages: word, gloss, etymology, document. Each iteration stages a UNIQUE
-/// surface into a fresh builder — the same shape as the full multilingual
-/// corpus, whose glosses/examples/translations are near-unique and miss every
-/// cache. Diagnostic for the 77 records/s full-file compose wall
-/// (build-logs/wiktionary-21gb-20260806-201419.log).
+/// Measures per-surface cost of the compose staging path
+/// (ContentTierSpine.TryStageIntoBuilder) at word, gloss, etymology and document
+/// sizes. Each iteration stages a unique surface into a fresh builder, so no
+/// cache hit hides the cost.
 /// </summary>
 [Collection("GrammarPerfcache")]
 [Trait("Tier", "perf")]
@@ -77,9 +74,9 @@ public sealed class ComposeCostBenchTests
     }
 
     /// <summary>
-    /// 11 threads staging unique surfaces concurrently, per-thread builders — the
-    /// compose fan's claimed shape. Linear scaling here means the 77 rec/s wall is
-    /// pipeline wiring; a collapse means shared native state serializes the fan.
+    /// Threads staging unique surfaces concurrently into per-thread builders, the
+    /// shape of the compose fan. Sublinear scaling means shared native state
+    /// serializes compose.
     /// </summary>
     [Theory]
     [InlineData(1000, 11, 200)]

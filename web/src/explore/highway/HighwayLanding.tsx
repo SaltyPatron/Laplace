@@ -7,13 +7,9 @@ import { HIGHWAY_LAYERS } from './layers';
 import styles from './Highway.module.css';
 
 /**
- * The highway, as a league table.
- *
- * The divisions are a fixed structural vocabulary — the layers the factorization
- * is built from — but unlike the mesh landing these are not blurb cards you can
- * only read: each is a real destination with a roster, standings and a named
- * read. Volume comes from /v1/query/bands so a division that has not been seeded
- * shows zero rather than looking populated.
+ * The highway layers as one table, each row linking to its layer page. Consensus volume
+ * per row is its band's `consensus_rows` from /v1/query/bands; the stored entity-mask
+ * accelerator's population state is read alongside.
  */
 export function HighwayLanding() {
   const [bands, setBands] = useState<RelationBand[] | null>(null);
@@ -87,9 +83,7 @@ export function HighwayLanding() {
                   {l.relations.length ? `${l.relations.length} type${l.relations.length === 1 ? '' : 's'}` : '—'}
                 </td>
                 <td className={styles.num}>
-                  {/* Three distinct states, not one ellipsis: no read at all,
-                      relations spread across bands so no single volume applies,
-                      and genuinely still loading. */}
+                  {/* No read, relations spanning bands, and still loading are distinct states. */}
                   {l.readGap ? '—'
                     : l.band == null ? <span className={styles.empty}>spans bands</span>
                     : error ? '—'

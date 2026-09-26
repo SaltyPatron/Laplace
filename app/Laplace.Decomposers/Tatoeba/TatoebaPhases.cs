@@ -8,24 +8,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Tatoeba;
 
 /// <summary>
-/// One Tatoeba file, one phase. Sentences run to completion, then links.
-///
-/// WHY PHASES AND NOT A PRELUDE: links.csv references sentences by row id, so the link
-/// lane needs id -> content root. The first cut built that map in OnInitializedAsync by
-/// streaming sentences.csv and resolving every root up front — which resolved all 13.26M
-/// roots a SECOND time (the sentence lane already computes every one of them) and blocked
-/// the whole ingest for ~6.7 minutes with no output at all. MEASURED on the live box:
-/// 13 minutes elapsed, 135% CPU, zero database activity, no progress line of any kind.
-/// Reported as a hang, and indistinguishable from one.
-///
-/// Here the map is a free side effect: <see cref="TatoebaEmitter.Emit"/>
-/// already holds the composed root, so it just records it. Phase 2 reads a map that is
-/// complete by construction. No second pass, no dead time.
-///
-/// Each phase is a SINGLE-file source, so <c>Decomposer&lt;TRecord&gt;.RunDecomposeAsync</c>
-/// still routes it through MonolithSegmenter (Decomposer.cs:270) — intra-file parallelism
-/// is preserved. That is what a sequential multi-FILE barrier would have cost, and why
-/// this is phases rather than ordered files.
+/// One Tatoeba file per phase: sentences.csv completes, then links.csv. The id → root map
+/// links resolve through is recorded by <see cref="TatoebaEmitter.Emit"/> as it composes
+/// each sentence root, so no separate pass over sentences.csv is needed. Each phase is a
+/// single file, so <c>Decomposer&lt;TRecord&gt;.RunDecomposeAsync</c> routes it through
+/// MonolithSegmenter and it keeps intra-file parallelism.
 /// </summary>
 internal abstract class TatoebaPhase : DecomposerPhase<TatoebaIngestRecord>
 {
@@ -89,7 +76,7 @@ internal abstract class TatoebaPhase : DecomposerPhase<TatoebaIngestRecord>
     }
 }
 
-/// <summary>Phase 1 — sentences.csv. Mints the content roots and records id -> root.</summary>
+/// <summary>sentences.csv: composes the sentence content roots and records id → root.</summary>
 internal sealed class TatoebaSentencePhase : TatoebaPhase
 {
     public TatoebaSentencePhase(TatoebaIdMap ids, ConcurrentDictionary<long, byte>? allowedIds)
@@ -104,7 +91,7 @@ internal sealed class TatoebaSentencePhase : TatoebaPhase
             : null;
 }
 
-/// <summary>Phase 2 — links.csv. Pure attestations between roots phase 1 already resolved.</summary>
+/// <summary>links.csv: attestations only, between roots the sentence file already composed.</summary>
 internal sealed class TatoebaLinkPhase : TatoebaPhase
 {
     private readonly ConcurrentDictionary<long, byte>? _allowedIds;

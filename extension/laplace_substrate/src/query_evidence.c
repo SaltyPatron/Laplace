@@ -41,10 +41,10 @@ typedef struct QueryChannelIndex
     int heap_index;
 } QueryChannelIndex;
 
-/* One response plane per exact occurrence, relation identity and direction.
- * A populous lexical/frame/source plane cannot evict a different plane before
- * the complete observation has coupled. Dynamic relation IDs participate by
- * the same rule; no source roster or static highway bit is required. */
+/* COUPLE retains one bounded response plane per operand occurrence, relation
+ * id and direction, so a populous relation family cannot evict another before
+ * the whole observation has coupled. Relation ids without a Highway bit are
+ * planes by the same rule. */
 typedef struct QueryPlaneKey
 {
     int32 ordinal;
@@ -79,10 +79,10 @@ typedef struct QueryEvidenceKey
     hash128_t id;
 } QueryEvidenceKey;
 
-/* One exact recorded witness retained only for the duration of this set-sized
- * query coupling pass. The key begins the entry so PostgreSQL's dynahash can
- * address it directly; the payload lets later source classification reduce a
- * deterministic-calculation subset without rereading attestations. */
+/* One recorded attestation bound to a channel for the duration of one
+ * coupling pass. The key leads the entry so dynahash addresses it directly;
+ * the payload lets the calculation subset be reduced without rereading
+ * attestations. */
 typedef struct QueryEvidenceWitness
 {
     QueryEvidenceKey key;
@@ -139,14 +139,12 @@ struct LaplaceQueryState
 static SPIPlanPtr query_highway_masks_plan = NULL;
 
 /*
- * The Highway mask is only a physical access accelerator. It may prune named
- * relation partitions only when the historical population is complete and no
- * requested identity has pending/dirty mask work. Dynamic relation identities
- * remain complete through a separate DEFAULT-partition scan.
- *
- * If any precondition is not proved, return complete=false and the canonical
- * unmasked relation scan runs unchanged. Cache state can therefore change the
- * amount of work, never the answer.
+ * The per-entity Highway mask is an access accelerator over the consensus
+ * relation partitions. The union of the operands' masks names the relation
+ * partitions to scan only when the registry is loaded and every operand has a
+ * complete mask row; relation ids without a bit are still read through the
+ * DEFAULT partition. Otherwise complete=false and the unmasked scan runs, so
+ * mask state changes the work, never the answer.
  */
 static bool
 query_highway_registry_ready(void)
@@ -306,9 +304,9 @@ query_plane_key(int ordinal, const hash128_t *relation, bool outbound)
     return key;
 }
 
-/* Negative means a is the stronger retained channel within its typed plane.
- * This does not compare the authority of grammar, meaning or source families;
- * their separately retained responses reach the query-relative operator. */
+/* Negative means a is stronger within one typed plane (rating - 2*rd, then
+ * identity). Planes are never ranked against each other here; each plane's
+ * responses reach the query-relative operator separately. */
 static int
 query_channel_rank(const LaplaceQueryChannel *a, const LaplaceQueryChannel *b)
 {
@@ -445,8 +443,8 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
 
     if (row->object_is_null)
         return;
-    /* Standing admits a response; relation rank orders it later. An admitted
-     * dynamic relation has real testimony even before a static rank exists. */
+    /* Positive consensus standing admits a response; no static relation rank
+     * is required to be admitted. */
     if (!(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
         return;
 
@@ -474,10 +472,10 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
     }
 }
 
-/* The plane-ranked scanner invokes this only inside one exact endpoint/type
- * range. Stop after every duplicate occurrence has filled that plane, strictly
- * below its retained worst score. Equal scores still reach the deterministic
- * identity tie-breaker. A different type or direction starts its own range. */
+/* The plane-ranked scanner calls this inside one endpoint/type range, which
+ * is read in descending standing. The range stops once every occurrence of the
+ * anchor has a full plane and the row scores strictly below that plane's worst
+ * retained channel; equal scores still reach the identity tie-breaker. */
 static bool
 query_consensus_cutoff(const LaplaceConsensusRow *row, void *opaque)
 {
@@ -520,10 +518,10 @@ add_occurrences(int64 *target, int64 value)
     return true;
 }
 
-/* Exact provenance is typed response state, not merely a source/context count.
- * Bind every witnessed row to a portable digest before reducing the set. The
- * row identity is included, but source/context/outcome/count are encoded again
- * so legacy/noncanonical row ids cannot collapse distinct provenance routes. */
+/* Digest of one attestation row: row id plus source, context, outcome and
+ * occurrence count encoded explicitly, so two rows sharing an id but differing
+ * in testimony remain distinct provenance members of the channel's Merkle
+ * root. */
 static hash128_t
 query_provenance_witness(const LaplaceObservation *row)
 {

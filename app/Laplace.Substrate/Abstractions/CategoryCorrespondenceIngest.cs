@@ -4,8 +4,8 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Category-key → fixed object id edge (CORRESPONDS_TO, ROLE_CORRESPONDS_TO context, etc.).
-/// Extraction-only record; staging runs through the shared pipeline.
+/// Extracted category key → fixed object id attestation (CORRESPONDS_TO by default, with
+/// an optional context id). Staging runs through the shared pipeline.
 /// </summary>
 public readonly record struct CategoryCorrespondenceRecord(
     string SubjectKey,

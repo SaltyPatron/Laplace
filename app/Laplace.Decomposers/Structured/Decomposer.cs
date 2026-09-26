@@ -14,7 +14,7 @@ public sealed record RecipeExecutionOptions(Hash128 SourceId, string SourceName,
 public sealed record RecipeProviderBinding(SemanticSourceRecipe? Recipe, int RecordDepth,
     JsonElement Configuration = default);
 
-/// <summary>A provider owns syntax recovery; the shared decomposer owns file execution and persistence.</summary>
+/// <summary>A provider recovers syntax; file execution and persistence are the shared decomposer's.</summary>
 public interface IRecipeSyntaxExecutor
 {
     /// <param name="openPrescan">Opens an independent read of the same artifact bytes, for

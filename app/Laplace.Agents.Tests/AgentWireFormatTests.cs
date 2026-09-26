@@ -5,9 +5,8 @@ using Xunit;
 namespace Laplace.Agents.Tests;
 
 /// <summary>
-/// Body shaping and response reading per wire. These are the failures that return
-/// HTTP 200 and an empty string: a field named for the wrong vendor, a content
-/// block read at the wrong path, a refusal mistaken for silence.
+/// Body shaping and response reading per wire: field names per provider, content
+/// read at each wire's path, and refusals reported with their stop reason.
 /// </summary>
 public sealed class AgentWireFormatTests
 {
@@ -40,8 +39,7 @@ public sealed class AgentWireFormatTests
     // ---- request bodies ---------------------------------------------------
 
     /// <summary>
-    /// OpenAI rejects max_tokens on its reasoning models and every clone rejects
-    /// max_completion_tokens, so the field name is per provider, not per wire.
+    /// The token-cap field name comes from the provider row, not the wire.
     /// </summary>
     [Fact]
     public void Openai_caps_output_with_max_completion_tokens_and_clones_with_max_tokens()
@@ -98,8 +96,7 @@ public sealed class AgentWireFormatTests
     }
 
     /// <summary>
-    /// Claude Opus 4.7 and later return 400 for temperature/top_p/top_k. An
-    /// unrequested default would break every current Anthropic model on this lane.
+    /// The Anthropic body carries no sampling parameter unless the request sets one.
     /// </summary>
     [Fact]
     public void Anthropic_body_omits_sampling_parameters_unless_asked_for()
@@ -113,8 +110,8 @@ public sealed class AgentWireFormatTests
     }
 
     /// <summary>
-    /// max_tokens is required by the Messages API and bounds thinking as well as
-    /// text; Claude Opus 5 thinks by default, so a small cap truncates the answer.
+    /// The Anthropic body always carries max_tokens: the default when unset, else the
+    /// configured cap.
     /// </summary>
     [Fact]
     public void Anthropic_body_always_carries_a_max_tokens_with_headroom()
@@ -268,8 +265,8 @@ public sealed class AgentWireFormatTests
     }
 
     /// <summary>
-    /// A declined request is HTTP 200 with an empty content array. Reading
-    /// content[0] before stop_reason is the documented way to break on this.
+    /// A refusal (200, empty content array) parses to empty text with its stop reason
+    /// and category, not an exception.
     /// </summary>
     [Fact]
     public void Anthropic_refusal_is_an_outcome_with_a_reason_not_an_exception()

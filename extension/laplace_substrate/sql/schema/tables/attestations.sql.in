@@ -1,15 +1,13 @@
--- attestations: attributable testimony, HASH-partitioned on subject_id exactly
--- like consensus, so a working set's testimony and the cells it folds route to
--- the same leaf number. Relation types are content ids and unbounded; the layout
--- never depends on which relations exist. Leaf count is declared once here;
--- native routing reads it from the partition descriptor.
+-- attestations: the testimony face of the web. Each row is one attributable
+-- observation (subject, relation, object) under a source and optional context,
+-- with outcome 0/1/2 = refute/draw/confirm. HASH-partitioned on subject_id like
+-- consensus, so testimony and the cells it folds into route to the same leaf.
+-- Relation types are content ids; the layout never depends on which exist.
 --
 -- qualifier_mask carries the claim's governed qualifiers (engine/manifest/
--- qualifiers.toml): multi-select variant flags such as identifier/iso639-1 or
--- mapping/upper, so one relation per meaning holds every variant as one claim.
--- It is the sister of an entity's highway_mask, never a copy of the relation's
--- highway bit; the native intent-stage tuple layout writes it
--- (IntentStage.CopyColumnList).
+-- qualifiers.toml) as multi-select flags, so one relation per meaning holds every
+-- variant as one claim. It is independent of the entity's highway_mask and of
+-- the relation's highway bit; the native bulk writer fills it.
 --
 -- PK includes the partition key; no FKs (see consensus.sql.in).
 -- Additive witness fields must also migrate existing evidence in place.
@@ -37,16 +35,11 @@ CREATE TABLE IF NOT EXISTS attestations (
     --                       phi, and the merge keeps the existing value.
     sum_score_fp1e9   bigint        NOT NULL,
     opponent_rd_fp1e9 bigint        NOT NULL,
-    --   opponent_rating_fp1e9 — the per-deposit opponent RATING (GH #1321). Until
-    --                       this column existed the fold passed
-    --                       CONSENSUS_FOLD_NEUTRAL_MU as the opponent on every
-    --                       call, so every cell replayed one match against a
-    --                       constant 1500 and the rating degenerated into a
-    --                       witness counter. The RD half was already stored here;
-    --                       this is the half that carries the surprise term.
-    --                       DEFAULT is neutral, not 0: a row that does not set it
-    --                       must fold exactly as the substrate did before, not
-    --                       against a rating-0 opponent.
+    --   opponent_rating_fp1e9 — the per-deposit opponent rating the fold plays
+    --                       against, pairing opponent_rd_fp1e9 so the Glicko-2
+    --                       update carries its surprise term. DEFAULT is the
+    --                       neutral 1500, not 0, so a row that does not set it
+    --                       folds against a neutral opponent.
     opponent_rating_fp1e9 bigint    NOT NULL DEFAULT 1500000000000,
     -- Transient-calibration receipts are durable categorical provenance but
     -- their continuous native score was consumed atomically at ingest and is

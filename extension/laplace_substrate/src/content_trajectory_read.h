@@ -5,29 +5,30 @@
 
 typedef void (*LaplaceContentTrajectoryConsumer)(Datum physicality, Datum entity,
     Datum geometry, void *context);
-/* Physicality kind is an exact identity coordinate, not an interchangeable
- * rendering hint. The shared batch reader hydrates only the requested kind. */
+/* Reads the trajectory physicality of one type for a batch of entities under
+ * the active snapshot. The type is part of the physicality id, so only rows of
+ * that type are handed on. The geometry datum is valid only during the callback. */
 void laplace_typed_trajectory_read(ArrayType *entities, int16 physicality_type,
     LaplaceContentTrajectoryConsumer consume, void *context);
-/* Read canonical Content physicalities for a batch of entity IDs under MVCC.
- * The geometry datum is valid only during the callback. */
+/* The same read over content trajectories (physicality type 1). */
 void laplace_content_trajectory_read(ArrayType *entities,
     LaplaceContentTrajectoryConsumer consume, void *context);
-/* Same canonical indexed batch with the stored count, never a derived count. */
+/* The content read that also hands on the stored constituent count. */
 typedef void (*LaplaceContentCarrierConsumer)(Datum physicality, Datum entity,
     int32 n_constituents, Datum geometry, void *context);
 void laplace_content_carrier_read(ArrayType *entities,
     LaplaceContentCarrierConsumer consume, void *context);
-/* Same reader with an admitted cumulative partition/PK-batch ceiling. Each
- * nonempty hash-leaf scan is counted before opening it. The bounded wrapper
- * releases per-frontier scratch before returning; callbacks allocate in their
- * original caller context. Scratch excludes executor/catalog bookkeeping. */
+/* Work envelope for the bounded readers: a ceiling on leaf-partition reads
+ * (each nonempty leaf counted before it is opened) and on per-frontier scratch
+ * bytes, executor and catalog bookkeeping excluded. Scratch is freed before
+ * return; callbacks run in the caller's memory context. */
 typedef struct LaplaceContentReadBudget {
     int maximum_leaf_reads;
     int leaf_reads;
     size_t maximum_scratch_bytes;
 } LaplaceContentReadBudget;
-/* Required structural manifests: reject an existing wrong-kind or NULL body. */
+/* Bounded read of required manifests: a probed row of another type or with a
+ * NULL trajectory is an error. */
 void laplace_typed_carrier_read_bounded(ArrayType *entities, int16 physicality_type,
     LaplaceContentCarrierConsumer consume, void *context,
     LaplaceContentReadBudget *budget);

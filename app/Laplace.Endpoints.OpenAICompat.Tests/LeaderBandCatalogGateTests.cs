@@ -4,9 +4,9 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// The leaders page needs immutable band names, not the live relation-band census.
-/// Keep the bounded leaderboard and naming catalog in one set-wise database command
-/// and reject any regression that puts converse.relation_bands() back on the request path.
+/// Leaders read the bounded leaderboard and the immutable band-name catalog in one
+/// set-wise command (<c>leaders.named</c>); the live <c>converse.relation_bands()</c>
+/// census is never on the request path.
 /// </summary>
 public sealed class LeaderBandCatalogGateTests
 {

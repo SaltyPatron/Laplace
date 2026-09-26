@@ -3,9 +3,9 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Text-alphabet adapter: file/dir of source text unpacked for grammar/compose valets.
-/// Tree-sitter grammars remain the default extractor behind this port; the adapter
-/// itself does not bind callers to a specific grammar engine.
+/// Content adapter for a file or directory of source text, handed to grammar parsing and
+/// composition. It binds callers to no grammar engine; tree-sitter grammars are the
+/// default extractor behind it.
 /// </summary>
 public sealed class TreeSitterTextAdapter : IContentRecordAdapter
 {
@@ -30,7 +30,7 @@ public sealed class TreeSitterTextAdapter : IContentRecordAdapter
         ct.ThrowIfCancellationRequested();
         if (Directory.Exists(path))
         {
-            // Directory roots are enumerated by the valet; expose a marker stream.
+            // A directory root is enumerated by the caller; expose an empty marker stream.
             Stream empty = new MemoryStream(Array.Empty<byte>());
             return ValueTask.FromResult(new ContentAdapterHandle(
                 "text-dir", empty,

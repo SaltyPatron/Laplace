@@ -5,12 +5,10 @@ import { LoadingText } from '@ui';
 const ENTITY_HEX = /^[0-9a-f]{32}$/i;
 
 /**
- * Compatibility redirect for historical /explore/resolve/:ref links.
- *
- * A surface string is not an entity merely because its deterministic content id can
- * be calculated.  Exact canonical ids may open an entity directly; all other input
- * returns to Browse so decomposition, admitted members and stored containment/name
- * candidates decide what actually exists in the substrate.
+ * Routes /explore/resolve/:ref. A 32-hex canonical id opens its entity page; any other
+ * input goes to Browse, since a calculable content id does not make the string an admitted
+ * entity — Browse resolves it through decomposition, admitted members and stored
+ * containment and name candidates.
  */
 export function ResolveBrowseRedirect() {
   const { ref = '' } = useParams();

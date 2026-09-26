@@ -23,26 +23,21 @@ public static class ChessCompose
     public const byte PositionTier = 2;
 
     /// <summary>
-    /// Intermediate containment between a single board and the full line (phase / motif
-    /// window / opening segment — invent the order; do not leave this address empty by
-    /// parking the line at Document). Until that order is defined and emitted, callers
-    /// must not invent a fake rung. See W14: skip was shallow Document mapping, not law.
+    /// Tier between a single board and the full line (a segment of play). Also the tier of
+    /// the Syzygy fact chunks ChessSyzygy composes.
     /// </summary>
     public const byte SegmentTier = 3;
 
-    // GH #736: the LINE — whole-game content. Lives at 4 today because game entities were
-    // typed EntityTier.Document; that is not a reason SegmentTier stays vacant forever.
+    // Tier of a LINE: the whole game's content (start position plus ordered moves).
     public const byte LineTier = 4;
 
     /// <summary>
-    /// The reusable line identity: start state plus ordered typed move objects. Replayed board
-    /// states are deterministic projections through the transition floor, not line content.
-    /// Identical play converges regardless of SAN/PGN spelling or provenance.
+    /// Line identity: Merkle over the start position then the ordered move ids. Replayed boards
+    /// are not constituents. Identical play is one line whatever its SAN/PGN spelling or source.
     /// </summary>
     public static Hash128 LineId(Hash128 startPositionId, ReadOnlySpan<Hash128> orderedMoveIds)
     {
-        // The ordinary composition law preserves a singleton child's identity.
-        // A playing that ends before its first move contains only its start state.
+        // A one-child composition is the child: a line with no moves is its start position.
         if (orderedMoveIds.IsEmpty) return startPositionId;
         Span<Hash128> constituents = orderedMoveIds.Length + 1 <= 256
             ? stackalloc Hash128[orderedMoveIds.Length + 1]
@@ -53,8 +48,8 @@ public static class ChessCompose
     }
 
     /// <summary>
-    /// Resolved-move content id (spec 11): piece × from × to × flags × promotion.
-    /// Deduped across games; pairs with <see cref="TransitionKey"/> for state→state floor hits.
+    /// Resolved-move content id: piece × from × to × flags × promotion, one entity across all
+    /// games. With a position it forms the <see cref="TransitionKey"/>.
     /// </summary>
     public static Hash128 MoveId(Piece moving, ChessMove mv)
         => ChessPositionIdentity.MoveId(moving, mv);
@@ -91,14 +86,9 @@ public static class ChessCompose
     }
 
     /// <summary>
-    /// Domain separator for the transition key — NOT a containment tier, despite sharing
-    /// the value <see cref="SegmentTier"/> holds today. It is spelled separately because
-    /// the two are free to diverge and must not drag each other: SegmentTier is a reserved
-    /// rung waiting for a real phase/motif order to be defined, and moving it is expected
-    /// work. If TransitionKey read that constant, defining SegmentTier would silently
-    /// re-mint every transition key and invalidate every persisted ChessTransitionFloor
-    /// blob — a content-addressed store answering for keys that no longer exist. The value
-    /// is pinned here so today's blobs keep their identity and tomorrow's tier work is free.
+    /// Domain separator for the transition key, not a containment tier, although it equals
+    /// <see cref="SegmentTier"/>. It is a separate constant because every persisted
+    /// ChessTransitionFloor key is hashed under it; changing SegmentTier must not change them.
     /// </summary>
     public const byte TransitionKeyDomain = 3;
 
@@ -116,9 +106,8 @@ public static class ChessCompose
     private static readonly ConcurrentDictionary<ChessPositionIdentity.Atom, ChessNode> AtomMemo = new();
 
     /// <summary>
-    /// Full position composition. Geometry for catalog ids uses native
-    /// <see cref="ChessPositionFloor"/> when loaded (spec 33 / #822).
-    /// No string→ChessComposed heap memo.
+    /// Position composition from a canonical interchange surface. Geometry for ids in the
+    /// <see cref="ChessPositionFloor"/> perfcache comes from that ROM; nothing is memoized by string.
     /// </summary>
     public static ChessComposed Position(string surface)
     {
@@ -158,8 +147,8 @@ public static class ChessCompose
                     PhysicalityId.Compute(id, PhysicalityType.Content),
                     n == 0 ? count : checked((int)n), tier == 0 ? PositionTier : tier), subs);
         }
-        // Allocate the geometric input only for a real miss. Identity, trajectory,
-        // and physicality are each derived once; a miss does not restart composition.
+        // Child coordinates are gathered only on a perfcache miss; identity and trajectory
+        // are not recomputed.
         var childCoords = new double[count * 4];
         for (int i = 0; i < count; i++) subs[i].Coord.CopyTo(childCoords, i * 4);
         return new ChessComposed(ComposeMissing(id, ids, childCoords, count, PositionTier), subs);
@@ -182,16 +171,9 @@ public static class ChessCompose
     }
 
     /// <summary>
-    /// The composed node for ONE piece-square constituent: byte-identical to the substructure
-    /// <see cref="Position(Board)"/> deposits for that piece standing on that square, because it
-    /// is the same atom through the same memo.
-    ///
-    /// This exists because LearnedPst needed exactly this and had no way to ask for it. It was
-    /// synthesizing a token like "Pa1" and handing it to Position(string), which requires a
-    /// canonical "stm: cr: ep: ..." interchange surface -- so TryFenFromSurface rejected it and
-    /// /chess/learned-pst threw ArgumentException on its FIRST square, every call. Reaching for
-    /// Substructures[0] would have been wrong even had it parsed: FillAtoms emits the header
-    /// atoms first, so index 0 is side-to-move, not the piece-square.
+    /// The composed node for one piece-square constituent: the same atom, through the same
+    /// memo, that <see cref="Position(Board)"/> composes for that piece on that square. (A
+    /// position's Substructures[0] is the side-to-move header atom, not a piece-square.)
     /// </summary>
     public static ChessNode PieceSquareNode(Piece piece, int file, int rank)
     {
@@ -232,7 +214,7 @@ public static class ChessCompose
         double[] traj = Trajectory.Build(childIds);
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
 
-        // Floor hit: deterministic lossless geometry already in the ROM — do not recompute.
+        // Perfcache hit: the ROM geometry is used as is.
         if (ChessPositionFloor.TryLookup(id, out var x, out var y, out var z, out var m,
                 out var hb, out var nFloor, out var tierFloor))
         {
@@ -248,9 +230,8 @@ public static class ChessCompose
     {
         double[] traj = trajectory ?? Trajectory.Build(childIds);
         Hash128 physId = physicalityId ?? PhysicalityId.Compute(id, PhysicalityType.Content);
-        // Karcher, not Centroid — intrinsic mean, lands on S3 at norm 1. The floor
-        // hit above returns ROM geometry untouched; only the computed branch moves.
-        // Requires a reseed.
+        // Geometry for a perfcache miss is the intrinsic (Karcher) mean of the children's
+        // coordinates.
         double[] coord = Math4d.KarcherMean(childCoords);
         Hilbert128 hbEnc = Hilbert128.Encode(coord);
         return new ChessNode(id, coord, hbEnc, traj, physId, n, tier);
@@ -259,16 +240,13 @@ public static class ChessCompose
     private static volatile bool _composeReady;
     private static readonly object ComposeReadyGate = new();
 
-    /// <summary>Initialize the same immutable floors used by composition and report their state separately.</summary>
+    /// <summary>Loads the position and transition perfcaches composition reads.</summary>
     public static void InitializePerfcaches() => EnsureLoaded();
 
     /// <summary>
-    /// One-time compose warmup. The <c>_composeReady</c> read is the fast path, but it
-    /// only suppresses REPEAT work once someone has finished — it does not stop N compose
-    /// workers entering together on a cold start and racing through Prime() and the two
-    /// floor loads. ChessTransitionFloor carries no internal gate of its own, so that race
-    /// is concurrent mmap setup over the same static fields, not merely duplicated effort.
-    /// Lock and re-check inside.
+    /// Loads both perfcaches once. The volatile flag is the fast path; the lock with a re-check
+    /// keeps concurrent compose workers on a cold start from mapping ChessTransitionFloor,
+    /// which has no gate of its own, over the same static fields at once.
     /// </summary>
     private static void EnsureLoaded()
     {

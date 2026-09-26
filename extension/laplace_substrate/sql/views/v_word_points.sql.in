@@ -1,24 +1,10 @@
--- The single most-repeated join in the SQL surface: an entity paired with its
--- type=1 (identity/content) physicality. Every KNN router, vocab builder, and
--- geometric peer walk was hand-rolling this. Callers that need a trajectory
--- filter add `WHERE trajectory IS NOT NULL` — the view does not invent that
--- filter so sites that only need coord keep working.
---
--- PERFORMANCE CONTRACT (measured 2026-08-01 on live ~4M entities / ~4M type=1
--- physicalities, 64 Hilbert bands, laplace_admin):
---   * Point lookup `WHERE id = $1 LIMIT 1` / structural.word_anchor($1):
---       execution ~0.3–0.7 ms (Nested Loop: entity_id btree → entities pkey).
---       Cold planning of the 64-partition Append is ~30 ms; PREPARE / warm
---       plan cache brings wall to ~8 ms. Prefer prepared statements on hot paths.
---   * KNN `ORDER BY coord <<->> $anchor LIMIT k` (k≈48):
---       execution ~38–65 ms — same order as bare `physicalities WHERE type=1`.
---       Plan is Merge Append of per-band GiST Order By, then Nested Loop into
---       entities for the LIMIT survivors (NOT a 4M-row hash join). Do not fear
---       the join for bounded KNN; do not use this view for unbounded scans.
---   * Do NOT SELECT this view without a selective predicate or LIMIT — it is
---     ~4M rows and will seq-scan.
--- DROP+CREATE: physicality_tableoid was inserted before coord; CREATE OR REPLACE
--- VIEW cannot rename/reorder columns (PG error on upgrade).
+-- An entity joined to its Content physicality (type 1): coordinate, Hilbert
+-- key, and trajectory beside the entity row. Geometry reads (KNN, anchors,
+-- peer walks) start here. No trajectory filter is applied; callers that need
+-- one add it. Bounded use only: a point lookup by id or a KNN with LIMIT plans
+-- as a nested loop into entities; without a selective predicate or LIMIT it
+-- scans every Content physicality.
+-- DROP+CREATE because CREATE OR REPLACE VIEW cannot reorder columns.
 DROP VIEW IF EXISTS laplace.v_word_points CASCADE;
 CREATE VIEW laplace.v_word_points AS
 SELECT e.id,

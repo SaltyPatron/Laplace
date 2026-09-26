@@ -3,10 +3,8 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// Honest per-modality resident counts. Computed from FAST targeted queries
-/// (per-source / per-plane counts, tens of ms) rather than the full
-/// ops.source_counts() aggregate, which degrades to empty under a seed and would
-/// make a live modality read as awaiting.
+/// Per-modality resident counts from targeted per-source and per-plane counts
+/// (ops.modality_counts), not the unbounded ops.source_counts() aggregate.
 /// </summary>
 public sealed record ModalitiesResponse(
     [property: JsonPropertyName("object")] string Object,

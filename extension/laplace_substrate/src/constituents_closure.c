@@ -17,11 +17,12 @@
 /*
  * realize.constituents_closure(roots, max_depth)
  *
- * The closure is a level-synchronous native frontier: each level submits one
- * typed bytea[] request and decodes the selected manifests in C.  The query
- * preserves the established placement choice exactly: type-1 trajectory,
- * physicality id ascending, then ST_NPoints descending.  The latter chooses
- * the finer manifest when legacy rows share a physicality id.
+ * Descends the composition face level by level: each level reads the trajectory
+ * manifest of every frontier entity in one bytea[] request and unpacks each
+ * vertex (child id, ordinal, run length, flags) natively. Emits
+ * (parent, ordinal, child, run_length, flags) sorted by parent and ordinal;
+ * max_depth 0 is unbounded. Where an entity has several trajectory rows, the
+ * lowest physicality id wins, then the one with more points.
  */
 static const char *CLOSURE_LEVEL_QUERY =
     "SELECT DISTINCT ON (w.id) w.id, public.ST_AsBinary(w.trajectory) "
@@ -30,8 +31,8 @@ static const char *CLOSURE_LEVEL_QUERY =
     "WHERE w.trajectory IS NOT NULL "
     "ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC";
 
-/* The traversal makes one identical typed read per frontier.  Keep its plan in
- * the backend instead of replanning the 64-partition view at every level. */
+/* Prepared once per backend; every level reuses the generic plan over the
+ * partitioned view. */
 static SPIPlanPtr closure_level_plan = NULL;
 
 static void
@@ -135,9 +136,8 @@ frontier_add_if_new(HTAB *visited, IdVec *frontier, const hash128_t *id,
                     MemoryContext owner)
 {
     uint32_t codepoint;
-    /* The immutable floor already resolves these identities. Codepoints have
-     * no constituent manifests to retrieve from PostgreSQL. The parent edge
-     * remains in the result; only the redundant leaf lookup is omitted. */
+    /* Tier-0 codepoints resolve in the perfcache and have no constituents: their
+     * parent edge is emitted, but they never enter the frontier. */
     if (laplace_perfcache_codepoint_for_id((const uint8_t *) id, &codepoint))
         return;
     bool found;

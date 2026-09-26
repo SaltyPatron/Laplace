@@ -1,7 +1,7 @@
--- Global serving order for consensus.top_relations(). relation_rank() is the
--- immutable manifest lookup; combining it with the stored Glicko conservative
--- estimate makes the exact leaderboard an index merge across physical leaves,
--- not one type-by-every-partition probe matrix.
+-- Global serving order for consensus.top_relations(): the manifest relation
+-- rank times the conservative estimate (rating - 2*rd), so the ranked page is
+-- an ordered index merge across leaves instead of a per-type probe of every
+-- partition.
 CREATE INDEX IF NOT EXISTS consensus_edge_rank_btree ON consensus (
     (consensus.relation_rank(type_id)
         * ((rating - 2 * rd)::double precision)) DESC,

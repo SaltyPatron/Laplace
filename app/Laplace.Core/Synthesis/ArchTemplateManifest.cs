@@ -92,14 +92,10 @@ public static partial class NativeInterop
     }
 
     /// <summary>
-    /// Materializes the complete architecture tensor manifest without imposing a
-    /// caller-side tensor-count ceiling.
-    ///
-    /// The native ABI intentionally returns the required count without filling the
-    /// buffer when the supplied capacity is too small. Callers that interpret any
-    /// positive return as populated data therefore consume zero/default TensorSpec
-    /// values. Probe with one real slot, allocate the exact required capacity, and
-    /// retry so the returned count and populated array are one contract.
+    /// Materializes the complete architecture tensor manifest with no caller-side
+    /// tensor-count ceiling. The native ABI returns the required count without filling
+    /// the buffer when capacity is too small, so this probes with one slot, allocates the
+    /// exact required capacity, and calls again.
     /// </summary>
     public static int ArchTemplateRequiredTensorsComplete(
         IntPtr tmpl, IntPtr recipe, out TensorSpec[] specs)
@@ -132,8 +128,8 @@ public static partial class NativeInterop
         }
 
         // Template + parsed recipe are immutable across the two calls. A different
-        // positive count means the ABI violated its capacity-query contract; never
-        // hand a partially trustworthy manifest to synthesis.
+        // positive count means the ABI violated its capacity-query contract, and no
+        // manifest is returned.
         if (filled != required)
         {
             specs = [];

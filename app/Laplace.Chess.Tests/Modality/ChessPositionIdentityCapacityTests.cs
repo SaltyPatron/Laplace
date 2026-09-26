@@ -5,23 +5,19 @@ using Xunit;
 namespace Laplace.Modality.Chess.Tests;
 
 /// <summary>
-/// The atom buffer must be sized by the BOARD (64 squares), not by the rules of legal chess
-/// (32 pieces). FillAtoms emits one atom per occupied square and hashes whatever board it is
-/// handed; it does not get to assume the position is legal.
+/// The atom buffer is sized by the board (64 squares), not by legal chess (32 pieces):
+/// FillAtoms emits one atom per occupied square of whatever board it is given.
 /// </summary>
 public sealed class ChessPositionIdentityCapacityTests
 {
     /// <summary>
-    /// The exact FEN that killed two ingest units. Chess.com "Odds Chess" gives one side three
-    /// full ranks of pawns: 41 occupied squares against a 40-slot stackalloc. PositionId threw
-    /// IndexOutOfRangeException up through ChessModality.FromFen and TryParseGame, which does
-    /// not catch it, so the ENTIRE FILE failed -- Firouzja2003_chesscom.pgn and
-    /// Hikaru_chesscom.pgn, one such game each, seed runs 32438771887 and 32439795126.
+    /// A chess.com "Odds Chess" start: one side has three full ranks of pawns, 41 occupied
+    /// squares, more than a legal position can hold.
     /// </summary>
     public const string OddsChessFen =
         "rnbqkbnr/pppppppp/8/8/PPPPPPPP/PPPPPPPP/PPPPPPPP/4K3 w kq - 0 1";
 
-    /// <summary>Every square occupied: the actual worst case the buffer must seat.</summary>
+    /// <summary>Every square occupied: the largest board the buffer must hold.</summary>
     public const string FullBoardFen =
         "rnbqkbnr/pppppppp/pppppppp/pppppppp/PPPPPPPP/PPPPPPPP/PPPPPPPP/RNBQKBNR w - - 0 1";
 
@@ -42,8 +38,7 @@ public sealed class ChessPositionIdentityCapacityTests
     [InlineData(FullBoardFen)]
     public void Compose_UsesTheSameBoundAsPositionId(string fen)
     {
-        // ChessCompose.Position held its OWN copy of the magic 40. A bound that lives in two
-        // places is a bound that gets fixed in one of them.
+        // ChessCompose.Position uses the same atom bound as PositionId.
         var composed = ChessCompose.Position(Board.FromFen(fen));
         Assert.NotEqual(default, composed.Position.Id);
     }

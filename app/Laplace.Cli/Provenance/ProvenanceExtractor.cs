@@ -121,9 +121,8 @@ internal static class ProvenanceExtractor
             ("VerbNet",  "substrate/source/verbnet/v1",  EntityTypeRegistry.VerbNetClass),
             ("PropBank", "substrate/source/propbank/v1", EntityTypeRegistry.PropBankRoleset),
         };
-        // ONE round-trip: count all four probe types at once, then bucket by type_id.
-        // GROUP BY over the ANY-filter only emits rows for types that have entities, so a
-        // type absent from the map is count 0 — identical to the old per-type count>0 gate.
+        // One read counts all probe types, bucketed by type_id. GROUP BY emits rows only
+        // for types that have entities, so a type absent from the map has count 0.
         var countByType = await CountByTypesAsync(ds, probes.Select(p => p.TypeId).ToArray(), ct);
         foreach (var (label, domain, typeId) in probes)
         {
@@ -250,9 +249,8 @@ internal static class ProvenanceExtractor
         var encodesMap = new Dictionary<Hash128, (string Relation, double EffMu, long Witnesses)>();
         try
         {
-            // edges_raw per subject (limit 1, eff_mu) — strongest ENCODES object, no
-            // hand-join on consensus. consensus_by_ids needs edge pks; we have
-            // subject ids and discover the object here.
+            // Strongest ENCODES object per circuit subject; only subject ids are known, so
+            // the object is discovered from the subject side.
             var rows = await NpgsqlSubstrateReads.BestOutboundBySubjectsAsync(
                 ds, idBytes, encodesTypeId.ToBytes(), refuted: true, timeoutSeconds: 120, ct: ct);
             foreach (var row in rows)
@@ -265,8 +263,8 @@ internal static class ProvenanceExtractor
         }
         catch (Exception ex)
         {
-            // Surface the failure — a silent empty map made circuit provenance look
-            // unseeded. Column was historically misspelled as c.witnesses.
+            // A failed read is raised, not returned as an empty map that would read as
+            // unseeded circuit provenance.
             throw new InvalidOperationException(
                 "circuit provenance consensus read failed (edges_raw / ENCODES)", ex);
         }

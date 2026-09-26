@@ -1,5 +1,6 @@
-/* Canonical typed physicality IDs are computable from entity identity. Route
- * each ID to its actual PostgreSQL hash partition before the batched PK probe. */
+/* A typed physicality id is computed from (entity id, type), so each id is
+ * routed to its hash partition and each partition is probed once by primary key
+ * for its whole batch. */
 #include "postgres.h"
 #include "access/genam.h"
 #include "access/nbtree.h"

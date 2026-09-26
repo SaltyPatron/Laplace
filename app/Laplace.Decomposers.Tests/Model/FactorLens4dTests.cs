@@ -6,13 +6,10 @@ using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model.Tests;
 
-// Lens-quality measurement for the 4D observation geometry (campaign doc 26, B').
-// Storage law: fireflies (factor records) are stored NATIVE-DIM and exact; the
-// S3/low-dim projection is a calculated LENS whose only job is nomination —
-// neighborhoods, cells, routing. This test MEASURES the lens: how much of the
-// native-dim ranking structure survives at k=4 (and where it saturates), with
-// every inner product computed by the native kernels. It does NOT gate
-// exactness — exactness never leaves native dim by design.
+// Measures how much native-dimension ranking structure a rank-k projection keeps
+// (k=4 through KMax), with every inner product computed by the native kernels. The
+// low-dimensional projection only nominates neighborhoods; exact scores stay at
+// native dimension, so this checks nomination quality, not exactness.
 public sealed class FactorLens4dTests
 {
     private const string Snap =
@@ -44,8 +41,8 @@ public sealed class FactorLens4dTests
         const int vocab = 30522, d = 384;
         float[] embed = WeightTensorETL.LoadTensorF32(refMap, "embeddings.word_embeddings.weight", (long)vocab * d);
 
-        // Sample rows, then column-center (the system's own SimilarityPlane path):
-        // the lens approximates the CENTERED gram, so the baseline is centered too.
+        // Sample rows, then column-center as SimilarityPlane does: the projection
+        // approximates the centered Gram matrix, so the baseline is centered too.
         var A = new float[(long)N * d];
         Array.Copy(embed, (long)RowOffset * d, A, 0, (long)N * d);
         unsafe
@@ -101,9 +98,8 @@ public sealed class FactorLens4dTests
             if (k == 32) overlapAt32 = overlap;
         }
 
-        // Lens viability floor: 4D nomination must beat chance decisively
-        // (chance for top-20 of 1999 candidates is ~1.0%), and more dimensions
-        // must not make the lens worse.
+        // 4D nomination must beat chance (about 1% for top-20 of 1999 candidates)
+        // several times over, and more dimensions must not make it worse.
         Assert.True(overlapAt4 > 0.05, $"4D top-{TopK} overlap {overlapAt4:P1} <= 5x chance");
         Assert.True(spearmanAt4 > 0.2, $"4D spearman {spearmanAt4:F3} too weak to nominate");
         Assert.True(overlapAt32 >= overlapAt4, "lens quality should not degrade with rank");

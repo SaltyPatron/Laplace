@@ -1,7 +1,6 @@
 # 38 — Collections are compositions, not edge fans
 
-Design law for set-valued facts. Measured live against `laplace` 2026-08-15 unless a line
-says otherwise. Companion to `08_Record_vs_Calculate_Spec.txt` (what may be derived) and
+Design law for set-valued facts. Companion to `08_Record_vs_Calculate_Spec.txt` (what may be derived) and
 `36_Laplace_Forward_Pass.md` (where a distribution belongs in the program).
 
 ---
@@ -13,28 +12,17 @@ attestation per member. A fan of edges gives the set no id, so no witness can co
 refute the set as a whole, and `attestations.context_id` — a single `bytea` — cannot hold a
 set at all, which forces an emitter to drop all but one member.
 
-Measurements motivating this design are recorded in the pull request that introduced it.
-
 ## 1. Three shapes, one emitter
 
-An emitter that writes a fact about a subject is choosing between three shapes. Two are
-settled law here and the third has never been implemented.
+An emitter that writes a fact about a subject is choosing between three shapes.
 
-| shape | example | correct storage | status |
-|---|---|---|---|
-| **ordered sequence** | word order in a sentence | trajectory geometry, read with `laplace_trajectory_constituents` | used by six inference sites |
-| **single-valued attribute** | `HAS_BLOCK`, `HAS_AGE`, `HAS_SCRIPT`, `HAS_EAST_ASIAN_WIDTH`, `HAS_LINE_BREAK` | one typed edge | correct as written |
-| **set-valued attribute** | a form's morphological analysis `{nominative, singular, masculine}` | **a composition entity, one edge** | **unimplemented — 186M rows of the wrong shape** |
+| shape | example | correct storage |
+|---|---|---|
+| **ordered sequence** | word order in a sentence | trajectory geometry, read with `laplace_trajectory_constituents` |
+| **single-valued attribute** | `HAS_BLOCK`, `HAS_AGE`, `HAS_SCRIPT`, `HAS_EAST_ASIAN_WIDTH`, `HAS_LINE_BREAK` | one typed edge |
+| **set-valued attribute** | a form's morphological analysis `{nominative, singular, masculine}` | **a composition entity, one edge** |
 
-The defect is one emitter: shape 3's data written with shape 2's loop. `WiktionaryEmit.cs:238-240`
-
-```csharp
-if (form.Tags is { } tags)
- foreach (var tag in tags)
- if (Stage(b, tag, roots, out var tagId)) Attest(b, formId, "HAS_FEATURE", tagId, null);
-```
-
-Three tags, three attestations, and the analysis itself has no id.
+Writing shape 3's data with shape 2's loop — one attestation per tag — leaves the analysis itself with no id.
 
 ---
 
@@ -48,33 +36,18 @@ Three tags, three attestations, and the analysis itself has no id.
  triple. With no bundle entity there is no rating, no `witness_count`, and no refutation of
  *the analysis* — only of its members, which is a different claim. A second source that
  disagrees about the analysis as a whole has nowhere to put the disagreement.
-3. **`context_id` is one slot.** `\d laplace.attestations` — `context_id bytea`, single. An
- emitter with a set of qualifiers must therefore drop all but one. Live instance,
- `WiktionaryEmit.cs:216-224`:
-
- ```csharp
- if (snd.Tags is { } tags)
- foreach (var tag in tags)
- if (Stage(b, tag, roots, out var dialectId)) { dialectCtx = dialectId; break; }
- Attest(b, wordId, "TRANSCRIBES_AS", ipaId, dialectCtx);
- ```
-
- The `break` is not laziness, it is the schema: a set does not fit in a bytea. That is
- **data loss** across every `TRANSCRIBES_AS` row, not merely a shape complaint. A
- bundle id fits in the slot.
-4. **The read is a self-join.** "forms that are nominative AND singular AND masculine" is a
- three-way self-join over a 186M-row relation whose `type_id` predicate prunes to one LIST
- partition and whose `subject_id` hash then fans across 8 — per join arm. As a composition
- it is one `@>` probe on `physicalities_constituents_gin`, the probe `containers_of.c:65`
- already runs.
-5. **§15.** The canonical implementation exists and the callers were never rewired — the same
- failure the 32-of-33 decomposers bypassing `IngestComposePipeline` are.
+3. **`context_id` is one slot.** `laplace.attestations.context_id` is a single `bytea`. A set
+ of qualifiers (the dialect tags on one transcription) does not fit in it; writing one member
+ loses the rest. A bundle id fits in the slot.
+4. **The read is a self-join.** "forms that are nominative AND singular AND masculine" is an
+ N-way self-join over the attestation relation, per join arm. As a composition it is one `@>`
+ probe on `physicalities_constituents_gin`, the probe `containers_of.c` runs.
 
 ---
 
-## 3. What is already built
+## 3. The pieces
 
-Nothing in §4 needs a new primitive. All four pieces are installed:
+A set uses existing primitives:
 
 | piece | site |
 |---|---|
@@ -84,8 +57,7 @@ Nothing in §4 needs a new primitive. All four pieces are installed:
 | membership probe | `physicalities_constituents_gin`, `IngestCommands.cs:799`; `laplace_trajectory_constituent_ids(trajectory) @> ARRAY[$1]` |
 
 The Karcher-mean line is the load-bearing one. An unordered set lands at the same coordinate
-regardless of member order, so a *set* is already a well-defined composition in the geometry —
-the only thing missing is a writer that mints one.
+regardless of member order, so a *set* is a well-defined composition in the geometry.
 
 **Canonical order for a set is ascending by member id.** That is what makes the merkle id of a
 set well-defined, which is what makes it content-addressed, which is what collapses the
@@ -96,8 +68,7 @@ deduplication mechanism.
 
 ## 4. The write API
 
-One method on `SubstrateChangeBuilder` (`app/Laplace.Substrate/Crud/SubstrateChangeBuilder.cs`,
-which already exposes `AddEntity`, `AddPhysicality`, `AddAttestation`):
+One method on `SubstrateChangeBuilder` (`app/Laplace.Substrate/Crud/SubstrateChangeBuilder.cs`):
 
 ```
 AttestSet(subject, relation, IReadOnlyList<Hash128> members, source, trust, context = null)
@@ -116,13 +87,11 @@ re-stages the same id and writes nothing new, exactly as text surfaces already d
 **The physicality `type` discriminator is not optional.** `physicalities_constituents_gin`,
 `physicalities_traj_first_id_btree` and `physicalities_traj_probe` are all partial on
 `type = 1`. A set is not a text trajectory and must not silently widen those three indexes;
-it gets its own type value and its own partial GIN. The `type` column is `smallint` and holds
-one value today, so the discriminator is free.
+it gets its own type value and its own partial GIN.
 
 **What this is not.** Not a CSV column, not a `text[]`, not JSON, not a bitmask. A collection
 is an entity with a merkle id, a coordinate, and typed edges — the same as every other thing
-in the substrate. A collection that cannot be attested about is the defect being fixed, so a
-representation that cannot carry a rating is not a candidate.
+in the substrate. A representation that cannot carry a rating is not a collection.
 
 ---
 
@@ -131,15 +100,12 @@ representation that cannot carry a rating is not a candidate.
 Two functions, both on shapes that already have index support:
 
 - `consensus.set_members(p_subject bytea, p_relation text)` — the bundle's constituents, in
- canonical order, via `laplace_trajectory_constituents`. Replaces the 3-row fan.
+ canonical order, via `laplace_trajectory_constituents`.
 - `consensus.subjects_with(p_relation text, p_members bytea[])` — GIN containment on the
- bundle, then the reverse edge. Replaces the N-way self-join.
+ bundle, then the reverse edge.
 
-`consensus.salient_facts` (`salient_facts.sql.in:13-38`) currently carries a hand-written
-fence for "dynamic `HAS_FEATURE` children"; with one edge per form that fence is deletable.
-
-Reverse reads still pay the 216-leaf Append because `object_id` prunes at neither level,
-so `subjects_with` resolves the bundle first and passes `type_id`.
+`object_id` does not prune partitions, so `subjects_with` resolves the bundle first and
+passes `type_id`.
 
 ---
 
@@ -159,9 +125,8 @@ so `subjects_with` resolves the bundle first and passes `type_id`.
  attribute per role. Single-valued, already correct.
 - `UD/UdSentenceEmitter.cs:100` — FEATS emits a **different relation type per feature**
  (`RelationTypeRegistry.ResolveFeature` → `FEAT_Case`, `FEAT_Number`, …) against a
- `Name=Value` entity. That is a record with named fields, which §1 shape 3 already calls
- correct, and it is the *better* shape than a bundle: each field is independently
- adjudicable and independently queryable. UD was right before this spec existed.
+ `Name=Value` entity. That is a record with named fields, and it is the *better* shape than a bundle: each field is
+ independently adjudicable and independently queryable.
 - `ConceptNet/ConceptNetSource.cs`, `Atomic2020/Atomic2020Source.cs` — `HAS_PROPERTY` comes
  from source rows that are already triples, one relation per row. There is no bundle in the
  input to preserve.

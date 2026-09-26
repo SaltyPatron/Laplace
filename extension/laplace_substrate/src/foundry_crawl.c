@@ -1,10 +1,10 @@
 /*
- * foundry_crawl.c — bounded-output, exact-depth vocabulary crawl.
- *
- * One SQL read is issued per frontier, not per node. p_budget limits only the
- * returned tier-2 vocabulary; traversal is defined exclusively by the caller's
- * p_hops and per-node p_fanout. Storage grows from the rows actually returned
- * and is rejected only at PostgreSQL's real allocation boundary.
+ * A sparse star over consensus from the seed ids. Each hop issues one set read
+ * of up to p_fanout neighbours per frontier id, optionally restricted to the
+ * given relation types. A reached entity's relevance is the highest product of
+ * edge strengths over the reads that reach it (seeds enter at 1.0, tier 2).
+ * p_hops and p_fanout are how far and how wide the star runs; p_budget bounds
+ * only the returned tier-2 entities, ranked by relevance and scaled by 1e6.
  */
 #include "postgres.h"
 

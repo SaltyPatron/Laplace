@@ -5,8 +5,9 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// CLI ingest ops: evidence/content counts, legacy index-recovery journal, post-COPY ANALYZE,
-/// validation probes. Hosts print; SQL stays here.
+/// Ingest verification and maintenance reads over the installed <c>ops.*</c> surface:
+/// file-trunk carrier readback, receipt-journal verification, post-bulk ANALYZE and GIN
+/// flush, evidence/content counts, and layer-completion probes.
 /// </summary>
 public static class NpgsqlIngestOps
 {
@@ -60,24 +61,13 @@ public static class NpgsqlIngestOps
             """, timeoutSeconds: 0, ct: ct, label: "analyze_post_ingest_validation");
 
     /// <summary>
-    /// Drain every GIN pending list once the write burst is over.
+    /// Flushes every GIN pending list after a bulk write burst.
     /// <para>
-    /// GIN with <c>fastupdate</c> buffers inserts into an unordered pending list and
-    /// merges it into the main structure only when it exceeds
-    /// <c>gin_pending_list_limit</c> — in the FOREGROUND of whichever backend crosses
-    /// the threshold. A large limit is what makes a bulk seed cheap, because merges
-    /// batch and same-key entries combine into one posting list update. But the
-    /// pending list is scanned LINEARLY on every search until it is flushed, so
-    /// whatever is left sitting there after an ingest is a tax on exactly the probes
-    /// these indexes exist to serve — and the containment probe on
-    /// physicalities_constituents_gin is the read model's hot path.
-    /// </para>
-    /// <para>
-    /// Flushing here removes the trade-off instead of splitting it: the limit can be
-    /// sized for write batching, and readers never scan a populated list, because the
-    /// burst always ends with this. Explicit rather than left to autovacuum, which
-    /// also cleans pending lists but on its own schedule — the first query after a
-    /// seed should not be the thing that pays.
+    /// GIN with <c>fastupdate</c> buffers inserts in an unordered pending list that is
+    /// merged only when it exceeds <c>gin_pending_list_limit</c>, and every search scans
+    /// that list linearly until then. A large limit keeps bulk persistence cheap; flushing
+    /// explicitly at the end of the burst means trajectory-constituent containment probes
+    /// never scan a populated list, without waiting for autovacuum.
     /// </para>
     /// </summary>
     public static Task CleanGinPendingListsAsync(
@@ -127,10 +117,9 @@ public static class NpgsqlIngestOps
                 p.Add("src", NpgsqlDbType.Bytea).Value = sourceId;
             }, ct, "evidence_count_relation_source_id");
 
-    // Close an orphaned journal row through the installed op. The op refuses
-    // rows not in status='running'; the CALLER owes the liveness proof — the
-    // sanctioned moment is while holding the global ingest mutex, when no other
-    // ingest can be alive by construction.
+    // Closes a journal row through ops.ingest_run_close, which refuses rows not in
+    // status = 'running'. The op does not check liveness; the caller must know the run
+    // is dead, e.g. by holding the global ingest mutex.
     public static Task<long> CloseIngestRunAsync(
         NpgsqlConnection conn, Guid runId, string status,
         CancellationToken ct = default) =>
@@ -143,9 +132,8 @@ public static class NpgsqlIngestOps
                 p.AddWithValue("status", status);
             }, ct, "ingest_run_close");
 
-    // Positive control for the roster's bootstrap filter (#760): the relation
-    // vocabulary is declared here, at the caller, and resolved to an id before
-    // it reaches SQL — the installed op takes ids only.
+    // Whether the source has testimony under the given relation. Both names resolve to
+    // ids before ops.source_bootstrap_present, which takes ids only.
     public static async Task<bool> SourceBootstrapPresentAsync(
         NpgsqlConnection conn, string sourceKey, string lawRelation,
         CancellationToken ct = default)
@@ -162,10 +150,8 @@ public static class NpgsqlIngestOps
         return v is bool b && b;
     }
 
-    // W5 seed-variance probe through the installed op (generation.probe):
-    // both generation lanes over one prompt and a seed set, one row per
-    // (lane, seed). Replay — the failure converse_compose's header gates wiring
-    // on — is distinct-reply-count == 1 for a lane across multiple seeds.
+    // generation.probe: one reply row per (lane, seed) for one prompt, so a caller
+    // can see whether a lane's reply varies with the seed.
     public static async Task<List<(string Lane, long Seed, string? Reply)>> GenerationProbeAsync(
         NpgsqlConnection conn, string prompt, long[] seeds, int steps,
         CancellationToken ct = default)
@@ -183,7 +169,7 @@ public static class NpgsqlIngestOps
         return rows;
     }
 
-    /// <summary>Has the source witness completed the layer (laplace.ingest_layer_completion)?</summary>
+    /// <summary>Whether the source has a completion receipt for the layer (laplace.ingest_layer_completion).</summary>
     public static async Task<bool> LayerCompletedAsync(
         NpgsqlConnection conn, int layer, Hash128 sourceId, CancellationToken ct = default)
     {

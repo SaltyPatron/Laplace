@@ -11,9 +11,8 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        // Native runtime init before any command touches the engine — unchanged from the
-        // pre-Spectre entrypoint, and still keyed off the ORIGINAL args[0] so cpu-topology
-        // (which may run before MKL is available) stays exempt.
+        // Native runtime init before any command touches the engine, keyed off the original
+        // args[0] so cpu-topology (which can run before MKL is available) is exempt.
         if (args.Length == 0 || args[0] != "cpu-topology")
         {
             NativeRuntimeEnv.ApplyFromTopology();
@@ -28,10 +27,9 @@ internal static class Program
 
         var app = BuildApp();
 
-        // SAFE ROUTING: Spectre routes on the command token, but the real arguments are handed
-        // to the existing command parsers verbatim via ctx.Remaining.Raw — so a `--` is injected
-        // after the command token for execution. Help requests are passed through unchanged so
-        // Spectre renders its own (banner/usage) help.
+        // Spectre routes on the command token; the arguments reach the command parsers
+        // verbatim via ctx.Remaining.Raw (see ForExecution). Help requests pass through so
+        // Spectre renders its own help.
         return await app.RunAsync(ForExecution(args));
     }
 
@@ -55,9 +53,8 @@ internal static class Program
     private static CommandApp BuildApp()
     {
         var services = new ServiceCollection();
-        // The DI bridge (GH #603): the shared ops logging factory is available to any command
-        // that wants a constructor-injected ILogger; the existing static composition root
-        // (CliRuntime.Services) remains for the seed decomposer resolver.
+        // The shared ops logging factory is available to any command that takes a
+        // constructor-injected ILogger; CliRuntime.Services stays the decomposer resolver.
         services.AddSingleton<ILoggerFactory>(_ => CliRuntime.LoggerFactory);
         services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
 
@@ -66,16 +63,14 @@ internal static class Program
         {
             config.SetApplicationName("laplace");
 
-            // Preserve the pre-Spectre contract: a failure prints "error: <Type>: <message>"
-            // (plus inner chain) to stderr and exits 1, rather than a raw stack dump. Covers
-            // both parse errors (unknown command / bad flag) and runtime command exceptions.
+            // A failure prints "error: <Type>: <message>" plus the inner chain to stderr and
+            // exits 1, for both parse errors and runtime command exceptions.
             config.SetExceptionHandler((ex, _) =>
             {
                 Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
                 for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
                     Console.Error.WriteLine($"  inner: {inner.GetType().Name}: {inner.Message}");
-                // A message without a frame is not a diagnosis: an ingest that dies mid-corpus
-                // leaves nothing to act on. Opt-in so the default contract above is unchanged.
+                // LAPLACE_STACK=1|true adds the full stack trace.
                 if (Environment.GetEnvironmentVariable("LAPLACE_STACK") is "1" or "true")
                     Console.Error.WriteLine(ex.ToString());
                 return 1;

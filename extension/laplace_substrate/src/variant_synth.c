@@ -29,11 +29,9 @@ PG_FUNCTION_INFO_V1(pg_laplace_variant_walk);
 PG_FUNCTION_INFO_V1(pg_laplace_respell_variant);
 
 /*
- * Per-node SPI plans are prepared once (static) and re-executed via
- * SPI_execute_plan in the recursion, instead of SPI_execute_with_args
- * re-planning on every visited node. tier + has_trajectory are collapsed
- * into ONE round-trip. Both changes are execution-efficiency only: the
- * queries, arguments, and the values read out are identical to before.
+ * Per-node plans are prepared once and re-executed through the recursion so
+ * each visited node costs an execution, not a plan. Tier and trajectory
+ * presence are read in one round trip.
  */
 static SPIPlanPtr tier_traj_plan   = NULL;   /* (bytea) -> (tier, has_traj) */
 static SPIPlanPtr traj_points_plan = NULL;   /* (bytea) -> trajectory points */
@@ -96,12 +94,10 @@ ensure_variant_plans(void)
     }
 }
 
-/* Memo: 16-byte entity id -> its deterministic render_text output.
- * render_text has no randomness, so caching it changes nothing about the
- * walk's output or its PRNG draw order -- it only avoids re-fetching (and
- * re-descending, since render_text re-walks the subtree in SQL) the same
- * entity. Callers pfree the string they receive, so a memo hit returns a
- * fresh pstrdup copy while the memo retains ownership of its own copy. */
+/* Memo: entity id -> its render_text realization. render_text is
+ * deterministic, so the memo leaves the walk's output and PRNG draw order
+ * unchanged while each entity's subtree is realized once. A hit returns a
+ * pstrdup copy because callers pfree what they receive. */
 typedef struct VariantMemoEntry
 {
     char  key[16];
@@ -210,10 +206,8 @@ fetch_trajectory_points(Datum id, int *out_n)
     return pts;
 }
 
-/* One round-trip for both tier and has_trajectory. Mirrors the two former
- * scalar lookups exactly: a failed/empty result yields tier=-1 (leaf), and
- * has_traj is only consulted when tier>2 -- so eagerly evaluating it for
- * low-tier entities is harmless and never affects output. */
+/* Tier and trajectory presence in one round trip. An empty result reads as
+ * tier -1 (a leaf); trajectory presence matters only above tier 2. */
 static void
 entity_tier_and_traj(Datum id, int32 *tier_out, bool *traj_out)
 {
@@ -233,6 +227,11 @@ entity_tier_and_traj(Datum id, int32 *tier_out, bool *traj_out)
                                            SPI_tuptable->tupdesc, 2, &isnull));
 }
 
+/* Realizes an entity by walking its trajectory in ordinal order, expanding each
+ * run. With probability swap, a constituent above tier 2 is replaced by its
+ * consensus peer (generation.consensus_peer, k) before descending; depth bounds
+ * how many levels may swap. Entities at tier <= 2 or without a trajectory are
+ * realized directly through render_text. */
 static char *
 variant_walk_impl(HTAB *memo, Datum id, float8 swap, int32 k, int32 depth)
 {

@@ -20,9 +20,8 @@ export const SliderField = forwardRef<HTMLDivElement, SliderFieldProps>(function
 ) {
   const clamp = (n: number) => Math.min(max, Math.max(min, n));
 
-  // Snap to the control's own step. This was a bare Math.round, which is correct only while
-  // every step is 1: a 0.1-step slider accepted 0.3 from the range handle and then rewrote it
-  // to the minimum the moment the paired number box was touched.
+  // Snap to the control's own step precision, so a fractional step (0.1) keeps its
+  // decimals when the paired number box is edited.
   const decimals = (String(step).split('.')[1] ?? '').length;
   const snap = (n: number) => (decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n));
 

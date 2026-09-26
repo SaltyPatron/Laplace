@@ -8,10 +8,9 @@ using Npgsql;
 namespace Laplace.Ingestion;
 
 /// <summary>
-/// Runtime close for standard user-owned text artifacts. This is deliberately separate
-/// from corpus ingestion and from conversation turns: user files witness the same global
-/// content ids, but under <c>UserContent@tenant</c> rather than a seeded source or
-/// <c>UserPrompt@tenant</c>.
+/// Admits a user-owned text artifact at runtime. The file composes to the same global
+/// content ids any source reaches; only the witness differs: <c>UserContent@tenant</c>
+/// rather than a seeded source or <c>UserPrompt@tenant</c>.
 /// </summary>
 public sealed class ContentArtifactCloser : IAsyncDisposable
 {
@@ -150,9 +149,8 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // A failed apply rolls back its journal/evidence/fold transaction.
-            // Retire this writer because a failed fold lane can remain poisoned,
-            // but do not disable unrelated later files handled by this closer.
+            // A failed apply rolls back its journal/evidence/fold transaction. The writer is
+            // retired, since its fold lane may stay faulted; later files get a fresh one.
             var failedWriter = _writer;
             _writer = null;
             Broken = false;

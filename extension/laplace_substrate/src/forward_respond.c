@@ -1,29 +1,22 @@
 /*
- * converse.respond: the query-relative response of the admitted web to a whole
- * observation (spec 36 COUPLE; INVENTION section 7).
+ * converse.respond: COUPLE of one whole observation against the consensus web.
  *
- * Every term is tugged at once. A term reaches its keys through its bindings
- * (KEY_BINDING: dog -> i46360), and the web answers from each key outward as an
- * indexed star, hop by hop (INVENTION section 9: hops and fanout are the compute
- * coordinates). A node records which terms reached it and by what route. A
- * candidate reached from every term, each by its own typed route, is the joint
- * interpretation the observation supports: "capital" and "France" meet at the key
- * that IS_INSTANCE_OF national capital and that France HAS_PART, and which senses of
- * "capital" and "France" were meant falls out of that meeting. No sense is elected
- * first.
+ * Every term expands at once. A term is its own key and also reaches the keys its
+ * KEY_BINDING relations name; from the keys the web answers as an indexed star,
+ * one native consensus-neighbor set read per hop, bounded by hops, fanout and a
+ * frontier cap. Each node records, per term, the typed route that reached it. A
+ * node reached by every term is a joint reading of the observation; the reading
+ * of each term follows from where the routes meet, not from a sense chosen first.
  *
- * A route stays typed: the term, the key it left from, its hop count, the relation of
- * its last step and the node it came through, plus the weakest salience and the weakest
- * conservative standing along the path, and the last step's rating, deviation,
- * volatility and witnesses. Candidates are ordered by how many terms they answer, then
- * by the salience of their least salient route (relation rank is read-time salience: a
- * shared part of speech says less than a shared taxonomic or partitive fact), then by
- * fewest hops, then by the weakest standing. That ordering is this operation's
- * declared contract; routes are never collapsed into one score. The expansion is the
- * native consensus-neighbor scan, one set read per hop, with no SQL per candidate.
+ * A route keeps the term, the key it left from, its hop count, the relation and
+ * predecessor of its last step, the last step's rating, deviation, volatility and
+ * witnesses, and the minimum relation salience and minimum conservative standing
+ * (rating - 2 rd) along the path. Candidates order by terms covered, then that
+ * minimum salience, then fewest hops, then that minimum standing; routes are
+ * returned per term, never folded into one score.
  *
- * Which salience bands the star may traverse is ROUTE's operand (min_salience): by
- * default the semantic bands, not lexical glue, scalar values or standards metadata.
+ * min_salience bounds which relation ranks the star traverses; binding and
+ * NON_SALIENT_STRUCTURAL relations are never traversed.
  */
 #include "postgres.h"
 
@@ -78,12 +71,10 @@ typedef struct
     uint8 mode;            /* ROUTE_* taxonomic direction state */
 } Route;
 
-/* A path's taxonomic direction. Generalizing the term (ascending IS_A /
- * IS_INSTANCE_OF) is allowed only straight from its key; once a path has
- * ascended it may not descend, because up-then-down reaches siblings (Marseille
- * is a city, as a capital is, and not a capital). Any other salient step
- * commits the path, after which it may only specialize or keep going laterally:
- * capital <- national capital <- Paris, France HAS_PART Paris. */
+/* A path's direction over PATH_UPWARD relations. Ascending is allowed only
+ * from the key or after another ascent; an ascended path may not descend, since
+ * up-then-down reaches siblings rather than the term. Any non-ascending step
+ * commits the path, after which it may descend or go laterally but not ascend. */
 #define ROUTE_AT_KEY 0
 #define ROUTE_ASCENDED 1
 #define ROUTE_COMMITTED 2
@@ -152,9 +143,9 @@ relation_salience(const hash128_t *type)
     return laplace_relation_lookup(type, &def) == 0 && def != NULL ? def->rank : 0.0;
 }
 
-/* Meeting specificity: how many cells name the candidate as their object, read
- * with a bound. A hub every entry is an instance of ("Concept") is shared by
- * everything; an answer such as Paris is shared by few. Ordering only. */
+/* Meeting specificity: how many consensus cells name the candidate as object,
+ * counted up to a firmware cap. A hub is shared by many cells, a specific
+ * meeting by few. Used only to order ties in coverage. */
 #define RESPOND_SHARING_WINDOW (laplace_firmware_default()->sharing_window)
 #define RESPOND_SHARING_CAP (laplace_firmware_default()->sharing_cap)
 
@@ -310,9 +301,8 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
             if (hash_search(binding_types, &e->type, HASH_FIND, NULL) ||
                 hash_search(non_salient_types, &e->type, HASH_FIND, NULL))
                 continue;
-            /* ROUTE's salience envelope: a governed classification value (a part of
-             * speech, a language, a script) is a filter, not a strand. Traversing it
-             * would make every noun two hops from every other. */
+            /* Low-rank relations (governed classification values) are filters,
+             * not strands: traversing one would join everything that shares it. */
             if (relation_salience(&e->type) < min_salience)
                 continue;
             from = hash_search(nodes, &e->frontier, HASH_FIND, NULL);
@@ -368,12 +358,11 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
         n_frontier = n_next;
     }
 
-    /* Meeting pass. Forward expansion is bounded per node, so a hub's members are
-     * truncated (a national capital has ~150 instances; Paris need not be among
-     * the kept few). A node some terms reached reads its own cells, which are few,
-     * and joins every node another term already reached, under the same salience
-     * envelope and direction law. France HAS_PART Paris meets
-     * capital <- national capital through Paris IS_INSTANCE_OF national capital. */
+    /* Meeting pass. Forward expansion truncates each node's fanout, so a hub's
+     * members may be cut off. Each node reached by some but not all terms reads
+     * its own cells in one set read, and a cell to a node another term reached
+     * extends that term's route back into it, under the same salience bound,
+     * hop bound and direction law. */
     {
         long n_nodes = hash_get_num_entries(nodes);
         hash128_t *partial = palloc(sizeof(hash128_t) * Max(Min(n_nodes, (long) frontier_cap), 1));
@@ -484,8 +473,6 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
                 if (route->hops > rk.hops) rk.hops = route->hops;
                 first = false;
             }
-            /* A multi-term observation asks what answers all of it; fall back to the
-             * best partial answers only when nothing answers every term. */
             if (rk.covered > 0) ranked[m++] = rk;
         }
         qsort(ranked, m, sizeof(Ranked), ranked_order);
@@ -536,6 +523,8 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
                 pfree(ids);
             }
         }
+        /* Only nodes covering every term are returned when any exists; otherwise
+         * the nodes at the highest coverage reached. */
         if (m > 0 && ranked[0].covered < needed && n_terms > 1)
             needed = ranked[0].covered;
         for (long x = 0, emitted = 0; x < m && emitted < limit; ++x)
@@ -577,10 +566,9 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
 }
 
 /*
- * converse.content_terms(words): the observation's content terms, in order. A word
- * is a term when it binds to a key (HAS_SENSE) and its strongest witnessed
- * universal part of speech, if any, is a content tag. Function words and
- * punctuation are read from their own evidence, never from a word list.
+ * converse.content_terms(ids): the ids, deduplicated in order, that have a
+ * positively standing HAS_SENSE and whose highest-standing HAS_POS, if any, is a
+ * content tag. One consensus scan over all ids; no word list.
  */
 typedef struct
 {
@@ -680,8 +668,9 @@ pg_laplace_content_terms(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(makeArrayResult(out, CurrentMemoryContext));
 }
 
-/* converse.firmware(name): a governed firmware image's policy and content id, so SQL
- * orchestration passes the image's values instead of literals. NULL name = default. */
+/* converse.firmware(name): a governed firmware image's compute coordinates and
+ * content id, so orchestration passes the image's values instead of literals.
+ * NULL name = default image. */
 Datum
 pg_laplace_firmware(PG_FUNCTION_ARGS)
 {

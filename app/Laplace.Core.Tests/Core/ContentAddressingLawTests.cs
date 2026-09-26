@@ -5,24 +5,12 @@ using Xunit;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// THE content-addressing law, spec 05 #1b: same content = same hash AT EVERY TIER. The id
-/// is a function of the child-id sequence and nothing else -- no tier, no ordinal, no
-/// container. It is what makes cross-source observations converge on one canonical
-/// content entity without an entity-resolution pass, and what lets "cat" the word and
-/// "cat" standing alone as an answer be one entity. Ordinary convergence is not a
-/// cryptographic hash collision.
+/// Content addressing (spec 05 #1b): a composition id is a function of the ordered child-id
+/// sequence and nothing else (no tier, ordinal, or container), so equal content from any
+/// source converges on one entity without a resolution pass.
 ///
-/// hash128.c discards the tier parameter with an explicit `(void)tier` and its comment
-/// records that a tier byte was briefly mixed in on 2026-07-01, broke the law, and was
-/// reverted.
-///
-/// NOTHING CAUGHT THAT. Measured 2026-08-24: mixing the tier byte back into
-/// hash128_compose and rebuilding leaves all 735 Laplace.Substrate.Tests and all
-/// Laplace.Core.Tests GREEN. TierFloorIdentityTests does not catch it either -- it composes
-/// the single-word "dog", and hash_composer collapses a one-child node to the child id, so
-/// the compose path under test is never reached.
-///
-/// This composes TWO children, which cannot collapse, at two different tiers.
+/// Composes two children through the native composer, since a one-child node collapses to
+/// the child and would never reach the Merkle compose path, at several tier arguments.
 /// </summary>
 public sealed class ContentAddressingLawTests
 {
@@ -32,10 +20,7 @@ public sealed class ContentAddressingLawTests
         double* coords = stackalloc double[8];
         for (int i = 0; i < 8; i++) coords[i] = 0.0;
         Hash128 outId;
-        // out_coord is double[4], not a single double (hash_composer.c:16). Passing a
-        // one-slot buffer let the native centroid write four doubles over the stack and
-        // clobber outId to zero -- and the "same id at every tier" assertion PASSED on
-        // 0 == 0 == 0. Only the converse assertion below exposed it.
+        // out_coord is double[4] (the 4-ball centroid); a smaller buffer is overwritten.
         double* outCoord = stackalloc double[4];
         Hilbert128 outHb;
         NativeInterop.HashComposerComposeNode(tier, kids, coords, 2, &outId, outCoord, &outHb);
@@ -60,15 +45,14 @@ public sealed class ContentAddressingLawTests
     [Fact]
     public unsafe void DifferentChildren_ComposeToDifferentIds()
     {
-        // The converse, so the test above cannot be satisfied by a degenerate composer that
-        // returns a constant.
+        // Different children give different ids, so a constant composer cannot pass.
         Hash128 a = Hash128.OfCanonical("law/content-addressing/a");
         Hash128 b = Hash128.OfCanonical("law/content-addressing/b");
         Hash128 c = Hash128.OfCanonical("law/content-addressing/c");
 
         Assert.NotEqual(Compose(3, a, b), Compose(3, a, c));
 
-        // Order is content: the child SEQUENCE is what is hashed.
+        // Order is content: the child sequence is what is hashed.
         Assert.NotEqual(Compose(3, a, b), Compose(3, b, a));
     }
 }

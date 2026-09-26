@@ -35,9 +35,8 @@ internal static class ChessCommands
         };
     }
 
-    // Engine-vs-engine match with a live terminal board (GH #604): drives the ChessLabService
-    // cutechess job and renders its event stream. Games stream into the substrate through the
-    // job's own re-ingestion (--no-ingest opts out, matching the lab's ingest=false).
+    // Engine-vs-engine match with a live terminal board: drives the ChessLabService cutechess
+    // job and renders its event stream. The job admits the games (--no-ingest sets ingest=false).
     private static async Task<int> MatchAsync(string[] args)
     {
         var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -79,11 +78,9 @@ internal static class ChessCommands
         + "  lichess [--token T] [--depth D] [--max-concurrent N] [--substrate] [--speed bullet|blitz|rapid|classical]\n"
         + "      stream account events + play rated standard games (token from LICHESS_API env or deploy\\secrets\\lichess.env)";
 
-    // Reproducible engine benchmark — the "profile before optimizing" baseline for the
-    // Search hot path (GH #607). Fixed-depth search over a fixed position set: node counts
-    // are deterministic at a given depth, so nodes/sec and bytes-allocated are the signal.
-    // A representative spread: opening, tactical middlegames, and endgames (where the
-    // 32MB TT clear per Think — see .scratchpad/31 — dominates the shortest searches).
+    // Reproducible Search benchmark: fixed-depth search over a fixed position set, so node
+    // counts are deterministic at a given depth and nodes/sec and bytes allocated are the
+    // measure. The set spans opening, tactical middlegames, and endgames.
     private static readonly string[] BenchPositions =
     [
         ChessModality.StartFen,

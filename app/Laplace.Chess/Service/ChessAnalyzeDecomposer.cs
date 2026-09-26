@@ -7,26 +7,21 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED pass, BACKFILL role: scan witnessed playings in Postgres (Chess_Event rows
-// carrying a PLAYS_LINE edge under a witness source, GH #736) that carry no current-version
-// per-event ANALYSIS marker, hydrate via content roundtrip,
-// derive geometry/consensus, stamp AnalysisMarker. Since GH #600, `laplace ingest chess` derives
-// inline in the recording pass (ChessPgnDecomposer.Compose -> DeriveFromParsed), so a fresh
-// ingest never needs this pass; it exists to (a) analyze games recorded before the fusion landed
-// and (b) re-derive at a bumped ChessAnalyze.Version without re-recording.
-// Run: `laplace ingest chess-analyze`  (no path — substrate is the source of truth)
+// Runs the ChessAnalyze calculation over playings already recorded in the substrate: streams
+// playings (PLAYS_LINE under a witness source) that lack the current-version analysis marker,
+// hydrates their witnessed inputs, and derives through the shared compose path. The recording
+// pass (ChessPgnDecomposer) derives inline, so this covers playings recorded without analysis
+// and re-derivation at a new ChessAnalyze.Version. Input is the substrate itself; no path.
 public sealed class ChessAnalyzeDecomposer
     : ComposeDecomposer<ChessAnalyzeRecord>, IIngestNoOpExplainer
 {
-    // Marker-gated backfill over playings the fused ingest pass (GH #600) already derived.
-    // On a substrate seeded through that fused path there is nothing left to backfill, and
-    // the declared denominator is still every recorded playing — so a correct, complete
-    // run applied zero and the silent-no-op guard failed it. See IIngestNoOpExplainer.
+    // Count of unanalyzed playings streamed. The declared denominator is every recorded
+    // playing, so a run that streams none is complete, not a silent no-op (IIngestNoOpExplainer).
     private long _candidatesStreamed;
 
     private readonly int _engineDepth;
-    /// <summary>engineDepth &gt; 0 runs the Laplace search per position for a calculated
-    /// eval/quality signal; 0 (default) records only witnessed structure (fast ingest).</summary>
+    /// <summary><paramref name="engineDepth"/> is forwarded to
+    /// <c>ChessAnalyze.DeriveFromWitnessed</c>.</summary>
     public ChessAnalyzeDecomposer(int engineDepth = 0) => _engineDepth = engineDepth;
 
     public override Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
@@ -88,8 +83,8 @@ public sealed class ChessAnalyzeDecomposer
 }
 
 /// <summary>
-/// Analysis pipeline record whose trunk root is the versioned per-EVENT analysis marker,
-/// not the playing itself (GH #736: the analyzer's unit is the playing).
+/// One playing to analyze. Its trunk root and completion key are the playing's versioned
+/// analysis marker, not the playing itself.
 /// </summary>
 public sealed record ChessAnalyzeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {

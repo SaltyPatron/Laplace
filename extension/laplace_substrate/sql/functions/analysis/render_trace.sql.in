@@ -1,41 +1,15 @@
--- ops.render_trace — why did realize.render_text(id) return NULL?
+-- ops.render_trace: why realize.render_text(id) returned NULL. REALIZE
+-- assembles a composition from its constituents and abstains (NULL, up to the
+-- root) if any child fails to resolve: rendering the rest would manufacture
+-- content under a valid hash. This walks the constituent closure of one entity
+-- and gives each child a verdict: orphan (no entities row), composed (renders
+-- by recursion), codepoint, or unrenderable.
 --
--- render_node (generate_walk.c:1104-1126) accumulates children into one buffer
--- and discards ALL of it if any single child fails to resolve:
---
---     if (child_text != NULL)  append child_text
---     else if (!append_codepoint_render(&out, kids[r].child))  ok = false;
---     ...
---     e->text = ok ? out.data : NULL;
---
--- NULL then propagates to the root, so one unresolvable constituent out of
--- thirty makes an entire document unreadable at any p_max_depth. That is the
--- CORRECT behaviour -- rendering the other twenty-nine would manufacture
--- content with a valid hash, which is the one thing a provenance substrate
--- must not do. Abstention is the design (see "softmax can be zero").
---
--- What was missing is the diagnosis. render_text returns NULL and says nothing
--- about which constituent killed it, so the only way to find out was a manual
--- LEFT JOIN against the trajectory, one document at a time. MEASURED
--- 2026-08-12: three tier-4 documents with n_constituents=5 returned NULL at
--- both depth 8 and depth 32; ordinals 1 and 5 had no laplace.entities row.
--- The former journal-count diagnostic does not establish a substrate-wide
--- missing-reference count; only the actual entity anti-join can measure that.
---
--- realize.render_gaps() does not answer this: it scans consensus for globally
--- unnameable ids, not the constituent closure of one entity.
---
--- Cost discipline: realize.codepoint_for_id is the expensive call, so it fires
--- only on rows the cheap entity join could not already classify, and labels
--- resolve through ONE converse.label_or_hex_batch rather than N scalar calls
--- (measured 2026-08-12: the scalar form is ~42 ms per call).
---
--- BEGIN ATOMIC, not AS $$ (G12 / GH #764). Codepoints render through to_hex
--- alone -- G14 bans lower()/upper()/initcap() anywhere on the read path, and
--- the conventional uppercase of "U+00E9" is not worth a case fold that is
--- Latin-shaped and silently a no-op for most of the codespace. Internal aliases
--- avoid the RETURNS TABLE column names, which are OUT parameters in scope over
--- an atomic body.
+-- realize.codepoint_for_id is the costly call, so it runs only on rows the
+-- entity join left undecided; labels realize through one
+-- converse.label_or_hex_batch. Codepoints print via to_hex alone: no case
+-- folding on the read path. Internal aliases avoid the RETURNS TABLE names,
+-- which are OUT parameters in scope over an atomic body.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -118,11 +92,8 @@ BEGIN ATOMIC
     ORDER BY kept.pid, kept.ord;
 END;
 
--- The text below deliberately does not spell the scalar realizer name followed
--- by an open paren. ISA gate G2 (RenderBeforeSelectGateTests) regexes the whole
--- file with SQL comments stripped but STRING LITERALS PRESERVED, so naming it
--- here registers as a row-producing scalar call this function does not make --
--- and the gate pins the repository total at exactly 17.
+-- The comment text avoids spelling the scalar realizer name with an open
+-- paren: RenderBeforeSelectGateTests scans string literals as code.
 COMMENT ON FUNCTION ops.render_trace(bytea, integer, boolean) IS
     'Why a render of this entity came back NULL: the constituent closure with a '
     'per-child verdict. Non-empty with p_failures_only means assembly aborted on '

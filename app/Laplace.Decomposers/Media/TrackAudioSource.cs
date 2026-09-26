@@ -3,7 +3,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Media;
 
-/// <summary>Generic audio-track lane (fixture / corpus-agnostic). Not a corpus source.</summary>
+/// <summary>Source identity for audio tracks, independent of any corpus.</summary>
 public readonly struct TrackAudioSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
@@ -17,9 +17,8 @@ public readonly struct TrackAudioSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_SPECTRAL_PEAK", "HAS_ONSET_SEGMENT"];
 
-    // Tier 2 is "Window" — the native audio ladder hashes blake3("Window")
-    // (laplace_modality_tier_type_id) and its tests pin it. "Frame" here was a
-    // C#/native identity split: two different type ids for one tier.
+    // Tier names match the native audio ladder: tier 2 is "Window", whose type id is
+    // blake3("Window") (laplace_modality_tier_type_id).
     public static IReadOnlyList<string>? TypeNodeNames =>
         ["Sample", "Window", "OnsetSegment", "Phrase", "Track"];
 

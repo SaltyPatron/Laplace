@@ -5,19 +5,9 @@ using Xunit;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// GH #986 was verified on exactly ONE machine: a non-hybrid i7-6850K, 6 cores / 12 threads.
-/// The hybrid path -- which is what the original Linux detector was written around, keying on
-/// /sys/devices/cpu_core/cpus that only hybrid P/E parts publish -- and dual-socket and
-/// no-SMT server parts were untested by anything.
-///
-/// "No physical ARM box" does not mean nothing can be tested. The layouts themselves are
-/// data, and CpuTopology.TestPoolsOverride takes them, so DetectPlatform's rule can be
-/// exercised against every shape the detector can produce.
-///
-/// The rule under test (CpuTopology.DetectPlatform): trust pools.PhysicalPCores when
-/// detection produced a real reading. It previously discarded that value for any NON-hybrid
-/// CPU and returned Environment.ProcessorCount -- the LOGICAL count -- as the physical one,
-/// which is why 911 tests passed at p_physical=12 on a 6-core part.
+/// Feeds CpuTopology.TestPoolsOverride with each layout shape the detector can produce
+/// (non-hybrid SMT, hybrid P/E, dual-socket, no-SMT, cpuset-restricted) and proves
+/// CpuTopology.DetectPlatform reports pools.PhysicalPCores as the physical core count.
 /// </summary>
 [Collection("CpuTopology")]
 public sealed class TopologyLayoutTests : IDisposable
@@ -49,7 +39,7 @@ public sealed class TopologyLayoutTests : IDisposable
             source: source);
     }
 
-    // i7-6850K, the machine #986 was found on: 6 cores, SMT, 12 logical, no E-cores.
+    // Non-hybrid SMT: 6 cores, 12 logical, no E-cores.
     [Fact]
     public void NonHybridSmt_ReportsCoresNotThreads()
     {
@@ -59,8 +49,7 @@ public sealed class TopologyLayoutTests : IDisposable
         Assert.False(CpuTopology.IsHybrid);
     }
 
-    // 14900KS: 8 P-cores with SMT (16 threads) + 16 E-cores without = 32 logical. This is the
-    // layout the original detector was written for and the only one it handled.
+    // Hybrid: 8 P-cores with SMT (16 threads) + 16 E-cores without = 32 logical.
     [Fact]
     public void HybridPeCores_KeepBothPoolsDistinct()
     {
@@ -69,13 +58,12 @@ public sealed class TopologyLayoutTests : IDisposable
         Assert.Equal(16, CpuTopology.EfficientCoreCount);
         Assert.True(CpuTopology.IsHybrid);
 
-        // E-cores must never be counted as P-cores: applyPartitions is sized from the P pool
-        // and a sustained-AVX fold scheduled onto an E-core is not equivalent work.
+        // E-cores are not counted as P-cores; apply partitions are sized from the P pool.
         Assert.NotEqual(CpuTopology.PerformanceCoreCount, CpuTopology.LogicalProcessorCount);
     }
 
-    // Dual-socket EPYC-shaped: 2 packages x 32 cores, SMT, 128 logical. core_id restarts per
-    // socket, so a dedupe keyed on core_id alone HALVES this to 32.
+    // Dual-socket: 2 packages x 32 cores, SMT, 128 logical. core_id restarts per socket,
+    // so a dedupe keyed on core_id alone would report 32.
     [Fact]
     public void DualSocket_CountsBothPackages()
     {
@@ -84,7 +72,7 @@ public sealed class TopologyLayoutTests : IDisposable
         Assert.Equal(128, CpuTopology.LogicalProcessorCount);
     }
 
-    // ARM server part: no SMT at all, so physical == logical and nothing is doubled.
+    // No SMT: physical == logical.
     [Fact]
     public void NoSmt_PhysicalEqualsLogical()
     {
@@ -93,9 +81,7 @@ public sealed class TopologyLayoutTests : IDisposable
         Assert.Equal(16, CpuTopology.LogicalProcessorCount);
     }
 
-    // A container under a cpuset sees the HOST's cpus in sysfs. The detector reads
-    // /proc/self/status Cpus_allowed_list instead, so the pools carry what the process may
-    // actually run on -- 2 cores of a 64-core host, not 64.
+    // Pools carry the process's Cpus_allowed_list, not the host's sysfs CPUs.
     [Fact]
     public void CpusetRestricted_SizesToTheProcessNotTheHost()
     {
@@ -105,8 +91,7 @@ public sealed class TopologyLayoutTests : IDisposable
             "a cpuset-restricted container must not be sized for the host");
     }
 
-    // Every derived pool follows PerformanceCoreCount. This is the relationship that nothing
-    // asserted, which is why a 2x error in the base was invisible to 911 tests.
+    // Apply partitions and parallel maintenance workers follow PerformanceCoreCount.
     [Theory]
     [InlineData(6, 12)]
     [InlineData(8, 32)]

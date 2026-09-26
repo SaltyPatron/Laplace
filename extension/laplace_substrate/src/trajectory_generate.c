@@ -1,10 +1,16 @@
 /*
- * trajectory_generate.c — canonical query-relative forward execution.
+ * trajectory_generate.c — the forward pass over one admitted observation:
+ * RESOLVE, COUPLE, ORIENT, then per step PROPOSE, SCAN, COMPOSE, STEER (route
+ * one more hop) or SELECT.
  *
- * One retained query state owns the semantic frontier for the whole pass.
- * Ordered physical continuation evidence and typed relation/evidence channels
- * are independent candidate providers; selection extends both the ordered
- * trajectory and the persistent query state before the next election.
+ * One retained query state holds the operand frontier for the whole pass:
+ * observation occurrences, supplemental semantic seeds, prior discourse, and
+ * the physicality and geometry responders COUPLE adds. Ordered trajectory
+ * continuations and typed consensus channels nominate candidates
+ * independently; the election orders them by typed evidence tuples, never a
+ * fused score; selection extends both the ordered trajectory and the query
+ * state before the next step. The cognition program tracks the observation's
+ * obligations and its receipt accompanies every traced row.
  */
 #include "postgres.h"
 
@@ -364,10 +370,8 @@ origin_add_occurrences(HTAB *origins, const hash128_t *target,
     MemoryContextSwitchTo(previous);
 }
 
-/* Structural continuity has exact ancestry too. A successor supported by a
- * matched suffix inherits the occurrence roots of that exact suffix; it is not
- * a provenance-free token merely because its provider is physicality rather
- * than testimony. */
+/* Structural continuity has exact ancestry too: a successor supported by a
+ * matched trajectory suffix inherits the occurrence roots of that suffix. */
 static void
 origin_inherit_sequence(HTAB *origins, const hash128_t *target,
                         Datum *context, int context_length, int stride,
@@ -402,8 +406,8 @@ propagate_candidate_origins(HTAB *origins, HTAB *candidate_index,
             !walk_relation_salient(channel->relation) ||
             laplace_prompt_contract_relation(&channel->relation))
             continue;
-        /* Prompt ancestry follows the same salience law as coverage: a hub reached
-         * through glue (every noun HAS_POS NOUN) would otherwise inherit every
+        /* Ancestry follows the same salience law as coverage: a hub reached
+         * through a non-salient relation would otherwise inherit every
          * occurrence and hand it to everything it reaches. */
         origin_merge(origins, &channel->candidate, &channel->anchor, owner);
     }
@@ -483,10 +487,8 @@ negative_channel_compare(const LaplaceQueryChannel *a,
     return 0;
 }
 
-/* Build a typed evidence index without reducing different relation families,
- * occurrences, source diversity, and standing into one scalar. The channel set
- * may be a bounded proposal field or the exact bounded-candidate adjudication
- * field; the election tuple itself is identical. */
+/* Mark, for one candidate and polarity, every observation occurrence the
+ * channel's anchor descends from; *covered counts the newly covered ones. */
 static void
 cover_origins(HTAB *coverage, HTAB *origins, const LaplaceQueryChannel *channel,
               uint8 polarity, int32 *covered)
@@ -514,6 +516,11 @@ cover_origins(HTAB *coverage, HTAB *origins, const LaplaceQueryChannel *channel,
     }
 }
 
+/* One typed evidence summary per candidate: occurrence coverage, obligations
+ * grounded, relation families, and the strongest positive and negative channel
+ * are kept separate rather than reduced to one scalar. The channel set may be
+ * the bounded proposal field or the exact candidate evidence read; the summary
+ * is the same. projection_only drops incoming asymmetric channels. */
 static HTAB *
 evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
                                  bool projection_only, HTAB *origins,
@@ -677,15 +684,13 @@ positive_summary_compare(const EvidenceSummary *a, const EvidenceSummary *b)
         return a->has_positive ? 1 : -1;
     if (!a->has_positive)
         return 0;
-    /* The turn's obligations come first: a candidate grounding more of the
-     * occurrences the program must satisfy outranks one that merely covers
-     * more of the observation (whitespace, function words, prior output). */
+    /* Obligations first: a candidate grounding more of the occurrences the
+     * cognition program must satisfy outranks one that merely covers more of
+     * the observation. */
     if (a->positive_required_occurrences != b->positive_required_occurrences)
         return a->positive_required_occurrences > b->positive_required_occurrences ? 1 : -1;
-    /* Elect against the joint query before comparing one supporting cell.
-     * Previously the cell's endpoint hash could settle the comparison before
-     * coverage was even inspected, so one strong isolated edge defeated a
-     * candidate supported by the complete declared operand set. */
+    /* Joint coverage of the query, then relation families, precede any
+     * comparison of the single strongest supporting cell. */
     if (a->positive_covered_occurrences != b->positive_covered_occurrences)
         return a->positive_covered_occurrences > b->positive_covered_occurrences ? 1 : -1;
     if (a->positive_relation_families != b->positive_relation_families)
@@ -803,15 +808,13 @@ candidate_can_output(const Candidate *candidate, const LaplacePromptIntent *inte
     if (intent && intent->explicit_invocation)
         return candidate_is_intent_result(candidate, intent);
 
-    /* A positive typed semantic transition is already a lawful proposal from
-     * the shared COUPLE/SCAN field. The old gate admitted it for ROUTE, then
-     * prohibited it from SELECT forever unless an unrelated sequence or
-     * source-declared task shape also happened to exist.
-     *
-     * Naming/sense/frame channels remain routing state rather than answer acts;
-     * protocol CALLS/HAS_INPUT edges remain invocation metadata. Every other
-     * traversable positive semantic responder may be selected, and cognition
-     * obligation closure still decides whether REALIZE is allowed. */
+    /* An explicit invocation outputs only its bound result. Otherwise a
+     * candidate may be selected when it has a trajectory continuation, a
+     * positive output projection, a bound intent result, or a positive typed
+     * traversal channel. Binding channels (naming, sense, frame) stay routing
+     * state and contract relations stay invocation metadata; neither makes a
+     * candidate outputtable. Obligation closure in the cognition program still
+     * decides whether REALIZE is allowed. */
     bool semantic_result =
         candidate->query_traversal.has_positive &&
         !laplace_prompt_binding_channel(&candidate->query_traversal.positive) &&
@@ -954,12 +957,10 @@ geometry_summary_present(const GeometrySummary *summary)
 
 /*
  * Meeting specificity. Among candidates that ground the same obligations, a
- * meeting reached through a cell whose object is shared by few subjects is more
- * specific than one reached through a hub: "Paris IS_INSTANCE_OF national
- * capital" shares its object with a few hundred rows, "X IS_INSTANCE_OF Concept"
- * with every concept. Sharing is a typed count read from consensus, bounded at
- * SHARING_CAP per cell; it orders, it is never fused into a score. The window
- * and cap are the default firmware image's values (spec 39).
+ * meeting reached through a (type, object) that few subjects share is more
+ * specific than one reached through a hub. Sharing is a typed count read from
+ * consensus, capped at SHARING_CAP per key; it orders and is never fused into
+ * a score. Window and cap come from the default firmware image.
  */
 #define SHARING_WINDOW (laplace_firmware_default()->sharing_window)
 #define SHARING_CAP (laplace_firmware_default()->sharing_cap)
@@ -1110,9 +1111,9 @@ candidate_compare(const void *left, const void *right)
     const Candidate *b = right;
     int cmp;
 
-    /* Declared election tuple: output-purpose testimony, query testimony,
-     * exact structural match, observed recurrence, then opposition. No cross-
-     * family score product or universal adjacency scalar is materialized. */
+    /* Election tuple: output-projection testimony, traversal testimony, query
+     * testimony, structural stride, trajectory recurrence, opposition, geometry,
+     * then id. No cross-family score product is materialized. */
     cmp = positive_summary_compare(&a->projection, &b->projection);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
     cmp = positive_summary_compare(&a->query_traversal, &b->query_traversal);
@@ -1431,9 +1432,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     }
     array_free_iterator(route_iterator);
 
-    /* RESOLVE owns the physical observation scope before COUPLE. The same scope
-     * is then retained for continuation after ORIENT; physicality is not rebuilt
-     * as a later walk-only side channel. */
+    /* RESOLVE fixes the trajectory scope before COUPLE: explicit trajectories,
+     * trajectories containing given ids, and the observation's own input. The
+     * same scope serves every continuation read after ORIENT. */
     if (PG_NARGS() > 9 && !PG_ARGISNULL(9) && max_stride > 0)
     {
         explicit_observation_scope = true;
@@ -1544,12 +1545,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 pfree(changed);
                 break;
             }
-            /* COUPLE expansion and ROUTE/SCAN expansion are distinct state
-             * coordinates. The same configured ceiling bounds each phase, but
-             * resolving a witnessed naming/binding path must not consume every
-             * later execution hop before the cognition program can run.
-             * Naming can be read in reverse without making asymmetric result
-             * relations traversable in reverse. No per-candidate SPI call. */
+            /* COUPLE hops and ROUTE hops are separate compute coordinates under
+             * the same ceiling, so resolving a naming/binding path does not spend
+             * the hops the cognition program routes with. Naming may be read in
+             * reverse without making asymmetric result relations reversible.
+             * Each hop extends the query state as one batch. */
             ArrayBuildState *next = NULL;
             ArrayIterator changed_iterator = array_create_iterator(changed, 0, NULL);
             Datum changed_value;
@@ -1587,8 +1587,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         else if (!output_relations ||
                  ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0)
             laplace_task_shape_compile(&coupled_intent, fanout);
-        /* An explicit output projection already declares its operation. Natural
-         * language alternatives cannot override that caller-owned contract. */
+        /* An explicit output projection already declares its operation; an
+         * oriented intent does not override that caller contract. */
         if (invocation_context || !output_relations ||
             ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0)
             intent = &coupled_intent;
@@ -1705,10 +1705,10 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     step_context = AllocSetContextCreate(walk_context, "forward query election",
                                          ALLOCSET_DEFAULT_SIZES);
     HTAB *geometry_table = geometry_summaries(intent, walk_context);
-    /* An open conversational turn has no declared operation: its answer is the
-     * constituent that jointly grounds what the observation still requires. */
-    /* Candidates an open turn routed past remain electable: widening the field
-     * must not discard the best partial answer found so far. */
+    /* An open turn has no declared operation: its answer is the constituent
+     * that jointly grounds what the observation still requires. Candidates it
+     * routed past stay electable (`carried`), so widening the field keeps the
+     * best partial answer found so far. */
     ArrayType *carried = NULL;
     const bool open_turn =
         !(intent && (intent->explicit_invocation || intent->relation_count > 0)) &&
@@ -1787,8 +1787,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             }
         }
 
-        /* Q->K proposal is bounded per active occurrence. It may nominate a
-         * candidate, but it is not the final evidence field used to elect it. */
+        /* PROPOSE is bounded per active occurrence. It nominates candidates but
+         * is not the evidence field that elects them. */
         query_proposals = evidence_summaries(query_state, false, origins, obligations, cognition, step_context);
 
         if (input && ((intent && intent->relation_count > 0) ||
@@ -1863,10 +1863,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             break;
         }
 
-        /* K->V/evidence binding: after all bounded providers nominate the
-         * candidate set, read EVERY exact stored typed cell between those
-         * candidates and every active query occurrence. Negative/refuted cells
-         * are retained here; proposal top-K cannot hide them. */
+        /* SCAN: once every provider has nominated, read every stored typed cell
+         * between the candidates and every active query operand. Refuting cells
+         * are retained; the proposal bound cannot hide them. */
         ArrayType *candidate_ids = candidate_id_array(candidates, candidate_count);
         int query_channel_count = 0;
         LaplaceQueryChannel *query_channels =
@@ -1961,9 +1960,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             if (geometry)
                 candidates[i].geometry = geometry->summary;
 
-            /* A graph-only result must survive exact positive typed evidence
-             * after candidate adjudication. Physical continuations remain an
-             * independently witnessed observation plane. */
+            /* COMPOSE keeps a candidate only with a trajectory continuation,
+             * positive typed evidence from the SCAN, or a geometry response. */
             if (candidates[i].sequence_occurrences == 0 &&
                 !candidates[i].projection.has_positive &&
                 !candidates[i].query.has_positive &&
@@ -1988,12 +1986,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             break;
         }
 
-        /* An explicit observation scope is already a selected physical evidence
-         * boundary, not corpus-wide frequency. If it yields an unrefuted exact
-         * ordinal continuation, unrelated positive graph testimony cannot evict
-         * that continuation merely because the observed candidate has no edge of
-         * its own. Explicit refutation removes the protection and lets the typed
-         * result plane supply the fallback. */
+        /* An explicit observation scope is a selected trajectory boundary, not
+         * estate-wide frequency. When it yields an unrefuted ordinal
+         * continuation, only such continuations stay candidates; positive typed
+         * testimony elsewhere cannot evict them. Refutation lifts this, and the
+         * typed result plane competes again. */
         if (explicit_observation_scope)
         {
             bool has_unopposed_scoped_sequence = false;
@@ -2296,12 +2293,10 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
     if (!PG_ARGISNULL(8))
     {
         /*
-         * SQL keeps the historical p_prior_frontier parameter name for ABI
-         * compatibility, but the canonical forward program treats this value as
-         * ordered prior discourse/state.  It is deliberately NOT merged into
-         * PromptFrontier semantic seeds: query_operands() assigns every element
-         * LAPLACE_QUERY_OPERAND_DISCOURSE so history keeps occurrence/order
-         * semantics and cannot silently become a bag of instruction candidates.
+         * The SQL p_prior_frontier argument is ordered prior discourse. It is
+         * not merged into the semantic seeds: query_operands() assigns every
+         * element LAPLACE_QUERY_OPERAND_DISCOURSE, so each keeps its occurrence
+         * and order.
          */
         discourse = PG_GETARG_ARRAYTYPE_P(8);
         validate_id_array(discourse, "discourse history", true);
@@ -2317,12 +2312,11 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
         walk_call->args[i] = fcinfo->args[i];
     if (walk_call->args[5].isnull)
     {
-        /* The native prompt executor owns the omitted-seed policy for every
-         * projection. Preserve the established text/chat seed: BLAKE3 over the
-         * exact prompt UTF-8, then the first eight digest bytes in network order,
-         * as laplace.hash128_lo exposes them. Neither parsed/normalized content
-         * nor the host-endian hash128_t fields represent that byte contract.
-         * An explicit seed (including zero or negative) is never replaced. */
+        /* Omitted seed: BLAKE3 over the exact observation bytes as UTF-8, first
+         * eight digest bytes in network order (as laplace.hash128_lo exposes
+         * them), so equal observations select identically. The host-endian
+         * hash128_t fields do not give that byte order. An explicit seed
+         * (including zero or negative) is never replaced. */
         text *prompt = PG_GETARG_TEXT_PP(0);
         const char *source = VARDATA_ANY(prompt);
         int source_length = VARSIZE_ANY_EXHDR(prompt);

@@ -1,10 +1,8 @@
--- Honest per-modality resident counts. Evidence modalities use the fast approx
--- catalog (~200ms) — never the unbounded exact aggregate. Documents ride the
--- document entity type with ~zero attestations (GH #660), so they are counted
--- structurally via entity_count, not by attestation source. Chess arrived as
--- ChessAnalysis/ChessPgn/ChessOpenings; OMW meshes languages through the ILI
--- hub; models count on their plane relation until a checkpoint ingests.
--- BEGIN ATOMIC: GH #764.
+-- Resident counts split by source family. Evidence shares come from the
+-- planner-statistics source census, never an exact aggregate: chess and
+-- multilingual by source name, the remainder as text evidence. Models count
+-- their ATTENDS cells; documents count Document entities, since a document is
+-- structure, not attestations.
 DROP FUNCTION IF EXISTS laplace.modality_counts();
 
 CREATE OR REPLACE FUNCTION ops.modality_counts()

@@ -49,7 +49,7 @@ export interface PopoverProps {
   placement?: Placement;
 }
 
-/** Interactive panel stub — click to open, Escape to dismiss. Not a tooltip. */
+/** Interactive panel — click to open, Escape to dismiss. Not a tooltip. */
 export function Popover({
   children,
   open: controlledOpen,

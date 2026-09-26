@@ -60,10 +60,9 @@ public sealed class Iso6392AdmissionTests
                 attestations.AddRange(change.AllAttestations());
             }
 
-            // A code is its content; a language is the content of its ISO 639-3 code, made a
-            // language by the IS_LANGUAGE_CODE claim of the 639-3 table. A collective 639-2
-            // code ("afa") is admitted as content with its names but no row makes it a
-            // language or the external id of one.
+            // A code is its content. A language is the content of its ISO 639-3 code, typed by
+            // the 639-3 table's IS_LANGUAGE_CODE attestation. A collective 639-2 code ("afa")
+            // is admitted as content with its names, and nothing attests it as a language.
             Hash128 eng = LanguageEntityId.FromIso639_3("eng");
             Hash128 afa = ContentEmitter.RootId("afa")!.Value;
             Hash128 isLanguageCode = RelationTypeRegistry.RelationTypeId("IS_LANGUAGE_CODE");

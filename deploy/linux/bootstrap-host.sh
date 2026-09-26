@@ -52,12 +52,9 @@ install -m 0644 "$HERE/nginx-laplace.conf" /etc/nginx/sites-available/laplace
 rm -f /etc/nginx/sites-enabled/laplace
 
 echo "==> sudoers grant for $RUN_USER (restart API + reload nginx only)"
-# PostgreSQL bounce lives in /etc/sudoers.d/laplace-pg-bounce, written by
-# scripts/bootstrap-laplace-runner.sh (bootstrap_pg_bounce_sudoers /
-# mode pg-bounce-sudoers). Operators (ahart) run pipeline.sh and cannot
-# SIGINT the laplace-runner-owned postmaster; that drop-in is the
-# sudo -n systemctl restart laplace-postgresql.service fallback. Do NOT
-# fold PG into this API/nginx file — keep the surfaces separate.
+# The PostgreSQL restart grant is a separate drop-in,
+# /etc/sudoers.d/laplace-pg-bounce, written by scripts/bootstrap-laplace-runner.sh;
+# operators cannot signal the laplace-runner-owned postmaster directly.
 cat > /etc/sudoers.d/laplace-runner-deploy <<EOF
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart laplace-api, \\
   /usr/bin/systemctl start laplace-api, /usr/bin/systemctl stop laplace-api, \\
@@ -73,13 +70,9 @@ systemctl enable laplace-api >/dev/null
 
 echo "==> validate + reload nginx"
 nginx -t
-# reload FAILS on a stopped nginx ("cannot reload"), and this script runs under
-# `set -e` inside setup-host.sh — so a stopped nginx aborted the whole run BEFORE
-# Layer 1 ever built the extensions or ran migrations. 2026-08-12: the storage
-# migration stopped nginx to unmount /var/www, and every setup-host after it died
-# right here with the cluster half-configured. Start it if it is not running;
-# there is no state where "nginx should stay down" is the correct outcome of a
-# script whose job is to install an nginx vhost.
+# `reload` fails on a stopped nginx and this runs under `set -e` inside setup-host.sh,
+# so a stopped unit is started instead; otherwise host setup would abort before the
+# extensions are built and migrations run.
 if systemctl is-active --quiet nginx; then
   systemctl reload nginx
 else

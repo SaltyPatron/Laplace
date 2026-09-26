@@ -1,5 +1,7 @@
-/* Native batch access to PostgreSQL's canonical consensus storage. Partition
- * routing and btree array scans use PostgreSQL access methods directly. */
+/* Set read of the consensus face: every folded (subject, type, object) standing
+ * cell whose endpoints and type lie in the caller's id sets, streamed to a
+ * consumer. Partition routing and B-tree array scans go through PostgreSQL
+ * access methods directly, with the caller's snapshot, ACL and RLS checks. */
 #include "postgres.h"
 
 #include "access/genam.h"
@@ -92,8 +94,8 @@ scan_set_destroy(ScanSet *set)
     if (set->values != NULL) pfree(set->values);
 }
 
-/* Partition metadata is read afresh for this statement. No cached leaf OID can
- * survive an attach/detach or an extension/schema replacement. */
+/* Partition metadata is read per statement, so leaf selection always follows
+ * the current partition topology. */
 static List *
 scan_children(Relation relation, const ScanSet *subjects, const ScanSet *types)
 {
@@ -231,8 +233,8 @@ scan_index(Relation relation, AttrNumber endpoint,
     return selected;
 }
 
-/* Match the expression rather than an index name: fresh installs and upgraded
- * partition children can name the same ordered access path differently. */
+/* The ordered access path is recognized by its rating - 2*rd (effective mu)
+ * expression, not by index name. */
 static bool
 scan_eff_mu_expression(Node *node, AttrNumber rating, AttrNumber rd)
 {
@@ -324,8 +326,8 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
         return;
     }
     /* A type-local cutoff is not valid on an endpoint-wide rank index. When
-     * the typed index is absent, retain every matching plane through the
-     * complete keyed batch read. Cache/index availability cannot hide facts. */
+     * the typed index is absent, every matching plane is read through the
+     * complete keyed batch scan, so index availability never hides a cell. */
     bool ranked = !plane_local && index != NULL;
     if (index == NULL) index = scan_index(relation, endpoint,
                                object, objects->array != NULL,
@@ -348,7 +350,7 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     }
     scan = index_beginscan(relation, index, GetActiveSnapshot(), NULL, nkeys, 0);
     /* Reuse the open leaf/index. Each endpoint has an independent ordered
-     * range: reaching its cutoff cannot skip any other prompt seed. */
+     * range: reaching its cutoff cannot skip any other endpoint. */
     for (int probe_index = 0; probe_index < (ranked ? probe->count : 1); ++probe_index)
     {
         if (ranked)

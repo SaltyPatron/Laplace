@@ -4,9 +4,9 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Open on-disk image packaging into planar RGBA recovery. Native decode covers
-/// JPEG/PNG/BMP/GIF/TGA (and sniff). Recovery buffer only — identity is the
-/// codepoint-floor image ladder, never container bytes and never blake3(rgba) as T0.
+/// Opens on-disk image packaging (JPEG/PNG/BMP/GIF/TGA, natively decoded and sniffed) into
+/// a planar RGBA recovery buffer. Neither container bytes nor RGBA bytes are identity inputs:
+/// identity is the image composition ladder over codepoint-floor atoms.
 /// </summary>
 public static class ImageFileOpen
 {

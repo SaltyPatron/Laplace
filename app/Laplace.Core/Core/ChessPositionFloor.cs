@@ -1,10 +1,10 @@
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// App load/lookup for the chess compose-floor blob (GH #822 / spec 33):
-/// finite typed board/move atoms, bounded move objects, and catalog positions. It is
-/// independent of text and the codepoint floor.
-/// Native mmap only (<c>chess_position_table_*</c>). Not a managed catalog walker.
+/// Load and lookup of the game-position perfcache blob: a read-only map over finite typed
+/// board/move atoms, bounded move objects, and catalog positions, derived from canonical
+/// structure and separate from the codepoint perfcache. Mapped and read natively
+/// (<c>chess_position_table_*</c>).
 /// </summary>
 public static unsafe class ChessPositionFloor
 {
@@ -64,21 +64,21 @@ public static unsafe class ChessPositionFloor
             }
             catch (EntryPointNotFoundException)
             {
-                // Stale liblaplace_core without chess_position_table_* — floor optional.
+                // A native library without chess_position_table_* leaves the map unloaded.
                 return;
             }
             string? path = Environment.GetEnvironmentVariable("LAPLACE_CHESS_PERFCACHE_BIN");
             if (string.IsNullOrEmpty(path))
                 path = ResolveBesideT0();
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
-                return; // optional until catalog emit is configured
+                return; // no blob present: every lookup reports a miss
             try
             {
                 _ = NativeInterop.ChessPositionTableLoad(path);
             }
             catch (EntryPointNotFoundException)
             {
-                // Same stale-lib case after path resolved.
+                // Native library lacks the load entry point: the map stays unloaded.
             }
         }
     }

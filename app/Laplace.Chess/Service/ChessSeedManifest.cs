@@ -3,7 +3,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Shared chess-lane vocabulary as an <see cref="ISourceManifest"/> factory.</summary>
+/// <summary>Governed chess type and relation vocabulary, declared for a chess source through an <see cref="ISourceManifest"/>.</summary>
 public static class ChessSeedManifest
 {
     public static readonly IReadOnlyList<string> TypeNodeNames =
@@ -11,16 +11,10 @@ public static class ChessSeedManifest
         "Chess_Position", "Chess_Substructure", "Chess_Result", "Chess_Player",
         "Chess_Game", "Chess_Event", "Chess_Playing", "Chess_AnalysisMarker",
         "Chess_Eval", "Chess_BookLine",
-        // Chess_Concept retired from the seed manifest (GH #577): zero entities
-        // on the live box; no emitter. Relation registry bits are untouched.
     ];
 
-    // Named constants for the relation surfaces other chess code needs to NAME rather
-    // than merely declare. The literal stays where it always was — in this list, which
-    // is the chess lanes' canonical vocabulary — and callers reference the constant
-    // instead of retyping the string. The ISA literalism gate counts a retyped
-    // relation name in a new file as a new violation, and it is right to: a name typed
-    // in two places is a name that can disagree with itself.
+    // Relation surfaces other chess code must name. Each literal is spelled once, here in
+    // the declared list, and callers reference the constant rather than retype it.
     internal const string OpeningName    = "OPENING_NAME";
     internal const string HasEco         = "HAS_ECO";
     internal const string GameHasOpening = "GAME_HAS_OPENING";
@@ -28,27 +22,22 @@ public static class ChessSeedManifest
     public static readonly IReadOnlyList<string> Relations =
     [
         "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", OpeningName, HasEco,
-        // GH #736: the event→line record edge; every chess lane that records playings emits it.
+        // Event → line: every source that records playings attests it.
         "PLAYS_LINE",
         "HAS_SETUP", "ANALYZED_AT",
         // PGN White/Black are its surfaces: HAS_PLAYER {side/white|black}.
         "HAS_PLAYER", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
         "HAS_TERMINATION", "HAS_RESULT", "HAS_EVAL", "MOVE_QUALITY",
         "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
-        // GAME_AT / GAME_AT_PLY retired from the seed manifest (GH #577): ChessGraph
-        // removed the ply-grain emitters; live evidence_count is 0 for both.
-        // Append-only relation_types.toml keeps the bits — do not renumber.
-        // Syzygy probe lane (campaign PR-8): exact endgame verdicts on witnessed
-        // positions — five-valued WDL token (STM POV) + distance-to-zeroing scalar.
+        // Exact tablebase verdicts on witnessed positions: five-valued WDL token (side to
+        // move's view) and distance-to-zeroing scalar.
         "HAS_WDL", "HAS_DTZ",
-        // GH #736: HAS_MOTIF is the position-grain sibling (family child of GAME_HAS_MOTIF —
-        // declaring the CHILD pulls the root via ExpandRelationsWithFamily; the converse
-        // does not hold, so both stay listed).
+        // HAS_MOTIF is the position-grain child of GAME_HAS_MOTIF. Declaring a child pulls
+        // its root through ExpandRelationsWithFamily but not the converse, so both are listed.
         "GAME_HAS_MOTIF", "HAS_MOTIF", "EXPLAINS", "IS_EXAMPLE_OF", "HAS_DEFINITION",
-        // GH #577: emitted by ChessPgnDecomposer (CORRESPONDS_TO game↔lichess-id bridge) and
-        // ChessVocabulary.EmitPlayer (HAS_NAME {name/alias}). Both are family_roots, so family
-        // expansion never pulls them — an undeclared emit is the 0xC0000005 class, previously
-        // masked only by global foundation seeding.
+        // Attested by ChessPgnDecomposer (CORRESPONDS_TO game ↔ lichess id) and
+        // ChessVocabulary.EmitPlayer (HAS_NAME {name/alias}). Both are family roots, which
+        // family expansion never pulls, so they are declared explicitly.
         "HAS_EXTERNAL_ID", "HAS_FEATURE", "CORRESPONDS_TO", "HAS_NAME",
     ];
 

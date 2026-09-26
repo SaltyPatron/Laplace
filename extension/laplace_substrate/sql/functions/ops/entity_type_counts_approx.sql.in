@@ -1,7 +1,6 @@
--- BEGIN ATOMIC: GH #764/#1008.
--- Planner-statistics form of ops.entity_type_counts over the authoritative
--- interpretation leaves. Each HASH(entity_id) leaf contributes its type-id MCV
--- frequencies weighted by that leaf's reltuples estimate.
+-- Planner-statistics form of ops.entity_type_counts: each entities leaf
+-- contributes its type_id MCV frequencies weighted by its reltuples estimate;
+-- type labels realize in one batch.
 DROP FUNCTION IF EXISTS laplace.entity_type_counts_approx();
 CREATE OR REPLACE FUNCTION ops.entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)

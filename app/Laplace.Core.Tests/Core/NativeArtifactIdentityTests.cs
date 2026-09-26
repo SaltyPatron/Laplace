@@ -9,21 +9,9 @@ using Xunit.Abstractions;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// A test must execute the artifact built from the source under test.
-///
-/// /etc/ld.so.conf.d puts /opt/laplace/lib on the system loader path, so a managed test
-/// resolves liblaplace_core.so to the INSTALLED copy and never to build/engine/core.
-/// Measured 2026-08-24: LAPLACE_GLICKO2_NEUTRAL_MU_FP was changed 1500 -> 1400 and the
-/// library relinked, and NeutralMu_MatchesServerConstant stayed GREEN. That test asserts a
-/// hard literal 1_500_000_000_000L and would have caught the change; it was reading a copy
-/// installed 21 minutes earlier. Installed 01:43, built 02:04, byte-different.
-///
-/// So every native-backed parity assertion in this repo -- Glicko2FoldParity,
-/// ConsensusKeysParity, CollapseIndexParity, QkPairsThresholdParity, RootIdNativeParityProbe
-/// -- can pass against a stale installed library while the source defining the invariant is
-/// broken. Green proves the INSTALLED binary is consistent; it says nothing about the tree.
-///
-/// This makes that condition a failure rather than a silent pass.
+/// The native libraries this process maps are the ones built from this tree, so every
+/// native-backed parity assertion describes the source under test. The system loader path
+/// can include /opt/laplace/lib, which would otherwise resolve an installed copy instead.
 /// </summary>
 public sealed class NativeArtifactIdentityTests
 {
@@ -32,8 +20,7 @@ public sealed class NativeArtifactIdentityTests
 
     private const string Lib = "liblaplace_core.so";
 
-    /// The path the process actually mapped, from /proc/self/maps — not a guess, and not
-    /// the search order the loader was configured with.
+    /// The paths this process actually mapped, read from /proc/self/maps.
     private static string[] LoadedPaths(string library)
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);
@@ -91,9 +78,8 @@ public sealed class NativeArtifactIdentityTests
     public void NativeDependenciesAndManagedImportsShareTheAppLocalClosure()
     {
         if (!OperatingSystem.IsLinux()) return;
-        // Isolated loader controls exercise dependency-first process startup. Here
-        // the actual production engines, including their initialization, must agree
-        // on one app-local image even after the other native tests have run.
+        // Core, dynamics and synthesis each map exactly one image, from the app-local
+        // directory, after their own initialization has run.
         Assert.NotEmpty(Laplace.Engine.Dynamics.NativeInterop.LaplaceDynamicsVersion());
         Assert.NotEmpty(Laplace.Engine.Synthesis.NativeInterop.LaplaceSynthesisVersion());
         Assert.NotEmpty(NativeInterop.LaplaceCoreVersion());

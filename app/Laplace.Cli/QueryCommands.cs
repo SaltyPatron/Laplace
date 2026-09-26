@@ -221,19 +221,9 @@ internal static class QueryCommands
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
-        // converse.chat() IS THE ENTRY POINT. This command used to call generation.walk_text()
-        // directly with four hardcoded knobs (steps 48, order 5, temp 0.6, topk 8),
-        // which made the CLI a SIBLING entry point to the forward pass rather than a
-        // caller of it, contrary to the single-entry program described by spec 36:
-        // "converse.chat() is the only conversational entry point and runs the full ladder;
-        // converse, converse_about, converse_walk, converse_facts are internal
-        // STAGES of it, never sibling entry points."
-        //
-        // Going straight to walk_text skipped every stage that makes a turn a turn:
-        // language inference from the prompt, the native specificity election
-        // (prompt_coherence), shape dispatch, the band lens, the responder family,
-        // and converse_about. A CLI answer and an API answer to the same prompt were
-        // produced by different machinery and could not be compared.
+        // The turn is one admitted observation run through converse.chat(), the same forward
+        // pass the OpenAI-compatible endpoint and MCP call; the CLI adds only the system
+        // language hint and the session id.
         var languageCode = LanguageReference.ResolveSystemCode();
         var language = languageCode is null
             ? null
@@ -243,12 +233,8 @@ internal static class QueryCommands
             language: language) ?? string.Empty;
         Console.WriteLine(response);
 
-        // CLOSE through the shared lane (Laplace.Ingestion.TurnCloser), the same one
-        // the MCP tool and the HTTP endpoint use. This previously deposited through
-        // the plain untenanted UserPrompt/Response sources, so a CLI turn carried no
-        // session, no tenant and no attribution — spec 34's conversational
-        // provenance did not apply to it at all, and its turns could not be
-        // distinguished from an agent's standalone note.
+        // WITNESS: TurnCloser deposits the prompt/response pair under this tenant and session
+        // with conversational provenance, as the MCP tool and HTTP endpoint do.
         await using var closer = new TurnCloser(ds, w => Console.Error.WriteLine($"laplace: {w}"));
         if (await closer.CloseAsync(CliTenant, SessionId, prompt, response))
             Console.WriteLine($"    [turn deposited @ session {Convert.ToHexStringLower(SessionId.ToBytes())[..16]} "
@@ -258,24 +244,12 @@ internal static class QueryCommands
     }
 
     /// <summary>
-    /// The CLI's conversational identity. One tenant for the lane, minted through the
-    /// same canonical id law the MCP tool and the HTTP surface use — so a CLI session
-    /// and an endpoint session with the same tenant+key are the SAME context entity,
-    /// not two.
+    /// The CLI's conversational identity, minted by the same canonical id law as the MCP
+    /// tool and the HTTP surface: equal tenant+key is the same context entity whichever
+    /// interface opened it. The key is content, not a random id, so re-running converges.
     ///
-    /// The key is DETERMINISTIC. It used to be <c>$"s-{Guid.NewGuid():N}"</c>, which
-    /// broke the guarantee the paragraph above states: a random key cannot match any
-    /// other surface's key, so the CLI could never share a session with an endpoint,
-    /// and every invocation minted a fresh context entity in the substrate. Ids are
-    /// content hashes and are never constructed outside the system — a GUID is an id
-    /// that is not a function of what it identifies, so re-running the same command
-    /// could never dedupe. Every other caller already passes a client-supplied key
-    /// (EndpointMappings.Inference, SubstrateTools); the CLI was the outlier.
-    ///
-    /// LAPLACE_SESSION_KEY names a session explicitly — that is how a CLI invocation
-    /// joins an endpoint or MCP conversation, and how two CLI lanes stay distinct.
-    /// Unset, the CLI is one stable context, which is what "same tenant+key is the
-    /// same entity" means when the key is the lane itself.
+    /// LAPLACE_SESSION_KEY names a session explicitly, which is how a CLI invocation joins
+    /// an endpoint or MCP conversation. Unset, the key is "cli": one stable context.
     /// </summary>
     private const string CliTenant = "cli-local";
     private static readonly Hash128 SessionId = ConversationContent.SessionId(
@@ -306,10 +280,9 @@ internal static class QueryCommands
 
         CodepointPerfcache.LoadDefault();
 
-        // Triple mode: exactly <subject> <RELATION_TYPE> <object> where the middle
-        // token is a canonical relation name (uppercase, e.g. IS_A). Anything else
-        // is the PRECEDES-chain form. Both go through the ONE feedback lane
-        // (FeedbackContent, doc 15 G1/G2).
+        // Triple mode: exactly <subject> <RELATION_TYPE> <object> where the middle token
+        // resolves to a relation type. Anything else is the PRECEDES-chain form. Both
+        // deposit through FeedbackContent.
         if (tokens.Length == 3 && FeedbackContent.TryResolveRelation(tokens[1], out var rel))
             return await AttestTripleAsync(ds, tokens[0], rel, tokens[2], confirm);
 
@@ -423,7 +396,7 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  CONSTITUENT KNOWLEDGE (the substrate answering through the parts it knows):");
 
-            // ONE round-trip via shared catalog reader; bucket by input ordinal in C#.
+            // One batched read for every part; rows are bucketed by input ordinal.
             var buckets = new Dictionary<int, List<(string Type, string? Obj, decimal Mu, long Wit)>>();
             if (words.Count > 0)
             {

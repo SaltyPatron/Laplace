@@ -4,11 +4,10 @@ import { exploreModalities } from '../api';
 import styles from './ModalityMap.module.css';
 
 /**
- * The omni-modal map, told honestly. The substrate's law is one identity across
- * every modality; this shows which are actually resident and which await
- * ingestion — driven by /v1/explore/modalities, which counts each modality from
- * a fast targeted query, never the flaky all-sources aggregate. A modality with
- * nothing seeded reads "awaiting ingest", not an empty scoreboard pretending live.
+ * Resident counts per modality from /v1/explore/modalities, classified live, sparse or
+ * awaiting ingest. Identity and standing are one law across modalities; a card only reports
+ * how much admitted content of that modality is resident. A missing count reads as
+ * awaiting ingest, never as zero.
  */
 type Status = 'live' | 'sparse' | 'awaiting';
 

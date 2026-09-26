@@ -151,25 +151,15 @@ int laplace_attestation_resolved_witness_parameters(
 }
 
 /*
- * THE OPPONENT'S RATING, which until now did not exist.
+ * The witness is the opponent. A Glicko update is driven by surprise:
+ * delta ~ g(phi_j) * (s - E(mu, mu_j, phi_j)), so the opponent's rating carries the
+ * information of a match. A trusted, salient witness is a strong and certain
+ * opponent (high rating, low RD); an untrusted one is weak and uncertain (low
+ * rating, high RD). Both are read from the same witness_weight that produces phi,
+ * so they cannot disagree about who is on the other side of the board.
  *
- * A Glicko update is driven by surprise: delta ~ g(phi_j) * (s - E(mu, mu_j, phi_j)).
- * The opponent's RATING is the entire information content of a match. The fold
- * passed CONSENSUS_FOLD_NEUTRAL_MU for it on every call, so every cell replayed
- * the same match against a constant 1500 forever, and the rating collapsed to a
- * function of witness count alone (measured 2026-08-24: 400,000 single-witness
- * cells spanning source trust 0.40..0.95 held 2 distinct ratings, total spread
- * 0.23, while one extra witness moved eff_mu by 157.98).
- *
- * The witness IS the opponent. A trusted, salient witness is a strong and certain
- * one: high rating, low RD. A crank is weak and uncertain: low rating, high RD.
- * Both halves are read off the same witness_weight that already produces phi, so
- * the two cannot disagree about who is on the other side of the board.
- *
- * The span is symmetric about neutral and equal to the RD span (320), so a claim
- * meeting a fully-trusted witness faces 1820 and a fully-untrusted one faces 1180
- * -- the same dynamic range the RD channel already spends, now on the axis that
- * actually carries surprise.
+ * The span is symmetric about neutral and equal to the RD span (320): a claim
+ * meeting a fully trusted witness faces 1820, a fully untrusted one 1180.
  */
 static const double kOpponentNeutral = 1500.0;
 static const double kOpponentSpan    = 320.0;
@@ -236,7 +226,7 @@ const char* laplace_relation_manifest_canonical(size_t idx) {
 const char* laplace_relation_manifest_successor(size_t idx) {
     if (idx >= laplace_relation_table_count) return NULL;
     int16_t successor = laplace_relation_table[idx].successor_idx;
-    if (successor == -2) return "TRAJECTORY";  /* an order/containment fact (spec 05 Rule #3) */
+    if (successor == -2) return "TRAJECTORY";  /* an order/containment fact */
     return successor < 0 ? NULL : laplace_relation_table[successor].canonical;
 }
 
@@ -310,8 +300,7 @@ double laplace_attestation_witness_opponent_rating(double witness_weight) {
     double w = witness_weight;
     if (w < 0.0) w = 0.0;
     if (w > 1.0) w = 1.0;
-    /* w = 0.5 is exactly neutral, so a witness carrying no signal either way
-     * leaves the old behaviour untouched. */
+    /* w = 0.5 maps exactly to the neutral rating. */
     return kOpponentNeutral + kOpponentSpan * (2.0 * w - 1.0);
 }
 
@@ -323,16 +312,11 @@ int laplace_attestation_outcome_from_score_fp(int64_t score_fp, int16_t* out_out
     return 0;
 }
 
-/* Net outcome of an AGGREGATED cell: games observations whose fixed-point scores
- * sum to sum_score_fp. The comparison is sum vs games*half, NOT (sum/games) vs
- * half -- integer division would silently reclassify (games=2, sum=1e9+1 is a
- * CONFIRM but divides to exactly half). Falls back to per-game averaging only
- * when games*half would overflow, which no real batch reaches.
- *
- * This exists so the draw threshold has ONE home. The managed merge lane
- * (AttestationMergeMath.ClassifyOutcome) previously reimplemented this rule
- * against its own copy of the 500000000 constant -- two definitions of what
- * "draw" means, free to drift. */
+/* Net outcome of an aggregated cell: games observations whose fixed-point scores
+ * sum to sum_score_fp. The comparison is sum vs games*half, not (sum/games) vs
+ * half -- integer division would reclassify (games=2, sum=1e9+1 is a CONFIRM but
+ * divides to exactly half). Per-game averaging is used only when games*half would
+ * overflow. This is the single definition of the draw threshold. */
 int laplace_attestation_outcome_from_totals_fp(
     int64_t games, int64_t sum_score_fp, int16_t* out_outcome) {
     if (!out_outcome) return -1;
@@ -768,8 +752,8 @@ int laplace_attestation_aggregated_batch_build(
 /* Total fold-input score of one staged row, for the persisted
  * sum_score_fp1e9 evidence column. Aggregated rows carry the total directly;
  * per-row deposits carry score x games (exact in fixed point). Returns -1 on
- * int64 overflow — a count x 1e9-scale product past int64 is an
- * argument-rotation bug (Issue 32 shape), never real evidence. */
+ * int64 overflow: a count x 1e9-scale product past int64 means count and score
+ * were passed in each other's positions, never real evidence. */
 static int staged_sum_score_total(const laplace_attestation_staged_t* a, int64_t* out) {
     if (a->is_aggregated) {
         *out = a->sum_score_fp1e9;
@@ -832,9 +816,9 @@ int laplace_attestation_categorical_add(
     return staged_to_intent_surface(stage, &staged, surface_relation);
 }
 
-/* Parameter order deliberately identical to laplace_attestation_aggregated_build — a
- * positional mismatch here compiled silently via int64<->double implicit conversions and
- * corrupted every attestation on this path (.scratchpad/02 Issue 32). */
+/* Parameter order matches laplace_attestation_aggregated_build: int64 and double
+ * convert implicitly, so a positional mismatch would compile while swapping count
+ * and score. */
 int laplace_attestation_aggregated_add(
     intent_stage_t*  stage,
     const hash128_t* subject,

@@ -7,10 +7,8 @@ import { ModalityMap } from './ModalityMap';
 import styles from './MeshView.module.css';
 
 /**
- * The mesh front page. The divisions are a fixed structural vocabulary — the hub
- * types the factorization is built from — not a data-derived list (there are
- * 100k+ synsets; you don't page a team list that long, you enter the graph at a
- * node and drill). So this explains the ladder and drops you in via Browse.
+ * Hub types of the mesh ladder, a fixed descriptive list rather than a data read. Entry
+ * into the web is through Browse at a concrete entity, from which MeshView drills.
  */
 const DIVISIONS: { name: string; tag: string; blurb: string }[] = [
   { name: 'Word surface', tag: 'surface', blurb: 'The lemma you type. Every entry point into the mesh; it plays for its senses.' },

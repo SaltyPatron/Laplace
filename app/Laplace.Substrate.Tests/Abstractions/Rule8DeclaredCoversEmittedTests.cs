@@ -11,42 +11,24 @@ using Xunit.Abstractions;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Rule #8: a decomposer declares every relation it emits. Nothing enforced it.
+/// Every source declares each relation its provider code names.
 ///
-/// DecomposerArchitectureGateTests has a case that LOOKS like it does --
-/// FamilyAwareBootstrap_ChildPullsParentRoot -- but it asserts DeclaredCoversEmitted over
-/// three hand-written literals (HAS_XPOS / HAS_POS / IS_A). It tests the helper. It walks no
-/// source, reads no roster, and would pass unchanged if every decomposer in the repo
-/// declared nothing at all.
+/// Rosters are evaluated, not scraped: a source's Relations can be composed at runtime
+/// (WordNetSource adds manifest language scope and pointer families to its declared list).
+/// Coverage uses SourceVocabularyBootstrap.DeclaredCoversEmitted, the same check ingest
+/// runs, so a declared family root covers its children.
 ///
-/// A first replacement compared rosters against DISTINCT (source_id, type_id) in
-/// laplace.attestations. That was worse: the db-tier fixture builds its OWN database holding
-/// only SubstrateCanonical rows, so it matched zero sources and passed vacuously even with
-/// HAS_BLOCK deleted from Unicode's roster -- the exact failure it was written to replace.
-///
-/// TWO THINGS THIS GETS RIGHT.
-///
-/// The roster is EVALUATED, never scraped. WordNetSource composes Relations from
-/// DeclaredRelations plus the manifest's language scope plus its pointer families, so a
-/// regex over `Relations { get; } = [...]` reports 1 where the answer is 33 -- which is how
-/// a false count reached engine/manifest/relation_types.toml.
-///
-/// Coverage goes through SourceVocabularyBootstrap.DeclaredCoversEmitted, so declaring a
-/// family root covers its children exactly as the ingest does. Reimplementing that
-/// comparison here would be a second definition free to drift from the one that runs.
-///
-/// Emission is read from the decomposer's own source as governed relation-name literals.
-/// That is a FLOOR, not a census: a relation reached only through a computed name is not
-/// visible here. It is enough to fail when a declaration is deleted while its emit remains,
-/// which is the regression this guards, and it needs no database.
+/// Emission is read from each provider directory as governed relation-name literals. That
+/// is a lower bound: a relation reached only through a computed name is not seen. It fails
+/// when a declaration is removed while its literal remains, and needs no database.
 /// </summary>
 public sealed class Rule8DeclaredCoversEmittedTests
 {
     private readonly ITestOutputHelper _out;
     public Rule8DeclaredCoversEmittedTests(ITestOutputHelper o) => _out = o;
 
-    // Emitted for every source by SourceVocabularyBootstrap / BootstrapIntentBuilder, not by
-    // any decomposer body, so a source cannot be asked to declare them.
+    // Attested for every source by SourceVocabularyBootstrap / BootstrapIntentBuilder, not by
+    // provider code, so no source declares them.
     private static readonly HashSet<string> SpineProvenance = new(StringComparer.Ordinal)
     {
         "HAS_ATTRIBUTION", "HAS_CITATION", "HAS_LICENSE", "HAS_SOURCE_URL", "HAS_TRUST_CLASS",
@@ -101,19 +83,13 @@ public sealed class Rule8DeclaredCoversEmittedTests
 
         var faults = new List<string>();
 
-        // A LANE, not a source. app/Laplace.Decomposers/SemLink defines SemLinkSource,
-        // MapNetDecomposer, WordFrameNetDecomposer and PredicateMatrix together, and
-        // SemLinkSources.cs alone holds two Relations rosters. Attributing the whole
-        // directory's literals to one source reported seven false violations against
-        // SemLink that are declared by a sibling in the same file. A literal in the lane is
-        // emitted by one of the lane's sources, so the lane's UNION is what must cover it.
+        // Rosters are grouped by provider directory: one directory can define several
+        // sources (SemLink holds SemLinkSource, MapNet, WordFrameNet and PredicateMatrix),
+        // and a literal there is covered by the union of its sources' rosters.
         var lanes = new Dictionary<string, (HashSet<string> Roster, List<string> Names)>(StringComparer.Ordinal);
         foreach (var (name, roster, type) in Sources())
         {
-            // By NAMESPACE, not by source name. MapNetDecomposer, WordFrameNetDecomposer and
-            // PredicateMatrix all live in the SemLink lane; mapping "MapNetDecomposer" to a
-            // MapNet directory finds nothing, drops those rosters, and then reports the lane's
-            // literals as undeclared by SemLink -- seven false violations.
+            // The directory comes from the type's namespace, not the source name.
             string? ns = type.Namespace;
             if (ns is null || !ns.StartsWith("Laplace.Decomposers.", StringComparison.Ordinal)) continue;
             string lane = Path.Combine(RepoRoot, "app", "Laplace.Decomposers",
@@ -149,8 +125,7 @@ public sealed class Rule8DeclaredCoversEmittedTests
                 faults.Add($"{label} names but does not declare: {string.Join(", ", missing)}");
         }
 
-        // Matching nothing is a failure, not a pass. That is how the previous attempt at this
-        // gate reported success while verifying nothing.
+        // Matching too few directories fails: a vacuous pass verifies nothing.
         Assert.True(lanes.Count >= 10,
             $"only {lanes.Count} decomposer lanes matched a declared roster — the gate "
             + "verified almost nothing, which is the failure mode it exists to replace");

@@ -83,9 +83,8 @@
     color: var(--color-text-primary);
   }
 
-  /* Unavailable is a distinct neutral state, not a half-transparent primary
-     action. Opacity-only disabled styling made the foreground and fill converge
-     in both system themes and looked like a broken button rather than a gate. */
+  /* Disabled is a distinct neutral state, not a faded primary: opacity alone lets
+     foreground and fill converge in both system themes. */
   .button:disabled,
   .button[aria-disabled='true'] {
     opacity: 1;

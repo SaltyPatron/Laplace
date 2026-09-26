@@ -6,9 +6,9 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Model;
 
 /// <summary>
-/// One selected model artifact whose handles remain owned by the surrounding
-/// analysis run. The generic artifact worker enumerates and opens the estate;
-/// this value passes that exact snapshot into contraction without reopening it.
+/// One selected model artifact whose handles stay open for the surrounding analysis run.
+/// The shared artifact worker enumerates and opens it; this value passes that exact
+/// snapshot into contraction without reopening it.
 /// </summary>
 public sealed record SelectedModelAnalysisInput(
     string ModelDirectory,
@@ -18,8 +18,8 @@ public sealed record SelectedModelAnalysisInput(
     SourceEntityIdConventions.ModelContentSnapshot Snapshot);
 
 /// <summary>
-/// One atomic multi-source OP9 unit. Each change retains its real model source;
-/// OrchestrationId names the selected artifact estate, OP3 basis and page.
+/// One atomically applied multi-source working set. Each change keeps its own model
+/// source; OrchestrationId names the selected artifacts, the nominating basis and the page.
 /// </summary>
 public sealed class ModelCorroborationWorkingSet
 {
@@ -66,11 +66,10 @@ public sealed class ModelCorroborationWorkingSet
 }
 
 /// <summary>
-/// Phase-5b embedding-similarity admission for two independent selected model
-/// artifacts. Existing graph cells only nominate bounded endpoint pairs. Both
-/// models must independently produce the same non-draw SIMILAR_TO outcome;
-/// their source-scoped circuit receipts and transient scores are then returned
-/// together for one journaled multi-source working-set apply.
+/// Embedding-similarity testimony from two independent model artifacts. Existing
+/// consensus cells only nominate bounded endpoint pairs; a pair is admitted when both
+/// models independently produce the same non-draw SIMILAR_TO outcome, and each model's
+/// receipts and transient scores go out together in one journaled working-set apply.
 /// </summary>
 public sealed class ModelSimilarityCorroborationETL
 {

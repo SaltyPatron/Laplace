@@ -4,10 +4,9 @@ using Xunit;
 namespace Laplace.Core.Tests;
 
 /// <summary>
-/// Batch sizing is computed from bytes-per-record, and bytes-per-record was a constant
-/// declared per source that nothing ever checked against a corpus. These pin the measured
-/// alternative and the fallbacks, because a sizing helper that throws or that returns a
-/// wild number is worse than the constant it replaces.
+/// IngestSizing.MeasureBytesPerRecord: a sampled mean over a line-delimited file, which
+/// returns the caller's default instead of throwing on unusable input, and the check of a
+/// declared per-source bytes/record against its corpus.
 /// </summary>
 public sealed class IngestRecordSizeMeasurementTests
 {
@@ -33,7 +32,7 @@ public sealed class IngestRecordSizeMeasurementTests
     [Fact]
     public void StopsAtTheSampleSize_RatherThanReadingTheWholeFile()
     {
-        // The point of sampling: a 20GB corpus must not be walked to size a batch.
+        // Sizing reads only the sample, never the whole file.
         var path = WriteLines(count: 5_000, bytesEach: 200);
         try
         {
@@ -78,11 +77,8 @@ public sealed class IngestRecordSizeMeasurementTests
     }
 
     /// <summary>
-    /// The declared constant against the corpus it describes. Skipped where the vault is
-    /// not mounted, because a test that silently passes on an absent file proves nothing.
-    /// MEASURED 2026-08-01: 6,158 bytes/record over 20,000 records of the 20.4 GB
-    /// raw-wiktextract-data.jsonl, against a declared 12,000 — so the batch is sized at
-    /// roughly half what the corpus supports, doubling round trips for the whole run.
+    /// The declared Wiktionary bytes/record against a 20,000-record sample of its corpus.
+    /// Vacuous where the vault is not mounted.
     /// </summary>
     [Fact]
     public void DeclaredWiktionaryRecordSize_IsCheckedAgainstTheRealCorpus()
@@ -94,9 +90,7 @@ public sealed class IngestRecordSizeMeasurementTests
         int declared = IngestSourceProfile.Wiktionary.EstBytesPerRecord;
 
         Assert.True(measured > 0, "measurement failed on a corpus that exists");
-        // The declaration must TRACK the corpus, not merely exceed it. A wild over-estimate
-        // is what halved the batch for the life of the project; a wild under-estimate would
-        // oversize it. Within 1.5x either way, or the constant has drifted from the file.
+        // Declared must be within 1.5x of measured in either direction.
         double ratio = (double)declared / measured;
         Assert.True(ratio is > 0.667 and < 1.5,
             $"IngestSourceProfile.Wiktionary declares {declared} bytes/record but the corpus "

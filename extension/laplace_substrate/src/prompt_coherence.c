@@ -1,51 +1,21 @@
 /*
- * prompt_coherence — joint orientation + sense resolution, natively.
+ * Joint sense election for one observation. The candidate senses of every
+ * resolved token are scored against each other through the consensus cells
+ * they share:
  *
- * WHY THIS IS C. The SQL form of this read hung converse.chat() for every prompt (>280s,
- * measured 2026-07-27 after the UD ingest) and was reverted off the hot path.
- * It was SQL doing what the substrate law puts in C: set-returning functions as
- * table sources (one lexical.senses() per token, one bubble_up per candidate relation
- * type), relation-name identifiers split with string_to_array per row, and an
- * O(n^2) join of 277-315 candidate senses against each other through an OR of
- * both directions that no consensus index can serve. Rewriting it as two indexed
- * joins with a MATERIALIZED fence still measured 82s.
+ *   coherence   rank-weighted effective mu of cells joining a candidate to a
+ *               candidate of a different token, read in both directions;
+ *   total_mass  the same weight over every cell incident to the candidate,
+ *               the denominator that makes coherence a scale-free share;
+ *   rel_mass    weight of the candidate's cells in a relation type that a
+ *               different token names.
  *
- * What it actually computes is a MEMBERSHIP SCAN: for each candidate sense, how
- * much rated mass connects it to the other tokens' candidates. That is one
- * indexed range read per direction plus an O(1) hash probe per edge -- the shape
- * recall.c and generate_walk.c already use. SQL fetches sets; C does the math.
- *
- * WHAT IT DECIDES. Orientation used to score every token in ISOLATION (best sense
- * by denote_mu, rank tokens by highway popcount). Measured failures that motivated
- * this: "What is a pawn in chess?" ranked the article "a" above "pawn" (breadth
- * tied 13-13, denote_mu 1537 vs 1313) and answered "A is the 1st letter of the
- * Roman alphabet"; "is" resolved to the sense ICE; "chess" ranked LAST. No scalar
- * over one token separates those -- the information is in the graph BETWEEN them.
- *
- * Two signals, both read off the same edge scan:
- *   COHERENCE  rated mass to OTHER tokens' candidate senses. Settles pawn/chess.
- *   REL_MASS   rated mass in a relation type NAMED by another token. Settles the
- *              "what are the X of Y" shape, where X names a relation and not a
- *              peer concept: a car HAS_PART door/wheel/engine and never HAS_PART
- *              "part", so coherence is silent and denote_mu picks TZAR for "car"
- *              (1648, the Slavic spelling) over the vehicle (1567) -- while the
- *              vehicle carries 29 HAS_PART edges and tzar carries none.
- *
- * A relation type is addressed by a name; the name's OBJECT token is a content
- * word with a content id, so a prompt token reaches it by id equality or through
- * an attested IS_LEMMA_OF edge -- which is what makes the PLURAL work ("parts" ->
- * "part" -> HAS_PART). Inflection is a witnessed fact, so this reads the
- * attestation rather than guessing morphology, and stays exact.
- *
- * Only the name's LAST token is used, and only at length >= 3: a canonical name
- * is a VERB_OBJECT identifier (HAS_PART, EVOKES_FRAME, IS_INSTANCE_OF)
- * whose leading tokens are grammar. Matching every token let the article "a" name
- * IS_A -- whose final token is literally "A" -- handing every candidate with many
- * IS_A edges an enormous mass and selecting a WORSE sense of "car" than denote_mu
- * did. The bound rejects degenerate identifier fragments, not English words.
- *
- * No floors, no caps, no top-k: sums over whatever edges exist, ranked, ties
- * broken on the id for determinism.
+ * A token names a relation type when its content id is the id of the longest
+ * segment of the type's canonical name, of a fixed alias of that segment, or
+ * of a lemma it is IS_LEMMA_OF-linked to. Each token emits its one elected
+ * sense with the keys the election used. SQL fetches sets in index range
+ * reads; C folds them with O(1) hash probes. No floors, caps or top-k; ties
+ * end on the sense id.
  */
 
 #include "postgres.h"
@@ -75,7 +45,7 @@ typedef struct PcCand
     uint8   tok[16];
     uint8   syn[16];
     double  denote_mu;
-    int64   witnesses;         /* evidence behind this sense, from lexical.senses() */
+    int64   witnesses;         /* witnesses behind this sense, from bubble_up_batch */
     int32   lang_agree;        /* +1 agrees with the token's language, 0 unknown,
                                 * -1 disagrees. Tri-state on purpose: an
                                 * unattested language is NOT a mismatch. */
@@ -219,9 +189,8 @@ pc_syn_add(HTAB *h, const uint8 *syn, int idx, MemoryContext cxt)
 }
 
 /* One direction of the edge scan. `forward` selects which column carries the
- * candidate we are crediting; both are served by a plain index range read
- * (consensus_subject_type_btree / consensus_object_btree), which is the entire
- * point of splitting the OR the SQL form used. */
+ * candidate being credited. Each direction is a plain index range read on the
+ * subject or object btree; one OR over both directions would not be. */
 static void
 pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
               ArrayType *syn_arr, bool forward)
@@ -271,9 +240,8 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
             rd = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
             if (isnull) continue;
 
-            /* Record the type so the relation-naming pass has the bounded set of
-             * types the candidates ACTUALLY have edges of -- never a scan of
-             * consensus for distinct types. */
+            /* Every type a candidate carries enters type_h, the set the
+             * rel_mass pass draws its named types from. */
             te = (PcTypeEntry *) hash_search(type_h, VARDATA_ANY(tid), HASH_ENTER, &found);
             if (!found)
             {
@@ -287,26 +255,15 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
             if (me == NULL)
                 continue;
 
-            /* eff_mu = rating - 2*rd, the conservative estimate everything ranks
-             * by; relation_rank weights the band. Both native -- no SQL call. */
+            /* Effective mu (rating - 2*rd) weighted by the relation's manifest rank. */
             eff = (double) (rating - 2 * rd);
             rank = (laplace_relation_lookup((const hash128_t *) VARDATA_ANY(tid), &def) == 0
                     && def != NULL) ? def->rank : 0.0;
 
-            /* TOTAL first, and for EVERY edge incident to this candidate -- this
-             * is the denominator that makes the bidirectional coherence sum mean
-             * something. The forward scan contributes outgoing mass and the
-             * reverse scan contributes incoming mass. That is not duplication:
-             * an edge between two candidates belongs once to each endpoint's own
-             * incident mass.
-             *
-             * Counting only the forward scan divided incoming coherence by an
-             * outgoing-only denominator. Measured on the foundation seed for
-             * `pawn -> HAS_DOMAIN {topic} -> chess`: both endpoints received the
-             * same peer coherence, but chess's large incoming degree was absent
-             * from its denominator, so the broad domain displaced the narrower
-             * pawn. Keep numerator and denominator on the same directional
-             * support. Free: both indexed scans already read these rows. */
+            /* Total mass counts every cell incident to the candidate: outgoing
+             * from the forward scan, incoming from the reverse. A cell between
+             * two candidates belongs once to each endpoint, so coherence and its
+             * denominator rest on the same directional support. */
             for (int i = 0; i < me->n_idx; i++)
                 cands[me->idx[i]].total_mass += rank * eff;
 
@@ -353,8 +310,6 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     MemoryContext  work, old;
     HASHCTL        ctl;
     HTAB          *syn_h, *tok_h, *type_h, *peer_h, *namer_h;
-    /* Ords whose token NAMES a relation. A namer is the operator the prompt is
-     * asking with, not the subject it is asking about — spec 37 OP3. */
     PcCand        *cands = NULL;
     int            n_cand = 0, cap_cand = 0;
     Datum         *syn_datums = NULL;
@@ -404,9 +359,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     ctl.hcxt = work;
     namer_h = hash_create("pc namers", 64, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
-    /* ---- candidates: ONE query, executed once. The SQL form re-executed this
-     * per CTE reference, which is why fencing it MATERIALIZED changed the shape
-     * at all. Here it is fetched once into C and never recomputed. ---- */
+    /* ---- candidates: one statement, fetched once into C ---- */
     {
         Oid    argtypes[1] = { TEXTOID };
         Datum  args[1];
@@ -415,28 +368,11 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         args[0] = PointerGetDatum(prompt);
         portal = SPI_cursor_open_with_args(
             "pc_cand",
-            /* p.language is computed by prompt_state and was DISCARDED here --
-             * W14 G-B. The substrate resolved the prompt's language correctly at
-             * fetch time and the elector could not see it, which is how a Polish
-             * prompt gets answered from English senses while 87,985 Polish senses
-             * sit in the substrate (W14 G-A, measured). Selecting both sides of
-             * the comparison; neither is ever named in code. */
-            /* ONE ELECTION FOR THE WHOLE PROMPT, not a LATERAL per token.
-             *
-             * lexical.senses is an inlinable SQL wrapper over taxonomy.bubble_up, so
-             * `CROSS JOIN LATERAL lexical.senses(p.id)` expanded bubble_up's entire CTE
-             * cascade into this plan once per token -- and dragged its whole
-             * dependency chain with it, including lexical_peers ->
-             * lexical.word_case_variants and the per-id realize.render_text inside it.
-             * Measured on 'the capital of France is': word_case_variants 5 calls /
-             * 486 ms and that inner render 5 calls / 435 ms, ~half of this function.
-             *
-             * NULL keeps the candidate field complete. A fixed pre-election cut
-             * changes the winner whenever the joint prompt evidence favors a sense
-             * outside that cut; bubble_up_batch owns only the deterministic order.
-             *
-             * Row ORDER is not load-bearing here: the loop below appends every row to
-             * `cands` and indexes it by token, so no row wins by arriving first. */
+            /* bubble_up_batch runs once over every resolved id, with a NULL cut
+             * that keeps the complete candidate field. The token's resolved
+             * language and the sense's language are read for comparison by id.
+             * Row order carries no weight: each row is appended and indexed by
+             * token. */
             "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
             "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
             "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)) "
@@ -482,8 +418,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
                     d_tl = SPI_getbinval(tup, td, 6, &tl_null);
                     d_sl = SPI_getbinval(tup, td, 7, &sl_null);
-                    /* Absence law: either side unattested leaves this 0. Only two
-                     * ATTESTED languages can agree or disagree. */
+                    /* Either side unattested leaves this 0. Only two attested
+                     * languages can agree or disagree. */
                     if (tl_null || sl_null)
                         lang_agree = 0;
                     else
@@ -523,10 +459,9 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
                 pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(syn), n_cand, work);
 
-                /* Word-level subjects too. IS_ANTONYM_OF on this seed hangs on
-                 * word_id('hot'), not its synsets (0 syn-subject edges, 2 word-
-                 * subject). Without the surface id in the membership set,
-                 * naming IS_ANTONYM_OF still left rel_mass at 0 — GH #864. */
+                /* The token's own id joins the membership set, so cells that
+                 * hang on the surface rather than on a sense credit its
+                 * candidates too. */
                 pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(tok), n_cand, work);
 
                 tk = (PcTokEntry *) hash_search(tok_h, VARDATA_ANY(tok), HASH_ENTER, &found);
@@ -582,11 +517,10 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     pc_scan_edges(syn_h, type_h, peer_h, cands, syn_arr, true);
     pc_scan_edges(syn_h, type_h, peer_h, cands, syn_arr, false);
 
-    /* ---- which of those types does a prompt token NAME? Canonical name and
-     * rank come from the manifest in C; the name's object token becomes a
-     * content id through the same hash the substrate uses everywhere, so the
-     * match is exact id equality -- or an attested IS_LEMMA_OF edge, which is
-     * the hop that makes an inflected prompt word ("parts") reach its lemma. ---- */
+    /* ---- which relation types does a token name? A name's concept segment
+     * becomes a content id through the substrate's content hash; a token names
+     * the type by id equality, or as the object of an IS_LEMMA_OF cell whose
+     * subject is that id. ---- */
     {
         PcTypeEntry     *te;
         Datum           *nw_datums = NULL;
@@ -604,27 +538,11 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         nw_owner = (PcTypeEntry **) palloc(sizeof(PcTypeEntry *) * Max(nw_capacity, (size_t) 1));
         MemoryContextSwitchTo(old);
 
-        /* Iterate the WHOLE MANIFEST, not type_h.
-         *
-         * type_h is populated by pc_scan_edges from the relation types the
-         * CANDIDATES ALREADY CARRY EDGES OF. Walking it here asked "which of the
-         * types already present does a token name" — so naming was conditional on
-         * the answer being present, which inverts the intent: naming exists to
-         * SELECT which relation to traverse.
-         *
-         * MEASURED 2026-08-04: 'synonym of dog' fired (dog's candidates carry
-         * IS_SYNONYM_OF) while 'The opposite of hot is' returned rel_type_id NULL
-         * and rel_mass 0 on every token, because nothing in that prompt's
-         * candidate set happened to carry an oppositional edge. The prompt named
-         * the relation and the elector could not see it.
-         *
-         * The manifest is bounded and static — laplace_relation_table_count is
-         * the relation count, not a function of graph degree — so this is a fixed
-         * cost per call, not a scan. Types the candidates do not carry simply
-         * find no rel_mass in the scan below; they are no longer invisible to it.
-         *
-         * A type first seen here is ENTERED into type_h so the rel_mass pass can
-         * reach it. GH #864. */
+        /* Iterate the whole manifest, not only the types the candidates carry:
+         * naming selects which relation to traverse, so it cannot depend on that
+         * relation already appearing among the candidates' cells. The manifest
+         * is bounded, so this is a fixed cost per call. Each manifest type is
+         * entered into type_h for the rel_mass pass. */
         for (size_t ri = 0; ri < laplace_relation_table_count; ri++)
         {
             const laplace_relation_def_t *def = &laplace_relation_table[ri];
@@ -640,13 +558,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 continue;
             tk = NULL;
 
-            /* def->type_id in the static table is always zero; real ids live in
-             * k_relation_type_id_cache and are filled by relation_ids_ensure().
-             * HASH_ENTER on &def->type_id collapsed every relation into one
-             * all-zero key, so naming set namer_ords (specificity=-1) while
-             * the rel_mass query asked for type_id = 0x00… and returned nothing.
-             * Measured post-a1ec6ed1: synonym-of-dog and opposite-of-hot both
-             * demoted the namer and still left rel_mass=0 / rel_type_id NULL. */
+            /* Canonical ids come from the native law cache; the static table's
+             * type_id field is not populated. */
             if (laplace_relation_type_id(name, &type_id) < 0)
                 continue;
             te = (PcTypeEntry *) hash_search(type_h, &type_id, HASH_ENTER, &found);
@@ -658,26 +571,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 te->named = false;
             }
 
-            /* Pick the LONGEST underscore-delimited segment, not the last one.
-             * `strrchr(name, '_') + 1` grabs the trailing preposition for every
-             * *_OF / *_TO / *_ON / *_BY name: "IS_SYNONYM_OF" yields "OF",
-             * which the len < 3 guard then discarded, leaving the relation
-             * unnameable from a prompt that names it in so many words.
-             *
-             * MEASURED 2026-08-04 against engine/manifest/relation_types.toml:
-             * 56 of 233 canonical names lost their concept that way, including
-             * IS_A, IS_SYNONYM_OF, IS_ANTONYM_OF, IS_TRANSLATION_OF,
-             * IS_INSTANCE_OF, MADE_UP_OF, RELATED_TO, CAPABLE_OF and
-             * DEPENDS_ON — i.e. most of the relations a question actually
-             * names. rel_mass was measured 0 and rel_type_id NULL on every
-             * token of every probe, so the elector's only discriminating key
-             * was inert and every election fell through to denote_mu, the
-             * single-token scalar spec 37 OP3 forbids ranking on.
-             *
-             * The longest segment is the concept in every manifest name; ties
-             * keep the earlier segment. Names with no segment >= 3 chars
-             * (IS_A -> "IS"/"A") stay skipped: those are stopwords, and a
-             * prompt token matching them would name nothing. */
+            /* A canonical name's concept is its longest underscore-delimited
+             * segment; ties keep the earlier segment. */
             {
                 const char *seg = name;
                 const char *best_seg = NULL;
@@ -697,28 +592,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                         break;
                     seg = us + 1;
                 }
-                /* Floor 2, not 3. The 3 existed because "A" named IS_A and wrecked
-                 * every election (W7:41-44) -- a ONE-character segment matches a
-                 * token that is in essentially every prompt. Two characters does
-                 * not have that property, and 3 excluded the single most damaging
-                 * function word in the set.
-                 *
-                 * MEASURED 2026-08-05, after the OMW seed: "is" segments IS_A to
-                 * IS/A, longest "IS" at 2, so it named nothing, stayed a full topic
-                 * candidate, and won four probes outright -- glacier, france, hot
-                 * and water all elected "ice", the Danish/Norwegian/Dutch synonym
-                 * that OMW attaches to the surface "is" with 9 witnesses against
-                 * English "is" with 1 (GH #867). Election correctness 5/6 -> 2/6.
-                 *
-                 * The demotion is precise, not a stopword list: longest-segment
-                 * means "is" names IS_A and nothing else (IS_PART_OF yields PART,
-                 * IS_SENSE_OF yields SENSE), and "a" stays excluded at length 1,
-                 * which is what the original incident requires. It also fixes
-                 * "parts of a car" for the same reason PART is a segment of
-                 * HAS_PART -- the header at prompt_coherence.sql.in:45 records that
-                 * probe failing because `parts` outmassed `car`. */
                 if (best_seg == NULL || best_len < 2)
-                    continue;           /* identifier fragment, not a concept */
+                    continue;           /* under two characters names nothing */
                 last = best_seg;
                 len = best_len;
             }
@@ -733,20 +608,11 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                     pfree(lower);
                     continue;
                 }
-                /* GH #864: concept-segment aliases. IS_ANTONYM_OF's longest
-                 * segment is ANTONYM; prompts say "opposite". They share a
-                 * WordNet synset but a full senses×tokens join hung the
-                 * elector — keep a closed alias list of measured misses. */
+                /* With no token carrying the segment's id, a fixed alias of the
+                 * segment is tried instead. */
                 {
                     static const struct { const char *from; const char *to; } aliases[] = {
                         {"antonym", "opposite"},
-                        /* HAS_DEFINITION's manifest segment is the noun. A user
-                         * supplies the verb when invoking that relation as an
-                         * operator ("define whale"). Without this content-id
-                         * alias, DEFINE remains a topic candidate and its ICF
-                         * prior beats WHALE even though it names the requested
-                         * traversal. The alias only marks its role; it does not
-                         * parse or dispatch an English shape. */
                         {"definition", "define"},
                         {NULL, NULL}
                     };
@@ -895,13 +761,10 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             args[2] = PointerGetDatum(laplace_symmetric_relation_types());
             portal = SPI_cursor_open_with_args(
                 "pc_rel",
-                /* Both ends for symmetric types: the candidate may be the
-                 * stored OBJECT of the single canonically-oriented cell, in
-                 * which case a subject-only probe scores it zero mass for a
-                 * relation the prompt explicitly named. Column 1 is "the
-                 * endpoint that IS the candidate" in both arms, so the
-                 * consuming loop below is unchanged. Asymmetric types keep
-                 * forward-only semantics. */
+                /* A symmetric type is stored once in canonical orientation, so
+                 * the candidate may be its object; both ends are read. Column 1
+                 * is the candidate endpoint in both arms. Asymmetric types are
+                 * read from the subject only. */
                 "SELECT c.subject_id, c.type_id, c.rating, c.rd "
                 "FROM laplace.consensus c "
                 "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
@@ -974,11 +837,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         }
     }
 
-    /* ---- emit one row per (token, best sense). WHICH SENSE: the one that
-     * coheres with the rest of the prompt, then the one participating in the
-     * relation the prompt named; denote_mu breaks a tie in both, and carries a
-     * prompt with no joint signal at all -- it is what picked TZAR and ICE when
-     * it led. ---- */
+    /* ---- emit one row per token: its elected sense ---- */
     {
         for (int i = 0; i < n_cand; i++)
         {
@@ -991,80 +850,16 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
                 if (j == i || o->ord != best->ord)
                     continue;
-                /* Select on the SHARE, the same scale-free quantity values[8]
-                 * reports -- not on raw coherence. This comparator DROPS every
-                 * non-winner for the ord (`if (!is_best) continue` below), so
-                 * whatever it selects on is the real election; computing the
-                 * share afterwards only describes a candidate raw sum already
-                 * picked. Selecting on the sum and reporting the share meant the
-                 * two disagreed, and the better candidate was gone before the
-                 * share was ever consulted.
-                 *
-                 * Raw coherence is a TOTAL, and a total rewards degree. Glicko-2
-                 * exists so a rating does not improve by playing more games;
-                 * summing rank*eff across edges puts that back. MEASURED on this
-                 * substrate for "what is a tree?": et carries 36,202 edges to
-                 * tree's 296 and loses on every quality axis -- rank 0.239 vs
-                 * 0.784, eff_mu 1.18e12 vs 1.26e12, rd 262 vs 232 -- yet wins the
-                 * raw sum 122x on volume alone. Rank-weighting alone only brings
-                 * it to a TIE (0.3 vs 0.3); the share separates them 3.3x. et is a
-                 * player who beat 36,000 weak opponents, and the fold already said
-                 * so in mu and rd.
-                 *
-                 * Ties still fall through to rel_mass, then denote_mu, then id --
-                 * unchanged. */
+                /* Election order: coherence share, raw rel_mass, language
+                 * agreement, witness count, denote_mu, total_mass, lower sense
+                 * id. The share, not raw coherence, so a high-degree candidate
+                 * does not win on edge count alone. Joint evidence from this
+                 * observation precedes language agreement, which precedes every
+                 * global quantity; an unattested language beats a disagreeing
+                 * one and loses to an agreeing one. */
                 double o_share    = o->total_mass    > 0.0 ? o->coherence    / o->total_mass    : 0.0;
                 double best_share = best->total_mass > 0.0 ? best->coherence / best->total_mass : 0.0;
 
-                /* total_mass DESC between denote_mu and the id: on a
-                 * foundation-only seed every DENOTES edge has ONE witness, so
-                 * denote_mu is the same constant (~1169.73) for nearly every
-                 * sense and the id memcmp was the real elector -- measured
-                 * 2026-08-01: "What is a dog?" answered the derogatory sense
-                 * ("a dull unattractive unpleasant girl") and "car" the
-                 * railway carriage, both by id order. The sense that carries
-                 * more witnessed mass is the dominant sense, and mass is
-                 * fold-produced; the id stays only as the determinism anchor. */
-                /* EVIDENCE BEFORE ADJUDICATED STRENGTH, third site. lexical.senses() and
-                 * taxonomy.bubble_up() were corrected the same way on 2026-08-05; this
-                 * comparator is a SEPARATE election and did not inherit either
-                 * fix, because it re-ranks the rows lexical.senses() returns rather than
-                 * taking its order. Correcting only the SQL left the C picking
-                 * `urine` for the word "water" in "Water is made of" -- the exact
-                 * row the SQL fix had just demoted.
-                 *
-                 * Placement: after the two PROMPT-LOCAL signals (share, rel_mass),
-                 * which are joint evidence from this prompt and outrank any global
-                 * count; before denote_mu, which is eff_mu = rating - 2*rd and
-                 * therefore orders substantially by how little rd has shrunk (W16
-                 * 3.2: mean |rating - neutral| 192.85 vs mean rd 262.24 across
-                 * 447,145 rows -- 2*rd runs ~2.7x the signal). Two witnesses
-                 * losing to one on 1.28 of eff_mu is reading the evidence
-                 * backwards through the uncertainty term.
-                 *
-                 * Nothing is excluded and no threshold is introduced; the sort key
-                 * order changes. Spec 37 L6 untouched. */
-                /* LANGUAGE AGREEMENT, ranked above every global quantity.
-                 *
-                 * A sense in a language the prompt is not written in is the wrong
-                 * sense however well attested it is -- W14 G-A measured
-                 * "Kot spi na stole w domu" answered in English while 87,985
-                 * Polish senses sat in the substrate. That is an ADDRESSING
-                 * failure, and no amount of witness count fixes it, so agreement
-                 * has to outrank witnesses rather than break ties under them.
-                 *
-                 * It sits BELOW share and rel_mass because those are joint
-                 * evidence from this prompt -- a direct edge between two
-                 * candidates outranks a provenance match.
-                 *
-                 * Tri-state, not boolean: an unattested language scores 0 and
-                 * therefore beats a DISAGREEING one while losing to an agreeing
-                 * one. `EXISTS`-style collapse of unattested into false is the
-                 * exact defect the read laws name; a sense whose language nobody
-                 * recorded has not been shown to be foreign.
-                 *
-                 * No language is named anywhere in this comparison. Both sides are
-                 * ids the substrate resolved. */
                 if (o_share > best_share
                     || (o_share == best_share && o->rel_mass > best->rel_mass)
                     || (o_share == best_share && o->rel_mass == best->rel_mass
@@ -1124,75 +919,15 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 }
                 else
                     nulls[6] = true;
-                /* REL_MASS IS THE SCALE-FREE SHARE (2026-08-21), not the summed mass.
-                 * The SPECIFICITY block below already states the law: "a summed mass is
-                 * meaningless on a high-degree id -- an article is wired to everything, so
-                 * its edges to the prompt are unremarkable." rel_mass sat ABOVE everything
-                 * except specificity in the one canonical elector key and was still the raw
-                 * sum, so whenever specificity tied at zero the article won on sheer degree.
-                 * MEASURED, "What is a glacier?": `a` rel_mass 2.385e12 over total 4.39e14
-                 * (share 0.0054) beat `glacier` 1.193e12 over 1.14e14 (share 0.0104) -- the
-                 * probe elected LATIN SMALL LETTER A. Same denominator as specificity: the
-                 * candidate's own witnessed mass, so the ratio does not drift as seeds land.
-                 * Re-ranked on the share across every eval probe: pawn/glacier/water/hot all
-                 * elect their topic (election 4/6 -> 5/6); france remains #1099's stranded
-                 * fact, unreachable by any ranking. Raw mass stays available to diagnostics
-                 * as share * total_mass -- both columns are returned. */
+                /* rel_mass as a share of the candidate's total mass, scale-free
+                 * like specificity; raw mass is share * total_mass. */
                 values[7] = Float8GetDatum(
                     best->total_mass > 0.0 ? best->rel_mass / best->total_mass : 0.0);
-                /* SPECIFICITY -- the contextual rank key. A summed mass is meaningless on a
-                 * high-degree id: an article is wired to everything, so its edges
-                 * to the prompt are unremarkable, while a chess pawn's edge to
-                 * chess is most of what it has. Measured on this substrate,
-                 * "What is a pawn in chess?": total mass a = 4.28e16, chess =
-                 * 5.28e14, pawn = 2.63e13 -- three orders between the article and
-                 * the topic, which is exactly the correction. Not a floor or a
-                 * knob: it is the share of a candidate's OWN witnessed mass that
-                 * reaches the rest of the prompt, and it is scale-free, so it
-                 * does not drift as seeds land. */
-                /* Keep direct prompt evidence and structural rarity in separate
-                 * dimensions. They are not comparable units. The old fallback
-                 * returned ICF in this same column when share was zero, allowing
-                 * a token with NO prompt edge to outrank a token with a witnessed
-                 * edge merely because 0.058 ICF was numerically above a 0.031
-                 * coherence share. Measured in CI on "What is a pawn in chess?":
-                 * `in` beat the directly connected `pawn` by exactly that mistake.
-                 *
-                 * specificity therefore means one thing: the scale-free share
-                 * of this candidate's mass that reaches the rest of the prompt.
-                 * Silent candidates report zero and reach the existing separate
-                 * lexicographic fallback keys. entity_container_degree remains a
-                 * diagnostic operation; it is not smuggled into this scalar. */
-                /* A NAMER IS NOT A TOPIC (2026-08-05).
-                 *
-                 * Spec 37 OP3: a token that names a relation selects WHICH
-                 * relation to traverse. It is the operator the question is asked
-                 * with, not the subject it is asked about. pc_scan_edges already
-                 * acts on this — a type's namer set excludes the naming ord from
-                 * receiving its own rel_mass — but the namer stayed a full topic
-                 * candidate, and with every discriminating key at 0 it won on
-                 * `ord DESC` whenever it sat later in the prompt.
-                 *
-                 * MEASURED: "Water is made of" elected `made`. Both tokens carry
-                 * specificity 0, rel_mass 0, coherence 0, peers 0, so ord DESC
-                 * decided and `made` is later. `made` is the longest segment of
-                 * MADE_UP_OF, so it names a relation; `Water` names none. The
-                 * question is what water is made OF, and the elector answered
-                 * with the preposition's relation.
-                 *
-                 * -1 rather than exclusion: a namer stays in the result and stays
-                 * orderable, so a prompt made entirely of relation words still
-                 * elects something instead of returning nothing. It sorts below
-                 * any non-namer, including one with no signal at all — which is
-                 * correct, because "I have nothing to say about this token" still
-                 * beats "this token is the verb".
-                 *
-                 * Deliberately NOT symmetric with the ICF prior below: this is a
-                 * ROLE distinction the manifest already encodes, not a frequency
-                 * heuristic. "The opposite of hot is" is the load-bearing case:
-                 * the antonym→opposite alias + real type_id lookup make
-                 * `opposite` a namer (specificity -1) and let hot take the
-                 * IS_ANTONYM_OF rel_mass (GH #864). */
+                /* Specificity: the share of the candidate's own mass that reaches
+                 * the rest of the observation, or -1 when its token names a
+                 * relation type. A namer is the operator of the observation, not
+                 * its subject: it stays orderable but sorts below every
+                 * non-namer, including one with no signal. */
                 {
                     double share = best->total_mass > 0.0
                                    ? best->coherence / best->total_mass
@@ -1203,22 +938,12 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                     values[8] = Float8GetDatum(
                         is_namer ? -1.0 : share);
                 }
-                /* The denominator, exposed raw. Computed here all along and
-                 * discarded; returning it is what let the electors' first
-                 * fallback premise (inverse own-mass) be refuted by
-                 * measurement on the foundation-only seed -- see
-                 * prompt_coherence.sql.in for the ledger. */
+                /* The denominator, exposed raw. */
                 values[9] = Float8GetDatum(best->total_mass);
-                /* The evidence behind the elected sense, exposed for the same
-                 * reason total_mass is: it is now a SORT KEY in the comparator
-                 * above, and a key that cannot be read cannot be refuted. The
-                 * comparator's first version was debugged by guessing at this
-                 * value; that is the cost of an unobservable rank key. */
+                /* Witness count, a key of the election. */
                 values[10] = Int64GetDatum(best->witnesses);
-                /* +1 agrees / 0 unattested / -1 disagrees. Exposed so the
-                 * abstention is visible: 0 across every token means the substrate
-                 * has no language for this prompt, which is a different statement
-                 * from "the languages matched" and must not read as one. */
+                /* +1 agrees / 0 unattested / -1 disagrees. 0 on every token means
+                 * no language evidence, not agreement. */
                 values[11] = Int32GetDatum(best->lang_agree);
 
                 tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);

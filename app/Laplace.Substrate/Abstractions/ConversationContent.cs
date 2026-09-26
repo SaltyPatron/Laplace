@@ -5,16 +5,15 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Conversational turn witnessing with tenant/user/session provenance (spec 34).
+/// Conversational turns as testimony with tenant/user/session provenance
+/// (docs/specs/34_Conversational_Provenance.md).
 ///
-/// Chess parity: a session is to conversation what a game is to chess — a
-/// content-addressed context entity whose id rides on every turn's evidence rows
-/// (context_id keeps per-session provenance; deduped subjects keep the fold shared).
-/// Tenant identity lives in the SOURCE (`UserPrompt@{tenant}` / `Response@{tenant}`),
-/// so two tenants asserting the same fact are distinct provenanced evidence rows by
-/// construction. Tenant scope controls authorization and provenance; the seeded
-/// source class owns the observation prior. Participant standing is distinct from
-/// both, and is not an arbitrary multiplier assigned to a tenant (spec 34).
+/// A session is a context entity whose id rides on every turn's attestation rows as
+/// context_id, the same way a game is context for its moves; subjects are shared content,
+/// so the fold is shared. Tenant identity is in the source (<c>UserPrompt@{tenant}</c> /
+/// <c>Response@{tenant}</c>), so two tenants stating the same fact are distinct attributable
+/// witnesses. Tenant scope governs authorization and provenance; the source's trust class
+/// sets the observation prior; participant standing is separate from both.
 /// </summary>
 public static class ConversationContent
 {
@@ -25,8 +24,8 @@ public static class ConversationContent
     public static readonly Hash128 SessionType = EntityTypeRegistry.ConversationSession;
 
     /// <summary>
-    /// Tenant ids and session keys become canonical-key segments, and header tenants
-    /// are attacker-controlled — the strict charset is load-bearing for key integrity.
+    /// Tenant ids and session keys become canonical-key segments and header tenants are
+    /// caller-controlled, so this strict charset protects key integrity.
     /// </summary>
     private static readonly Regex IdentifierPattern =
         new(@"^[A-Za-z0-9._@-]{1,128}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -65,8 +64,8 @@ public static class ConversationContent
     }
 
     /// <summary>
-    /// Every relation a source emits MUST be declared at bootstrap (the HAS_POS law);
-    /// family expansion happens in the builder loop below.
+    /// Every relation a source attests is declared at bootstrap; family expansion happens
+    /// in the builder loop below.
     /// </summary>
     private static readonly string[] DeclaredRelations =
         ["APPEARS_IN", "HAS_ATTRIBUTION", "HAS_ROLE", "IS_INSTANCE_OF", "DEPENDS_ON"];
@@ -77,10 +76,9 @@ public static class ConversationContent
 
     /// <summary>
     /// The three bootstrap changes for a tenant's first turn: prompt-source and
-    /// response-source registrations (trust classes reuse the base conversational
-    /// classes — the tenant changes WHO witnesses, not what KIND of witness it is),
-    /// plus the source→tenant HAS_ATTRIBUTION linkage. Rows are idempotent; the
-    /// witness lane caches per process so testimony refolds are bounded to restarts.
+    /// response-source registrations (with the base conversational trust classes: the
+    /// tenant changes who witnesses, not what kind of witness it is) and the
+    /// source → tenant HAS_ATTRIBUTION attestation. The rows are idempotent.
     /// </summary>
     public static SubstrateChange[] BuildTenantBootstrapChanges(TenantScope scope)
     {
@@ -116,16 +114,14 @@ public static class ConversationContent
     }
 
     /// <summary>
-    /// One turn, one change, one apply (the writer's φ-per-cell invariant assumes a
-    /// turn is never batched with another tenant's). Content lands via the ordinary
-    /// text DAG mint; the loop-closing testimony is turn-level only — no per-token
-    /// chains (Pillar 3a stays deleted):
-    ///   (messageOccurrence APPEARS_IN session) @ctx=session — record-lane membership
+    /// One turn is one change and one apply; it is never batched with another tenant's
+    /// turn. Content is composed through the ordinary text spine; testimony is turn-level,
+    /// with no per-token chains:
+    ///   (messageOccurrence APPEARS_IN session) @ctx=session — membership.
     ///   Each occurrence composes its metadata and exact content as separate branches.
-    ///   Prompt/reply order is carried by the packed session trajectory appended
-    ///     by the writer. It does not create a second PRECEDES consensus fact.
-    ///   (session HAS_ATTRIBUTION userRoot)             — witnessed when the
-    ///     caller supplies a user key (user-within-tenant provenance).
+    ///   Prompt/reply order is carried by the session trajectory the writer appends,
+    ///     not by a PRECEDES attestation.
+    ///   (session HAS_ATTRIBUTION userRoot) — when the caller supplies a user key.
     /// </summary>
     public static bool TryBuildTurnChange(
         TenantScope scope,
@@ -185,9 +181,9 @@ public static class ConversationContent
         }
 
         var b = new SubstrateChangeBuilder(
-            // Identical text in two actual turns is two occurrences. The writer
-            // journals this change's intent, so a content-only unit label would
-            // incorrectly suppress the second turn as a transport retry.
+            // Identical text in two turns is two occurrences. The writer journals this
+            // change's intent by unit label, so the label carries the occurrence key;
+            // a content-only label would drop the second turn as a retry.
             phase == TurnPhase.Output ? scope.ResponseSource : scope.PromptSource,
             phase == TurnPhase.Complete
                 ? $"conversation/turn/{sessionId}/{occurrenceKey}"
@@ -200,9 +196,9 @@ public static class ConversationContent
             || (hasReply && !ContentTierSpine.EmitTree(b, replyTree!, scope.ResponseSource, [], out _)))
             throw new InvalidOperationException("Conversation content could not be staged.");
 
-        // The output names the exact input occurrence even when other requests
-        // appended to this session during generation. Reconstructing its native
-        // content identity does not submit the input testimony a second time.
+        // The output names its exact input occurrence even if other requests appended
+        // to the session meanwhile; recomposing that identity (stage: false) does not
+        // submit the input testimony again.
         Hash128 promptTurn = StageOccurrence(b, scope, sessionId, occurrenceKey,
             "user", promptTree, scope.PromptSource,
             SourceTrust.UserPrompt, participantKey,
@@ -235,9 +231,9 @@ public static class ConversationContent
         return true;
     }
 
-    // Spec 34: an occurrence and its message content have separate identities.
-    // The metadata branch prevents identical text in different roles/sessions
-    // from sharing a role-bearing subject; the content branch stays unchanged.
+    // An occurrence and its message content have separate identities: the metadata
+    // branch keeps identical text in different roles or sessions from sharing a
+    // role-bearing subject, while the content branch is the shared content entity.
     private static unsafe Hash128 StageOccurrence(
         SubstrateChangeBuilder builder, TenantScope scope, Hash128 sessionId,
         string occurrenceKey, string role, TierTree contentTree,

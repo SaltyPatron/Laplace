@@ -214,8 +214,8 @@ public sealed class WiktionarySenseIdentityTests
             }],
         });
 
-        // The QID is content, staged through the content spine: the normalized "Q22687"
-        // (its type is neither identity nor a managed entity row).
+        // The QID is content: its id is the content root of "Q22687", staged through the
+        // content spine rather than as a managed entity row.
         Hash128 item = ReferenceAnchor.Id(ReferenceIdentityKind.WikidataItem, "Q22687")!.Value;
         Assert.Equal(ContentEmitter.RootId("Q22687"), item);
         Assert.DoesNotContain(change.Entities, e => e.Id == item);

@@ -70,9 +70,8 @@ function isChessPlayer(type?: string | null) {
 }
 
 function displayRelation(type: string, entityType: string | null | undefined, direction: string) {
-  // Historical chess pairing cells were written as player --PLAYED_BY--> opponent even though
-  // every writer/read interprets the object as the opponent. Until that relation id is migrated,
-  // never turn the legacy storage name into the false English sentence "Spassky played by ...".
+  // An outgoing PLAYED_BY cell from a chess player names its opponent as the object, so it
+  // reads as "played against".
   if (direction === 'out' && isChessPlayer(entityType)
       && type.replaceAll('_', ' ').trim().toLowerCase() === 'played by') {
     return 'played against';
@@ -96,11 +95,8 @@ function ambiguousLabels(rows: ExploreConsensusRow[]) {
 function relationEntityLabel(row: ExploreConsensusRow, ambiguous: Set<string>) {
   const label = row.entity_label.trim();
   if (!label) return `Entity · ${row.entity_id_hex.slice(0, 12)}`;
-  // A display projection can legitimately collapse distinct governed references to the
-  // same descriptive type/source fallback (for example every CILI WordNet mapping becoming
-  // "Source Reference · CILIDecomposer"). Never render those different graph objects as
-  // indistinguishable rows: identity stays separate from display text, but a bounded hash
-  // suffix makes the distinction visible until the source-specific reference label is retained.
+  // Distinct entities can share one display label; a label shared by more than one id in
+  // this table carries a 12-hex id suffix so the rows stay distinguishable.
   return ambiguous.has(label)
     ? `${label} · ${row.entity_id_hex.slice(0, 12)}`
     : label;

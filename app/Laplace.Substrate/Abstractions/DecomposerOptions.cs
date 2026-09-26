@@ -11,8 +11,8 @@ public sealed record DecomposerOptions(
     long MaxInputUnits = 0,
 
     /// <summary>
-    /// Re-emit testimony for content already present (laplace ingest --force). When false,
-    /// per-root novelty filters skip present roots before compose.
+    /// Re-emits testimony for content already present (<c>laplace ingest --force</c>). When
+    /// false, per-root novelty filters skip present roots before compose.
     /// </summary>
     bool ReObservePresent = false)
 {

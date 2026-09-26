@@ -107,9 +107,8 @@ neighbor_cell(const LaplaceConsensusRow *row, void *opaque)
     char key[32];
     bool found;
     if (row->object_is_null || memcmp(&row->subject, &row->object, 16) == 0) return;
-    /* Output admission cannot spend its bound on an edge whose signed
-     * standing does not support the requested operation. Browse retains all
-     * standings; this predicate is an explicit execution operand. */
+    /* Positive-only admission is an explicit operand, applied before the
+     * per-frontier bound so a non-supporting cell cannot spend fanout. */
     if (state->require_positive &&
         !(walk_edge_score(row->type, row->rating, row->rd) > 0.0)) return;
     /* Direction is checked before pair election and the bounded heap. */

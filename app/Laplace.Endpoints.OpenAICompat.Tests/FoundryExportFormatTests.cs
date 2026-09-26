@@ -4,8 +4,8 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// The HTTP export service binds the GGUF synthesis command. Its advertised formats
-/// must reflect complete route integration, even when another native codec exists.
+/// The HTTP export service binds the GGUF synthesis command and advertises as writable
+/// only formats with a complete export route, even when another native codec exists.
 /// </summary>
 public sealed class FoundryExportFormatTests
 {

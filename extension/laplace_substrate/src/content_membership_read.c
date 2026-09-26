@@ -1,5 +1,7 @@
-/* Native typed GIN set reader. PostgreSQL owns index consistency, bitmap
- * memory limits and MVCC; C owns consumption. No planner, SPI or SQL cursor. */
+/* Reads the occurrence face of trajectories: which entities' typed trajectories
+ * contain given constituents. Each leaf partition's GIN index over the
+ * trajectory's constituent-id projection is scanned as a bitmap under the active
+ * snapshot; no planner, SPI, or cursor. */
 #include "postgres.h"
 #include "access/genam.h"
 #include "access/relscan.h"
@@ -267,8 +269,8 @@ laplace_typed_membership_read_with_required(ArrayType *members, bool require_all
                               &ctl, HASH_ELEM | HASH_BLOBS);
     for (int i = 0; i < partitions->nparts; ++i)
         hash_search(leaves, &partitions->oids[i], HASH_ENTER, NULL);
-    /* Read the index's children once. index_get_partition() walks every index
-     * on every leaf and repeatedly probes pg_inherits, recreating catalog I/O. */
+    /* Leaf indexes come from the parent index's inheritance children in one
+     * read; index_get_partition() would scan every index of every leaf. */
     List *indexes = find_inheritance_children(parent_oid, AccessShareLock);
     ListCell *cell;
     uint64 matched_rows = 0;
