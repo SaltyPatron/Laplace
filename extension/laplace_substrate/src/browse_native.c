@@ -153,17 +153,33 @@ add_member_hits(HTAB *hits, ArrayType *members)
     pfree(nulls);
 }
 
+/* Structural distance from the query: the entity it names, the content it is,
+ * the words it is made of, then the structures that contain all of them. */
+static int
+match_rank(BrowseMatchKind kind)
+{
+    switch (kind) {
+        case BROWSE_MATCH_NAME: return 0;
+        case BROWSE_MATCH_SURFACE: return 1;
+        case BROWSE_MATCH_CONSTITUENT: return 2;
+        case BROWSE_MATCH_CONTAINS_ALL: return 3;
+    }
+    return 4;
+}
+
 static int
 hit_compare(const void *a, const void *b)
 {
     const BrowseHit *x = a, *y = b;
-    bool x_structural = x->match_kind != BROWSE_MATCH_NAME;
-    bool y_structural = y->match_kind != BROWSE_MATCH_NAME;
-    if (x_structural != y_structural) return x_structural ? 1 : -1;
-    if (!x_structural) {
+    int xr = match_rank(x->match_kind), yr = match_rank(y->match_kind);
+    if (xr != yr) return xr < yr ? -1 : 1;
+    if (x->match_kind == BROWSE_MATCH_NAME) {
         int64 xm = eff_mu_display_fp(x->rating, x->rd), ym = eff_mu_display_fp(y->rating, y->rd);
         if (xm != ym) return xm > ym ? -1 : 1;
         if (x->witnesses != y->witnesses) return x->witnesses > y->witnesses ? -1 : 1;
+    } else if (x->tier != y->tier) {
+        /* A containing phrase sits closer to the query than a containing document. */
+        return x->tier < y->tier ? -1 : 1;
     }
     return id_compare(&x->id, &y->id);
 }
