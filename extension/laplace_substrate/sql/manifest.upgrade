@@ -328,6 +328,7 @@ functions/consensus/explore_web_neighbors.sql.in
 functions/consensus/explore_web.sql.in
 functions/generation/forward_frontier.sql.in
 functions/generation/walk_text.sql.in
+functions/converse/answer.sql.in
 functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
 functions/consensus/consensus_step_edge.sql.in

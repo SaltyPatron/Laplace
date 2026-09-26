@@ -1,0 +1,49 @@
+-- Installed after generation/walk_text: its BEGIN ATOMIC body binds realize.forward_text_batch
+-- when the function is created.
+-- converse.answer(prompt, lang): an open turn's answer is the joint meeting of its
+-- content terms (converse.respond), realized in the asked language. One term asks
+-- what the term is; several ask what answers all of them.
+CREATE OR REPLACE FUNCTION converse.answer(p_prompt text, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    -- A term may span words ("hot dog", "New York", "national capital"): every
+    -- span of up to three consecutive words is a candidate surface; the longest
+    -- bound span wins over the words inside it.
+    WITH w AS MATERIALIZED (
+        SELECT row_number() OVER (ORDER BY ord) AS i, word
+        FROM converse.prompt_words(p_prompt)
+    ), spans AS MATERIALIZED (
+        SELECT a.i AS first_i, a.i AS last_i, laplace.word_id(a.word) AS id FROM w a
+        UNION ALL
+        SELECT a.i, b.i, laplace.word_id(a.word || ' ' || b.word)
+        FROM w a JOIN w b ON b.i = a.i + 1
+        UNION ALL
+        SELECT a.i, c.i, laplace.word_id(a.word || ' ' || b.word || ' ' || c.word)
+        FROM w a JOIN w b ON b.i = a.i + 1 JOIN w c ON c.i = a.i + 2
+    ), content AS MATERIALIZED (
+        SELECT converse.content_terms(array_agg(s.id)) AS ids FROM spans s
+    ), bound AS MATERIALIZED (
+        SELECT DISTINCT s.first_i, s.last_i, s.id
+        FROM spans s, content c
+        WHERE s.id = ANY (c.ids)
+    ), terms AS MATERIALIZED (
+        SELECT array_agg(b.id ORDER BY b.first_i) AS ids
+        FROM bound b
+        WHERE NOT EXISTS (
+            SELECT 1 FROM bound o
+            WHERE o.first_i <= b.first_i AND o.last_i >= b.last_i
+              AND o.last_i - o.first_i > b.last_i - b.first_i)
+    ), met AS MATERIALIZED (
+        SELECT r.candidate
+        FROM terms t, converse.firmware() f,
+             converse.respond(t.ids, f.meeting_hops, f.meeting_fanout, f.meeting_frontier, 1,
+                              f.salience_floor) r
+        WHERE cardinality(t.ids) > 0
+        LIMIT 1
+    )
+    SELECT (realize.forward_text_batch(
+                ARRAY[m.candidate],
+                COALESCE(p_lang, converse.prompt_language_top(p_prompt))))[1]
+    FROM met m;
+END;
