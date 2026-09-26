@@ -39,6 +39,20 @@ internal static class QueryEndpoints
         .Produces<RelationBandsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        // The governed relation vocabulary as the native manifest registry holds it:
+        // the relation id is the identifier, the canonical name one realization.
+        app.MapGet("/v1/query/relations", () =>
+        {
+            var relations = Laplace.Decomposers.Abstractions.RelationTypeRegistry.AllCanonical()
+                .Select(r => new RelationTypeView(r.Canonical, Convert.ToHexString(r.Id.ToBytes()).ToLowerInvariant(), r.Rank,
+                    r.Symmetry == Laplace.Decomposers.Abstractions.RelationTypeRegistry.Symmetry.Symmetric))
+                .OrderBy(r => r.Name, StringComparer.Ordinal)
+                .ToArray();
+            return Results.Json(new RelationTypesResponse("list", relations));
+        })
+        .WithTags("query")
+        .Produces<RelationTypesResponse>();
+
         app.MapGet("/v1/query/highway-status", async (ISubstrateClient substrate, CancellationToken ct) =>
             Results.Json(await substrate.HighwayPopulationAsync(ct)))
         .WithTags("query")

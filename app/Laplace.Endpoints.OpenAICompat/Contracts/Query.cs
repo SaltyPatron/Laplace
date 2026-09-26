@@ -77,3 +77,14 @@ public sealed record HighwayPopulationStatus(
     [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
     [property: JsonPropertyName("pending_pairs")] long PendingPairs,
     [property: JsonPropertyName("pending_refreshes")] long PendingRefreshes);
+
+/// <summary>One governed relation: its id is the identifier, the name its canonical realization.</summary>
+public sealed record RelationTypeView(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("rank")] double Rank,
+    [property: JsonPropertyName("symmetric")] bool Symmetric);
+
+public sealed record RelationTypesResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("relations")] IReadOnlyList<RelationTypeView> Relations);
