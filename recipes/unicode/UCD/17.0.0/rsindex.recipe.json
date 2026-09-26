@@ -1,0 +1,62 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX38/RSIndex",
+  "fields": [
+    {
+      "syntaxPath": "record/@key",
+      "propertyName": "key",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@codepoints",
+      "propertyName": "ideographs",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PART",
+      "qualifiers": [
+        "meronymy/member"
+      ],
+      "objectParts": [
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "key",
+        "entityType": "Property_Value",
+        "identityParts": [
+          {
+            "path": "",
+            "literal": "kRSUnicode"
+          },
+          {
+            "path": "@key"
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": "\t",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "key",
+      "codepoints"
+    ]
+  }
+}

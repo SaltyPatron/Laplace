@@ -1,0 +1,186 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX38/USourceData",
+  "fields": [
+    {
+      "syntaxPath": "record/@id",
+      "propertyName": "id",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@status",
+      "propertyName": "status",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "U_Source_Status"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@codepoint",
+      "propertyName": "codepoint",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "CORRESPONDS_TO",
+      "sequenceSeparator": " ",
+      "objectParts": [
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@rs",
+      "propertyName": "radicalStroke",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kRSUnicode"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@virtualKangXi",
+      "propertyName": "virtualKangXi",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Virtual_KangXi_Position"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@ids",
+      "propertyName": "ids",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Ideographic_Description_Sequence"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@sources",
+      "propertyName": "sources",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "pairMode": "KeyValueComposition",
+      "sequenceSeparator": "*",
+      "pairValueSeparator": " ",
+      "objectEntityType": "Property_Value",
+      "flagRelation": "HAS_FEATURE"
+    },
+    {
+      "syntaxPath": "record/@comments",
+      "propertyName": "comments",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "record/@totalStrokes",
+      "propertyName": "totalStrokes",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "kTotalStrokes"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@firstResidualStroke",
+      "propertyName": "firstResidualStroke",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "First_Residual_Stroke"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "id",
+        "entityType": "U_Source_Ideograph",
+        "identityParts": [
+          {
+            "path": "@id",
+            "splitLast": "-",
+            "side": "Each"
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "id",
+      "status",
+      "codepoint",
+      "rs",
+      "virtualKangXi",
+      "ids",
+      "sources",
+      "comments",
+      "totalStrokes",
+      "firstResidualStroke"
+    ]
+  }
+}

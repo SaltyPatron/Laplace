@@ -372,6 +372,11 @@ canonical = "UD_Token_Ref"
 [[type]]
 canonical = "UD_XPOS"
 
+# A U-source ideograph (USourceData.txt): the composition of its identifier's pieces
+# (UTC-00001 -> [UTC, 00001]).
+[[type]]
+canonical = "U_Source_Ideograph"
+
 [[type]]
 canonical = "UcdClassifier"
 

@@ -31,8 +31,11 @@
     {
       "selector": "charts/RSIndex.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX38/RSIndex",
+      "recipePath": "rsindex.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "charts/Readme.txt",
@@ -85,14 +88,20 @@
     {
       "selector": "idna/Idna2008.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "RFC5892/Idna2008",
+      "recipePath": "idna2008.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "idna/IdnaMappingTable.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS46/IdnaMappingTable",
+      "recipePath": "idna-mapping-table.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "idna/IdnaTestV2.txt",
@@ -184,8 +193,8 @@
     {
       "selector": "uca/ctt.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "EquivalentPackaging",
+      "reason": "The ISO/IEC 14651 Common Template Table: the DUCET of allkeys.txt in 14651 syntax."
     },
     {
       "selector": "uca/decomps.txt",
@@ -430,8 +439,11 @@
     {
       "selector": "ucd/SpecialCasing.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX44/SpecialCasing",
+      "recipePath": "special-casing.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/StandardizedVariants.txt",
@@ -454,8 +466,11 @@
     {
       "selector": "ucd/USourceData.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX38/USourceData",
+      "recipePath": "usource-data.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/USourceGlyphs.pdf",

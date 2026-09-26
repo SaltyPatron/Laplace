@@ -134,7 +134,11 @@ public sealed record SourceRecipeField(
     // and values/flags signed by a leading + (confirm) or - (refute).
     string? ValueListSeparator = null,
     string? FlagRelation = null,
-    bool SignedValues = false);
+    bool SignedValues = false,
+    // The claim is made only in its ContextField's context: the source states the
+    // context-free claim elsewhere (SpecialCasing's unconditional lines are the UCD XML's
+    // full case mappings; its conditional ones are its own).
+    bool RequireContext = false);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode

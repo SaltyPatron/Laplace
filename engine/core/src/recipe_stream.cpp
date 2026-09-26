@@ -102,6 +102,7 @@ struct field_rule {
     std::string value_list_separator;
     hash128_t flag_relation{};
     bool signed_values = false;
+    bool require_context = false;   // claim only in the context field's context
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -958,6 +959,7 @@ struct laplace_recipe_stream {
         const std::string* context_value = nullptr;
         if (!rule.context_field.empty()) context_value = context_of(rule, attributes);
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
+        if (rule.require_context && (!context_value || context_value->empty())) return;
         if (rule.group_once) {
             const auto first = attributes.find("group:first");
             if (first != attributes.end() && first->second != "1") return;
@@ -1483,7 +1485,14 @@ struct laplace_recipe_stream {
             }
             if (!part.space_mark.empty())
                 for (char& c : text) if (part.space_mark.find(c) != std::string::npos) c = ' ';
-            if (part.codepoints && !text.empty()) {
+            // A value that is not code points stays the source's own text (USourceData's
+            // "UTC-03214", a reference to another entry where a code point belongs).
+            bool is_codepoints = part.codepoints && !text.empty();
+            if (is_codepoints)
+                for (const auto& token : split(text, " ")) {
+                    try { (void)point(token); } catch (const std::runtime_error&) { is_codepoints = false; break; }
+                }
+            if (is_codepoints) {
                 // One code point is its Tier-0 atom, whatever its category (a surrogate
                 // position included); a sequence is its text.
                 const auto tokens = split(text, " ");
@@ -1866,6 +1875,10 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 const uint32_t signed_values = r.number();
                 if (signed_values > 1) throw std::runtime_error("invalid signed-values instruction at " + f.path);
                 f.signed_values = signed_values != 0;
+                const uint32_t require_context = r.number();
+                if (require_context > 1 || (require_context && f.context_field.empty()))
+                    throw std::runtime_error("a context-required field needs its context field at " + f.path);
+                f.require_context = require_context != 0;
                 if (f.outcome_field.empty() != f.refute_value.empty())
                     throw std::runtime_error("an outcome field needs its refute value at " + f.path);
                 if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))

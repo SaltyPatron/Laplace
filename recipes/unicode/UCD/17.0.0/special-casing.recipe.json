@@ -1,0 +1,94 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX44/SpecialCasing",
+  "fields": [
+    {
+      "syntaxPath": "record/@code",
+      "propertyName": "code",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@lower",
+      "propertyName": "lowerMapping",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "HAS_CASE_MAPPING",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/lower",
+        "mapping/full"
+      ],
+      "contextField": "conditions",
+      "requireContext": true
+    },
+    {
+      "syntaxPath": "record/@title",
+      "propertyName": "titleMapping",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "HAS_CASE_MAPPING",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/title",
+        "mapping/full"
+      ],
+      "contextField": "conditions",
+      "requireContext": true
+    },
+    {
+      "syntaxPath": "record/@upper",
+      "propertyName": "upperMapping",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "HAS_CASE_MAPPING",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/upper",
+        "mapping/full"
+      ],
+      "contextField": "conditions",
+      "requireContext": true
+    },
+    {
+      "syntaxPath": "record/@conditions",
+      "propertyName": "conditions",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "code"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "code",
+      "lower",
+      "title",
+      "upper",
+      "conditions"
+    ],
+    "minimumColumns": 4,
+    "allowTrailingEmptyColumn": true
+  }
+}

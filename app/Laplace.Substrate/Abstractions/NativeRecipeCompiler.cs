@@ -66,7 +66,8 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static f => f.ObjectScopedToRecord || f.ObjectScopePath is not null
                 || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span || f.ObjectParts is { Count: > 0 }
                 || f.OutcomeField is not null || f.DrawPrefix is not null
-                || f.ValueListSeparator is not null || f.FlagRelation is not null || f.SignedValues)
+                || f.ValueListSeparator is not null || f.FlagRelation is not null || f.SignedValues
+                || f.RequireContext)
             // A static relation named in its inverse direction needs the RCP8 flip bit.
             || recipe.Fields.Any(static f => f.Disposition.HasFlag(SourceFieldDisposition.Testimony)
                 && f.PairMode == SourcePairMode.None && f.RelationField is null
@@ -244,6 +245,7 @@ public static class NativeRecipeCompiler
                 WriteHash(writer, field.FlagRelation is null
                     ? Hash128.Zero : RelationTypeRegistry.Resolve(field.FlagRelation).Id);
                 writer.Write(field.SignedValues ? 1u : 0u);
+                writer.Write(field.RequireContext ? 1u : 0u);
             }
         }
 

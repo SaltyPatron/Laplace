@@ -1,0 +1,107 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS46/IdnaMappingTable",
+  "fields": [
+    {
+      "syntaxPath": "record/@status",
+      "propertyName": "status",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "IDNA_Status"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@mapping",
+      "propertyName": "mapping",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "IDNA_Mapping"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@idna2008",
+      "propertyName": "idna2008",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "IDNA2008_Status"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@first",
+      "propertyName": "first",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@last",
+      "propertyName": "last",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@codepoints",
+      "propertyName": "codepoints",
+      "valueKind": "Codepoint",
+      "disposition": "Identity"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "CodepointRange",
+        "identityField": "codepoints",
+        "rangeStartField": "first",
+        "lastField": "last"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "codepoints",
+      "status",
+      "mapping",
+      "idna2008"
+    ],
+    "minimumColumns": 2,
+    "rangeColumn": "codepoints",
+    "rangeSeparator": ".."
+  }
+}
