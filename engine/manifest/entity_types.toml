@@ -304,6 +304,11 @@ canonical = "Sample"
 [[type]]
 canonical = "Scalar"
 
+# A text's segmentation under a boundary property: [X_Break, [segments]] (UAX #29, #14
+# break tests).
+[[type]]
+canonical = "Segmentation"
+
 [[type]]
 canonical = "Sentence"
 

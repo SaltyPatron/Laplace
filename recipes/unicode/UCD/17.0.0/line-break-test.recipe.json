@@ -1,0 +1,60 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX29/LineBreakTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@test",
+      "propertyName": "test",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PARSE",
+      "objectEntityType": "Segmentation",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Line_Break"
+        },
+        {
+          "path": "value()",
+          "splitLast": "\u00f7",
+          "side": "Each",
+          "spaceMark": "\u00d7",
+          "codepoints": true,
+          "nested": true,
+          "scopeEntityType": "Segmentation"
+        }
+      ]
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "test",
+        "entityType": "Recipe_Subject",
+        "identityParts": [
+          {
+            "path": "@test",
+            "spaceMark": "\u00f7\u00d7",
+            "codepoints": true
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "test"
+    ]
+  }
+}

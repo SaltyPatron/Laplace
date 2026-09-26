@@ -236,6 +236,34 @@ static std::string sequence_text(const std::string& raw, const std::string& sepa
     }
     return out;
 }
+// Separator and mark sets are sets of code points ("÷×" are two, not four bytes).
+static std::vector<uint32_t> code_points(const std::string& text) {
+    std::vector<uint32_t> out;
+    for (size_t i = 0; i < text.size();) {
+        uint32_t cp = 0; size_t used = 1;
+        if (laplace_utf8_decode(reinterpret_cast<const uint8_t*>(text.data()) + i, text.size() - i, &cp, &used) != 0) {
+            cp = static_cast<unsigned char>(text[i]); used = 1;
+        }
+        out.push_back(cp); i += used;
+    }
+    return out;
+}
+// Pieces of text between any of the separator code points, empty pieces dropped.
+static std::vector<std::string> split_any(const std::string& text, const std::string& separators) {
+    const auto set = code_points(separators);
+    std::vector<std::string> out; std::string piece;
+    for (size_t i = 0; i < text.size();) {
+        uint32_t cp = 0; size_t used = 1;
+        if (laplace_utf8_decode(reinterpret_cast<const uint8_t*>(text.data()) + i, text.size() - i, &cp, &used) != 0) {
+            cp = static_cast<unsigned char>(text[i]); used = 1;
+        }
+        if (std::find(set.begin(), set.end(), cp) != set.end()) { if (!piece.empty()) out.push_back(piece); piece.clear(); }
+        else piece.append(text, i, used);
+        i += used;
+    }
+    if (!piece.empty()) out.push_back(piece);
+    return out;
+}
 // Record-relative path: "@attr" on the record itself or "Child/.../@attr" on every
 // matching descendant, in source order.
 static void collect(const node& n, const std::string& path, std::vector<std::string>& out) {
@@ -1410,6 +1438,24 @@ struct laplace_recipe_stream {
     }
     // Components for identity parts, in declaration order. A part with no value is
     // absent from the composition (a valence unit with no grammatical function).
+    // Hex code points as a part: one code point is its Tier-0 atom (returned in atom, a
+    // surrogate position included); a sequence becomes its text (in value). A value that
+    // is not code points stays the source's own text (USourceData's "UTC-03214").
+    bool codepoint_value(intent_stage_t* stage, std::string& value, laplace_ordered_component_t& atom) {
+        const auto tokens = split(value, " ");
+        if (tokens.empty()) return false;
+        for (const auto& token : tokens) {
+            try { (void)point(token); } catch (const std::runtime_error&) { return false; }
+        }
+        if (tokens.size() > 1) { value = sequence_text(value, " "); return false; }
+        const uint32_t cp = point(tokens.front());
+        hilbert128_t hb{};
+        if (codepoint_table_resolve_atom(cp, &atom.id, atom.coord, &hb) != 0)
+            throw std::runtime_error("code point has no atom: " + tokens.front());
+        check(content_witness_emit_floor_atom(stage, cp, &atom.id, INTENT_STAGE_PG_EPOCH_UNIX_US), "code point atom");
+        atom.tier = 0; atom.atom = cp; atom.has_atom = true;
+        return true;
+    }
     // Returns whether every declared part contributed a component.
     bool compose_parts(intent_stage_t* stage, const route_rule& route, const node* element,
         const std::string& path, const std::vector<route_rule::identity_part>& declared,
@@ -1483,46 +1529,28 @@ struct laplace_recipe_stream {
                 if (!text.empty()) text += part.join.empty() ? " " : part.join;
                 text += values[k];
             }
-            if (!part.space_mark.empty())
-                for (char& c : text) if (part.space_mark.find(c) != std::string::npos) c = ' ';
-            // A value that is not code points stays the source's own text (USourceData's
-            // "UTC-03214", a reference to another entry where a code point belongs).
-            bool is_codepoints = part.codepoints && !text.empty();
-            if (is_codepoints)
-                for (const auto& token : split(text, " ")) {
-                    try { (void)point(token); } catch (const std::runtime_error&) { is_codepoints = false; break; }
-                }
-            if (is_codepoints) {
-                // One code point is its Tier-0 atom, whatever its category (a surrogate
-                // position included); a sequence is its text.
-                const auto tokens = split(text, " ");
-                if (tokens.size() == 1) {
-                    const uint32_t cp = point(tokens.front());
-                    laplace_ordered_component_t atom{};
-                    hilbert128_t hb{};
-                    if (codepoint_table_resolve_atom(cp, &atom.id, atom.coord, &hb) != 0)
-                        throw std::runtime_error("code point has no atom: " + tokens.front());
-                    check(content_witness_emit_floor_atom(stage, cp, &atom.id, INTENT_STAGE_PG_EPOCH_UNIX_US), "code point atom");
-                    atom.tier = 0; atom.atom = cp; atom.has_atom = true;
-                    sink.push_back(atom);
-                    close_nested();
-                    continue;
-                }
-                text = sequence_text(text, " ");
+            if (!part.space_mark.empty()) {
+                std::string spaced;
+                for (const auto& piece : split_any(text, part.space_mark)) { if (!spaced.empty()) spaced += ' '; spaced += piece; }
+                text = spaced;
+            }
+            if (part.codepoints && part.side != 3 && !text.empty()) {
+                laplace_ordered_component_t atom{};
+                if (codepoint_value(stage, text, atom)) { sink.push_back(atom); close_nested(); continue; }
             }
             if (part.aliased) {
                 if (!aliases) throw std::runtime_error("an aliased identity part has no value aliases: " + part.path);
                 const auto hit = aliases->find(alias_key(text)); if (hit != aliases->end()) text = hit->second;
             }
             if (part.side == 3) {
-                size_t begin = 0;
-                for (size_t k = 0; k <= text.size(); ++k) {
-                    if (k < text.size() && part.split.find(text[k]) == std::string::npos) continue;
-                    if (k > begin) {
-                        const content_form piece = compose_content(stage, governed_value(part.vocabulary, text.substr(begin, k - begin)));
-                        sink.push_back(component(piece.id, piece.coord, piece.tier, piece.atom));
-                    }
-                    begin = k + 1;
+                for (const auto& raw_piece : split_any(text, part.split)) {
+                    const std::string piece_text = recipe_element_text(raw_piece);
+                    if (piece_text.empty()) continue;
+                    laplace_ordered_component_t atom{};
+                    std::string value = piece_text;
+                    if (part.codepoints && codepoint_value(stage, value, atom)) { sink.push_back(atom); continue; }
+                    const content_form piece = compose_content(stage, governed_value(part.vocabulary, value));
+                    sink.push_back(component(piece.id, piece.coord, piece.tier, piece.atom));
                 }
                 if (sink.size() == sink_had) complete = false;
                 close_nested();

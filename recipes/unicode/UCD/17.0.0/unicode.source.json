@@ -571,8 +571,11 @@
     {
       "selector": "ucd/auxiliary/GraphemeBreakTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX29/GraphemeBreakTest",
+      "recipePath": "grapheme-break-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/auxiliary/LineBreakTest.html",
@@ -583,8 +586,11 @@
     {
       "selector": "ucd/auxiliary/LineBreakTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX29/LineBreakTest",
+      "recipePath": "line-break-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/auxiliary/SentenceBreakProperty.txt",
@@ -601,8 +607,11 @@
     {
       "selector": "ucd/auxiliary/SentenceBreakTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX29/SentenceBreakTest",
+      "recipePath": "sentence-break-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/auxiliary/WordBreakProperty.txt",
@@ -619,8 +628,11 @@
     {
       "selector": "ucd/auxiliary/WordBreakTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX29/WordBreakTest",
+      "recipePath": "word-break-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/emoji/ReadMe.txt",
