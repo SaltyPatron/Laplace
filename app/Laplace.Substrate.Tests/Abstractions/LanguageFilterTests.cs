@@ -6,14 +6,27 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 [Collection("GrammarPerfcache")]
 public sealed class LanguageFilterTests
 {
+    // A tag is content as written; a region subtag keeps its language (BCP 47).
     [Fact]
-    public void En_Resolves_Eng_And_En_Us()
+    public void En_Matches_Itself_And_Its_Regions_But_Not_Other_Tags()
     {
         var f = LanguageFilter.FromSpec("en");
         Assert.True(f.MatchesRaw("en"));
-        Assert.True(f.MatchesRaw("eng"));
         Assert.True(f.MatchesRaw("en-US"));
+        Assert.True(f.MatchesRaw("en_GB"));
+        Assert.False(f.MatchesRaw("eng"));
         Assert.False(f.MatchesRaw("de"));
+    }
+
+    // ISO 639 testimony relates en, eng and English; the filter admits the tags it names.
+    [Fact]
+    public void Testimony_Widens_A_Tag_To_Its_Language()
+    {
+        var f = LanguageFilter.FromSpec("en").WithTags(["eng", "English"]);
+        Assert.True(f.MatchesRaw("eng"));
+        Assert.True(f.MatchesRaw("English"));
+        Assert.True(f.MatchesRaw("en-AU"));
+        Assert.False(f.MatchesRaw("deu"));
     }
 
     [Fact]
@@ -35,21 +48,14 @@ public sealed class LanguageFilterTests
     }
 
     [Fact]
-    public void MultiLanguage_Spec_By_FullName_ResolvesAll()
+    public void MultiLanguage_Spec_Keeps_Every_Tag_As_Written()
     {
-        var f = LanguageFilter.FromSpec("English, Japanese, Mandarin Chinese");
-        Assert.True(f.MatchesRaw("eng"));
-        Assert.True(f.MatchesRaw("jpn"));
+        var f = LanguageFilter.FromSpec("English, Japanese, cmn");
+        Assert.True(f.MatchesRaw("English"));
+        Assert.True(f.MatchesRaw("Japanese"));
         Assert.True(f.MatchesRaw("cmn"));
         Assert.False(f.MatchesRaw("de"));
-    }
-
-    [Fact]
-    public void UnresolvableToken_In_MultiLanguage_Spec_ThrowsNamingIt()
-    {
-        var ex = Assert.Throws<ArgumentException>(
-            () => LanguageFilter.FromSpec("English, Mandarin"));
-        Assert.Contains("Mandarin", ex.Message);
+        Assert.Equal(3, f.Tags.Count);
     }
 
     // ForSource is the mechanism witness-manifest.json documents as law:

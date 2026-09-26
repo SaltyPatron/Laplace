@@ -46,28 +46,37 @@ public sealed class LanguageFilter
         return s.ToUpperInvariant().Replace('-', '_');
     }
 
+    /// <summary>The tags of a spec exactly as written. A tag is content: "en", "eng" and
+    /// "English" are related by ISO 639 testimony (<see cref="WithTags"/>), never rewritten.</summary>
     public static LanguageFilter FromSpec(string commaSeparated)
     {
-        var canon = new HashSet<string>(StringComparer.Ordinal);
-        var unresolved = new List<string>();
+        var tags = new HashSet<string>(StringComparer.Ordinal);
         foreach (var part in commaSeparated.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            string? c = LanguageReference.ResolveCode(part);
-            if (c is not null) canon.Add(c);
-            else unresolved.Add(part);
-        }
-        if (unresolved.Count > 0)
-            throw new ArgumentException(
-                $"LanguageFilter: unresolvable language(s) in '{commaSeparated}': {string.Join(", ", unresolved)}");
-        return new LanguageFilter(canon);
+            tags.Add(part);
+        return new LanguageFilter(tags);
     }
 
+    /// <summary>The tags this filter admits.</summary>
+    public IReadOnlyCollection<string> Tags => _canon;
+
+    /// <summary>This filter with further tags of the same languages.</summary>
+    public LanguageFilter WithTags(IEnumerable<string> tags)
+    {
+        var all = new HashSet<string>(_canon, StringComparer.Ordinal);
+        foreach (var tag in tags)
+            if (!string.IsNullOrWhiteSpace(tag)) all.Add(tag.Trim());
+        return new LanguageFilter(all);
+    }
+
+    // A language tag's first subtag names its language (BCP 47): en-US is English.
     public bool MatchesRaw(string? rawLangCode)
     {
         if (!IsActive) return true;
-        if (string.IsNullOrWhiteSpace(rawLangCode)) return false;
         string? c = LanguageReference.ResolveCode(rawLangCode);
-        return c is not null && _canon.Contains(c);
+        if (c is null) return false;
+        if (_canon.Contains(c)) return true;
+        int sep = c.IndexOfAny(['-', '_']);
+        return sep > 0 && _canon.Contains(c[..sep]);
     }
 
 
@@ -89,10 +98,9 @@ public sealed class LanguageFilter
     {
         if (!IsActive) return true;
         if (rawLangCode.IsEmpty) return false;
-        string? c = rawLangCode.Length <= 8
-            ? LanguageReference.ResolveCode(Utf8ToString(rawLangCode))
-            : LanguageReference.ResolveCode(System.Text.Encoding.UTF8.GetString(rawLangCode));
-        return c is not null && _canon.Contains(c);
+        return MatchesRaw(rawLangCode.Length <= 8
+            ? Utf8ToString(rawLangCode)
+            : System.Text.Encoding.UTF8.GetString(rawLangCode));
     }
 
     private static string Utf8ToString(ReadOnlySpan<byte> utf8)

@@ -707,12 +707,19 @@ internal static partial class IngestCommands
         Console.WriteLine($"ingest {dec.GetType().Name} source={dec.SourceName} via IngestRunner → {destination} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
-        var result = await runner.RunAsync(
-            dec,
-            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
-                skipSourceCompletion,
-                sizingProfile: dec.SizingProfile),
-            CancellationToken.None);
+        var options = BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
+            skipSourceCompletion,
+            sizingProfile: dec.SizingProfile);
+        // A language scope admits every tag of the languages it names, by ISO 639 testimony.
+        options = options with
+        {
+            DecomposerOptions = options.DecomposerOptions with
+            {
+                Languages = await LanguageTagExpansion.ExpandAsync(
+                    options.DecomposerOptions.Languages, ds).ConfigureAwait(false),
+            },
+        };
+        var result = await runner.RunAsync(dec, options, CancellationToken.None);
         sw.Stop();
 
         Console.WriteLine(

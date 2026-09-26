@@ -317,6 +317,21 @@ SQL_QUERY("write.commit_settings", "",
     "current_setting('full_page_writes')::boolean")
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
 
+/* Every tag of the languages a set of tags names, by ISO 639 testimony: a tag names the
+ * language it is (an ISO 639-3 code) or the language that states it as an external
+ * identifier or a name; the language's tags are its code and its external identifiers. */
+SQL_QUERY("language.tags", "text[]",
+    "WITH rel AS (SELECT laplace.relation_type_id('HAS_EXTERNAL_ID') AS ext,"
+    "laplace.relation_type_id('HAS_NAME') AS name,laplace.relation_type_id('HAS_LANGUAGE_SCOPE') AS scope),"
+    "spec AS (SELECT laplace.content_id(convert_to(t,'UTF8')) AS id FROM unnest($1::text[]) t),"
+    "named AS (SELECT c.subject_id AS id FROM laplace.consensus c,rel,spec s "
+    "WHERE c.object_id=s.id AND (c.type_id=rel.ext OR c.type_id=rel.name) UNION SELECT id FROM spec),"
+    "lang AS (SELECT n.id FROM named n,rel WHERE EXISTS (SELECT 1 FROM laplace.consensus k "
+    "WHERE k.subject_id=n.id AND k.type_id=rel.scope)),"
+    "tags AS (SELECT id FROM lang UNION SELECT c.object_id FROM laplace.consensus c JOIN lang l "
+    "ON c.subject_id=l.id,rel WHERE c.type_id=rel.ext AND c.object_id IS NOT NULL) "
+    "SELECT t FROM unnest(realize.render_text_batch((SELECT array_agg(id) FROM tags))) t WHERE t IS NOT NULL")
+
 /* The staged load (StagedSourceWriter). A source is extracted completely into its
  * own staging schema ({stage}) before any record is processed; the load then runs
  * once over the complete staged set: the records converge by identity (a staged id
