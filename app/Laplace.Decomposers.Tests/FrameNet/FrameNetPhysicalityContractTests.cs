@@ -37,7 +37,7 @@ public sealed class FrameNetPhysicalityContractTests
             var changes = new List<SubstrateChange>();
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 changes.Add(change);
 
             var annotationIds = changes.SelectMany(c => c.Entities)

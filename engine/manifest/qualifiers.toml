@@ -39,7 +39,9 @@ base = 96
 # Unicode Decomposition_Type long names (PropertyValueAliases.txt dt); the UCD recipe
 # resolves the XML's short codes (nb, can, ...) to them through its value aliases.
 values = ["Canonical", "Compat", "Circle", "Final", "Font", "Fraction", "Initial", "Isolated",
-          "Medial", "Narrow", "Nobreak", "Small", "Square", "Sub", "Super", "Vertical", "Wide"]
+          "Medial", "Narrow", "Nobreak", "Small", "Square", "Sub", "Super", "Vertical", "Wide",
+          # UTS #10 decomps.txt tags beyond Decomposition_Type (the DUCET's own derivations).
+          "sort", "circlekata", "smallnarrow"]
 
 # ISO 639-3 retirement reasons (code table documentation: C change, D duplicate,
 # N non-existent, S split, M merge) and macrolanguage membership status (A active,
@@ -89,3 +91,12 @@ name = "subevent"
 relations = ["HAS_SUBEVENT"]
 base = 0
 values = ["first", "last"]
+
+# A UCD "# @missing: range; value" line states a default: the range (the composition
+# [first code point, last code point]) HAS_CHARACTER_PROPERTY [property, value], qualified
+# default. An explicit claim on a code point overrides it; nothing expands per code point.
+[[family]]
+name = "character_property"
+relations = ["HAS_CHARACTER_PROPERTY"]
+base = 0
+values = ["default"]

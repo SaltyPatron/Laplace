@@ -2292,16 +2292,8 @@ rank = "lexical_glue"
 symmetry = "asymmetric"
 lowercase_input = false
 
-# Unicode property assertions are relations, not HAS_PROPERTY values with the
-# property name hidden in ContextId.  PropertyAliases canonicalizes the input
-# before this dynamic family is resolved, so every short/long alias converges on
-# one UCD_<PROPERTY> relation entity under the governed HAS_ATTRIBUTE family.
-[dynamic.ucd_property]
-prefix = "UCD_"
-root = "HAS_ATTRIBUTE"
-rank = "standards_structural"
-symmetry = "asymmetric"
-lowercase_input = false
+# A Unicode property is not a relation family: a character property is one element,
+# HAS_CHARACTER_PROPERTY, whose object is the composition [property, value].
 
 
 # ---------------------------------------------------------------------------------------

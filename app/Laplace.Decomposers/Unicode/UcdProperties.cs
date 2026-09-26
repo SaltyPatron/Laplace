@@ -42,11 +42,6 @@ internal sealed class UcdProperties
     public static readonly Hash128 RelTypeHasCharacterProperty =
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeHasCharacterProperty)));
-    // A property's values are its members: HAS_PART qualified meronymy/member.
-    public static readonly Hash128 RelTypeHasPart =
-        RelationTypeRegistry.RelationTypeId(
-            RelationSymbol.CanonicalFromField(nameof(RelTypeHasPart)));
-    public static readonly Mask256 MemberPart = ClaimQualifiers.Of("meronymy", "member");
 
     public readonly string?[] Name;
 

@@ -50,7 +50,7 @@ public sealed class ConceptNetDecomposerTests
             var synSubjects = new HashSet<Hash128>();
             var relatedEdges = new List<AttestationRow>();
 
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 foreach (var a in change.Attestations)
                 {
@@ -102,7 +102,7 @@ public sealed class ConceptNetDecomposerTests
             var dec = new ConceptNetDecomposer();
             var ctx = new FakeContext(dir, new NullWriter());
             var attestations = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 attestations.AddRange(change.Attestations);
 
             Hash128 dog = ContentTierSpine.ResolveRoot("dog")!.Value;

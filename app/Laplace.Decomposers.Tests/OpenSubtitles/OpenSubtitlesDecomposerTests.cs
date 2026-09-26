@@ -90,7 +90,7 @@ public sealed class OpenSubtitlesDecomposerTests
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
             Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 if (change.Metadata.SourceContentUnitName.StartsWith(
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))

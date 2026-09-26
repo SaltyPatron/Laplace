@@ -49,7 +49,7 @@ public sealed class TatoebaDecomposerTests
         var entities = new List<EntityRow>();
         var physicalities = new List<PhysicalityRow>();
         long physicalityCount = 0;
-        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
         {
             attestations.AddRange(change.Attestations);
             entities.AddRange(change.Entities);

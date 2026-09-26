@@ -45,7 +45,7 @@ public sealed class CILIReferenceAdmissionTests
             var decomposer = new CILIDecomposer();
             var context = new FakeContext(new NullWriter()) { EcosystemPath = dir };
 
-            await foreach (var change in decomposer.DecomposeAsync(context, DecomposerOptions.Default))
+            await foreach (var change in decomposer.DecomposeAsync(context, DecomposerOptions.Default).WithoutWriter())
             {
                 foreach (var entity in change.Entities) entities[entity.Id] = entity;
                 foreach (var physicality in change.Physicalities)

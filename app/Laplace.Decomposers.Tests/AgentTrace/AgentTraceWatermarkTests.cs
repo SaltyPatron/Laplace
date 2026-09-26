@@ -66,7 +66,7 @@ public sealed class AgentTraceWatermarkTests
         await dec.InitializeAsync(ctx);
         var entities = new List<EntityRow>();
         var attestations = new List<AttestationRow>();
-        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
         {
             entities.AddRange(change.Entities);
             attestations.AddRange(change.Attestations);

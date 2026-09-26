@@ -87,7 +87,7 @@ public sealed class MapNetDecomposerTests
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var ents = new List<EntityRow>();
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 ents.AddRange(change.Entities.ToArray());
                 atts.AddRange(change.Attestations.ToArray());

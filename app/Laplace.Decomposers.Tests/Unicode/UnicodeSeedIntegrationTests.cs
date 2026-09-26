@@ -78,7 +78,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         // codepoint proof into a second full Unicode-source ingest.  Those artifacts
         // have their own inventory/admission coverage.
         var floorOnly = DecomposerOptions.Default with { MaxInputUnits = TotalCodepoints };
-        await foreach (var change in dec.DecomposeAsync(ctx, floorOnly))
+        await foreach (var change in dec.DecomposeAsync(ctx, floorOnly).WithoutWriter())
         {
             applied += change.Entities.Length;
             if (!change.IntentStages.IsDefaultOrEmpty)

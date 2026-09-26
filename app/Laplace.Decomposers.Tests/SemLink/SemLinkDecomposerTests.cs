@@ -240,7 +240,7 @@ public sealed class SemLinkDecomposerTests
             var atts = new List<AttestationRow>();
             var phase = new SemLinkInstancePhase(path);
             await foreach (var change in phase.DecomposeAsync(
-                new FakeContext(new NullWriter()), DecomposerOptions.Default))
+                new FakeContext(new NullWriter()), DecomposerOptions.Default).WithoutWriter())
             {
                 entities.AddRange(change.Entities.ToArray());
                 atts.AddRange(change.Attestations.ToArray());
@@ -481,7 +481,7 @@ public sealed class SemLinkDecomposerTests
             ];
             foreach (var phase in phases)
             {
-                await foreach (var change in phase.DecomposeAsync(ctx, DecomposerOptions.Default))
+                await foreach (var change in phase.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 {
                     ents.AddRange(change.Entities.ToArray());
                     atts.AddRange(change.Attestations.ToArray());
@@ -509,7 +509,7 @@ public sealed class SemLinkDecomposerTests
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var ents = new List<EntityRow>();
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 ents.AddRange(change.Entities.ToArray());
                 atts.AddRange(change.Attestations.ToArray());
@@ -531,7 +531,7 @@ public sealed class SemLinkDecomposerTests
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var ents = new List<EntityRow>();
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 ents.AddRange(change.Entities.ToArray());
                 atts.AddRange(change.Attestations.ToArray());

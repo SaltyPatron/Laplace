@@ -39,7 +39,7 @@ public sealed class AgentTraceDecomposerTests
         var entities = new List<EntityRow>();
         var physicalities = new List<PhysicalityRow>();
         var attestations = new List<AttestationRow>();
-        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
         {
             entities.AddRange(change.Entities);
             physicalities.AddRange(change.Physicalities);

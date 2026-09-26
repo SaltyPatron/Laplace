@@ -835,15 +835,6 @@ public static unsafe partial class NativeInterop
         byte* outFlip,
         Hash128* outParentId);
 
-    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve_ucd_property", StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int RelationResolveUcdProperty(
-        string propertyName,
-        Hash128* outTypeId,
-        double* outRank,
-        int* outSymmetry,
-        byte* outFlip,
-        Hash128* outParentId);
-
     [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_build", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int AttestationCategoricalBuild(
         string surfaceRelation,

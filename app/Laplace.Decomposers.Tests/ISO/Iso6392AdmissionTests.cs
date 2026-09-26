@@ -54,7 +54,7 @@ public sealed class Iso6392AdmissionTests
             var context = new FakeContext(root, new NullWriter());
 
             await foreach (SubstrateChange change in new ISODecomposer().DecomposeAsync(
-                context, DecomposerOptions.Default))
+                context, DecomposerOptions.Default).WithoutWriter())
             {
                 entities.AddRange(change.Entities);
                 attestations.AddRange(change.Attestations);

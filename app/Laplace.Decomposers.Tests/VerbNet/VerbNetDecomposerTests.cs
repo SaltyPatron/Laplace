@@ -370,7 +370,7 @@ public sealed class VerbNetDecomposerTests
             var dec = new VerbNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 if (change.Metadata.SourceContentUnitName.StartsWith(
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))

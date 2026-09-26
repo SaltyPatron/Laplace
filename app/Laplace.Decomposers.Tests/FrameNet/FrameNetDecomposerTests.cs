@@ -229,7 +229,7 @@ public sealed class FrameNetDecomposerTests
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var changes = new List<SubstrateChange>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 changes.Add(change);
 
             var evokes = changes.SelectMany(c => c.Attestations)
@@ -312,7 +312,7 @@ public sealed class FrameNetDecomposerTests
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var changes = new List<SubstrateChange>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 changes.Add(change);
 
             var evokes = Assert.Single(
@@ -368,7 +368,7 @@ public sealed class FrameNetDecomposerTests
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var nonphysical = new Dictionary<Hash128, Hash128>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 if (change.Metadata.SourceContentUnitName.StartsWith(
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
@@ -431,7 +431,7 @@ public sealed class FrameNetDecomposerTests
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var referenced = new HashSet<Hash128>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 foreach (var a in change.Attestations)
                 {
                     referenced.Add(a.SubjectId);
@@ -465,7 +465,7 @@ public sealed class FrameNetDecomposerTests
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 // Skip file-progress boundaries (period-boundary/ / file-failed/) — not
                 // FrameNet testimony (GH #898).

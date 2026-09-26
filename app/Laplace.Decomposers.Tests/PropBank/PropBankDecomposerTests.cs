@@ -196,7 +196,7 @@ public sealed class PropBankDecomposerTests
             var dec = new PropBankDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = root };
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
                 atts.AddRange(change.Attestations.ToArray());
 
             var giveId = ContentEmitter.Emit(
@@ -258,7 +258,7 @@ public sealed class PropBankDecomposerTests
             var dec = new PropBankDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var nonphysical = new Dictionary<Hash128, Hash128>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 if (change.Metadata.SourceContentUnitName.StartsWith(
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
@@ -300,7 +300,7 @@ public sealed class PropBankDecomposerTests
             var dec = new PropBankDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 if (change.Metadata.SourceContentUnitName.StartsWith(
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))

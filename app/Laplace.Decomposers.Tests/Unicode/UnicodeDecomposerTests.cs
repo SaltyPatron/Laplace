@@ -49,7 +49,7 @@ public sealed class UnicodeDecomposerTests
         EntityRow? aEntity = null;
         PhysicalityRow? aPhys = null;
 
-        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
         {
             inputUnits += change.Metadata.InputUnitsConsumed;
             for (int i = 0; i < change.Entities.Length; i++)
@@ -150,7 +150,7 @@ public sealed class UnicodeDecomposerTests
         bool sawMappingAttestation = false;
         HashSet<Hash128> mappingTypes = [UcdProperties.RelTypeHasCaseMapping];
 
-        await foreach (var change in dec.DecomposeAsync(ctx, opts))
+        await foreach (var change in dec.DecomposeAsync(ctx, opts).WithoutWriter())
         {
             if (change.Entities.Any(e => e.TypeId == UnicodeDecomposer.CodepointType))
                 sawCodepointEntity = true;
@@ -195,11 +195,11 @@ public sealed class UnicodeDecomposerTests
         var opts = DecomposerOptions.Default with { MaxInputUnits = 2048 };
 
         var first = new List<Hash128>();
-        await foreach (var c in dec.DecomposeAsync(ctx, opts))
+        await foreach (var c in dec.DecomposeAsync(ctx, opts).WithoutWriter())
             first.Add(c.Metadata.IntentId);
 
         var second = new List<Hash128>();
-        await foreach (var c in dec.DecomposeAsync(ctx, opts))
+        await foreach (var c in dec.DecomposeAsync(ctx, opts).WithoutWriter())
             second.Add(c.Metadata.IntentId);
 
         Assert.Equal(first, second);
@@ -384,15 +384,37 @@ public sealed class UnicodeDecomposerTests
         Assert.Equal(expected, actual);
     }
 
-    [Fact]
-    public void Ucd_property_relations_are_typed_dynamic_children_of_has_attribute()
+    [Theory]
+    [InlineData("HAS_GENERAL_CATEGORY")]
+    [InlineData("HAS_BLOCK")]
+    [InlineData("HAS_AGE")]
+    [InlineData("HAS_EMOJI_PROPERTY")]
+    [InlineData("HAS_NUMERIC_VALUE")]
+    [InlineData("USES_SCRIPT_EXTENSION")]
+    public void Per_property_unicode_relations_are_retired_into_the_character_property(string retired)
     {
-        RelationTypeRegistry.RelationTypeResolution relation =
-            RelationTypeRegistry.ResolveUcdProperty("General_Category");
+        // One element per meaning: the property is the object's first part, never a relation.
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => RelationTypeRegistry.Resolve(retired));
+        Assert.Contains("retired", ex.Message, StringComparison.Ordinal);
+    }
 
-        Assert.Equal("UCD_GENERAL_CATEGORY", relation.Canonical);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTE"), relation.ParentId);
-        Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, relation.Symmetry);
+    [Fact]
+    public void A_character_property_value_is_the_composition_of_property_and_value()
+    {
+        Hash128 source = Hash128.OfCanonical("test/unicode/source");
+        using var builder = new SubstrateChangeBuilder(source, "test/unicode/property-value");
+        Hash128? pair = ContentEmitter.StagePropertyValue(
+            builder, "General_Category", "Space_Separator", source);
+        Hash128? property = ContentEmitter.Emit(builder, "General_Category", source);
+        Hash128? value = ContentEmitter.Emit(builder, "Space_Separator", source);
+        Assert.NotNull(pair);
+        Assert.NotEqual(property, pair);
+        Assert.NotEqual(value, pair);
+        Assert.Equal(pair, ContentEmitter.StagePropertyValue(
+            builder, "General_Category", "Space_Separator", source));
+        Assert.NotEqual(pair, ContentEmitter.StagePropertyValue(
+            builder, "Bidi_Class", "Space_Separator", source));
     }
 
     [Fact]
@@ -620,13 +642,14 @@ public sealed class UnicodeDecomposerTests
     public void Binary_property_negative_is_refuting_testimony_on_the_same_typed_cell()
     {
         Hash128 source = Hash128.OfCanonical("test/unicode/source");
-        Hash128 relation = RelationTypeRegistry.ResolveUcdProperty("White_Space").Id;
+        Hash128 relation = RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
+        Hash128 whiteSpace = Hash128.OfCanonical("test/unicode/[White_Space, Yes]");
         using var builder = new SubstrateChangeBuilder(
             source, "test/unicode/binary-refute", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1);
 
         NativeAttestation.AddCodepointRange(
-            builder.ContentStage, 0x41, 0x41, relation, objectId: null,
+            builder.ContentStage, 0x41, 0x41, relation, objectId: whiteSpace,
             sourceId: source, contextId: null, sourceTrust: SourceTrust.StandardsDerived,
             confirm: false);
         SubstrateChange change = builder.Build();
@@ -639,7 +662,7 @@ public sealed class UnicodeDecomposerTests
         AttestationRow row = Assert.Single(decoded);
         Assert.Equal(AttestationOutcome.Refute, row.Outcome);
         Assert.Equal(relation, row.TypeId);
-        Assert.Null(row.ObjectId);
+        Assert.Equal(whiteSpace, row.ObjectId);
         Assert.Null(row.ContextId);
     }
 
