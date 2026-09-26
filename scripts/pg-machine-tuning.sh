@@ -100,7 +100,7 @@ pg_compute_machine_tuning() {
   PG_TUNE_ECS=${ecs}kB
   PG_TUNE_MWM=${mwm_kb}kB
   PG_TUNE_WM=${wm_kb}kB
-  PG_TUNE_WB=auto
+  PG_TUNE_WB=$(( sb / 32 / 8 * 8 ))kB
   # shellcheck disable=SC2034  # no consumer yet; kept so this block mirrors EmitPgTuning's
   # full surface — deleting one member of a mirrored contract is worse than an unused var.
   PG_TUNE_CORES=$cores
@@ -360,7 +360,7 @@ pg_apply_machine_tuning_fallback() {
     -c "ALTER SYSTEM SET work_mem = '$PG_TUNE_WM'" \
     -c "ALTER SYSTEM SET max_wal_size = '$PG_TUNE_MAX_WAL'" \
     -c "ALTER SYSTEM SET min_wal_size = '$PG_TUNE_MIN_WAL'" \
-    -c "ALTER SYSTEM RESET wal_buffers" \
+    -c "ALTER SYSTEM SET wal_buffers = '$PG_TUNE_WB'" \
     -c "ALTER SYSTEM SET wal_level = minimal" \
     -c "ALTER SYSTEM SET max_wal_senders = 0" \
     -c "ALTER SYSTEM SET checkpoint_timeout = '$PG_TUNE_CHECKPOINT'" \

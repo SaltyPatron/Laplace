@@ -133,8 +133,8 @@ public class PgTuningParityTests
         Assert.Contains("backend_processes=$(( PG_TUNE_MAXCONN + pcores + avw ))", sh,
             StringComparison.Ordinal);
         Assert.Contains("wm_kb=$(( per_backend_kb / 2 ))", sh, StringComparison.Ordinal);
-        Assert.Contains("PG_TUNE_WB=auto", sh, StringComparison.Ordinal);
-        Assert.Contains("ALTER SYSTEM RESET wal_buffers", sh, StringComparison.Ordinal);
+        Assert.Contains("PG_TUNE_WB=$(( sb / 32 / 8 * 8 ))kB", sh, StringComparison.Ordinal);
+        Assert.Contains("ALTER SYSTEM SET wal_buffers = '$PG_TUNE_WB'", sh, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"\(\(\s*(sb|ecs|mwm|wm|iow)\s*>\s*\d+", sh);
     }
 

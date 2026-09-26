@@ -104,6 +104,7 @@ internal static class CpuTopologyCommands
         static long Blocks(long bytes) => (bytes >> 10) & ~7L;
 
         long sharedKb = Blocks(pg.SharedBuffersBytes);
+        long walBuffersKb = Blocks(pg.SharedBuffersBytes / 32);
         long cacheKb = Blocks(pg.EffectiveCacheSizeBytes);
         long maintKb = pg.MaintenanceWorkMemBytes >> 10;   // kB units, not blocks
         long workKb = pg.WorkMemBytes >> 10;               // kB units
@@ -147,10 +148,11 @@ internal static class CpuTopologyCommands
         w.WriteLine($"ALTER SYSTEM SET effective_cache_size = '{cacheKb}kB';");
         w.WriteLine($"ALTER SYSTEM SET maintenance_work_mem = '{maintKb}kB';");
         w.WriteLine($"ALTER SYSTEM SET work_mem = '{workKb}kB';");
-        // Let PostgreSQL derive WAL buffering from the machine-sized shared buffer
-        // pool. The former RAM/512 with 16MiB/1GiB clamps was a second, conflicting
-        // policy layered over PostgreSQL's own shared_buffers-aware calculation.
-        w.WriteLine("ALTER SYSTEM RESET wal_buffers;");
+        // WAL buffering is PostgreSQL's own shared_buffers/32 ratio without its
+        // one-segment cap: parallel apply connections generate WAL far faster than one
+        // 16MB segment of buffer drains, and every full buffer forces a backend to write
+        // WAL itself under WALWrite.
+        w.WriteLine($"ALTER SYSTEM SET wal_buffers = '{walBuffersKb}kB';");
         w.WriteLine($"ALTER SYSTEM SET max_worker_processes = {workers};");
         w.WriteLine($"ALTER SYSTEM SET max_parallel_workers = {pg.MaxParallelWorkers};");
         w.WriteLine($"ALTER SYSTEM SET max_parallel_workers_per_gather = {pg.MaxParallelWorkersPerGather};");
