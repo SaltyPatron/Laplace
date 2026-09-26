@@ -214,10 +214,11 @@ public sealed class WiktionarySenseIdentityTests
             }],
         });
 
+        // The QID is content, staged through the content spine: the normalized "Q22687"
+        // (its type is neither identity nor a managed entity row).
         Hash128 item = ReferenceAnchor.Id(ReferenceIdentityKind.WikidataItem, "Q22687")!.Value;
-        Assert.Contains(change.Entities, e =>
-            e.Id == item && e.TypeId == EntityTypeRegistry.WikidataItem);
-        Assert.Contains(change.Physicalities, p => p.EntityId == item);
+        Assert.Equal(ContentEmitter.RootId("Q22687"), item);
+        Assert.DoesNotContain(change.Entities, e => e.Id == item);
         Hash128 sense = Assert.Single(change.Attestations, a => a.TypeId == HasSense).ObjectId!.Value;
         Assert.Contains(change.Attestations, a =>
             a.TypeId == CorrespondsTo
