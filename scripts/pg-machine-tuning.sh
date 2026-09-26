@@ -127,10 +127,9 @@ pg_compute_machine_tuning() {
   # THE CEILING MOVED WHEN io_method DID. effective_io_concurrency is a REQUEST for queue
   # depth; something else bounds what a backend may actually hold in flight. Under
   # io_method=worker that bound is the io_workers pool, which is what the measurement
-  # above reasons about. pg_apply_io_method now probes and selects io_uring whenever the
-  # build supports it, and under io_uring the bound is io_max_concurrency -- a per-backend
-  # cap this script never emitted, so it sat at its default of 64 while this line asked
-  # for 256.
+  # above reasons about; pg_apply_io_method keeps the cluster on it. Under io_uring the
+  # bound was io_max_concurrency -- a per-backend cap this script never emitted, so it
+  # sat at its default of 64 while this line asked for 256.
   #
   # THE CAP BINDS, sampled from pg_aios while one backend seq-scanned a 2,573 MB
   # attestations leaf: MAX in-flight AIO ops held by that backend = 64, exactly
@@ -203,12 +202,7 @@ pg_tune_cli_dll() {
 # emitter; the bash formulas below survive ONLY as the bare-host bootstrap fallback
 # (setup-host tunes the cluster before the app is ever built) and are pinned
 # bytes-equal to MemoryTopology by PgTuningParityTests.
-# io_method is probed, never assumed: io_uring only appears in enumvals when PG was built
-# with liburing. This USED TO LIVE IN THE FALLBACK ONLY, so on every host where the CLI is
-# built -- i.e. normal operation -- the emitter's hardcoded `io_method = worker` stood and
-# the probe never ran. io_uring lets each backend submit directly to the kernel with no
-# worker pool and therefore no io_workers ceiling at all, which is the whole point on NVMe.
-# wal_compression is probed for the same reason io_method is: PostgreSQL's configure does
+# wal_compression is probed: PostgreSQL's configure does
 # NOT auto-detect lz4/zstd, so a build without them silently offers only pglz -- the SLOWEST
 # codec (~100-200 MB/s vs lz4 ~500+). `wal_compression = on` RESOLVES TO pglz, so the old
 # unconditional `SET wal_compression = on` looked like a tuning decision and was really a
@@ -337,17 +331,14 @@ pg_apply_wal_sync_method() {
   echo "pg-machine-tuning: wal_sync_method=$best (measured on $wal)"
 }
 
+# Asynchronous reads go through the io_workers pool. io_uring on this host's kernel
+# (5.15) completes queued reads with ECANCELED: PostgreSQL raises
+# "could not read blocks ...: Operation canceled" (XX000) mid-query. Measured in every
+# month of logs since 2026-08-16; it killed a ConceptNet ingest and the 2026-09-26
+# foundation ladder's staged load. The worker method has no such completion path.
 pg_apply_io_method() {
-  local io
-  io=$(pg_tune_psql -tAc \
-    "SELECT CASE WHEN 'io_uring' = ANY(enumvals) THEN 'io_uring' ELSE 'worker' END FROM pg_settings WHERE name = 'io_method'")
-  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET io_method = $io"
-  echo "pg-machine-tuning: io_method=$io"
-  if [[ "$io" != "io_uring" ]]; then
-    echo "pg-machine-tuning: NOTE this PostgreSQL was built without liburing, so async I/O" >&2
-    echo "  is capped by the io_workers pool. Rebuilding with --with-liburing removes that" >&2
-    echo "  ceiling entirely (scripts/win/build-pg.cmd / the pg build recipe)." >&2
-  fi
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET io_method = worker"
+  echo "pg-machine-tuning: io_method=worker"
 }
 
 pg_apply_machine_tuning() {
@@ -355,8 +346,6 @@ pg_apply_machine_tuning() {
   if dll="$(pg_tune_cli_dll)"; then
     if dotnet "$dll" cpu-topology --pg-tuning | pg_tune_psql -v ON_ERROR_STOP=1 -f -; then
       pg_compute_machine_tuning
-      # The emitter cannot probe -- it writes SQL with no connection -- so it hardcodes
-      # io_method=worker. Correct it here, on the path that actually runs.
       pg_apply_io_method
       pg_apply_wal_compression
       pg_apply_wal_sync_method

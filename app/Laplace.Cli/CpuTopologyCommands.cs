@@ -206,8 +206,7 @@ internal static class CpuTopologyCommands
         w.WriteLine($"ALTER SYSTEM SET temp_buffers = '{tempKb}kB';");
         w.WriteLine($"ALTER SYSTEM SET autovacuum_work_mem = '{autovacKb}kB';");
         // Queue-depth requests follow the live I/O issuer pool. The previous fixed 64
-        // merely mirrored one host's io_max_concurrency and silently capped larger hosts;
-        // pg_apply_io_method still chooses the device-native implementation at runtime.
+        // merely mirrored one host's io_max_concurrency and silently capped larger hosts.
         w.WriteLine($"ALTER SYSTEM SET effective_io_concurrency = {pg.IoConcurrency};");
         w.WriteLine($"ALTER SYSTEM SET maintenance_io_concurrency = {pg.IoConcurrency};");
         w.WriteLine("ALTER SYSTEM SET random_page_cost = 1.1;");

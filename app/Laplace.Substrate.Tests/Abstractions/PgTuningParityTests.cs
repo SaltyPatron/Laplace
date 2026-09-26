@@ -394,17 +394,17 @@ public class PgTuningParityTests
     }
 
     /// <summary>
-    /// The io_method probe must run on the PRIMARY path, not only in the bootstrap fallback.
-    /// It used to live in pg_apply_machine_tuning_fallback alone, so on every host where the
-    /// CLI is built — i.e. normal operation — the emitter's hardcoded io_method=worker stood
-    /// and the probe never executed. io_uring removes the io_workers ceiling entirely by
-    /// letting each backend submit directly to the kernel, which is the point on NVMe.
+    /// The io_method choice runs on the PRIMARY path, not only in the bootstrap fallback, and
+    /// selects the worker pool: io_uring on this host's kernel completes queued reads with
+    /// ECANCELED, which PostgreSQL raises mid-query as XX000.
     /// </summary>
     [Fact]
-    public void IoMethodProbe_RunsOnThePrimaryApplyPath()
+    public void IoMethod_IsAppliedOnThePrimaryPath()
     {
         var shell = TuningScript();
         Assert.Contains("pg_apply_io_method()", shell, StringComparison.Ordinal);
+        Assert.Contains("ALTER SYSTEM SET io_method = worker", shell, StringComparison.Ordinal);
+        Assert.DoesNotContain("'io_uring' = ANY(enumvals)", shell, StringComparison.Ordinal);
         Assert.Matches(
             @"pg_apply_machine_tuning\(\)\s*\{(?:[^{}]|\{[^{}]*\})*pg_apply_io_method",
             shell);
