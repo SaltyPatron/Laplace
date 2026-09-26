@@ -417,6 +417,14 @@ public sealed class UnicodeDecomposerTests
             builder, "Bidi_Class", "Space_Separator", source));
     }
 
+    // The [property, value] pair a recipe composes: the same identity the C# emitter stages.
+    private static Hash128 PropertyValue(string property, string value)
+    {
+        Hash128 source = Hash128.OfCanonical("test/unicode/pair");
+        using var builder = new SubstrateChangeBuilder(source, "test/unicode/pair");
+        return ContentEmitter.StagePropertyValue(builder, property, value, source)!.Value;
+    }
+
     [Fact]
     public void Ucd_recipe_reuses_iso15924_script_identity()
     {
@@ -449,9 +457,10 @@ public sealed class UnicodeDecomposerTests
             }
         }
         var rows = Parse("U+5EDD<kMatthews U+53AE<kFenn,kMatthews");
-        var relation = RelationTypeRegistry.RelationTypeId("UCD_KSEMANTICVARIANT");
+        // kSemanticVariant and kCompatibilityVariant are both HAS_VARIANT_OF a character.
+        var relation = RelationTypeRegistry.RelationTypeId("HAS_VARIANT_OF");
         var references = rows.Where(row => row.TypeId == relation).ToArray();
-        Assert.Equal(2, references.Length);
+        Assert.Equal(3, references.Length);
         using var expected = new SubstrateChangeBuilder(UnicodeDecomposer.Source, "reference-contexts");
         Assert.Contains(references, row => row.ObjectId is { } id
             && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x5EDD
@@ -459,8 +468,8 @@ public sealed class UnicodeDecomposerTests
         Assert.Contains(references, row => row.ObjectId is { } id
             && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x53AE
             && row.ContextId == ContentEmitter.Emit(expected, "kFenn,kMatthews", UnicodeDecomposer.Source));
-        Assert.Contains(rows, row => row.TypeId == RelationTypeRegistry.RelationTypeId("UCD_KCOMPATIBILITYVARIANT")
-            && row.ObjectId is { } id && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x7471);
+        Assert.Contains(references, row => row.ObjectId is { } id
+            && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x7471);
         Assert.Throws<InvalidDataException>(() => Parse("kMatthews"));
     }
 
@@ -549,8 +558,9 @@ public sealed class UnicodeDecomposerTests
                 [stage.TupleBuffer(IntentStageTable.Attestations)], rows);
         }
 
-        Hash128 relation = RelationTypeRegistry.RelationTypeId("UCD_ALPHABETIC");
-        AttestationRow[] alphabetic = rows.Where(row => row.TypeId == relation).ToArray();
+        Hash128 relation = RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
+        Hash128 alphabeticYes = PropertyValue("Alphabetic", "Yes");
+        AttestationRow[] alphabetic = rows.Where(row => row.TypeId == relation && row.ObjectId == alphabeticYes).ToArray();
         Assert.Equal(2, alphabetic.Length);
         Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x41].Hash);
         Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x43].Hash);
@@ -583,10 +593,11 @@ public sealed class UnicodeDecomposerTests
                 [stage.TupleBuffer(IntentStageTable.Attestations)], rows);
         }
 
-        Hash128 alphabetic = RelationTypeRegistry.RelationTypeId("UCD_ALPHABETIC");
-        Hash128 category = RelationTypeRegistry.RelationTypeId("UCD_GENERAL_CATEGORY");
-        AttestationRow[] alpha = rows.Where(row => row.TypeId == alphabetic).ToArray();
-        AttestationRow[] gc = rows.Where(row => row.TypeId == category).ToArray();
+        Hash128 property = RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
+        Hash128 alphabeticYes = PropertyValue("Alphabetic", "Yes");
+        Hash128 uppercase = PropertyValue("General_Category", "Uppercase_Letter");
+        AttestationRow[] alpha = rows.Where(row => row.TypeId == property && row.ObjectId == alphabeticYes).ToArray();
+        AttestationRow[] gc = rows.Where(row => row.TypeId == property && row.ObjectId == uppercase).ToArray();
         Assert.Single(alpha);
         Assert.Equal(CodepointPerfcache.Records[0x41].Hash, alpha[0].SubjectId);
         Assert.Equal(2, gc.Length);
@@ -631,10 +642,13 @@ public sealed class UnicodeDecomposerTests
             }
         }
 
-        Hash128 relation = RelationTypeRegistry.RelationTypeId("UCD_ALPHABETIC");
-        Assert.DoesNotContain(Parse("N"), row => row.TypeId == relation);
+        Hash128 relation = RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
+        Hash128 alphabeticYes = PropertyValue("Alphabetic", "Yes");
+        Hash128 alphabeticNo = PropertyValue("Alphabetic", "No");
+        Assert.DoesNotContain(Parse("N"), row => row.TypeId == relation
+            && (row.ObjectId == alphabeticYes || row.ObjectId == alphabeticNo));
         AttestationRow positive = Assert.Single(
-            Parse("Y").Where(row => row.TypeId == relation));
+            Parse("Y").Where(row => row.TypeId == relation && row.ObjectId == alphabeticYes));
         Assert.Equal(AttestationOutcome.Confirm, positive.Outcome);
     }
 
