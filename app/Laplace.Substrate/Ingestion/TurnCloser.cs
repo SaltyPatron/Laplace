@@ -16,14 +16,10 @@ namespace Laplace.Ingestion;
 /// already shared (<see cref="ConversationContent"/>); the SEQUENCE was not, and
 /// each frontend re-derived it:
 ///
-///   floor check -> writer -> tenant scope -> bootstrap -> build turn change -> apply
+///   Tier-0 ROM -> writer -> tenant scope -> bootstrap -> build turn change -> apply
 ///
-/// They had already diverged. Only the HTTP lane checked that the substrate floor
-/// exists before depositing, so an MCP turn against a floorless database wrote
-/// testimony with nothing to anchor it. The CLI did not use this lane at all — it
-/// deposited through the plain untenanted UserPrompt/Response sources, so no CLI
-/// turn carried a session, a tenant, or attribution, and spec 34 simply did not
-/// apply to it.
+/// Every lane (HTTP, MCP, CLI) runs this one sequence, so each turn carries its
+/// session, tenant and attribution under spec 34.
 ///
 /// Caching is per instance and deliberate: bootstrap rows are idempotent but
 /// TESTIMONY IS NOT (see the re-ingest guard law) — registering a tenant's sources
@@ -38,11 +34,9 @@ namespace Laplace.Ingestion;
 public sealed class TurnCloser : IAsyncDisposable
 {
     private readonly NpgsqlDataSource _db;
-    private readonly ISubstrateReader _reader;
     private readonly Action<string>? _warn;
     private readonly Dictionary<string, ConversationContent.TenantScope> _scopes = new(StringComparer.Ordinal);
     private ConsensusAccumulatingWriter? _writer;
-    private bool _floorPresent;
 
     /// <summary>
     /// Whether the most recent deposit failed. A later turn can retry the write
@@ -53,7 +47,6 @@ public sealed class TurnCloser : IAsyncDisposable
     public TurnCloser(NpgsqlDataSource db, Action<string>? warn = null)
     {
         _db = db;
-        _reader = new NpgsqlSubstrateReader(db);
         _warn = warn;
     }
 
@@ -79,23 +72,13 @@ public sealed class TurnCloser : IAsyncDisposable
 
         try
         {
+            // Tier-0 is the codepoint ROM, not PostgreSQL rows: every constituent
+            // a turn composes resolves against the mapped table, and LoadDefault
+            // refuses the lane when that table is missing or stale.
             if (_writer is null)
             {
                 CodepointPerfcache.LoadDefault();
                 _writer = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
-            }
-
-            // The floor gate, formerly only on the HTTP lane. Depositing into a
-            // database with no Codepoint entities mints content whose tier-0
-            // constituents do not exist — testimony anchored to nothing.
-            if (!_floorPresent)
-            {
-                _floorPresent = await FloorPresentAsync(ct);
-                if (!_floorPresent)
-                {
-                    _warn?.Invoke("substrate floor missing (no Codepoint entities); turn not deposited");
-                    return false;
-                }
             }
 
             if (!_scopes.TryGetValue(tenant, out var scope))
@@ -132,16 +115,6 @@ public sealed class TurnCloser : IAsyncDisposable
             return false;
         }
     }
-
-    /// <summary>
-    /// The substrate floor: tier-0 codepoints exist, so minted content has
-    /// constituents to anchor to. Reads through the shared reader surface — this
-    /// was a hand-written `SELECT 1 FROM laplace.entities WHERE type_id = @t` in
-    /// TurnWitness, which the read-path gate correctly flags: a consumer that
-    /// hand-writes a query gives every other caller a reason to write their own.
-    /// </summary>
-    private async Task<bool> FloorPresentAsync(CancellationToken ct) =>
-        await _reader.CountEntitiesByTypeAsync(EntityTypeRegistry.Codepoint, ct) > 0;
 
     public async ValueTask DisposeAsync()
     {

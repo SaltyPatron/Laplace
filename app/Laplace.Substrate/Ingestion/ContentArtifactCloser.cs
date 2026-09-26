@@ -16,18 +16,15 @@ namespace Laplace.Ingestion;
 public sealed class ContentArtifactCloser : IAsyncDisposable
 {
     private readonly NpgsqlDataSource _db;
-    private readonly ISubstrateReader _reader;
     private readonly Action<string>? _warn;
     private readonly Dictionary<string, UserArtifactContent.TenantScope> _scopes =
         new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ConsensusAccumulatingWriter? _writer;
-    private bool _floorPresent;
 
     public ContentArtifactCloser(NpgsqlDataSource db, Action<string>? warn = null)
     {
         _db = db;
-        _reader = new NpgsqlSubstrateReader(db);
         _warn = warn;
     }
 
@@ -107,20 +104,11 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // Tier-0 is the codepoint ROM; LoadDefault refuses when it is absent.
             if (_writer is null)
             {
                 CodepointPerfcache.LoadDefault();
                 _writer = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
-            }
-
-            if (!_floorPresent)
-            {
-                _floorPresent = await _reader.CountEntitiesByTypeAsync(EntityTypeRegistry.Codepoint, ct) > 0;
-                if (!_floorPresent)
-                {
-                    _warn?.Invoke("substrate floor missing (no Codepoint entities); user artifact not deposited");
-                    return null;
-                }
             }
 
             if (!_scopes.TryGetValue(tenant, out var scope))

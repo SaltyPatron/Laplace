@@ -86,11 +86,11 @@ public sealed class ConverseLoopLiveTests
     {
         try
         {
+            // The floor is a reachable substrate plus the mapped Tier-0 ROM.
             using var conn = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString());
             conn.Open();
-            using var cmd = new NpgsqlCommand(
-                "SELECT 1 FROM laplace.entities WHERE type_id = laplace.entity_type_id('Codepoint') LIMIT 1", conn);
-            return cmd.ExecuteScalar() is not null;
+            CodepointPerfcache.LoadDefault();
+            return true;
         }
         catch
         {
