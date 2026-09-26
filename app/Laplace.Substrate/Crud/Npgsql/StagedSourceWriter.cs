@@ -228,7 +228,10 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         }
         finally
         {
-            await LoadLockAsync(control, "pg_advisory_unlock", CancellationToken.None).ConfigureAwait(false);
+            // A broken control session already released its lock; the load's own
+            // failure is the one to report.
+            if (control.FullState == System.Data.ConnectionState.Open)
+                await LoadLockAsync(control, "pg_advisory_unlock", CancellationToken.None).ConfigureAwait(false);
         }
     }
 
