@@ -294,7 +294,7 @@ public sealed class VerbNetDecomposerTests
     }
 
     [Fact]
-    public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
+    public async Task Bootstrap_Registers_The_Source_And_No_Vocabulary_Rows()
     {
         var dec = new VerbNetDecomposer();
         var writer = new CapturingWriter();
@@ -304,20 +304,12 @@ public sealed class VerbNetDecomposerTests
         var boot = writer.Captured[0];
         Assert.Contains(boot.Entities, e =>
             e.Id == VerbNetDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.Id("VerbNet_Class")
-            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.Id("VerbNet_Role")
-            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.Id("VerbNet_Member")
-            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.Id("VerbNet_Predicate")
-            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
-        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_PART"));
+        // Type and relation ids are the content ids of their labels: vocabulary keys are
+        // never rows (764bb0bf7).
+        Assert.DoesNotContain(boot.Entities, e =>
+            e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId
+            || e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId);
+        Assert.DoesNotContain(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
     }

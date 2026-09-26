@@ -115,3 +115,66 @@ CREATE OR REPLACE FUNCTION laplace.has_qualifier(p_mask bytea, p_family text, p_
     SELECT p_mask IS NOT NULL
        AND get_bit(p_mask, laplace.qualifier_bit(p_family, p_value)) = 1
 $q$;
+
+-- The type ids whose rows state an element in its own direction: the element and every
+-- relation retired into it unflipped. IMMUTABLE over literals, so it folds and prunes.
+CREATE OR REPLACE FUNCTION laplace.element_type_ids(p_element text)
+    RETURNS bytea[]
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $q$
+    SELECT CASE p_element
+        WHEN 'CAPABLE_OF' THEN ARRAY[laplace.relation_type_id('CAPABLE_OF'), laplace.relation_type_id('NOT_CAPABLE_OF')]
+        WHEN 'DECOMPOSES_TO' THEN ARRAY[laplace.relation_type_id('DECOMPOSES_TO'), laplace.relation_type_id('CANONICAL_DECOMPOSES_TO'), laplace.relation_type_id('COMPATIBILITY_DECOMPOSES_TO')]
+        WHEN 'DESIRES' THEN ARRAY[laplace.relation_type_id('DESIRES'), laplace.relation_type_id('NOT_DESIRES')]
+        WHEN 'ETYMOLOGICALLY_DERIVED_FROM' THEN ARRAY[laplace.relation_type_id('ETYMOLOGICALLY_DERIVED_FROM'), laplace.relation_type_id('BORROWED_FROM'), laplace.relation_type_id('INHERITED_FROM')]
+        WHEN 'HAS_ATTRIBUTE' THEN ARRAY[laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('HAS_CACHE_CREATE_TOKENS'), laplace.relation_type_id('HAS_CACHE_READ_TOKENS'), laplace.relation_type_id('HAS_COST'), laplace.relation_type_id('HAS_HIDDEN_SIZE'), laplace.relation_type_id('HAS_INPUT_TOKENS'), laplace.relation_type_id('HAS_INTERMEDIATE_SIZE'), laplace.relation_type_id('HAS_NUM_HEADS'), laplace.relation_type_id('HAS_NUM_KV_HEADS'), laplace.relation_type_id('HAS_NUM_LAYERS'), laplace.relation_type_id('HAS_OUTPUT_TOKENS'), laplace.relation_type_id('HAS_STOP_REASON'), laplace.relation_type_id('HAS_VOCAB_SIZE')]
+        WHEN 'HAS_CASE_MAPPING' THEN ARRAY[laplace.relation_type_id('HAS_CASE_MAPPING'), laplace.relation_type_id('HAS_LOWERCASE_MAPPING'), laplace.relation_type_id('HAS_TITLECASE_MAPPING'), laplace.relation_type_id('HAS_UPPERCASE_MAPPING')]
+        WHEN 'HAS_CHARACTER_PROPERTY' THEN ARRAY[laplace.relation_type_id('HAS_CHARACTER_PROPERTY'), laplace.relation_type_id('HAS_AGE'), laplace.relation_type_id('HAS_BIDI_CLASS'), laplace.relation_type_id('HAS_BLOCK'), laplace.relation_type_id('HAS_COMBINING_CLASS'), laplace.relation_type_id('HAS_EAST_ASIAN_WIDTH'), laplace.relation_type_id('HAS_EMOJI_PROPERTY'), laplace.relation_type_id('HAS_GENERAL_CATEGORY'), laplace.relation_type_id('HAS_JOINING_TYPE'), laplace.relation_type_id('HAS_LINE_BREAK'), laplace.relation_type_id('HAS_NUMERIC_TYPE'), laplace.relation_type_id('HAS_NUMERIC_VALUE'), laplace.relation_type_id('USES_SCRIPT_EXTENSION')]
+        WHEN 'HAS_DOMAIN' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN'), laplace.relation_type_id('HAS_DOMAIN_REGION'), laplace.relation_type_id('HAS_DOMAIN_TOPIC'), laplace.relation_type_id('HAS_DOMAIN_USAGE')]
+        WHEN 'HAS_EXTERNAL_ID' THEN ARRAY[laplace.relation_type_id('HAS_EXTERNAL_ID'), laplace.relation_type_id('HAS_ISO639_1_CODE'), laplace.relation_type_id('HAS_ISO639_2B_CODE'), laplace.relation_type_id('HAS_ISO639_2T_CODE'), laplace.relation_type_id('HAS_ISO639_2_CODE')]
+        WHEN 'HAS_NAME' THEN ARRAY[laplace.relation_type_id('HAS_NAME'), laplace.relation_type_id('HAS_NAME_ALIAS')]
+        WHEN 'HAS_PART' THEN ARRAY[laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_A'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('MADE_UP_OF')]
+        WHEN 'HAS_PROPERTY' THEN ARRAY[laplace.relation_type_id('HAS_PROPERTY'), laplace.relation_type_id('NOT_HAS_PROPERTY')]
+        WHEN 'HAS_SCRIPT' THEN ARRAY[laplace.relation_type_id('HAS_SCRIPT'), laplace.relation_type_id('USES_SCRIPT')]
+        WHEN 'HAS_SUBEVENT' THEN ARRAY[laplace.relation_type_id('HAS_SUBEVENT'), laplace.relation_type_id('HAS_FIRST_SUBEVENT'), laplace.relation_type_id('HAS_LAST_SUBEVENT')]
+        WHEN 'USED_FOR' THEN ARRAY[laplace.relation_type_id('USED_FOR'), laplace.relation_type_id('NOT_USED_FOR')]
+        WHEN 'X_EFFECT' THEN ARRAY[laplace.relation_type_id('X_EFFECT'), laplace.relation_type_id('O_EFFECT')]
+        WHEN 'X_REACT' THEN ARRAY[laplace.relation_type_id('X_REACT'), laplace.relation_type_id('O_REACT')]
+        WHEN 'X_WANT' THEN ARRAY[laplace.relation_type_id('X_WANT'), laplace.relation_type_id('O_WANT')]
+        ELSE ARRAY[laplace.relation_type_id(p_element)]
+    END
+$q$;
+
+-- The type ids of relations retired into an element with retired_flip: their admitted
+-- rows state the element with subject and object exchanged.
+CREATE OR REPLACE FUNCTION laplace.element_flipped_type_ids(p_element text)
+    RETURNS bytea[]
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $q$
+    SELECT CASE p_element
+        WHEN 'HAS_PART' THEN ARRAY[laplace.relation_type_id('MEMBER_OF_MACROLANGUAGE'), laplace.relation_type_id('MEMBER_OF_VERBNET_CLASS')]
+        WHEN 'IS_BEFORE' THEN ARRAY[laplace.relation_type_id('IS_AFTER')]
+        ELSE ARRAY[]::bytea[]
+    END
+$q$;
+
+-- Whether a claim states a qualifier: its mask carries the bit, or its type is a relation
+-- retired with that qualifier (an admitted HAS_MEMBER row states HAS_PART {meronymy/member}).
+CREATE OR REPLACE FUNCTION laplace.claim_has_qualifier(
+        p_type bytea, p_mask bytea, p_family text, p_value text)
+    RETURNS boolean
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $q$
+    SELECT laplace.has_qualifier(p_mask, p_family, p_value)
+        OR p_type = ANY (CASE p_family || '/' || p_value
+        WHEN 'domain/region' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN_REGION')]
+        WHEN 'domain/topic' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN_TOPIC')]
+        WHEN 'domain/usage' THEN ARRAY[laplace.relation_type_id('HAS_DOMAIN_USAGE')]
+        WHEN 'etymology/borrowed' THEN ARRAY[laplace.relation_type_id('BORROWED_FROM')]
+        WHEN 'etymology/inherited' THEN ARRAY[laplace.relation_type_id('INHERITED_FROM')]
+        WHEN 'meronymy/member' THEN ARRAY[laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('MEMBER_OF_MACROLANGUAGE'), laplace.relation_type_id('MEMBER_OF_VERBNET_CLASS')]
+        WHEN 'meronymy/part' THEN ARRAY[laplace.relation_type_id('HAS_A')]
+        WHEN 'meronymy/substance' THEN ARRAY[laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('MADE_UP_OF')]
+        WHEN 'participant/others' THEN ARRAY[laplace.relation_type_id('O_EFFECT'), laplace.relation_type_id('O_REACT'), laplace.relation_type_id('O_WANT')]
+        WHEN 'subevent/first' THEN ARRAY[laplace.relation_type_id('HAS_FIRST_SUBEVENT')]
+        WHEN 'subevent/last' THEN ARRAY[laplace.relation_type_id('HAS_LAST_SUBEVENT')]
+            ELSE ARRAY[]::bytea[]
+        END)
+$q$;

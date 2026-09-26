@@ -115,7 +115,7 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
-    public async Task Initialize_Bootstraps_Source_Codepoint_Type_And_TrustClass()
+    public async Task Initialize_Bootstraps_The_Source_And_No_Vocabulary_Rows()
     {
         var dec = NewDecomposer();
         var writer = new CapturingWriter();
@@ -128,8 +128,8 @@ public sealed class UnicodeDecomposerTests
 
         Assert.Contains(boot.Entities, e =>
             e.Id == UnicodeDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == UnicodeDecomposer.CodepointType && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        // A type id is the content id of its label; vocabulary keys are never rows (764bb0bf7).
+        Assert.DoesNotContain(boot.Entities, e => e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
         Assert.DoesNotContain(boot.Attestations, a =>

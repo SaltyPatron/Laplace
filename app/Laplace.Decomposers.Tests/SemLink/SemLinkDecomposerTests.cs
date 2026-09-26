@@ -358,7 +358,7 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
-    public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
+    public async Task Bootstrap_Registers_The_Sources_And_No_Vocabulary_Rows()
     {
         var dec = new SemLinkDecomposer();
         var writer = new CapturingWriter();
@@ -369,8 +369,8 @@ public sealed class SemLinkDecomposerTests
             c.Metadata.SourceContentUnitName == "bootstrap/SemLinkDecomposer");
         Assert.Contains(boot.Entities, e =>
             e.Id == SemLinkDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"));
-        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO"));
+        // Relation and type ids are label content ids; vocabulary keys are never rows.
+        Assert.DoesNotContain(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"));
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
 
@@ -378,8 +378,7 @@ public sealed class SemLinkDecomposerTests
             c.Metadata.SourceContentUnitName == "bootstrap/PredicateMatrixDecomposer");
         Assert.Contains(pmBoot.Entities, e =>
             e.Id == PredicateMatrixIngest.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Assert.Contains(pmBoot.Entities, e => e.Id == EntityTypeRegistry.PredicateMatrixPredicate);
-        Assert.Contains(pmBoot.Entities, e => e.Id == EntityTypeRegistry.PredicateMatrixRole);
+        Assert.DoesNotContain(pmBoot.Entities, e => e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(writer.Captured, c =>
             c.Metadata.SourceContentUnitName == "bootstrap/license/PredicateMatrixDecomposer");
         Assert.Equal("CC-BY-3.0", PredicateMatrixSource.License.Spdx);

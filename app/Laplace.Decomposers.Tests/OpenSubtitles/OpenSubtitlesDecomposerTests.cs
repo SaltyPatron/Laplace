@@ -184,7 +184,7 @@ public sealed class OpenSubtitlesDecomposerTests
     }
 
     [Fact]
-    public async Task Initialize_Bootstraps_Source_Alignment_Types_And_Language_Relation()
+    public async Task Initialize_Bootstraps_The_Source_And_No_Vocabulary_Rows()
     {
         var dec = new OpenSubtitlesDecomposer();
         var writer = new CapturingWriter();
@@ -195,14 +195,13 @@ public sealed class OpenSubtitlesDecomposerTests
 
         Assert.Contains(boot.Entities, e =>
             e.Id == OpenSubtitlesDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.OpenSubtitlesSequence
-            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.OpenSubtitlesAlignment
-            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        // Type and relation ids are the content ids of their labels: vocabulary keys are
+        // never rows (764bb0bf7).
+        Assert.DoesNotContain(boot.Entities, e =>
+            e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId
+            || e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId);
         Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
-        Assert.Contains(boot.Entities, e => e.Id == languageType);
+        Assert.DoesNotContain(boot.Entities, e => e.Id == languageType);
     }
 
     [Fact]

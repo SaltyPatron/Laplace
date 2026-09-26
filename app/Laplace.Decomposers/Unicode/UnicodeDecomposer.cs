@@ -728,10 +728,6 @@ public sealed class UnicodeDecomposer
                 this, job.Path, batch),
             ArtifactKind.CjkRadicals => new CjkRadicalPhase(this, job.Path, batch),
             ArtifactKind.DoNotEmit => new DoNotEmitPhase(this, job.Path, batch),
-            ArtifactKind.UcaDecompositions => new DelimitedCodepointPropertyPhase(
-                this, job.Path, batch,
-                ["UCA_Decomposition_Tag", "UCA_Decomposition"],
-                new HashSet<int> { 1 }),
             ArtifactKind.LinkBracket => new DelimitedCodepointPropertyPhase(
                 this, job.Path, batch, ["Link_Bracket"], new HashSet<int> { 0 }),
             ArtifactKind.LinkEmail => new CodepointListPropertyPhase(
@@ -874,8 +870,6 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "ucd", "CJKRadicals.txt"), "ucd/CJKRadicals.txt");
         AddIfPresent(legacy, ArtifactKind.DoNotEmit,
             Path.Combine(baseDir, "ucd", "DoNotEmit.txt"), "ucd/DoNotEmit.txt");
-        AddIfPresent(legacy, ArtifactKind.UcaDecompositions,
-            Path.Combine(baseDir, "uca", "decomps.txt"), "uca/decomps.txt");
         AddIfPresent(legacy, ArtifactKind.LinkBracket,
             Path.Combine(baseDir, "linkification", "LinkBracket.txt"), "linkification/LinkBracket.txt");
         AddIfPresent(legacy, ArtifactKind.LinkEmail,
@@ -899,7 +893,8 @@ public sealed class UnicodeDecomposer
         or "idna/Idna2008.txt" or "idna/IdnaMappingTable.txt" or "charts/RSIndex.txt"
         or "uca/ctt.txt" or "ucd/auxiliary/GraphemeBreakTest.txt" or "ucd/auxiliary/WordBreakTest.txt"
         or "ucd/auxiliary/SentenceBreakTest.txt" or "ucd/auxiliary/LineBreakTest.txt"
-        or "ucd/NormalizationTest.txt" or "emoji/emoji-test.txt" or "ucd/NamesList.txt";
+        or "ucd/NormalizationTest.txt" or "emoji/emoji-test.txt" or "ucd/NamesList.txt"
+        or "uca/decomps.txt";
 
     private static ArtifactKind ClassifyArtifact(
         string fullPath,
@@ -979,7 +974,6 @@ public sealed class UnicodeDecomposer
                 => ArtifactKind.TabbedCodepointProperties,
             "ucd/CJKRadicals.txt" => ArtifactKind.CjkRadicals,
             "ucd/DoNotEmit.txt" => ArtifactKind.DoNotEmit,
-            "uca/decomps.txt" => ArtifactKind.UcaDecompositions,
             "linkification/LinkBracket.txt" => ArtifactKind.LinkBracket,
             "linkification/LinkEmail.txt" => ArtifactKind.LinkEmail,
             "linkification/LinkTerm.txt" => ArtifactKind.LinkTerm,
@@ -1088,7 +1082,6 @@ public sealed class UnicodeDecomposer
         TabbedCodepointProperties = 47,
         CjkRadicals = 48,
         DoNotEmit = 49,
-        UcaDecompositions = 58,
         LinkBracket = 61,
         LinkEmail = 62,
         LinkTerm = 63,

@@ -228,7 +228,7 @@ public sealed class PropBankDecomposerTests
     }
 
     [Fact]
-    public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
+    public async Task Bootstrap_Registers_The_Source_And_No_Vocabulary_Rows()
     {
         var dec = new PropBankDecomposer();
         var writer = new CapturingWriter();
@@ -238,11 +238,12 @@ public sealed class PropBankDecomposerTests
         var boot = writer.Captured[0];
         Assert.Contains(boot.Entities, e =>
             e.Id == PropBankDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.Id("PropBank_Roleset"));
-        Assert.Contains(boot.Entities, e =>
-            e.Id == EntityTypeRegistry.Id("PropBank_Role"));
-        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE"));
+        // Type and relation ids are the content ids of their labels: vocabulary keys are
+        // never rows (764bb0bf7).
+        Assert.DoesNotContain(boot.Entities, e =>
+            e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId
+            || e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId);
+        Assert.DoesNotContain(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE"));
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
     }
