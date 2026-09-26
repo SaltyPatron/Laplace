@@ -390,6 +390,7 @@ class DeploymentReadinessTests(unittest.TestCase):
             return responses.pop(0)
 
         with patch.object(self.verify, "request", side_effect=fake_request), \
+             patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}), \
              patch.object(self.verify, "verify_stockfish") as stockfish:
             self.assertEqual((False, False), self.verify.verify("http://unit"))
         stockfish.assert_called_once_with()
@@ -399,6 +400,15 @@ class DeploymentReadinessTests(unittest.TestCase):
         )
         self.assertEqual("POST", calls[-1][0])
         self.assertIn(b"ops.substrate_counts", calls[-1][2])
+        self.assertEqual("Bearer unit-key", calls[-1][3]["Authorization"])
+
+    def test_typed_operation_without_api_key_fails_before_request(self):
+        environment = {k: v for k, v in os.environ.items() if k != "LAPLACE_API_KEY"}
+        with patch.object(self.verify, "request") as request, \
+             patch.dict(os.environ, environment, clear=True):
+            with self.assertRaisesRegex(ValueError, "requires LAPLACE_API_KEY"):
+                self.verify.verify_typed_operation("http://unit")
+        request.assert_not_called()
 
     def test_readiness_only_does_not_pretend_to_verify_spa_or_typed_operation(self):
         with patch.object(
@@ -438,9 +448,11 @@ API_ADAPTERS = r'''
 source "$1"
 ROOT="$2"
 event() { printf '%s\n' "$*" >> "$ROOT/events"; [[ "$*" != "${FAIL_AT:-}" ]]; }
+# API publication guards only the installed native/database runtime.
 application_guard() {
-  event "guard $1" || return 9
-  if [[ "$1" == --snapshot ]]; then printf '{}' > "$2"; fi
+  [[ "$1" == --installed-runtime ]] || { event "FORBIDDEN guard $*"; return 94; }
+  event "guard $2" || return 9
+  if [[ "$2" == --snapshot ]]; then printf '{}' > "$3"; fi
 }
 application_api_active() { event active >&2; printf '%s\n' "${WAS_ACTIVE:-1}"; }
 application_api_manifest() { event manifest; printf '{}' > "$2"; }

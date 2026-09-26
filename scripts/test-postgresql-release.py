@@ -57,7 +57,7 @@ class PostgreSQLReleaseTests(unittest.TestCase):
     def setUp(self):
         scratch = Path(os.environ.get("TMPDIR", ""))
         if not scratch.is_absolute() or not scratch.is_dir():
-            raise RuntimeError("tests require an existing absolute permanent TMPDIR")
+            self.skipTest("tests require an existing absolute permanent TMPDIR")
         self.temporary = tempfile.TemporaryDirectory(prefix="postgresql-release-", dir=scratch)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)

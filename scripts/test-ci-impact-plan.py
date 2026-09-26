@@ -111,7 +111,7 @@ class ImpactPlanTests(unittest.TestCase):
         )
         self.assertEqual(
             value["delivery_actions"],
-            ["install", "database", "reconcile", "publish"],
+            ["install", "database", "publish"],
         )
         self.assertEqual(value["publish_scope"], "full")
         self.assertEqual(value["live_suites"], [])
@@ -264,7 +264,7 @@ class ImpactPlanTests(unittest.TestCase):
         )
         self.assertEqual(
             value["delivery_actions"],
-            ["install", "database", "reconcile", "publish"],
+            ["install", "database", "publish"],
         )
         self.assertEqual(value["live_suites"], [])
         self.assertEqual(value["publish_scope"], "full")
@@ -303,18 +303,17 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
 
-    def test_highway_reconcile_script_is_owned_database_delivery_not_unknown_product(self):
+    def test_highway_reconcile_script_is_maintenance_tooling_not_delivery(self):
         value = plan("scripts/reconcile-highway-masks.sh")
-        self.assertEqual(value["components"], ["database", "deployment"])
+        self.assertEqual(value["components"], [])
         self.assertEqual(value["build_components"], [])
         self.assertEqual(value["dev_suites"], [])
-        self.assertEqual(value["db_suites"], ["db-health"])
+        self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["browser_test_suites"], [])
         self.assertEqual(value["managed_build_projects"], [])
-        self.assertEqual(value["managed_test_projects"], [])
-        self.assertEqual(value["managed_db_test_projects"], [])
-        self.assertEqual(value["delivery_actions"], ["reconcile"])
+        self.assertEqual(value["delivery_actions"], [])
         self.assertEqual(value["unknown_paths"], [])
+        self.assertEqual(value["ignored_paths"], ["scripts/reconcile-highway-masks.sh"])
         self.assertFalse(value["full_qualification"])
 
     def test_pipeline_and_delivery_control_changes_create_no_product_work(self):
@@ -370,13 +369,13 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_test_filter"], "")
         self.assertNotIn("native", value["build_components"])
         self.assertEqual(value["db_suites"], ["db-health"])
-        self.assertEqual(value["delivery_actions"], ["database", "install"])
+        self.assertEqual(value["delivery_actions"], ["extension-sql", "database"])
         self.assertFalse(value["full_qualification"])
 
     def test_native_test_change_runs_native_qualification_without_delivery(self):
         for path in (
             "engine/core/tests/test_content_root_placement.cpp",
-            "extension/laplace_substrate/tests/physicality_descriptor_native_probe.c",
+            "extension/laplace_substrate/tests/physicality_readback_native_probe.c",
         ):
             with self.subTest(path=path):
                 value = plan(path)

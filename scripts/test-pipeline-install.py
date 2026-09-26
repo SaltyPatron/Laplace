@@ -161,6 +161,7 @@ phase_publish
 
     def library(self, **env):
         return self.run_shell(function("ensure_extension_library_path") + r'''
+postgres_accepting() { [[ "${PG_DOWN:-0}" == 0 ]]; }
 psql() {
   printf '%s\n' "$*" >> "$CALLS"
   if [[ "$*" == *"SHOW dynamic_library_path"* ]]; then
@@ -173,6 +174,19 @@ psql() {
 }
 if ensure_extension_library_path; then exit 0; else exit $?; fi
 ''', **env)
+
+    def test_down_server_defers_library_path_without_reading_or_writing(self):
+        result = self.run_shell(function("ensure_extension_library_path") + r'''
+postgres_accepting() { return 1; }
+psql() { printf '%s\n' "$*" >> "$CALLS"; }
+rc=0
+ensure_extension_library_path || rc=$?
+printf 'deferred=%s\n' "${LAPLACE_LIBRARY_PATH_DEFERRED:-0}"
+exit "$rc"
+''')
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertIn("deferred=1", result.stdout)
+        self.assertEqual("", self.calls())
 
     def test_failed_read_aborts_without_write_or_success(self):
         result = self.library(READ_FAIL="1")
@@ -233,9 +247,33 @@ psql -d postgres -U laplace_admin -c 'SHOW dynamic_library_path'
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(["-X", "-w", "-c", "SELECT"], self.calls().splitlines())
 
+    REVISION = "1" * 40
+
     def phase(self, source=None, **env):
         env.setdefault("LAPLACE_BUILD_DIRECTORY", str(self.base / "build"))
-        return self.run_shell((source or function("phase_install")) + r'''
+        env.setdefault("FIXTURE_REVISION", self.REVISION)
+        # The ingest runtime for this revision is already published; these
+        # controls own the native install and PostgreSQL activation transaction.
+        runtime = self.base / "install/ingest/runtimes" / env["FIXTURE_REVISION"]
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / ".laplace-source-revision").write_text(env["FIXTURE_REVISION"] + "\n")
+        for name in ("Laplace.Cli.dll", "liblaplace_core.so"):
+            (runtime / name).touch()
+        return self.run_shell(function("phase_activate_postgres") + "\n"
+                              + (source or function("phase_install")) + r'''
+ROOT="$PWD"
+git() { [[ "${*: -1}" == HEAD ]] || return 97; printf '%s\n' "$FIXTURE_REVISION"; }
+bash() {
+  case "$1" in
+    "$ROOT/scripts/wait-for-quiet-substrate.sh") echo quiet >> "$CALLS" ;;
+    "$ROOT/scripts/check-deployed-revision.sh") return "${DEPLOYED_RC:-0}" ;;
+    *) return 97 ;;
+  esac
+}
+reclaim_install_headroom() { :; }
+getent() { return 2; }
+postgres_accepting() { return 0; }
+preloaded_native_restart_required() { return 1; }
 ensure_extension_library_path() { return "${PATH_RC:-1}"; }
 systemctl() { [[ "${API_ACTIVE:-1}" == 1 ]]; }
 sudo() {
@@ -254,7 +292,12 @@ preloaded_so_digest() {
   if [[ "${SAME_PRELOAD:-0}" == 1 ]]; then echo same;
   elif [[ -f installed ]]; then echo new; else echo old; fi
 }
-cmake() { echo install >> "$CALLS"; touch installed; return "${COPY_RC:-0}"; }
+cmake() {
+  echo install >> "$CALLS"
+  mkdir -p "$DESTDIR$LAPLACE_INSTALL_PREFIX/lib"
+  touch "$DESTDIR$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" installed
+  return "${COPY_RC:-0}"
+}
 psql() {
   echo probe >> "$CALLS"
   [[ "${PROBE_RC:-0}" == 0 ]] || return "$PROBE_RC"
@@ -268,25 +311,31 @@ phase_install
         result = self.phase(PG_RESTART_RC="0", SAME_PRELOAD="1")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         calls = self.calls().splitlines()
+        self.assertEqual("quiet", calls[0])
         self.assertEqual(1, calls.count("install"))
         self.assertEqual(1, calls.count("bounce"))
         self.assertLess(calls.index("install"), calls.index("bounce"))
-        self.assertLess(calls.index("bounce"), calls.index("release-after"))
-        self.assertLess(calls.index("release-after"), calls.index("-n systemctl start laplace-api"))
+        last_release = len(calls) - 1 - calls[::-1].index("release-after")
+        self.assertLess(calls.index("bounce"), last_release)
+        self.assertLess(last_release, calls.index("-n systemctl start laplace-api"))
 
     def test_server_release_read_failure_refuses_install_and_service_actions(self):
         result = self.phase(PG_RESTART_RC="2")
         self.assertEqual(2, result.returncode, result.stdout + result.stderr)
-        self.assertEqual("", self.calls())
+        self.assertEqual(["quiet"], self.calls().splitlines())
 
     def test_failed_restart_or_stale_readback_fails_and_restores_api(self):
-        for error in ({"BOUNCE_RC": "27"}, {"PG_AFTER_RC": "0"}, {"PG_AFTER_RC": "2"}):
+        # A failed bounce or a release that still differs after the bounce fails;
+        # an unreadable release refuses activation before any bounce.
+        for error, bounced in (({"BOUNCE_RC": "27"}, True), ({"PG_AFTER_RC": "0"}, True),
+                               ({"PG_AFTER_RC": "2"}, False)):
             with self.subTest(error=error):
                 (self.base / "calls").write_text("")
                 (self.base / "installed").unlink(missing_ok=True)
+                (self.base / "install/lib/.laplace-source-revision").unlink(missing_ok=True)
                 result = self.phase(PG_RESTART_RC="0", SAME_PRELOAD="1", **error)
                 self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
-                self.assertIn("bounce", self.calls())
+                self.assertEqual(bounced, "bounce" in self.calls())
                 self.assertIn("start laplace-api", self.calls())
 
     def test_running_release_comparison_uses_actual_helper_and_refuses_bad_observation(self):
@@ -297,6 +346,7 @@ phase_install
             executable.write_text("#!/bin/sh\nprintf '%s\\n' '" + label + " 18.6'\n")
             executable.chmod(0o755)
         script = function("postgresql_restart_required") + r'''
+postgres_accepting() { [[ "${PG_DOWN:-0}" == 0 ]]; }
 psql() {
   [[ "$*" == "-d postgres -U laplace_admin -tAc SHOW server_version_num" ]] || return 98
   [[ "${READ_FAIL:-0}" == 0 ]] || return 29
@@ -312,22 +362,39 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
                 self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
         self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
                                           RUNNING_VERSION="180006", READ_FAIL="1").returncode)
+        # A server that is not accepting connections is restarted by the install.
+        self.assertEqual(0, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                          RUNNING_VERSION="180006", PG_DOWN="1").returncode)
         executable = binary_root / "postgres"
         executable.write_text(executable.read_text().replace("18.6", "18.3"))
         self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
                                           RUNNING_VERSION="180003").returncode)
 
-    def test_each_install_invocation_delegates_copy_and_observes_release(self):
-        for _ in range(2):
-            result = self.phase(SAME_PRELOAD="1")
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(2, self.calls().splitlines().count("install"))
+    def test_served_revision_is_a_no_op_until_forced_or_unverified(self):
+        result = self.phase(SAME_PRELOAD="1")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        receipt = self.base / "install/lib/.laplace-source-revision"
+        self.assertEqual(self.REVISION + "\n", receipt.read_text())
+        self.assertEqual(1, self.calls().splitlines().count("install"))
         self.assertNotIn("bounce", self.calls())
+
+        (self.base / "calls").write_text("")
+        result = self.phase(SAME_PRELOAD="1")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("install is a no-op", result.stdout)
+        self.assertEqual("", self.calls())
+
+        for env in ({"FORCE": "1"}, {"DEPLOYED_RC": "1"}):
+            with self.subTest(env=env):
+                (self.base / "calls").write_text("")
+                result = self.phase(SAME_PRELOAD="1", **env)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(1, self.calls().splitlines().count("install"))
 
     def test_failed_preflight_never_installs_or_touches_services(self):
         result = self.phase(PATH_RC="2")
         self.assertEqual(2, result.returncode)
-        self.assertEqual("", self.calls())
+        self.assertEqual(["quiet"], self.calls().splitlines())
 
     def test_failed_copy_and_probe_restore_active_api(self):
         for env in ({"COPY_RC": "23"}, {"PROBE_RC": "24"}):
@@ -363,9 +430,10 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
         self.assertEqual(0, result.returncode)
         self.assertIn("install", self.calls())  # the no-install regression would fail
         (self.base / "installed").unlink()
+        (self.base / "install/lib/.laplace-source-revision").unlink()
         (self.base / "calls").write_text("")
         self.assertEqual(2, self.phase(PATH_RC="2").returncode)
-        self.assertEqual("", self.calls())
+        self.assertEqual(["quiet"], self.calls().splitlines())
 
     def test_setup_does_not_install_after_failed_build(self):
         setup = (ROOT / "scripts/setup-host.sh").read_text()
@@ -394,7 +462,7 @@ class BuildInputTests(unittest.TestCase):
     def setUp(self):
         scratch = Path(os.environ.get("TMPDIR", ""))
         if not scratch.is_absolute() or not scratch.is_dir():
-            raise RuntimeError("build input controls require an existing absolute TMPDIR")
+            self.skipTest("build input controls require an existing absolute TMPDIR")
         self.temporary = tempfile.TemporaryDirectory(prefix="pipeline-build-inputs-", dir=scratch)
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
@@ -427,7 +495,9 @@ class BuildInputTests(unittest.TestCase):
                        "LAPLACE_EXTERNAL": str(self.base / "external"),
                        "CALLS": str(self.calls), "FORCE_REBUILD": "0", "FORCE_CODEGEN": "0",
                        "CLEAN_FIRST": "0", **changes}
-        program = function("phase_build") + r'''
+        program = "\n".join(function(name) for name in (
+            "configure_native_build_tree", "phase_build_native", "phase_build")) + r'''
+phase_build_web() { echo web-build >> "$CALLS"; }
 phase_clean() { echo clean >> "$CALLS"; }
 phase_codegen() { echo codegen >> "$CALLS"; }
 chess_openings_path() { printf '%s\n' "$ROOT/openings"; }
@@ -453,6 +523,7 @@ phase_build
         self.assertEqual(2, calls.count("clean"))
         self.assertEqual(2, calls.count("codegen"))
         self.assertEqual(2, calls.count("managed-build"))
+        self.assertEqual(2, calls.count("web-build"))
         configure = [row for row in calls if row.startswith("cmake -S ")]
         builds = [row for row in calls if row.startswith("cmake --build ")]
         self.assertEqual(2, len(configure))
@@ -485,7 +556,7 @@ class ManagedPolicyPreparationTests(unittest.TestCase):
     def setUp(self):
         scratch = Path(os.environ.get("TMPDIR", ""))
         if not scratch.is_absolute() or not scratch.is_dir():
-            raise RuntimeError("policy preparation controls require an existing absolute TMPDIR")
+            self.skipTest("policy preparation controls require an existing absolute TMPDIR")
         self.temporary = tempfile.TemporaryDirectory(prefix="managed-policy-prepare-", dir=scratch)
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
@@ -494,10 +565,30 @@ class ManagedPolicyPreparationTests(unittest.TestCase):
         self.scripts = self.project / "scripts"
         self.installed = self.base / "installed"
         self.tools = self.base / "tools"
-        for directory in (self.source, self.scripts, self.installed, self.tools):
+        for directory in (self.source, self.scripts, self.installed, self.tools,
+                          self.source / "managed-services"):
             directory.mkdir(parents=True)
+        # The trusted policy directory must not be group or world writable.
+        self.installed.chmod(0o755)
         for name in ("managed-publish.sh", "payload-sync.sh"):
             shutil.copy2(ROOT / "deploy/linux" / name, self.source / name)
+        for name in ("laplace-mcp.service", "laplace-lichess.service"):
+            shutil.copy2(ROOT / "deploy/linux/managed-services" / name,
+                         self.source / "managed-services" / name)
+        # The real compatibility owner runs; only its fixed trusted directory and
+        # owner are redirected to this fixture.
+        (self.scripts / "managed-policy.py").write_text(
+            "import importlib.util,json,os,sys\nfrom pathlib import Path\n"
+            "spec=importlib.util.spec_from_file_location('managed_policy',"
+            + repr(str(ROOT / "scripts/managed-policy.py")) + ")\n"
+            "policy=importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)\n"
+            "assert sys.argv[1:2]==['--root'] and len(sys.argv)==3, sys.argv\n"
+            "try:\n"
+            " receipt=policy.select(Path(sys.argv[2]).resolve(strict=True),"
+            "Path(os.environ['POLICY_FIXTURE_INSTALLED']),int(os.environ['POLICY_FIXTURE_UID']))[2]\n"
+            "except (OSError, ValueError) as error:\n"
+            " print('managed policy compatibility failed: '+str(error),file=sys.stderr); raise SystemExit(1)\n"
+            "print(json.dumps(receipt,sort_keys=True))\n")
         self.names = ("laplace-managed-deploy", "laplace-service-control")
         for name in self.names:
             (self.source / name).write_text("selected " + name + "\n")
@@ -550,16 +641,13 @@ class ManagedPolicyPreparationTests(unittest.TestCase):
             target.chmod(0o755)
 
     def invoke(self, operation, mode="update", uid=None):
-        environment = dict(self.environment, POLICY_FIXTURE_MODE=mode)
-        # Production execution sets TRUSTED_POLICY_UID=0 unconditionally. Source
-        # the same functions with a private current-UID fixture, as root policy
-        # tests do, without touching /usr/local or requiring real sudo.
+        # Production trusts root-owned policy under /usr/local/libexec. The fixture
+        # trusts the current UID in a private directory, without real sudo.
+        environment = dict(self.environment, POLICY_FIXTURE_MODE=mode,
+                           POLICY_FIXTURE_UID=str(os.getuid() if uid is None else uid))
         return subprocess.run([
-            "bash", "-c",
-            'source "$1"; HELPER="$2"; TRUSTED_POLICY_UID="$3"; "$4"',
-            "policy-fixture", str(self.source / "managed-publish.sh"),
-            str(self.installed / "laplace-managed-deploy"),
-            str(os.getuid() if uid is None else uid), operation],
+            "bash", "-c", 'source "$1"; "$2"',
+            "policy-fixture", str(self.source / "managed-publish.sh"), operation],
             env=environment, capture_output=True, text=True, timeout=15)
 
     def setup_rows(self):

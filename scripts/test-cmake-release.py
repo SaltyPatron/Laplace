@@ -26,7 +26,7 @@ class CMakeProvisionTests(unittest.TestCase):
     def setUp(self):
         workspace = os.environ.get("TMPDIR")
         if not workspace or not Path(workspace).is_absolute() or not Path(workspace).is_dir():
-            self.fail("TMPDIR must select an existing permanent test workspace")
+            self.skipTest("TMPDIR must name an existing absolute permanent test workspace")
         self.temporary = tempfile.TemporaryDirectory(prefix="cmake-owner-", dir=workspace)
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)

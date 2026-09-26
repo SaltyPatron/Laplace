@@ -60,6 +60,7 @@ on:
       - "scripts/laplace"
       - "deploy/linux/laplace-api.env.example"
       - "deploy/linux/managed-services/laplace-stripe.service"
+      - "config/agents.json"
 permissions:
   contents: read
 

@@ -7,6 +7,16 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
+def shell_function(source: str, name: str) -> str:
+    start = source.index(f"{name}() {{\n")
+    return source[start:source.index("\n}\n", start) + 3]
+
+
+def code(body: str) -> str:
+    """The executable lines of a shell body; comments name owners they do not call."""
+    return "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
+
+
 class MainPushQueueContract(unittest.TestCase):
     def test_main_push_is_one_serial_build_deploy_readback_job(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
@@ -112,9 +122,12 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("stage: mainline", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
-        self.assertIn("db_suites: ${{ needs.plan.outputs.db_suites }}", lifecycle)
-        self.assertIn("live_suites: ${{ needs.plan.outputs.live_suites }}", lifecycle)
         self.assertIn("publish_scope: ${{ needs.plan.outputs.publish_scope }}", lifecycle)
+        # Automatic main delivery is deploy-only: integration suites stay explicit.
+        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
+        for suite in ("db_suites:", "live_suites:", "managed_db_test_projects:",
+                      "managed_live_test_projects:", "native_db_test_filter:"):
+            self.assertNotIn(suite, delivery)
         self.assertEqual(1, lifecycle.count("uses: ./.github/workflows/product-stage.yml"))
         self.assertEqual(1, lifecycle.count("skip_if_superseded: true"))
 
@@ -371,20 +384,27 @@ class WorkflowArchitecture(unittest.TestCase):
 
     def test_test_only_successor_can_carry_undelivered_product_work(self):
         product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
-        carry = product.split("carry_forward_undelivered_impact() {", 1)[1].split(
-            "\n}\n\nrun_db_tests", 1)[0]
+        carry = shell_function(product, "carry_forward_undelivered_impact")
         self.assertNotIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
         self.assertNotIn("deployed product carry-forward skipped", carry)
-        self.assertIn("--base \"$deployed\" --head \"$target\"", carry)
-        self.assertIn("strands those product changes forever", carry)
-        fallback = product.split("force_full_carry_forward_impact() {", 1)[1].split(
-            "\n}\n\ncarry_forward_undelivered_impact", 1)[0]
-        self.assertIn('LAPLACE_BUILD_COMPONENTS="managed"', fallback)
-        self.assertIn('Laplace.Endpoints.OpenAICompat.csproj', fallback)
-        self.assertIn('LAPLACE_DB_SUITES=""', fallback)
-        self.assertIn('LAPLACE_LIVE_SUITES=""', fallback)
-        self.assertIn('LAPLACE_DELIVERY_ACTIONS="publish"', fallback)
-        self.assertIn('LAPLACE_PUBLISH_SCOPE="full"', fallback)
+        # Each installed component diffs its own receipt against the target, so a
+        # test-only successor still carries every undelivered component forward.
+        for name in ("carry_forward_installed_native_impact",
+                     "carry_forward_installed_ingest_runtime_impact",
+                     "carry_forward_installed_application_impact"):
+            with self.subTest(owner=name):
+                self.assertIn(name, carry)
+                self.assertIn('--base "$deployed" --head "$target"',
+                              shell_function(product, name))
+        self.assertIn("carry_forward_installed_extension_impact", carry)
+        self.assertIn("carry_forward_installed_web_impact", carry)
+        fallback = shell_function(product, "force_full_carry_forward_impact")
+        self.assertIn("append_csv_env LAPLACE_BUILD_COMPONENTS managed", fallback)
+        self.assertIn("Laplace.Endpoints.OpenAICompat.csproj", fallback)
+        self.assertIn("append_csv_env LAPLACE_DELIVERY_ACTIONS publish", fallback)
+        self.assertIn("merge_publish_scope full", fallback)
+        self.assertNotIn("LAPLACE_DB_SUITES", fallback)
+        self.assertNotIn("LAPLACE_LIVE_SUITES", fallback)
         self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn('- "scripts/product-ci.sh"', lifecycle)
@@ -425,13 +445,12 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("run_database_maintenance --prepare", mutation)
         self.assertNotIn("run_db_tests", mutation)
         self.assertNotIn('run_release_mutation_window "$actions"', mutation)
-        self.assertIn("run_db_tests", automatic)
+        # Integration suites are explicit test-db/audit work, not delivery steps.
+        self.assertNotIn("run_db_tests", code(automatic))
         self.assertLess(
             automatic.index('run_release_mutation_window "$actions"'),
-            automatic.index("run_db_tests"),
+            automatic.index("run_publish"),
         )
-        self.assertLess(automatic.index("run_db_tests"), automatic.index("run_publish"))
-        self.assertIn("run_publish", automatic)
         self.assertIn("verify_installed_product", automatic)
         self.assertNotIn("run_live_tests", automatic)
         self.assertNotIn("run_release_activation", automatic)
@@ -445,7 +464,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertEqual(1, manual.count("uses: ./.github/workflows/product-stage.yml"))
         self.assertIn("stage: ${{ inputs.operation }}", manual)
         self.assertIn("normal main delivery is automatic", manual)
-        self.assertIn("options: [verify, reconcile, chess-lab, deploy]", manual)
+        self.assertIn("options: [verify, forward-chat-proof, reconcile, chess-lab, deploy]", manual)
+        # The forward chat proof runs directly on the installed host, not as a stage.
+        self.assertIn("if: inputs.operation != 'forward-chat-proof'", manual)
+        self.assertIn("  forward-chat-proof:\n", manual)
 
     def test_competitive_proof_remains_explicit_and_composed(self):
         proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")

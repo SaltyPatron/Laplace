@@ -152,11 +152,25 @@ class WorkspaceReservation(WorkspaceFixture):
         self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
         (stale / "build-junk.bin").write_bytes(b"x" * 4096)
         (self.work / f"product-{self.old}.lock").touch()
+        # Candidates touched inside the two-hour handoff window are preserved.
+        handed_off = time.time() - 3 * 3600
+        os.utime(stale, (handed_off, handed_off))
 
         result = self.execute("operator")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(stale.exists())
         self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
+
+    def test_recent_superseded_candidate_is_preserved_for_handoff(self):
+        stale = self.candidate(self.old)
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
+        (self.work / f"product-{self.old}.lock").touch()
+
+        result = self.execute("operator")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(stale.exists())
+        self.assertIn("preserving recent candidate handoff", result.stdout)
 
     def test_stale_cleanup_does_not_create_missing_revision_lock(self):
         stale = self.candidate(self.old)

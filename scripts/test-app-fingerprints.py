@@ -19,13 +19,18 @@ def shell_function(path, name):
 
 class PreparedIngestTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(
-            prefix="prepared-ingest-", dir=os.environ["TMPDIR"])
+        workspace = os.environ.get("TMPDIR")
+        if not workspace or not Path(workspace).is_absolute() or not Path(workspace).is_dir():
+            self.skipTest("TMPDIR must name an existing absolute permanent test workspace")
+        temporary = tempfile.TemporaryDirectory(prefix="prepared-ingest-", dir=workspace)
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         source = (ROOT / "scripts/ingest-source.sh").read_text()
-        start = source.index('if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then')
-        end = source.index('\nfi', start) + len('\nfi')
+        # The whole runtime selection runs: with no installed prefix runtime it
+        # must select this checkout's prepared CLI closure.
+        start = source.index('PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"')
+        checkout = source.index('INGEST_USES_PREFIX=0', start)
+        end = source.index('\nfi\n', checkout) + len('\nfi')
         self.selection = source[start:end]
         self.guard = shell_function(ROOT / "scripts/ingest-source.sh", "require_cli")
         self.native = self.root / "build/engine/core/liblaplace_core.so"
@@ -57,8 +62,10 @@ class PreparedIngestTests(unittest.TestCase):
         native = directory / "liblaplace_core.so"
         dll.write_bytes(b"prepared managed fixture")
         native.write_bytes(self.native.read_bytes())
-        env = dict(os.environ, FIXTURE_ROOT=str(self.root))
+        env = dict(os.environ, FIXTURE_ROOT=str(self.root),
+                   LAPLACE_INSTALL_PREFIX=str(self.root / "absent prefix"))
         env.pop("LAPLACE_BUILD_ROOT", None)
+        env.pop("LAPLACE_INGEST_RUNTIME", None)
         if alternate:
             env["LAPLACE_BUILD_ROOT"] = str(self.root / "alternate build")
             conventional.mkdir(parents=True)
@@ -88,7 +95,7 @@ dotnet() { printf 'unexpected compilation\n' >> "$ROOT/compile-events"; return 9
         native.write_bytes(b"stale native fixture")
         result = run()
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("differs from the prepared engine build", result.stderr)
+        self.assertIn("differs from the installed prefix", result.stderr)
         self.assertEqual(b"stale native fixture", native.read_bytes())
         native.write_bytes(original_native)
         self.assertEqual(0, run().returncode)

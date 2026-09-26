@@ -35,6 +35,16 @@ class ConfigureLaplaceEnvironmentTests(unittest.TestCase):
             "gemini",
         )
 
+    def configure_runner(self, runner):
+        return MODULE.configure_runner(
+            runner,
+            Path("/srv/Laplace-Legacy"),
+            Path("/srv/Laplace-Refactor"),
+            Path("/opt/laplace"),
+            "https://hart-server:8443",
+            "gemini",
+        )
+
     def test_operator_loader_sources_one_secret_file_and_exports_contract(self):
         self.configure()
         loader = self.home / ".config/shell/laplace.env"
@@ -58,15 +68,17 @@ class ConfigureLaplaceEnvironmentTests(unittest.TestCase):
         runner = self.root / "runner.env"
         runner.write_text("STRIPE_API_SECRET=preserved\n")
         self.assertTrue(
-            MODULE.configure_runner(runner, Path("/opt/laplace"), "https://hart-server:8443", "gemini")
+            self.configure_runner(runner)
         )
         first = runner.read_text()
         self.assertFalse(
-            MODULE.configure_runner(runner, Path("/opt/laplace"), "https://hart-server:8443", "gemini")
+            self.configure_runner(runner)
         )
         self.assertEqual(first, runner.read_text())
         self.assertIn("STRIPE_API_SECRET=preserved", first)
         self.assertIn("LAPLACE_AGENTS_CONFIG=/opt/laplace/app/agents.json", first)
+        self.assertIn("LAPLACE_ROOT=/srv/Laplace-Legacy", first)
+        self.assertIn("LAPLACE_REFACTOR_ROOT=/srv/Laplace-Refactor", first)
 
     def test_unclosed_managed_block_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -75,13 +87,27 @@ class ConfigureLaplaceEnvironmentTests(unittest.TestCase):
     def test_runner_only_cli_does_not_require_operator_paths(self):
         runner = self.root / "runner.env"
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--skip-operator", "--runner-env", str(runner)],
+            [sys.executable, str(SCRIPT), "--skip-operator", "--runner-env", str(runner),
+             "--laplace-root", "/srv/Laplace-Legacy", "--refactor-root", "/srv/Laplace-Refactor"],
             text=True,
             capture_output=True,
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("LAPLACE_AGENT_DEFAULT=gemini", runner.read_text())
+        self.assertIn("LAPLACE_ROOT=/srv/Laplace-Legacy", runner.read_text())
+
+    def test_runner_env_requires_the_roots_it_exports(self):
+        runner = self.root / "runner.env"
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--skip-operator", "--runner-env", str(runner)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("--runner-env requires --laplace-root and --refactor-root", result.stderr)
+        self.assertFalse(runner.exists())
 
     def test_runner_can_update_existing_file_without_directory_write(self):
         runner_dir = self.root / "locked-runner"
@@ -92,7 +118,7 @@ class ConfigureLaplaceEnvironmentTests(unittest.TestCase):
         runner_dir.chmod(0o500)
         try:
             self.assertTrue(
-                MODULE.configure_runner(runner, Path("/opt/laplace"), "https://hart-server:8443", "gemini")
+                self.configure_runner(runner)
             )
         finally:
             runner_dir.chmod(0o700)

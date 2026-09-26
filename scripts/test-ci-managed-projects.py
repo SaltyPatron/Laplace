@@ -34,7 +34,9 @@ class ManagedProjectImpactTests(unittest.TestCase):
             ROOT, ["app/Laplace.Substrate.Tests/Abstractions/DecomposerArchitectureGateTests.cs"]
         )
         self.assertEqual([target], value["changed_projects"])
-        self.assertEqual([target], value["build_projects"])
+        # Publication builds production roots only; the test project is built by
+        # the test operation that selects it.
+        self.assertEqual([], value["build_projects"])
         self.assertEqual([target], value["test_projects"])
 
     def test_test_only_source_change_builds_exact_class_filter(self):

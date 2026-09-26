@@ -21,6 +21,11 @@ def function(name: str) -> str:
     return source[start:finish]
 
 
+def code(body: str) -> str:
+    """The executable lines of a shell body; comments name owners they do not call."""
+    return "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
+
+
 def subshell_function(name: str, next_name: str) -> str:
     source = PRODUCT.read_text(encoding="utf-8")
     start = source.index(f"{name}() (\n")
@@ -172,9 +177,11 @@ class ProductStageOwnershipContract(unittest.TestCase):
         mutation_window = subshell_function(
             "run_release_mutation_window", "run_release_candidate")
         mutation = [
-            'csv_selected "$actions" install',
-            "run_install",
-            'csv_selected "$actions" database',
+            'if csv_selected "$actions" install; then',
+            "    run_install\n",
+            'if csv_selected "$actions" extension-sql; then',
+            "run_install_extension_sql",
+            'if csv_selected "$actions" database; then',
             "run_database_maintenance --prepare",
         ]
         positions = [mutation_window.index(token) for token in mutation]
@@ -202,15 +209,16 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn('csv_selected "$actions" reconcile', delivery)
         self.assertIn('csv_selected "$actions" publish', delivery)
         self.assertNotIn('csv_selected "$actions" live', delivery)
-        self.assertNotIn("run_install", delivery)
-        self.assertNotIn("run_database_maintenance --prepare", delivery)
-        self.assertIn("run_db_tests", delivery)
+        executable = code(delivery)
+        self.assertNotIn("run_install", executable)
+        self.assertNotIn("run_database_maintenance --prepare", executable)
+        # Integration suites are explicit test-db/audit work, never a step between
+        # a completed mutation and publication.
+        self.assertNotIn("run_db_tests", executable)
         self.assertLess(
             delivery.index('run_release_mutation_window "$actions"'),
-            delivery.index("run_db_tests"),
+            delivery.index("run_publish"),
         )
-        self.assertLess(delivery.index("run_db_tests"), delivery.index("run_publish"))
-        self.assertIn("run_publish", delivery)
         self.assertIn("verify_installed_product", delivery)
         self.assertIn("reconcile_installed_product", delivery)
         self.assertNotIn("run_live_tests", delivery)
@@ -281,22 +289,43 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("verify_isolated_web_delivery", delivery)
 
     def test_automatic_delivery_carries_impact_from_the_installed_revision(self):
+        # Each installed component carries forward from its own revision receipt.
         carry = function("carry_forward_undelivered_impact")
-        self.assertIn(".laplace-source-revision", carry)
-        self.assertIn("ci-impact-plan.py", carry)
-        self.assertIn("--base \"$deployed\" --head \"$target\"", carry)
-        self.assertIn("LAPLACE_BUILD_COMPONENTS", carry)
-        self.assertIn("LAPLACE_DEV_SUITES", carry)
-        self.assertIn("LAPLACE_DELIVERY_ACTIONS", carry)
-        self.assertIn("force_full_carry_forward_impact", carry)
+        owners = [
+            'carry_forward_installed_native_impact "$target"',
+            'carry_forward_installed_ingest_runtime_impact "$target"',
+            "carry_forward_installed_extension_impact",
+            'carry_forward_installed_application_impact "$target"',
+            'carry_forward_installed_web_impact "$target"',
+        ]
+        positions = [carry.index(owner) for owner in owners]
+        self.assertEqual(positions, sorted(positions))
         self.assertNotIn("qualification has no delivery actions", carry)
         self.assertNotIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
 
+        for name, receipt in (
+            ("carry_forward_installed_native_impact", "lib/.laplace-source-revision"),
+            ("carry_forward_installed_ingest_runtime_impact",
+             "ingest/current/.laplace-source-revision"),
+            ("carry_forward_installed_application_impact", '$app_dir/.laplace-source-revision'),
+        ):
+            with self.subTest(owner=name):
+                owner = function(name)
+                self.assertIn(receipt, owner)
+                self.assertIn("ci-impact-plan.py", owner)
+                self.assertIn('--base "$deployed" --head "$target"', owner)
+                self.assertIn("LAPLACE_BUILD_COMPONENTS", owner)
+                self.assertIn("LAPLACE_DELIVERY_ACTIONS", code(owner))
+        native = function("carry_forward_installed_native_impact")
+        self.assertNotIn("append_csv_env LAPLACE_DELIVERY_ACTIONS reconcile", native)
+        self.assertIn("force_full_carry_forward_impact",
+                      function("carry_forward_installed_application_impact"))
+
         fallback = function("force_full_carry_forward_impact")
-        self.assertIn('LAPLACE_BUILD_COMPONENTS="managed"', fallback)
-        self.assertIn('LAPLACE_DELIVERY_ACTIONS="publish"', fallback)
-        self.assertNotIn('LAPLACE_BUILD_COMPONENTS="native', fallback)
-        self.assertNotIn('LAPLACE_DB_SUITES="db-', fallback)
+        self.assertIn("append_csv_env LAPLACE_BUILD_COMPONENTS managed", fallback)
+        self.assertIn("append_csv_env LAPLACE_DELIVERY_ACTIONS publish", fallback)
+        self.assertNotIn("LAPLACE_BUILD_COMPONENTS native", fallback)
+        self.assertNotIn("LAPLACE_DB_SUITES", fallback)
         self.assertNotIn("LAPLACE_DEV_SUITES=all", fallback)
         self.assertNotIn("LAPLACE_MANAGED_TEST_PROJECTS=all", fallback)
 
