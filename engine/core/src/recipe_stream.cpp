@@ -146,6 +146,10 @@ struct route_rule {
         std::string split;
         uint32_t side = 0;
         std::string space_mark;   // characters the source writes for a space ("goose_step")
+        std::string literal;      // a fixed value the recipe states ([General_Category, value])
+        bool nested = false;      // the pieces compose one inner composition typed scope_type
+        bool aliased = false;     // resolve through the enclosing route's or field's value aliases
+        bool codepoints = false;  // the value is hex code points: the part is their text
     };
     std::vector<identity_part> subject_parts;
     struct element_rule {
@@ -275,9 +279,20 @@ static void read_identity_parts(image_reader& r, std::vector<route_rule::identit
                         if (part.side > 3 || (part.side != 0) == part.split.empty())
                             throw std::runtime_error("invalid identity part split at " + where);
                         part.space_mark = r.text();
+                        part.literal = r.text();
+                        const uint32_t nested = r.number();
+                        if (nested > 1 || (nested && !part.scope.empty()))
+                            throw std::runtime_error("invalid nested identity part at " + where);
+                        part.nested = nested != 0;
+                        const uint32_t aliased = r.number();
+                        if (aliased > 1) throw std::runtime_error("invalid aliased identity part at " + where);
+                        part.aliased = aliased != 0;
+                        const uint32_t codepoints = r.number();
+                        if (codepoints > 1) throw std::runtime_error("invalid code-point identity part at " + where);
+                        part.codepoints = codepoints != 0;
                         if (part.side == 3 && !part.scope.empty())
                             throw std::runtime_error("a split-each identity part cannot be scoped at " + where);
-                        if (part.path.empty() && part.children.empty())
+                        if (part.path.empty() && part.children.empty() && part.literal.empty())
                             throw std::runtime_error("identity part names neither a path nor children at " + where);
                         out.push_back(std::move(part));
                     }
@@ -372,7 +387,7 @@ struct laplace_recipe_stream {
         // "value()" is the field's own value: each item of a separated sequence.
         std::map<std::string, std::string> values = attributes;
         values["value()"] = value;
-        if (!compose_parts(stage, no_route, nullptr, rule.path, parts->second, components, &values)) return {};
+        if (!compose_parts(stage, no_route, nullptr, rule.path, parts->second, components, &values, &rule.aliases)) return {};
         laplace_ordered_composition_request_t request{};
         request.components = components.data(); request.component_count = components.size();
         request.type_id = rule.entity_type; request.source_id = current_witness;
@@ -977,6 +992,15 @@ struct laplace_recipe_stream {
             else if (raw == "N" || raw == "No" || raw == "false" || raw == "False" || raw == "0") f.confirm = false;
             else throw std::runtime_error("invalid boolean: " + raw);
             if (ordinary_content) content(stage, raw);
+            if (object_parts.count(rule.path)) {
+                // [property, value]: the claim states the value, whichever it is.
+                std::string value = raw;
+                const auto alias = rule.aliases.find(alias_key(value)); if (alias != rule.aliases.end()) value = alias->second;
+                f.confirm = true;
+                f.object = object_from_parts(stage, rule, attributes, value); f.has_object = true;
+                if (nonzero(f.object)) emit_fact(f);
+                return;
+            }
             if (!rule.object_literal.empty()) { f.object = content(stage, rule.object_literal); f.has_object = true; }
             emit_fact(f); return;
         }
@@ -985,6 +1009,22 @@ struct laplace_recipe_stream {
             lexical.object = content(stage, raw); lexical.has_object = true; emit_fact(lexical);
         }
         f.has_object = true;
+        if (rule.kind != 8 && object_parts.count(rule.path)) {
+            // Each value, resolved to its long name, composes the declared object parts; a
+            // code-point sequence is one value.
+            const bool sequence = rule.codec == 2 || rule.kind == 7;
+            const auto values = sequence || rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
+            for (auto value : values) {
+                if (rule.codec == 0) {
+                    value = governed(rule, identify(rule.identity_table, value));
+                    const auto alias = rule.aliases.find(alias_key(value)); if (alias != rule.aliases.end()) value = alias->second;
+                }
+                fact g = f;
+                g.object = object_from_parts(stage, rule, attributes, value);
+                if (nonzero(g.object)) emit_fact(g);
+            }
+            return;
+        }
         if (rule.codec == 4) {
             const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
             for (const auto& value : values) {
@@ -1034,6 +1074,7 @@ struct laplace_recipe_stream {
                 }
                 if (item.empty() || (!rule.absent.empty() && item == rule.absent)) continue;
                 if (composed) {
+                    const auto alias = rule.aliases.find(alias_key(item)); if (alias != rule.aliases.end()) item = alias->second;
                     g.object = object_from_parts(stage, rule, attributes, item);
                     if (!nonzero(g.object)) continue;
                 } else {
@@ -1286,7 +1327,7 @@ struct laplace_recipe_stream {
             // The record's subject is the composition of its declared parts.
             scope_attributes = &record.attributes;
             std::vector<laplace_ordered_component_t> parts;
-            if (!compose_parts(stage, route, &record, route.prefix, route.subject_parts, parts))
+            if (!compose_parts(stage, route, &record, route.prefix, route.subject_parts, parts, nullptr, &route.aliases))
                 throw std::runtime_error("composition subject is missing a declared part in " + record.name);
             laplace_ordered_composition_request_t request{};
             request.components = parts.data(); request.component_count = parts.size();
@@ -1351,7 +1392,8 @@ struct laplace_recipe_stream {
     bool compose_parts(intent_stage_t* stage, const route_rule& route, const node* element,
         const std::string& path, const std::vector<route_rule::identity_part>& declared,
         std::vector<laplace_ordered_component_t>& out,
-        const std::map<std::string, std::string>* value_map = nullptr) {
+        const std::map<std::string, std::string>* value_map = nullptr,
+        const std::unordered_map<std::string, std::string>* aliases = nullptr) {
         bool complete = true;
         auto component = [](const hash128_t& id, const double* coord, uint8_t tier, uint32_t atom) {
             laplace_ordered_component_t c{};
@@ -1378,8 +1420,23 @@ struct laplace_recipe_stream {
                 if (out.size() == had) complete = false;
                 continue;
             }
+            // A nested part composes its own pieces into one component.
+            std::vector<laplace_ordered_component_t> inner;
+            std::vector<laplace_ordered_component_t>& sink = part.nested ? inner : out;
+            const size_t sink_had = sink.size();
+            auto close_nested = [&]() {
+                if (!part.nested || inner.empty()) return;
+                laplace_ordered_composition_request_t request{};
+                request.components = inner.data(); request.component_count = inner.size();
+                request.type_id = part.scope_type; request.source_id = current_witness;
+                request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+                laplace_ordered_composition_result_t result{};
+                check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "nested identity part");
+                out.push_back(component(result.id, result.coord, result.tier, 0));
+            };
             std::vector<std::string> values;
-            if (value_map) {
+            if (!part.literal.empty()) values.push_back(part.literal);
+            else if (value_map) {
                 const std::string key = part.path.rfind("@", 0) == 0 ? part.path.substr(1) : part.path;
                 const auto hit = value_map->find(key);
                 if (hit != value_map->end() && !hit->second.empty()) values.push_back(hit->second);
@@ -1397,24 +1454,48 @@ struct laplace_recipe_stream {
             }
             if (!part.space_mark.empty())
                 for (char& c : text) if (part.space_mark.find(c) != std::string::npos) c = ' ';
+            if (part.codepoints && !text.empty()) {
+                // One code point is its Tier-0 atom, whatever its category (a surrogate
+                // position included); a sequence is its text.
+                const auto tokens = split(text, " ");
+                if (tokens.size() == 1) {
+                    const uint32_t cp = point(tokens.front());
+                    laplace_ordered_component_t atom{};
+                    hilbert128_t hb{};
+                    if (codepoint_table_resolve_atom(cp, &atom.id, atom.coord, &hb) != 0)
+                        throw std::runtime_error("code point has no atom: " + tokens.front());
+                    check(content_witness_emit_floor_atom(stage, cp, &atom.id, INTENT_STAGE_PG_EPOCH_UNIX_US), "code point atom");
+                    atom.tier = 0; atom.atom = cp; atom.has_atom = true;
+                    sink.push_back(atom);
+                    close_nested();
+                    continue;
+                }
+                text = sequence_text(text, " ");
+            }
+            if (part.aliased) {
+                if (!aliases) throw std::runtime_error("an aliased identity part has no value aliases: " + part.path);
+                const auto hit = aliases->find(alias_key(text)); if (hit != aliases->end()) text = hit->second;
+            }
             if (part.side == 3) {
                 size_t begin = 0;
                 for (size_t k = 0; k <= text.size(); ++k) {
                     if (k < text.size() && part.split.find(text[k]) == std::string::npos) continue;
                     if (k > begin) {
                         const content_form piece = compose_content(stage, governed_value(part.vocabulary, text.substr(begin, k - begin)));
-                        out.push_back(component(piece.id, piece.coord, piece.tier, piece.atom));
+                        sink.push_back(component(piece.id, piece.coord, piece.tier, piece.atom));
                     }
                     begin = k + 1;
                 }
-                if (out.size() == had) complete = false;
+                if (sink.size() == sink_had) complete = false;
+                close_nested();
                 continue;
             }
             if (!part.split.empty()) text = split_side(text, part.split, part.side);
             if (text.empty()) { complete = false; continue; }
             const content_form value = compose_content(stage, governed_value(part.vocabulary, text));
             if (part.scope.empty()) {
-                out.push_back(component(value.id, value.coord, value.tier, value.atom));
+                sink.push_back(component(value.id, value.coord, value.tier, value.atom));
+                close_nested();
                 continue;
             }
             const std::string key = part.scope.rfind("@", 0) == 0 ? part.scope.substr(1) : part.scope;

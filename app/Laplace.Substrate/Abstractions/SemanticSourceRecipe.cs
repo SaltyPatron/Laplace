@@ -304,7 +304,19 @@ public sealed record SourceIdentityPart(
     string? SplitLast = null,
     SourceIdentitySide Side = SourceIdentitySide.Whole,
     // Characters the source writes for a space inside a word ("goose_step").
-    string? SpaceMark = null);
+    string? SpaceMark = null,
+    // A fixed value the recipe states instead of reading one: the property a UCD value
+    // belongs to ([General_Category, Uppercase_Letter]).
+    string? Literal = null,
+    // The part's pieces compose one inner composition typed ScopeEntityType (a VerbNet
+    // class [conduct, 111, 1] inside the role key [class, Agent]).
+    bool Nested = false,
+    // The value resolves through the value aliases of the enclosing route's identity or
+    // the field (UCD "Basic Latin" -> Basic_Latin, as every blk value names it).
+    bool Aliased = false,
+    // The value is code points (hex, space-separated): the part is their text, a single
+    // character being its own atom ([Bidi_Paired_Bracket, ")"]).
+    bool Codepoints = false);
 
 public enum SourceIdentitySide { Whole = 0, Before = 1, After = 2, Each = 3 }
 

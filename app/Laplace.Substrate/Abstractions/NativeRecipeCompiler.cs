@@ -423,6 +423,10 @@ public static class NativeRecipeCompiler
             WriteText(writer, part.SplitLast);
             writer.Write((uint)part.Side);
             WriteText(writer, part.SpaceMark);
+            WriteText(writer, part.Literal);
+            writer.Write(part.Nested ? 1u : 0u);
+            writer.Write(part.Aliased ? 1u : 0u);
+            writer.Write(part.Codepoints ? 1u : 0u);
         }
     }
 
