@@ -3,7 +3,7 @@
 --
 -- Promoted 2026-08-02 from a hand-run that took FOUR attempts to find the
 -- layer map, which is the argument for its existence: the layering (GH #736)
--- is that the PLAYER is the OBJECT of HAS_WHITE/HAS_BLACK, whose subject is
+-- is that the PLAYER is the OBJECT of HAS_PLAYER {side}, whose subject is
 -- the shared LINE and whose context pins the PLAYING; HAS_ECO and
 -- HAS_TC_CLASS ride the same (line, context) pair. PLAYED_BY lives on a
 -- different layer and does NOT reach the headers -- three empty joins proved
@@ -30,8 +30,7 @@ WITH grouped AS (
                        AND e.type_id = laplace.relation_type_id('HAS_ECO')
     WHERE a.object_id = p_player
       AND a.context_id IS NOT NULL
-      AND a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
-                        laplace.relation_type_id('HAS_BLACK'))
+      AND a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
       AND (p_tc_class IS NULL OR tcc.object_id = laplace.word_id(lower(p_tc_class)))
     GROUP BY tcc.object_id, e.object_id
     ORDER BY count(*) DESC, tcc.object_id, e.object_id

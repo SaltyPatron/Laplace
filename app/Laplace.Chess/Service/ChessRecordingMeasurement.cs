@@ -210,7 +210,7 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
         (playings.Contains(row.SubjectId) && row.ContextId is null
             && (row.TypeId == ChessVocabulary.PlaysLineType || row.TypeId == ChessVocabulary.HasEventType))
         || (row.ContextId is { } context && playings.Contains(context)
-            && (row.TypeId == ChessVocabulary.HasWhiteType || row.TypeId == ChessVocabulary.HasBlackType
+            && (row.TypeId == ChessVocabulary.RelTypeHasPlayer
                 || row.TypeId == ChessVocabulary.HasResultType || row.TypeId == ChessVocabulary.HasTerminationType
                 || row.TypeId == WitnessRelations.Setup));
 
@@ -247,9 +247,9 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
             // board identity and legal full-line replay. This consumer compares the batch.
             var hydrated = await MeasureReadbackAsync(ReadbackOperation.HydrationAndLegalReplay,
                 () => ChessWitnessHydrator.TryHydrateChunkAsync(ds, playingIds.ToArray(), ct));
-            var whiteByPlaying = expected.Where(a => a.TypeId == ChessVocabulary.HasWhiteType)
+            var whiteByPlaying = expected.Where(a => ChessVocabulary.IsSide(a, ChessVocabulary.WhiteSide))
                 .ToDictionary(a => a.ContextId!.Value, a => a.ObjectId);
-            var blackByPlaying = expected.Where(a => a.TypeId == ChessVocabulary.HasBlackType)
+            var blackByPlaying = expected.Where(a => ChessVocabulary.IsSide(a, ChessVocabulary.BlackSide))
                 .ToDictionary(a => a.ContextId!.Value, a => a.ObjectId);
             var expectedGames = games.Select(g => new ExpectedGame(g,
                 whiteByPlaying.GetValueOrDefault(g.PlayingId), blackByPlaying.GetValueOrDefault(g.PlayingId))).ToArray();

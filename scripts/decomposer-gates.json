@@ -441,12 +441,7 @@
           "scope": "source_evidence"
         },
         {
-          "relation": "HAS_WHITE",
-          "min": 1,
-          "scope": "source_evidence"
-        },
-        {
-          "relation": "HAS_BLACK",
+          "relation": "HAS_PLAYER",
           "min": 1,
           "scope": "source_evidence"
         },

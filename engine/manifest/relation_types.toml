@@ -1738,7 +1738,19 @@ parent = null
 family_root = "HAS_ECO"
 
 [[relation]]
+# A game line's player; which side the player has is the claim's side/{white,black}
+# qualifier (PGN's White and Black tags are its surfaces).
+canonical = "HAS_PLAYER"
+bit = 232
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_PLAYER"
+
+[[relation]]
 canonical = "HAS_WHITE"
+retired = "HAS_PLAYER"
+retired_qualifier = "side/white"
 bit = 133
 rank = "partitive"
 symmetry = "asymmetric"
@@ -1747,6 +1759,8 @@ family_root = "HAS_WHITE"
 
 [[relation]]
 canonical = "HAS_BLACK"
+retired = "HAS_PLAYER"
+retired_qualifier = "side/black"
 bit = 49
 rank = "partitive"
 symmetry = "asymmetric"
@@ -2701,3 +2715,16 @@ surface = "oWant"
 canonical = "X_WANT"
 flip = false
 qualifier = "participant/others"
+
+# PGN (Standard: Portable Game Notation) seven-tag roster: White and Black name the players.
+[[alias]]
+surface = "White"
+canonical = "HAS_PLAYER"
+flip = false
+qualifier = "side/white"
+
+[[alias]]
+surface = "Black"
+canonical = "HAS_PLAYER"
+flip = false
+qualifier = "side/black"

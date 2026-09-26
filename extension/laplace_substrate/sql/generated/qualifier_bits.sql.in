@@ -98,6 +98,8 @@ DECLARE
         WHEN 'variant/specialized-semantic' THEN 4
         WHEN 'variant/spoofing' THEN 5
         WHEN 'variant/z' THEN 6
+        WHEN 'side/white' THEN 0
+        WHEN 'side/black' THEN 1
     END;
 BEGIN
     IF v_bit IS NULL THEN
@@ -133,6 +135,7 @@ CREATE OR REPLACE FUNCTION laplace.element_type_ids(p_element text)
         WHEN 'HAS_EXTERNAL_ID' THEN ARRAY[laplace.relation_type_id('HAS_EXTERNAL_ID'), laplace.relation_type_id('HAS_ISO639_1_CODE'), laplace.relation_type_id('HAS_ISO639_2B_CODE'), laplace.relation_type_id('HAS_ISO639_2T_CODE'), laplace.relation_type_id('HAS_ISO639_2_CODE')]
         WHEN 'HAS_NAME' THEN ARRAY[laplace.relation_type_id('HAS_NAME'), laplace.relation_type_id('HAS_NAME_ALIAS')]
         WHEN 'HAS_PART' THEN ARRAY[laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_A'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('MADE_UP_OF')]
+        WHEN 'HAS_PLAYER' THEN ARRAY[laplace.relation_type_id('HAS_PLAYER'), laplace.relation_type_id('HAS_BLACK'), laplace.relation_type_id('HAS_WHITE')]
         WHEN 'HAS_PROPERTY' THEN ARRAY[laplace.relation_type_id('HAS_PROPERTY'), laplace.relation_type_id('NOT_HAS_PROPERTY')]
         WHEN 'HAS_SCRIPT' THEN ARRAY[laplace.relation_type_id('HAS_SCRIPT'), laplace.relation_type_id('USES_SCRIPT')]
         WHEN 'HAS_SUBEVENT' THEN ARRAY[laplace.relation_type_id('HAS_SUBEVENT'), laplace.relation_type_id('HAS_FIRST_SUBEVENT'), laplace.relation_type_id('HAS_LAST_SUBEVENT')]
@@ -173,6 +176,8 @@ CREATE OR REPLACE FUNCTION laplace.claim_has_qualifier(
         WHEN 'meronymy/part' THEN ARRAY[laplace.relation_type_id('HAS_A')]
         WHEN 'meronymy/substance' THEN ARRAY[laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('MADE_UP_OF')]
         WHEN 'participant/others' THEN ARRAY[laplace.relation_type_id('O_EFFECT'), laplace.relation_type_id('O_REACT'), laplace.relation_type_id('O_WANT')]
+        WHEN 'side/black' THEN ARRAY[laplace.relation_type_id('HAS_BLACK')]
+        WHEN 'side/white' THEN ARRAY[laplace.relation_type_id('HAS_WHITE')]
         WHEN 'subevent/first' THEN ARRAY[laplace.relation_type_id('HAS_FIRST_SUBEVENT')]
         WHEN 'subevent/last' THEN ARRAY[laplace.relation_type_id('HAS_LAST_SUBEVENT')]
             ELSE ARRAY[]::bytea[]

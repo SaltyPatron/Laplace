@@ -115,10 +115,11 @@ public sealed class ChessPlayerRatingTests
         var change = Compose(WhiteWins);
         // The aggregating lane is IN ADDITION to the witnessed record, never instead of it:
         // who sat where is still one categorical row per game.
+        // One element, HAS_PLAYER; the side is the claim's qualifier.
         Assert.Contains(change.Attestations,
-            a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_WHITE") && a.ObjectId == Alice);
+            a => ChessVocabulary.IsSide(a, ChessVocabulary.WhiteSide) && a.ObjectId == Alice);
         Assert.Contains(change.Attestations,
-            a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_BLACK") && a.ObjectId == Bob);
+            a => ChessVocabulary.IsSide(a, ChessVocabulary.BlackSide) && a.ObjectId == Bob);
     }
 
     [Fact]

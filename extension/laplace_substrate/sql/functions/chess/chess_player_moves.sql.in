@@ -21,8 +21,9 @@ BEGIN ATOMIC
         SELECT h.subject_id AS line_id, h.context_id AS playing_id,
                max(h.observation_count)::bigint AS games
         FROM laplace.attestations h
-        WHERE h.type_id = laplace.relation_type_id(
-                  CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
+        WHERE h.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
+          AND laplace.claim_has_qualifier(h.type_id, h.qualifier_mask, 'side',
+                  CASE WHEN p_as_white THEN 'white' ELSE 'black' END)
           AND h.object_id = p_player
           AND h.context_id IS NOT NULL
         GROUP BY h.subject_id, h.context_id

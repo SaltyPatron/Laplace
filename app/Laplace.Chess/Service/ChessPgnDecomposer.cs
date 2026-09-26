@@ -687,8 +687,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         b.AddAttestation(NativeAttestation.Categorical(
             playingId, HasEventRelation, eventId, src, null, PgnWitnessWeight));
 
-        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_WHITE", wp, src, playingId, PgnWitnessWeight));
-        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_BLACK", bp, src, playingId, PgnWitnessWeight));
+        // PGN's White/Black tags: the line HAS_PLAYER the player {side/white|black}.
+        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "White", wp, src, playingId, PgnWitnessWeight));
+        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "Black", bp, src, playingId, PgnWitnessWeight));
 
         if (whitePlayer is { } w2)
             ChessGraph.AppendPlayerResult(

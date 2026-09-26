@@ -31,7 +31,8 @@ public static class ChessSeedManifest
         // GH #736: the event→line record edge; every chess lane that records playings emits it.
         "PLAYS_LINE",
         "HAS_SETUP", "ANALYZED_AT",
-        "HAS_WHITE", "HAS_BLACK", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
+        // PGN White/Black are its surfaces: HAS_PLAYER {side/white|black}.
+        "HAS_PLAYER", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
         "HAS_TERMINATION", "HAS_RESULT", "HAS_EVAL", "MOVE_QUALITY",
         "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
         // GAME_AT / GAME_AT_PLY retired from the seed manifest (GH #577): ChessGraph

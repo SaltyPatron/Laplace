@@ -58,12 +58,13 @@ BEGIN ATOMIC
     mine AS MATERIALIZED (
         SELECT a.subject_id AS line,
                a.context_id AS event,
-               (a.type_id = laplace.relation_type_id('HAS_WHITE')) AS white
+               -- The side is the claim's qualifier (admitted HAS_WHITE/HAS_BLACK rows
+               -- state it through their retired type).
+               laplace.claim_has_qualifier(a.type_id, a.qualifier_mask, 'side', 'white') AS white
         FROM laplace.attestations a
         JOIN identity_ids i ON i.id = a.object_id
         WHERE a.context_id IS NOT NULL
-          AND a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
-                            laplace.relation_type_id('HAS_BLACK'))
+          AND a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
     ),
     dated AS MATERIALIZED (
         SELECT m.line, m.event, m.white, d.object_id AS date_id
@@ -100,18 +101,17 @@ BEGIN ATOMIC
                max(h.object_id) FILTER (
                    WHERE h.type_id = laplace.relation_type_id('HAS_RESULT')) AS result_id,
                max(h.object_id) FILTER (
-                   WHERE h.type_id = CASE WHEN pg.white
-                       THEN laplace.relation_type_id('HAS_BLACK')
-                       ELSE laplace.relation_type_id('HAS_WHITE') END) AS opponent_id
+                   WHERE h.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
+                     AND laplace.claim_has_qualifier(h.type_id, h.qualifier_mask, 'side',
+                             CASE WHEN pg.white THEN 'black' ELSE 'white' END)) AS opponent_id
         FROM page pg
         LEFT JOIN laplace.attestations h
                ON h.subject_id = pg.line
               AND h.context_id = pg.event
-              AND h.type_id IN (laplace.relation_type_id('HAS_EVENT'),
+              AND h.type_id = ANY (laplace.element_type_ids('HAS_PLAYER') || ARRAY[
+                                laplace.relation_type_id('HAS_EVENT'),
                                 laplace.relation_type_id('HAS_ECO'),
-                                laplace.relation_type_id('HAS_RESULT'),
-                                laplace.relation_type_id('HAS_WHITE'),
-                                laplace.relation_type_id('HAS_BLACK'))
+                                laplace.relation_type_id('HAS_RESULT')])
         GROUP BY pg.event, pg.white, pg.played_on
     ),
     surface_batch AS MATERIALIZED (

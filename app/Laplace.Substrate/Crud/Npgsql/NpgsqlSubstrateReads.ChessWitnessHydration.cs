@@ -25,7 +25,7 @@ public static partial class NpgsqlSubstrateReads
     }
 
     public readonly record struct ChessWitnessInputRow(
-        byte[] Subject, byte[] Type, byte[]? Object, byte[]? Context);
+        byte[] Subject, byte[] Type, byte[]? Object, byte[]? Context, byte[]? Qualifiers = null);
     public readonly record struct ChessContentVertexRow(
         byte[] Parent, int Ordinal, byte[] Child, int RunLength);
 
@@ -56,7 +56,8 @@ public static partial class NpgsqlSubstrateReads
             budget.Reserve(256);
             result.Add(new((byte[])reader[0], (byte[])reader[1],
                 reader.IsDBNull(2) ? null : (byte[])reader[2],
-                reader.IsDBNull(3) ? null : (byte[])reader[3]));
+                reader.IsDBNull(3) ? null : (byte[])reader[3],
+                reader.IsDBNull(4) ? null : (byte[])reader[4]));
         }
         return result;
     }

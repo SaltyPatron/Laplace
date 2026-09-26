@@ -224,10 +224,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                         b, emitBlack, blackName, ChessVocabulary.SourceId, SourceTrust.Response);
                 if (session.WhitePlayerId is { } wp)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lineId, "HAS_WHITE", wp, ChessVocabulary.SourceId, playingId, WitnessWeight));
+                        lineId, "White", wp, ChessVocabulary.SourceId, playingId, WitnessWeight));
                 if (session.BlackPlayerId is { } bp)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
+                        lineId, "Black", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
 
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(

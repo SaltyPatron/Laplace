@@ -6,14 +6,14 @@ CREATE OR REPLACE FUNCTION chess.player_record(p_player bytea)
 BEGIN ATOMIC
     -- One player's record, straight off the witnessed game headers. Rides
     -- attestations_object_btree to find the games he appears in (as
-    -- HAS_WHITE or HAS_BLACK), then the (subject_id, type_id, object_id) index
+    -- HAS_PLAYER {side/white|black}), then the (subject_id, type_id, object_id) index
     -- to pick up each game's HAS_RESULT -- both index lookups, so this stays
     -- interactive for a 9k-game career.
     --
     -- PLAYER-ID MIGRATION LAW (#1405): a playing can already be present while
     -- the governed player-id encoding changed later. The playing novelty gate
     -- correctly refuses to re-witness that source record, so a replay cannot
-    -- repair old HAS_WHITE/HAS_BLACK rows by emitting them again. Career reads
+    -- repair old player rows by emitting them again. Career reads
     -- therefore admit ONLY the deterministic ChessPgn legacy-id bridge emitted
     -- by ChessPgnDecomposer.EmitPlayer. CORRESPONDS_TO is symmetric, so probe
     -- both indexed directions. This is not fuzzy/name identity and deliberately
@@ -51,12 +51,13 @@ BEGIN ATOMIC
     sides AS (
         SELECT a.subject_id AS line,
                a.context_id AS event,
-               (a.type_id = laplace.relation_type_id('HAS_WHITE')) AS white
+               -- The side is the claim's qualifier; rows admitted as HAS_WHITE/HAS_BLACK
+               -- state it through their retired type (laplace.claim_has_qualifier).
+               laplace.claim_has_qualifier(a.type_id, a.qualifier_mask, 'side', 'white') AS white
         FROM laplace.attestations a
         JOIN identity_ids i ON i.id = a.object_id
         WHERE a.context_id IS NOT NULL
-          AND a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
-                            laplace.relation_type_id('HAS_BLACK'))
+          AND a.type_id = ANY (laplace.element_type_ids('HAS_PLAYER'))
     ),
     scored AS (
         SELECT s.white,

@@ -3401,14 +3401,14 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "attestations_by_subjects_type", onError: onError);
 
     public readonly record struct AttestationQuadRow(
-        byte[] SubjectId, byte[] TypeId, byte[]? ObjectId, byte[]? ContextId);
+        byte[] SubjectId, byte[] TypeId, byte[]? ObjectId, byte[]? ContextId, byte[]? QualifierMask = null);
 
     /// <summary>Attestation quads for subjects filtered by type set.</summary>
     public static Task<IReadOnlyList<AttestationQuadRow>> AttestationsBySubjectsAndTypesAsync(
         NpgsqlDataSource dataSource, byte[][] subjectIds, byte[][] typeIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT a.subject_id, a.type_id, a.object_id, a.context_id
+            SELECT a.subject_id, a.type_id, a.object_id, a.context_id, a.qualifier_mask
             FROM laplace.attestations a
             WHERE a.subject_id = ANY(@subjects)
               AND a.type_id = ANY(@types)
@@ -3416,7 +3416,8 @@ public static partial class NpgsqlSubstrateReads
             static r => new AttestationQuadRow(
                 (byte[])r[0], (byte[])r[1],
                 r.IsDBNull(2) ? null : (byte[])r[2],
-                r.IsDBNull(3) ? null : (byte[])r[3]),
+                r.IsDBNull(3) ? null : (byte[])r[3],
+                r.IsDBNull(4) ? null : (byte[])r[4]),
             p =>
             {
                 var subjects = p.AddWithValue("subjects", subjectIds);

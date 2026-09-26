@@ -125,3 +125,10 @@ relations = ["HAS_VARIANT_OF"]
 base = 0
 values = ["semantic", "compatibility", "simplified", "traditional", "specialized-semantic",
           "spoofing", "z"]
+
+# Which side a chess player has in a game line (PGN White / Black).
+[[family]]
+name = "side"
+relations = ["HAS_PLAYER"]
+base = 0
+values = ["white", "black"]

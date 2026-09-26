@@ -91,8 +91,15 @@ public static class ChessVocabulary
 
     public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
         => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
-    public static readonly Hash128 HasWhiteType = RelationTypeRegistry.RelationTypeId("HAS_WHITE");
-    public static readonly Hash128 HasBlackType = RelationTypeRegistry.RelationTypeId("HAS_BLACK");
+    // A line's player is HAS_PLAYER; which side is the claim's side/{white,black} qualifier.
+    public static readonly Hash128 RelTypeHasPlayer =
+        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasPlayer)));
+    public static readonly Mask256 WhiteSide = ClaimQualifiers.Of("side", "white");
+    public static readonly Mask256 BlackSide = ClaimQualifiers.Of("side", "black");
+
+    /// <summary>Whether a player claim states that side.</summary>
+    public static bool IsSide(AttestationRow row, Mask256 side) =>
+        row.TypeId == RelTypeHasPlayer && !(row.QualifierMask & side).IsZero;
     public static readonly Hash128 HasEventType = RelationTypeRegistry.RelationTypeId("HAS_EVENT");
     public static readonly Hash128 OnDateType = RelationTypeRegistry.RelationTypeId("ON_DATE");
     public static readonly Hash128 HasTimeControlType = RelationTypeRegistry.RelationTypeId("HAS_TIME_CONTROL");
