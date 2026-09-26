@@ -993,6 +993,8 @@ struct laplace_recipe_stream {
         if (!rule.context_field.empty()) context_value = context_of(rule, attributes);
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         if (rule.require_context && (!context_value || context_value->empty())) return;
+        // A form equal to its source is no claim (NormalizationTest's NFC of an NFC string).
+        if (rule.omit_equal_subject && raw == current_identity) return;
         if (rule.group_once) {
             const auto first = attributes.find("group:first");
             if (first != attributes.end() && first->second != "1") return;

@@ -391,8 +391,11 @@
     {
       "selector": "ucd/NormalizationTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX15/NormalizationTest",
+      "recipePath": "normalization-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/NushuSources.txt",

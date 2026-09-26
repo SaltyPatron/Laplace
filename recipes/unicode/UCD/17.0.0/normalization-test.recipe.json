@@ -1,0 +1,115 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX15/NormalizationTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@source",
+      "propertyName": "source",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@nfc",
+      "propertyName": "nfc",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "NORMALIZES_TO",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/nfc"
+      ],
+      "omitWhenEqualsSubject": true
+    },
+    {
+      "syntaxPath": "record/@nfd",
+      "propertyName": "nfd",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "NORMALIZES_TO",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/nfd"
+      ],
+      "omitWhenEqualsSubject": true
+    },
+    {
+      "syntaxPath": "record/@nfkc",
+      "propertyName": "nfkc",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "NORMALIZES_TO",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/nfkc"
+      ],
+      "omitWhenEqualsSubject": true
+    },
+    {
+      "syntaxPath": "record/@nfkd",
+      "propertyName": "nfkd",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "NORMALIZES_TO",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifiers": [
+        "mapping/nfkd"
+      ],
+      "omitWhenEqualsSubject": true
+    },
+    {
+      "syntaxPath": "part/@part",
+      "propertyName": "part",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "source"
+      }
+    },
+    {
+      "recordName": "part",
+      "namespaceUri": "",
+      "fieldPrefix": "part",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "part"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "source",
+      "nfc",
+      "nfd",
+      "nfkc",
+      "nfkd"
+    ],
+    "allowTrailingEmptyColumn": true,
+    "directivePrefix": "@",
+    "directiveRecordName": "part",
+    "directiveColumns": [
+      "part"
+    ]
+  }
+}
