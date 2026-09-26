@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "laplace/core/intent_stage.h"
+#include "laplace/core/ordered_composition.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,6 +31,14 @@ int laplace_recipe_stream_prescan(laplace_recipe_stream_t*, const uint8_t*, size
  * the number of physical records completed by this batch, not a cumulative count. */
 int laplace_recipe_stream_drain(laplace_recipe_stream_t*, size_t maximum_rows,
     size_t maximum_bytes, intent_stage_t** out, uint64_t* records_completed);
+/* The metadata tree of the file this stream reads (its path and digest, composed by
+ * the caller). Set before feed. After the last record the stream composes the file's
+ * trunk: [metadata tree, every distinct content the file states in first-seen order],
+ * so each content is a direct child of the file that witnessed it. */
+int laplace_recipe_stream_set_file(laplace_recipe_stream_t*, const laplace_ordered_component_t* head);
+/* 1 and the file trunk (id, coord, tier) once the final drain composed it, 0 before,
+ * -1 on bad input. */
+int laplace_recipe_stream_file_root(const laplace_recipe_stream_t*, laplace_ordered_component_t* out);
 const char* laplace_recipe_stream_error(const laplace_recipe_stream_t*);
 void laplace_recipe_stream_free(laplace_recipe_stream_t*);
 #ifdef __cplusplus

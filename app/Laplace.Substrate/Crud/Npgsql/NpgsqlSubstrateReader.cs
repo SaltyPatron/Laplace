@@ -174,6 +174,47 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         return done;
     }
 
+    public async Task<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>> TrunksByHeadAsync(
+        IReadOnlyList<Hash128> heads, Hash128 typeId, CancellationToken ct = default)
+    {
+        // physicalities_traj_first_id_btree: the head is the trajectory's first constituent.
+        await using var cmd = _ds.CreateCommand(
+            "SELECT DISTINCT ON (h.head) h.head, e.id, e.tier, "
+            + "ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) "
+            + "FROM unnest($1::bytea[]) AS h(head) "
+            + "JOIN laplace.physicalities p ON p.type = 1 AND p.trajectory IS NOT NULL "
+            + "AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1] = h.head "
+            + "JOIN laplace.entities e ON e.id = p.entity_id AND e.type_id = $2 "
+            + "ORDER BY h.head, e.id");
+        cmd.Parameters.Add(new NpgsqlParameter { Value = ToByteArrays(heads), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
+        return await ReadComponentsAsync(cmd, ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>> CompositionComponentsAsync(
+        IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+    {
+        await using var cmd = _ds.CreateCommand(
+            "SELECT DISTINCT ON (e.id) e.id, e.id, e.tier, "
+            + "ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) "
+            + "FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id "
+            + "WHERE e.id = ANY($1) ORDER BY e.id, p.type, p.id");
+        cmd.Parameters.Add(new NpgsqlParameter { Value = ToByteArrays(ids), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        return await ReadComponentsAsync(cmd, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>> ReadComponentsAsync(
+        NpgsqlCommand cmd, CancellationToken ct)
+    {
+        var found = new Dictionary<Hash128, OrderedCompositionComponent>();
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+            found[Hash128.FromBytes((byte[])r[0])] = new OrderedCompositionComponent(
+                Hash128.FromBytes((byte[])r[1]), checked((byte)r.GetInt16(2)),
+                r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6));
+        return found;
+    }
+
     public async Task<IReadOnlySet<IngestUnitCompletionKey>> CompletedUnitsAsync(
         IReadOnlyList<IngestUnitCompletionKey> keys, CancellationToken ct = default)
     {

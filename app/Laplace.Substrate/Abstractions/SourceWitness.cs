@@ -15,7 +15,11 @@ public static class SourceWitness
     public static Hash128 Id(string authority, string release) =>
         Hash128.Merkle(EntityTier.Document, [Root(authority), Root(release)]);
 
-    public static Hash128 Stage(SubstrateChangeBuilder builder, string authority, string release)
+    public static Hash128 Stage(SubstrateChangeBuilder builder, string authority, string release) =>
+        StageComponent(builder, authority, release).Id;
+
+    /// <summary>Stages the witness and returns it as a composition component.</summary>
+    public static OrderedCompositionComponent StageComponent(SubstrateChangeBuilder builder, string authority, string release)
     {
         ArgumentNullException.ThrowIfNull(builder);
         Hash128 id = Id(authority, release);
@@ -26,9 +30,9 @@ public static class SourceWitness
         Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
         OrderedComposition.StageBatch(builder.ContentStage,
             [new OrderedCompositionRequest([a, r], EntityTypeRegistry.SourceVersion, id, 0)], composed);
-        if (composed[0].Id != id)
-            throw new InvalidOperationException("source witness identity changed during composition");
-        return id;
+        OrderedCompositionResult w = composed[0];
+        if (w.Id != id) throw new InvalidOperationException("source witness identity changed during composition");
+        return new OrderedCompositionComponent(w.Id, w.Tier, w.CoordX, w.CoordY, w.CoordZ, w.CoordM);
     }
 
     private static Hash128 Root(string value) =>

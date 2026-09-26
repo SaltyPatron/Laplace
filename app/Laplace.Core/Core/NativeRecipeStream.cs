@@ -83,6 +83,43 @@ public sealed class NativeRecipeStream : SafeHandle
         }
     }
 
+    /// <summary>The metadata tree of the file this stream reads. After its last record the
+    /// stream composes the file's trunk: the metadata tree, then every distinct content the
+    /// file states, so each content is a child of the file that witnessed it.</summary>
+    public unsafe void SetFile(OrderedCompositionComponent head)
+    {
+        var native = new NativeInterop.OrderedCompositionComponentNative
+        {
+            Id = head.Id, Coord0 = head.CoordX, Coord1 = head.CoordY, Coord2 = head.CoordZ,
+            Coord3 = head.CoordM, Atom = head.Atom, Tier = head.Tier, HasAtom = head.HasAtom ? (byte)1 : (byte)0,
+        };
+        lock (LaplaceCoreGate.Native)
+        {
+            ObjectDisposedException.ThrowIf(IsClosed, this);
+            int result = NativeInterop.RecipeStreamSetFile(handle, &native);
+            if (result != 0) throw new InvalidDataException(Error(handle, result));
+            GC.KeepAlive(this);
+        }
+    }
+
+    /// <summary>The file trunk, once the final drain composed it.</summary>
+    public unsafe OrderedCompositionComponent? FileRoot
+    {
+        get
+        {
+            lock (LaplaceCoreGate.Native)
+            {
+                ObjectDisposedException.ThrowIf(IsClosed, this);
+                NativeInterop.OrderedCompositionComponentNative root = default;
+                int result = NativeInterop.RecipeStreamFileRoot(handle, &root);
+                GC.KeepAlive(this);
+                if (result < 0) throw new InvalidDataException(Error(handle, result));
+                return result == 0 ? null : new OrderedCompositionComponent(root.Id, root.Tier,
+                    root.Coord0, root.Coord1, root.Coord2, root.Coord3, root.Atom, root.HasAtom != 0);
+            }
+        }
+    }
+
     /// <summary>The caller owns and must dispose each returned stage.</summary>
     public unsafe IntentStage? Drain(int maximumRows, long maximumBytes, out ulong recordsCompleted)
     {
@@ -141,6 +178,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_drain")]
     internal static partial int RecipeStreamDrain(IntPtr stream, nuint maximumRows, nuint maximumBytes,
         IntPtr* stage, ulong* completed);
+    [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_set_file")]
+    internal static partial int RecipeStreamSetFile(IntPtr stream, OrderedCompositionComponentNative* head);
+    [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_file_root")]
+    internal static partial int RecipeStreamFileRoot(IntPtr stream, OrderedCompositionComponentNative* root);
     [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_error")]
     internal static partial IntPtr RecipeStreamError(IntPtr stream);
     [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_free")]

@@ -85,6 +85,21 @@ public interface ISubstrateReader
         return done;
     }
 
+    /// <summary>
+    /// The file trunks headed by each metadata tree: the entity of the given type whose
+    /// trajectory's first constituent is the head. A head with no trunk is absent.
+    /// </summary>
+    Task<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>> TrunksByHeadAsync(
+        IReadOnlyList<Hash128> heads, Hash128 typeId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>>(
+            new Dictionary<Hash128, OrderedCompositionComponent>());
+
+    /// <summary>Admitted entities as composition components: id, tier and coordinate.</summary>
+    Task<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>> CompositionComponentsAsync(
+        IReadOnlyList<Hash128> ids, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>>(
+            new Dictionary<Hash128, OrderedCompositionComponent>());
+
     Task<IReadOnlySet<Hash128>> HasFilesCompletedAsync(
         IReadOnlyList<Hash128> fileIds, Hash128 decomposerSourceId, int layerOrder,
         CancellationToken ct = default) =>

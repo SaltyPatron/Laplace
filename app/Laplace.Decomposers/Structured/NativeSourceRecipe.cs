@@ -28,6 +28,8 @@ public sealed class NativeSourceRecipe
         int readBufferBytes,
         int commitEpoch = 0,
         Func<Stream>? openPrescan = null,
+        OrderedCompositionComponent? fileHead = null,
+        Action<OrderedCompositionComponent>? onFileRoot = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(input);
@@ -36,6 +38,7 @@ public sealed class NativeSourceRecipe
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(readBufferBytes);
         using NativeRecipeStream native = NativeRecipeStream.Open(_program, sourceId, sourceTrust);
+        if (fileHead is { } head) native.SetFile(head);
         // Drain parser events and tuple output between transport windows. A large
         // I/O envelope must not queue an entire source's expanded syntax tree.
         int feedBytes = Math.Min(readBufferBytes, 64 * 1024);
@@ -98,5 +101,6 @@ public sealed class NativeSourceRecipe
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+        if (native.FileRoot is { } root) onFileRoot?.Invoke(root);
     }
 }

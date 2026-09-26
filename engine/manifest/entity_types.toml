@@ -323,11 +323,6 @@ canonical = "Source"
 [[type]]
 canonical = "SourceFile"
 
-# The observed content of one source record, in source order (an OEWN Synset's lemma,
-# part of speech, definition and examples): observation structure, never testimony.
-[[type]]
-canonical = "SourceRecord"
-
 [[type]]
 canonical = "Source_Reference"
 

@@ -19,8 +19,12 @@ public interface IRecipeSyntaxExecutor
 {
     /// <param name="openPrescan">Opens an independent read of the same artifact bytes, for
     /// recipes that collect the source's identity tables before lowering.</param>
+    /// <param name="fileHead">The file's metadata tree; the stream composes the file's trunk
+    /// over it and every content the file states.</param>
     IAsyncEnumerable<SubstrateChange> ReadChangesAsync(Stream input, RecipeExecutionOptions options,
-        string artifactLabel, Func<Stream>? openPrescan = null, CancellationToken ct = default);
+        string artifactLabel, Func<Stream>? openPrescan = null,
+        OrderedCompositionComponent? fileHead = null, Action<OrderedCompositionComponent>? onFileRoot = null,
+        CancellationToken ct = default);
 
     /// <summary>The entries of a zip artifact to parse, each as its own file (UCA's
     /// CollationTest.zip); empty reads the archive's single entry.</summary>
@@ -118,10 +122,13 @@ public sealed class RecipeSyntaxProviderRegistry
         }
 
         public IAsyncEnumerable<SubstrateChange> ReadChangesAsync(Stream input, RecipeExecutionOptions options,
-            string artifactLabel, Func<Stream>? openPrescan = null, CancellationToken ct = default)
+            string artifactLabel, Func<Stream>? openPrescan = null,
+            OrderedCompositionComponent? fileHead = null, Action<OrderedCompositionComponent>? onFileRoot = null,
+            CancellationToken ct = default)
             => (_runtime ?? ForArtifact(artifactLabel)).ReadChangesAsync(input, options.SourceId, options.Trust, artifactLabel,
                 IngestSizing.ResolveApplyTransactionRows(), IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
-                IngestSizing.ResolveSequentialIoBufferBytes(), openPrescan: openPrescan, ct: ct);
+                IngestSizing.ResolveSequentialIoBufferBytes(), openPrescan: openPrescan,
+                fileHead: fileHead, onFileRoot: onFileRoot, ct: ct);
 
         private NativeSourceRecipe ForArtifact(string artifactLabel)
         {
@@ -154,6 +161,10 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     private IReadOnlyCollection<string> _canonicalNames = [];
     private FileStream? _input;
     private IngestArtifact? _artifact;
+    private readonly List<(Hash128 Head, OrderedCompositionComponent File)> _files = [];
+
+    /// <summary>The file trunks this execution composed, keyed by their metadata head.</summary>
+    internal IReadOnlyList<(Hash128 Head, OrderedCompositionComponent File)> Files => _files;
 
     public SingleArtifactRecipeDecomposer(SemanticSourceRecipe recipe, RecipeExecutionOptions options, string inputPath,
         RecipeSyntaxProviderRegistry? providers = null)
@@ -256,7 +267,7 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         IncrementalHash? passHash = null;
         // The parses of this artifact: the file itself, or the declared entries of a zip
         // archive (each its own file, labelled artifact!entry), or its single entry.
-        var parses = new List<(string Label, Func<Stream> Open)>();
+        var parses = new List<(string Label, string? Entry, Func<Stream> Open)>();
         var opened = new List<Stream>();
         if (_inputPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
@@ -273,7 +284,8 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
                     ? archive.Entries[0]
                     : archive.Entries.First(static item => item.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))];
             foreach (ZipArchiveEntry zipEntry in entries)
-                parses.Add((named.Count > 0 ? $"{label}!{zipEntry.FullName}" : label, () =>
+                parses.Add((named.Count > 0 ? $"{label}!{zipEntry.FullName}" : label,
+                    named.Count > 0 ? zipEntry.FullName : null, () =>
                 {
                     Stream stream = zipEntry.Open();
                     opened.Add(stream);
@@ -283,7 +295,7 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         else
         {
             passHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            parses.Add((label, () =>
+            parses.Add((label, null, () =>
             {
                 Stream stream = new HashingReadStream(input, passHash);
                 // A gzip member is the same artifact bytes; the digest still covers the file.
@@ -293,18 +305,27 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         }
         try
         {
-            foreach ((string parseLabel, Func<Stream> open) in parses)
-            await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
-                               open(), _options, parseLabel, () => OpenIndependentRead(_inputPath), ct).ConfigureAwait(false))
+            foreach ((string parseLabel, string? entry, Func<Stream> open) in parses)
             {
-                records += change.Metadata.InputUnitsConsumed;
-                foreach (IntentStage stage in change.IntentStages)
+                // The file's metadata tree heads its trunk; the stream hangs every content the
+                // file states under it.
+                var metadata = new SubstrateChangeBuilder(SourceId, $"file-metadata/{parseLabel}", null);
+                OrderedCompositionComponent head = SourceArtifactProvenance.StageFileMetadata(metadata, artifact, entry, SourceId);
+                yield return IngestBatchPipeline.BindFileLabel(SourceArtifactProvenance.Bind(metadata.Build(), generationId), label)
+                    with { CountsAsUnit = false };
+                await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
+                                   open(), _options, parseLabel, () => OpenIndependentRead(_inputPath), head,
+                                   file => _files.Add((head.Id, file)), ct).ConfigureAwait(false))
                 {
-                    entities += stage.EntityCount;
-                    physicalities += stage.PhysicalityCount;
-                    attestations += stage.AttestationCount;
+                    records += change.Metadata.InputUnitsConsumed;
+                    foreach (IntentStage stage in change.IntentStages)
+                    {
+                        entities += stage.EntityCount;
+                        physicalities += stage.PhysicalityCount;
+                        attestations += stage.AttestationCount;
+                    }
+                    yield return IngestBatchPipeline.BindFileLabel(SourceArtifactProvenance.Bind(change, generationId), label);
                 }
-                yield return IngestBatchPipeline.BindFileLabel(SourceArtifactProvenance.Bind(change, generationId), label);
             }
         }
         finally
@@ -568,6 +589,7 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
         } while (changed);
         var pending = resolved.Bindings.Where(binding => !unavailable.Contains(binding.ArtifactId))
             .ToDictionary(static binding => binding.ArtifactId);
+        var composedFiles = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, OrderedCompositionComponent>();
         int level = 0;
         while (pending.Count > 0)
         {
@@ -588,6 +610,7 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
                 yield return change;
             foreach (ResolvedSourceArtifact binding in ready) pending.Remove(binding.ArtifactId);
         }
+        yield return await BuildSourceTrunkAsync(context, resolved, unavailable, composedFiles, ct).ConfigureAwait(false);
         if (_executionErrors.Count > 0)
         {
             await foreach (SubstrateChange barrier in ApplyBarrierAsync(
@@ -612,7 +635,55 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
                 _executors[binding.ArtifactId], resolved.GenerationId, binding.Dependencies);
             await foreach (SubstrateChange change in executor.DecomposeAsync(context, options, token).ConfigureAwait(false))
                 yield return change;
+            foreach ((Hash128 head, OrderedCompositionComponent file) in executor.Files)
+                composedFiles[head] = file;
         }
+    }
+
+    /// <summary>
+    /// The source trunk: [witness, every file node in manifest order]. A file node's
+    /// trajectory holds its metadata tree and every content the file states, so containment
+    /// climbs from any content to the file and the source that witnessed it. A file this run
+    /// composed is known in process; a file completed by an earlier run is found by its
+    /// metadata head, so a resumed generation composes the same trunk.
+    /// </summary>
+    private async Task<SubstrateChange> BuildSourceTrunkAsync(IDecomposerContext context,
+        ResolvedSourceGeneration resolved, IReadOnlySet<Hash128> unavailable,
+        IReadOnlyDictionary<Hash128, OrderedCompositionComponent> composed, CancellationToken ct)
+    {
+        var heads = new List<Hash128>();
+        foreach (ResolvedSourceArtifact binding in resolved.Bindings)
+        {
+            if (unavailable.Contains(binding.ArtifactId)) continue;
+            IReadOnlyList<string> entries = _executors[binding.ArtifactId].ZipEntries;
+            if (binding.Artifact.RelativePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && entries.Count > 0)
+                heads.AddRange(entries.Select(entry => SourceArtifactProvenance.FileMetadataId(binding.Artifact, entry)));
+            else
+                heads.Add(SourceArtifactProvenance.FileMetadataId(binding.Artifact));
+        }
+        Hash128[] earlier = heads.Where(head => !composed.ContainsKey(head)).ToArray();
+        IReadOnlyDictionary<Hash128, OrderedCompositionComponent> resumed = earlier.Length == 0
+            ? new Dictionary<Hash128, OrderedCompositionComponent>()
+            : await context.Reader.TrunksByHeadAsync(earlier, EntityTypeRegistry.SourceFile, ct).ConfigureAwait(false);
+        // A file that stated no content is its metadata tree alone (one child collapses).
+        Hash128[] bare = earlier.Where(head => !resumed.ContainsKey(head)).ToArray();
+        IReadOnlyDictionary<Hash128, OrderedCompositionComponent> admitted = bare.Length == 0
+            ? new Dictionary<Hash128, OrderedCompositionComponent>()
+            : await context.Reader.CompositionComponentsAsync(bare, ct).ConfigureAwait(false);
+        OrderedCompositionComponent File(Hash128 head) =>
+            composed.TryGetValue(head, out OrderedCompositionComponent file) ? file
+            : resumed.TryGetValue(head, out file) ? file
+            : admitted.TryGetValue(head, out file) ? file
+            : throw new InvalidDataException($"File {head} of {SourceName} has no admitted trunk.");
+        var builder = new SubstrateChangeBuilder(SourceId, $"cookbook/{Hex(resolved.GenerationId)}/source-trunk", null);
+        OrderedCompositionComponent witness = SourceWitness.StageComponent(builder, _recipe.Authority, _recipe.Release);
+        if (witness.Id != SourceId)
+            throw new InvalidDataException($"{SourceName} is witnessed by {SourceId}, not its [authority, release].");
+        OrderedCompositionComponent[] members = heads.Select(File).Prepend(witness).ToArray();
+        Span<OrderedCompositionResult> trunk = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(builder.ContentStage,
+            [new OrderedCompositionRequest(members, EntityTypeRegistry.Id("Source"), SourceId, 0)], trunk);
+        return builder.Build() with { CountsAsUnit = false };
     }
 
     private static string Hex(Hash128 id) => Convert.ToHexStringLower(id.ToBytes());
