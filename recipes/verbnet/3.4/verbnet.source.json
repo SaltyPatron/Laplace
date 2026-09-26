@@ -1,0 +1,65 @@
+{
+  "authority": "VerbNet",
+  "release": "3.4",
+  "sourceName": "VerbNet",
+  "trustClass": "AcademicCurated",
+  "layerOrder": 3,
+  "selected": true,
+  "root": "/vault/Data/VerbNet/verbnet-master",
+  "aliases": [
+    "verbnet-recipe"
+  ],
+  "artifacts": [
+    {
+      "selector": "verbnet3.4/*.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "VerbNet/vn_class-3",
+      "recipePath": "vn-class.recipe.json",
+      "recordDepth": 0
+    },
+    {
+      "selector": "verbnet3.4/*.dtd",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Format declaration of the class files."
+    },
+    {
+      "selector": "verbnet3.4/*.xsd",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Format declaration of the class files."
+    },
+    {
+      "selector": "vn-gl/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "The Generative Lexicon analysis of the classes is its own witness (verbnet-gl.source.json)."
+    },
+    {
+      "selector": "verbnet-test/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "The development working copy of the classes, not the 3.4 release."
+    },
+    {
+      "selector": "api/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "The reference Python API."
+    },
+    {
+      "selector": "README.md",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Documentation."
+    },
+    {
+      "selector": ".gitignore",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Repository packaging."
+    }
+  ]
+}

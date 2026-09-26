@@ -370,8 +370,14 @@ canonical = "UcdClassifier"
 [[type]]
 canonical = "Utf8Role"
 
+# A VerbNet class is the composition of its identifier's pieces: run-51.3.2 is
+# [run, 51, 3, 2] and its subclass run-51.3.2-1 is [run, 51, 3, 2, 1].
 [[type]]
 canonical = "VerbNet_Class"
+
+# A class's syntactic frame: [class, syntax].
+[[type]]
+canonical = "VerbNet_Frame"
 
 [[type]]
 canonical = "VerbNet_Member"
@@ -379,8 +385,24 @@ canonical = "VerbNet_Member"
 [[type]]
 canonical = "VerbNet_Predicate"
 
+# One argument of a VerbNet predicate: [type, value] (ThemRole Theme, Event e1).
+[[type]]
+canonical = "VerbNet_Predicate_Argument"
+
+# A selectional or syntactic restriction: [sign, type], or a group [logic, restrictions].
+[[type]]
+canonical = "VerbNet_Restriction"
+
 [[type]]
 canonical = "VerbNet_Role"
+
+# A frame's syntax: the ordered composition of its slots.
+[[type]]
+canonical = "VerbNet_Syntax"
+
+# One syntax slot: [category, value pieces, restrictions] (NP Theme, PREP to towards into).
+[[type]]
+canonical = "VerbNet_Syntax_Slot"
 
 [[type]]
 canonical = "Video"
@@ -402,6 +424,11 @@ canonical = "WordNetSynset"
 
 [[type]]
 canonical = "WordNet_Sense"
+
+# A WordNet sense key decomposed: [lemma, ss_type, lex_filenum, lex_id(, head, head_id)]
+# (amble%2:38:00 is [amble, 2, 38, 00]).
+[[type]]
+canonical = "WordNet_Sense_Key"
 
 [[type]]
 canonical = "WordNet_Synset"

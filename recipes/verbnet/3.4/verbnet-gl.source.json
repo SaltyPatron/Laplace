@@ -1,0 +1,30 @@
+{
+  "authority": "VerbNet",
+  "release": "3.4",
+  "sourceName": "VerbNet-GL",
+  "sourceId": "b61cde8648015f3735bd08373b1ef31d",
+  "trustClass": "AcademicCurated",
+  "layerOrder": 3,
+  "selected": true,
+  "root": "/vault/Data/VerbNet/verbnet-master/vn-gl",
+  "aliases": [
+    "verbnet-gl"
+  ],
+  "artifacts": [
+    {
+      "selector": "*.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "VerbNet/vn_class-3",
+      "recipePath": "vn-class.recipe.json",
+      "recordDepth": 0
+    },
+    {
+      "selector": "*.xml~",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Editor backup copies of two class files."
+    }
+  ]
+}
