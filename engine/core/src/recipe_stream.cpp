@@ -152,6 +152,7 @@ struct route_rule {
         std::string identity;
         hash128_t relation{}, entity_type{};
         bool child_is_subject = false;   // child -rel-> parent (an LU EVOKES_FRAME its frame)
+        bool standalone = false;         // identity without the record subject (a lemma's lexeme)
         // Several identity parts: a FrameNet lexical unit is [frame, its lexemes'
         // text, UPOS]. Empty = the identity attribute.
         std::vector<identity_part> parts;
@@ -1248,7 +1249,7 @@ struct laplace_recipe_stream {
                 a.first == route.range_first || a.first == route.range_last;
             field(stage, path, a.second, bound, record.attributes);
         }
-        if (recipe_has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
+        if (recipe_has_text(record.text)) field(stage, route.prefix, recipe_element_text(record.text), false, record.attributes);
         const auto record_seen = with_ancestors(record, nullptr);
         for (const auto& child : record.children) lower_child(stage, route, child, child.name, &record_seen);
         if (route.parse.on) lower_parse(stage, route, record);
@@ -1348,7 +1349,8 @@ struct laplace_recipe_stream {
         out.id = result.id; std::memcpy(out.coord, result.coord, sizeof(out.coord)); out.tier = result.tier;
         return {true, out};
     }
-    // The child is its own subject: [record subject, its identity content], composed
+    // The child is its own subject: [record subject, its identity content] (a standalone
+    // child: its identity content alone), composed
     // by the native ordered-composition kernel. Its fields and descendants are claims
     // about it; the parent links to it through the declared relation.
     void lower_child_subject(intent_stage_t* stage, const route_rule& route, const node& child,
@@ -1363,7 +1365,7 @@ struct laplace_recipe_stream {
             part.tier = c.tier; part.atom = c.atom; part.has_atom = c.tier == 0;
             parts.push_back(part);
         };
-        add_part(record_subject_form);
+        if (!rule.standalone) add_part(record_subject_form);
         if (rule.parts.empty()) {
             const std::string key = child.get(rule.identity);
             if (key.empty()) throw std::runtime_error("child subject has no identity value: " + path);
@@ -1398,7 +1400,7 @@ struct laplace_recipe_stream {
             if (a.first == rule.identity) continue;
             field(stage, prefix + "/@" + a.first, a.second, false, seen);
         }
-        if (recipe_has_text(child.text)) field(stage, prefix, child.text, false, seen);
+        if (recipe_has_text(child.text)) field(stage, prefix, recipe_element_text(child.text), false, seen);
         for (const auto& grandchild : child.children)
             lower_child(stage, route, grandchild, path + "/" + grandchild.name, &seen);
         for (size_t k = first; k < facts.size(); ++k)
@@ -1462,7 +1464,7 @@ struct laplace_recipe_stream {
         const auto seen = with_ancestors(child, ancestors);
         for (const auto& a : child.attributes)
             field(stage, chosen + "/@" + a.first, a.second, false, seen);
-        if (recipe_has_text(child.text)) field(stage, chosen, child.text, false, seen);
+        if (recipe_has_text(child.text)) field(stage, chosen, recipe_element_text(child.text), false, seen);
         for (const auto& grandchild : child.children)
             lower_child(stage, route, grandchild, path + "/" + grandchild.name, &seen);
     }
@@ -1719,8 +1721,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     rule.relation = r.hash();
                     rule.entity_type = r.hash();
                     const uint32_t direction = r.number();
-                    if (direction > 1) throw std::runtime_error("invalid child subject direction");
-                    rule.child_is_subject = direction != 0;
+                    if (direction > 3) throw std::runtime_error("invalid child subject direction");
+                    rule.child_is_subject = (direction & 1u) != 0;
+                    rule.standalone = (direction & 2u) != 0;
                     read_parts(rule.parts, path);
                     if (path.empty() || rule.identity.empty() || !route.children.count(path))
                         throw std::runtime_error("child subject names no declared child path");

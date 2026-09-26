@@ -259,7 +259,10 @@ public sealed record SourceChildSubject(
     // The link runs child -> parent (a lexical unit EVOKES_FRAME its frame).
     bool ChildIsSubject = false,
     // Several identity parts instead of IdentityField: [record subject, part...].
-    IReadOnlyList<SourceIdentityPart>? IdentityParts = null);
+    IReadOnlyList<SourceIdentityPart>? IdentityParts = null,
+    // The child exists apart from the record (a lemma's lexeme is the lexeme anywhere):
+    // its identity is its own parts, without the record subject.
+    bool Standalone = false);
 
 /// <summary>
 /// One part of a composed child identity: a child-relative path ("lexeme/@name", "@POS")

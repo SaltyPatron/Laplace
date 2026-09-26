@@ -351,7 +351,7 @@ public static class NativeRecipeCompiler
                     WriteHash(writer, child.ParentRelation is null
                         ? Hash128.Zero : RelationTypeRegistry.Resolve(child.ParentRelation).Id);
                     WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
-                    writer.Write(child.ChildIsSubject ? 1u : 0u);
+                    writer.Write((child.ChildIsSubject ? 1u : 0u) | (child.Standalone ? 2u : 0u));
                     WriteParts(writer, child.IdentityParts);
                 }
                 writer.Write(checked((uint)(route.ConditionalPrefixes?.Count ?? 0)));

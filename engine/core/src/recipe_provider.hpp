@@ -56,6 +56,15 @@ inline bool recipe_has_text(std::string_view text) {
     return text.find_first_not_of(" \r\n\t") != std::string_view::npos;
 }
 
+// An element's character data as a field value: the indentation around it is the
+// document's layout, not content ("\n    Armistice day\n   " is "Armistice day").
+inline std::string recipe_element_text(std::string_view text) {
+    const size_t first = text.find_first_not_of(" \r\n\t");
+    if (first == std::string_view::npos) return {};
+    const size_t last = text.find_last_not_of(" \r\n\t");
+    return std::string(text.substr(first, last - first + 1));
+}
+
 // What a provider reports. Hierarchical syntaxes also report the scope one level
 // above the record depth (a WN-LMF Lexicon, a UCD group): opened once its own
 // attributes are complete, closed after its last record. Values arrive as written.
