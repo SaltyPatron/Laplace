@@ -60,8 +60,10 @@ public static class NativeRecipeCompiler
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
         bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
+                || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
-            || recipe.Fields.Any(static f => f.ObjectScopedToRecord);
+            || recipe.Fields.Any(static f => f.ObjectScopedToRecord || f.ObjectScopePath is not null
+                || f.ObjectIsRecordSubject || f.SubjectMode == SourceSubjectMode.Span);
         uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
@@ -207,7 +209,14 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.QualifierFamily);
                 WriteText(writer, field.QualifierField);
             }
-            if (version >= Rcp8) writer.Write(field.ObjectScopedToRecord ? 1u : 0u);
+            if (version >= Rcp8)
+            {
+                writer.Write(field.ObjectScopedToRecord ? 1u : 0u);
+                WriteText(writer, field.ObjectScopePath);
+                writer.Write(field.ObjectIsRecordSubject ? 1u : 0u);
+                WriteText(writer, field.SpanStartField);
+                WriteText(writer, field.SpanEndField);
+            }
         }
 
         if (version >= Rcp4)
@@ -338,6 +347,14 @@ public static class NativeRecipeCompiler
                     WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
                     writer.Write(child.ChildIsSubject ? 1u : 0u);
                     WriteParts(writer, child.IdentityParts);
+                }
+                writer.Write(checked((uint)(route.ConditionalPrefixes?.Count ?? 0)));
+                foreach (SourceConditionalPrefix conditional in route.ConditionalPrefixes ?? [])
+                {
+                    WriteText(writer, conditional.ChildPath);
+                    WriteText(writer, conditional.Field);
+                    WriteText(writer, conditional.Value);
+                    WriteText(writer, conditional.Prefix);
                 }
             }
         }

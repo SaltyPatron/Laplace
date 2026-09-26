@@ -109,7 +109,16 @@ public sealed record SourceRecipeField(
     string? QualifierField = null,
     // The object is [record subject, value]: the same identity the record's child
     // subject named value has (a FrameNet requiresFE names an FE of the same frame).
-    bool ObjectScopedToRecord = false);
+    bool ObjectScopedToRecord = false,
+    // The object is [content(record attribute ObjectScopePath), value] typed
+    // ObjectEntityType ([@frame, FE] in a lexical-unit file).
+    string? ObjectScopePath = null,
+    // The object is the record's subject (an annotated target word FORM_OF its LU).
+    bool ObjectIsRecordSubject = false,
+    // SubjectMode Span: attributes naming the inclusive codepoint offsets of the span
+    // of TrunkField's text that is the subject.
+    string? SpanStartField = null,
+    string? SpanEndField = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -120,6 +129,8 @@ public enum SourceSubjectMode
     Value = 1,
     /// <summary>The group trunk (for example a sentence's text) is the subject.</summary>
     Trunk = 2,
+    /// <summary>A span of the trunk text between two offsets is the subject.</summary>
+    Span = 3,
 }
 
 /// <summary>How a field carrying several items is split.</summary>
@@ -219,7 +230,19 @@ public sealed record SourceRecipeProviderRoute(
     // Nested elements that are their own subjects (RCP8): each is the ordered
     // composition [record subject, content(identity attribute)].
     IReadOnlyList<SourceChildSubject>? ChildSubjects = null,
-    IReadOnlyList<SourceElementComposition>? ElementCompositions = null);
+    IReadOnlyList<SourceElementComposition>? ElementCompositions = null,
+    IReadOnlyList<SourceConditionalPrefix>? ConditionalPrefixes = null);
+
+/// <summary>
+/// A child path's field prefix chosen by an attribute condition over the element and its
+/// ancestors, whose attributes are also addressable qualified ("layer@name") and whose
+/// text children as "name()" ("text()").
+/// </summary>
+public sealed record SourceConditionalPrefix(
+    string ChildPath,
+    string Field,
+    string Value,
+    string Prefix);
 
 /// <summary>
 /// A nested element that is its own subject: a FrameNet frame element is the

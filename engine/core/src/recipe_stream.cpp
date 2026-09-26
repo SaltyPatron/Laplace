@@ -84,6 +84,13 @@ struct field_rule {
     // identity a child subject of that record has (a FrameNet requiresFE names an FE
     // of the same frame).
     bool object_record_scoped = false;
+    // RCP8: scope the object by a record attribute instead of the record subject
+    // ([@frame, FE] from a lexical-unit file); or make the object the record subject.
+    std::string object_scope;
+    bool object_record_subject = false;
+    // RCP8 subject mode 3 (span): the subject is the content of trunk_field's text
+    // between the span_start and span_end attributes (inclusive codepoint offsets).
+    std::string span_start, span_end;
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
@@ -130,6 +137,10 @@ struct route_rule {
         std::string observation;
     };
     std::unordered_map<std::string, element_rule> elements;
+    // RCP8: a child path's field prefix chosen by an attribute condition over the
+    // element and its ancestors (a FrameNet label under layer@name="FE").
+    struct conditional_prefix { std::string field, value, prefix; };
+    std::unordered_map<std::string, std::vector<conditional_prefix>> conditional_prefixes;
     struct child_subject_rule {
         std::string identity;
         hash128_t relation{}, entity_type{};
@@ -416,6 +427,57 @@ struct laplace_recipe_stream {
     }
     hash128_t content(intent_stage_t* stage, const std::string& text) {
         return compose_content(stage, text).id;
+    }
+    // The content of trunk_field's text between two inclusive codepoint offsets; zero
+    // when the offsets are absent or do not address the text (a null instantiation).
+    hash128_t span_subject(intent_stage_t* stage, const field_rule& rule,
+                           const std::map<std::string, std::string>& attributes) {
+        const auto text = attributes.find(rule.trunk_field);
+        const auto a = attributes.find(rule.span_start), b = attributes.find(rule.span_end);
+        if (text == attributes.end() || a == attributes.end() || b == attributes.end()) return {};
+        auto number = [](const std::string& v, long& out) {
+            if (v.empty() || v.find_first_not_of("0123456789") != std::string::npos || v.size() > 9) return false;
+            out = std::stol(v); return true;
+        };
+        long first = 0, last = 0;
+        if (!number(a->second, first) || !number(b->second, last) || last < first) return {};
+        // Codepoint offsets into UTF-8.
+        const std::string& t = text->second;
+        size_t begin = std::string::npos, end = std::string::npos;
+        long cp = 0;
+        for (size_t i = 0; i <= t.size(); ) {
+            if (cp == first && begin == std::string::npos) begin = i;
+            if (cp == last + 1) { end = i; break; }
+            if (i == t.size()) break;
+            const unsigned char c = static_cast<unsigned char>(t[i]);
+            i += c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : 4;
+            ++cp;
+        }
+        if (begin == std::string::npos || end == std::string::npos || end <= begin) return {};
+        const std::string span = t.substr(begin, end - begin);
+        if (!recipe_has_text(span)) return {};
+        return content(stage, span);
+    }
+    // [content(record attribute object_scope), value], typed as the field's object type.
+    hash128_t scoped_by_attribute(intent_stage_t* stage, const field_rule& rule, const std::string& value) {
+        const std::string key = rule.object_scope.rfind("@", 0) == 0 ? rule.object_scope.substr(1) : rule.object_scope;
+        if (!scope_attributes) throw std::runtime_error("scoped object outside a record");
+        const auto scope = scope_attributes->find(key);
+        if (scope == scope_attributes->end() || scope->second.empty())
+            throw std::runtime_error("object scope attribute is absent: " + rule.object_scope);
+        const content_form a = compose_content(stage, scope->second), b = compose_content(stage, value);
+        laplace_ordered_component_t parts[2]{};
+        parts[0].id = a.id; std::memcpy(parts[0].coord, a.coord, sizeof(parts[0].coord));
+        parts[0].tier = a.tier; parts[0].atom = a.atom; parts[0].has_atom = a.tier == 0;
+        parts[1].id = b.id; std::memcpy(parts[1].coord, b.coord, sizeof(parts[1].coord));
+        parts[1].tier = b.tier; parts[1].atom = b.atom; parts[1].has_atom = b.tier == 0;
+        laplace_ordered_composition_request_t request{};
+        request.components = parts; request.component_count = 2;
+        request.type_id = rule.entity_type; request.source_id = current_witness;
+        request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "attribute-scoped object");
+        return result.id;
     }
     // [record subject, value]: the identity a child subject of this record named value has.
     hash128_t scoped_to_record(intent_stage_t* stage, const field_rule& rule, const std::string& value) {
@@ -996,8 +1058,19 @@ struct laplace_recipe_stream {
         if (!nonzero(relation)) throw std::runtime_error("grouped testimony has no relation");
         const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
         for (const auto& value : values) {
+            const hash128_t object = rule.object_record_subject ? subject
+                : !rule.object_scope.empty() ? scoped_by_attribute(stage, rule, value)
+                : hash128_t{};
+            const bool special_object = rule.object_record_subject || !rule.object_scope.empty();
             switch (rule.subject_mode) {
-            case 0: grouped_fact(rule, subject, relation, endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
+            case 3: {
+                const hash128_t span = span_subject(stage, rule, attributes);
+                if (!nonzero(span)) break;
+                grouped_fact(rule, span, relation, special_object ? object : endpoint(stage, rule, value, attributes),
+                             rank, flip, context_value, stage);
+                break;
+            }
+            case 0: grouped_fact(rule, subject, relation, special_object ? object : endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
             case 1: grouped_fact(rule, endpoint(stage, rule, value, attributes), relation, subject, rank, flip, context_value, stage); break;
             case 2: grouped_fact(rule, trunk(stage, rule, attributes), relation, endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
             default: throw std::runtime_error("unknown subject mode");
@@ -1247,6 +1320,12 @@ struct laplace_recipe_stream {
     static std::map<std::string, std::string> with_ancestors(
         const node& child, const std::map<std::string, std::string>* ancestors) {
         std::map<std::string, std::string> merged = child.attributes;
+        // Qualified keys never shadow ("layer@name" beside a label's own "name"), and a
+        // child element's character data is addressable as "<name>()" ("text()").
+        for (const auto& a : child.attributes) merged.emplace(child.name + "@" + a.first, a.second);
+        for (const auto& c : child.children)
+            if (c.attributes.empty() && c.children.empty() && recipe_has_text(c.text))
+                merged.emplace(c.name + "()", c.text);
         if (ancestors) for (const auto& a : *ancestors) merged.try_emplace(a.first, a.second);
         return merged;
     }
@@ -1255,9 +1334,18 @@ struct laplace_recipe_stream {
         auto prefix = route.children.find(path);
         if (prefix == route.children.end()) throw std::runtime_error("recipe has no child disposition: " + path);
         if (child.ns != route.ns) throw std::runtime_error("unaccounted nested structure: " + path);
+        std::string chosen = prefix->second;
+        const auto conditional = route.conditional_prefixes.find(path);
+        if (conditional != route.conditional_prefixes.end()) {
+            const auto seen_here = with_ancestors(child, ancestors);
+            for (const auto& c : conditional->second) {
+                const auto hit = seen_here.find(c.field);
+                if (hit != seen_here.end() && hit->second == c.value) { chosen = c.prefix; break; }
+            }
+        }
         // An empty prefix is a declared excluded subtree (packaging, or knowledge
         // another artifact states), never an undeclared structure.
-        if (prefix->second.empty() && !route.elements.count(path)) return;
+        if (chosen.empty() && !route.elements.count(path)) return;
         const auto composed = route.elements.find(path);
         if (composed != route.elements.end()) {
             const auto element = compose_element(stage, route, child, path, composed->second);
@@ -1280,8 +1368,8 @@ struct laplace_recipe_stream {
         }
         const auto seen = with_ancestors(child, ancestors);
         for (const auto& a : child.attributes)
-            field(stage, prefix->second + "/@" + a.first, a.second, false, seen);
-        if (recipe_has_text(child.text)) field(stage, prefix->second, child.text, false, seen);
+            field(stage, chosen + "/@" + a.first, a.second, false, seen);
+        if (recipe_has_text(child.text)) field(stage, chosen, child.text, false, seen);
         for (const auto& grandchild : child.children)
             lower_child(stage, route, grandchild, path + "/" + grandchild.name, &seen);
     }
@@ -1388,7 +1476,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 f.subject_mode = r.number(); f.pair_mode = r.number(); f.relation_resolver = r.number();
                 f.relation_field = r.text(); f.trunk_field = r.text(); f.pair_value_separator = r.text();
                 const uint32_t omit_equal = r.number(), once = r.number();
-                if (f.subject_mode > 2 || f.pair_mode > 3 || f.relation_resolver > 4 || omit_equal > 1 || once > 1)
+                if (f.subject_mode > 3 || f.pair_mode > 3 || f.relation_resolver > 4 || omit_equal > 1 || once > 1)
                     throw std::runtime_error("invalid grouped-field instruction at " + f.path);
                 f.omit_equal_subject = omit_equal != 0; f.group_once = once != 0;
                 if (((f.pair_mode != 0 && f.pair_mode != 3) || !f.relation_field.empty()) && f.relation_resolver == 0)
@@ -1418,6 +1506,13 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 const uint32_t scoped = r.number();
                 if (scoped > 1) throw std::runtime_error("invalid object-scope instruction at " + f.path);
                 f.object_record_scoped = scoped != 0;
+                f.object_scope = r.text();
+                const uint32_t record_subject = r.number();
+                if (record_subject > 1) throw std::runtime_error("invalid record-subject object at " + f.path);
+                f.object_record_subject = record_subject != 0;
+                f.span_start = r.text(); f.span_end = r.text();
+                if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))
+                    throw std::runtime_error("span subject needs trunk, start and end fields at " + f.path);
             }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
@@ -1536,6 +1631,15 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         throw std::runtime_error("child subject names no declared child path");
                     if (!route.child_subjects.emplace(std::move(path), std::move(rule)).second)
                         throw std::runtime_error("duplicate child subject instruction");
+                }
+                const uint32_t conditionals = r.number();
+                for (uint32_t k = 0; k < conditionals; ++k) {
+                    auto path = r.text();
+                    route_rule::conditional_prefix c;
+                    c.field = r.text(); c.value = r.text(); c.prefix = r.text();
+                    if (path.empty() || c.field.empty() || !route.children.count(path))
+                        throw std::runtime_error("conditional prefix names no declared child path: " + path);
+                    route.conditional_prefixes[path].push_back(std::move(c));
                 }
                 if (route.kind == 4 && route.subject_parts.empty())
                     throw std::runtime_error("composition subject declares no parts at " + route.name);

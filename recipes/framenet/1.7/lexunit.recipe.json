@@ -81,6 +81,189 @@
       "propertyName": "groupRealizationTotal",
       "valueKind": "Integer",
       "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "SubCorpus/@name",
+      "propertyName": "subCorpus",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Sentence/@corpID",
+      "propertyName": "sentencecorpID",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Sentence/@docID",
+      "propertyName": "sentencedocID",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Sentence/@sentNo",
+      "propertyName": "sentencesentNo",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Sentence/@paragNo",
+      "propertyName": "sentenceparagNo",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Sentence/@aPos",
+      "propertyName": "sentenceaPos",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "Sentence/@ID",
+      "propertyName": "sentenceID",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "SentenceText",
+      "propertyName": "sentenceText",
+      "valueKind": "Text",
+      "disposition": "Content"
+    },
+    {
+      "syntaxPath": "AnnotationSet/@cDate",
+      "propertyName": "annotationSetcDate",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "AnnotationSet/@status",
+      "propertyName": "annotationSetstatus",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "AnnotationSet/@ID",
+      "propertyName": "annotationSetID",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "AnnotationSet/@cBy",
+      "propertyName": "annotationSetcBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Layer/@rank",
+      "propertyName": "layerRank",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Layer/@name",
+      "propertyName": "layerName",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@name",
+      "propertyName": "filledRole",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_SEMANTIC_ROLE",
+      "subjectMode": "Span",
+      "trunkField": "text()",
+      "spanStartField": "start",
+      "spanEndField": "end",
+      "objectScopePath": "@frame",
+      "objectEntityType": "FrameNet_FE",
+      "contextField": "text()"
+    },
+    {
+      "syntaxPath": "FELabel/@start",
+      "propertyName": "feLabelstart",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@end",
+      "propertyName": "feLabelend",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@cBy",
+      "propertyName": "feLabelcBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@feID",
+      "propertyName": "feLabelfeID",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@itype",
+      "propertyName": "feLabelitype",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@bgColor",
+      "propertyName": "feLabelbgColor",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FELabel/@fgColor",
+      "propertyName": "feLabelfgColor",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "TargetLabel/@name",
+      "propertyName": "target",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "FORM_OF",
+      "subjectMode": "Span",
+      "trunkField": "text()",
+      "spanStartField": "start",
+      "spanEndField": "end",
+      "objectIsRecordSubject": true,
+      "contextField": "text()"
+    },
+    {
+      "syntaxPath": "TargetLabel/@start",
+      "propertyName": "targetLabelstart",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "TargetLabel/@end",
+      "propertyName": "targetLabelend",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "TargetLabel/@cBy",
+      "propertyName": "targetLabelcBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "TargetLabel/@bgColor",
+      "propertyName": "targetLabelbgColor",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "TargetLabel/@fgColor",
+      "propertyName": "targetLabelfgColor",
+      "valueKind": "Text",
+      "disposition": "Excluded"
     }
   ],
   "providerRoutes": [
@@ -111,7 +294,7 @@
         "header": "",
         "definition": "",
         "lexeme": "",
-        "subCorpus": "",
+        "subCorpus": "SubCorpus",
         "valences": "Valences",
         "valences/FERealization": "FERealization",
         "valences/FERealization/FE": "",
@@ -120,7 +303,12 @@
         "valences/FEGroupRealization": "FEGroupRealization",
         "valences/FEGroupRealization/FE": "",
         "valences/FEGroupRealization/pattern": "Pattern",
-        "valences/FEGroupRealization/pattern/valenceUnit": "ValenceUnit"
+        "valences/FEGroupRealization/pattern/valenceUnit": "ValenceUnit",
+        "subCorpus/sentence": "Sentence",
+        "subCorpus/sentence/text": "SentenceText",
+        "subCorpus/sentence/annotationSet": "AnnotationSet",
+        "subCorpus/sentence/annotationSet/layer": "Layer",
+        "subCorpus/sentence/annotationSet/layer/label": ""
       },
       "elementCompositions": [
         {
@@ -180,6 +368,20 @@
               "children": "valenceUnit"
             }
           ]
+        }
+      ],
+      "conditionalPrefixes": [
+        {
+          "childPath": "subCorpus/sentence/annotationSet/layer/label",
+          "field": "layer@name",
+          "value": "FE",
+          "prefix": "FELabel"
+        },
+        {
+          "childPath": "subCorpus/sentence/annotationSet/layer/label",
+          "field": "layer@name",
+          "value": "Target",
+          "prefix": "TargetLabel"
         }
       ]
     }
