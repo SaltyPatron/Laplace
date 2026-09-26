@@ -1,0 +1,61 @@
+{
+  "authority": "CILI",
+  "release": "a895d7ecb18019dda3443f98901e59d81ce8722b",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "CILI/sense-mapping.tab",
+  "fields": [
+    {
+      "syntaxPath": "record/@sensekey",
+      "propertyName": "senseKey",
+      "valueKind": "Identity",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@offset",
+      "propertyName": "synsetOffset",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "IS_SENSE_OF",
+      "contextField": "version"
+    },
+    {
+      "syntaxPath": "record/@version",
+      "propertyName": "version",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "Composition",
+        "identityField": "sensekey",
+        "entityType": "WordNet_Sense_Key",
+        "identityParts": [
+          {
+            "path": "@sensekey",
+            "splitLast": "%:",
+            "side": "Each",
+            "spaceMark": "_"
+          }
+        ]
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "offset",
+      "sensekey"
+    ],
+    "separator": "\t",
+    "commentPrefix": "",
+    "trimFields": true,
+    "minimumColumns": 2,
+    "allowTrailingEmptyColumn": false
+  }
+}

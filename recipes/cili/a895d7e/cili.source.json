@@ -121,9 +121,18 @@
     },
     {
       "selector": "extracted/sense-mappings/*.tab",
-      "disposition": "unsupported-with-why-not",
-      "required": false,
-      "reason": "Per-release WordNet sense key to synset offset tables (UPC TALP). They bind a sense key to a synset of that release, not to an ILI; lowered with the WordNet sense-key consumers (VerbNet, SemLink, PropBank)."
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "CILI/sense-mapping.tab",
+      "recipePath": "sense-mapping.recipe.json",
+      "configuration": {
+        "constants": {
+          "version": {
+            "pathPattern": "(pwn\\d+)\\.tab$"
+          }
+        }
+      }
     },
     {
       "selector": "extracted/sense-mappings/Makefile",
