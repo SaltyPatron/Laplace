@@ -67,6 +67,12 @@
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Build tooling shipped inside one treebank."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/merge/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Tooling that restores the BCCWJ word forms from the separately licensed BCCWJ core file, which the release does not ship; the pickles are its lookup tables."
     }
   ]
 }
