@@ -1,0 +1,187 @@
+{
+  "authority": "FrameNet",
+  "release": "1.7",
+  "provider": "laplace/native-streaming-xml-recipe/v1",
+  "syntax": "FrameNet/lexUnit-1.7",
+  "fields": [
+    {
+      "syntaxPath": "LexUnit/@name",
+      "propertyName": "lexicalUnitName",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexUnit/@POS",
+      "propertyName": "lexicalUnitPos",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@frame",
+      "propertyName": "frameName",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@frameID",
+      "propertyName": "frameId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexUnit/@ID",
+      "propertyName": "lexicalUnitId",
+      "valueKind": "Identity",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "LexUnit/@status",
+      "propertyName": "status",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@totalAnnotated",
+      "propertyName": "totalAnnotated",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@xsi:schemaLocation",
+      "propertyName": "schemaLocation",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@cBy",
+      "propertyName": "createdBy",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@cDate",
+      "propertyName": "createdDate",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "LexUnit/@incorporatedFE",
+      "propertyName": "incorporatedFrameElement",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FERealization/@total",
+      "propertyName": "realizationTotal",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "FEGroupRealization/@total",
+      "propertyName": "groupRealizationTotal",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "lexUnit",
+      "namespaceUri": "http://framenet.icsi.berkeley.edu",
+      "fieldPrefix": "LexUnit",
+      "subject": {
+        "kind": "Composition",
+        "identityField": "name",
+        "entityType": "FrameNet_LU",
+        "identityParts": [
+          {
+            "path": "@frame"
+          },
+          {
+            "path": "lexeme/@name",
+            "join": " "
+          },
+          {
+            "path": "@POS",
+            "vocabulary": "pos/framenet"
+          }
+        ]
+      },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "header": "",
+        "definition": "",
+        "lexeme": "",
+        "subCorpus": "",
+        "valences": "Valences",
+        "valences/FERealization": "FERealization",
+        "valences/FERealization/FE": "",
+        "valences/FERealization/pattern": "Pattern",
+        "valences/FERealization/pattern/valenceUnit": "ValenceUnit",
+        "valences/FEGroupRealization": "FEGroupRealization",
+        "valences/FEGroupRealization/FE": "",
+        "valences/FEGroupRealization/pattern": "Pattern",
+        "valences/FEGroupRealization/pattern/valenceUnit": "ValenceUnit"
+      },
+      "elementCompositions": [
+        {
+          "path": "valences/FERealization/pattern/valenceUnit",
+          "entityType": "FrameNet_Valence_Unit",
+          "parts": [
+            {
+              "path": "@FE",
+              "scopePath": "@frame",
+              "scopeEntityType": "FrameNet_FE"
+            },
+            {
+              "path": "@GF"
+            },
+            {
+              "path": "@PT"
+            }
+          ]
+        },
+        {
+          "path": "valences/FERealization/pattern",
+          "entityType": "FrameNet_Valence_Pattern",
+          "relation": "HAS_VALENCE_PATTERN",
+          "observationField": "total",
+          "parts": [
+            {
+              "path": "",
+              "children": "valenceUnit"
+            }
+          ]
+        },
+        {
+          "path": "valences/FEGroupRealization/pattern/valenceUnit",
+          "entityType": "FrameNet_Valence_Unit",
+          "parts": [
+            {
+              "path": "@FE",
+              "scopePath": "@frame",
+              "scopeEntityType": "FrameNet_FE"
+            },
+            {
+              "path": "@GF"
+            },
+            {
+              "path": "@PT"
+            }
+          ]
+        },
+        {
+          "path": "valences/FEGroupRealization/pattern",
+          "entityType": "FrameNet_Valence_Pattern",
+          "relation": "HAS_VALENCE_PATTERN",
+          "observationField": "total",
+          "parts": [
+            {
+              "path": "",
+              "children": "valenceUnit"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

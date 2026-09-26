@@ -59,7 +59,8 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static f => f.ObjectLiteral is not null || f.ContextLiteral is not null
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
-        bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 })
+        bool childSubjects = recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
+                || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
             || recipe.Fields.Any(static f => f.ObjectScopedToRecord);
         uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
@@ -313,6 +314,17 @@ public static class NativeRecipeCompiler
             }
             if (version >= Rcp8)
             {
+                WriteParts(writer, route.Subject.IdentityParts);
+                writer.Write(checked((uint)(route.ElementCompositions?.Count ?? 0)));
+                foreach (SourceElementComposition element in route.ElementCompositions ?? [])
+                {
+                    WriteText(writer, element.Path);
+                    WriteParts(writer, element.Parts);
+                    WriteHash(writer, EntityTypeRegistry.Id(element.EntityType));
+                    WriteHash(writer, element.Relation is null
+                        ? Hash128.Zero : RelationTypeRegistry.Resolve(element.Relation).Id);
+                    WriteText(writer, element.ObservationField);
+                }
                 writer.Write(checked((uint)(route.ChildSubjects?.Count ?? 0)));
                 foreach (SourceChildSubject child in route.ChildSubjects ?? [])
                 {
@@ -325,13 +337,7 @@ public static class NativeRecipeCompiler
                         ? Hash128.Zero : RelationTypeRegistry.Resolve(child.ParentRelation).Id);
                     WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
                     writer.Write(child.ChildIsSubject ? 1u : 0u);
-                    writer.Write(checked((uint)(child.IdentityParts?.Count ?? 0)));
-                    foreach (SourceIdentityPart part in child.IdentityParts ?? [])
-                    {
-                        WriteText(writer, part.Path);
-                        WriteText(writer, part.Vocabulary);
-                        WriteText(writer, part.Join);
-                    }
+                    WriteParts(writer, child.IdentityParts);
                 }
             }
         }
@@ -358,6 +364,21 @@ public static class NativeRecipeCompiler
 
         writer.Flush();
         return image.ToArray();
+    }
+
+    private static void WriteParts(BinaryWriter writer, IReadOnlyList<SourceIdentityPart>? parts)
+    {
+        writer.Write(checked((uint)(parts?.Count ?? 0)));
+        foreach (SourceIdentityPart part in parts ?? [])
+        {
+            WriteText(writer, part.Path);
+            WriteText(writer, part.Vocabulary);
+            WriteText(writer, part.Join);
+            WriteText(writer, part.ScopePath);
+            WriteHash(writer, part.ScopeEntityType is null
+                ? Hash128.Zero : EntityTypeRegistry.Id(part.ScopeEntityType));
+            WriteText(writer, part.Children);
+        }
     }
 
     private static void WriteText(BinaryWriter writer, string? value)

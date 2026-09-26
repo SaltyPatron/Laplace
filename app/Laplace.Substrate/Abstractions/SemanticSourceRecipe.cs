@@ -168,6 +168,9 @@ public enum SourceSubjectBindingKind
     // Canonical interval subject: singleton collapses to its codepoint; a true span
     // becomes one Range entity/physicality over the two canonical endpoints.
     CodepointInterval,
+    // The subject is the ordered composition of IdentityParts (RCP8): a FrameNet
+    // lexical-unit file's subject is [@frame, lexemes' text, UPOS].
+    Composition,
 }
 
 public sealed record SourceRecipeSubjectBinding(
@@ -178,7 +181,8 @@ public sealed record SourceRecipeSubjectBinding(
     string? EntityNamespace = null,
     string EntityType = "Recipe_Subject",
     string? SequenceSeparator = null,
-    string? IdentityTable = null);
+    string? IdentityTable = null,
+    IReadOnlyList<SourceIdentityPart>? IdentityParts = null);
 
 /// <summary>
 /// A source's own identifier table, collected from the artifact before lowering. A
@@ -214,7 +218,8 @@ public sealed record SourceRecipeProviderRoute(
     IReadOnlyList<string>? WitnessFields = null,
     // Nested elements that are their own subjects (RCP8): each is the ordered
     // composition [record subject, content(identity attribute)].
-    IReadOnlyList<SourceChildSubject>? ChildSubjects = null);
+    IReadOnlyList<SourceChildSubject>? ChildSubjects = null,
+    IReadOnlyList<SourceElementComposition>? ElementCompositions = null);
 
 /// <summary>
 /// A nested element that is its own subject: a FrameNet frame element is the
@@ -239,7 +244,26 @@ public sealed record SourceChildSubject(
 public sealed record SourceIdentityPart(
     string Path,
     string? Vocabulary = null,
-    string? Join = null);
+    string? Join = null,
+    // The part is [content(record attribute ScopePath), value], typed ScopeEntityType:
+    // a valence unit's FE is the frame's element [@frame, FE].
+    string? ScopePath = null,
+    string? ScopeEntityType = null,
+    // The part is the ordered compositions of the child elements of this name, each
+    // composed by its own element composition (a pattern's valence units).
+    string? Children = null);
+
+/// <summary>
+/// A nested element composed from its parts (RCP8) and, when Relation is declared,
+/// claimed from the record's subject with the element's ObservationField as games:
+/// "walk.v HAS_VALENCE_PATTERN [[Self_mover, Ext, NP], [Goal, Dep, PP[into]]]" x total.
+/// </summary>
+public sealed record SourceElementComposition(
+    string Path,
+    IReadOnlyList<SourceIdentityPart> Parts,
+    string EntityType,
+    string? Relation = null,
+    string? ObservationField = null);
 
 /// <summary>
 /// A grouped delimited record (a CoNLL-U sentence) lowered to its trunk's parse
