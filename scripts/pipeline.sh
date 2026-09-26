@@ -949,6 +949,12 @@ phase_api_env() {
   mkdir -p "$ops_log_dir"; chmod 2775 "$ops_log_dir" 2>/dev/null || true
   if grep -q '^LAPLACE_OPS_LOG_DIR=' "$env_file"; then sed -i "s|^LAPLACE_OPS_LOG_DIR=.*|LAPLACE_OPS_LOG_DIR=$ops_log_dir|" "$env_file"; else printf '\nLAPLACE_OPS_LOG_DIR=%s\n' "$ops_log_dir" >>"$env_file"; fi
   sed -i '/^LAPLACE_LOG_DIR=/d' "$env_file"
+  # Sandbox principal: an uncredentialed request acts as this workspace.
+  if [[ -n "${LAPLACE_AUTH_DEV_PRINCIPAL:-}" ]]; then
+    set_api_env LAPLACE_AUTH_DEV_PRINCIPAL "$LAPLACE_AUTH_DEV_PRINCIPAL"
+  else
+    sed -i '/^LAPLACE_AUTH_DEV_PRINCIPAL=/d' "$env_file"
+  fi
   if [[ -n "${LAPLACE_PUBLIC_BASE_URL:-}" ]]; then
     [[ "$LAPLACE_PUBLIC_BASE_URL" =~ ^https://[^/?#]+(:[0-9]+)?$ ]] || {
       echo "::error::LAPLACE_PUBLIC_BASE_URL must be an HTTPS origin without a path" >&2

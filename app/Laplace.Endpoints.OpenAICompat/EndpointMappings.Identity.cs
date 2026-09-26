@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -15,12 +16,13 @@ internal static class IdentityEndpoints
             .WithTags("identity")
             .Produces<AuthConfigResponse>();
 
-        app.MapGet("/v1/auth/me", (HttpContext context, BrowserAuthSettings settings) =>
+        app.MapGet("/v1/auth/me", (HttpContext context, BrowserAuthSettings settings, IOptions<LaplaceAuthOptions> auth) =>
         {
             var principal = context.User;
+            var devPrincipal = auth.Value.DevPrincipalActive ? auth.Value.DevPrincipal!.Trim() : null;
             if (!TryIdentity(principal, out var userId, out var tenantId))
                 return Results.Json(new AuthMeResponse(
-                    false, null, settings.Providers.Select(ProviderView).ToArray()));
+                    false, null, settings.Providers.Select(ProviderView).ToArray(), devPrincipal));
 
             return Results.Json(new AuthMeResponse(
                 true,
@@ -30,7 +32,7 @@ internal static class IdentityEndpoints
                     principal.FindFirstValue(ClaimTypes.Name),
                     principal.FindFirstValue(ClaimTypes.Email),
                     principal.FindFirstValue(LaplaceClaimTypes.Provider)),
-                settings.Providers.Select(ProviderView).ToArray()));
+                settings.Providers.Select(ProviderView).ToArray(), devPrincipal));
         })
         .WithTags("identity")
         .Produces<AuthMeResponse>();
@@ -156,8 +158,9 @@ internal static class IdentityEndpoints
     internal sealed record AuthConfigResponse(IReadOnlyList<AuthProviderView> Providers);
     internal sealed record AuthUserView(
         Guid Id, string TenantId, string? DisplayName, string? Email, string? Provider);
+    /// <param name="DevPrincipal">The sandbox workspace an uncredentialed request acts as, when configured.</param>
     internal sealed record AuthMeResponse(
-        bool Authenticated, AuthUserView? User, IReadOnlyList<AuthProviderView> Providers);
+        bool Authenticated, AuthUserView? User, IReadOnlyList<AuthProviderView> Providers, string? DevPrincipal = null);
     internal sealed record WebSessionsResponse(IReadOnlyList<WebSessionView> Sessions);
     internal sealed record ConversationSessionsResponse(IReadOnlyList<ConversationSessionView> Conversations);
 }

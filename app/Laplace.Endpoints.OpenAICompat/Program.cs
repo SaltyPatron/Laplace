@@ -95,6 +95,12 @@ builder.Services.AddOpenTelemetry()
 
 var app = builder.Build();
 
+var laplaceAuth = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Laplace.Endpoints.OpenAICompat.Auth.LaplaceAuthOptions>>().Value;
+if (laplaceAuth.DevPrincipalActive)
+    app.Logger.LogWarning(
+        "LAPLACE_AUTH_DEV_PRINCIPAL is set: requests without a credential act as workspace '{Workspace}' with operator authority.",
+        laplaceAuth.DevPrincipal!.Trim());
+
 var forwardedHeaders = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto

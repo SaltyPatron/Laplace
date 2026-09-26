@@ -27,6 +27,9 @@ declare -A vars=(
     # hart-server is the development deployment. Stripe remains fully active,
     # but execution is not paywalled unless a production deployment opts in.
     [LAPLACE_BILLING_BYPASS]="${LAPLACE_BILLING_BYPASS:-true}"
+    # hart-server is the developer's sandbox: uncredentialed requests act as this
+    # workspace. Leave empty on any host that serves other people.
+    [LAPLACE_AUTH_DEV_PRINCIPAL]="${LAPLACE_AUTH_DEV_PRINCIPAL:-local-dev}"
 )
 
 for name in "${!vars[@]}"; do

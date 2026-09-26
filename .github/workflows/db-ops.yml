@@ -21,6 +21,7 @@ env:
   PGUSER: laplace_admin
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
+  LAPLACE_AUTH_DEV_PRINCIPAL: ${{ vars.LAPLACE_AUTH_DEV_PRINCIPAL }}
 
 jobs:
   db:

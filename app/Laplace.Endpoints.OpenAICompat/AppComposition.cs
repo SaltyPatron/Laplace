@@ -137,6 +137,7 @@ internal static class AppComposition
             options.Mode = authMode;
             options.OperatorToken = FirstConfig(
                 "LAPLACE_OPERATOR_TOKEN", "LAPLACE_OPERATOR_SECRET", secretFile: "stripe.env");
+            options.DevPrincipal = FirstConfig("LAPLACE_AUTH_DEV_PRINCIPAL");
         });
         services.AddOptions<StripeBillingOptions>().Configure(options =>
         {

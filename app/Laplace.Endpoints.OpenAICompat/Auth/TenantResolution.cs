@@ -18,6 +18,13 @@ internal sealed class LaplaceAuthOptions
 {
     public string Mode { get; set; } = "header";
     public string? OperatorToken { get; set; }
+    /// <summary>
+    /// Sandbox principal (<c>LAPLACE_AUTH_DEV_PRINCIPAL</c>): a request presenting no
+    /// credential acts as this workspace with operator authority. Unset on any host
+    /// that serves people other than its developer.
+    /// </summary>
+    public string? DevPrincipal { get; set; }
+    public bool DevPrincipalActive => !string.IsNullOrWhiteSpace(DevPrincipal);
     public bool KeyMode => string.Equals(Mode, "key", StringComparison.OrdinalIgnoreCase);
     public bool IdentityMode => string.Equals(Mode, "identity", StringComparison.OrdinalIgnoreCase);
     public bool RequiresIdentity => !string.Equals(Mode, "header", StringComparison.OrdinalIgnoreCase);
@@ -40,7 +47,12 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
     private const string CacheKey = "laplace.tenant_context";
     private readonly IApiKeyService _apiKeys;
     private readonly HeaderTenantResolver _header = new();
-    public ApiKeyTenantResolver(IApiKeyService apiKeys) => _apiKeys = apiKeys;
+    private readonly string? _devPrincipal;
+    public ApiKeyTenantResolver(IApiKeyService apiKeys, IOptions<LaplaceAuthOptions>? auth = null)
+    {
+        _apiKeys = apiKeys;
+        _devPrincipal = auth?.Value.DevPrincipalActive == true ? auth.Value.DevPrincipal!.Trim() : null;
+    }
 
     public async ValueTask<TenantContext> ResolveAsync(HttpContext context, CancellationToken ct)
     {
@@ -92,6 +104,8 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
                     ["provider"] = principal.FindFirstValue(LaplaceClaimTypes.Provider) ?? "oidc"
                 });
             }
+            if (_devPrincipal is not null)
+                return new TenantContext(_devPrincipal, "dev", TenantContext.NoClaims);
             return await _header.ResolveAsync(context, ct);
         }
         var record = await _apiKeys.ValidateAsync(presented, ct);
@@ -143,6 +157,9 @@ internal sealed class ApiKeyEnforcementMiddleware
         var request = context.Request;
         var path = request.Path.Value ?? "";
         if (!IsUnder(path, "/v1") && !IsUnder(path, "/chess")) { await _next(context); return; }
+        // /chess is both an engine operation prefix and a web route; a request no
+        // chess operation matched is a page navigation served by the web fallback.
+        if (!IsUnder(path, "/v1") && !ChessOperation(context)) { await _next(context); return; }
         if (path.Equals("/v1/billing/webhooks/stripe", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(request.Method))
         {
             await _next(context); return;
@@ -163,7 +180,7 @@ internal sealed class ApiKeyEnforcementMiddleware
         {
             await Reject(context, "invalid_api_key", "The provided API key is unknown, malformed, or revoked."); return;
         }
-        if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser") && !PublicRead(request, path))
+        if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser" or "dev") && !PublicRead(request, path))
         {
             await Reject(context, "authentication_required", "Sign in or provide a Laplace API key for this workspace."); return;
         }
@@ -201,6 +218,10 @@ internal sealed class ApiKeyEnforcementMiddleware
         await _next(context);
     }
 
+    private static bool ChessOperation(HttpContext context) =>
+        context.GetEndpoint() is RouteEndpoint endpoint
+        && endpoint.RoutePattern.RawText?.StartsWith("/chess/", StringComparison.OrdinalIgnoreCase) == true;
+
     private static bool SameOrigin(HttpRequest request)
     {
         var origin = request.Headers.Origin.ToString();
@@ -224,6 +245,7 @@ internal static class OperatorAuth
     public const string TokenHeader = "X-Laplace-Operator-Token";
     public static bool IsAuthorized(HttpRequest request, LaplaceAuthOptions options)
     {
+        if (options.DevPrincipalActive) return true;
         if (string.IsNullOrWhiteSpace(options.OperatorToken)) return false;
         var presented = request.Headers[TokenHeader].ToString();
         if (string.IsNullOrWhiteSpace(presented)) return false;
