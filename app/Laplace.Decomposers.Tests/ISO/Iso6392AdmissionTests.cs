@@ -56,8 +56,8 @@ public sealed class Iso6392AdmissionTests
             await foreach (SubstrateChange change in new ISODecomposer().DecomposeAsync(
                 context, DecomposerOptions.Default).WithoutWriter())
             {
-                entities.AddRange(change.Entities);
-                attestations.AddRange(change.Attestations);
+                entities.AddRange(change.AllEntities());
+                attestations.AddRange(change.AllAttestations());
             }
 
             Hash128 eng = LanguageEntityId.FromIso639_3("eng");

@@ -4,7 +4,6 @@ using Laplace.Decomposers.Tests;
 using Laplace.Decomposers.WordNet;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.WordNet.Tests;
@@ -91,21 +90,14 @@ public sealed class WordNetDecomposerTests
 
         try
         {
-            var typeOf = new Dictionary<Hash128, Hash128>();
+            var typed = new HashSet<(Hash128 Id, Hash128 Type)>();
             var attestations = new List<AttestationRow>();
             var context = new FakeContext(root, new NullWriter());
             await foreach (var change in new WordNetDecomposer().DecomposeAsync(
                                context, DecomposerOptions.Default).WithoutWriter())
             {
-                foreach (var entity in change.Entities) typeOf[entity.Id] = entity.TypeId;
-                attestations.AddRange(change.Attestations);
-                if (change.IntentStages.IsDefaultOrEmpty) continue;
-                // Staged rows are the persisted intent surface.
-                var staged = CopyTupleParser.ParseEntities(change.IntentStages
-                    .Select(stage => stage.TupleBuffer(IntentStageTable.Entities)).ToList());
-                for (int i = 0; i < staged.Ids.Count; i++) typeOf[staged.Ids[i]] = staged.TypeIds[i];
-                CopyTupleParser.DecodeAttestations(change.IntentStages
-                    .Select(stage => stage.TupleBuffer(IntentStageTable.Attestations)).ToList(), attestations);
+                foreach (var entity in change.AllEntities()) typed.Add((entity.Id, entity.TypeId));
+                attestations.AddRange(change.AllAttestations());
             }
 
             Hash128 exactA = SenseAnchor.ExactId(uninhabited)!.Value;
@@ -116,9 +108,9 @@ public sealed class WordNetDecomposerTests
 
             Assert.NotEqual(exactA, exactB);
             Assert.Equal(compatibility, SenseAnchor.Id(uninhibited));
-            Assert.Equal(EntityTypeRegistry.WordNetSense, typeOf[exactA]);
-            Assert.Equal(EntityTypeRegistry.WordNetSense, typeOf[exactB]);
-            Assert.Equal(EntityTypeRegistry.SourceReference, typeOf[compatibility]);
+            Assert.Contains((exactA, EntityTypeRegistry.WordNetSense), typed);
+            Assert.Contains((exactB, EntityTypeRegistry.WordNetSense), typed);
+            Assert.Contains((compatibility, EntityTypeRegistry.SourceReference), typed);
             Assert.Contains(attestations, a =>
                 a.TypeId == correspondsTo
                 && ((a.SubjectId == compatibility && a.ObjectId == exactA)
@@ -159,12 +151,7 @@ public sealed class WordNetDecomposerTests
             var attestations = new List<AttestationRow>();
             await foreach (var change in new WordNetDecomposer().DecomposeAsync(
                                new FakeContext(root, new NullWriter()), DecomposerOptions.Default).WithoutWriter())
-            {
-                attestations.AddRange(change.Attestations);
-                if (!change.IntentStages.IsDefaultOrEmpty)
-                    CopyTupleParser.DecodeAttestations(change.IntentStages
-                        .Select(stage => stage.TupleBuffer(IntentStageTable.Attestations)).ToList(), attestations);
-            }
+                attestations.AddRange(change.AllAttestations());
 
             Hash128 lemma = ContentEmitter.RootId("able")!.Value;
             Hash128 sense = SenseAnchor.ExactId(senseKey)!.Value;
