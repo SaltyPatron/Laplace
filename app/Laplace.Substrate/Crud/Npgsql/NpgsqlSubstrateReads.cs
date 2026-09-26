@@ -716,9 +716,16 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn,
             "SELECT source, evidence, content, encode(source_id, 'hex') FROM ops.source_counts()",
             static r => new SourceCountRow(
-                r.GetString(0), r.GetInt64(1), r.GetInt64(2),
+                SourceLabel(r, 0, 3), r.GetInt64(1), r.GetInt64(2),
                 r.IsDBNull(3) ? null : r.GetString(3)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "source_counts", onError: onError);
+
+    /// <summary>
+    /// A source is its content tree; its rendered label is one realization. When
+    /// no realization exists the source still stands under its id.
+    /// </summary>
+    private static string SourceLabel(NpgsqlDataReader r, int label, int idHex) =>
+        !r.IsDBNull(label) ? r.GetString(label) : r.IsDBNull(idHex) ? "" : r.GetString(idHex);
 
     /// <summary><c>ops.source_counts_approx()</c> — partition-stats evidence; content unknown.</summary>
     public static Task<IReadOnlyList<SourceCountRow>> SourceCountsApproxAsync(
@@ -727,7 +734,7 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn,
             "SELECT source, evidence_approx, encode(source_id, 'hex') FROM ops.source_counts_approx()",
             static r => new SourceCountRow(
-                r.GetString(0), r.GetInt64(1), null,
+                SourceLabel(r, 0, 2), r.GetInt64(1), null,
                 r.IsDBNull(2) ? null : r.GetString(2)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "source_counts_approx", onError: onError);
 
