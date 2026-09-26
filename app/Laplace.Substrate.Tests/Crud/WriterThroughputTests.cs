@@ -46,12 +46,6 @@ public sealed class EntityWriterThroughputTests
     [Fact]
     public async Task NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        await using var cmd = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id) VALUES "
-          + "($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
-        await cmd.ExecuteNonQueryAsync();
-
         var phases = new WsApplyCaptureLog();
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource, phases);
         const int totalRows = 500_000;
@@ -98,18 +92,6 @@ public sealed class WriterThroughputTests
 
     private Hash128 Id(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
-    private async Task EnsureVocabAsync()
-    {
-        await using var cmd = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id) VALUES "
-          + "($1, 0::smallint, $1, NULL), ($2, 0::smallint, $1, NULL), ($3, 0::smallint, $1, NULL) "
-          + "ON CONFLICT (id) DO NOTHING");
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputSrc.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, RelTypeId.ToBytes());
-        await cmd.ExecuteNonQueryAsync();
-    }
-
     internal static SubstrateChange NativeOnly(
         IntentStage stage, Hash128 src, string unitName, long inputUnits = 0)
     {
@@ -133,7 +115,6 @@ public sealed class WriterThroughputTests
     [Fact]
     public async Task Attestation_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        await EnsureVocabAsync();
         var writer = Writer(_pg.DataSource);
 
         const int totalRows = 500_000;
@@ -172,7 +153,6 @@ public sealed class WriterThroughputTests
     [Fact]
     public async Task Physicality_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        await EnsureVocabAsync();
         var writer = Writer(_pg.DataSource);
 
         const int totalRows = 500_000;
@@ -242,7 +222,6 @@ public sealed class WriterThroughputTests
         // The Rule #8 lane: one GUC/lock batch, one verification probe per
         // 131072-id chunk, one COPY per touched table. 50k rows must not
         // cost more round trips than 5k rows.
-        await EnsureVocabAsync();
 
         async Task<int> RoundTripsFor(int rows, int idBase)
         {

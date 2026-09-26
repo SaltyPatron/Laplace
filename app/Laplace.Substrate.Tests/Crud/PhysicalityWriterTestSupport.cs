@@ -145,18 +145,23 @@ internal static class PhysicalityWriterTestSupport
         byte[][] e = entities.Distinct().Select(id => id.ToBytes()).ToArray();
         byte[][] p = physicalities.Distinct().Select(id => id.ToBytes()).ToArray();
         byte[][] a = attestations.Distinct().Select(id => id.ToBytes()).ToArray();
-        await using var command = dataSource.CreateCommand("""
-            SELECT (SELECT count(DISTINCT id) FROM laplace.entities WHERE id=ANY($1::bytea[])),
-                   (SELECT count(*) FROM laplace.physicalities WHERE id=ANY($2::bytea[])),
-                   (SELECT count(*) FROM laplace.attestations WHERE id=ANY($3::bytea[]))
-            """);
-        foreach (var ids in new[] { e, p, a })
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-        await using var reader = await command.ExecuteReaderAsync();
-        Assert.True(await reader.ReadAsync());
-        Assert.Equal(e.LongLength, reader.GetInt64(0));
-        Assert.Equal(p.LongLength, reader.GetInt64(1));
-        Assert.Equal(a.LongLength, reader.GetInt64(2));
-        Assert.False(await reader.ReadAsync());
+        Assert.Equal(e.LongLength, await CountAsync("entities", e));
+        Assert.Equal(p.LongLength, await CountAsync("physicalities", p));
+        Assert.Equal(a.LongLength, await CountAsync("attestations", a));
+
+        // Counted in slices: one bound array of every id would exceed a statement's limits.
+        async Task<long> CountAsync(string table, byte[][] ids)
+        {
+            long total = 0;
+            for (int start = 0; start < ids.Length; start += 50_000)
+            {
+                await using var command = dataSource.CreateCommand(
+                    $"SELECT count(DISTINCT id) FROM laplace.{table} WHERE id=ANY($1::bytea[])");
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                    ids[start..Math.Min(ids.Length, start + 50_000)]);
+                total += (long)(await command.ExecuteScalarAsync())!;
+            }
+            return total;
+        }
     }
 }

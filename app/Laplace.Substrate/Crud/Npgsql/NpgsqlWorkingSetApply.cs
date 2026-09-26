@@ -1317,17 +1317,39 @@ public sealed partial class NpgsqlSubstrateWriter
                 best[id] = i;
         }
 
-        var orderedIds = best.Keys.OrderBy(id => id, Hash128BytewiseOrder).ToArray();
-        var selected = new List<int>(orderedIds.Length);
-        tier0Present = tier0Gate ? new List<Hash128>() : null;
-        foreach (var id in orderedIds)
+        // Bytewise id order as primitive keys: the leading eight bytes big-endian sort
+        // the rows; equal leading words (rare for content hashes) are ordered by the rest.
+        int n = best.Count;
+        var lead = new ulong[n];
+        var rows = new int[n];
+        int k = 0;
+        foreach (var (id, row) in best)
         {
-            if (tier0Gate && tier0Ids!.Contains(id))
+            lead[k] = System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(id.Hi);
+            rows[k++] = row;
+        }
+        Array.Sort(lead, rows);
+        List<Hash128> idList = ents.Ids;
+        for (int start = 0; start < n;)
+        {
+            int end = start + 1;
+            while (end < n && lead[end] == lead[start]) end++;
+            if (end - start > 1)
+                rows.AsSpan(start, end - start).Sort((a, b) =>
+                    System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(idList[a].Lo)
+                        .CompareTo(System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(idList[b].Lo)));
+            start = end;
+        }
+        var selected = new List<int>(n);
+        tier0Present = tier0Gate ? new List<Hash128>() : null;
+        foreach (int row in rows)
+        {
+            if (tier0Gate && tier0Ids!.Contains(ids[row]))
             {
-                tier0Present!.Add(id);
+                tier0Present!.Add(ids[row]);
                 continue;
             }
-            selected.Add(best[id]);
+            selected.Add(row);
         }
         return selected;
     }
