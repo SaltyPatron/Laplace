@@ -1,5 +1,5 @@
 {
-  "authority": "Unicode/UCD",
+  "authority": "Unicode/UCA",
   "release": "17.0.0",
   "provider": "laplace/native-streaming-delimited-recipe/v1",
   "syntax": "UTS10/allkeys",

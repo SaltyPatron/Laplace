@@ -175,35 +175,32 @@
     {
       "selector": "uca/CollationTest.zip",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Superseded",
+      "reason": "UTS #10 data: lowered by the Unicode/UCA source generation (recipes/unicode/UCA/17.0.0/uca.source.json), its own witness."
     },
     {
       "selector": "uca/ReadMe.txt",
       "required": true,
-      "disposition": "Excluded",
-      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+      "disposition": "Superseded",
+      "reason": "UTS #10 data: lowered by the Unicode/UCA source generation (recipes/unicode/UCA/17.0.0/uca.source.json), its own witness."
     },
     {
       "selector": "uca/allkeys.txt",
       "required": true,
-      "disposition": "Admitted",
-      "provider": "laplace/native-streaming-delimited-recipe/v1",
-      "syntax": "UTS10/allkeys",
-      "recipePath": "allkeys.recipe.json",
-      "recordDepth": 2
+      "disposition": "Superseded",
+      "reason": "UTS #10 data: lowered by the Unicode/UCA source generation (recipes/unicode/UCA/17.0.0/uca.source.json), its own witness."
     },
     {
       "selector": "uca/ctt.txt",
       "required": true,
-      "disposition": "EquivalentPackaging",
-      "reason": "The ISO/IEC 14651 Common Template Table: the DUCET of allkeys.txt in 14651 syntax."
+      "disposition": "Superseded",
+      "reason": "UTS #10 data: lowered by the Unicode/UCA source generation (recipes/unicode/UCA/17.0.0/uca.source.json), its own witness."
     },
     {
       "selector": "uca/decomps.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Superseded",
+      "reason": "UTS #10 data: lowered by the Unicode/UCA source generation (recipes/unicode/UCA/17.0.0/uca.source.json), its own witness."
     },
     {
       "selector": "ucd/ArabicShaping.txt",

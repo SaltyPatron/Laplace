@@ -840,9 +840,13 @@ struct laplace_recipe_stream {
             else if (scope_attributes && (hit = scope_attributes->find(rule.qualifier_field)) != scope_attributes->end())
                 value = &hit->second;
             std::string named;
+            const auto sibling = fields.find(path.substr(0, path.rfind('@') + 1) + rule.qualifier_field);
+            // An empty qualifier value is the qualifier field's declared default (decomps.txt:
+            // no tag is a canonical decomposition).
+            if ((!value || value->empty()) && sibling != fields.end() && sibling->second.has_default)
+                value = &sibling->second.default_value;
             if (value && !value->empty()) {
                 named = *value;
-                const auto sibling = fields.find(path.substr(0, path.rfind('@') + 1) + rule.qualifier_field);
                 if (sibling != fields.end()) {
                     const auto alias = sibling->second.aliases.find(alias_key(named));
                     if (alias != sibling->second.aliases.end()) named = alias->second;

@@ -1,0 +1,79 @@
+{
+  "authority": "Unicode/UCA",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS10/decomps",
+  "fields": [
+    {
+      "syntaxPath": "record/@code",
+      "propertyName": "code",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@tag",
+      "propertyName": "tag",
+      "valueKind": "Enumerated",
+      "disposition": "Excluded",
+      "valueAliasProperty": "Decomposition_Tag",
+      "defaultValue": "Canonical"
+    },
+    {
+      "syntaxPath": "record/@decomposition",
+      "propertyName": "decomposition",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "DECOMPOSES_TO",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " ",
+      "qualifierFamily": "decomposition",
+      "qualifierField": "tag"
+    }
+  ],
+  "valueAliases": {
+    "Decomposition_Tag\u0000<CIRCLE>": "Circle",
+    "Decomposition_Tag\u0000<CIRCLEKATA>": "circlekata",
+    "Decomposition_Tag\u0000<COMPAT>": "Compat",
+    "Decomposition_Tag\u0000<FINAL>": "Final",
+    "Decomposition_Tag\u0000<FONT>": "Font",
+    "Decomposition_Tag\u0000<FRACTION>": "Fraction",
+    "Decomposition_Tag\u0000<INITIAL>": "Initial",
+    "Decomposition_Tag\u0000<ISOLATED>": "Isolated",
+    "Decomposition_Tag\u0000<MEDIAL>": "Medial",
+    "Decomposition_Tag\u0000<NARROW>": "Narrow",
+    "Decomposition_Tag\u0000<NOBREAK>": "Nobreak",
+    "Decomposition_Tag\u0000<SMALL>": "Small",
+    "Decomposition_Tag\u0000<SMALLNARROW>": "smallnarrow",
+    "Decomposition_Tag\u0000<SORT>": "sort",
+    "Decomposition_Tag\u0000<SQUARE>": "Square",
+    "Decomposition_Tag\u0000<SUB>": "Sub",
+    "Decomposition_Tag\u0000<SUPER>": "Super",
+    "Decomposition_Tag\u0000<VERTICAL>": "Vertical",
+    "Decomposition_Tag\u0000<WIDE>": "Wide"
+  },
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "code"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "code",
+      "tag",
+      "decomposition"
+    ]
+  }
+}

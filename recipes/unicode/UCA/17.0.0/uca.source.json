@@ -1,0 +1,50 @@
+{
+  "authority": "Unicode/UCA",
+  "release": "17.0.0",
+  "sourceName": "UnicodeCollation",
+  "trustClass": "StandardsDerived",
+  "layerOrder": 0,
+  "selected": true,
+  "aliases": [
+    "uca"
+  ],
+  "root": "/vault/Data/UCD/Public/UCD/latest/uca",
+  "artifacts": [
+    {
+      "selector": "allkeys.txt",
+      "required": true,
+      "disposition": "admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS10/allkeys",
+      "recipePath": "allkeys.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "decomps.txt",
+      "required": true,
+      "disposition": "admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS10/decomps",
+      "recipePath": "decomps.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "ctt.txt",
+      "required": true,
+      "disposition": "equivalent-packaging",
+      "reason": "The ISO/IEC 14651 Common Template Table: the DUCET of allkeys.txt in 14651 syntax."
+    },
+    {
+      "selector": "CollationTest.zip",
+      "required": true,
+      "disposition": "unsupported-with-why-not",
+      "reason": "Collation conformance orderings; the ordering recipe is not yet written."
+    },
+    {
+      "selector": "ReadMe.txt",
+      "required": true,
+      "disposition": "excluded-with-reason",
+      "reason": "Release documentation."
+    }
+  ]
+}
