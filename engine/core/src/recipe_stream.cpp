@@ -1021,7 +1021,12 @@ struct laplace_recipe_stream {
         }
         emit_fact(f);
     }
+    // The qualifier the last Surface-resolved relation name carries, applied to the
+    // facts that name produces (holo_member -> HAS_PART {meronymy/member}); -1 none.
+    int surface_qualifier_bit = -1;
     hash128_t resolve_relation(const field_rule& rule, const std::string& name, double* rank, bool* flip) {
+        surface_qualifier_bit = rule.relation_resolver == 4
+            ? laplace_relation_surface_qualifier(name.c_str()) : -1;
         hash128_t id{}, parent{}; laplace_rel_symmetry_t symmetry{}; uint8_t flipped = 0;
         double resolved_rank = 1.0;
         int rc = -1;
@@ -1052,6 +1057,11 @@ struct laplace_recipe_stream {
                       double rank, bool flip, const std::string* context_value, intent_stage_t* stage) {
         fact f;
         f.relation = relation; f.rank = rank; f.explicit_rank = true;
+        if (surface_qualifier_bit >= 0) {
+            f.qualifiers[static_cast<size_t>(surface_qualifier_bit) / 8] |=
+                static_cast<uint8_t>(1u << (surface_qualifier_bit % 8));
+            f.has_qualifiers = true;
+        }
         f.subject = flip ? object : subj; f.object = flip ? subj : object;
         f.has_subject = true; f.has_object = true;
         if (context_value && !context_value->empty()) {
@@ -1064,6 +1074,7 @@ struct laplace_recipe_stream {
     void lower_grouped(intent_stage_t* stage, const field_rule& rule, const std::string& raw,
                        const std::string* context_value,
                        const std::map<std::string, std::string>& attributes) {
+        surface_qualifier_bit = -1;
         if ((rule.disposition & (1u << 6)) == 0)
             throw std::runtime_error("grouped lowering requires a testimony disposition");
         auto sibling = [&](const std::string& name) -> std::string {
@@ -1599,6 +1610,15 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 const uint32_t flip = r.number();
                 if (flip > 1) throw std::runtime_error("invalid relation direction at " + f.path);
                 f.flip = flip != 0;
+                // The static relation name's own qualifier (a retired or alias surface
+                // such as HAS_MEMBER -> HAS_PART {meronymy/member}).
+                const uint32_t surface_qualifier = r.number();
+                if (surface_qualifier > 256) throw std::runtime_error("invalid surface qualifier at " + f.path);
+                if (surface_qualifier) {
+                    const uint32_t bit = surface_qualifier - 1;
+                    f.qualifiers[bit / 8] |= static_cast<uint8_t>(1u << (bit % 8));
+                    f.has_qualifiers = true;
+                }
                 if (f.subject_mode == 3 && (f.span_start.empty() || f.span_end.empty() || f.trunk_field.empty()))
                     throw std::runtime_error("span subject needs trunk, start and end fields at " + f.path);
             }

@@ -219,6 +219,9 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.SpanEndField);
                 WriteParts(writer, field.ObjectParts);
                 writer.Write(flip ? 1u : 0u);
+                int surfaceQualifier = testimony && !dynamicRelation
+                    ? NativeInterop.RelationSurfaceQualifier(field.RelationName ?? field.PropertyName) : -1;
+                writer.Write(surfaceQualifier >= 0 ? checked((uint)surfaceQualifier + 1) : 0u);
             }
         }
 
