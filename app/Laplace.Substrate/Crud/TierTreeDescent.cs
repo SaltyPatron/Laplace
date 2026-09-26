@@ -280,8 +280,9 @@ public static class TierTreeDescent
 
         int treeCount = probeTrees.Count;
         var perTreeBm = new byte[treeCount][];
-        // A node is resolved only by its own exact identity answer. Parent
-        // presence carries no durable statement about descendants.
+        // Trunk to leaf: a present node is its whole subtree (a composition lands only
+        // with its constituents), so a node under a present ancestor is present without
+        // being asked. Tiers descend, so every ancestor is decided before its descendants.
         var resolved = new bool[treeCount][];
         int maxTier = 0;
         for (int t = 0; t < treeCount; t++)
@@ -310,11 +311,18 @@ public static class TierTreeDescent
                 for (int j = 0; j < nodeCount; j++)
                 {
                     if (resolved[t][j]) continue;
-                    if (tree.GetNode((uint)j).Tier != tier) continue;
-                    var id = tree.GetNode((uint)j).Id;
+                    var node = tree.GetNode((uint)j);
+                    if (node.Tier != tier) continue;
+                    var id = node.Id;
 
-                    // An exact positive cache hit suppresses only this entity;
-                    // descendants retain their own probe/cache decisions.
+                    if (node.ParentIdx != uint.MaxValue && node.ParentIdx < (uint)nodeCount
+                        && BitmapBits.IsSet(perTreeBm[t], (int)node.ParentIdx))
+                    {
+                        BitmapBits.Set(perTreeBm[t], j);
+                        resolved[t][j] = true;
+                        continue;
+                    }
+
                     if (reader.IsProvenPresent(id))
                     {
                         BitmapBits.Set(perTreeBm[t], j);
