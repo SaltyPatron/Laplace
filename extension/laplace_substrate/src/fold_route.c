@@ -525,8 +525,8 @@ update_leaf_plan(PriorRouteEntry *route, int remainder, const char *label)
 
     if (plan == NULL)
     {
-        static const Oid argtypes[7] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
-            TIMESTAMPTZARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
+        static const Oid argtypes[8] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
+            TIMESTAMPTZARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID, BOOLARRAYOID};
         char *namespace_name = get_namespace_name(
             get_rel_namespace(route->leaves->leaf_oids[remainder]));
         char *relation_name = get_rel_name(route->leaves->leaf_oids[remainder]);
@@ -539,13 +539,14 @@ update_leaf_plan(PriorRouteEntry *route, int remainder, const char *label)
         initStringInfo(&sql);
         appendStringInfo(&sql,
             "UPDATE ONLY %s AS c SET rating=b.rating, rd=b.rd, volatility=b.volatility,"
-            " witness_count=c.witness_count+b.games,"
+            " witness_count=CASE WHEN b.recomputed THEN b.games ELSE c.witness_count+b.games END,"
             " last_observed_at=GREATEST(c.last_observed_at,b.ts) "
             "FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
-            " $5::int8[],$6::int8[],$7::int8[]) AS b(id,s,games,ts,rating,rd,volatility) "
+            " $5::int8[],$6::int8[],$7::int8[],$8::bool[])"
+            " AS b(id,s,games,ts,rating,rd,volatility,recomputed) "
             "WHERE c.id=b.id AND c.subject_id=b.s",
             quote_qualified_identifier(namespace_name, relation_name));
-        plan = SPI_prepare(sql.data, 7, (Oid *) argtypes);
+        plan = SPI_prepare(sql.data, 8, (Oid *) argtypes);
         if (plan == NULL)
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
@@ -1688,7 +1689,7 @@ static FoldEvidenceStates *
 read_evidence_states(const uint8_t *type16, const InArray *subjects,
                      const InArray *objects, const InArray *games,
                      const InArray *ts, FoldPriorStates *priors,
-                     const char *label, bool replayable_only)
+                     const char *label, bool replayable_only, bool require_all)
 {
     static const Oid args[2] = {BYTEAARRAYOID,BYTEAARRAYOID};
     Datum vals[2] = {PointerGetDatum(subjects->array),PointerGetDatum(objects->array)};
@@ -1787,7 +1788,7 @@ read_evidence_states(const uint8_t *type16, const InArray *subjects,
         out->counts[i] = Int64GetDatum(witnesses);
         out->timestamps[i] = latest;
     }
-    for (int i = 0; i < subjects->n; ++i)
+    for (int i = 0; require_all && i < subjects->n; ++i)
         if (!visited[i])
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
                 errmsg("%s: target has no durable accepted testimony", label),
@@ -1868,7 +1869,7 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
                 Datum *mid = palloc(sizeof(Datum) * m), *ms = palloc(sizeof(Datum) * m);
                 Datum *mg = palloc(sizeof(Datum) * m), *mt = palloc(sizeof(Datum) * m);
                 Datum *mr = palloc(sizeof(Datum) * m), *md = palloc(sizeof(Datum) * m);
-                Datum *mv = palloc(sizeof(Datum) * m);
+                Datum *mv = palloc(sizeof(Datum) * m), *mc = palloc(sizeof(Datum) * m);
                 int k = 0;
                 for (int i = 0; i < n; ++i)
                     if (priors->matched[i] && priors->leaves[i] == leaf)
@@ -1876,16 +1877,18 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
                         mid[k] = all_ids[i]; ms[k] = subjects->elems[i];
                         mg[k] = evidence->counts[i]; mt[k] = evidence->timestamps[i];
                         mr[k] = rat[i]; md[k] = rds[i]; mv[k] = vol[i];
+                        mc[k] = BoolGetDatum(evidence->recomputed[i]);
                         ++k;
                     }
-                Datum vals[7] = {
+                Datum vals[8] = {
                     PointerGetDatum(construct_array(mid, m, BYTEAOID, -1, false, 'i')),
                     PointerGetDatum(construct_array(ms, m, BYTEAOID, -1, false, 'i')),
                     PointerGetDatum(construct_array(mg, m, INT8OID, 8, true, 'd')),
                     PointerGetDatum(construct_array(mt, m, TIMESTAMPTZOID, 8, true, 'd')),
                     PointerGetDatum(construct_array(mr, m, INT8OID, 8, true, 'd')),
                     PointerGetDatum(construct_array(md, m, INT8OID, 8, true, 'd')),
-                    PointerGetDatum(construct_array(mv, m, INT8OID, 8, true, 'd'))};
+                    PointerGetDatum(construct_array(mv, m, INT8OID, 8, true, 'd')),
+                    PointerGetDatum(construct_array(mc, m, BOOLOID, 1, true, 'c'))};
                 int rc = SPI_execute_plan(update_leaf_plan(route, leaf, label), vals, NULL, false, 0);
                 if (rc != SPI_OK_UPDATE || SPI_processed != (uint64) m)
                     ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
@@ -2049,20 +2052,16 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
             DirectFunctionCall1(pg_advisory_xact_lock_int8, Int64GetDatum((int64) key));
         }
 
-        /* Lock existing cells in their exact leaves, fold the delta onto each
-         * prior (novel cells from the neutral prior), then one keyed UPDATE per
-         * touched leaf and one native COPY of the novel cells. */
+        /* A cell's standing is one rating period over all of its durable
+         * evidence from the neutral prior (laplace.consensus_fold). This
+         * transaction's testimony is already durable here, so every cell with
+         * retained evidence is recomputed from it; a cell without retained
+         * evidence (consensus-only admission) folds the delta onto its prior. */
         priors = read_run_priors(type16, types.elems[run_start], cell_ids,
                                  &run_subjects, 0, run_subjects.n, label);
-        /* The delta folds onto each locked prior: one Glicko-2 rating period per
-         * working set, in commit order. Durable evidence is never re-read. */
-        evidence = NULL;
-        {
-            evidence = palloc(sizeof(*evidence));
-            evidence->recomputed = palloc0(sizeof(bool) * run_subjects.n);
-            evidence->counts = run_games.elems;
-            evidence->timestamps = run_ts.elems;
-        }
+        evidence = read_evidence_states(type16, &run_subjects, &run_objects,
+                                        &run_games, &run_ts, priors, label,
+                                        false, false);
         fold_run_states(&phis, &opps, &games, &sums, &periods,
                         run_start, run_subjects.n, priors, label,
                         &folds, evidence->recomputed);
@@ -2161,7 +2160,7 @@ consensus_upsert_type(FunctionCallInfo fcinfo, bool from_evidence)
             ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
                            errmsg("%s: locked target is absent from its physical owner",label)));
         FoldEvidenceStates *evidence=read_evidence_states(
-            type16,&subjects,&objects,&games,&ts,priors,label,false);
+            type16,&subjects,&objects,&games,&ts,priors,label,false,true);
         fold_run_states(&phis,&opps,&games,&sums,&periods,0,subjects.n,
                         priors,label,&folds,evidence->recomputed);
         int64 affected=write_evidence_states(
@@ -2272,7 +2271,7 @@ pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
     if (priors->matched_n!=(uint64)subjects.n)
         ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
                        errmsg("%s: locked target is absent from its physical owner",label)));
-    evidence=read_evidence_states(type16,&subjects,&objects,NULL,NULL,priors,label,true);
+    evidence=read_evidence_states(type16,&subjects,&objects,NULL,NULL,priors,label,true,true);
     folds.seen_array=NULL;
     folds.rating_array=construct_array(priors->ratings,subjects.n,INT8OID,8,true,'d');
     folds.rd_array=construct_array(priors->rds,subjects.n,INT8OID,8,true,'d');
