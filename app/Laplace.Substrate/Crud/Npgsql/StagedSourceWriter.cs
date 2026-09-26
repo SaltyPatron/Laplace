@@ -15,14 +15,14 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// physicalities, claims) is copied into the run's own staging schema as it is produced.
 /// Records collide there; nothing touches the substrate and nothing is scored. When the
 /// source's last file is done, staging holds everything the source said.</item>
-/// <item>Load, once, over the complete staged set: distinct records, each with the hash
-/// partition it lands in; novelty proven trunk to leaf against the substrate, one set
-/// statement per round, a present node covering its subtree; claims merged per id natively;
-/// then scoring, one rating period per witness per cell on prior standing, natively.</item>
+/// <item>Load, once, over the complete staged set: the records converge by identity, each
+/// with the hash partition it lands in, and a staged id equal to a stored id is that
+/// entity; claims merged per id natively; consensus folded, one rating period per witness
+/// per cell on prior standing, natively.</item>
 /// <item>Landing: every touched leaf of entities, physicalities, attestations and consensus
 /// is rebuilt on the side (its rows and its own indexes written without WAL) and one
 /// transaction swaps them all in, so a source's compositions, claims and standing appear
-/// together; a large leaf receiving little takes its rows in place instead.</item>
+/// together.</item>
 /// </list>
 /// PostgreSQL stores and sorts; native code merges and folds; this class sequences the
 /// operations and moves COPY streams. No record becomes a managed object.
@@ -229,18 +229,9 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         await SweepOrphanLeavesAsync(control, ct).ConfigureAwait(false);
         await Mark("census");
 
-        // Distinct records, their hash partitions and their composition edges.
+        // The staged records converged by identity, each routed to its hash partition.
         await ExecuteAsync(control, null, Sql("stage.structure"), ct).ConfigureAwait(false);
-        await Mark("structure");
-
-        // Trunk to leaf: each round decides one frontier; a present node covers its subtree.
-        int rounds = 0;
-        while (await ScalarAsync(control, Sql("stage.frontier_size"), ct).ConfigureAwait(false) > 0)
-        {
-            await ExecuteAsync(control, null, Sql("stage.descend"), ct).ConfigureAwait(false);
-            rounds++;
-        }
-        await Mark($"novelty({rounds} rounds)");
+        await Mark("converge");
 
         // Claims the substrate has not admitted, every observation of one claim merged natively.
         await ExecuteAsync(control, null, Sql("stage.claim_table"), ct).ConfigureAwait(false);
@@ -269,27 +260,14 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         await ExecuteAsync(control, null, Sql("stage.new_sets"), ct).ConfigureAwait(false);
         await Mark("new sets");
 
-        // Every touched leaf is rebuilt on the side and swapped in, or, when the leaf is
-        // large and receives little, takes its rows in place.
+        // Every touched leaf is rebuilt on the side, then swapped in.
         IReadOnlyList<LeafWork> work = await PlanLeavesAsync(control, ct).ConfigureAwait(false);
-        var rebuilt = new System.Collections.Concurrent.ConcurrentBag<LeafWork>();
-        await ForEachAsync(work, async leaf =>
-        {
-            if (leaf.Rebuild)
-            {
-                await BuildLeafAsync(leaf, ct).ConfigureAwait(false);
-                rebuilt.Add(leaf);
-            }
-            else
-            {
-                await DeltaLeafAsync(leaf, ct).ConfigureAwait(false);
-            }
-        }, ct).ConfigureAwait(false);
-        await Mark($"leaves({work.Count(static l => l.Rebuild)} rebuilt, {work.Count(static l => !l.Rebuild)} in place)");
+        await ForEachAsync(work, leaf => BuildLeafAsync(leaf, ct), ct, connectionsPerItem: 2).ConfigureAwait(false);
+        await Mark($"leaves({work.Count} rebuilt)");
 
         // One transaction makes every rebuilt leaf of the source visible at once: a stored
         // composition's subtree, its claims and their standing all appear together.
-        await SwapAsync(control, [.. rebuilt], ct).ConfigureAwait(false);
+        await SwapAsync(control, work, ct).ConfigureAwait(false);
         await Mark("swap");
 
         // Every claimed relation's Highway bit on its entities.
@@ -304,7 +282,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     }
 
     private sealed record LeafWork(string Table, string Leaf, int Modulus, int Remainder, long Rows,
-        long NewRows, bool Rebuild, string Columns, IReadOnlyList<(string Name, string Definition, bool Primary)> Indexes);
+        long NewRows, string Columns, IReadOnlyList<(string Name, string Definition, bool Primary)> Indexes);
 
     // Tables hashed on their key; a replacement leaf is bound to its partition by it.
     private static readonly IReadOnlyDictionary<string, string> PartitionKey = new Dictionary<string, string>
@@ -335,24 +313,36 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         foreach ((string table, int part, long rows) in counts)
         {
             (string leaf, int modulus, long existing) = leaves[(table, part)];
-            // A leaf is rebuilt unless it is large and the source adds little to it.
-            bool rebuild = existing < 1_000_000 || rows * 4 >= existing;
             var indexes = new List<(string, string, bool)>();
             await using (var cmd = new NpgsqlCommand(Sql("stage.leaf_indexes")
                 .Replace("{leafname}", Quote(leaf)), control) { CommandTimeout = 0 })
             await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                     indexes.Add((reader.GetString(0), reader.GetString(1), reader.GetBoolean(2)));
-            work.Add(new LeafWork(table, leaf, modulus, part, existing, rows, rebuild, columns[table], indexes));
+            work.Add(new LeafWork(table, leaf, modulus, part, existing, rows, columns[table], indexes));
         }
         return work;
     }
 
-    private string LeafSql(string name, LeafWork leaf, string replacement) => Sql(name)
+    private string LeafSql(string name, LeafWork leaf, string replacement, string? target = null) => Sql(name)
         .Replace("{new}", replacement)
+        .Replace("{table}", leaf.Table)
         .Replace("{leaf}", leaf.Leaf)
+        .Replace("{target}", target ?? leaf.Columns)
         .Replace("{cols}", leaf.Columns)
         .Replace("{r}", leaf.Remainder.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    private const string ConsensusColumns = "id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at";
+
+    // The row streams a rebuilt leaf is filled from, in order, each with the columns it carries.
+    private static (string Rows, string? Target)[] LeafRows(string table) => table switch
+    {
+        "entities" => [("stage.rows_current", null), ("stage.rows_entities", "id,tier,type_id")],
+        "physicalities" => [("stage.rows_current", null), ("stage.rows_physicalities", null)],
+        "attestations" => [("stage.rows_current", null), ("stage.rows_attestations", null)],
+        "consensus" => [("stage.rows_consensus_current", ConsensusColumns), ("stage.rows_consensus", ConsensusColumns)],
+        _ => throw new InvalidOperationException($"no leaf rows for {table}"),
+    };
 
     private string Replacement(LeafWork leaf) => $"stg_{_stage[^8..]}_{leaf.Leaf}";
 
@@ -364,7 +354,16 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         string replacement = Replacement(leaf);
         await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await BeginAsync(conn, ct).ConfigureAwait(false);
-        await ExecuteAsync(conn, tx, LeafSql($"stage.build_{leaf.Table}", leaf, replacement), ct).ConfigureAwait(false);
+        await ExecuteAsync(conn, tx, LeafSql("stage.leaf_create", leaf, replacement), ct).ConfigureAwait(false);
+        await using (var source = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false))
+            foreach ((string rows, string? target) in LeafRows(leaf.Table))
+            {
+                await using var sink = await conn.BeginRawBinaryCopyAsync(
+                    LeafSql("stage.leaf_fill", leaf, replacement, target), ct).ConfigureAwait(false);
+                await using var reader = await source.BeginRawBinaryCopyAsync(
+                    LeafSql(rows, leaf, replacement), ct).ConfigureAwait(false);
+                await reader.CopyToAsync(sink, 1 << 20, ct).ConfigureAwait(false);
+            }
         for (int k = 0; k < leaf.Indexes.Count; k++)
         {
             (string name, string definition, bool primary) = leaf.Indexes[k];
@@ -384,14 +383,8 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             + $"(satisfies_hash_partition('laplace.{leaf.Table}'::regclass,{leaf.Modulus},{leaf.Remainder},{PartitionKey[leaf.Table]}))",
             ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
-    }
-
-    private async Task DeltaLeafAsync(LeafWork leaf, CancellationToken ct)
-    {
-        await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await BeginAsync(conn, ct).ConfigureAwait(false);
-        await ExecuteAsync(conn, tx, LeafSql($"stage.delta_{leaf.Table}", leaf, leaf.Leaf), ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
+        // Statistics belong to the table, so they carry through the swap.
+        await ExecuteAsync(conn, null, $"ANALYZE laplace.{replacement}", ct).ConfigureAwait(false);
     }
 
     private async Task SwapAsync(NpgsqlConnection control, IReadOnlyList<LeafWork> rebuilt, CancellationToken ct)
@@ -427,8 +420,6 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
                 $"the leaf swap failed at statement {at + 1} of {batch.BatchCommands.Count}: {failed.CommandText}", ex);
         }
         await tx.CommitAsync(ct).ConfigureAwait(false);
-        foreach (LeafWork leaf in rebuilt)
-            await ExecuteAsync(control, null, $"ANALYZE laplace.{leaf.Leaf}", ct).ConfigureAwait(false);
     }
 
     // Replacement leaves a load never swapped in (the process ended before its swap) are

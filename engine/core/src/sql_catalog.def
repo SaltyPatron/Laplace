@@ -319,11 +319,11 @@ SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch'
 
 /* The staged load (StagedSourceWriter). A source is extracted completely into its
  * own staging schema ({stage}) before any record is processed; the load then runs
- * once over the complete staged set: distinct records, trunk-to-leaf novelty against
- * the substrate (one set statement per tier round), new entities with their
- * physicalities and merged claims, scoring, and each touched partition leaf rebuilt
- * beside its live leaf and swapped in. {tier}, {lanes}, {lane} and {excluded} are
- * integers and bytea literals the caller formats; COPY takes no bind parameters. */
+ * once over the complete staged set: the records converge by identity (a staged id
+ * equal to a stored id is that entity), the entities and physicalities the substrate
+ * does not hold and the merged claims are persisted, consensus is folded, and each
+ * touched partition leaf is rebuilt beside its live leaf and swapped in. {lanes} and
+ * {lane} are integers the caller formats; COPY takes no bind parameters. */
 SQL_QUERY("stage.create", "",
     "CREATE SCHEMA {stage}; "
     "CREATE UNLOGGED TABLE {stage}.entity (id bytea,tier smallint,type_id bytea); "
@@ -342,8 +342,8 @@ SQL_QUERY("stage.attestation_copy", "",
     "COPY {stage}.attestation (id,subject_id,type_id,object_id,source_id,context_id,outcome,"
     "last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,"
     "fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
-/* Distinct records and the composition edges among them; the frontier starts at the
- * staged roots (records no staged composition contains). */
+/* The staged records converged: one row per entity id and per physicality id, each
+ * routed to the hash partition it lands in. */
 SQL_QUERY("stage.structure", "",
     "CREATE UNLOGGED TABLE {stage}.route AS SELECT l.oid AS leaf,"
     "(regexp_match(pg_get_expr(l.relpartbound,l.oid),'remainder (\\d+)'))[1]::int AS r "
@@ -357,26 +357,7 @@ SQL_QUERY("stage.structure", "",
     "(SELECT DISTINCT ON (id) * FROM {stage}.physicality ORDER BY id) d "
     "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},d.id)::oid; "
     "CREATE INDEX ON {stage}.form (entity_id); "
-    "CREATE UNLOGGED TABLE {stage}.edge AS SELECT DISTINCT f.entity_id AS parent,c.child FROM {stage}.form f "
-    "CROSS JOIN LATERAL unnest(public.laplace_trajectory_constituent_ids(f.trajectory)) AS c(child) "
-    "JOIN {stage}.node n ON n.id=c.child WHERE f.type=1 AND f.trajectory IS NOT NULL; "
-    "CREATE INDEX ON {stage}.edge (parent); CREATE INDEX ON {stage}.edge (child); "
-    "CREATE UNLOGGED TABLE {stage}.verdict (id bytea PRIMARY KEY,novel boolean NOT NULL); "
-    "CREATE UNLOGGED TABLE {stage}.frontier AS SELECT n.id FROM {stage}.node n "
-    "WHERE NOT EXISTS (SELECT 1 FROM {stage}.edge e WHERE e.child=n.id); "
-    "ANALYZE {stage}.node; ANALYZE {stage}.form; ANALYZE {stage}.edge; ANALYZE {stage}.frontier")
-/* One trunk-to-leaf round: decide the frontier against the substrate; a present node
- * covers its subtree, so only children of new nodes are decided next. Returns the size
- * of the next frontier. */
-SQL_QUERY("stage.descend", "",
-    "INSERT INTO {stage}.verdict SELECT f.id,NOT EXISTS (SELECT 1 FROM laplace.entities s WHERE s.id=f.id) "
-    "FROM {stage}.frontier f; "
-    "CREATE UNLOGGED TABLE {stage}.frontier_next AS SELECT DISTINCT e.child AS id FROM {stage}.frontier f "
-    "JOIN {stage}.verdict v ON v.id=f.id AND v.novel JOIN {stage}.edge e ON e.parent=f.id "
-    "WHERE NOT EXISTS (SELECT 1 FROM {stage}.verdict x WHERE x.id=e.child); "
-    "DROP TABLE {stage}.frontier; ALTER TABLE {stage}.frontier_next RENAME TO frontier; "
-    "ANALYZE {stage}.frontier")
-SQL_QUERY("stage.frontier_size", "", "SELECT count(*) FROM {stage}.frontier")
+    "ANALYZE {stage}.node; ANALYZE {stage}.form")
 /* Claims the substrate has not admitted, sorted by id for the native merge; a stored
  * claim is a replay of an observation already folded. */
 SQL_QUERY("stage.claims_out", "",
@@ -431,13 +412,10 @@ SQL_QUERY("stage.cell_copy", "",
  * the substrate lacks its id. */
 SQL_QUERY("stage.new_sets", "",
     "CREATE UNLOGGED TABLE {stage}.new_entity AS SELECT n.id,n.tier,n.type_id,n.part FROM {stage}.node n "
-    "JOIN {stage}.verdict v ON v.id=n.id AND v.novel; "
+    "WHERE NOT EXISTS (SELECT 1 FROM laplace.entities s WHERE s.id=n.id); "
     "CREATE INDEX ON {stage}.new_entity (part); "
-    "CREATE UNLOGGED TABLE {stage}.new_form AS "
-    "SELECT f.* FROM {stage}.form f WHERE EXISTS (SELECT 1 FROM {stage}.verdict v WHERE v.id=f.entity_id AND v.novel) "
-    "UNION ALL SELECT f.* FROM {stage}.form f WHERE NOT EXISTS (SELECT 1 FROM {stage}.node n "
-    "LEFT JOIN {stage}.verdict v ON v.id=n.id WHERE n.id=f.entity_id AND (f.type=1 OR coalesce(v.novel,false))) "
-    "AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id=f.id); "
+    "CREATE UNLOGGED TABLE {stage}.new_form AS SELECT f.* FROM {stage}.form f "
+    "WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id=f.id); "
     "CREATE INDEX ON {stage}.new_form (part); "
     "CREATE UNLOGGED TABLE {stage}.cellp AS SELECT c.*,rt.r AS part FROM {stage}.cell c "
     "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},c.subject_id)::oid; "
@@ -472,49 +450,31 @@ SQL_QUERY("stage.leaf_indexes", "",
 SQL_QUERY("stage.orphan_leaves", "",
     "SELECT relname FROM pg_class WHERE relnamespace='laplace'::regnamespace AND relkind='r' "
     "AND relname LIKE 'stg\\_%' AND NOT relispartition")
-/* A leaf rebuilt on the side: created in this transaction, so under wal_level=minimal its
- * rows and every index built here are written without WAL and fsynced at commit. The
- * rows are the leaf's current rows and the source's new rows for that partition. */
-SQL_QUERY("stage.build_entities", "",
-    "CREATE TABLE laplace.{new} (LIKE laplace.entities INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS); "
-    "INSERT INTO laplace.{new} ({cols}) SELECT {cols} FROM laplace.{leaf}; "
-    "INSERT INTO laplace.{new} (id,tier,type_id) SELECT id,tier,type_id FROM {stage}.new_entity "
-    "WHERE part={r} ORDER BY id")
-SQL_QUERY("stage.build_physicalities", "",
-    "CREATE TABLE laplace.{new} (LIKE laplace.physicalities INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS); "
-    "INSERT INTO laplace.{new} ({cols}) SELECT {cols} FROM laplace.{leaf}; "
-    "INSERT INTO laplace.{new} ({cols}) SELECT {cols} FROM {stage}.new_form WHERE part={r} ORDER BY hilbert_index")
-SQL_QUERY("stage.build_attestations", "",
-    "CREATE TABLE laplace.{new} (LIKE laplace.attestations INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS); "
-    "INSERT INTO laplace.{new} ({cols}) SELECT {cols} FROM laplace.{leaf}; "
-    "INSERT INTO laplace.{new} ({cols}) SELECT {cols} FROM {stage}.claimp WHERE part={r} ORDER BY subject_id,id")
-/* A consensus leaf: its current cells with the source's folded standing applied, and the
- * source's new cells. */
-SQL_QUERY("stage.build_consensus", "",
-    "CREATE TABLE laplace.{new} (LIKE laplace.consensus INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS); "
-    "INSERT INTO laplace.{new} (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
-    "SELECT c.id,c.subject_id,c.type_id,c.object_id,coalesce(s.rating,c.rating),coalesce(s.rd,c.rd),"
+/* A leaf rebuilt on the side: created in the transaction that fills it, so under
+ * wal_level=minimal its rows and every index built there are written without WAL and
+ * fsynced at commit, and COPY FREEZE lands its rows frozen with their hint bits set, so
+ * no later read rewrites its pages. Its rows are the leaf's current rows and the
+ * source's new rows for that partition, each streamed once out of PostgreSQL. */
+SQL_QUERY("stage.leaf_create", "",
+    "CREATE TABLE laplace.{new} (LIKE laplace.{table} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS)")
+SQL_QUERY("stage.leaf_fill", "", "COPY laplace.{new} ({target}) FROM STDIN (FORMAT BINARY, FREEZE)")
+SQL_QUERY("stage.rows_current", "", "COPY (SELECT {cols} FROM laplace.{leaf}) TO STDOUT (FORMAT BINARY)")
+SQL_QUERY("stage.rows_entities", "",
+    "COPY (SELECT id,tier,type_id FROM {stage}.new_entity WHERE part={r} ORDER BY id) TO STDOUT (FORMAT BINARY)")
+SQL_QUERY("stage.rows_physicalities", "",
+    "COPY (SELECT {cols} FROM {stage}.new_form WHERE part={r} ORDER BY hilbert_index) TO STDOUT (FORMAT BINARY)")
+SQL_QUERY("stage.rows_attestations", "",
+    "COPY (SELECT {cols} FROM {stage}.claimp WHERE part={r} ORDER BY subject_id,id) TO STDOUT (FORMAT BINARY)")
+/* A consensus leaf: its current cells with the source's folded standing applied, then
+ * the source's new cells. */
+SQL_QUERY("stage.rows_consensus_current", "",
+    "COPY (SELECT c.id,c.subject_id,c.type_id,c.object_id,coalesce(s.rating,c.rating),coalesce(s.rd,c.rd),"
     "coalesce(s.volatility,c.volatility),c.witness_count+coalesce(s.witness_count,0),"
     "GREATEST(c.last_observed_at,s.last_observed_at) FROM laplace.{leaf} c LEFT JOIN {stage}.standingp s "
-    "ON s.part={r} AND s.id=c.id AND s.type_id=c.type_id AND s.subject_id=c.subject_id; "
-    "INSERT INTO laplace.{new} (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
-    "SELECT id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at "
-    "FROM {stage}.cellp WHERE part={r} ORDER BY id")
-/* A large leaf receiving few rows takes them in place instead of being rebuilt. */
-SQL_QUERY("stage.delta_entities", "",
-    "INSERT INTO laplace.{leaf} (id,tier,type_id) SELECT id,tier,type_id FROM {stage}.new_entity "
-    "WHERE part={r} ORDER BY id")
-SQL_QUERY("stage.delta_physicalities", "",
-    "INSERT INTO laplace.{leaf} ({cols}) SELECT {cols} FROM {stage}.new_form WHERE part={r} ORDER BY hilbert_index")
-SQL_QUERY("stage.delta_attestations", "",
-    "INSERT INTO laplace.{leaf} ({cols}) SELECT {cols} FROM {stage}.claimp WHERE part={r} ORDER BY subject_id,id")
-SQL_QUERY("stage.delta_consensus", "",
-    "UPDATE laplace.{leaf} AS c SET rating=s.rating,rd=s.rd,volatility=s.volatility,"
-    "witness_count=c.witness_count+s.witness_count,last_observed_at=GREATEST(c.last_observed_at,s.last_observed_at) "
-    "FROM {stage}.standingp s WHERE s.part={r} AND c.id=s.id AND c.type_id=s.type_id AND c.subject_id=s.subject_id; "
-    "INSERT INTO laplace.{leaf} (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
-    "SELECT id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at "
-    "FROM {stage}.cellp WHERE part={r} ORDER BY id")
+    "ON s.part={r} AND s.id=c.id AND s.type_id=c.type_id AND s.subject_id=c.subject_id) TO STDOUT (FORMAT BINARY)")
+SQL_QUERY("stage.rows_consensus", "",
+    "COPY (SELECT id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at "
+    "FROM {stage}.cellp WHERE part={r} ORDER BY id) TO STDOUT (FORMAT BINARY)")
 SQL_QUERY("stage.census", "",
     "SELECT (SELECT count(*) FROM {stage}.entity),(SELECT count(*) FROM {stage}.physicality),"
     "(SELECT count(*) FROM {stage}.attestation)")
