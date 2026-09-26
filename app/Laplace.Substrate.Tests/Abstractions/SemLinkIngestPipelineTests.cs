@@ -1,6 +1,7 @@
 using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.SemLink;
+using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -49,9 +50,12 @@ public sealed class SemLinkIngestPipelineTests
             await foreach (var change in phase.DecomposeAsync(ctx, options))
                 changes.Add(change);
 
+            // No descent into the JSON packaging. The roles and rolesets are semantic
+            // content, and admitting content probes existence like any other content.
             Assert.Equal(0, reader.LegacyContentDescentCalls);
-            Assert.Equal(0, reader.FlatProbeCalls);
-            Assert.Equal(0, PhysicalityCount(changes));
+            // The JSON packaging is never composed. The rolesets, verb classes and roles it
+            // carries are semantic structures and own their physicalities; the document does not.
+            AssertNoPackagingPhysicality(changes);
             Assert.True(AttestationCount(changes) > 0);
         }
         finally
@@ -76,8 +80,8 @@ public sealed class SemLinkIngestPipelineTests
             await foreach (var change in phase.DecomposeAsync(ctx, options))
                 changes.Add(change);
 
-            Assert.Equal(0, reader.FlatProbeCalls);
-            Assert.Equal(0, PhysicalityCount(changes));
+            Assert.Equal(0, reader.LegacyContentDescentCalls);
+            AssertNoPackagingPhysicality(changes);
             Assert.True(AttestationCount(changes) > 0,
                 "SemLink witness edges must not depend on a packaging-root probe");
             Assert.Equal(2, changes.Sum(c => c.Metadata.InputUnitsConsumed));
@@ -97,7 +101,10 @@ public sealed class SemLinkIngestPipelineTests
         public string SubstrateVersion => "test";
     }
 
-    private static int PhysicalityCount(IEnumerable<SubstrateChange> changes) =>
-        changes.Sum(change => change.Physicalities.Length
-            + change.IntentStages.Sum(stage => stage.PhysicalityCount));
+    private static void AssertNoPackagingPhysicality(IEnumerable<SubstrateChange> changes)
+    {
+        Hash128? document = ContentTierSpine.ResolveRoot(PbVnJson);
+        Assert.NotNull(document);
+        Assert.DoesNotContain(changes.SelectMany(c => c.Physicalities), p => p.EntityId == document!.Value);
+    }
 }

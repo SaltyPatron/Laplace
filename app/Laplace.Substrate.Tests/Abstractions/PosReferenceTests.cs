@@ -36,27 +36,29 @@ public class PosReferenceTests
     [Fact]
     public void UnknownTag_GoesProbationary_NeverSilent_NeverThrows()
     {
-        var id = PosReference.Resolve("proverb", PosReference.PosTagset.Wiktionary);
+        var id = PosReference.Resolve("proverb", PosReference.PosTagset.Wiktionary, out bool probationary);
 
-        Assert.Equal(SubstrateCanonicalIds.PosProbationary("wiktionary", "proverb"), id);
+        // An unmapped tag stays the source's own value: its exact content, never a
+        // namespaced key.
+        Assert.True(probationary);
+        Assert.Equal(Laplace.Decomposers.Abstractions.ContentTierSpine.ResolveRoot("proverb"), id);
         Assert.DoesNotContain(PosReference.Canonical,
             t => PosReference.CanonicalId(t) == id);
     }
 
     [Fact]
-    public void SeedCanonical_EmitsTypePlusSeventeenValues()
+    public void SeedCanonical_EmitsSeventeenContentValues()
     {
         var b = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(
             SubstrateCanonicalIds.Of("test", "pos", "source"), "test/pos-seed", null,
             entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
         PosReference.SeedCanonical(b, SubstrateCanonicalIds.Of("test", "pos", "source"));
+
+        // Each UPOS value is content ("VERB" is the text), staged through the content
+        // spine; no POS type row is seeded among the managed entity rows.
+        // A one-codepoint value ("X") is its Tier-0 atom and stages no row of its own.
+        Assert.Equal(PosReference.Canonical.Count(t => t.Length > 1), b.ContentStage.EntityCount);
         var change = b.Build();
-
-
-
-        Assert.Equal(PosReference.Canonical.Length,
-            change.Entities.Count(e => e.TypeId == PosReference.PosTypeId));
-        Assert.Contains(change.Entities, e => e.Id == PosReference.PosTypeId);
-        Assert.Contains(change.Entities, e => e.Id == PosReference.CanonicalId("VERB"));
+        Assert.DoesNotContain(change.Entities, e => e.Id == PosReference.PosTypeId);
     }
 }

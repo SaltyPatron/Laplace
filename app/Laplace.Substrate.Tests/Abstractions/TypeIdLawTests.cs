@@ -122,9 +122,10 @@ public class TypeIdLawTests
     [InlineData("FrameNet_Frame")]
     public void EntityTypeRegistry_IsContentAddressed(string name)
     {
-
-        var expected = Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(name));
-        Assert.Equal(expected, EntityTypeRegistry.Id(name));
+        // An entity type's id is the content id of its label: the same entity the text is.
+        var expected = Laplace.Decomposers.Abstractions.ContentTierSpine.ResolveRoot(name);
+        Assert.NotNull(expected);
+        Assert.Equal(expected!.Value, EntityTypeRegistry.Id(name));
     }
 
     [Fact]

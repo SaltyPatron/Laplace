@@ -55,7 +55,8 @@ public class RelationTypeRegistryTests
         Assert.Equal(RelationTypeRank.Causal, RelationTypeRegistry.Resolve("X_INTENT").Rank);
         Assert.Equal(Kid("OBSTRUCTED_BY"), RelationTypeRegistry.Resolve("HINDERED_BY").Id);
         Assert.Equal(Kid("X_FILLED_BY"), RelationTypeRegistry.Resolve("IS_FILLED_BY").Id);
-        Assert.Equal(Kid("HAS_PART"), RelationTypeRegistry.Resolve("MADE_UP_OF").ParentId);
+        // MadeUpOf is meronymy: the element HAS_PART with the substance qualifier.
+        Assert.Equal(Kid("HAS_PART"), RelationTypeRegistry.Resolve("MADE_UP_OF").Id);
     }
 
     [Fact]
@@ -75,11 +76,13 @@ public class RelationTypeRegistryTests
         CodepointPerfcache.LoadDefault();
         var b = new SubstrateChangeBuilder(Hash128.OfCanonical("src"), "test/edep", null,
             entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
+        var names = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>();
         RelationTypeRegistry.SeedEnhancedDeprel(b, "advcl:cond", Hash128.OfCanonical("src"),
-            new HashSet<Hash128>(), new ConcurrentIdSet());
+            new HashSet<Hash128>(), new ConcurrentIdSet(), names);
         var change = b.Build();
-        Assert.Contains(change.Entities, e => e.Id == Kid("EDEP_ADVCL_COND"));
-        Assert.Contains(change.Entities, e => e.Id == Kid("EDEP_ADVCL"));
+        // A relation key is registry law, never an entity row; only its readback name is kept.
+        Assert.Empty(change.Entities);
+        Assert.NotEmpty(names);
     }
 
     [Fact]
