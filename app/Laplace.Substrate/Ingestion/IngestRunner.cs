@@ -133,6 +133,8 @@ public sealed class IngestRunner
             SubstrateVersion: "v1");
 
         await using var bulkRun = await BulkRunLease.BeginAsync(_writer, ct).ConfigureAwait(false);
+        // The closure this run checks is of the entities this run writes.
+        (_writer as Laplace.SubstrateCRUD.Npgsql.IPhysicalityClosure)?.TakePhysicalityClosure();
         await decomposer.InitializeAsync(ctx, ct);
 
         NativeRuntimeEnv.ApplyFromTopologyIfUnset();
@@ -623,7 +625,8 @@ public sealed class IngestRunner
         if (fullSuccessfulExtraction)
         {
             var (writtenEntities, unplacedEntities) =
-                Laplace.SubstrateCRUD.Npgsql.PhysicalityClosureLedger.Take();
+                _writer is Laplace.SubstrateCRUD.Npgsql.IPhysicalityClosure closure
+                    ? closure.TakePhysicalityClosure() : (0L, 0L);
             if (unplacedEntities != 0)
                 throw new InvalidOperationException(
                     $"{decomposer.SourceName}: physicality closure failed after ingest: "

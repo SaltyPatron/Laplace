@@ -370,10 +370,14 @@ static int emit_node(
         }
     }
 
-    if (emit_entity) {
-        if (intent_stage_witness_seen(stage, &node.id)) return 0;
+    /* Each row is staged once per stage, known by its own id. */
+    hash128_t phys_id;
+    laplace_physicality_id_compute(node.id, 1, &phys_id);
+    if (intent_stage_witness_seen(stage, &phys_id)) return 0;
+    if (emit_entity && !intent_stage_witness_seen(stage, &node.id)) {
         hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
-        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0)
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0
+            || intent_stage_witness_record(stage, &node.id) != 0)
             return -2;
     }
 
@@ -404,8 +408,6 @@ static int emit_node(
         free(flags);
     }
 
-    hash128_t phys_id;
-    laplace_physicality_id_compute(node.id, 1, &phys_id);
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,
@@ -414,10 +416,8 @@ static int emit_node(
         return -2;
     }
     free(traj);
-    if (emit_entity) {
-        if (intent_stage_witness_record(stage, &node.id) != 0
-            || intent_stage_allocation_failed(stage)) return -2;
-    }
+    if (intent_stage_witness_record(stage, &phys_id) != 0
+        || intent_stage_allocation_failed(stage)) return -2;
     *emitted = 1;
     return 0;
 }

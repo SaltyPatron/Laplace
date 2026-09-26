@@ -825,25 +825,28 @@ struct laplace_recipe_stream {
         check(laplace_ordered_composition_compose_batch(&request, 1, &result),
             "range composition");
 
+        // Each row is staged once per stage, known by its own id.
         if (!intent_stage_witness_seen(stage, &result.id)) {
             check(intent_stage_add_entity(
                 stage, &result.id, result.tier, &range_type), "range entity");
-
+            check(intent_stage_witness_record(stage, &result.id), "range witness");
+        }
+        hash128_t physicality;
+        laplace_physicality_id_compute(result.id, 10, &physicality);
+        if (!intent_stage_witness_seen(stage, &physicality)) {
             hash128_t ids[2] = {components[0].id, components[1].id};
             double trajectory[8]{};
             check(trajectory_build(ids, 2, trajectory), "range trajectory");
-            hash128_t physicality;
-            laplace_physicality_id_compute(result.id, 10, &physicality);
             check(intent_stage_add_physicality(
                 stage, &physicality, &result.id, 10,
                 result.coord, &result.hilbert,
                 trajectory, 2, 2,
                 1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US),
                 "range physicality");
-            check(intent_stage_witness_record(stage, &result.id), "range witness");
-            if (intent_stage_allocation_failed(stage))
-                throw std::runtime_error("range staging exceeded the admitted byte envelope");
+            check(intent_stage_witness_record(stage, &physicality), "range form witness");
         }
+        if (intent_stage_allocation_failed(stage))
+            throw std::runtime_error("range staging exceeded the admitted byte envelope");
         return result.id;
     }
 

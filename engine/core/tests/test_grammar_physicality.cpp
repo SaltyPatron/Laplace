@@ -72,6 +72,17 @@ protected:
         return Capture(raw, physicality_descriptor_capture_free);
     }
 
+    // The composition's physicalities in first-seen order, one per physicality id.
+    static std::vector<const laplace_compose_physicality_t*> distinct(const laplace_compose_result_t& r) {
+        std::vector<const laplace_compose_physicality_t*> out;
+        for (size_t i = 0; i < r.phys_count; ++i) {
+            bool seen = false;
+            for (const auto* p : out) seen = seen || hash128_equals(&p->id, &r.physicalities[i].id);
+            if (!seen) out.push_back(&r.physicalities[i]);
+        }
+        return out;
+    }
+
     void expect_body(const physicality_descriptor_input_t& body,
                      const laplace_compose_physicality_t& expected) {
         EXPECT_TRUE(hash128_equals(&body.entity_id, &expected.entity_id));
@@ -85,43 +96,33 @@ protected:
     }
 };
 
-TEST_F(GrammarPhysicality, DistinctSourcesRetainEveryComputedBodyAndFirstEntityWitness) {
+// Same content, same physicality: a second source composing the same game stages no
+// second entity and no second form. Its provenance is its own trunk's trajectory.
+TEST_F(GrammarPhysicality, DistinctSourcesStageEachFormOnce) {
     const std::string source = kGame;
     auto ast = parse(source);
     ASSERT_NE(ast, nullptr);
     auto result = compose(source, ast);
     ASSERT_NE(result, nullptr);
     ASSERT_GT(result->phys_count, 0u);
+    const auto forms = distinct(*result);
     Stage stage(intent_stage_new_bounded(0, kBudget), intent_stage_free);
     ASSERT_NE(stage, nullptr);
     ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceA,
         10, 1.0, nullptr, 0), 0);
     const size_t first_entities = intent_stage_entity_count(stage.get());
     ASSERT_GT(first_entities, 0u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), result->phys_count);
-    size_t entity_bytes = 0;
-    const auto* entities = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &entity_bytes);
-    const std::vector<uint8_t> first_entity_rows(entities, entities + entity_bytes);
+    ASSERT_EQ(intent_stage_physicality_count(stage.get()), forms.size());
     ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceB,
         20, 1.0, nullptr, 0), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), first_entities);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), result->phys_count * 2u);
-    entities = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &entity_bytes);
-    EXPECT_EQ(std::vector<uint8_t>(entities, entities + entity_bytes), first_entity_rows);
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), forms.size());
     auto captured = capture(stage);
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* inputs = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, result->phys_count * 2u);
-    const auto* observations = physicality_descriptor_capture_observations(captured.get(), nullptr);
-    const auto* roots = physicality_descriptor_plan_roots(physicality_descriptor_capture_plan(captured.get()), nullptr);
-    for (size_t i = 0; i < result->phys_count; ++i) {
-        expect_body(inputs[i], result->physicalities[i]);
-        expect_body(inputs[result->phys_count + i], result->physicalities[i]);
-        EXPECT_EQ(observations[i].observed_at_unix_us, 10);
-        EXPECT_EQ(observations[result->phys_count + i].observed_at_unix_us, 20);
-        EXPECT_TRUE(hash128_equals(&roots[i], &roots[result->phys_count + i]));
-    }
+    ASSERT_EQ(count, forms.size());
+    for (size_t i = 0; i < forms.size(); ++i) expect_body(inputs[i], *forms[i]);
 }
 
 // A present composition is its entity and its one composition physicality: a present
@@ -145,7 +146,9 @@ TEST_F(GrammarPhysicality, PresentCompositionsStageNoEntityAndNoPhysicality) {
     EXPECT_EQ(intent_stage_physicality_count(stage.get()), 0u);
 }
 
-TEST_F(GrammarPhysicality, AlternateNativeCoordinateAtSamePlacementSurvivesDrainAndDescriptorCapture) {
+// A physicality id is its entity and its type: a second body computed for the same
+// placement is the form already staged, not another one.
+TEST_F(GrammarPhysicality, AnotherBodyAtTheSamePlacementIsTheStagedForm) {
     const std::string source = kGame;
     auto ast = parse(source);
     ASSERT_NE(ast, nullptr);
@@ -154,22 +157,11 @@ TEST_F(GrammarPhysicality, AlternateNativeCoordinateAtSamePlacementSurvivesDrain
     ASSERT_NE(original, nullptr);
     ASSERT_NE(changed, nullptr);
     ASSERT_GT(original->phys_count, 0u);
-    ASSERT_EQ(original->phys_count, changed->phys_count);
     auto& alternate = changed->physicalities[0];
     ASSERT_GE(alternate.n_constituents, 2u);
-    std::vector<hash128_t> children(alternate.n_constituents);
-    ASSERT_EQ(trajectory_constituents(alternate.trajectory_xyzm, alternate.trajectory_n / 4u,
-        children.data(), children.size()), static_cast<int>(children.size()));
-    // Controlled alternate child geometry, composed by the canonical native
-    // owner; the AST, ordered child identities and legacy placement stay fixed.
-    std::vector<double> coords(children.size() * 4u, 0.0);
-    for (size_t i = 0; i < children.size(); ++i) coords[i * 4u] = 0.125;
-    hash128_t recomposed{};
-    hash_composer_compose_node(4, children.data(), coords.data(), children.size(),
-        &recomposed, alternate.coord, &alternate.hilbert);
-    ASSERT_TRUE(hash128_equals(&recomposed, &alternate.entity_id));
-    ASSERT_NE(std::memcmp(alternate.coord, original->physicalities[0].coord, sizeof(alternate.coord)), 0);
+    for (size_t i = 0; i < 4; ++i) alternate.coord[i] += 0.125;
     EXPECT_TRUE(hash128_equals(&alternate.id, &original->physicalities[0].id));
+    const auto forms = distinct(*original);
     Stage stage(intent_stage_new_bounded(0, kBudget), intent_stage_free);
     ASSERT_EQ(laplace_compose_drain_into_stage(original.get(), stage.get(), &kSourceA,
         10, 1.0, nullptr, 0), 0);
@@ -181,30 +173,22 @@ TEST_F(GrammarPhysicality, AlternateNativeCoordinateAtSamePlacementSurvivesDrain
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* bodies = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, original->phys_count * 2u);
+    ASSERT_EQ(count, forms.size());
     expect_body(bodies[0], original->physicalities[0]);
-    expect_body(bodies[original->phys_count], alternate);
-    const auto* roots = physicality_descriptor_plan_roots(physicality_descriptor_capture_plan(captured.get()), nullptr);
-    EXPECT_FALSE(hash128_equals(&roots[0], &roots[original->phys_count]));
 }
 
-TEST_F(GrammarPhysicality, SourceRepresentationRetainsRepeatedAstCompositionWithoutDuplicateEntity) {
+// Two identical games in one source are one composition occurring twice in the file's
+// trajectory: the drain stages each entity and each form once.
+TEST_F(GrammarPhysicality, SourceRepresentationStagesRepeatedCompositionOnce) {
     const std::string source = std::string(kGame) + kGame;
     auto ast = parse(source);
     ASSERT_NE(ast, nullptr);
     auto result = compose(source, ast, true);
     ASSERT_NE(result, nullptr);
-    size_t repeated_entities = 0;
-    for (size_t i = 0; i < result->entity_count; ++i) {
+    for (size_t i = 0; i < result->entity_count; ++i)
         for (size_t j = 0; j < i; ++j)
             EXPECT_FALSE(hash128_equals(&result->entities[i].id, &result->entities[j].id));
-        size_t physicalities = 0;
-        for (size_t j = 0; j < result->phys_count; ++j)
-            if (hash128_equals(&result->entities[i].id, &result->physicalities[j].entity_id)) ++physicalities;
-        if (physicalities > 1u) ++repeated_entities;
-    }
-    EXPECT_GT(repeated_entities, 0u) << "The two identical parsed games must retain repeated computed bodies";
-    EXPECT_GT(result->phys_count, result->entity_count);
+    const auto forms = distinct(*result);
     Stage stage(intent_stage_new_bounded(0, kBudget), intent_stage_free);
     ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceA,
         10, 1.0, nullptr, 0), 0);
@@ -212,11 +196,14 @@ TEST_F(GrammarPhysicality, SourceRepresentationRetainsRepeatedAstCompositionWith
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* bodies = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_GE(count, result->phys_count);
-    // The grammar drain appends its computed P in order after lexical owners.
-    const size_t first = count - result->phys_count;
-    for (size_t i = 0; i < result->phys_count; ++i)
-        expect_body(bodies[first + i], result->physicalities[i]);
+    ASSERT_GE(count, forms.size());
+    for (size_t i = 0; i < count; ++i)
+        for (size_t j = 0; j < i; ++j)
+            EXPECT_FALSE(hash128_equals(&bodies[i].entity_id, &bodies[j].entity_id)
+                && bodies[i].type == bodies[j].type);
+    // The grammar drain appends its forms in order after lexical owners.
+    const size_t first = count - forms.size();
+    for (size_t i = 0; i < forms.size(); ++i) expect_body(bodies[first + i], *forms[i]);
 }
 
 TEST_F(GrammarPhysicality, RepeatedParsedSpansRemainResolvableAfterEntityReuse) {

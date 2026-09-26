@@ -19,9 +19,12 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// that was already launched per working set. Storage flush boundaries remain transport
 /// only; durable replayable testimony forms one canonical rating period per typed cell.
 /// </summary>
-public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
+public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IPhysicalityClosure, IAsyncDisposable
 {
     public const string PeriodBoundaryUnitPrefix = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
+
+    public (long Written, long Unplaced) TakePhysicalityClosure() =>
+        _inner is IPhysicalityClosure closure ? closure.TakePhysicalityClosure() : (0, 0);
 
     private readonly ISubstrateWriter _inner;
     private readonly NpgsqlDataSource _ds;

@@ -287,9 +287,9 @@ int laplace_ordered_composition_stage_batch(
                 }
                 continue;
             }
-            if (intent_stage_witness_seen(stage, &result->id)) {
-                /* Witnessed in an earlier batch: the entity row keeps its
-                 * minimum floor; this batch stages no second form and the
+            if (intent_stage_witness_seen(stage, &placement)) {
+                /* Its form was staged in an earlier batch: the entity row keeps
+                 * its minimum floor; this batch stages no second form and the
                  * result names no row it did not emit. */
                 result->first_physicality_row = 0u;
                 result->emitted_physicality_rows = 0u;
@@ -313,9 +313,11 @@ int laplace_ordered_composition_stage_batch(
             rc = -3;
             break;
         }
-        if (intent_stage_add_entity(
-                stage, &result->id, (int16_t)result->tier,
-                &r->type_id) != 0) {
+        /* Another path may have staged the entity without its form. */
+        if (!intent_stage_witness_seen(stage, &result->id)
+            && (intent_stage_add_entity(
+                    stage, &result->id, (int16_t)result->tier, &r->type_id) != 0
+                || intent_stage_witness_record(stage, &result->id) != 0)) {
             rc = -3;
             break;
         }
@@ -338,7 +340,7 @@ int laplace_ordered_composition_stage_batch(
                 staged_placements, staged_placement_rows, staged_placement_count);
             ++staged_placement_count;
         }
-        if (intent_stage_witness_record(stage, &result->id) != 0
+        if (intent_stage_witness_record(stage, &physicality_id) != 0
             || intent_stage_allocation_failed(stage)) {
             rc = -3;
             break;

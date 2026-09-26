@@ -42,20 +42,28 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         // Input storage is stable, but every enumeration scans and hashes all bytes.
         // No root or completion identity is precomputed outside the measured run.
         private readonly byte[][] _units;
+        // The declared recipe is content: the composition of its own text.
+        private readonly byte[] _recipeUtf8;
         private readonly Hash128 _recipe;
         private long _scannedBytes;
         private int _composedUnits;
 
         public long ScannedBytes => Interlocked.Read(ref _scannedBytes);
+
+        /// <summary>The content this source states: every unit's root and its recipe.</summary>
+        public Hash128[] Content() => _units
+            .Select(static u => ContentTierSpine.ResolveRoot(u)!.Value)
+            .Append(_recipe).Distinct().ToArray();
         public int ComposedUnits => Volatile.Read(ref _composedUnits);
 
         public DeferredContentSyntheticDecomposer(
-            int unitCount, int bytesPerUnit, Hash128 sourceId, Hash128? recipe = null)
+            int unitCount, int bytesPerUnit, Hash128 sourceId, string? recipe = null)
         {
             _unitCount = unitCount;
             SourceId = sourceId;
-            _recipe = recipe ?? Hash128.OfCanonical(
-                "test/deferred-content-synthetic/content-observations/v1");
+            _recipeUtf8 = Encoding.UTF8.GetBytes(recipe ?? "test/deferred-content-synthetic/content-observations/v1");
+            _recipe = ContentTierSpine.ResolveRoot(_recipeUtf8)
+                ?? throw new InvalidOperationException("synthetic recipe has no content identity");
             _units = new byte[unitCount][];
             var sb = new StringBuilder(bytesPerUnit);
             for (int i = 0; i < unitCount; i++)
@@ -91,7 +99,9 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                     if (!ContentTierSpine.TryStageIntoBuilder(b, unit.Utf8, SourceId, out var root)
                         || root != unit.Root)
                         throw new InvalidOperationException("synthetic unit did not compose its exact content");
-                    b.AddEntity(unit.Recipe, EntityTier.Word, EntityTypeRegistry.SourceReference);
+                    if (!ContentTierSpine.TryStageIntoBuilder(b, _recipeUtf8, SourceId, out var recipe)
+                        || recipe != unit.Recipe)
+                        throw new InvalidOperationException("synthetic recipe did not compose its exact content");
                     // BuildAsync must finish deferred content before the control transaction
                     // can record this completion together with its physicality testimony.
                     IngestUnitCompletion.Emit(b, root, SourceId, LayerOrder, unit.Recipe);
@@ -225,7 +235,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                     SELECT a.* FROM laplace.attestations a
                     WHERE a.source_id=$1),
                 referenced AS MATERIALIZED (
-                    SELECT subject_id AS id FROM owned
+                    SELECT unnest($2::bytea[]) AS id
+                    UNION SELECT subject_id FROM owned
                     UNION SELECT object_id FROM owned WHERE object_id IS NOT NULL
                     UNION SELECT context_id FROM owned WHERE context_id IS NOT NULL)
                 SELECT jsonb_build_object(
@@ -248,6 +259,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                               AND a.object_id IS NOT DISTINCT FROM c.object_id)), '[]'::jsonb))::text
                 """);
             command.Parameters.AddWithValue(source.ToBytes());
+            command.Parameters.AddWithValue(producer.Content().Select(static id => id.ToBytes()).ToArray());
             return (string)(await command.ExecuteScalarAsync())!;
         }
         async Task<long> ReceiptCountAsync()
@@ -280,7 +292,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         // Identical content and owner with a different declared recipe must compose
         // again. Only that recipe's own receipts authorize its subsequent warm pass.
         var revised = new DeferredContentSyntheticDecomposer(
-            count, bytes, source, Hash128.OfCanonical("test/deferred-content-synthetic/recipe/v2"));
+            count, bytes, source, "test/deferred-content-synthetic/recipe/v2");
         var revisedRun = await NewRunner(_pg.DataSource).RunAsync(revised, options);
         Assert.Equal(0, revisedRun.UnitsFailed);
         Assert.Equal(count, revised.ComposedUnits);

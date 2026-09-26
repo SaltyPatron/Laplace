@@ -429,6 +429,11 @@ SQL_QUERY("stage.new_sets", "",
     "CREATE INDEX ON {stage}.standingp (part,id); "
     "ANALYZE {stage}.new_entity; ANALYZE {stage}.new_form; ANALYZE {stage}.mask; ANALYZE {stage}.cellp; "
     "ANALYZE {stage}.standingp")
+/* Physicality closure of the source's new entities: each is realized by a form the
+ * source staged with it. */
+SQL_QUERY("stage.closure", "",
+    "SELECT count(*),count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM {stage}.form f "
+    "WHERE f.entity_id=n.id)) FROM {stage}.new_entity n")
 /* New rows per table and partition. */
 SQL_QUERY("stage.part_counts", "",
     "SELECT 'entities',part,count(*) FROM (SELECT part FROM {stage}.new_entity UNION ALL "

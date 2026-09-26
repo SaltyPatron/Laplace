@@ -998,7 +998,7 @@ public sealed partial class NpgsqlSubstrateWriter
                         continue;
                     if (!placedEntities.Contains(eid)) unplaced++;
                 }
-                PhysicalityClosureLedger.Record(firstEntIdx.Count, unplaced);
+                _closure.Record(firstEntIdx.Count, unplaced);
             }
 
             // The content-addressed five-tuple owns testimony identity. An

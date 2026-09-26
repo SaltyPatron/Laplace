@@ -1508,9 +1508,13 @@ struct owner_novelty {
     std::unordered_map<std::string, bool> novel;
     owner_novelty(const laplace_compose_result_t* r, const compose_emit_filter_t* f) {
         novel.reserve(r->entity_count);
-        for (size_t i = 0; i < r->entity_count; ++i)
-            novel.emplace(std::string(reinterpret_cast<const char*>(&r->entities[i].id), sizeof(hash128_t)),
-                          entity_novel(f, i) != 0);
+        /* One entity may occur at several indices; it is novel if any occurrence is. */
+        for (size_t i = 0; i < r->entity_count; ++i) {
+            auto placed = novel.emplace(
+                std::string(reinterpret_cast<const char*>(&r->entities[i].id), sizeof(hash128_t)),
+                entity_novel(f, i) != 0);
+            if (!placed.second && entity_novel(f, i)) placed.first->second = true;
+        }
     }
     bool operator()(const hash128_t* owner) const {
         auto it = novel.find(std::string(reinterpret_cast<const char*>(owner), sizeof(hash128_t)));
@@ -1569,6 +1573,7 @@ int laplace_compose_drain_into_stage(
     for (size_t i = 0; i < r->phys_count; ++i) {
         const laplace_compose_physicality_t* ph = &r->physicalities[i];
         if (!filter.emit_all && !owner_novel(&ph->entity_id)) continue;
+        if (intent_stage_witness_seen(stage, &ph->id)) continue;
         if (intent_stage_add_physicality(
                 stage, &ph->id, &ph->entity_id, 1, ph->coord, &ph->hilbert,
                 ph->trajectory_xyzm, (uint32_t)(ph->trajectory_n / 4), (int32_t)ph->n_constituents,

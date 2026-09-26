@@ -50,21 +50,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         {
             var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
             if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
-
-            var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
-                .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(TrustClassId, 0,
-                           BootstrapIntentBuilder.SourceTypeId)
-                .Build();
-            await context.Writer.ApplyAsync(metaSeed, ct);
-
-            var b = new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId);
-            await context.Writer.ApplyAsync(b.Build(), ct);
+            await context.Writer.ApplyAsync(new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId).Build(), ct);
         }
 
         public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -72,22 +58,12 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            var children = new Hash128[3];
-            var seed = new byte[12];
             for (int i = 0; i < _unitCount; i++)
             {
                 ct.ThrowIfCancellationRequested();
                 var builder = new SubstrateChangeBuilder(SourceId, $"unit-{i}");
-                for (int k = 0; k < 3; k++)
-                {
-                    BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
-                    BitConverter.TryWriteBytes(seed.AsSpan(8, 4), i * 100 + k);
-                    var leaf = Hash128.Blake3(seed);
-                    children[k] = leaf;
-                    builder.AddEntity(leaf, 0, BootstrapIntentBuilder.SourceTypeId);
-                }
-                var parent = Hash128.Merkle(1, children);
-                builder.AddEntity(parent, 1, BootstrapIntentBuilder.SourceTypeId);
+                SyntheticContent.Sentence(builder, SourceId,
+                    $"{SourceId.Lo:x16}:{i}:0", $"{SourceId.Lo:x16}:{i}:1", $"{SourceId.Lo:x16}:{i}:2");
                 yield return builder.SetInputUnitsConsumed(1).Build();
                 await Task.Yield();
             }
@@ -340,18 +316,9 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             var ids = new Hash128[3];
             for (int i = 0; i < 3; i++)
             {
-                var seed = new byte[12];
-                BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
-                BitConverter.TryWriteBytes(seed.AsSpan(8, 4), i);
-                ids[i] = Hash128.Blake3(seed);
-            }
-
-            for (int i = 0; i < 3; i++)
-            {
-                yield return new SubstrateChangeBuilder(SourceId, $"ent-{i}")
-                    .SetCommitEpoch(0)
-                    .AddEntity(ids[i], 0, BootstrapIntentBuilder.SourceTypeId)
-                    .Build();
+                var builder = new SubstrateChangeBuilder(SourceId, $"ent-{i}").SetCommitEpoch(0);
+                ids[i] = SyntheticContent.Words(builder, SourceId, $"{SourceId.Lo:x16}:phased:{i}")[0];
+                yield return builder.Build();
                 await Task.Yield();
             }
 
@@ -377,17 +344,14 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     {
         private readonly int _fileCount;
         private readonly int _batchesPerFile;
-        private readonly Hash128 _sharedVocab;
+        private readonly string _sharedVocab;
 
         public MultiFileParallelDecomposer(int fileCount, int batchesPerFile, Hash128 sourceId)
         {
             _fileCount = fileCount;
             _batchesPerFile = batchesPerFile;
             SourceId = sourceId;
-            var seed = new byte[12];
-            BitConverter.TryWriteBytes(seed.AsSpan(0, 8), sourceId.Lo);
-            BitConverter.TryWriteBytes(seed.AsSpan(8, 4), -99);
-            _sharedVocab = Hash128.Blake3(seed);
+            _sharedVocab = $"{sourceId.Lo:x16}:shared";
         }
 
         public Hash128 SourceId { get; }
@@ -427,18 +391,12 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                         int fileIdx = Interlocked.Increment(ref nextFile);
                         if (fileIdx >= _fileCount) break;
 
-                        var seed = new byte[12];
                         for (int b = 0; b < _batchesPerFile; b++)
                         {
                             ct.ThrowIfCancellationRequested();
-                            BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
-                            BitConverter.TryWriteBytes(seed.AsSpan(8, 4), fileIdx * 1000 + b);
-                            var uniq = Hash128.Blake3(seed);
-                            var change = new SubstrateChangeBuilder(SourceId, $"file-{fileIdx}/batch-{b}")
-                                .AddEntity(_sharedVocab, 0, BootstrapIntentBuilder.SourceTypeId)
-                                .AddEntity(uniq, 0, BootstrapIntentBuilder.SourceTypeId)
-                                .Build();
-                            await outChannel.Writer.WriteAsync(change, ct);
+                            var builder = new SubstrateChangeBuilder(SourceId, $"file-{fileIdx}/batch-{b}");
+                            SyntheticContent.Words(builder, SourceId, _sharedVocab, $"{SourceId.Lo:x16}:{fileIdx}:{b}");
+                            await outChannel.Writer.WriteAsync(builder.Build(), ct);
                         }
                     }
                 }, ct);
@@ -465,16 +423,13 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     private sealed class OverlapDecomposer : IDecomposer
     {
         private readonly int _unitCount;
-        private readonly Hash128 _shared;
+        private readonly string _shared;
 
         public OverlapDecomposer(int unitCount, Hash128 sourceId)
         {
             _unitCount = unitCount;
             SourceId = sourceId;
-            var seed = new byte[12];
-            BitConverter.TryWriteBytes(seed.AsSpan(0, 8), sourceId.Lo);
-            BitConverter.TryWriteBytes(seed.AsSpan(8, 4), -1);
-            _shared = Hash128.Blake3(seed);
+            _shared = $"{sourceId.Lo:x16}:shared";
         }
 
         public Hash128 SourceId { get; }
@@ -488,13 +443,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
             if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
 
-            var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
-                .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
-                .AddEntity(TrustClassId, 0, BootstrapIntentBuilder.SourceTypeId)
-                .Build();
-            await context.Writer.ApplyAsync(metaSeed, ct);
             await context.Writer.ApplyAsync(
                 new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId).Build(), ct);
         }
@@ -503,16 +451,11 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             IDecomposerContext context, DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            var seed = new byte[12];
             for (int i = 0; i < _unitCount; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
-                BitConverter.TryWriteBytes(seed.AsSpan(8, 4), i);
-                var uniq = Hash128.Blake3(seed);
-                var builder = new SubstrateChangeBuilder(SourceId, $"ov-{i}")
-                    .AddEntity(_shared, 0, BootstrapIntentBuilder.SourceTypeId)
-                    .AddEntity(uniq, 0, BootstrapIntentBuilder.SourceTypeId);
+                var builder = new SubstrateChangeBuilder(SourceId, $"ov-{i}");
+                SyntheticContent.Words(builder, SourceId, _shared, $"{SourceId.Lo:x16}:{i}");
                 yield return builder.Build();
                 await Task.Yield();
             }
@@ -653,5 +596,52 @@ public sealed class LocalPgFixture : IAsyncLifetime
         const string pgBin = @"C:\Program Files\PostgreSQL\18\bin";
         string exe = Path.Combine(pgBin, program + ".exe");
         return File.Exists(exe) ? exe : program;
+    }
+}
+
+/// <summary>
+/// Content a synthetic source states, staged the way every source stages it: each text is
+/// the composition of its codepoints and a unit is the composition of its texts, each
+/// with its trajectory.
+/// </summary>
+internal static class SyntheticContent
+{
+    private static OrderedCompositionComponent Atom(int codepoint)
+    {
+        CodepointPerfcache.LoadDefault();
+        var p = CodepointPerfcache.Records[codepoint];
+        return new(p.Hash, 0, p.CoordX, p.CoordY, p.CoordZ, p.CoordM, (uint)codepoint, true);
+    }
+
+    private static OrderedCompositionResult[] Texts(IntentStage stage, Hash128 sourceId, string[] texts)
+    {
+        Hash128 word = EntityTypeRegistry.Id("Word");
+        var requests = texts.Select(t => new OrderedCompositionRequest(
+            t.EnumerateRunes().Select(r => Atom(r.Value)).ToArray(), word, sourceId, 1)).ToArray();
+        var results = new OrderedCompositionResult[requests.Length];
+        OrderedComposition.StageBatch(stage, requests, results);
+        return results;
+    }
+
+    /// <summary>Stages each text as its own root; returns their ids in order.</summary>
+    public static Hash128[] Words(SubstrateChangeBuilder builder, Hash128 sourceId, params string[] texts)
+    {
+        var stage = IntentStage.New(texts.Length);
+        Hash128[] ids = Texts(stage, sourceId, texts).Select(static r => r.Id).ToArray();
+        builder.AddIntentStage(stage);
+        return ids;
+    }
+
+    /// <summary>Stages the texts and the composition of them; returns the composition's id.</summary>
+    public static Hash128 Sentence(SubstrateChangeBuilder builder, Hash128 sourceId, params string[] texts)
+    {
+        var stage = IntentStage.New(texts.Length + 1);
+        OrderedCompositionResult[] words = Texts(stage, sourceId, texts);
+        var parent = new OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(stage, [new OrderedCompositionRequest(
+            words.Select(static w => new OrderedCompositionComponent(w.Id, w.Tier, w.CoordX, w.CoordY, w.CoordZ, w.CoordM))
+                .ToArray(), EntityTypeRegistry.Id("Sentence"), sourceId, 1)], parent);
+        builder.AddIntentStage(stage);
+        return parent[0].Id;
     }
 }

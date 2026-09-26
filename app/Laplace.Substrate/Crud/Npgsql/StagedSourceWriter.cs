@@ -27,7 +27,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// PostgreSQL stores and sorts; native code merges and folds; this class sequences the
 /// operations and moves COPY streams. No record becomes a managed object.
 /// </summary>
-public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
+public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics, IPhysicalityClosure, IAsyncDisposable
 {
     private readonly ISubstrateWriter _inner;
     private readonly NpgsqlDataSource _ds;
@@ -55,6 +55,20 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         _durability = durability;
         _lanes = lanes;
         _log = logger ?? NullLogger.Instance;
+    }
+
+    private readonly PhysicalityClosureLedger _closure = new();
+
+    public (long Written, long Unplaced) TakePhysicalityClosure()
+    {
+        (long written, long unplaced) = _closure.Take();
+        if (_inner is IPhysicalityClosure inner)
+        {
+            (long w, long u) = inner.TakePhysicalityClosure();
+            written += w;
+            unplaced += u;
+        }
+        return (written, unplaced);
     }
 
     public long ObservationsAccumulated => Interlocked.Read(ref _observations)
@@ -286,6 +300,12 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
         // The new records of every table, by the partition they land in.
         await ExecuteAsync(control, null, Sql("stage.new_sets"), ct).ConfigureAwait(false);
+        await using (var closure = new NpgsqlCommand(Sql("stage.closure"), control) { CommandTimeout = 0 })
+        await using (var reader = await closure.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            await reader.ReadAsync(ct).ConfigureAwait(false);
+            _closure.Record(reader.GetInt64(0), reader.GetInt64(1));
+        }
         await Mark("new sets");
 
         // Every touched leaf is rebuilt on the side, then swapped in.

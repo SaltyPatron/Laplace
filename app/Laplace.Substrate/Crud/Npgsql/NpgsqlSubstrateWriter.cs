@@ -6,8 +6,12 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
+public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicalityClosure
 {
+    private readonly PhysicalityClosureLedger _closure = new();
+
+    public (long Written, long Unplaced) TakePhysicalityClosure() => _closure.Take();
+
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<NpgsqlSubstrateWriter> _log;
     public PostgresWriteDurability Durability { get; }

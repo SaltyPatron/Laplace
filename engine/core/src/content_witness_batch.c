@@ -428,9 +428,13 @@ static int emit_node(
     if (node.tier == 0) return 0;
     if (!should_emit_compositional(tree, idx)) return 0;
     /* One content is one entity with one composition physicality (its id is the
-     * entity id and the physicality type): a node already staged here stages nothing
-     * more. Repeated occurrences live in their parents' trajectories. */
-    if (intent_stage_witness_seen(stage, &node.id)) {
+     * entity id and the physicality type). Each row is staged once per stage, known by
+     * its own id: another path may have staged the entity without its form. Repeated
+     * occurrences live in their parents' trajectories. */
+    hash128_t phys_id;
+    laplace_physicality_id_compute(node.id, 1, &phys_id);
+    const int entity_staged = intent_stage_witness_seen(stage, &node.id);
+    if (intent_stage_witness_seen(stage, &phys_id)) {
         *emitted = 1;
         return 0;
     }
@@ -455,9 +459,10 @@ static int emit_node(
         }
     }
 
-    if (emit_entity) {
+    if (emit_entity && !entity_staged) {
         hash128_t type_id = laplace_content_tier_type_id(node.tier);
-        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0)
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0
+            || intent_stage_witness_record(stage, &node.id) != 0)
             return -2;
     }
 
@@ -468,17 +473,15 @@ static int emit_node(
             || n_traj > UINT32_MAX) return -2;
     }
 
-    hash128_t phys_id;
     /* Content-derived identity: (entity_id, physicality_type=Content). The coord
-     * and trajectory below are still stored as payload, but no longer forge the id. */
-    laplace_physicality_id_compute(node.id, 1, &phys_id);
+     * and trajectory below are payload; they do not forge the id. */
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,
             (int32_t)(m > 1 ? m : 0), 1, 0.0, 1, 0, now_us) != 0) {
         return -2;
     }
-    if (intent_stage_witness_record(stage, &node.id) != 0
+    if (intent_stage_witness_record(stage, &phys_id) != 0
         || intent_stage_allocation_failed(stage)) return -2;
     *emitted = 1;
     return 0;
