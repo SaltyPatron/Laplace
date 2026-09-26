@@ -60,18 +60,21 @@ public sealed class Iso6392AdmissionTests
                 attestations.AddRange(change.AllAttestations());
             }
 
+            // A code is its content; a language is the content of its ISO 639-3 code, made a
+            // language by the IS_LANGUAGE_CODE claim of the 639-3 table. A collective 639-2
+            // code ("afa") is admitted as content with its names but no row makes it a
+            // language or the external id of one.
             Hash128 eng = LanguageEntityId.FromIso639_3("eng");
-            Hash128 afaLanguage = LanguageEntityId.FromIso639_3("afa");
-            Hash128 afaCode = Hash128.OfCanonical("iso639-2:afa");
+            Hash128 afa = ContentEmitter.RootId("afa")!.Value;
+            Hash128 isLanguageCode = RelationTypeRegistry.RelationTypeId("IS_LANGUAGE_CODE");
+            Hash128 hasExternalId = RelationTypeRegistry.RelationTypeId("HAS_EXTERNAL_ID");
 
-            Assert.Contains(entities, e =>
-                e.Id == eng && e.TypeId == EntityTypeRegistry.Language);
-            Assert.DoesNotContain(entities, e =>
-                e.Id == afaLanguage && e.TypeId == EntityTypeRegistry.Language);
-            Assert.Contains(entities, e =>
-                e.Id == afaCode && e.TypeId == EntityTypeRegistry.Iso639Code);
-            Assert.DoesNotContain(attestations, a =>
-                a.SubjectId == afaLanguage && a.ObjectId == afaCode);
+            Assert.Contains(attestations, a => a.SubjectId == eng && a.TypeId == isLanguageCode);
+            Assert.Contains(attestations, a =>
+                a.SubjectId == eng && a.TypeId == hasExternalId && a.ObjectId == eng);
+            Assert.Contains(entities, e => e.Id == afa);
+            Assert.DoesNotContain(attestations, a => a.SubjectId == afa && a.TypeId == isLanguageCode);
+            Assert.DoesNotContain(attestations, a => a.TypeId == hasExternalId && a.ObjectId == afa);
         }
         finally
         {

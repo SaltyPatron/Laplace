@@ -63,14 +63,12 @@ public sealed class CILIReferenceAdmissionTests
                 ReferenceIdentityKind.CiliMapVersion, "pwn31")!.Value;
 
             Assert.Equal(key, pwn31Key);
-            Assert.Contains(entities, e =>
-                e.Id == ili && e.TypeId == EntityTypeRegistry.WordNetSynset);
-            Assert.Contains(entities, e =>
-                e.Id == key && e.TypeId == EntityTypeRegistry.SourceReference);
-            Assert.Contains(entities, e =>
-                e.Id == version && e.TypeId == EntityTypeRegistry.SourceVersion);
-            Assert.Contains(entities, e =>
-                e.Id == pwn31Version && e.TypeId == EntityTypeRegistry.SourceVersion);
+            // References are content entities: what they denote is stated by the claims
+            // that use them (rdf:type as IS_TYPED_AS, HAS_SYNSET_KEY), not by an entity type.
+            Assert.Contains(entities, e => e.Id == ili);
+            Assert.Contains(entities, e => e.Id == key);
+            Assert.Contains(entities, e => e.Id == version);
+            Assert.Contains(entities, e => e.Id == pwn31Version);
             Assert.Contains(ili, physicalEntities);
             Assert.Contains(key, physicalEntities);
             Assert.Contains(version, physicalEntities);
