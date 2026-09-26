@@ -14,9 +14,9 @@
  * A textual preview follows one first-child spine in native C; no recursive
  * SQL, per-row rendering, sibling expansion or whole-document reconstruction. */
 typedef struct {
-    hash128_t id, type, source, target, chosen_evidence;
+    hash128_t id, type, target, chosen_evidence;
     int16 tier, target_tier;
-    bool exists, has_type, has_source, has_target;
+    bool exists, has_type, has_target;
     int64 chosen_time;
     char *label;
 } DisplayItem;
@@ -267,8 +267,8 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         if(!item)continue;
         item->exists=true;item->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
         Datum type=SPI_getbinval(t,d,3,&isnull);item->has_type=!isnull;if(!isnull)item->type=datum_to_hash128(type);
-        Datum source=SPI_getbinval(t,d,4,&isnull);item->has_source=!isnull;if(!isnull)item->source=datum_to_hash128(source);
-        Datum name=SPI_getbinval(t,d,5,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
+        /* display.facets: id, tier, type_id, canonical name. An entity row names no source. */
+        Datum name=SPI_getbinval(t,d,4,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
     }
     SPI_freetuptable(SPI_tuptable);
     /* An identifier (an ILI, a synset key) realizes through the words a source
@@ -319,22 +319,19 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         if(laplace_relation_lookup(&work[i]->id,&def)==0 && def)work[i]->label=pstrdup(def->canonical);
     }
     count=pending(all,unique,work,0);
-    DisplayItem *meta=palloc0(Max(count*2,1)*sizeof(DisplayItem));DisplayItem **meta_ptr=palloc(Max(count*2,1)*sizeof(DisplayItem*));
-    int nmeta=0;int *type_slot=palloc(Max(count,1)*sizeof(int)),*source_slot=palloc(Max(count,1)*sizeof(int));
+    DisplayItem *meta=palloc0(Max(count,1)*sizeof(DisplayItem));DisplayItem **meta_ptr=palloc(Max(count,1)*sizeof(DisplayItem*));
+    int nmeta=0;int *type_slot=palloc(Max(count,1)*sizeof(int));
     for(int i=0;i<count;++i) {
-        type_slot[i]=source_slot[i]=-1;
+        type_slot[i]=-1;
         if(work[i]->has_type){type_slot[i]=nmeta;meta[nmeta].id=work[i]->type;meta_ptr[nmeta]=&meta[nmeta];++nmeta;}
-        if(work[i]->has_source){source_slot[i]=nmeta;meta[nmeta].id=work[i]->source;meta_ptr[nmeta]=&meta[nmeta];++nmeta;}
     }
     labels=metadata_labels(meta_ptr,nmeta);
     for(int i=0;i<count;++i) {
-        char *type=type_slot[i]>=0?labels[type_slot[i]]:NULL,*source=source_slot[i]>=0?labels[source_slot[i]]:NULL;
-        if(opaque_name(type,false))type=NULL;if(opaque_name(source,false))source=NULL;
+        char *type=type_slot[i]>=0?labels[type_slot[i]]:NULL;
+        if(opaque_name(type,false))type=NULL;
         if(type)for(char *p=type;*p;++p)if(*p=='_')*p=' ';
         char *identity = short_identity(&work[i]->id);
-        if(type && source)work[i]->label=psprintf("%s · %s · %s",type,source,identity);
-        else if(type)work[i]->label=psprintf("%s · %s",type,identity);
-        else if(source)work[i]->label=psprintf("Entity · %s · %s",source,identity);
+        if(type)work[i]->label=psprintf("%s · %s",type,identity);
         else work[i]->label=psprintf("Entity · %s",identity);
     }
     for(int i=0;i<n;++i) {

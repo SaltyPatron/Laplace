@@ -88,7 +88,6 @@ public sealed class IngestBootstrapAccountingTests
         Assert.Equal(1, result.BootstrapEntitiesInserted);
         Assert.Equal(0, result.BootstrapPhysicalitiesInserted);
         Assert.Equal(0, result.BootstrapAttestationsInserted);
-        Assert.Equal(1, result.GovernedIdentitiesWithoutPhysicality);
         Assert.Equal(1, result.InputUnitsDone);
         Assert.Equal(1, result.ConsensusObservations);
         Assert.Equal(1, result.ConsensusCellDeposits);

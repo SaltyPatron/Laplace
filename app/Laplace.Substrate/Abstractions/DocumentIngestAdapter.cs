@@ -68,11 +68,24 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
             return;
         }
 
+        // Present content stages nothing of itself, yet its file node still composes it:
+        // the root's component comes from the unit's tree or, for a present root, one
+        // built only to read it.
+        OrderedCompositionComponent contentComponent;
+        if (unit.TreeForBatchProbe is { } tree)
+        {
+            contentComponent = FileEntity.RootComponent(tree);
+        }
+        else
+        {
+            using var built = ContentTierSpine.BuildTree(record.CanonicalUtf8)
+                ?? throw new InvalidOperationException("document content has no native tree");
+            contentComponent = FileEntity.RootComponent(built);
+        }
         FileIdentity file = FileEntity.Emit(
             builder,
             DocumentSource.SourceId,
-            FileEntity.RootComponent(unit.TreeForBatchProbe
-                ?? throw new InvalidOperationException("document content tree was released before file publication")),
+            contentComponent,
             metadata,
             SourceTrust.StructuredCorpus);
         if (file.ContentRootId != contentRoot

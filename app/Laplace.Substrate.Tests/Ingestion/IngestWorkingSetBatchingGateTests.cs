@@ -55,7 +55,6 @@ public sealed class IngestWorkingSetBatchingGateTests
         Assert.Equal(2, pending.Count);
         Assert.Contains(word, pending);
         Assert.Contains(pos, pending);
-        Assert.Equal(0, tracker.GovernedWithoutPhysicalityCount);
     }
 
     [Fact]

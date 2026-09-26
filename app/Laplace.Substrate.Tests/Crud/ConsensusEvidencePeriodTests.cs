@@ -307,8 +307,10 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         int end = source.IndexOf("\nSQL_QUERY(", start, StringComparison.Ordinal);
         if (end < 0) end = source.Length;
         Assert.True(end > start, "the native query must have a complete literal");
+        // The entry's literal is its run of string lines; a comment may precede the next entry.
         string query = string.Concat(source[start..end]
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .TakeWhile(line => line.TrimStart().StartsWith('"'))
             .Select(line => JsonSerializer.Deserialize<string>(line.Trim().TrimEnd(')'))
                 ?? throw new InvalidDataException("null native SQL fragment")));
         query = query.Replace("'\\x%s'::bytea", "@type", StringComparison.Ordinal)

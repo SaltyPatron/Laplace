@@ -57,12 +57,9 @@ BEGIN ATOMIC
                        JOIN pg_class c ON c.oid = t.relid
                        WHERE t.isleaf)
             END AS entities,
-            -- The Tier-0 surface is admitted content: a codepoint entity has a
-            -- physicality. Without it nothing composes and no read can answer.
-            EXISTS (
-                SELECT 1 FROM laplace.physicalities
-                WHERE entity_id = public.laplace_hash128_blake3('A'::bytea)
-            ) AS surface_present,
+            -- The Tier-0 surface is the codepoint ROM: an atom resolves through it,
+            -- never through a stored row. Without it nothing composes.
+            (laplace.content_id(convert_to('A', 'UTF8')) IS NOT NULL) AS surface_present,
             (SELECT count(*) FROM laplace.relation_registry()) AS registry_relations
     )
     SELECT

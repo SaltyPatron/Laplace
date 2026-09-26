@@ -2,15 +2,14 @@ CREATE OR REPLACE FUNCTION laplace.compositional_type_ids()
 RETURNS bytea[]
 LANGUAGE sql
 IMMUTABLE
--- No SET search_path: every reference below is already schema-qualified (public.laplace_hash128_blake3),
--- and the clause would block Postgres from INLINING/constant-folding this into callers' predicates —
--- turning a compile-time-constant id set into 5 BLAKE3 hashes recomputed per entity row.
+-- No SET search_path: every reference below is already schema-qualified, and the clause would
+-- block Postgres from inlining this constant id set into callers' predicates.
 BEGIN ATOMIC
     SELECT ARRAY[
-        public.laplace_hash128_blake3('Codepoint'::bytea),
-        public.laplace_hash128_blake3('Grapheme'::bytea),
-        public.laplace_hash128_blake3('Word'::bytea),
-        public.laplace_hash128_blake3('Sentence'::bytea),
-        public.laplace_hash128_blake3('Document'::bytea)
+        laplace.entity_type_id('Codepoint'),
+        laplace.entity_type_id('Grapheme'),
+        laplace.entity_type_id('Word'),
+        laplace.entity_type_id('Sentence'),
+        laplace.entity_type_id('Document')
     ];
 END;

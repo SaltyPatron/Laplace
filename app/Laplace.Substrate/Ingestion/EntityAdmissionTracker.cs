@@ -88,11 +88,5 @@ internal sealed class EntityAdmissionTracker
         lock (_gate) return _contentAwaitingPhysicality.Values.ToArray();
     }
 
-    // Compatibility surface for the run receipt. The generic pipeline no longer
-    // admits a second class of "governed nonphysical" entity; recipes must realize
-    // every entity they introduce. Remove the receipt field once callers no longer
-    // consume it.
-    internal int GovernedWithoutPhysicalityCount => 0;
-
     internal sealed record PendingEntity(Hash128 Id, Hash128 TypeId, string UnitName);
 }

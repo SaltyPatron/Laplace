@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION structural.model_recipes()
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH constants AS MATERIALIZED (
-        SELECT public.laplace_hash128_blake3(convert_to('Model_Recipe', 'UTF8')) AS model_recipe_type,
+        SELECT laplace.entity_type_id('Model_Recipe') AS model_recipe_type,
                laplace.relation_type_id('ENCODES') AS encodes_type
     ), recipes AS MATERIALIZED (
         SELECT e.id

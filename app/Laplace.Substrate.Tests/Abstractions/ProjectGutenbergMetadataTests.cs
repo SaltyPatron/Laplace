@@ -81,7 +81,7 @@ public sealed class ProjectGutenbergMetadataTests
             ContentIngestRecord record = Assert.Single(records);
             var builder = new SubstrateChangeBuilder(DocumentSource.SourceId, "gutenberg/edition");
             new DocumentIngestHandler(layerOrder: 2).WalkWitness(
-                record, record.ContentRootId, builder, unit: null!);
+                record, record.ContentRootId, builder, PresentRootDeferredUnit.Instance);
             SubstrateChange change = builder.Build();
             WorkIdentity work = WorkEntity.Resolve(
                 metadata.FormatMetadata!.Title!, metadata.FormatMetadata.Author);

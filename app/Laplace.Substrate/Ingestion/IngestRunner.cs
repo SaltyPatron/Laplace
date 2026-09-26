@@ -661,7 +661,6 @@ public sealed class IngestRunner
             FilesDone: counters.FilesDone,
             InputUnitsDone: counters.InputUnitsDone,
             InputUnitsTotal: inventory?.EffectiveTotalInputUnits ?? 0,
-            GovernedIdentitiesWithoutPhysicality: 0,
             BootstrapEntitiesInserted: counters.BootstrapEntitiesInserted,
             BootstrapPhysicalitiesInserted: counters.BootstrapPhysicalitiesInserted,
             BootstrapAttestationsInserted: counters.BootstrapAttestationsInserted,

@@ -35,7 +35,7 @@ BEGIN ATOMIC
                c.witness_count AS plays
         FROM laplace.consensus c
         WHERE c.type_id = ANY (consensus.relation_family_ids('OUTCOME'))
-          AND c.object_id = public.laplace_hash128_blake3('Chess_Result')
+          AND c.object_id = laplace.entity_type_id('Chess_Result')
     ), cls(id, label, ord) AS (
         VALUES
             (laplace.word_id('rushed'), 'rushed', 1),
