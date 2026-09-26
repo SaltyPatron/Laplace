@@ -342,6 +342,10 @@ def check_source(
     SPREAD_SAMPLE = 50000
     for gate in src.get("consensus_gates", []):
         rel = gate["relation"]
+        # An absence gate (max 0) says this source must not emit the relation; the
+        # relation's consensus belongs to other witnesses and says nothing about it.
+        if "max" in gate and int(gate["max"]) == 0:
+            continue
         exempt = gate.get("constant_rating_ok")
         try:
             row = psql(

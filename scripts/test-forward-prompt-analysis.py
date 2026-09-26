@@ -55,8 +55,14 @@ def main() -> int:
 
     # Exact observation identity precedes cognition. No text heuristic is
     # permitted to replace the canonical prompt tree.
-    assert count(walk, "generation.forward_program(") == 1, \
+    assert count(function_slice(walk, "generation.forward_text", "converse.forward_turn"),
+                 "generation.forward_program(") == 1, \
         "forward_text must execute the native cognition program exactly once"
+    observed = function_slice(walk, "converse.forward_turn_observed", "generation.walk_text")
+    assert count(observed, "generation.forward_program(") == 1, \
+        "an observed turn owns its answer and receipts through one native program"
+    assert count(walk, "generation.forward_program(") == 2, \
+        "only forward_text and the observed turn execute the native cognition program"
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
     assert "converse.prompt_operands(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
@@ -74,7 +80,8 @@ def main() -> int:
     assert "NULL::bytea[]" in forward_text
     assert "r.completion" in forward_text
     assert "r.semantic_act_id IS NOT NULL" in forward_text
-    assert "realize.batch(entities)" in forward_text
+    assert re.search(r"realize\.forward_text_batch\(\s*entities,\s*"
+                     r"converse\.prompt_language_top\(p_prompt\)\)", forward_text)
 
     # Full program is the only C whole-prompt execution. Compatibility trace and
     # identity output are SQL projections of that exact invocation contract.
@@ -178,7 +185,10 @@ def main() -> int:
     completion = (ROOT / "extension/laplace_substrate/src/cognition_program.c").read_text()
     completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
     assert "tiers[node] >= 2" in completion
-    assert "program->required = bms_add_members(bms_copy(eligible), compiled_required)" in completion, \
+    assert re.search(r"program->required = operation_count == 0 && content_required\s*"
+                     r"\? bms_copy\(content_required\)\s*"
+                     r": bms_add_members\(bms_copy\(eligible\), compiled_required\);",
+                     completion), \
         "binding an operation cannot erase unresolved prompt constituents"
     assert "cue_origins" not in completion
     assert "operation->operand_origins" in completion
@@ -242,7 +252,7 @@ def main() -> int:
     assert "laplace_consensus_scan(operand_ids, candidate_ids" in evidence_native
     assert "laplace_consensus_scan(candidate_ids, operand_ids" in evidence_native
     assert "state->operands = DatumGetArrayTypePCopy" in evidence_native
-    assert "query_state_append_operands(state, selected)" in evidence_native
+    assert "query_state_append_operands(state, selected, selected_count, operand_role)" in evidence_native
     assert count(program, "laplace_query_state_candidate_evidence(") == 2
     assert "proposal top-K cannot hide them" in program
 
@@ -269,25 +279,28 @@ def main() -> int:
     assert drop_trace in walk
     assert walk.index(drop_frontier) < walk.index(drop_trace)
 
-    # Natural chat carries exact session state into this same program.
-    natural = re.search(r"IF shape IS NULL THEN(.*?)END IF;", chat, re.S)
-    assert natural is not None and "RETURN out;" in natural.group(1)
-    call = re.search(r"converse\.forward_turn\(\s*p_prompt,\s*p_session,\s*(\d+),", natural.group(1))
-    assert call is not None
-    program_sql = function_slice(walk, "converse.forward_turn", "generation.walk_text")
-    default_steps = re.search(r"p_steps int DEFAULT (\d+)", program_sql)
-    assert default_steps is not None
-    steps = int(call.group(1))
-    assert steps >= 40 and steps == int(default_steps.group(1))
+    # Natural chat answers an open turn with the joint meeting of its content
+    # terms first, then carries exact session state into this same program under
+    # the governed firmware image's policy rather than literal envelopes.
+    natural = re.search(r"IF shape IS NULL THEN(.*?)\n    ELSE\n", chat, re.S)
+    assert natural is not None
+    natural_body = natural.group(1)
+    assert "out := converse.answer(p_prompt, p_lang);" in natural_body
+    assert natural_body.index("converse.answer(") < natural_body.index("converse.forward_turn(")
+    call = re.search(r"FROM converse\.firmware\(\) f,\s*converse\.forward_turn\(\s*"
+                     r"p_prompt,\s*p_session,\s*f\.steps,\s*f\.max_stride,\s*f\.spread,"
+                     r"\s*f\.top_k,\s*NULL::bigint,\s*f\.semantic_hops,\s*f\.fanout\)",
+                     natural_body)
+    assert call is not None, "natural chat must read its envelope from the firmware image"
     assert count(chat, "converse.forward_turn(") == 1
     assert "generation.forward_text(" not in chat
-    assert "chat_scaffold" not in natural.group(1)
+    assert "chat_scaffold" not in natural_body
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"obligations=native semantic_act=hash-bound realization=completion-gated "
         f"query_state=persistent candidate_evidence=exact evidence=typed-separate "
-        f"intent=explicit-witnessed-invocation execution=single-native-program route_owner=native chat_steps={steps}"
+        f"intent=explicit-witnessed-invocation execution=single-native-program route_owner=native chat_steps=firmware"
     )
     return 0
 

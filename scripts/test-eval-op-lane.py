@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -40,11 +39,6 @@ def _load_primary_workflow():
     if not isinstance(workflow, dict):
         raise ValueError("laplace.yml must be a mapping")
     return workflow
-
-
-def _load_test_profiles():
-    value = json.loads((ROOT / "scripts/test-profiles.json").read_text(encoding="utf-8"))
-    return value["suites"]
 
 
 class _Response(BytesIO):
@@ -393,12 +387,10 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertNotIn("verify-generation.py", product)
         self.assertNotIn("eval-generation.py", product)
         self.assertNotIn("--api http://127.0.0.1:8080", product)
-        self.assertEqual(1, product.count("test-parallel.sh --perf"))
 
-        perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")
-        perf_command = " ".join(perf["command"])
+        perf_command = (ROOT / "scripts/test-suites/perf.sh").read_text(encoding="utf-8")
         self.assertIn("verify-generation.py", perf_command)
-        self.assertIn("--api ${LAPLACE_API_BASE:-http://127.0.0.1:8080}", perf_command)
+        self.assertIn("--api \"${LAPLACE_API_BASE:-http://127.0.0.1:8080}\"", perf_command)
         self.assertNotIn("--" + "db", perf_command)
 
         probes = json.loads((ROOT / "scripts/eval-probes.json").read_text(encoding="utf-8"))
@@ -409,31 +401,28 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertGreaterEqual(text.count('"converse.prompt_language"'), 2)
         self.assertNotIn("word_" + "language", text)
 
-    def test_long_generation_benchmark_is_dispatch_only(self):
+    def test_long_generation_benchmark_runs_only_from_the_perf_profile(self):
+        # The product lifecycle and its workflow never run the long benchmark; it is
+        # reached only by naming the perf profile, which enforces its detectors.
         workflow = _load_primary_workflow()
-        dispatch = workflow["on"]["workflow_dispatch"]
-        benchmark = dispatch["inputs"]["generation_benchmark"]
-        self.assertEqual("boolean", benchmark["type"])
-        self.assertEqual("false", benchmark["default"])
-
+        self.assertNotIn("generation_benchmark",
+                         workflow["on"]["workflow_dispatch"].get("inputs", {}))
         workflow_text = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
-        self.assertIn(
-            "github.event_name == 'workflow_dispatch' && inputs.generation_benchmark && '1' || ''",
-            workflow_text,
-        )
-        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
-        for requested in ("0", "1"):
-            result = subprocess.run(
-                ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
-                env={**os.environ, "LAPLACE_GENERATION_BENCHMARK": requested,
-                     "LAPLACE_FRESH_DB": "0", "LAPLACE_RESTORE_FOUNDATION": "0"},
-                capture_output=True, text=True, check=True, timeout=10,
-            )
-            self.assertEqual(requested == "1", "performance" in result.stdout.splitlines())
-        self.assertEqual(1, product.count("test-parallel.sh --perf"))
+        self.assertNotIn("GENERATION_BENCHMARK", workflow_text)
 
-        perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")
-        perf_command = " ".join(perf["command"])
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        self.assertNotIn("GENERATION_BENCHMARK", product)
+        self.assertNotIn("--perf", product)
+        self.assertNotIn("perf.sh", product)
+
+        runner = (ROOT / "scripts/test-parallel.sh").read_text(encoding="utf-8")
+        self.assertIn("--perf) MODE=perf; shift ;;", runner)
+        self.assertIn("  perf) run_suite perf ;;", runner)
+        for profile in ("dev", "db", "live", "app", "all"):
+            line = next(l for l in runner.splitlines() if l.startswith(f"  {profile}) run_suite"))
+            self.assertNotIn("run_suite perf", line, profile)
+
+        perf_command = (ROOT / "scripts/test-suites/perf.sh").read_text(encoding="utf-8")
         self.assertIn("verify-generation.py", perf_command)
         self.assertIn("--enforce", perf_command)
 

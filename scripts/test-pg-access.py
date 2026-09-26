@@ -230,7 +230,7 @@ raise SystemExit(0)
     def test_health_connects_to_target_database_without_psql_command_metasyntax(self):
         result, calls = self._run_health()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext source_extension=test-ext relation_bands=maintained_counts", result.stdout)
+        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext source_extension=test-ext artifact_scope=source relation_bands=maintained_counts", result.stdout)
         self.assertGreaterEqual(len(calls), 9)
         self.assertEqual("laplace", calls[0][calls[0].index("-d") + 1])
         self.assertEqual("SELECT 1", calls[0][-1])

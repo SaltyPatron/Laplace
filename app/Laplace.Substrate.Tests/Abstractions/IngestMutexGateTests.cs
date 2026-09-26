@@ -237,10 +237,10 @@ public sealed class IngestMutexGateTests
     public void ProductionScan_SeparatesTestFixturesFromRuntimeOwners()
     {
         Assert.True(IsTestSource("app/Laplace.Substrate.Tests/Abstractions/MeasurementLaneGateTests.cs"));
-        Assert.True(IsTestSource("scripts/test-bootstrap-ingest-liveness.py"));
-        Assert.False(IsTestSource("scripts/bootstrap-ingest-liveness.py"));
+        Assert.True(IsTestSource("scripts/test-ingest-source-exit.py"));
+        Assert.False(IsTestSource("scripts/decomposer-gate-check.py"));
         Assert.False(IsTestSource("scripts/wait-for-quiet-substrate.sh"));
-        Assert.False(IsTestSource("scripts/test-bootstrap-ingest-liveness.sh"));
+        Assert.False(IsTestSource("scripts/test-parallel.sh"));
         Assert.False(IsTestSource("scripts/test-tools/runtime.py"));
         Assert.False(IsTestSource("app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestObservability.cs"));
     }

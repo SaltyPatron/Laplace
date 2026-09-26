@@ -8,6 +8,7 @@ import stat
 import importlib.machinery
 import importlib.util
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -291,14 +292,38 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual([], self.calls)
 
     def test_api_restart_safety_net_runs_even_if_recovery_step_fails(self):
-        product = (ROOT / "scripts/product-ci.sh").read_text()
-        recovery = product.split("recover_publish() {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("publish-applications.sh recover", recovery)
-        self.assertIn("ensure_api_running", recovery)
-        safety = product.split("ensure_api_running() {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("sudo -n systemctl start laplace-api || true", safety)
-        self.assertIn("127.0.0.1:5187/health", safety)
-
+        publish = (ROOT / "scripts/publish-applications.sh").read_text()
+        recover = "recover() {" + publish.split("\nrecover() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        deploy = publish.split("    deploy)\n", 1)[1].split("      ;;\n", 1)[0]
+        trap = deploy.index("recover '\"$keep_api_stopped\"' || rc=1; exit \"$rc\"' EXIT")
+        self.assertLess(deploy.index("managed begin"), trap)
+        self.assertLess(trap, deploy.index('bash "$ROOT/scripts/pipeline.sh" publish'))
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as work:
+            calls = Path(work) / "calls"
+            harness = (
+                "set -uo pipefail\n"
+                f"ROOT={shlex.quote(work)}\n"
+                f"CALLS={shlex.quote(str(calls))}\n"
+                "LAPLACE_MANAGED_TRANSACTION_PATH=$ROOT/absent\n"
+                'managed() { echo "managed $*" >> "$CALLS"; return 7; }\n'
+                'sudo() { echo "sudo $*" >> "$CALLS"; }\n'
+                + recover +
+                'recover "$1"\n'
+            )
+            for keep, started in (("0", True), ("1", False)):
+                calls.unlink(missing_ok=True)
+                result = subprocess.run(["bash", "-c", harness, "recover", keep],
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(7, result.returncode, result.stderr)
+                lines = calls.read_text().splitlines()
+                self.assertIn("managed rollback", lines)
+                self.assertEqual(started, "sudo -n systemctl start laplace-api" in lines)
+                if started:
+                    self.assertLess(lines.index("managed rollback"),
+                                    lines.index("sudo -n systemctl start laplace-api"))
+                else:
+                    self.assertLess(lines.index("sudo -n systemctl stop laplace-api"),
+                                    lines.index("managed rollback"))
 
 if __name__ == "__main__":
     unittest.main()

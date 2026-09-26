@@ -213,7 +213,7 @@ case "$source" in
         require_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|operational|cili|document|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
+    unicode|uca|iso639|operational|cili|document|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         require_cli
         if [[ "$source" == document && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"

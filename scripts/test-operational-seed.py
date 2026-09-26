@@ -115,8 +115,11 @@ class OperationalSeedTests(unittest.TestCase):
         self.assertNotIn("ORDER BY started_at", sql)
         self.assertIn("substrate/file-resume-fingerprint/v1", sql)
         self.assertIn("public.laplace_hash128_merkle(0::smallint", sql)
-        self.assertIn("a.subject_id = e.fingerprint AND a.object_id = e.fingerprint", sql)
-        self.assertIn("a.context_id = laplace.source_id('OperationalDecomposer')", sql)
+        # File completion is operational state read from the completion table, not
+        # a self-referential attestation.
+        self.assertIn(
+            "ops.unit_completed(laplace.source_id('OperationalDecomposer'), e.fingerprint, 2)", sql)
+        self.assertNotIn("laplace.attestations", sql)
         self.assertIn(next(iter(self.selected.values())).hex(), sql)
 
     def test_native_fingerprint_uses_length_and_complete_fixed_size_blocks(self):
