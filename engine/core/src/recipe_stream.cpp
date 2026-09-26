@@ -152,6 +152,7 @@ struct route_rule {
         bool aliased = false;     // resolve through the enclosing route's or field's value aliases
         bool codepoints = false;  // the value is hex code points: the part is their text
         std::string alias_by;     // resolve through the aliases of the property this attribute names
+        bool optional = false;    // contributing nothing leaves the composition complete
     };
     std::vector<identity_part> subject_parts;
     struct element_rule {
@@ -327,6 +328,9 @@ static void read_identity_parts(image_reader& r, std::vector<route_rule::identit
                         if (codepoints > 1) throw std::runtime_error("invalid code-point identity part at " + where);
                         part.codepoints = codepoints != 0;
                         part.alias_by = r.text();
+                        const uint32_t optional = r.number();
+                        if (optional > 1) throw std::runtime_error("invalid optional identity part at " + where);
+                        part.optional = optional != 0;
                         if (part.side == 3 && !part.scope.empty())
                             throw std::runtime_error("a split-each identity part cannot be scoped at " + where);
                         if (part.path.empty() && part.children.empty() && part.literal.empty())
@@ -1521,7 +1525,7 @@ struct laplace_recipe_stream {
                     const auto composed = compose_element(stage, route, child, child_path, rule->second);
                     if (composed.first) out.push_back(composed.second);
                 }
-                if (out.size() == had) complete = false;
+                if (out.size() == had && !part.optional) complete = false;
                 continue;
             }
             // A nested part composes its own pieces into one component.
@@ -1594,16 +1598,20 @@ struct laplace_recipe_stream {
                     if (piece_text.empty()) continue;
                     laplace_ordered_component_t atom{};
                     std::string value = piece_text;
+                    // Each piece resolves through the part's aliases ("L" -> Left_To_Right).
+                    if (part.aliased && aliases) {
+                        const auto hit = aliases->find(alias_key(value)); if (hit != aliases->end()) value = hit->second;
+                    }
                     if (part.codepoints && codepoint_value(stage, value, atom)) { sink.push_back(atom); continue; }
                     const content_form piece = compose_content(stage, governed_value(part.vocabulary, value));
                     sink.push_back(component(piece.id, piece.coord, piece.tier, piece.atom));
                 }
-                if (sink.size() == sink_had) complete = false;
+                if (sink.size() == sink_had && !part.optional) complete = false;
                 close_nested();
                 continue;
             }
             if (!part.split.empty()) text = split_side(text, part.split, part.side);
-            if (text.empty()) { complete = false; continue; }
+            if (text.empty()) { if (!part.optional) complete = false; continue; }
             const content_form value = compose_content(stage, governed_value(part.vocabulary, text));
             if (part.scope.empty()) {
                 sink.push_back(component(value.id, value.coord, value.tier, value.atom));
@@ -1869,6 +1877,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         const uint32_t keys = r.number();
                         for (uint32_t g = 0; g < keys; ++g) config.state_keys.push_back(r.text());
                         config.state_separator = r.text();
+                        config.state_prefix = r.text();
                         config.pattern_column = r.text();
                         const uint32_t named = r.number();
                         for (uint32_t g = 0; g < named; ++g) {

@@ -56,7 +56,7 @@ struct recipe_delimited_config {
     // Data the source keeps in comments (UTS 51 emoji-test): a record's trailing comment
     // as a column, fields captured from it by a pattern, and comment lines "key: value"
     // whose value holds for the records that follow.
-    std::string comment_column, comment_pattern, state_separator;
+    std::string comment_column, comment_pattern, state_separator, state_prefix;
     std::vector<std::string> comment_groups, state_keys;
     // The pattern reads this column instead of the comment (NamesList's annotation).
     std::string pattern_column;
@@ -101,6 +101,19 @@ class recipe_delimited_stream {
             return;
         }
         bool directive = false;
+        // A state line outside the comment lane ("@Levels:\tx 0").
+        if (!config.state_prefix.empty() && nonspace.find(config.state_prefix) == 0) {
+            const auto body = nonspace.substr(config.state_prefix.size());
+            const auto split_at = body.find(config.state_separator);
+            if (split_at != std::string_view::npos) {
+                const std::string key(trim(body.substr(0, split_at)));
+                for (const auto& declared : config.state_keys)
+                    if (declared == key) {
+                        state_[key] = std::string(trim(body.substr(split_at + config.state_separator.size())));
+                        return;
+                    }
+            }
+        }
         if (!config.comment_prefix.empty() && nonspace.find(config.comment_prefix) == 0) {
             auto body = trim(nonspace.substr(config.comment_prefix.size()));
             if (config.group_blank_lines && !config.group_attribute_separator.empty()) {
@@ -131,8 +144,11 @@ class recipe_delimited_stream {
                 directive = true;
                 text = body.substr(config.directive_prefix.size());
             } else {
-                // Data-bearing directives cannot disappear into the comment lane.
-                if (!body.empty() && body.front() == '@') fail("undeclared directive " + std::string(body));
+                // Data-bearing directives cannot disappear into the comment lane; a comment
+                // that documents the declared state lines ("# @Levels: <levels>") is prose.
+                if (!body.empty() && body.front() == '@'
+                    && (config.state_prefix.empty() || body.find(config.state_prefix) != 0))
+                    fail("undeclared directive " + std::string(body));
                 return;
             }
         } else if (!config.directive_prefix.empty() && nonspace.find(config.directive_prefix) == 0) {

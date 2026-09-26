@@ -1,0 +1,106 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX9/BidiCharacterTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@text",
+      "propertyName": "text",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@direction",
+      "propertyName": "direction",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PARSE",
+      "objectEntityType": "Bidi_Resolution",
+      "valueAliasProperty": "Bidi_Paragraph_Direction",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi"
+        },
+        {
+          "path": "value()",
+          "aliased": true
+        },
+        {
+          "path": "@level"
+        },
+        {
+          "path": "@levels",
+          "splitLast": " ",
+          "side": "Each",
+          "nested": true
+        },
+        {
+          "path": "@order",
+          "splitLast": " ",
+          "side": "Each",
+          "nested": true,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@level",
+      "propertyName": "paragraphLevel",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@levels",
+      "propertyName": "levels",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@order",
+      "propertyName": "order",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    }
+  ],
+  "valueAliases": {
+    "Bidi_Paragraph_Direction\u00000": "LTR",
+    "Bidi_Paragraph_Direction\u00001": "RTL",
+    "Bidi_Paragraph_Direction\u00002": "Auto"
+  },
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "text",
+        "entityType": "Recipe_Subject",
+        "identityParts": [
+          {
+            "path": "@text",
+            "codepoints": true
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "text",
+      "direction",
+      "level",
+      "levels",
+      "order"
+    ],
+    "allowTrailingEmptyColumn": true,
+    "minimumColumns": 4
+  }
+}

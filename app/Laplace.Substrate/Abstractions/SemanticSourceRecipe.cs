@@ -324,7 +324,10 @@ public sealed record SourceIdentityPart(
     // The value resolves through the value aliases of the property named by this
     // attribute ("@property": a PropertyValueAliases @missing default "n" of
     // Bidi_Paired_Bracket_Type is None).
-    string? AliasBy = null);
+    string? AliasBy = null,
+    // The part may contribute nothing without making the composition incomplete (a
+    // bidi test whose every level is removed has an empty visual order).
+    bool Optional = false);
 
 public enum SourceIdentitySide { Whole = 0, Before = 1, After = 2, Each = 3 }
 
@@ -417,6 +420,9 @@ public sealed record SourceDelimitedSyntax(
     IReadOnlyList<string>? CommentGroups = null,
     IReadOnlyList<string>? StateKeys = null,
     string StateSeparator = ":",
+    // StateKeys may also be set by lines that begin with this prefix instead of a comment
+    // (BidiTest's "@Levels:" and "@Reorder:").
+    string? StatePrefix = null,
     // The pattern reads this column instead of the comment.
     string? PatternColumn = null,
     // A keyed line's record name, and columns whose last value holds for later records

@@ -152,6 +152,7 @@ public static class NativeRecipeCompiler
                     writer.Write(checked((uint)(syntax.StateKeys?.Count ?? 0)));
                     foreach (string key in syntax.StateKeys ?? []) WriteText(writer, key);
                     WriteText(writer, syntax.StateSeparator);
+                    WriteText(writer, syntax.StatePrefix);
                     WriteText(writer, syntax.PatternColumn);
                     var names = (syntax.KeyedRecordNames ?? new Dictionary<string, string>())
                         .OrderBy(static pair => pair.Key, StringComparer.Ordinal).ToArray();
@@ -477,6 +478,7 @@ public static class NativeRecipeCompiler
             writer.Write(part.Aliased ? 1u : 0u);
             writer.Write(part.Codepoints ? 1u : 0u);
             WriteText(writer, part.AliasBy);
+            writer.Write(part.Optional ? 1u : 0u);
         }
     }
 

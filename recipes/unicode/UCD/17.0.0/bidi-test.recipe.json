@@ -1,0 +1,154 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX9/BidiTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@input",
+      "propertyName": "input",
+      "valueKind": "Text",
+      "disposition": "Identity",
+      "valueAliasProperty": "Bidi_Class"
+    },
+    {
+      "syntaxPath": "record/@bitset",
+      "propertyName": "directions",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_PARSE",
+      "objectEntityType": "Bidi_Resolution",
+      "valueAliasProperty": "Bidi_Paragraph_Directions",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Bidi"
+        },
+        {
+          "path": "value()",
+          "splitLast": " ",
+          "side": "Each",
+          "nested": true,
+          "aliased": true
+        },
+        {
+          "path": "@Levels",
+          "splitLast": " ",
+          "side": "Each",
+          "nested": true
+        },
+        {
+          "path": "@Reorder",
+          "splitLast": " ",
+          "side": "Each",
+          "nested": true,
+          "optional": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@Levels",
+      "propertyName": "levels",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@Reorder",
+      "propertyName": "order",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    }
+  ],
+  "valueAliases": {
+    "Bidi_Class\u0000AL": "Arabic_Letter",
+    "Bidi_Class\u0000AN": "Arabic_Number",
+    "Bidi_Class\u0000ARABICLETTER": "Arabic_Letter",
+    "Bidi_Class\u0000ARABICNUMBER": "Arabic_Number",
+    "Bidi_Class\u0000B": "Paragraph_Separator",
+    "Bidi_Class\u0000BN": "Boundary_Neutral",
+    "Bidi_Class\u0000BOUNDARYNEUTRAL": "Boundary_Neutral",
+    "Bidi_Class\u0000COMMONSEPARATOR": "Common_Separator",
+    "Bidi_Class\u0000CS": "Common_Separator",
+    "Bidi_Class\u0000EN": "European_Number",
+    "Bidi_Class\u0000ES": "European_Separator",
+    "Bidi_Class\u0000ET": "European_Terminator",
+    "Bidi_Class\u0000EUROPEANNUMBER": "European_Number",
+    "Bidi_Class\u0000EUROPEANSEPARATOR": "European_Separator",
+    "Bidi_Class\u0000EUROPEANTERMINATOR": "European_Terminator",
+    "Bidi_Class\u0000FIRSTSTRONGISOLATE": "First_Strong_Isolate",
+    "Bidi_Class\u0000FSI": "First_Strong_Isolate",
+    "Bidi_Class\u0000L": "Left_To_Right",
+    "Bidi_Class\u0000LEFTTORIGHT": "Left_To_Right",
+    "Bidi_Class\u0000LEFTTORIGHTEMBEDDING": "Left_To_Right_Embedding",
+    "Bidi_Class\u0000LEFTTORIGHTISOLATE": "Left_To_Right_Isolate",
+    "Bidi_Class\u0000LEFTTORIGHTOVERRIDE": "Left_To_Right_Override",
+    "Bidi_Class\u0000LRE": "Left_To_Right_Embedding",
+    "Bidi_Class\u0000LRI": "Left_To_Right_Isolate",
+    "Bidi_Class\u0000LRO": "Left_To_Right_Override",
+    "Bidi_Class\u0000NONSPACINGMARK": "Nonspacing_Mark",
+    "Bidi_Class\u0000NSM": "Nonspacing_Mark",
+    "Bidi_Class\u0000ON": "Other_Neutral",
+    "Bidi_Class\u0000OTHERNEUTRAL": "Other_Neutral",
+    "Bidi_Class\u0000PARAGRAPHSEPARATOR": "Paragraph_Separator",
+    "Bidi_Class\u0000PDF": "Pop_Directional_Format",
+    "Bidi_Class\u0000PDI": "Pop_Directional_Isolate",
+    "Bidi_Class\u0000POPDIRECTIONALFORMAT": "Pop_Directional_Format",
+    "Bidi_Class\u0000POPDIRECTIONALISOLATE": "Pop_Directional_Isolate",
+    "Bidi_Class\u0000R": "Right_To_Left",
+    "Bidi_Class\u0000RIGHTTOLEFT": "Right_To_Left",
+    "Bidi_Class\u0000RIGHTTOLEFTEMBEDDING": "Right_To_Left_Embedding",
+    "Bidi_Class\u0000RIGHTTOLEFTISOLATE": "Right_To_Left_Isolate",
+    "Bidi_Class\u0000RIGHTTOLEFTOVERRIDE": "Right_To_Left_Override",
+    "Bidi_Class\u0000RLE": "Right_To_Left_Embedding",
+    "Bidi_Class\u0000RLI": "Right_To_Left_Isolate",
+    "Bidi_Class\u0000RLO": "Right_To_Left_Override",
+    "Bidi_Class\u0000S": "Segment_Separator",
+    "Bidi_Class\u0000SEGMENTSEPARATOR": "Segment_Separator",
+    "Bidi_Class\u0000WHITESPACE": "White_Space",
+    "Bidi_Class\u0000WS": "White_Space",
+    "Bidi_Paragraph_Directions\u00001": "Auto",
+    "Bidi_Paragraph_Directions\u00002": "LTR",
+    "Bidi_Paragraph_Directions\u00003": "Auto LTR",
+    "Bidi_Paragraph_Directions\u00004": "RTL",
+    "Bidi_Paragraph_Directions\u00005": "Auto RTL",
+    "Bidi_Paragraph_Directions\u00006": "LTR RTL",
+    "Bidi_Paragraph_Directions\u00007": "Auto LTR RTL"
+  },
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "input",
+        "entityType": "Recipe_Subject",
+        "identityParts": [
+          {
+            "path": "@input",
+            "splitLast": " ",
+            "side": "Each",
+            "aliased": true
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "input",
+      "bitset"
+    ],
+    "statePrefix": "@",
+    "stateKeys": [
+      "Levels",
+      "Reorder"
+    ],
+    "stateSeparator": ":"
+  }
+}

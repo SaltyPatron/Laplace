@@ -20,6 +20,11 @@ canonical = "Atomic_Marker"
 [[type]]
 canonical = "Atomic_Split"
 
+# How the Unicode Bidi Algorithm resolves a text or class sequence: [Bidi, paragraph
+# directions, [levels], [visual order]] (BidiTest, BidiCharacterTest).
+[[type]]
+canonical = "Bidi_Resolution"
+
 [[type]]
 canonical = "Byte"
 

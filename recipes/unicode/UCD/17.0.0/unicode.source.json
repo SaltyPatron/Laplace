@@ -217,8 +217,11 @@
     {
       "selector": "ucd/BidiCharacterTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX9/BidiCharacterTest",
+      "recipePath": "bidi-character-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/BidiMirroring.txt",
@@ -229,8 +232,11 @@
     {
       "selector": "ucd/BidiTest.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX9/BidiTest",
+      "recipePath": "bidi-test.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "ucd/Blocks.txt",
