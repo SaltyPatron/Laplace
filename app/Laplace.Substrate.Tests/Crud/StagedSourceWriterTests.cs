@@ -168,4 +168,51 @@ public class StagedSourceWriterTests
         Assert.Equal(0x0c, mask![4]);
         Assert.Equal(2, (await StandingAsync(subject, type, obj))!.Value.Witnesses);
     }
+
+    private async Task<Hash128> RelationAsync(string name)
+    {
+        await using var cmd = _pg.DataSource.CreateCommand("SELECT laplace.relation_type_id($1)");
+        cmd.Parameters.AddWithValue(name);
+        return Hash128.FromBytes((byte[])(await cmd.ExecuteScalarAsync())!);
+    }
+
+    private async Task<int[]> BitsAsync(string sql, params object[] args)
+    {
+        await using var cmd = _pg.DataSource.CreateCommand(sql);
+        foreach (object arg in args) cmd.Parameters.AddWithValue(arg);
+        object? value = await cmd.ExecuteScalarAsync();
+        return value is int[] bits ? bits : [];
+    }
+
+    [Fact]
+    public async Task EveryClaimedRelationsBitLandsOnItsEntitiesWithTheBitsTheyHold()
+    {
+        var source = H(60); var subject = H(61); var obj = H(62);
+        Hash128 isA = await RelationAsync("IS_A");
+        Hash128 hasPart = await RelationAsync("HAS_PART");
+        var entities = ImmutableArray.Create(new EntityRow(subject, 2, H(63)), new EntityRow(obj, 2, H(63)));
+        await using var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        await using (var first = Staged(inner))
+        {
+            await first.ApplyWorkingSetAsync(Change(source, "lexicon", Claim(subject, isA, obj, source, 1_000_000_000))
+                with { Entities = entities });
+            await first.CompleteBulkRunAsync();
+        }
+        int[] isABit = await BitsAsync("SELECT ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('IS_A'))]");
+        foreach (Hash128 entity in new[] { subject, obj })
+            Assert.Equal(isABit, await BitsAsync(
+                "SELECT consensus.highway_mask_bits(highway_mask) FROM laplace.entities WHERE id = $1", entity.ToBytes()));
+        await using (var second = Staged(inner))
+        {
+            await second.ApplyWorkingSetAsync(Change(H(64), "meronymy", Claim(subject, hasPart, obj, H(64), 1_000_000_000)));
+            await second.CompleteBulkRunAsync();
+        }
+        int[] expected = await BitsAsync(
+            "SELECT array_agg(b ORDER BY b) FROM (SELECT consensus.relation_highway_bit(laplace.relation_type_id(n)) b "
+            + "FROM unnest(ARRAY['IS_A','HAS_PART']) n) x");
+        Assert.Equal(2, expected.Length);
+        foreach (Hash128 entity in new[] { subject, obj })
+            Assert.Equal(expected, await BitsAsync(
+                "SELECT consensus.highway_mask_bits(highway_mask) FROM laplace.entities WHERE id = $1", entity.ToBytes()));
+    }
 }

@@ -17,6 +17,11 @@ internal static class AdvisoryTxLock
     internal const int MeasurementLaneLockClass = 0x4C504C4E; // "LPLN"
     internal const int MeasurementLaneLockKey = 0;
 
+    // A staged load reads current leaves and standing and swaps rebuilt leaves in; two
+    // loads interleaved would each rebuild from the rows the other replaces.
+    internal const int StagedLoadLockClass = 0x4C504C44; // "LPLD"
+    internal const int StagedLoadLockKey = 0;
+
     internal static async Task HoldMeasurementLaneAsync(
         NpgsqlConnection conn, bool exclusive, Action<string>? onWaiting, CancellationToken ct)
     {

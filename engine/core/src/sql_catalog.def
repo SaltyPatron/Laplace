@@ -343,19 +343,15 @@ SQL_QUERY("stage.attestation_copy", "",
     "last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,"
     "fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
 /* The staged records converged: one row per entity id and per physicality id, each
- * routed to the hash partition it lands in. */
+ * with the hash partition it lands in. A partition is PostgreSQL's own hash routing of
+ * the key (hashbyteaextended under the partition seed, combined with zero, modulo the
+ * power-of-two modulus), computed from the key alone. */
 SQL_QUERY("stage.structure", "",
-    "CREATE UNLOGGED TABLE {stage}.route AS SELECT l.oid AS leaf,"
-    "(regexp_match(pg_get_expr(l.relpartbound,l.oid),'remainder (\\d+)'))[1]::int AS r "
-    "FROM pg_inherits i JOIN pg_class l ON l.oid=i.inhrelid WHERE i.inhparent='laplace.consensus'::regclass; "
-    "CREATE UNIQUE INDEX ON {stage}.route (leaf); "
-    "CREATE UNLOGGED TABLE {stage}.node AS SELECT d.id,d.tier,d.type_id,rt.r AS part FROM "
-    "(SELECT DISTINCT ON (id) id,tier,type_id FROM {stage}.entity ORDER BY id,tier) d "
-    "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},d.id)::oid; "
+    "CREATE UNLOGGED TABLE {stage}.node AS SELECT d.id,d.tier,d.type_id,(((hashbyteaextended(d.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part FROM "
+    "(SELECT DISTINCT ON (id) id,tier,type_id FROM {stage}.entity ORDER BY id,tier) d; "
     "CREATE UNIQUE INDEX ON {stage}.node (id); "
-    "CREATE UNLOGGED TABLE {stage}.form AS SELECT d.*,rt.r AS part FROM "
-    "(SELECT DISTINCT ON (id) * FROM {stage}.physicality ORDER BY id) d "
-    "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},d.id)::oid; "
+    "CREATE UNLOGGED TABLE {stage}.form AS SELECT d.*,(((hashbyteaextended(d.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part FROM "
+    "(SELECT DISTINCT ON (id) * FROM {stage}.physicality ORDER BY id) d; "
     "CREATE INDEX ON {stage}.form (entity_id); "
     "ANALYZE {stage}.node; ANALYZE {stage}.form")
 /* Claims the substrate has not admitted, sorted by id for the native merge; a stored
@@ -374,11 +370,6 @@ SQL_QUERY("stage.claim_copy", "",
     "fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
 /* Every claimed relation's Highway bit on its subject and object, one native deposit
  * per leading id byte. */
-SQL_QUERY("stage.masks", "",
-    "SELECT coalesce(sum(d),0)::bigint FROM (SELECT consensus.highway_mask_deposit(array_agg(entity),array_agg(type)) AS d "
-    "FROM (SELECT subject_id AS entity,type_id AS type FROM {stage}.claim UNION "
-    "SELECT object_id,type_id FROM {stage}.claim WHERE object_id IS NOT NULL) x "
-    "WHERE x.type<>ALL({excluded}) GROUP BY get_byte(x.entity,0)) g")
 /* Scoring: the new evidence per cell with the cell's prior standing, in the order the
  * native fold groups it. */
 SQL_QUERY("stage.score_out", "",
@@ -397,8 +388,8 @@ SQL_QUERY("stage.standing_copy", "",
     "COPY {stage}.standing (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,"
     "last_observed_at) FROM STDIN (FORMAT BINARY)")
 SQL_QUERY("stage.claim_parts", "",
-    "CREATE UNLOGGED TABLE {stage}.claimp AS SELECT c.*,rt.r AS part FROM {stage}.claim c "
-    "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},c.subject_id)::oid; "
+    "CREATE UNLOGGED TABLE {stage}.claimp AS SELECT c.*,(((hashbyteaextended(c.subject_id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part "
+    "FROM {stage}.claim c; "
     "CREATE INDEX ON {stage}.claimp (part); ANALYZE {stage}.claimp")
 SQL_QUERY("stage.cell_table", "",
     "CREATE UNLOGGED TABLE {stage}.cell (id bytea,subject_id bytea,type_id bytea,object_id bytea,"
@@ -417,16 +408,31 @@ SQL_QUERY("stage.new_sets", "",
     "CREATE UNLOGGED TABLE {stage}.new_form AS SELECT f.* FROM {stage}.form f "
     "WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id=f.id); "
     "CREATE INDEX ON {stage}.new_form (part); "
-    "CREATE UNLOGGED TABLE {stage}.cellp AS SELECT c.*,rt.r AS part FROM {stage}.cell c "
-    "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},c.subject_id)::oid; "
+    "CREATE UNLOGGED TABLE {stage}.typebit AS SELECT t.type_id,CASE WHEN consensus.highway_ready() THEN "
+    "coalesce(consensus.relation_highway_bit(t.type_id),(SELECT consensus.relation_highway_bit(f.object_id) FROM "
+    "(SELECT object_id FROM laplace.consensus WHERE subject_id=t.type_id AND type_id=laplace.relation_type_id('IS_A') "
+    "AND object_id IS NOT NULL UNION ALL SELECT object_id FROM {stage}.claim WHERE subject_id=t.type_id "
+    "AND type_id=laplace.relation_type_id('IS_A') AND object_id IS NOT NULL) f "
+    "WHERE consensus.relation_highway_bit(f.object_id) IS NOT NULL LIMIT 1)) END AS bit "
+    "FROM (SELECT DISTINCT type_id FROM {stage}.claim WHERE type_id<>ALL({excluded})) t; "
+    "CREATE UNLOGGED TABLE {stage}.mask AS SELECT x.id,(((hashbyteaextended(x.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part,"
+    "consensus.highway_mask_from_bits(array_agg(DISTINCT b.bit ORDER BY b.bit)) AS mask "
+    "FROM (SELECT subject_id AS id,type_id FROM {stage}.claim UNION SELECT object_id,type_id FROM {stage}.claim "
+    "WHERE object_id IS NOT NULL) x JOIN {stage}.typebit b ON b.type_id=x.type_id AND b.bit IS NOT NULL "
+    "GROUP BY x.id; "
+    "CREATE INDEX ON {stage}.mask (part,id); "
+    "CREATE UNLOGGED TABLE {stage}.cellp AS SELECT c.*,(((hashbyteaextended(c.subject_id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part "
+    "FROM {stage}.cell c; "
     "CREATE INDEX ON {stage}.cellp (part); "
-    "CREATE UNLOGGED TABLE {stage}.standingp AS SELECT s.*,rt.r AS part FROM {stage}.standing s "
-    "JOIN {stage}.route rt ON rt.leaf=consensus.partition_leaf({zero},s.subject_id)::oid; "
+    "CREATE UNLOGGED TABLE {stage}.standingp AS SELECT s.*,(((hashbyteaextended(s.subject_id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part "
+    "FROM {stage}.standing s; "
     "CREATE INDEX ON {stage}.standingp (part,id); "
-    "ANALYZE {stage}.new_entity; ANALYZE {stage}.new_form; ANALYZE {stage}.cellp; ANALYZE {stage}.standingp")
+    "ANALYZE {stage}.new_entity; ANALYZE {stage}.new_form; ANALYZE {stage}.mask; ANALYZE {stage}.cellp; "
+    "ANALYZE {stage}.standingp")
 /* New rows per table and partition. */
 SQL_QUERY("stage.part_counts", "",
-    "SELECT 'entities',part,count(*) FROM {stage}.new_entity GROUP BY part UNION ALL "
+    "SELECT 'entities',part,count(*) FROM (SELECT part FROM {stage}.new_entity UNION ALL "
+    "SELECT part FROM {stage}.mask) x GROUP BY part UNION ALL "
     "SELECT 'physicalities',part,count(*) FROM {stage}.new_form GROUP BY part UNION ALL "
     "SELECT 'attestations',part,count(*) FROM {stage}.claimp GROUP BY part UNION ALL "
     "SELECT 'consensus',part,count(*) FROM (SELECT part FROM {stage}.cellp UNION ALL "
@@ -459,8 +465,19 @@ SQL_QUERY("stage.leaf_create", "",
     "CREATE TABLE laplace.{new} (LIKE laplace.{table} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS)")
 SQL_QUERY("stage.leaf_fill", "", "COPY laplace.{new} ({target}) FROM STDIN (FORMAT BINARY, FREEZE)")
 SQL_QUERY("stage.rows_current", "", "COPY (SELECT {cols} FROM laplace.{leaf}) TO STDOUT (FORMAT BINARY)")
+/* An entity's Highway mask is the union of the bits it already carries and the bits of
+ * every relation the source claims it in, as subject or object: a byte-exact OR of the
+ * four 64-bit words (bytea <-> bigint casts are big-endian). */
+SQL_QUERY("stage.rows_entities_current", "",
+    "COPY (SELECT e.id,e.tier,e.type_id,e.created_at,CASE WHEN m.id IS NULL THEN e.highway_mask ELSE "
+    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),1,8)::bigint|substr(m.mask,1,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),9,8)::bigint|substr(m.mask,9,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),17,8)::bigint|substr(m.mask,17,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),25,8)::bigint|substr(m.mask,25,8)::bigint)::bytea END "
+    "FROM laplace.{leaf} e LEFT JOIN {stage}.mask m ON m.part={r} AND m.id=e.id) TO STDOUT (FORMAT BINARY)")
 SQL_QUERY("stage.rows_entities", "",
-    "COPY (SELECT id,tier,type_id FROM {stage}.new_entity WHERE part={r} ORDER BY id) TO STDOUT (FORMAT BINARY)")
+    "COPY (SELECT n.id,n.tier,n.type_id,m.mask FROM {stage}.new_entity n "
+    "LEFT JOIN {stage}.mask m ON m.part={r} AND m.id=n.id WHERE n.part={r} ORDER BY n.id) TO STDOUT (FORMAT BINARY)")
 SQL_QUERY("stage.rows_physicalities", "",
     "COPY (SELECT {cols} FROM {stage}.new_form WHERE part={r} ORDER BY hilbert_index) TO STDOUT (FORMAT BINARY)")
 SQL_QUERY("stage.rows_attestations", "",

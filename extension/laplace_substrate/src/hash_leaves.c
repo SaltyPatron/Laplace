@@ -5,6 +5,7 @@
 #include "partitioning/partbounds.h"
 #include "partitioning/partdesc.h"
 #include "utils/lsyscache.h"
+#include "utils/inval.h"
 #include "utils/memutils.h"
 #include "utils/partcache.h"
 #include "utils/rel.h"
@@ -13,23 +14,21 @@
 
 static LaplaceHashLeaves resolved[LAPLACE_HASH_LEAF_TABLES];
 static int resolved_count = 0;
+static bool invalidation_registered = false;
 
-const LaplaceHashLeaves *
-laplace_hash_leaves(const char *relname, const char *label)
+static void
+hash_leaves_invalidate(Datum arg, Oid relid)
 {
-    Oid parent_oid = get_relname_relid(relname, get_namespace_oid("laplace", false));
-
-    if (!OidIsValid(parent_oid))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
-                        errmsg("%s: laplace.%s does not exist", label, relname)));
+    (void) arg;
     for (int i = 0; i < resolved_count; ++i)
-        if (resolved[i].parent_oid == parent_oid)
-            return &resolved[i];
-    if (resolved_count == LAPLACE_HASH_LEAF_TABLES)
-        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                        errmsg("%s: too many routed tables", label)));
+        if (relid == InvalidOid || relid == resolved[i].parent_oid)
+            resolved[i].stale = true;
+}
 
-    Relation parent = table_open(parent_oid, AccessShareLock);
+static void
+hash_leaves_resolve(LaplaceHashLeaves *entry, const char *relname, const char *label)
+{
+    Relation parent = table_open(entry->parent_oid, AccessShareLock);
     PartitionKey key = RelationGetPartitionKey(parent);
     PartitionDesc desc = RelationGetPartitionDesc(parent, false);
     if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
@@ -39,10 +38,13 @@ laplace_hash_leaves(const char *relname, const char *label)
                         errmsg("%s: laplace.%s must be HASH partitioned on one key with one leaf per remainder",
                                label, relname)));
 
-    LaplaceHashLeaves *entry = &resolved[resolved_count];
-    entry->parent_oid = parent_oid;
+    if (entry->leaf_oids == NULL || entry->count != desc->nparts)
+    {
+        if (entry->leaf_oids != NULL)
+            pfree(entry->leaf_oids);
+        entry->leaf_oids = MemoryContextAlloc(TopMemoryContext, sizeof(Oid) * desc->nparts);
+    }
     entry->count = desc->nparts;
-    entry->leaf_oids = MemoryContextAlloc(TopMemoryContext, sizeof(Oid) * desc->nparts);
     for (int remainder = 0; remainder < desc->nparts; ++remainder)
     {
         int part = desc->boundinfo->indexes[remainder];
@@ -53,6 +55,38 @@ laplace_hash_leaves(const char *relname, const char *label)
         entry->leaf_oids[remainder] = desc->oids[part];
     }
     table_close(parent, AccessShareLock);
+    entry->stale = false;
+}
+
+const LaplaceHashLeaves *
+laplace_hash_leaves(const char *relname, const char *label)
+{
+    Oid parent_oid = get_relname_relid(relname, get_namespace_oid("laplace", false));
+
+    if (!OidIsValid(parent_oid))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                        errmsg("%s: laplace.%s does not exist", label, relname)));
+    if (!invalidation_registered)
+    {
+        CacheRegisterRelcacheCallback(hash_leaves_invalidate, (Datum) 0);
+        invalidation_registered = true;
+    }
+    for (int i = 0; i < resolved_count; ++i)
+        if (resolved[i].parent_oid == parent_oid)
+        {
+            if (resolved[i].stale)
+                hash_leaves_resolve(&resolved[i], relname, label);
+            return &resolved[i];
+        }
+    if (resolved_count == LAPLACE_HASH_LEAF_TABLES)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("%s: too many routed tables", label)));
+
+    LaplaceHashLeaves *entry = &resolved[resolved_count];
+    entry->parent_oid = parent_oid;
+    entry->count = 0;
+    entry->leaf_oids = NULL;
+    hash_leaves_resolve(entry, relname, label);
     resolved_count++;
     return entry;
 }

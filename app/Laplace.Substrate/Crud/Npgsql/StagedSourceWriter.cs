@@ -40,6 +40,11 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     private bool _staged;
     private long _observations, _cells;
     private int _epochRoute = -1;
+    private int _modulus;
+
+    // PostgreSQL combines a hash-partition key's hash with zero as hash + this constant
+    // (hash_combine64); modulo a power of two only its low bits matter.
+    private const ulong HashPartitionCombine = 0x49a0f4dd15e5a8e3UL;
 
     public StagedSourceWriter(ISubstrateWriter inner, NpgsqlDataSource dataSource,
         PostgresWriteDurability durability, int lanes, ILogger? logger = null)
@@ -200,9 +205,32 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
     private async Task LoadAsync(CancellationToken ct)
     {
+        await using var control = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        // One load at a time reads and replaces the substrate's leaves.
+        await LoadLockAsync(control, "pg_advisory_lock", ct).ConfigureAwait(false);
+        try
+        {
+            await LoadHeldAsync(control, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await LoadLockAsync(control, "pg_advisory_unlock", CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task LoadLockAsync(NpgsqlConnection control, string function, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand($"SELECT {function}($1, $2)", control) { CommandTimeout = 0 };
+        cmd.Parameters.AddWithValue(AdvisoryTxLock.StagedLoadLockClass);
+        cmd.Parameters.AddWithValue(AdvisoryTxLock.StagedLoadLockKey);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task LoadHeldAsync(NpgsqlConnection control, CancellationToken ct)
+    {
+        _modulus = await ModulusAsync(control, ct).ConfigureAwait(false);
         var total = Stopwatch.StartNew();
         var marks = new List<string>();
-        await using var control = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         // Each phase reports its wall time and the WAL the cluster wrote during it.
         long walMark = await WalAsync(control, ct).ConfigureAwait(false);
         long timeMark = 0;
@@ -270,14 +298,10 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         await SwapAsync(control, work, ct).ConfigureAwait(false);
         await Mark("swap");
 
-        // Every claimed relation's Highway bit on its entities.
-        long masks = await ScalarAsync(control, Sql("stage.masks"), ct).ConfigureAwait(false);
-        await Mark("masks");
-
         _log.LogInformation(
             "STAGED_LOAD {Stage}: staged {E:N0}e/{P:N0}p/{A:N0}a; claims {CI:N0} new rows -> {CO:N0} merged; "
-            + "scored {Cells:N0} cells from {Games:N0} games; mask deposits {Masks:N0}; {Marks}",
-            _stage, stagedEntities, stagedPhysicalities, stagedClaims, claimsIn, claimsOut, cells, games, masks,
+            + "scored {Cells:N0} cells from {Games:N0} games; {Marks}",
+            _stage, stagedEntities, stagedPhysicalities, stagedClaims, claimsIn, claimsOut, cells, games,
             string.Join(" ", marks));
     }
 
@@ -290,6 +314,20 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         ["entities"] = "id", ["physicalities"] = "id", ["attestations"] = "subject_id", ["consensus"] = "subject_id",
     };
 
+    // Every substrate table is hashed into the same power-of-two number of leaves.
+    private static async Task<int> ModulusAsync(NpgsqlConnection control, CancellationToken ct)
+    {
+        var moduli = new HashSet<int>();
+        await using (var cmd = new NpgsqlCommand(SqlCatalog.Get("stage.leaves").Text, control) { CommandTimeout = 0 })
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                moduli.Add(reader.GetInt32(2));
+        if (moduli.Count != 1 || !System.Numerics.BitOperations.IsPow2(moduli.First()))
+            throw new InvalidOperationException(
+                "the staged load routes by one power-of-two hash modulus for every substrate table");
+        return moduli.First();
+    }
+
     private async Task<IReadOnlyList<LeafWork>> PlanLeavesAsync(NpgsqlConnection control, CancellationToken ct)
     {
         var leaves = new Dictionary<(string, int), (string Leaf, int Modulus, long Rows)>();
@@ -297,8 +335,6 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 leaves[(reader.GetString(0), reader.GetInt32(3))] = (reader.GetString(1), reader.GetInt32(2), reader.GetInt64(4));
-        if (leaves.Values.Select(static l => l.Modulus).Distinct().Count() != 1)
-            throw new InvalidOperationException("the staged load routes by one hash modulus for every substrate table");
         var columns = new Dictionary<string, string>(StringComparer.Ordinal);
         await using (var cmd = new NpgsqlCommand(Sql("stage.table_columns"), control) { CommandTimeout = 0 })
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -337,7 +373,8 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     // The row streams a rebuilt leaf is filled from, in order, each with the columns it carries.
     private static (string Rows, string? Target)[] LeafRows(string table) => table switch
     {
-        "entities" => [("stage.rows_current", null), ("stage.rows_entities", "id,tier,type_id")],
+        "entities" => [("stage.rows_entities_current", "id,tier,type_id,created_at,highway_mask"),
+            ("stage.rows_entities", "id,tier,type_id,highway_mask")],
         "physicalities" => [("stage.rows_current", null), ("stage.rows_physicalities", null)],
         "attestations" => [("stage.rows_current", null), ("stage.rows_attestations", null)],
         "consensus" => [("stage.rows_consensus_current", ConsensusColumns), ("stage.rows_consensus", ConsensusColumns)],
@@ -519,6 +556,9 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
     private string Sql(string name) => SqlCatalog.Get(name).Text
         .Replace("{stage}", _stage)
+        .Replace("{partmask}", (_modulus - 1).ToString(System.Globalization.CultureInfo.InvariantCulture))
+        .Replace("{partadd}", ((long)(HashPartitionCombine & (ulong)(_modulus - 1)))
+            .ToString(System.Globalization.CultureInfo.InvariantCulture))
         .Replace("{zero}", "'\\x00000000000000000000000000000000'::bytea")
         .Replace("{lanes}", _lanes.ToString(System.Globalization.CultureInfo.InvariantCulture))
         .Replace("{excluded}", Excluded);

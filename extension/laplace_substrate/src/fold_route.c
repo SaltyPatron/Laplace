@@ -223,6 +223,12 @@ prior_route(const uint8_t *type16, Datum type_datum, const char *label)
         entry->update_plans = MemoryContextAllocZero(
             TopMemoryContext, sizeof(SPIPlanPtr) * entry->leaves->count);
     }
+    else
+    {
+        /* A swapped leaf keeps its name, so the prepared per-leaf plans stay valid; the
+         * leaf oids they were named from are resolved again. */
+        entry->leaves = laplace_hash_leaves("consensus", label);
+    }
     return entry;
 }
 

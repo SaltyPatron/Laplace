@@ -285,7 +285,7 @@ public sealed class SubstrateChangeSourcePriorTests
     }
 
     [Fact]
-    public void OrderedNativeBatchPreservesSourceRangesForEveryRawFormAcrossCollapseAndReplay()
+    public void OrderedNativeBatchStagesEachContentOnceAcrossSourcesAndReplay()
     {
         CodepointPerfcache.LoadDefault();
         static OrderedCompositionComponent Atom(char value)
@@ -309,18 +309,16 @@ public sealed class SubstrateChangeSourcePriorTests
         Assert.Equal(results[0].Id, results[2].Id);
         Assert.Equal(a.Id, results[1].Id);
         Assert.NotEqual(results[0].Id, results[3].Id);
+        // Same content, same physicality: [A,B] seen from a second source is the form
+        // already staged; the floor atom and [B,A] are each staged once.
         Assert.Equal(2, stage.EntityCount);
-        Assert.Equal(4, stage.PhysicalityCount);
+        Assert.Equal(3, stage.PhysicalityCount);
         Assert.Equal(new[] { new PhysicalitySourceRange(0, 1, Source),
-            new PhysicalitySourceRange(1, 3, OtherSource) }, stage.PhysicalitySourceRanges.ToArray());
-        var before = stage.PhysicalitySourceRanges;
+            new PhysicalitySourceRange(1, 2, OtherSource) }, stage.PhysicalitySourceRanges.ToArray());
         OrderedComposition.StageBatch(stage, requests, results);
         Assert.Equal(2, stage.EntityCount);
-        Assert.Equal(8, stage.PhysicalityCount);
+        Assert.Equal(3, stage.PhysicalityCount);
         Assert.Equal(new[] { new PhysicalitySourceRange(0, 1, Source),
-            new PhysicalitySourceRange(1, 4, OtherSource),
-            new PhysicalitySourceRange(5, 1, Source),
-            new PhysicalitySourceRange(6, 2, OtherSource) }, stage.PhysicalitySourceRanges.ToArray());
-        Assert.Equal(2, before.Length);
+            new PhysicalitySourceRange(1, 2, OtherSource) }, stage.PhysicalitySourceRanges.ToArray());
     }
 }
