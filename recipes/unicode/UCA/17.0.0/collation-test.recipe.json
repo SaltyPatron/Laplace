@@ -1,0 +1,43 @@
+{
+  "authority": "Unicode/UCA",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS10/CollationTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@sequence",
+      "propertyName": "sequence",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "Composition",
+        "identityField": "sequence",
+        "entityType": "Recipe_Subject",
+        "identityParts": [
+          {
+            "path": "@sequence",
+            "codepoints": true
+          }
+        ]
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "sequence"
+    ],
+    "allowTrailingEmptyColumn": true
+  }
+}

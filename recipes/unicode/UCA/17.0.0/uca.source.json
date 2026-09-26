@@ -37,8 +37,17 @@
     {
       "selector": "CollationTest.zip",
       "required": true,
-      "disposition": "unsupported-with-why-not",
-      "reason": "Collation conformance orderings; the ordering recipe is not yet written."
+      "disposition": "admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS10/CollationTest",
+      "recipePath": "collation-test.recipe.json",
+      "recordDepth": 2,
+      "configuration": {
+        "entries": [
+          "CollationTest/CollationTest_NON_IGNORABLE.txt",
+          "CollationTest/CollationTest_SHIFTED.txt"
+        ]
+      }
     },
     {
       "selector": "ReadMe.txt",

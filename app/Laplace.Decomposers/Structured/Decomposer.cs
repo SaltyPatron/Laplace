@@ -21,6 +21,10 @@ public interface IRecipeSyntaxExecutor
     /// recipes that collect the source's identity tables before lowering.</param>
     IAsyncEnumerable<SubstrateChange> ReadChangesAsync(Stream input, RecipeExecutionOptions options,
         string artifactLabel, Func<Stream>? openPrescan = null, CancellationToken ct = default);
+
+    /// <summary>The entries of a zip artifact to parse, each as its own file (UCA's
+    /// CollationTest.zip); empty reads the archive's single entry.</summary>
+    IReadOnlyList<string> ZipEntries => [];
 }
 
 public sealed class RecipeSyntaxProviderRegistry
@@ -60,6 +64,7 @@ public sealed class RecipeSyntaxProviderRegistry
         private readonly SemanticSourceRecipe _recipe;
         private readonly int _recordDepth;
         private readonly IReadOnlyList<(string Name, System.Text.RegularExpressions.Regex Pattern)> _pathConstants = [];
+        public IReadOnlyList<string> ZipEntries { get; } = [];
         internal NativeXmlExecutor(RecipeProviderBinding binding, NativeSyntax syntax)
         {
             SemanticSourceRecipe recipe = binding.Recipe
@@ -81,12 +86,21 @@ public sealed class RecipeSyntaxProviderRegistry
             _recordDepth = binding.RecordDepth;
             if (binding.Configuration.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
             {
-                // The only execution configuration is per-artifact record constants
-                // recovered from the artifact path (for example a treebank's language
-                // code in its file name): {"constants": {"name": {"pathPattern": "..."}}}.
+                // Execution configuration: per-artifact record constants recovered from the
+                // artifact path (a treebank's language code in its file name):
+                // {"constants": {"name": {"pathPattern": "..."}}}; and the entries of a zip
+                // artifact, each parsed as its own file: {"entries": ["a.txt", ...]}.
                 var constants = new List<(string, System.Text.RegularExpressions.Regex)>();
                 foreach (JsonProperty property in binding.Configuration.EnumerateObject())
                 {
+                    if (property.Name == "entries")
+                    {
+                        ZipEntries = property.Value.EnumerateArray()
+                            .Select(static entry => entry.GetString()
+                                ?? throw new InvalidDataException("A zip entry name is empty."))
+                            .ToArray();
+                        continue;
+                    }
                     if (property.Name != "constants" || !delimited)
                         throw new InvalidDataException(
                             $"Native provider configuration '{property.Name}' is not an execution setting.");
@@ -238,10 +252,12 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
                 recipeName, SourceId, TrustClassId, requires), label);
         long records = 0, entities = 0, physicalities = 0, attestations = 0;
         byte[] expectedDigest = Convert.FromHexString(artifact.Sha256);
-        Stream parseInput = input;
         ZipArchive? archive = null;
-        Stream? entry = null;
         IncrementalHash? passHash = null;
+        // The parses of this artifact: the file itself, or the declared entries of a zip
+        // archive (each its own file, labelled artifact!entry), or its single entry.
+        var parses = new List<(string Label, Func<Stream> Open)>();
+        var opened = new List<Stream>();
         if (_inputPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
             byte[] zipDigest = await SHA256.HashDataAsync(input, ct).ConfigureAwait(false);
@@ -249,23 +265,37 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
                 throw new IOException("Recipe input changed while being parsed; file completion was not recorded.");
             input.Position = 0;
             archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
-            ZipArchiveEntry xmlEntry = archive.Entries.Count == 1
-                ? archive.Entries[0]
-                : archive.Entries.First(static item => item.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase));
-            entry = xmlEntry.Open();
-            parseInput = new BlockingReadStream(entry);
+            IReadOnlyList<string> named = _runtime.ZipEntries;
+            IEnumerable<ZipArchiveEntry> entries = named.Count > 0
+                ? named.Select(name => archive.GetEntry(name)
+                    ?? throw new InvalidDataException($"Zip artifact '{label}' has no entry '{name}'."))
+                : [archive.Entries.Count == 1
+                    ? archive.Entries[0]
+                    : archive.Entries.First(static item => item.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))];
+            foreach (ZipArchiveEntry zipEntry in entries)
+                parses.Add((named.Count > 0 ? $"{label}!{zipEntry.FullName}" : label, () =>
+                {
+                    Stream stream = zipEntry.Open();
+                    opened.Add(stream);
+                    return new BlockingReadStream(stream);
+                }));
         }
         else
         {
             passHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            parseInput = new HashingReadStream(input, passHash);
-            // A gzip member is the same artifact bytes; the digest still covers the file.
-            if (IsGzip(_inputPath)) entry = parseInput = new GZipStream(parseInput, CompressionMode.Decompress, leaveOpen: true);
+            parses.Add((label, () =>
+            {
+                Stream stream = new HashingReadStream(input, passHash);
+                // A gzip member is the same artifact bytes; the digest still covers the file.
+                if (IsGzip(_inputPath)) { stream = new GZipStream(stream, CompressionMode.Decompress, leaveOpen: true); opened.Add(stream); }
+                return stream;
+            }));
         }
         try
         {
+            foreach ((string parseLabel, Func<Stream> open) in parses)
             await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
-                               parseInput, _options, label, () => OpenIndependentRead(_inputPath), ct).ConfigureAwait(false))
+                               open(), _options, parseLabel, () => OpenIndependentRead(_inputPath), ct).ConfigureAwait(false))
             {
                 records += change.Metadata.InputUnitsConsumed;
                 foreach (IntentStage stage in change.IntentStages)
@@ -279,7 +309,7 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         }
         finally
         {
-            entry?.Dispose();
+            foreach (Stream stream in opened) stream.Dispose();
             archive?.Dispose();
         }
         if (passHash is not null)

@@ -1461,7 +1461,29 @@ struct laplace_recipe_stream {
         for (const auto& token : tokens) {
             try { (void)point(token); } catch (const std::runtime_error&) { return false; }
         }
-        if (tokens.size() > 1) { value = sequence_text(value, " "); return false; }
+        if (tokens.size() > 1) {
+            bool surrogate = false;
+            for (const auto& token : tokens) { const uint32_t cp = point(token); if (cp >= 0xd800 && cp <= 0xdfff) surrogate = true; }
+            if (!surrogate) { value = sequence_text(value, " "); return false; }
+            // A surrogate position is no text: the sequence is the ordered composition of
+            // its atoms (UCA CollationTest's lone-surrogate strings).
+            std::vector<laplace_ordered_component_t> atoms(tokens.size());
+            for (size_t k = 0; k < tokens.size(); ++k) {
+                const uint32_t cp = point(tokens[k]);
+                hilbert128_t hb{};
+                if (codepoint_table_resolve_atom(cp, &atoms[k].id, atoms[k].coord, &hb) != 0)
+                    throw std::runtime_error("code point has no atom: " + tokens[k]);
+                check(content_witness_emit_floor_atom(stage, cp, &atoms[k].id, INTENT_STAGE_PG_EPOCH_UNIX_US), "code point atom");
+                atoms[k].tier = 0; atoms[k].atom = cp; atoms[k].has_atom = true;
+            }
+            laplace_ordered_composition_request_t request{};
+            request.components = atoms.data(); request.component_count = atoms.size();
+            request.source_id = current_witness; request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+            laplace_ordered_composition_result_t result{};
+            check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "code point sequence");
+            atom = {}; atom.id = result.id; std::memcpy(atom.coord, result.coord, sizeof(atom.coord)); atom.tier = result.tier;
+            return true;
+        }
         const uint32_t cp = point(tokens.front());
         hilbert128_t hb{};
         if (codepoint_table_resolve_atom(cp, &atom.id, atom.coord, &hb) != 0)
