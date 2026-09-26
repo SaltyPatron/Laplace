@@ -12,6 +12,9 @@ public static unsafe class CodepointPerfcache
         ArgumentException.ThrowIfNullOrEmpty(path);
         lock (LaplaceCoreGate.Native)
         {
+            // One immutable mapping per process: readers hold its records lock-free,
+            // and a native reload unmaps the table under them.
+            if (IsLoadedUnlocked()) { PublishRecordsUnlocked(); return; }
             int rc = NativeInterop.CodepointTableLoadPerfcache(path);
             if (rc != 0)
             {
