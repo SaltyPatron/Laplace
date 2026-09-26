@@ -1,0 +1,123 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS51/EmojiTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@sequence",
+      "propertyName": "sequence",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@status",
+      "propertyName": "status",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Test_Status"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@version",
+      "propertyName": "version",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Test_Version"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@name",
+      "propertyName": "name",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_NAME"
+    },
+    {
+      "syntaxPath": "record/@group",
+      "propertyName": "group",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Test_Group"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "record/@subgroup",
+      "propertyName": "subgroup",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Emoji_Test_Subgroup"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "structurePaths": [],
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "sequence"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "columns": [
+      "sequence",
+      "status"
+    ],
+    "commentPattern": "^\\S+ E(\\S+) (.+)$",
+    "commentGroups": [
+      "version",
+      "name"
+    ],
+    "stateKeys": [
+      "group",
+      "subgroup"
+    ],
+    "stateSeparator": ":"
+  }
+}

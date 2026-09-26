@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <regex>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -52,6 +53,11 @@ struct recipe_delimited_config {
     std::vector<std::string> columns, directive_columns;
     // A line whose first field is a key here is read with that key's columns.
     std::map<std::string, std::vector<std::string>> keyed_columns;
+    // Data the source keeps in comments (UTS 51 emoji-test): a record's trailing comment
+    // as a column, fields captured from it by a pattern, and comment lines "key: value"
+    // whose value holds for the records that follow.
+    std::string comment_column, comment_pattern, state_separator;
+    std::vector<std::string> comment_groups, state_keys;
 };
 
 class recipe_delimited_stream {
@@ -65,6 +71,8 @@ class recipe_delimited_stream {
     std::vector<std::map<std::string, std::string>> group_skipped_;
     std::vector<std::vector<std::string>> group_lines_;
     std::vector<std::vector<std::string>> group_row_cells_;
+    std::map<std::string, std::string> state_;       // comment-set values for later records
+    std::unique_ptr<std::regex> comment_regex_;
 
     static std::string_view trim(std::string_view text) {
         auto first = text.find_first_not_of(" \t\r");
@@ -100,6 +108,17 @@ class recipe_delimited_stream {
                 }
                 return;
             }
+            if (!config.state_keys.empty()) {
+                const auto split_at = body.find(config.state_separator);
+                if (split_at != std::string_view::npos) {
+                    const std::string key(trim(body.substr(0, split_at)));
+                    for (const auto& declared : config.state_keys)
+                        if (declared == key) {
+                            state_[key] = std::string(trim(body.substr(split_at + config.state_separator.size())));
+                            return;
+                        }
+                }
+            }
             if (!config.directive_prefix.empty() && body.find(config.directive_prefix) == 0) {
                 directive = true;
                 text = body.substr(config.directive_prefix.size());
@@ -112,9 +131,13 @@ class recipe_delimited_stream {
             directive = true;
             text = nonspace.substr(config.directive_prefix.size());
         }
+        std::string comment_text;
         if (!config.comment_prefix.empty() && !config.group_blank_lines) {
             auto comment = text.find(config.comment_prefix);
-            if (comment != std::string_view::npos) text = text.substr(0, comment);
+            if (comment != std::string_view::npos) {
+                comment_text = std::string(trim(text.substr(comment + config.comment_prefix.size())));
+                text = text.substr(0, comment);
+            }
         }
         const std::vector<std::string>* layout = directive ? &config.directive_columns : &config.columns;
         if (!directive && !config.keyed_columns.empty()) {
@@ -173,6 +196,22 @@ class recipe_delimited_stream {
         for (const auto& constant : config.constants)
             if (!values.emplace(constant.first, constant.second).second)
                 fail("constant collides with a declared column: " + constant.first);
+        if (!directive) {
+            if (!config.comment_column.empty() && !comment_text.empty()
+                && !values.emplace(config.comment_column, comment_text).second)
+                fail("comment column collides with a declared column");
+            if (!config.comment_pattern.empty() && !comment_text.empty()) {
+                if (!comment_regex_) comment_regex_ = std::make_unique<std::regex>(config.comment_pattern);
+                std::smatch match;
+                if (std::regex_match(comment_text, match, *comment_regex_))
+                    for (size_t g = 0; g < config.comment_groups.size() && g + 1 < match.size(); ++g)
+                        if (match[g + 1].matched && !values.emplace(config.comment_groups[g], match[g + 1].str()).second)
+                            fail("comment field collides with a declared column: " + config.comment_groups[g]);
+            }
+            for (const auto& state : state_)
+                if (!values.emplace(state.first, state.second).second)
+                    fail("comment state collides with a declared column: " + state.first);
+        }
         if (config.group_blank_lines && !directive) {
             if (!config.skip_key_column.empty()) {
                 const auto key = values.find(config.skip_key_column);

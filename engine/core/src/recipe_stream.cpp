@@ -1816,6 +1816,16 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                             if (key.empty() || cols.empty() || !config.keyed_columns.emplace(std::move(key), std::move(cols)).second)
                                 throw std::runtime_error("invalid keyed column layout");
                         }
+                        config.comment_column = r.text(); config.comment_pattern = r.text();
+                        const uint32_t groups = r.number();
+                        for (uint32_t g = 0; g < groups; ++g) config.comment_groups.push_back(r.text());
+                        const uint32_t keys = r.number();
+                        for (uint32_t g = 0; g < keys; ++g) config.state_keys.push_back(r.text());
+                        config.state_separator = r.text();
+                        if (config.comment_pattern.empty() != config.comment_groups.empty()
+                            || (!config.state_keys.empty() && config.state_separator.empty()))
+                            throw std::runtime_error("invalid comment-data instruction");
+                        if (!config.comment_pattern.empty()) (void)std::regex(config.comment_pattern);
                     }
                 }
                 s->delimited = true;

@@ -60,6 +60,8 @@ public static class NativeRecipeCompiler
                 || f.ObservationOf is not null || f.ScoreOf is not null || f.Vocabulary is not null
                 || f.Aggregate || f.Qualifiers is { Count: > 0 } || f.QualifierFamily is not null);
         bool childSubjects = recipe.DelimitedSyntax?.KeyedColumns is { Count: > 0 }
+            || recipe.DelimitedSyntax?.CommentColumn is not null || recipe.DelimitedSyntax?.CommentPattern is not null
+            || recipe.DelimitedSyntax?.StateKeys is { Count: > 0 }
             || recipe.ProviderRoutes.Any(static r => r.ChildSubjects is { Count: > 0 }
                 || r.ConditionalPrefixes is { Count: > 0 }
                 || r.ElementCompositions is { Count: > 0 } || r.Subject.Kind == SourceSubjectBindingKind.Composition)
@@ -141,6 +143,13 @@ public static class NativeRecipeCompiler
                         writer.Write(checked((uint)layout.Value.Count));
                         foreach (string column in layout.Value) WriteText(writer, column);
                     }
+                    WriteText(writer, syntax.CommentColumn);
+                    WriteText(writer, syntax.CommentPattern);
+                    writer.Write(checked((uint)(syntax.CommentGroups?.Count ?? 0)));
+                    foreach (string group in syntax.CommentGroups ?? []) WriteText(writer, group);
+                    writer.Write(checked((uint)(syntax.StateKeys?.Count ?? 0)));
+                    foreach (string key in syntax.StateKeys ?? []) WriteText(writer, key);
+                    WriteText(writer, syntax.StateSeparator);
                 }
             }
         }

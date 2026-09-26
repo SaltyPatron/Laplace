@@ -404,7 +404,15 @@ public sealed record SourceDelimitedSyntax(
     int HeaderLines = 0,
     // A line whose first field is a key here is read with that key's columns instead
     // (PropertyValueAliases: "ccc" lines carry a numeric value before the names).
-    IReadOnlyDictionary<string, IReadOnlyList<string>>? KeyedColumns = null)
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? KeyedColumns = null,
+    // Data kept in comments (UTS 51 emoji-test): the trailing comment as a column, fields
+    // captured from it by CommentPattern's groups, and comment lines "key: value" whose
+    // value holds for the records that follow (StateKeys, StateSeparator).
+    string? CommentColumn = null,
+    string? CommentPattern = null,
+    IReadOnlyList<string>? CommentGroups = null,
+    IReadOnlyList<string>? StateKeys = null,
+    string StateSeparator = ":")
 {
     public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
 }
