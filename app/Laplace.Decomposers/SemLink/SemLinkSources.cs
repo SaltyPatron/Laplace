@@ -18,7 +18,7 @@ public readonly struct SemLinkSource : ISeedSource
             "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO",
             // Annotated SemLink 2 instances, not merely its aggregate JSON maps.
             "APPEARS_IN", "HAS_ROLE", "HAS_SENSE",
-            "MEMBER_OF_VERBNET_CLASS", "EVOKES_FRAME",
+            "IS_INSTANCE_OF", "EVOKES_FRAME",
         ];
 
     internal static readonly Hash128 RoleCorrespondsToTypeId =
@@ -29,7 +29,9 @@ public readonly struct SemLinkSource : ISeedSource
         RelationTypeRegistry.RelationTypeId(Relations[3]);
     internal static readonly Hash128 HasSenseTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[4]);
-    internal static readonly Hash128 MemberOfVerbNetClassTypeId =
+    // An annotated occurrence IS_INSTANCE_OF its VerbNet class; lexical membership is
+    // VerbNet's own HAS_PART {member}.
+    internal static readonly Hash128 InstanceOfTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[5]);
     internal static readonly Hash128 EvokesFrameTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[6]);

@@ -1157,9 +1157,12 @@ parent = "IS_A"
 family_root = "IS_A"
 
 [[relation]]
-# VerbNet MEMBER element: lemma belongs to a Levin/VN class. De-conflated from IS_A so class
-# membership does not pollute WordNet-style hypernym/subsumption walks.
+# VerbNet MEMBER element: a class HAS_PART its member {meronymy/member} (the IS_MEMBER_OF
+# surface). Membership is not hypernymy, so it stays out of IS_A walks.
 canonical = "MEMBER_OF_VERBNET_CLASS"
+retired = "HAS_PART"
+retired_flip = true
+retired_qualifier = "meronymy/member"
 bit = 160
 rank = "taxonomic"
 symmetry = "asymmetric"

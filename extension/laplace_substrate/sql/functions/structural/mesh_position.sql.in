@@ -23,23 +23,33 @@ BEGIN ATOMIC
         SELECT s.synset_id AS id, s.eff_mu, s.witnesses,
                row_number() OVER (ORDER BY s.eff_mu DESC NULLS LAST, s.synset_id) AS ord
         FROM lexical.senses(p_id) s
-    ), up_rows AS MATERIALIZED (
-        SELECT c.object_id AS id, c.type_id,
-               (SELECT e.type_id FROM laplace.entities e WHERE e.id = c.object_id) AS hub_id,
-               consensus.eff_mu_display(c.rating,c.rd) AS eff_mu, c.witness_count,
-               row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating,c.rd) DESC NULLS LAST,
-                                           c.object_id) AS ord
+    ), up_cells AS MATERIALIZED (
+        SELECT c.object_id AS id, consensus.relation_canonical(c.type_id) AS relation,
+               c.rating, c.rd, c.witness_count
         FROM up_subjects s
         JOIN laplace.consensus c ON c.subject_id=s.id
         WHERE c.type_id IN (laplace.relation_type_id('IS_SENSE_OF'),
                             laplace.relation_type_id('HAS_SENSE'),
                             laplace.relation_type_id('EVOKES_FRAME'),
-                            laplace.relation_type_id('MEMBER_OF_VERBNET_CLASS'),
                             laplace.relation_type_id('IS_INSTANCE_OF'),
                             laplace.relation_type_id('IS_A'),
                             laplace.relation_type_id('CORRESPONDS_TO'),
                             laplace.relation_type_id('HAS_SEMANTIC_ROLE'))
-        ORDER BY eff_mu DESC NULLS LAST, c.object_id
+        UNION ALL
+        -- What contains the node (a VerbNet class its member, a holonym its part) is
+        -- up: the HAS_PART cell read from its object side.
+        SELECT c.subject_id, 'IS_PART_OF', c.rating, c.rd, c.witness_count
+        FROM up_subjects s
+        JOIN laplace.consensus c ON c.object_id=s.id
+        WHERE c.type_id = laplace.relation_type_id('HAS_PART')
+    ), up_rows AS MATERIALIZED (
+        SELECT u.id, u.relation,
+               (SELECT e.type_id FROM laplace.entities e WHERE e.id = u.id) AS hub_id,
+               consensus.eff_mu_display(u.rating,u.rd) AS eff_mu, u.witness_count,
+               row_number() OVER (ORDER BY consensus.eff_mu_display(u.rating,u.rd) DESC NULLS LAST,
+                                           u.id) AS ord
+        FROM up_cells u
+        ORDER BY eff_mu DESC NULLS LAST, u.id
         LIMIT GREATEST(p_relation_limit, 0)
     ), down_rows AS MATERIALIZED (
         SELECT m.member AS id, m.kind, m.mu, m.witnesses,
@@ -55,7 +65,7 @@ BEGIN ATOMIC
         SELECT 1, s.ord, 'up', s.id, 'has sense', NULL, 'WordNet_Synset', s.eff_mu, s.witnesses
         FROM sense_rows s
         UNION ALL
-        SELECT 2, u.ord, 'up', u.id, consensus.relation_canonical(u.type_id),
+        SELECT 2, u.ord, 'up', u.id, u.relation,
                u.hub_id, NULL, u.eff_mu, u.witness_count FROM up_rows u
         UNION ALL
         SELECT 3, d.ord, 'down', d.id, d.kind, NULL, NULL, d.mu, d.witnesses FROM down_rows d

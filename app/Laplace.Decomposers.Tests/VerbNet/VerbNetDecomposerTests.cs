@@ -64,7 +64,7 @@ public sealed class VerbNetDecomposerTests
         Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A"));
-        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PART"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERB_FRAME"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE"));
@@ -72,7 +72,7 @@ public sealed class VerbNetDecomposerTests
     }
 
     [Fact]
-    public async Task Member_MemberOfVerbNetClass_And_Subclass_IsA_ParentClass()
+    public async Task Class_HasPart_Member_And_Subclass_IsA_ParentClass()
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
@@ -87,20 +87,23 @@ public sealed class VerbNetDecomposerTests
         var memberId = LexicalMemberAnchor.Id(
             LexicalMemberIdentityKind.VerbNet, classId!.Value, "lend#1");
         Assert.NotNull(memberId);
+        // One element: the class HAS_PART the member, qualified meronymy/member.
+        Mask256 member = ClaimQualifiers.Of("meronymy", "member");
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
-            && a.SubjectId == memberId!.Value && a.ObjectId == classId.Value);
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PART")
+            && a.SubjectId == classId.Value && a.ObjectId == memberId!.Value
+            && !(a.QualifierMask & member).IsZero);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME")
             && a.SubjectId == memberId.Value && a.ObjectId == lendId!.Value);
         Assert.DoesNotContain(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
-            && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PART")
+            && a.SubjectId == classId!.Value && a.ObjectId == lendId!.Value);
 
-        Assert.Contains(atts, a =>
+        // An entity's type is its row's type, never source testimony (304f7a73a).
+        Assert.DoesNotContain(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
-            && a.SubjectId == classId!.Value
-            && a.ObjectId == EntityTypeRegistry.Id("VerbNet_Class"));
+            && a.SubjectId == classId!.Value);
 
         var subId = AnchorAdmission.Id(
             SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"),
@@ -314,7 +317,7 @@ public sealed class VerbNetDecomposerTests
             e.Id == EntityTypeRegistry.Id("VerbNet_Predicate")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
-        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));
+        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_PART"));
         Assert.DoesNotContain(boot.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
     }

@@ -38,7 +38,7 @@
  * attestation rather than guessing morphology, and stays exact.
  *
  * Only the name's LAST token is used, and only at length >= 3: a canonical name
- * is a VERB_OBJECT identifier (HAS_PART, EVOKES_FRAME, MEMBER_OF_VERBNET_CLASS)
+ * is a VERB_OBJECT identifier (HAS_PART, EVOKES_FRAME, IS_INSTANCE_OF)
  * whose leading tokens are grammar. Matching every token let the article "a" name
  * IS_A -- whose final token is literally "A" -- handing every candidate with many
  * IS_A edges an enormous mass and selecting a WORSE sense of "car" than denote_mu

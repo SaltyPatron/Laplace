@@ -111,8 +111,9 @@ public sealed class VerbNetDecomposer
                 memberId.Value, VerbNetSource.HasNameTypeId, lemmaId.Value,
                 Source, null, TC.AcademicCurated)
                 with { QualifierMask = VerbNetSource.AliasName });
+            // The class HAS_PART the member {member}: stated through the IS_MEMBER_OF surface.
             b.AddAttestation(NativeAttestation.Categorical(
-                memberId.Value, "MEMBER_OF_VERBNET_CLASS", classEntity, Source, TC.AcademicCurated));
+                memberId.Value, VerbNetSource.Relations[1], classEntity, Source, TC.AcademicCurated));
 
             string wn = member.GetAttribute("wn");
             if (wn.Length > 0)

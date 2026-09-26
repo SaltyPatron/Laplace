@@ -20,7 +20,7 @@ internal static class SemLinkInstanceIngest
     private static readonly Hash128 AppearsIn = SemLinkSource.AppearsInTypeId;
     private static readonly Hash128 HasRole = SemLinkSource.HasRoleTypeId;
     private static readonly Hash128 HasSense = SemLinkSource.HasSenseTypeId;
-    private static readonly Hash128 MemberOfVerbNet = SemLinkSource.MemberOfVerbNetClassTypeId;
+    private static readonly Hash128 InstanceOf = SemLinkSource.InstanceOfTypeId;
     private static readonly Hash128 EvokesFrame = SemLinkSource.EvokesFrameTypeId;
     private static readonly Hash128 RoleCorrespondsTo = SemLinkSource.RoleCorrespondsToTypeId;
 
@@ -190,7 +190,7 @@ internal static class SemLinkInstanceIngest
         // annotation belongs to the occurrence identity itself. Word-level promotion,
         // when wanted, is a derived/elected operation rather than ingest-time spray.
         if (vnClass is { } verbNetClass)
-            Add(builder, occurrence, MemberOfVerbNet, verbNetClass, occurrence);
+            Add(builder, occurrence, InstanceOf, verbNetClass, occurrence);
         if (frame is { } frameId)
             Add(builder, occurrence, EvokesFrame, frameId, occurrence);
         if (roleset is { } rolesetId)

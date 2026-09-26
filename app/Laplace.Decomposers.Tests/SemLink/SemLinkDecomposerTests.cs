@@ -257,7 +257,7 @@ public sealed class SemLinkDecomposerTests
             Hash128 lemma = ContentEmitter.RootId("join")!.Value;
 
             foreach (string relation in new[]
-                     { "MEMBER_OF_VERBNET_CLASS", "EVOKES_FRAME", "HAS_SENSE" })
+                     { "IS_INSTANCE_OF", "EVOKES_FRAME", "HAS_SENSE" })
             {
                 Hash128 type = RelationTypeRegistry.RelationTypeId(relation);
                 Assert.Contains(atts, a =>
@@ -268,7 +268,7 @@ public sealed class SemLinkDecomposerTests
                     && a.ContextId == occurrence);
             }
             Assert.Contains(atts, a =>
-                a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
+                a.TypeId == RelationTypeRegistry.RelationTypeId("IS_INSTANCE_OF")
                 && a.ContextId is not null);
             Assert.Contains(atts, a =>
                 a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME")

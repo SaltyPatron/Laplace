@@ -84,7 +84,7 @@ BEGIN
 
     -- taxonomy: multi-hop beam walk up the topic's strongest HYPERNYMY relation.
     -- FAMILY, not band. The taxonomic BAND ranks importance and contains more than
-    -- hypernymy -- MEMBER_OF_VERBNET_CLASS is its own family_root at taxonomic rank,
+    -- hypernymy -- VerbNet class membership (then MEMBER_OF_VERBNET_CLASS) had its own family_root,
     -- so a band-2 pick rendered class membership through the "is a kind of" frame:
     -- "Hound is a kind of Cotheme", "a kind of bully-59.5" (observed after the
     -- wiktionary seed). Bands say how much a relation matters; families say what it

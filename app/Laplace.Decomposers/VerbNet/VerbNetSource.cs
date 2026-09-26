@@ -15,7 +15,7 @@ public readonly struct VerbNetSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
     [
-        "IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE", "HAS_SEMANTIC_ROLE",
+        "IS_A", "IS_MEMBER_OF", "HAS_THEMATIC_ROLE", "HAS_SEMANTIC_ROLE",
         "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME",
         "ENTAILS",
     ];
