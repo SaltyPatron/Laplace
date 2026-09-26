@@ -31,8 +31,8 @@ public sealed class ChessVocabularyBatchTests
         Assert.Equal(1, writer.ApplyManyCalls);
         Assert.Equal(3, Assert.Single(writer.Batches).Count);
         Assert.Equal(0, writer.ApplyOneCalls);
-        Assert.NotEmpty(names);
-        Assert.Equal(names.Count, names.Distinct(StringComparer.Ordinal).Count());
+        // Type and relation labels are registry codes, so bootstrap registers no names for readback.
+        Assert.Empty(names);
         Assert.All(Sources, source => Assert.Contains(source.SourceId, reader.Proven));
     }
 

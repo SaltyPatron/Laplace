@@ -1,4 +1,7 @@
+using System.Buffers.Binary;
+using System.Text;
 using Laplace.Engine.Core;
+using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Xunit;
 
@@ -49,6 +52,61 @@ public sealed class ChessPgnChunkTests
                 row.SourceId, row.ContextId, row.FoldReplayable, row.OpponentRdFp1e9, row.QualifierMask))
             .Distinct().Order(StringComparer.Ordinal).ToArray();
 
+
+    // A native stage stages each physicality at most once; repeated occurrences live in
+    // their parents' trajectories. Separate chunks may each stage the same row, so a
+    // split is compared with the whole by the set of staged physicality ids.
+    private static Hash128[] StagedPhysicalityIds(IEnumerable<SubstrateChange> changes)
+    {
+        var all = new HashSet<Hash128>();
+        foreach (var stage in changes.SelectMany(change => change.IntentStages))
+        {
+            var rows = stage.EmitCopyBinary(IntentStageTable.Physicalities);
+            var inStage = new HashSet<Hash128>();
+            int at = 19; // COPY binary signature, flags and header-extension length
+            while (true)
+            {
+                short fields = BinaryPrimitives.ReadInt16BigEndian(rows.AsSpan(at));
+                at += 2;
+                if (fields == -1) break;
+                for (int field = 0; field < fields; field++)
+                {
+                    int length = BinaryPrimitives.ReadInt32BigEndian(rows.AsSpan(at));
+                    at += 4;
+                    if (field == 0)
+                    {
+                        Assert.Equal(16, length);
+                        Assert.True(inStage.Add(Hash128.FromBytes(rows.AsSpan(at, 16))));
+                    }
+                    if (length > 0) at += length;
+                }
+            }
+            Assert.Equal(rows.Length, at);
+            Assert.Equal(stage.PhysicalityCount, inStage.Count);
+            all.UnionWith(inStage);
+        }
+        return all.OrderBy(id => id.ToString(), StringComparer.Ordinal).ToArray();
+    }
+
+    // Deterministic legal games that share no line with the recorded fixtures, so each
+    // one grows the composition window by its own content.
+    private static ChessGameRecord DistinctGame(int seed)
+    {
+        var board = Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        var pgn = new StringBuilder(
+            $"[Event \"T\"]\n[White \"W{seed}\"]\n[Black \"B{seed}\"]\n[Result \"1/2-1/2\"]\n\n");
+        for (int ply = 0; ply < 154; ply++)
+        {
+            var legal = MoveGen.Legal(board);
+            if (legal.Count == 0) break;
+            var move = legal[(ply * 7 + seed) % legal.Count];
+            if (board.WhiteToMove) pgn.Append(board.FullmoveNumber).Append(". ");
+            pgn.Append(San.ToSan(board, move)).Append(' ');
+            MoveApply.Make(board, move);
+        }
+        pgn.Append("1/2-1/2\n");
+        return Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(pgn.ToString()));
+    }
 
     private static void AssertRepairParity(SubstrateChange expected, SubstrateChange repaired)
     {
@@ -197,8 +255,7 @@ public sealed class ChessPgnChunkTests
             Assert.Equal(Physicalities(expected), Physicalities(split));
             Assert.Equal(Attestations(expected), Attestations(split));
             Assert.Equal(EvidenceFacts(expected), EvidenceFacts(split));
-            Assert.Equal(expected.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount),
-                split.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount));
+            Assert.Equal(StagedPhysicalityIds(expected), StagedPhysicalityIds(split));
             long after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
             Assert.All(split.SelectMany(c => c.Physicalities)
                 .Where(row => row.ObservedAtUnixUs != 0),
@@ -308,21 +365,26 @@ public sealed class ChessPgnChunkTests
     [Fact]
     public void SharedByteEstimatesCloseAfterTheCrossingGameWithoutANewGameCountCap()
     {
-        var games = Games();
+        // The second fixture repeats the first game's line, so it adds almost no staged
+        // content; the window only crosses its share on games with content of their own.
+        ChessGameRecord[] games = [Parse(1), .. Enumerable.Range(1, 16).Select(DistinctGame)];
         var novel = games.Select(game => game.PlayingId).ToHashSet();
+        Assert.Equal(games.Length, novel.Count);
         int firstOffset = 0;
         using var first = ChessPgnChunk.ComposeNext(games, novel, ref firstOffset, 1);
         long firstBytes = Math.Max(first.StagedBytes, first.ModeledSourceAdmissionBytes);
         Dispose(Build(first));
         int offset = 0;
-        using var combined = ChessPgnChunk.ComposeNext(games, novel, ref offset, checked(firstBytes + 1));
+        long budget = checked(firstBytes + 1);
+        using var combined = ChessPgnChunk.ComposeNext(games, novel, ref offset, budget);
         try
         {
-            Assert.Equal(2, combined.Games.Count);
-            Assert.True(combined.StagedBytesBeforeLastGame < firstBytes + 1);
-            Assert.True(combined.ModeledSourceAdmissionBytesBeforeLastGame < firstBytes + 1);
-            Assert.True(Math.Max(combined.StagedBytes, combined.ModeledSourceAdmissionBytes) >= firstBytes + 1);
-            Assert.Equal(2, offset);
+            Assert.True(combined.Games.Count > 1);
+            Assert.Equal(combined.Games.Count, offset);
+            Assert.True(offset < games.Length);
+            Assert.True(combined.StagedBytesBeforeLastGame < budget);
+            Assert.True(combined.ModeledSourceAdmissionBytesBeforeLastGame < budget);
+            Assert.True(Math.Max(combined.StagedBytes, combined.ModeledSourceAdmissionBytes) >= budget);
         }
         finally { Dispose(Build(combined)); }
     }
@@ -368,8 +430,7 @@ public sealed class ChessPgnChunkTests
             Assert.Equal(EvidenceFacts(expected), EvidenceFacts(split));
             Assert.Equal(expected.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()),
                 split.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()));
-            Assert.Equal(expected.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount),
-                split.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount));
+            Assert.Equal(StagedPhysicalityIds(expected), StagedPhysicalityIds(split));
 
             int replayOffset = 0;
             var replayed = new List<ChessGameRecord>();

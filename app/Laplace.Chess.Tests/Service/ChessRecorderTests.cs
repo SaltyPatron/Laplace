@@ -45,8 +45,9 @@ public sealed class ChessRecorderTests
             var type = RelationTypeRegistry.RelationTypeId(relation);
             Assert.DoesNotContain(change.Attestations, a => a.TypeId == type);
         }
-        Assert.DoesNotContain(change.Entities, e => e.TypeId == EntityTypeRegistry.Id("Chess_Movetext"));
-        Assert.DoesNotContain(change.Entities, e => e.TypeId == EntityTypeRegistry.Id("Chess_Ply"));
+        // Movetext and ply are not governed entity types, so no recorded entity can carry them.
+        Assert.Throws<ArgumentException>(() => EntityTypeRegistry.Id("Chess_Movetext"));
+        Assert.Throws<ArgumentException>(() => EntityTypeRegistry.Id("Chess_Ply"));
     }
 
     [Fact]
