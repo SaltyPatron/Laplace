@@ -4,10 +4,9 @@ import type { TaxonomyResponse } from '../query/api';
 import styles from './TaxonomyTree.module.css';
 
 /**
- * The IS_A tree as an actual visual: the parent chain climbs as a connected
- * ladder to the root (organism, entity…), the topic sits highlighted at the
- * fork, and its strongest children branch below. Every rung navigates. This is
- * the witnessed taxonomy drawn as a tree — not a prose list.
+ * The witnessed IS_A neighborhood of a topic: the parent chain as a ladder down
+ * from the root, the topic highlighted at the fork, and its strongest children
+ * below. Every rung navigates to its topic.
  */
 export function TaxonomyTree({ tax }: { tax: TaxonomyResponse }) {
   if (tax.up.length === 0 && tax.children.length === 0) {

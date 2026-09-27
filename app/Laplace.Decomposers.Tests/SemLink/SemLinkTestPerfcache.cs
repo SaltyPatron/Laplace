@@ -6,7 +6,7 @@ internal static class SemLinkTestPerfcache
 {
     internal static void Load()
     {
-        // Process-global native state: skip the mmap+CRC re-load when another class loaded it.
+        // The codepoint perfcache is process-global; skip the mmap and CRC check when already loaded.
         if (CodepointPerfcache.IsLoaded) return;
         try
         {

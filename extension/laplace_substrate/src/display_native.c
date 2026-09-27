@@ -10,9 +10,11 @@
 #include "spi_nested.h"
 #include "trajectory_wkb.h"
 
-/* Ordered, lazy display election. Only unresolved ids enter the next stage.
- * A textual preview follows one first-child spine in native C; no recursive
- * SQL, per-row rendering, sibling expansion or whole-document reconstruction. */
+/* Labels a set of ids for REALIZE. Stages run in a fixed order as set reads;
+ * an id leaves once a stage gives it a non-opaque label, so only unlabeled ids
+ * reach the next stage. A composition's textual preview follows its first-child
+ * spine through trajectory head vertices; siblings are never expanded and no
+ * document is rendered whole. */
 typedef struct {
     hash128_t id, type, target, chosen_evidence;
     int16 tier, target_tier;
@@ -205,8 +207,8 @@ preview(DisplayItem **items,int n)
     }
 }
 
-/* Provenance is an identity, not permission to reconstruct its entire content
- * as a label. Apply the same bounded preview law to metadata operands. */
+/* Labels type and source operands: entities at tier <= 3 render whole,
+ * compositions through the bounded first-child preview. */
 static char **
 metadata_labels(DisplayItem **items, int n)
 {
@@ -271,10 +273,8 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         Datum name=SPI_getbinval(t,d,4,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
     }
     SPI_freetuptable(SPI_tuptable);
-    /* An identifier (an ILI, a synset key) realizes through the words a source
-     * binds to it, never as its own identifier text. Content then shows its own
-     * surface: the word "not" is "not" even though, as the ISO 639-3 code for
-     * Nomatsiguenga, it is also the subject of that language's HAS_NAME. A name
+    /* An identifier realizes through the surfaces a source binds to it, never
+     * its own key text. Content then shows its own surface; a HAS_NAME name
      * labels only what has no surface of its own. */
     int count=pending(all,unique,work,0);char **labels=batch_text(LEXICAL,work,count,false);
     for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
@@ -305,9 +305,7 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         selected=0;for(int i=0;i<unique;++i)if(!all[i]->label&&all[i]->has_target)work[selected++]=all[i];
         preview(work,selected);
     }
-    /* Any still-unnamed composition can supply its own first witnessed unit.
-     * This also handles self-observed documents without following provenance
-     * back into an unbounded render of the same document. */
+    /* A composition still unlabeled previews its own first-child spine. */
     selected=0;
     for(int i=0;i<unique;++i) if(!all[i]->label && all[i]->exists && all[i]->tier>3) {
         all[i]->target=all[i]->id; all[i]->has_target=true; work[selected++]=all[i];

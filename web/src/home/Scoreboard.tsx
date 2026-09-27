@@ -3,11 +3,9 @@ import { usePulse } from './usePulse';
 import styles from './Scoreboard.module.css';
 
 /**
- * The live scoreboard. Game night for a substrate: the running totals of the
- * witnessed graph, climbing while a source is folded in. The status pill reads
- * the ingest heartbeat — green and rated when a source is at bat, quiet when the
- * league is between games. Nothing here is theatre; every number is the real
- * count, polled, and the rate is measured from consecutive samples.
+ * Live totals of the admitted web from /v1/pulse. The status pill reads the fold
+ * heartbeat and shows the attestation fold rate, measured from consecutive samples,
+ * while a source is folding.
  */
 export function Scoreboard() {
   const { pulse, ratePerSec, reachable, failure } = usePulse();

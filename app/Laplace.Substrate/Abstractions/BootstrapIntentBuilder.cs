@@ -46,11 +46,9 @@ public sealed class BootstrapIntentBuilder
         CanonicalNamedIdentity.Declare(
             _inner, sourceId, EntityTier.Word, SourceTypeId, sourceName, sourceId);
 
-        // The source names ITSELF, by the same law AddType uses for type nodes:
-        // HAS_NAME {name/primary} → the name's content root. Canonical-string sources are
-        // unaffected on the read side (realize.render() prefers canonical_names); content-
-        // hash sources (models) stop rendering as raw hex, and name → source-id
-        // resolution becomes a consensus lookup (seed-step verify depends on it).
+        // The source names itself as AddType names type nodes: HAS_NAME with the primary-name
+        // qualifier → the name's content root. A source whose id is a content hash then
+        // renders by name, and name → source id resolves through consensus.
         if (ContentEmitter.Emit(_inner, sourceName, sourceId) is { } sourceNameId)
             _inner.AddAttestation(NativeAttestation.CategoricalResolved(
                 sourceId, RelTypeHasName, sourceNameId, sourceId, null,
@@ -72,18 +70,17 @@ public sealed class BootstrapIntentBuilder
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(canonicalTypeName);
         var id = EntityTypeRegistry.Id(canonicalTypeName);
-        // type_id is structural metadata on an entity row. The registry key is not
-        // itself content and must not be materialized as a fake Entity/Physicality.
-        // Semantic category endpoints are ordinary content entities witnessed by
-        // the source that actually makes the claim.
+        // type_id is structural metadata on an entity row; the registry key is not content
+        // and gets no entity or physicality. Category endpoints are ordinary content
+        // entities, witnessed by the source that makes the claim.
         return id;
     }
 
     public Hash128 AddRelationType(string canonicalRelationTypeName)
     {
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
-        // Relation keys belong to the native relation/operator registry and highway
-        // perfcache. They are not content entities and receive no physicality.
+        // Relation keys live in the native relation/operator registry and highway perfcache;
+        // they are not content entities and get no physicality.
         return r.Id;
     }
 

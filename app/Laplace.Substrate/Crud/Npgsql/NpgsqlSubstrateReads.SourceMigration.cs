@@ -28,7 +28,8 @@ public static partial class NpgsqlSubstrateReads
         long SourceRows, long NullContextOutcomeRows, long ContextOutcomeRows,
         long OutcomeObservations, long OutcomeContexts, long MarkerRows, string Database, string ServerVersion);
 
-    /// <summary>Read-only inventory before replacing a calculated source's observation recipe.</summary>
+    /// <summary>Read-only counts of a calculated source's testimony, outcome rows and markers,
+    /// taken before its observation recipe is replaced.</summary>
     public static async Task<SourceObservationInventory> SourceObservationInventoryAsync(
         NpgsqlDataSource ds, byte[] source, byte[] outcomeType, byte[] outcomeObject,
         byte[] markerType, CancellationToken ct = default)
@@ -48,9 +49,10 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// Retain complete typed rows as PostgreSQL JSON before the existing eviction owner
-    /// changes evidence, standing, markers or replay receipts. One database snapshot and
-    /// sequential transport; no client-side row reconstruction or per-row database calls.
+    /// Streams the source's complete typed rows, serialized as JSON by PostgreSQL, to
+    /// <paramref name="destination"/> before eviction changes its testimony, standing,
+    /// markers or receipts. One snapshot, sequential access, capped at
+    /// <paramref name="maximumBytes"/>.
     /// </summary>
     public static async Task<long> RetainSourceMigrationAsync(
         NpgsqlDataSource ds, byte[] source, byte[] markerType, Stream destination,

@@ -28,9 +28,9 @@ public sealed record ResolvedSourceGeneration(
     bool CoversGeneration = true);
 
 /// <summary>
-/// Resolves the complete physical file set before execution, following the source
-/// bundle's relative-path and exact-byte identity law. No source-specific admission
-/// or persistence semantics live in this configuration boundary.
+/// Resolves the complete physical file set before execution, identifying each artifact
+/// by relative path and exact bytes. It carries no source-specific admission or
+/// persistence semantics.
 /// </summary>
 public static class SourceGenerationResolver
 {

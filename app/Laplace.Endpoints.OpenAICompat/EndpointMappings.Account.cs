@@ -45,8 +45,8 @@ internal static class AccountEndpoints
                     publicBaseUrl = stripe.Value.PublicBaseUrl,
                     persistentSessionKeys = !string.IsNullOrWhiteSpace(LaplaceInstall.TryReadConfig("LAPLACE_DATA_PROTECTION_KEYS", "identity.env")),
                     providers = identity.Providers.Select(p => new { id = p.Scheme, name = p.DisplayName, callbackPath = p.CallbackPath }),
-                    // Account authentication does not isolate the shared global
-                    // substrate readers. Do not infer a privacy promise from login.
+                    // Sign-in governs the account, not substrate reads, which are
+                    // over the one shared world.
                     substrateScope = "shared", privateDataIsolation = false
                 }
             });

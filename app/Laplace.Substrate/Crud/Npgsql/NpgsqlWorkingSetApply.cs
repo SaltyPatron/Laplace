@@ -7,38 +7,29 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The Rule #8 write protocol (docs/specs/06_Engineering_Ruleset.txt): the
-/// client already knows exactly what is novel (descent + hot caches decided
-/// that before we got here), so the server's only remaining jobs are (1) a
-/// bulk in-transaction verification of the claimed-novel ids — the guard
-/// against a concurrent ingest having committed an overlapping subtree
-/// between our unlocked descent and this transaction — and (2) pure COPY of
-/// what survives, in entities → physicalities → attestations order. No temp
-/// tables, no anti-join, no ON CONFLICT.
+/// Persist-in-bulk step of the shared ingest recipe (the write protocol of
+/// docs/specs/06_Engineering_Ruleset.txt Rule #8). Convergence during composition
+/// already decided which rows are novel, so the server does two things: (1) one
+/// bulk in-transaction verification of the claimed-novel ids, which catches rows a
+/// concurrent writer committed between the unlocked descent and this transaction,
+/// and (2) plain COPY of what survives, in entities → physicalities → attestations
+/// order. No temp-table anti-join and no ON CONFLICT on the COPY path.
 ///
-/// The verification probe is flat over the whole claimed-novel set, not
-/// frontier-only: a concurrent ingest commits subtrees rooted at ITS roots,
-/// which can sit strictly below our novel frontier (we hold novel sentence
-/// S ⊃ word w; the other run committed w standalone — probing only S would
-/// miss w and hit a PK violation).
+/// The verification probe covers the whole claimed-novel set, not only its
+/// frontier: another writer commits compositions rooted at its own roots, which can
+/// sit strictly below this set's novel frontier (a novel parent here may contain a
+/// child committed standalone elsewhere; probing only the parent would miss the
+/// child and COPY would hit a primary-key violation).
 ///
-/// Entity presence is checked with entities_stored_bitmap (perfcache fast
-/// path OFF): this probe decides what gets written, and tier-0 codepoint
-/// rows only exist because the unicode seed writes them through this lane —
-/// answering their presence axiomatically would drop them from the write
-/// list forever. The one licensed shortcut is DB-state-conditioned, not
-/// axiomatic: once the UnicodeDecomposer L0 layer-complete marker exists in
-/// the TARGET database (checked once per bulk run), the tier-0 entity space
-/// is closed (UCD law: UnicodeDecomposer is the single origin of tier 0) and
-/// every tier-0 id is present by definition — those ids skip the probe
-/// client-side. During the unicode seed itself the marker is absent and
-/// every tier-0 row still flows through the probe + COPY lane.
+/// Entity presence is read with entities_stored_bitmap, not the perfcache: this
+/// probe decides what is written, and tier-0 rows are themselves persisted through
+/// this path. The one shortcut is conditioned on database state: when the target
+/// already holds the Unicode source's layer-0 completion receipt (checked once per
+/// bulk run), tier-0 entity ids are answered present client-side without a probe.
+/// Before that receipt exists, every tier-0 row goes through probe and COPY.
 ///
-/// Attestation presence is always verified. The former structural-novelty
-/// shortcut inferred that an attestation embedding a novel-looking entity
-/// could not already exist; live OMW ingest disproved that premise by millions
-/// of rows and COPY failed on 23505. The detailed evidence remains beside the
-/// attestation probe below.
+/// Attestation presence is always verified: a claim that embeds a novel entity can
+/// already exist, so structural novelty never licenses skipping its probe.
 /// </summary>
 public sealed partial class NpgsqlSubstrateWriter
 {
@@ -47,24 +38,17 @@ public sealed partial class NpgsqlSubstrateWriter
         IngestSizing.ResolveApplyIo(ApplyParallelism);
 
     /// <summary>
-    /// The COPY half of the ingest connection equation, as ONE process-wide budget.
+    /// Process-wide bound on connections held by COPY groups at once.
     ///
     /// <see cref="PostgresResourcePlan"/> sizes the pool as
-    /// <c>1 control + 2p (COPY fan + fold fan) + observability</c>, so the COPY fan is
-    /// budgeted at p. But the physicalities and attestations phases OVERLAP by design
-    /// (see the dispatch below: "they overlap, so the phase cost is max(phys, atts)"),
-    /// and each fans out to <see cref="ApplyParallelism"/> = p groups — so live COPY
-    /// connections could reach 2p and consume the fold fan's and observability's share
-    /// as well. The pool then had nothing left to hand out and every remaining owner
-    /// could only wait the 15s rent Timeout and throw "connection pool has been
-    /// exhausted (currently 28)" — the seed-lane failures on runs 32601294533 and
-    /// 32550697390, in WiktionaryDecomposer and the chess eval census respectively.
+    /// <c>1 control + 2p (COPY fan + fold fan) + observability</c>, budgeting the COPY fan
+    /// at p. The physicality and attestation phases overlap and each fans out to
+    /// <see cref="ApplyParallelism"/> groups, so without this bound live COPY connections
+    /// could reach 2p and take the fold fan's and observability's share of the pool.
     ///
-    /// Group COUNT is unchanged (id-range disjointness and payload sizing still decide
-    /// it); only the number simultaneously HOLDING a connection is bounded, so extra
-    /// groups queue for a slot instead of racing the pool to a timeout. Derived from the
-    /// plan record rather than a literal, so it tracks the same equation that sizes
-    /// MaxPoolSize instead of drifting from it.
+    /// Group count is not changed (id-range disjointness and payload sizing decide it);
+    /// only the number holding a connection at once is bounded, so extra groups wait for
+    /// a slot. Derived from the same plan that sizes MaxPoolSize.
     /// </summary>
     private static readonly SemaphoreSlim CopyConnectionBudget =
         new(ResolveCopyConnectionBudget(), ResolveCopyConnectionBudget());
@@ -72,34 +56,29 @@ public sealed partial class NpgsqlSubstrateWriter
     internal static int ResolveCopyConnectionBudget()
     {
         var plan = PostgresResourcePlan.Current;
-        // Minus the control owner, the observability owners, AND the fold's reserved
-        // slack -- the slack is not fan capacity, and counting it as such derives a COPY
-        // budget wider than a single phase's fan-out.
+        // Minus the control owner, the observability owners and the fold's reserved
+        // headroom: the headroom is not fan capacity, and counting it would give a COPY
+        // budget wider than one phase's fan-out.
         int fans = plan.IngestConnectionOwners - 1
                  - plan.ObservabilityConnectionOwners
                  - plan.FoldPoolHeadroomOwners;
         return Math.Max(1, fans / 2);
     }
     /// <summary>
-    /// Write-epoch telemetry (PR1 of the trusted-novelty series — OBSERVABILITY
-    /// ONLY, no probe/skip decision reads any of this yet). Every write-lane
-    /// transaction bumps laplace.apply_write_epoch BEFORE writing; the epoch is
-    /// a plain sequence, so advances survive rollback/crash — the conservative
-    /// direction (an aborted write still forces the next apply to re-probe).
+    /// Write-epoch accounting, logged only; no probe or skip decision reads it. Every
+    /// write transaction advances laplace.apply_write_epoch before writing; the epoch is
+    /// a plain sequence, so advances survive rollback and crash (an aborted write still
+    /// counts as a foreign write).
     ///
-    /// <see cref="_epochAfterLastCommit"/> is last_value read on the control
-    /// connection AFTER the whole apply committed (control tx + COPY sub-txns +
-    /// merge sub-txns — every bump this apply made). At the next apply the
-    /// control bump returns v, and v − 1 − baseline − ownBumpsSinceBaseline is
-    /// exactly the number of nextval calls made by OTHER transactions in the
-    /// window — the foreign delta a later PR will test against zero to skip the
-    /// verify probe. Two documented simplifications, both conservative
-    /// (overcount foreign, never undercount): bumps by this process's OWN
-    /// background consensus fold/mask lanes (ConsensusAccumulatingWriter) are
-    /// not tracked here and count as foreign; and a bump that lands between the
-    /// merge commit and the last_value read folds into the baseline instead.
-    /// <see cref="_epochOwnBumpsSinceBaseline"/> covers the one path that bumps
-    /// without re-reading the baseline: a journal-replay apply.
+    /// <see cref="_epochAfterLastCommit"/> is last_value read on the control connection
+    /// after the whole apply committed (control transaction, COPY sub-transactions and
+    /// merge sub-transactions). At the next apply the control advance returns v, and
+    /// v − 1 − baseline − ownBumpsSinceBaseline counts nextval calls by other
+    /// transactions in between. Both approximations overcount foreign writes, never
+    /// undercount: advances by this process's consensus fold and mask lanes count as
+    /// foreign, and an advance landing between the merge commit and the last_value read
+    /// is absorbed into the baseline. <see cref="_epochOwnBumpsSinceBaseline"/> covers
+    /// the path that advances without re-reading the baseline: a journal-replay apply.
     /// </summary>
     private int _applyWriteEpochRoute = -1;
 
@@ -151,9 +130,9 @@ public sealed partial class NpgsqlSubstrateWriter
     public async Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
         _tier0LayerComplete = false;
-        // This is part of generic ingest completion, after the accumulator drains
-        // its writes. It must run for every host, independently of CLI validation.
-        // A failed drain must fail completion rather than promise read-ready output.
+        // Every ingest's completion drains GIN pending lists after the consensus
+        // writer has drained, whatever host drives it. A failed drain fails
+        // completion rather than reporting the admitted rows read-ready.
         var drain = System.Diagnostics.Stopwatch.StartNew();
         await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         await NpgsqlIngestOps.CleanGinPendingListsAsync(conn, ct).ConfigureAwait(false);
@@ -171,11 +150,11 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Applies one whole working set in a single serialized transaction,
-    /// claiming an idempotency token in laplace.ingest_flush_journal keyed
-    /// by the change's intent hash. A retry after commit-ambiguity finds the
-    /// token and returns a no-op instead of double-applying the additive
-    /// attestation merges.
+    /// Persists one whole working set in a single serialized transaction, claiming
+    /// an idempotency receipt in laplace.ingest_flush_journal keyed by the working
+    /// set's token over its intent ids. A retry after an ambiguous commit finds the
+    /// receipt and returns a no-op instead of applying the additive attestation
+    /// merges twice.
     /// </summary>
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
     {
@@ -221,12 +200,10 @@ public sealed partial class NpgsqlSubstrateWriter
             if (!changes[i].EphemeralFoldInputs.IsDefaultOrEmpty)
                 ephemeralCount = checked(ephemeralCount + changes[i].EphemeralFoldInputs.Length);
 
-        // Preserve every historical ordinary token byte-for-byte. Transient
-        // inputs additionally bind their opaque calculation receipt, so a
-        // directly-constructed SubstrateChange cannot replay-hit a different
-        // deterministic native calculation. The score itself is deliberately
-        // absent: the receipt binds the calculation without becoming a value
-        // channel for the continuous result.
+        // Without transient inputs the token is BLAKE3 over the ordered intent ids.
+        // Transient inputs additionally bind their calculation receipt ids, so a
+        // change cannot replay-hit the receipt of a different calculation. The
+        // score is not bound: the receipt identifies the calculation, not its value.
         if (ephemeralCount == 0)
         {
             var ordinary = new byte[changes.Count * 16];
@@ -313,11 +290,9 @@ public sealed partial class NpgsqlSubstrateWriter
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 3, "entities");
         var ents = CopyTupleParser.ParseEntities(entBlobs);
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
-        // 14 since fold_replayable (model transient-fold receipts) — must track
-        // ATTESTATION_COL_COUNT in engine/core/src/intent_stage.c. This validator
-        // is what caught the mismatch when the column landed, which is what it is
-        // for: a COPY blob whose field count disagrees with the target table is a
-        // silent column-shift, not a parse error.
+        // 14 columns, including fold_replayable; must equal ATTESTATION_COL_COUNT in
+        // engine/core/src/intent_stage.c. A COPY blob whose field count disagrees
+        // with the target table would shift columns silently, so it is rejected here.
         var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 14, "attestations");
         long blobMs = prepSw.ElapsedMilliseconds;
 
@@ -331,27 +306,21 @@ public sealed partial class NpgsqlSubstrateWriter
                 "non-replayable categorical evidence requires the atomic consensus participant");
         long parseMs = prepSw.ElapsedMilliseconds;
 
-        // Distinct entity ids in first-seen order across EVERY staged intent.
-        // A builder/content bank deduplicates only its own stage; IngestRunner
-        // combines many changes into one working-set apply (Unicode's failed
-        // seed combined 627), so uniqueness never crosses this boundary unless
-        // the shared writer enforces it here. COPY has no ON CONFLICT: one
-        // duplicate in the claimed-novel set aborts the whole working set.
+        // Distinct entity ids in first-seen order across every staged intent.
+        // Each builder deduplicates only its own stage, and one working set
+        // combines many changes, so uniqueness across them is enforced here.
+        // COPY has no ON CONFLICT: one duplicate in the claimed-novel set would
+        // abort the whole working set.
         //
-        // Identity is the content id; tier is metadata, not part of identity,
-        // matching SubstrateChangeBuilder and the managed-stage aggregation.
-        // Preserve the first row exactly as those paths do.
+        // Identity is the content id; tier is not part of it. The first row for
+        // an id is kept.
         //
-        // Physicalities are verified by
-        // their OWN content-addressed id, never inferred from their entity:
-        // a physicality legitimately arrives for an already-stored entity
-        // (projections and building blocks land after identity content).
-        // First-occurrence row indices only — probe id/tier lists are built
-        // AFTER invert if any ids still need the bitmap path. MEASURED: copying
-        // 500k ids into probe lists was ~110ms of the prep dedupe bucket.
-        // Tier-0 gate (snapshot once per apply): with the unicode L0 layer
-        // complete in the target DB, a tier-0 id is present by definition —
-        // it never enters the probe and folds straight into the present set.
+        // Physicalities are verified by their own id, never inferred from their
+        // entity: a physicality can arrive for an entity that is already stored.
+        // Only first-occurrence row indices are collected here; probe id lists
+        // are built later, after cache filtering.
+        // Tier-0 gate (snapshot once per apply): while it is on, tier-0 ids
+        // never enter the probe and go straight into the present set.
         bool tier0Gate = _tier0LayerComplete;
         var dedupeSw = System.Diagnostics.Stopwatch.StartNew();
         var firstEntIdx = DistinctEntityRowIndices(ents, tier0Gate, out var tier0Present);
@@ -412,9 +381,9 @@ public sealed partial class NpgsqlSubstrateWriter
             }
         }
 
-        // Per-phase round-trip counters — summed into the returned total AND logged as a
-        // breakdown, so the operator sees WHERE the round-trips go (lock / journal / epoch /
-        // probe / copy / merge) instead of one opaque number. Probe fans across connections → atomic.
+        // Per-phase round-trip counters (lock / journal / epoch / probe / copy / merge),
+        // summed into the returned total. The probe fans across connections, so its
+        // counter is updated atomically.
         int rtLock = 0, rtJournal = 0, rtEpoch = 0, rtProbe = 0, rtCopy = 0, rtMerge = 0;
         int eIns = 0, pIns = 0, aIns = 0;
         long aFold = 0, eSkip = 0, pSkip = 0;
@@ -453,12 +422,11 @@ public sealed partial class NpgsqlSubstrateWriter
             commit = await ReadCommitSettingsAsync(conn, tx, Durability, ct);
             rtLock++;
 
-            // Control-transaction epoch bump — nextval BEFORE any write, per the
-            // sequence's law. The returned value doubles as the telemetry read:
-            // nextval values are totally ordered, so v − 1 − baseline −
-            // ownBumpsSinceBaseline is exactly how many OTHER transactions
-            // bumped since this writer's last post-commit baseline. −1 = no
-            // baseline yet (first apply of this writer, or sequence absent).
+            // Control-transaction epoch advance: nextval before any write. nextval
+            // values are totally ordered, so v − 1 − baseline − ownBumpsSinceBaseline
+            // counts advances by other transactions since this writer's last
+            // post-commit baseline. −1 means no baseline yet (first apply of this
+            // writer, or no sequence installed).
             long epochForeignDelta = -1;
             if (epochRoute)
             {
@@ -489,7 +457,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (!completions.IsEmpty)
                     {
                         // The journal proves this working set's evidence committed, so
-                        // its completion state is owed; record it without re-admission.
+                        // its completion receipts are written without persisting again.
                         await completions.InsertAsync(conn, tx, ct).ConfigureAwait(false);
                         rtJournal++;
                         await CommitMeasuredAsync(tx, ct).ConfigureAwait(false);
@@ -513,23 +481,20 @@ public sealed partial class NpgsqlSubstrateWriter
 
             var probePhysIdsUse = probePhysIds;
 
-            // Probes fan out across pooled connections. Correct under the
+            // Probes fan out across pooled connections. This is sound under the
             // held advisory lock: every snapshot starts after the lock was
             // acquired, so anything a prior applier committed is visible.
             using var verificationDiagnostic = MeasureApplyPhase("presence-verification");
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
 
-            // Empty-relation probe skip (under the apply advisory lock only).
-            // If the whole phys|att heap has zero rows, every staged id for
-            // that keyspace is absent — the bitmap probe would return an
-            // all-zero mask after paying full chunk round-trips. Canonical entity
-            // presence is id-only/HASH(id), so it goes directly through the
-            // content-id bitmap rather than a tier census or inversion.
+            // Empty-relation skip (sound only under the apply advisory lock): if the
+            // physicalities or attestations relation has no rows, every staged id for
+            // it is absent and the bitmap probe is not run. Entity presence always goes
+            // through the id bitmap.
             //
-            // These probes do not run on the control transaction: pooled connections
-            // release their AccessShare locks as soon as each probe completes while
-            // preserving the same visibility (every snapshot starts after the apply
-            // advisory lock was acquired).
+            // These probes run on pooled connections, not the control transaction, so
+            // each releases its AccessShare locks when it completes; visibility is the
+            // same because every snapshot starts after the advisory lock was acquired.
             long physEmptySkip = 0, attEmptySkip = 0;
             // Canonical entity storage is HASH(id). Tier is altitude, not
             // identity, and cannot participate in row presence or partition routing.
@@ -612,8 +577,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 "SELECT laplace.entities_stored_bitmap($1)", probeEntIdsUse,
                 static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
-            // Id-only phys probe: hilbert-keyed routing hits the wrong HASH(id)
-            // partition under the current schema (absent-for-stored is fatal).
+            // Id-only physicality probe: physicalities are partitioned by HASH(id),
+            // so a Hilbert-keyed probe would search the wrong partition and report a
+            // stored row absent.
             var physProbeTask = ProbePresentCoreAsync(
                 "SELECT laplace.physicalities_exist_bitmap($1)", probePhysIdsUse,
                 static (_, _, _) => { },
@@ -640,10 +606,10 @@ public sealed partial class NpgsqlSubstrateWriter
 
             using var filteringDiagnostic = MeasureApplyPhase("copy-survivor-selection");
 
-            // Entities: one deterministic representative per canonical id,
-            // minus stored rows. Kept rows carry content ids so parallel COPY
-            // groups stay uniform over HASH(id), while sorted ids walk each
-            // bucket's PK leaves forward.
+            // Entities: one deterministic representative per id, minus stored
+            // rows. Kept rows are keyed by id so parallel COPY groups stay
+            // uniform over HASH(id), and sorted ids walk each bucket's PK leaves
+            // forward.
             List<KeptRow> keptEnts;
             byte[][]? prebuiltEntPayloads = null;
             int[]? prebuiltEntRowsByLane = null;
@@ -695,16 +661,10 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
             // Physicalities: first occurrence of each id, minus stored rows.
-            // Sort key = ID, matching physicalities' HASH(id) partitioning and its
-            // PK(id). It was the hilbert index while the table was RANGE(hilbert),
-            // for coord-GiST spatial locality — but hilbert is a curve position,
-            // not a hash, so uniform bands over a clustered distribution sent
-            // 58.96% of the table (and of every batch) into one partition and
-            // collapsed these 8 lanes to 1: 527 rows/s with one backend working
-            // and 21 idle at COMMIT. Ids are content hashes, so id-range groups
-            // are equal-sized by construction and land in disjoint PK leaf ranges.
-            // The GiST gives up insert locality it was not being paid for: no
-            // installed read prunes on hilbert, so no KNN ever used the bands.
+            // Groups are split by id, matching HASH(id) partitioning and PK(id):
+            // ids are content hashes, so id-range groups are equal-sized and land
+            // in disjoint PK leaf ranges. A Hilbert index is a curve position, not a
+            // hash; splitting by it would pile clustered coordinates into one group.
             var keptPhys = new List<KeptRow>(phys.Rows.Count);
             var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
             for (int i = 0; i < phys.Ids.Count; i++)
@@ -720,9 +680,10 @@ public sealed partial class NpgsqlSubstrateWriter
                     phys.Rows[i], -1, 0));
             }
 
-            // Physicality closure is decided here, per working set, in memory: every
-            // entity this apply writes must be realized by a physicality staged in the
-            // same set. A novel entity cannot already own a stored physicality.
+            // Physicality closure, counted per working set in memory: every entity this
+            // apply writes should be realized by a physicality staged in the same set,
+            // since a novel entity cannot already have a stored physicality. Novel
+            // entities without one are counted as unplaced.
             {
                 var placedEntities = new HashSet<Hash128>(phys.EntityIds);
                 long unplaced = 0;
@@ -781,7 +742,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
             if (!parallelCopy)
             {
-                // Small applies stay fully atomic inside the control tx.
+                // Small applies stay fully atomic inside the control transaction.
                 if (keptEnts.Count > 0 || keptPhys.Count > 0 || keptAtts.Count > 0)
                     copyTransactions.StartControl();
                 if (keptEnts.Count > 0)
@@ -808,25 +769,16 @@ public sealed partial class NpgsqlSubstrateWriter
             }
             else
             {
-                // Bulk COPY fans out across connections owning disjoint primary-key ranges.
-                // All production indexes remain online throughout the apply; partitioning and
-                // batching reduce write amplification without taking the read surface down.
-                // Per-table barriers keep referenced rows durable before their referencers
-                // (entities → physicalities → attestations). The control transaction holds the
-                // advisory lock across the whole window, so no other applier interleaves; a crash
-                // mid-phase leaves no flush-journal token and replay verification subtracts what
-                // already landed.
+                // Bulk COPY fans out across connections that each hold a disjoint
+                // primary-key range. Indexes stay online throughout. Per-table barriers
+                // make referenced rows durable before their referencers. The control
+                // transaction holds the advisory lock across the whole window, so no
+                // other applier interleaves; a crash mid-phase leaves no flush-journal
+                // receipt, and the retry's verification subtracts what already landed.
 
-                // Entities COMPLETE first — the structural attestation
-                // novelty rule (and crash recovery) depends on "attestation
-                // committed ⇒ its batch's entities committed". Physicalities
-                // and attestations have no cross-dependency and are the two
-                // expensive phases: they overlap, so the phase cost is
-                // max(phys, atts) instead of the old sequential sum.
-                // Entity batches often share one type_id (throughput fixture; many
-                // real sources too). Id-range parallelism then contends on the same
-                // type/tier_type btree leaves — cap groups when the batch is
-                // type-homogeneous so COPY is not fighting itself.
+                // Entities complete first, so a committed attestation implies its
+                // working set's entities are committed. Physicalities and
+                // attestations do not depend on each other and may overlap.
                 if (prebuiltEntPayloads is not null)
                 {
                     rtCopy += await CopyPayloadsParallelAsync(
@@ -841,11 +793,11 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 eIns = keptEntCount;
                 // A claimed working-set token is the exactly-once boundary for
-                // evidence and its derived standing. Entity and physicality copies may commit
-                // independently: their content-addressed identities are
-                // re-verified and subtracted on a retry. Attestation COPY and
-                // its consensus fold must commit together, so a retry cannot
-                // mistake an unfolded witness for a completed observation.
+                // evidence and the standing folded from it. Entity and physicality
+                // copies may commit independently: their content-addressed ids are
+                // re-verified and subtracted on a retry. Attestation COPY and its
+                // consensus fold commit together in the control transaction, so a
+                // retry cannot mistake unfolded testimony for a completed observation.
                 if (workingSetToken is not null)
                 {
                     rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
@@ -876,10 +828,10 @@ public sealed partial class NpgsqlSubstrateWriter
 
             copyDiagnostic?.Complete();
 
-            // Consensus acceptance is supplied only by the accumulating writer
-            // for a freshly claimed V2 working set. It shares this transaction
-            // with the evidence and replay token: a failure leaves no accepted
-            // journal claim, while a retry that sees the claim cannot refold.
+            // Fold in sets: the consensus participant (supplied by the accumulating
+            // writer for a freshly claimed working set) folds the novel attestations
+            // in this same transaction as the evidence and the journal receipt, so a
+            // failure leaves no receipt and a retry that sees the receipt cannot refold.
             if (transactionParticipant is not null && workingSetToken is not null)
             {
                 using var participantDiagnostic = MeasureApplyPhase("consensus-acceptance-participant");
@@ -904,8 +856,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 participantDiagnostic?.Complete();
             }
 
-            // Completion state commits with the control transaction that accepts this
-            // evidence: a failed or rolled-back admission leaves no completion row.
+            // Completion receipts commit with the control transaction that persists this
+            // evidence: a failed or rolled-back apply leaves no completion row.
             if (!completions.IsEmpty)
             {
                 using var completionDiagnostic = MeasureApplyPhase("completion-state");
@@ -919,14 +871,11 @@ public sealed partial class NpgsqlSubstrateWriter
             commit = commit with { WriteCommitAcknowledged = workingSetToken is not null
                 || eIns > 0 || pIns > 0 || aIns > 0 || aFold > 0 };
 
-            // Epoch baseline for the NEXT apply's foreign-delta: last_value read
-            // AFTER every bump this apply made (control tx above, COPY sub-txns,
-            // merge sub-txns) has committed, so any later advance is someone
-            // else's. Reading the sequence relation directly needs no nextval on
-            // this session and takes no lock. A concurrent bump landing between
-            // the merge commits and this read folds into the baseline — kept
-            // simple on purpose; the cost is one undercounted foreign delta in
-            // telemetry, never a wrong skip (nothing skips on this yet).
+            // Epoch baseline for the next apply's foreign delta: last_value read after
+            // every advance this apply made has committed, so any later advance is
+            // another transaction's. Reading the sequence relation needs no nextval and
+            // takes no lock. A concurrent advance between the merge commits and this
+            // read is absorbed into the baseline; only the logged delta is affected.
             if (epochRoute)
             {
                 await using var last = conn.CreateCommand();
@@ -1016,11 +965,11 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Return one deterministic canonical row for each staged content id. The
-    /// entity COPY chooses its representative by (tier,type_id) rather than by
-    /// arrival/batch order. If any staged row for an id is tier 0 after the
-    /// Unicode completion marker, the content id is already known present and
-    /// the whole canonical id can skip the database probe.
+    /// Returns one deterministic row index per staged entity id, in bytewise id
+    /// order: the representative is the lowest tier, then the bytewise-smallest
+    /// type_id, independent of arrival order. With the tier-0 gate on, an id with
+    /// any tier-0 row goes to <paramref name="tier0Present"/> instead and skips
+    /// the probe.
     /// </summary>
     internal static List<int> DistinctEntityRowIndices(
         CopyTupleParser.EntityRows ents, bool tier0Gate, out List<Hash128>? tier0Present)
@@ -1076,11 +1025,10 @@ public sealed partial class NpgsqlSubstrateWriter
         List<int> RemainingIdx, long Resolved, int RoundTrips);
 
     /// <summary>
-    /// Historical LIST(tier) inversion retained for measured-reference archaeology;
-    /// the HASH(id) production path above no longer calls it. Formerly, if committed row count was
-    /// strictly less than staged probe count for that tier, load the present id
-    /// set and resolve membership locally; otherwise leave those ids on the
-    /// bitmap probe path. Build the smaller side — not a fixed size dial.
+    /// Per-tier presence resolution: for each tier where fewer rows are stored than
+    /// this batch stages, load that tier's stored ids and resolve membership locally;
+    /// other tiers stay on the bitmap probe. Not used by the apply path, whose
+    /// presence is id-only over HASH(id) because tier is not identity.
     /// <paramref name="rowIdx"/> are indices into <paramref name="ents"/>.
     /// </summary>
     private static async Task<EntityInvertResult> InvertEntityTiersBySmallerSideAsync(
@@ -1098,18 +1046,9 @@ public sealed partial class NpgsqlSubstrateWriter
             stagedPerTier.TryGetValue(tier, out int n);
             stagedPerTier[tier] = n + 1;
         }
-        // BOUNDED COUNT, NOT A CENSUS. The only use of this number is the
-        // `have < staged` test below, and `staged` is how many rows THIS batch is
-        // inserting -- a handful for a chat turn. Counting every entity in the tier to
-        // answer "does it already hold at least `staged`?" scanned 73M rows for tier 2
-        // alone. Stopping at `staged` gives the identical answer: at or above the bound
-        // the count comes back == staged, so `have < staged` is false exactly as before;
-        // below it, the true count is returned.
-        //
-        // Measured live 2026-08-15 on tiers {0,2,3} (1,114,240 / 73,532,044 / 38,028,956
-        // rows): full census 4,805 ms, bounded 2.171 ms -- 2,213x. That statement ran
-        // SEVEN times in one MCP chat turn for 29,734 ms of a 44,829 ms turn, with
-        // another 16,309 ms of pg_advisory_xact_lock waiting behind it.
+        // Bounded count, not a census: the number only feeds `have < staged`, so
+        // counting stops at `staged` (LIMIT need). At or above the bound the count
+        // equals staged and the test is false; below it the true count is returned.
         var tierArr = new short[stagedPerTier.Count];
         var needArr = new int[stagedPerTier.Count];
         {
@@ -1166,8 +1105,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
             }
 
-            // Fast path: every staged tier inverted — no remain list, just
-            // mark the rare present hits (throughput / fresh-seed shape).
+            // Every staged tier inverted: no ids remain for the probe; only
+            // mark the present hits.
             if (invertTiers.Count == stagedPerTier.Count)
             {
                 if (presentInLeaf.Count > 0)
@@ -1200,11 +1139,10 @@ public sealed partial class NpgsqlSubstrateWriter
 
     /// <summary>
     /// Shared chunked, connection-parallel presence probe. Sends the ids in
-    /// byte-budgeted chunks as $1 (bytea[]).
-    /// <paramref name="bindKeys"/> add the target table's partition-key
-    /// arrays for the same [start, start+n) window, and decodes the returned
-    /// bitmap back to hit ids. Every probe shape (tiered, pair-keyed,
-    /// triple-keyed) rides this one implementation.
+    /// sized chunks as $1 (bytea[]); <paramref name="bindKeys"/> adds the target
+    /// table's partition-key arrays for the same [start, start+n) window. The
+    /// returned bitmap is decoded back to the ids found present. Every probe
+    /// shape (id-only and keyed) uses this one implementation.
     /// </summary>
     private async Task<HashSet<Hash128>> ProbePresentCoreAsync(
         string commandText, IReadOnlyList<Hash128> ids,
@@ -1252,8 +1190,7 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         else
         {
-            // Was capped at 8; a 500k-id verify is ceil(500k/131072)=4 chunks on
-            // small hosts and more on large probes — let ApplyParallelism own it.
+            // Chunk workers are bounded by ApplyParallelism.
             int workers = Math.Min(chunkCount, ApplyParallelism);
             int next = -1;
             await CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
@@ -1271,9 +1208,8 @@ public sealed partial class NpgsqlSubstrateWriter
         return present;
     }
 
-    /// <summary>Tier-keyed presence probe (entities: LIST(tier), t2 further
-    /// HASH(id)). The write lane stages every entity's tier, so the probe
-    /// prunes to one index descent per id instead of one per leaf.</summary>
+    /// <summary>Presence probe that passes each id's staged tier as a second
+    /// key array ($2 smallint[]) alongside the ids.</summary>
     private Task<HashSet<Hash128>> ProbePresentTieredParallelAsync(
         string function, IReadOnlyList<Hash128> ids, IReadOnlyList<short> tiers,
         Action<int> addRoundTrips, CancellationToken ct)
@@ -1291,11 +1227,8 @@ public sealed partial class NpgsqlSubstrateWriter
             }, addRoundTrips, ct);
     }
 
-    /// <summary>Triple-keyed presence probe (attestations: LIST(type_id) ->
-    /// HASH(subject_id); an id-only probe pays one index descent per leaf —
-    /// ~145x).</summary>
     // Identity permutation sorted by a partition-key comparison over indices, so all parallel
-    // probe arrays can be reordered together for sequential-I/O locality (see the call site).
+    // probe arrays can be reordered together for forward index walks (see the call site).
     private static int[] BuildProbePermutation(int count, Comparison<int> byKey)
     {
         var perm = new int[count];
@@ -1311,6 +1244,9 @@ public sealed partial class NpgsqlSubstrateWriter
         return reordered;
     }
 
+    /// <summary>Triple-keyed presence probe for attestations, which are partitioned
+    /// LIST(type_id) -> HASH(subject_id): passing type and subject lets the probe prune
+    /// to one leaf per id, where an id-only probe would descend every leaf's index.</summary>
     private Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
         string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
         IReadOnlyList<Hash128> subjectIds, Action<int> addRoundTrips, CancellationToken ct)
@@ -1388,19 +1324,17 @@ public sealed partial class NpgsqlSubstrateWriter
         long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     /// <summary>
-    /// Exact CLR array-addressability ceiling for the contiguous payload PackFiltered
-    /// currently requires. Bytes, never rows: row count says nothing about payload size
-    /// when one row can be a 145 MB trajectory.
+    /// CLR array-addressability ceiling for the one contiguous payload PackFiltered
+    /// builds. Measured in bytes, never rows: a single row can carry a very large
+    /// trajectory.
     /// </summary>
     private static readonly long MaxCopyPayloadBytes = Array.MaxLength;
 
     /// <summary>
-    /// Splits a kept-range into byte-bounded COPY payloads. PackFiltered packs an
-    /// entire call into ONE byte[] and refuses past 2 GiB, so the unit that matters
-    /// is bytes — a TinyLlama factors layer is only 69 physicality rows but ~10 GB of
-    /// trajectory, and no row-count batching avoids the ceiling. Each chunk gets its
-    /// own COPY stream, which is already what CopyFilteredAsync does per call, so this
-    /// changes the size of the unit and nothing about the wire protocol.
+    /// Splits a kept range into byte-bounded COPY payloads. PackFiltered packs one call
+    /// into a single byte[] and refuses past the array ceiling, so chunks are bounded by
+    /// bytes: a few rows can carry gigabytes of trajectory. Each chunk gets its own COPY
+    /// stream through CopyFilteredAsync; the wire protocol is unchanged.
     /// </summary>
     private static async Task CopyKeptAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
@@ -1667,10 +1601,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 if (payload.Length == 0) return;
                 long laneStarted = System.Diagnostics.Stopwatch.GetTimestamp();
 
-                // Claim a slot in the plan's COPY share BEFORE renting from the pool:
-                // overlapping phases share one budget, so a group waits on a semaphore
-                // (cheap, fair, cancellable) instead of on a 15s pool-rent timeout that
-                // ends the whole ingest batch.
+                // Claim a slot in the plan's COPY share before renting from the pool:
+                // overlapping phases share one budget, so a group waits on a cancellable
+                // semaphore instead of timing out on a pool rent and failing the batch.
                 using (var waitDiagnostic = MeasureApplyPhase(
                     "copy-lane-wait", tableName, lane: group, rows: rowsByLane[group]))
                 {
@@ -1684,12 +1617,11 @@ public sealed partial class NpgsqlSubstrateWriter
                 await using var conn = await _ds.OpenConnectionAsync(ct);
                 await using var tx = await conn.BeginTransactionAsync(ct);
                 Interlocked.Increment(ref copyTransactions.Started);
-                // The epoch bump rides the GUC batch — same round trip, and this
+                // The epoch advance rides the GUC batch in the same round trip; the
                 // command has no positional parameters (Npgsql forbids $n in
-                // multi-statement commands). nextval BEFORE the COPY below, per
-                // the sequence's law; each parallel sub-transaction is its own
-                // write-lane transaction, so each bumps once. The route flag was
-                // resolved on the control connection before any COPY dispatch.
+                // multi-statement commands). nextval runs before the COPY below; each
+                // parallel sub-transaction is its own write transaction and advances
+                // once. The route flag was resolved on the control connection first.
                 bool epochBump = Volatile.Read(ref _applyWriteEpochRoute) == 1;
                 await using (var guc = conn.CreateCommand())
                 {
@@ -1703,9 +1635,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 string cols = IntentStage.CopyColumnList(table);
                 var stream = await conn.BeginRawBinaryCopyAsync(
                     $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
-                // This try/finally is the original await-using disposal boundary.
-                // Finish includes COPY completion/acknowledgement even when writing
-                // throws; the transaction and budget retain their original owners.
+                // Disposing the stream completes the COPY and reads its acknowledgement,
+                // even when writing throws; the transaction and budget slot are released
+                // by their own enclosing scopes.
                 try
                 {
                     setupDiagnostic?.Complete();
@@ -1731,8 +1663,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 finally
                 {
-                    // The connection and transaction above are disposed on the way out of
-                    // the try block, so the slot is released only after the pool has the
+                    // The connection and transaction are disposed on the way out of the
+                    // try block, so the slot is released only after the pool has the
                     // connection back.
                     CopyConnectionBudget.Release();
                     elapsedMsByLane[group] =
@@ -1762,10 +1694,9 @@ public sealed partial class NpgsqlSubstrateWriter
         var sw = System.Diagnostics.Stopwatch.StartNew();
         long payloadBytes = TotalKeptBytes(kept);
         int groups = ResolveCopyGroups(kept.Count, payloadBytes);
-        // Bound StagedRowRef.Blob before pack — IndexOutOfRange inside
-        // BuildSortedCopyPayloads / PackFiltered has no table name on the stack
-        // (Release inlines the packer). Measured 2026-08-02: Unicode second
-        // working-set on laplace-dev died here after #776 dedup cleared 23505.
+        // Bounds-check StagedRowRef.Blob before packing: an IndexOutOfRange inside
+        // BuildSortedCopyPayloads / PackFiltered carries no table name on the stack
+        // (Release builds inline the packer), so the check names it here.
         int blobCount = blobs.Count;
         int minBlob = int.MaxValue, maxBlob = int.MinValue;
         for (int i = 0; i < kept.Count; i++)
@@ -1804,14 +1735,10 @@ public sealed partial class NpgsqlSubstrateWriter
         long[]? patchedCounts, IReadOnlyList<int>? countValueOffsets,
         long[]? patchedSums, IReadOnlyList<int>? sumValueOffsets, CancellationToken ct)
     {
-        // Pack BEFORE opening the stream. PackFiltered can throw — its own 2 GiB
-        // ceiling is the common one — and when it threw with the COPY already open,
-        // `await using` disposed the stream, the server reported that it had never
-        // received a binary header, and that 22P04 "COPY file signature not
-        // recognized" REPLACED the real exception on the way out. A TinyLlama
-        // factors layer packing 9,547 MB reported a corrupt-looking wire protocol
-        // instead of "payload exceeds 2 GiB", which is a completely different bug
-        // hunt. Packing first lets the real error propagate untouched.
+        // Pack before opening the stream. PackFiltered can throw (its payload size
+        // ceiling is the usual case); with the COPY already open, disposing the stream
+        // would make the server report 22P04 "COPY file signature not recognized",
+        // replacing the real exception. Packing first lets the real error propagate.
         byte[] packed = CopyTupleParser.PackFiltered(
             blobs, rows, patchedCounts, countValueOffsets, patchedSums, sumValueOffsets);
         string cols = IntentStage.CopyColumnList(table);

@@ -4,17 +4,16 @@ using System.Text;
 namespace Laplace.Ops;
 
 /// <summary>
-/// The RFC 4180 CSV shape for the ops.app_log sink — a deliberate SUBSET of ops.pg_log's
-/// columns (GH #601) so the two log surfaces read the same way in SQL:
+/// The RFC 4180 CSV shape for the ops.app_log sink, a subset of ops.pg_log's columns so
+/// both logs read the same way in SQL:
 ///
 ///   log_time, application_name, error_severity, category, message, detail
 ///
 /// log_time / application_name / error_severity / message are shared-shape with ops.pg_log;
 /// category (the logger category) and detail (exception text) are the app-side columns. A
 /// file_fdw foreign table over the sink declares exactly these six columns in this order.
-/// No header row (file_fdw reads header 'false'). This static core is what the Serilog
-/// <see cref="OpsLogCsvTextFormatter"/> writes per event, kept separate so the exact CSV
-/// contract stays unit-testable without a LogEvent.
+/// No header row (file_fdw reads header 'false'). <see cref="OpsLogCsvTextFormatter"/>
+/// writes one line per event through this static core, which is testable without a LogEvent.
 /// </summary>
 public static class OpsLogCsvFormatter
 {
@@ -49,9 +48,8 @@ public static class OpsLogCsvFormatter
         sb.Append('\n');
     }
 
-    // RFC 4180: quote a field when it holds a comma, quote, CR or LF; escape embedded quotes
-    // by doubling. Always quoting would also be valid, but quoting only when needed keeps the
-    // common short lines readable in a plain `less`.
+    // RFC 4180: quote a field only when it holds a comma, quote, CR or LF; embedded
+    // quotes are doubled.
     private static void Field(StringBuilder sb, string value)
     {
         bool mustQuote = value.AsSpan().IndexOfAny(",\"\r\n") >= 0;

@@ -6,14 +6,11 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Audio content path: mono PCM16 recovery → native audio ladder above shared
-/// codepoint T0 (codepoint→sample→window→onset→phrase→track) → O(tiers)
-/// existence → modality witness emit. Sibling of <see cref="ContentTierSpine"/>;
-/// same T0 floor. Do not blake3(pcm) as identity.
-///
-/// Perfcache law is compositional (#1711): reusable sample/window/segment/track
-/// structures may be mmap-accelerated and consumed unchanged by video or other
-/// multimodal containers.
+/// Audio composition: mono PCM16 → native audio ladder over the shared Tier-0 atoms
+/// (codepoint→sample→window→onset→phrase→track) → O(tiers) existence probe → staging.
+/// Same Tier-0 floor as <see cref="ContentTierSpine"/>; identity is the composed root,
+/// never a hash of the PCM bytes. Sample/window/segment/track structures are reusable
+/// perfcache maps that video and other containers consume unchanged.
 /// </summary>
 public static class AudioTierSpine
 {
@@ -30,8 +27,8 @@ public static class AudioTierSpine
         IntentStage.BuildAudioTree(pcm);
 
     /// <summary>
-    /// Ladder root via native compose. Memo key is an opaque cache key over the
-    /// recovery buffer — never returned as the entity id.
+    /// Ladder root via native compose. The memo key hashes the PCM buffer only to cache
+    /// the lookup; it is never returned as the entity id.
     /// </summary>
     public static Hash128? ResolveRoot(ReadOnlySpan<short> pcm)
     {

@@ -4,12 +4,10 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
-/// Agent session-log lane (spec 34 batch counterpart). One decomposer, many provider
-/// format adapters (Claude Code, Codex, Gemini, Antigravity, Copilot, Cursor, generic
-/// JSON/JSONL fallback). This static source witnesses the STRUCTURAL rows (roles,
-/// tool graph, usage scalars, metadata attributes); conversational content and
-/// membership ride the per-tenant UserPrompt@/Response@/ToolResult@ sources so
-/// replayed logs land on the same evidence cells as live turns (TurnCloser parity).
+/// Source identity for agent session logs. It witnesses the structural rows (roles, tool
+/// graph, usage, metadata attributes); conversational content and membership are attested
+/// under the per-tenant UserPrompt@/Response@/ToolResult@ sources, so replayed logs land
+/// in the same consensus cells as live turns.
 /// </summary>
 public readonly struct AgentTraceSource : ISeedSource
 {
@@ -22,9 +20,8 @@ public readonly struct AgentTraceSource : ISeedSource
         TrustClassRegistry.Id("AgentTranscript");
 
     /// <summary>
-    /// Every relation the lane emits under ANY of its sources (the HAS_POS law).
-    /// Turn ORDER is deliberately absent: sequence lives in the session physicality
-    /// trajectory (Pillar 3a), not in adjacency attestations.
+    /// Every relation agent-session ingest attests under any of its sources. Turn order is
+    /// absent: sequence lives in the session's physicality trajectory, not in attestations.
     /// </summary>
     public static IReadOnlyList<string> Relations { get; } =
     [

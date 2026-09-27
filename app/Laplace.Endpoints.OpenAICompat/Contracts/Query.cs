@@ -3,9 +3,8 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// A structural read. The caller names the shape of the read, the lens (which
-/// salience bands to traverse) and the dials; nothing here is inferred from the
-/// phrasing of a question, so the same query works from any language.
+/// A structural read. The caller names the shape, the salience bands to traverse, and the
+/// dials; nothing is inferred from the phrasing of the topic.
 /// </summary>
 public sealed record QueryRequest(
     [property: JsonPropertyName("topic")] string? Topic,
@@ -57,8 +56,8 @@ public sealed record QueryShapesResponse(
     [property: JsonPropertyName("shapes")] IReadOnlyList<QueryShape> Shapes);
 
 /// <summary>
-/// A salience band: a set of relation types sharing a read-time rank, addressed
-/// by one precomputed highway mask. Counts are live, not manifest-declared.
+/// A salience band: the relation types sharing a read-time rank, addressed by one
+/// intent-mask bit. Counts are read from current consensus.
 /// </summary>
 public sealed record RelationBand(
     [property: JsonPropertyName("band")] int Band,

@@ -8,9 +8,9 @@
 #include "spi_nested.h"
 #include "content_membership_read.h"
 
-/* Browse owns composition, deduplication, ranking, paging and receipts in C.
- * PostgreSQL executes retained, typed set reads. No generated SQL, SQL ranking,
- * recursive query or per-entity probe. Cursor fetches bound transfer memory. */
+/* Resolves a query's constituent ids to ranked entities. Membership,
+ * deduplication, ranking and paging run in C over retained typed set reads;
+ * cursor fetches bound transfer memory. */
 static SPIPlanPtr names_plan, facets_plan;
 
 static SPIPlanPtr
@@ -55,10 +55,9 @@ id_array(HTAB *ids)
     return construct_array(items, i, BYTEAOID, -1, false, TYPALIGN_INT);
 }
 
-/* Reuse the installed composition operation. Members are the decomposer's
- * whole content identities. No floor expansion, rendered search, or private
- * graph walk: the trajectory containment index elects the matching manifests.
- * The compatibility capacity cannot hide candidates. */
+/* Entities whose trajectories contain every member, from the trajectory
+ * membership index. `capacity` does not bound the set, so `truncated` is
+ * always false. */
 static hash128_t *
 candidate_names(ArrayType *members, int capacity, int *count, bool *truncated)
 {
@@ -153,8 +152,8 @@ add_member_hits(HTAB *hits, ArrayType *members)
     pfree(nulls);
 }
 
-/* Structural distance from the query: the entity it names, the content it is,
- * the words it is made of, then the structures that contain all of them. */
+/* Structural distance from the query: the entities it names, the content it is,
+ * its constituents, then the structures that contain all of them. */
 static int
 match_rank(BrowseMatchKind kind)
 {
@@ -178,7 +177,7 @@ hit_compare(const void *a, const void *b)
         if (xm != ym) return xm > ym ? -1 : 1;
         if (x->witnesses != y->witnesses) return x->witnesses > y->witnesses ? -1 : 1;
     } else if (x->tier != y->tier) {
-        /* A containing phrase sits closer to the query than a containing document. */
+        /* Among structural hits, a lower tier sits closer to the query. */
         return x->tier < y->tier ? -1 : 1;
     }
     return id_compare(&x->id, &y->id);
@@ -237,16 +236,15 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
         hash128_t exact = datum_to_hash128(PG_GETARG_DATUM(1));
         add_structural_hit(hits, &exact, BROWSE_MATCH_SURFACE);
     }
-    /* Containment is a product result in its own right. Attested names above
-     * attach domain entities; they do not hide the matched content DAG. */
+    /* Containers of all members are hits beside the named entities. An id
+     * already present keeps its earlier match kind. */
     for (int i = 0; i < count; ++i)
         add_structural_hit(hits, &names[i], BROWSE_MATCH_CONTAINS_ALL);
-    /* The query's witnessed words are also real substrate results. A missing
-     * higher-tier phrase must not erase the canonical constituents that formed
-     * the query. Existing stronger matches retain precedence by insertion order. */
+    /* The members themselves are hits, so the query's constituents surface even
+     * when no container holds them all. */
     add_member_hits(hits, members);
-    /* One batch hydrates all matched identities, including exact, containment,
-     * and constituent arms. Unwitnessed computed ids disappear here. */
+    /* One facet read hydrates tier and type for every hit; ids with no entity
+     * row are dropped. */
     args[0] = PointerGetDatum(id_array(hits));
     p = plan(&facets_plan, laplace_sql_query_text("entity.facets"), 1, array_type);
     if (SPI_execute_plan(p, args, NULL, true, 0) != SPI_OK_SELECT) elog(ERROR, "browse: facet read failed");

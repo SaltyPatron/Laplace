@@ -1,34 +1,21 @@
 /*
- * realize_batch.c — realize.realize() for N ids in a bounded number of batched
- * SPI round-trips, positionally aligned to the input array.
+ * REALIZE for a set of ids: one text per input id, positionally aligned, from a
+ * bounded number of set reads over unrefuted consensus. Per id, the first of:
+ *   - lexicalization: a word attested HAS_SENSE of it, attested in the
+ *     requested language first, then by effective mu, first non-empty render;
+ *   - a tier-0 codepoint's own glyph, from the perfcache;
+ *   - its own content render, if non-empty;
+ *   - an attested HAS_NAME, first non-empty render;
+ *   - an IS_TRANSLATION_OF target, requested language first, first non-empty;
+ *   - the render of its top-mu HAS_DEFINITION as-is ('' is a result).
+ * A NULL lang gives no language preference. Ids nothing realizes yield NULL,
+ * never hex. realize.realize() is the scalar form of the same order.
  *
- * The scalar ladder it reproduces exactly (realize.sql.in, lang-only path —
- * resolve_name is called WITHOUT context, so only its null-context branch
- * matters):
- *
- *   COALESCE(
- *     realize._synset_lemma(id, lang),  -- arm 0: lexicalization (word HAS_SENSE concept)
- *     NULLIF(realize.render_text(id), ''),  -- arm 1: exact self render
- *     realize._has_name(id, lang),      -- arm 2: first NON-EMPTY render
- *     realize._translation(id, lang),   -- arm 5: first NON-EMPTY render
- *     realize._defines(id))             -- arm 6: TOP-mu row, render AS-IS
- *
- * Parity notes (deliberate, match the scalar helpers byte-for-byte):
- *   - arms 2/3/5 filter candidates to non-empty renders BEFORE their LIMIT 1,
- *     so the batch walks each id's rank-ordered candidates and takes the first
- *     whose render is non-empty;
- *   - arm 6 has NO non-empty filter in the scalar: it returns the render of the
- *     single top-mu definition as-is (possibly NULL → overall NULL, possibly
- *     '' → '' is the final answer);
- *   - a NULL lang makes every lp flag false (LEFT JOIN on object_id = NULL
- *     never matches), identical to the scalar helpers;
- *   - abstention: unresolvable ids yield SQL NULL, never hex.
- *
- * Render input identities once, retain those results, then render only newly
- * discovered fallback identities as one additional batch. The append-only union
- * provides stable slots across arms; repeated ids reuse the same result, including
- * NULL/empty results. Each batch uses the complete cycle-safe constituent closure
- * in realize.render_text_batch; no candidate introduces a scalar SPI call.
+ * Inputs and lexicalization candidates render in one batch through the
+ * cycle-safe constituent closure (realize.render_text_batch). The name,
+ * translation and definition arms run only on ids that neither lexicalize nor
+ * render, and only the ids they add render in a second batch. The render union
+ * is append-only, so slots are stable and a repeated id reuses its result.
  */
 #include "postgres.h"
 
@@ -58,15 +45,15 @@ static SPIPlanPtr plan_translation = NULL;
 static SPIPlanPtr plan_defines = NULL;
 static SPIPlanPtr plan_render = NULL;
 
-/* Names: realize.name_candidates (sql_catalog.def), one relation HAS_NAME. */
+/* Names: realize.name_candidates (sql_catalog.def), relation HAS_NAME. */
 
-/* Lexicalization: a concept is realized in language by the words a source says
- * express it (word HAS_SENSE concept), strongest first, the requested language first. */
+/* Lexicalization: an entity is realized by the words attested to express it
+ * (word HAS_SENSE entity), requested language first, then strongest. */
 static const char *Q_SYNSET_LEMMA =
     "SELECT hs.object_id, hs.subject_id,"
-    /* The language is the binding's, not the word's: a source attests
-     * `chat HAS_SENSE <cat> @fr` and `chat HAS_SENSE <talk> @en`. One probe of
-     * attestations_relation_btree (subject, type, object) per candidate. */
+    /* The language is the attestation's context, not the word's: one surface
+     * can express different entities in different languages. One probe of the
+     * (subject, type, object) attestation index per candidate. */
     "       EXISTS (SELECT 1 FROM laplace.attestations a"
     "               WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id"
     "                 AND a.object_id = hs.object_id AND a.context_id = $2) AS lp,"
@@ -161,13 +148,8 @@ typedef struct RenderEntry
     int32 slot;
 } RenderEntry;
 
-/* EVERY ARM CARRIES A TOTAL ORDER. Each of these took "the first row per id" off an
- * ORDER BY that ended on mu, so any tie was broken by whatever order the plan
- * happened to produce -- and the plan depends on the size of the input array. Running
- * the arms on the residual instead of on every input changed that array and therefore
- * changed which definition won for 4 of 314 ids ("dog" vs "a form of abuse" for the
- * same entity). The rows were equally valid; the choice was simply not reproducible.
- * Closing each ORDER BY on an id makes the winner a property of the data. */
+/* Every arm's ORDER BY closes on an id, so the first row per input id is a
+ * property of the data, not of the plan the input array's size selects. */
 
 
 static void
@@ -513,7 +495,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         ensure_plan(&plan_defines, Q_DEFINES, 1, one);
     }
 
-    /* Seed the render union with the inputs themselves (arm 1, self render). */
+    /* Seed the render union with the inputs themselves (self render). */
     render_ids = make_id_htab("realize_batch render union",
                               sizeof(RenderEntry), Max(256, n * 2));
     ucap = Max(64, n * 2);
@@ -522,29 +504,14 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         if (!in_nulls[i])
             render_union_add(render_ids, &union_ids, &un, &ucap, in_elems[i]);
 
-    /* ---- THE ARMS RUN ON THE RESIDUAL, NOT ON EVERY INPUT ----
-     *
-     * Arm 1 is the self render, so an input that renders never consults has_name,
-     * translation or defines. Measured on 200 real object
-     * ids, 185 (92.5%) render directly -- so running all five arms over the whole
-     * input array, and rendering every candidate they return, is work thrown away
-     * for the overwhelming majority. realize.render_text_batch was 1,385 ms mean over
-     * 205 calls, ~1,200 ids per call against ~200 inputs.
-     *
-     * Retain the exact input renders as the prefix of the append-only union.
-     * Fallback arms can reference an input again; its prior result (including
-     * NULL or empty) is still authoritative within this read. Only identities
-     * added by the arms require another batched closure.
-     *
-     * When the residual is empty the arms are skipped entirely: five SPI queries and
-     * their whole candidate set never happen. */
+    /* The name, translation and definition arms run only on the residual: ids
+     * with no lexicalization and no non-empty self render. Input renders are
+     * the prefix of the append-only union; an arm that names an input again
+     * reuses that result (NULL or empty included). An empty residual runs no
+     * arm. */
     {
-        /* Every arm must be a VALID EMPTY arm before the residual test, because the
-         * ladder hash-searches all four unconditionally. run_arm builds by_id itself,
-         * and arm_def's htab is built inside the defines block -- both of which are
-         * now conditional, so without this an empty residual left four stack-garbage
-         * ArmData structs for the ladder to search. That is what produced 4 wrong
-         * labels out of 314 on the first attempt. */
+        /* The ladder searches every arm, and the residual arms are built only
+         * when the residual is non-empty, so each starts as a valid empty arm. */
         arm_name.by_id  = make_id_htab("has_name empty", sizeof(ArmEntry), 32);
         arm_trans.by_id = make_id_htab("translation empty", sizeof(ArmEntry), 32);
         arm_def.by_id   = make_id_htab("defines empty", sizeof(ArmEntry), 32);
@@ -552,10 +519,10 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         arm_name.n = arm_trans.n = arm_def.n = 0;
         arm_name.cap = arm_trans.cap = arm_def.cap = 0;
 
-        /* A concept is realized in language through the words that express it
-         * (word HAS_SENSE concept); its own content is an identifier (an ILI), so
-         * this arm runs over every input and precedes the self render. Only
-         * concepts are HAS_SENSE objects, so for every other id it is one index miss. */
+        /* Lexicalization runs over every input and precedes the self render:
+         * an entity whose own content is an identifier is realized through the
+         * words that express it. An id that is no HAS_SENSE object costs one
+         * index miss. */
         run_arm(plan_synset_lemma, PointerGetDatum(in_arr), lang, lang_null,
                 &arm_lemma, render_ids, &union_ids, &un, &ucap, "lexicalization");
 
@@ -594,7 +561,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         else
             arm_input = NULL;
     }
-    /* defines takes no lang; reuse the runner with a one-arg plan. Residual only. */
+    /* Definition arm: residual only, no language argument, top-mu row per id. */
     if (arm_input != NULL)
     {
         Datum args[1] = { PointerGetDatum(arm_input) };
@@ -626,7 +593,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             id_key(&key, in_id, "defines");
             e = (ArmEntry *) hash_search(arm_def.by_id, &key, HASH_ENTER, &found);
             if (found)
-                continue;       /* only the TOP-mu row matters (scalar LIMIT 1) */
+                continue;       /* only the top-mu row per id */
             cand = copy_bytea_datum(cand);
             if (arm_def.n == arm_def.cap)
             {
@@ -642,9 +609,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         SPI_freetuptable(SPI_tuptable);
     }
 
-    /* Extend the retained render prefix with NEW candidates only. Re-rendering
-     * the whole union would repeat every input closure even when no fallback
-     * arm ran. Slots never move when render_union_add appends a new identity. */
+    /* Render only the ids the residual arms appended; existing slots never
+     * move. */
     rendered = input_rendered;
     if (un > input_render_count)
     {
@@ -659,7 +625,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         pfree(additional);
     }
 
-    /* ---- per-id COALESCE ladder, output aligned to the input ---- */
+    /* ---- per-id ladder, output aligned to the input ---- */
     out = (Datum *) palloc(sizeof(Datum) * n);
     out_nulls = (bool *) palloc(sizeof(bool) * n);
     for (int i = 0; i < n; i++)
@@ -673,7 +639,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             continue;
         id_key(&key, in_elems[i], "input");
 
-        /* arm 0: LEXICALIZATION -- a concept renders as the words expressing it. */
+        /* Lexicalization: the words expressing the entity. */
         label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
 
         /* A codepoint is its own glyph (perfcache), never its UCD name. */
@@ -696,23 +662,9 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             }
         }
 
-        /* arm 1: SELF RENDER, NULLIF '' -- CONTENT BEFORE NAME.
-         *
-         * render_text is the VALUE an entity carries; a name is the LABEL for it.
-         * An entity that has content must emit the content. This arm used to sit
-         * third, behind has_name and synset_lemma, so any entity carrying a
-         * HAS_NAME edge emitted its name instead of itself -- and every Unicode
-         * codepoint carries one, which put "MIDDLE DOT" and "COLON" into replies.
-         *
-         * Measured over the 224 distinct constituents of 40 tier-3 containers: all
-         * 224 render, only 16 carry a name, and all 16 are the label losing to the
-         * content (COLON/':', DIGIT ONE/'1', AMPERSAND/'&'). Reordering cannot lose
-         * a name: an entity whose name IS the right answer renders empty and falls
-         * through to arm 2 (a Language entity renders NULL and names 'English').
-         *
-         * This MUST match realize/realize.sql.in's COALESCE order -- the two are one
-         * policy with two implementations (§15), and they diverged when the scalar
-         * was fixed in 0b55b8ac and this was not. */
+        /* Self render before name: an entity that carries content emits its
+         * content; a name is a label for it. An entity whose name is its only
+         * realization renders empty and falls through to the name arm. */
         {
             RenderEntry *re = (RenderEntry *) hash_search(render_ids, &key,
                                                           HASH_FIND, NULL);
@@ -721,13 +673,13 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
                 && rendered[re->slot][0] != '\0')
                 label = rendered[re->slot];
         }
-        /* arm 2: an attested name, first non-empty render */
+        /* An attested name, first non-empty render. */
         if (label == NULL)
             label = first_nonempty(&arm_name, &key, rendered, render_ids);
-        /* arm 5: translation, only if resolve_name returned SQL NULL. */
+        /* A translation target, first non-empty render. */
         if (label == NULL)
             label = first_nonempty(&arm_trans, &key, rendered, render_ids);
-        /* arm 6: top-mu definition's render AS-IS (may be NULL; '' is a result) */
+        /* The top-mu definition's render as-is (may be NULL; '' is a result). */
         if (label == NULL)
         {
             ArmEntry *e = (ArmEntry *) hash_search(arm_def.by_id, &key,

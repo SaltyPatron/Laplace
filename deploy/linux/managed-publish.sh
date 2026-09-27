@@ -46,14 +46,10 @@ preflight() {
     return 0
   fi
 
-  # Initial managed-service cutover has one special state that the root helper
-  # deliberately refuses: an in-process Lichess bot owned by the legacy API.
-  # That bot's event stream is intentionally long-lived, so "let it finish" can
-  # never become true on its own. The deploy would later restart this same API
-  # during install anyway. Resolve ONLY that exact condition by using the API's
-  # normal systemd shutdown/restart path, which runs the legacy bot's bounded
-  # drain/dispose logic; standalone CLI bots and every other preflight failure
-  # remain hard stops owned by the root policy.
+  # The root helper refuses preflight while an API process hosts an in-process
+  # Lichess bot. That event stream never ends on its own, so only that refusal is
+  # resolved here, by restarting the API through systemd (which drains and disposes
+  # the bot). Standalone CLI bots and every other preflight refusal stay fatal.
   if grep -Fq 'legacy API Lichess bot is active; let it finish before managed deployment' <<<"$output"; then
     echo "::notice::legacy in-process Lichess bot active — performing graceful API-owned handoff before managed cutover"
     sudo -n systemctl restart laplace-api
@@ -124,13 +120,12 @@ case "${1:-}" in
     }
     ensure_host
     [[ ! -f "$RECEIPT" ]] || { echo "unresolved publish receipt" >&2; exit 1; }
-    # Reclaim transaction backups and only mechanically-dead immutable releases
-    # before allocating the next rollback snapshot. Release liveness/legacy
-    # completeness has one owner in payload-sync.sh; deploy must not carry a
-    # second, drifting garbage-collection implementation.
+    # Reclaim transaction backups and mechanically-dead immutable releases before
+    # allocating the next rollback snapshot. Release liveness is decided only in
+    # payload-sync.sh.
     laplace_prune_managed_backups "$BACKUP_ROOT"
-    # Root-owned releases are deleted by the helper. A retained predecessor
-    # does not implement prune-releases, and sudo will not run a verb it lacks.
+    # Root-owned releases are deleted by the helper, when the installed helper
+    # implements prune-releases.
     if grep -F -q 'prune-releases)' "$HELPER"; then
       sudo -n "$HELPER" prune-releases
     fi
@@ -173,12 +168,10 @@ case "${1:-}" in
     laplace_prune_managed_backups "$BACKUP_ROOT"
     ;;
   rollback)
-    # The workflow's semantic/election eval runs AFTER publish, readiness, the
-    # substrate floor, live smoke, and endpoint contract tests. It exercises the
-    # installed extension + standing substrate as well as the API. Restoring an
-    # older API payload cannot revert either of those layers, so an eval-only
-    # failure used to throw away a smoke-verified application while leaving the
-    # state that actually failed the eval untouched.
+    # The semantic eval runs after publish and smoke and exercises the installed
+    # extension and standing substrate as well as the API. Restoring an older API
+    # payload cannot revert those layers, so an eval-only failure keeps the
+    # smoke-verified payload.
     if [[ "${PUBLISH_RESULT:-}" == "success" \
        && "${SMOKE_RESULT:-}" == "success" \
        && "${EVAL_RESULT:-}" == "failure" ]]; then

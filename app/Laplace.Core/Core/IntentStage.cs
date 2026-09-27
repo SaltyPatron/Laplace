@@ -148,8 +148,8 @@ public sealed partial class IntentStage : SafeHandle
     }
 
     /// <summary>
-    /// ONE native call for a whole batch of pre-staged attestation rows —
-    /// the bulk door; never loop AddAttestation when rows are already staged.
+    /// Stage a whole batch of pre-built attestation rows in one native call; each row's
+    /// 32-byte qualifier mask is read from <paramref name="masksFlat"/>.
     /// </summary>
     public void AddAttestationsStaged(AttestationStagedNative[] rows, int count, byte[] masksFlat)
     {
@@ -307,8 +307,7 @@ public sealed partial class IntentStage : SafeHandle
     /// <summary>
     /// Build one exact semantic content DAG using an explicit native physical worker
     /// grant. Worker count affects only scheduling; identity and placement remain the
-    /// scalar hash-composer law. This overload is also the parity/benchmark control for
-    /// single-object frontier scaling.
+    /// scalar hash-composer law.
     /// </summary>
     public static TierTree? BuildContentTree(ReadOnlySpan<byte> canonical, int workerCount)
     {
@@ -389,9 +388,7 @@ public sealed partial class IntentStage : SafeHandle
 
     /// <summary>
     /// Compose planar RGBA recovery → image ladder above shared codepoint T0
-    /// (digit→number→channel→pixel→patch→region→image). Requires the lower
-    /// canonical floor today; #1711 permits trunk-first higher-tier image ROM
-    /// hits to bypass descendant recomposition when a compatible module is loaded.
+    /// (digit→number→channel→pixel→patch→region→image). Requires the T0 perfcache.
     /// </summary>
     public static TierTree? BuildImageTree(ReadOnlySpan<byte> rgba, uint width, uint height)
     {
@@ -480,7 +477,8 @@ public sealed partial class IntentStage : SafeHandle
     }
 
     /// <summary>
-    /// Cheap image ladder root (compose + collapsed root). Not blake3(rgba).
+    /// Root id of the image ladder's composition, computed without emitting the tree.
+    /// It is the Merkle root over the composed children, not a hash of the raw RGBA bytes.
     /// </summary>
     public static Hash128? ImageRootId(ReadOnlySpan<byte> rgba, uint width, uint height)
     {
@@ -502,7 +500,8 @@ public sealed partial class IntentStage : SafeHandle
     }
 
     /// <summary>
-    /// Cheap audio ladder root (compose + collapsed root). Not blake3(pcm).
+    /// Root id of the audio ladder's composition, computed without emitting the tree.
+    /// It is the Merkle root over the composed children, not a hash of the raw PCM samples.
     /// </summary>
     public static Hash128? AudioRootId(ReadOnlySpan<short> pcm)
     {

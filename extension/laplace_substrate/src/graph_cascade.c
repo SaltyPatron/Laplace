@@ -16,8 +16,8 @@
 #include "laplace/core/relation_law.h"
 #include "spi_common.h"
 
-/* Step-edge lookup plan, prepared once and kept: the query runs once per path
- * step inside the realization loop — re-planning it per step was pure overhead. */
+/* Step-edge plan, prepared once: it runs once per path step and returns the
+ * relation type joining two adjacent path entities and its direction. */
 static SPIPlanPtr step_edge_plan = NULL;
 
 static SPIPlanPtr
@@ -45,6 +45,9 @@ ensure_step_edge_plan(void)
 
 PG_FUNCTION_INFO_V1(pg_laplace_cascade);
 
+/* Resolves both endpoints, routes an A* path from x to y or any of y's synsets,
+ * reads the consensus relation joining each adjacent pair, and realizes the
+ * path as one chain with its maximum step cost. */
 Datum
 pg_laplace_cascade(PG_FUNCTION_ARGS)
 {
@@ -174,24 +177,14 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         int        rc;
         double     max_cost = costs[0];
 
-        /* via_types[s] stays 0 for any step whose edge lookup misses. A zero
-         * Datum is a NULL pointer, and construct_array() with elmlen=-1 /
-         * elmbyval=false dereferences every element to read its varlena header
-         * — so one missing edge segfaults the backend and takes the whole
-         * cluster into recovery. construct_array() has no nulls argument and
-         * cannot represent a missing element; construct_md_array() can.
-         *
-         * MEASURED: `SELECT * FROM converse.cascade('dog','dog',4)` on a
-         * substrate with 0 consensus rows. Every step-edge lookup misses, so it
-         * dereferences NULL on the first element. Server log 2026-08-10
-         * 10:23:33 UTC and again at 03:01:56 UTC — "client backend was
-         * terminated by signal 11: Segmentation fault", followed by
-         * "terminating any other active server processes". Reproducible.
-         */
+        /* A step whose edge lookup misses keeps a zero Datum and a set null
+         * flag. construct_array() dereferences every by-reference element and
+         * has no nulls argument, so the via-type array is built with
+         * construct_md_array() below. */
         via_types = (Datum *) palloc0(sizeof(Datum) * n_steps);
         via_null = (bool *) palloc0(sizeof(bool) * n_steps);
         for (int s = 0; s < n_steps; s++)
-            via_null[s] = true;          /* until an edge is actually found */
+            via_null[s] = true;          /* until an edge is found */
         via_dirs = (int *) palloc0(sizeof(int) * n_steps);
 
         for (int s = 1; s < n_steps; s++)
@@ -204,11 +197,8 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
                 HeapTuple tup = SPI_tuptable->vals[0];
                 TupleDesc td  = SPI_tuptable->tupdesc;
                 bool      isnull;
-                /* isnull FIRST. copy_bytea_datum() calls DatumGetByteaPP()
-                 * then VARSIZE_ANY() with no null check, so copying before
-                 * testing the flag dereferences the zero Datum that
-                 * SPI_getbinval returns for a NULL column — the same fault
-                 * this function was fixed for. */
+                /* Test isnull before copying: copy_bytea_datum() reads the
+                 * varlena header without a null check. */
                 Datum via = SPI_getbinval(tup, td, 1, &isnull);
                 via_null[s] = isnull;
                 if (!isnull)
@@ -230,8 +220,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         args[0] = PointerGetDatum(construct_array(steps, n_steps, BYTEAOID,
                                                   -1, false, TYPALIGN_INT));
         {
-            /* construct_md_array, not construct_array: a step with no edge is a
-             * genuine SQL NULL, not a zero Datum to dereference. */
+            /* A step with no edge is an SQL NULL element. */
             int md_dims[1] = { n_steps - 1 };
             int md_lbs[1]  = { 1 };
             args[1] = PointerGetDatum(

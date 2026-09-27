@@ -52,8 +52,8 @@ public readonly record struct Hash128(ulong Hi, ulong Lo)
 
     /// <summary>
     /// memcmp of the 16-byte host layout — same order as <c>hash128_compare</c>.
-    /// On little-endian, that is unsigned compare of endian-reversed Hi then Lo
-    /// (no P/Invoke: COPY id-range sort paid ~600ms/500k rows on the native call).
+    /// On little-endian, that is unsigned compare of endian-reversed Hi then Lo,
+    /// computed in managed code so bulk id sorts make no per-compare native call.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int CompareToBytewise(Hash128 other)

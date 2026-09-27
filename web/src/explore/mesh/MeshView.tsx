@@ -10,13 +10,10 @@ import type { MeshLink, MeshResponse } from './types';
 import styles from './MeshView.module.css';
 
 /**
- * The semantic-mesh drill-down — the tiered master/detail navigation over the
- * factorization of meaning. The current node sits in the middle; the hubs it
- * plays for climb the ladder on the left (belongs_to), its roster fans out on
- * the right. Every name re-centers the view, and the breadcrumb is the path you
- * drilled. This is the league→team→player structure, over a graph rather than a
- * fixed tree: a synset is a team whose roster is its members; a word is a player
- * whose "teams" are its senses, synsets, frames and classes.
+ * Master/detail drill over one entity's containment in the web: the entity in the center,
+ * the hubs it belongs to (`belongs_to`) on the left, its members (`roster`) on the right.
+ * Every name re-centers the view on that entity; the breadcrumb is the drilled path. The
+ * relation is a graph, so one entity can belong to many hubs.
  */
 export function MeshView() {
   const { id } = useParams();
@@ -43,8 +40,7 @@ function MeshDrill({ idHex }: { idHex: string }) {
         pushMeshCrumb({ id: m.id, label: m.label });
       })
       .catch((e) => { if (!stale) setError(e instanceof Error ? e.message : String(e)); });
-    // The node's stat row (top rating, games, facts) comes from the preview —
-    // a separate cheap read so the ladder itself never waits on it.
+    // The entity's stat card comes from a separate preview read so the ladder never waits on it.
     explorePreview(idHex)
       .then((pv) => { if (!stale) setPreview(pv); })
       .catch(() => { /* card falls back to the record line alone */ });

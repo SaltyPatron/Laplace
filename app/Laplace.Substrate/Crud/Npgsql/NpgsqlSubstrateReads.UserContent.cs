@@ -11,8 +11,8 @@ public static partial class NpgsqlSubstrateReads
         DateTimeOffset? ModifiedAt);
 
     /// <summary>
-    /// Whether one tenant source has confirmed membership of the exact physical file.
-    /// Global content identity does not imply this source-scoped occurrence.
+    /// Whether one tenant source has confirmed membership of the file entity. Content
+    /// identity is global; this occurrence is scoped to the source's own testimony.
     /// </summary>
     public static async Task<bool> HasConfirmedUserArtifactOccurrenceAsync(
         NpgsqlConnection connection,
@@ -69,7 +69,8 @@ public static partial class NpgsqlSubstrateReads
         parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
     }
 
-    /// <summary>The newest successful physical observation of a source-owned file.</summary>
+    /// <summary>Size and modification time from the newest successful file-journal receipt for
+    /// the file under the source.</summary>
     public static async Task<UserArtifactObservation?> UserArtifactObservationAsync(
         NpgsqlConnection connection,
         string sourceName,
@@ -84,7 +85,8 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary>The newest successful physical observation of a source-owned file.</summary>
+    /// <summary>Size and modification time from the newest successful file-journal receipt for
+    /// the file under the source.</summary>
     public static async Task<UserArtifactObservation?> UserArtifactObservationAsync(
         NpgsqlDataSource dataSource,
         string sourceName,
@@ -99,7 +101,8 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary>Confirmed contexts for one prompt under its tenant prompt source.</summary>
+    /// <summary>Contexts (or objects, when context is null) of the prompt's confirmed
+    /// membership testimony under its tenant prompt source.</summary>
     public static Task<IReadOnlyList<string>> ConfirmedPromptContextsAsync(
         NpgsqlConnection connection,
         byte[] promptId,

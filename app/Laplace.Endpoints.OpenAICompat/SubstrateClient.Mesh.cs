@@ -4,11 +4,9 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Mesh + taxonomy reads: thin callers over the installed structural.mesh_position() /
-/// taxonomy.tree(). The set logic (hub gating, top-synset rooting, ranking)
-/// lives in the extension — one implementation shared with the MCP server;
-/// C# only splits the dir-tagged rows into the response shape. The SQL
-/// itself lives in <see cref="NpgsqlSubstrateReads"/> (doc 41).
+/// Mesh and taxonomy reads over structural.mesh_position() and taxonomy.tree(). Selection,
+/// rooting, and ranking run in the extension, shared with every other interface; this
+/// only splits the dir-tagged rows into the response shape.
 /// </summary>
 internal sealed partial class SubstrateClient
 {

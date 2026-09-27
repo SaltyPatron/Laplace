@@ -4,10 +4,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Regression gate for GH #933: endpoint execution may borrow a PostgreSQL pool,
-/// but a request handler must never create its own NpgsqlDataSource. Pool limits are
-/// per datasource, so per-request construction multiplies the process connection
-/// budget even when every individual datasource is correctly capped.
+/// Admin endpoints borrow the host-lifetime serving and ingest pools; no request handler
+/// creates its own NpgsqlDataSource. Pool limits are per datasource, so per-request
+/// construction would multiply the process connection budget.
 /// </summary>
 public sealed class AdminPostgresPoolOwnershipTests
 {

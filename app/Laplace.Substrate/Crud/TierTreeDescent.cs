@@ -231,31 +231,26 @@ public static class TierTreeDescent
     }
 
     /// <summary>
-    /// Uniform tier-by-tier batch existence probing. Each round deduplicates exact
-    /// candidate IDs across all trees and checks them in one bounded reader call.
-    /// A stored parent does not prove its children were committed: parallel entity
-    /// COPY transactions can leave a partial tree after failure. Only each node's
-    /// own positive probe/cache answer suppresses that entity's insertion. Raw
-    /// physicality observations remain independent of this entity bitmap.
+    /// Converges composed tier trees against stored entities, tier by tier from the top.
+    /// Each round deduplicates candidate ids across all trees and checks them in one
+    /// reader call; the returned per-tree bitmap marks nodes already stored (bit 1), so
+    /// persist emits only the rest. A stored parent does not prove its children are stored:
+    /// parallel entity COPY transactions can leave a partial tree after a failure, so only a
+    /// node's own positive answer suppresses its insertion. Physicality rows are not governed
+    /// by this entity bitmap. A null tree yields a null bitmap.
     /// </summary>
     public static Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader, CancellationToken ct = default)
         => ProbeBatchEmitBitmapsAsync(trees, reader, probedAbsent: null, ct);
 
     /// <summary>
-    /// Working-set overload. <paramref name="probedAbsent"/> is a
-    /// caller-owned, working-set-lifetime record of ids a previous round in
-    /// the SAME working set already probed and found absent: they are
-    /// skipped (bit left 0 — "emit") without re-querying, because the
-    /// working set's stage witness-dedup already absorbed their first
-    /// emission and re-probing an id that cannot have appeared since our
-    /// own unwritten working set began is pure waste. This is an efficiency
-    /// cache only — it must never be shared across working sets or
-    /// processes (another writer may commit the id at any time; the write
-    /// protocol's in-transaction re-probe is what restores correctness at
-    /// the boundary). Ids proven PRESENT are handled by the reader's own
-    /// process-lifetime proven cache and are confirmed here without a DB
-    /// round trip, handled exactly as a fresh confirmation of that node would be.
+    /// Working-set overload. <paramref name="probedAbsent"/> holds ids an earlier round of
+    /// the same working set probed and found absent; they are left at bit 0 (emit) without
+    /// re-querying, and the stage's witness dedup absorbs the repeated emission. Newly absent
+    /// ids are added to it. It is valid only within one working set: another writer may
+    /// commit an id at any time, and the in-transaction re-probe at write time is what
+    /// decides the boundary. Ids in the reader's proven-present cache are marked stored
+    /// without a round trip, exactly as a fresh positive answer would mark them.
     /// </summary>
     public static async Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader,
@@ -296,11 +291,9 @@ public static class TierTreeDescent
 
         for (int tier = maxTier; tier >= 0; tier--)
         {
-            // One probe slot per DISTINCT id this round; every (tree, node)
-            // occurrence of that id shares the slot's answer. OMW-style
-            // sources repeat the same lemma across thousands of records --
-            // probing per occurrence multiplies the round's row count for
-            // no information.
+            // One probe slot per distinct id this round; every (tree, node)
+            // occurrence of that id shares the slot's answer, since the same
+            // composition recurs across many trees of one working set.
             var ids = new List<Hash128>();
             var slotOf = new Dictionary<Hash128, int>();
             var placements = new List<List<(int TreeIndex, int NodeIndex)>>();
@@ -371,9 +364,8 @@ public static class TierTreeDescent
                 }
             }
 
-            // Only the ids THIS round's real query positively confirmed
-            // present are ever marked proven -- never the round's whole,
-            // unfiltered candidate list (that was the bug).
+            // Only ids this round's query confirmed present are marked
+            // proven, never the round's whole candidate list.
             if (confirmedPresent.Count > 0) reader.MarkProven(confirmedPresent, presenceScope);
         }
 

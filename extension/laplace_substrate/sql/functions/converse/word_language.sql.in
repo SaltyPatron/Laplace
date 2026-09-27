@@ -22,7 +22,6 @@
 -- resolve in whatever order the scan returns, and spec 05 requires the read path be
 -- deterministic. Same winner as before wherever a winner existed.
 DROP FUNCTION IF EXISTS laplace.word_language(bytea);
--- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.word_language_candidates_batch(p_words bytea[])
     RETURNS TABLE(word bytea, lang bytea, mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE

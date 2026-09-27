@@ -1,8 +1,9 @@
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// Reconcile MKL/TBB/native thread counts from Intel hybrid topology (Rule #12).
-/// env.cmd may seed fallbacks for non-CLI tools; the Laplace CLI always wins here.
+/// Set MKL/TBB/native thread counts and the GC heap count from the detected CPU topology.
+/// With <c>force</c> the topology values overwrite anything already in the environment;
+/// otherwise only unset variables are filled. MKL_DYNAMIC is always 0.
 /// </summary>
 public static class NativeRuntimeEnv
 {
@@ -16,19 +17,12 @@ public static class NativeRuntimeEnv
         SetThreadVar("MKL_NUM_THREADS", pThreads, force);
         SetThreadVar("TBB_NUM_THREADS", pThreads, force);
         SetThreadVar("LAPLACE_NATIVE_THREADS", pThreads, force);
-        // MKL_DYNAMIC=0 is deliberate on BOTH counts, and the pairing is load-bearing:
-        //  - REQUIRED for determinism: a FIXED MKL thread count keeps BLAS/LAPACK reduction
-        //    order reproducible, so foundry eigenmaps/DGEMM are bit-identical run to run.
-        //    MKL_DYNAMIC=1 lets MKL vary the count -> non-deterministic FP reductions ->
-        //    breaks the rock's content-addressing. Do NOT flip this to 1.
-        //  - SAFE (no oversubscription) ONLY under this INVARIANT: MKL/Eigen/TBB are reached
-        //    exclusively through Dynamics/Synthesis NativeInterop (the foundry/export path),
-        //    called from single-threaded orchestration -- NEVER nested inside a pinned ingest
-        //    worker. The ingest RunPinned* regions (compose in IngestDescentFlush, the glicko
-        //    fold in ConsensusAccumulatingWriter, apply/COPY in NpgsqlWorkingSetApply) call
-        //    only custom laplace_core C (glicko2/hash/geometry), never MKL. If you ever invoke
-        //    an MKL/Eigen kernel from inside a RunPinned* body, set MKL threads to 1 for that
-        //    region FIRST -- otherwise pThreads-per-worker x workers is real oversubscription.
+        // MKL_DYNAMIC=0: a fixed MKL thread count keeps BLAS/LAPACK reduction order
+        // reproducible, so export eigenmaps/DGEMM are bit-identical run to run and their
+        // outputs stay content-addressable. A fixed count does not oversubscribe because
+        // MKL/Eigen/TBB are reached only through Dynamics/Synthesis NativeInterop from
+        // single-threaded orchestration; pinned ingest workers call only laplace_core C.
+        // An MKL kernel inside a pinned worker region would need MKL threads set to 1 there.
         SetThreadVar("MKL_DYNAMIC", 0, force: true);
 
         if (force || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DOTNET_GCHeapCount")))

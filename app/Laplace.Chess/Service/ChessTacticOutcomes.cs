@@ -10,10 +10,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Bounded tactical-pattern learning lane. Exact chess positions are mostly singleton evidence;
-/// color-normalized fork/pin/skewer patterns recur across the entire corpus and therefore form
-/// real statistical subjects. Each recorded game contributes at most one outcome observation per
-/// (pattern, owning side), preventing a long-lived pin from counting once per ply.
+/// Outcome testimony on color-normalized fork/pin/skewer patterns. Exact positions mostly occur
+/// once; these patterns recur across games, so their consensus cells accumulate standing. Each
+/// recorded game contributes at most one observation per (pattern, owning side), so a long-lived
+/// pin is not counted once per ply.
 /// </summary>
 public static class ChessTacticOutcomes
 {
@@ -41,9 +41,9 @@ public static class ChessTacticOutcomes
         => ContentEmitter.RootId(Surface(pattern));
 
     /// <summary>
-    /// Closed tactical vocabulary used by the hot-path reader. It is intentionally bounded:
-    /// three tactic kinds × six attacker types × canonical victim pairs, deduplicated by the
-    /// color-normalized pattern key. Search never scans the corpus to discover motif subjects.
+    /// Closed tactical vocabulary read during search: three tactic kinds × six attacker types ×
+    /// canonical victim pairs, deduplicated by color-normalized pattern key, so search reads a
+    /// fixed set of subjects instead of scanning for them.
     /// </summary>
     public static IReadOnlyList<(Hash128 Id, ChessTacticPattern Pattern)> PatternUniverse()
     {
@@ -129,7 +129,7 @@ public static class ChessTacticOutcomes
         }
     }
 
-    /// <summary>Backfill path: replay witnessed SAN and deposit only this lane.</summary>
+    /// <summary>Replays a witnessed game and deposits only the tactic-pattern testimony.</summary>
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {
         if (!TryReplay(game, out var boards)) return;
@@ -171,9 +171,8 @@ public sealed record ChessTacticOutcomeRecord(ChessWitnessedGame Game) : ITrunkR
 }
 
 /// <summary>
-/// Historical backfill without bumping ChessAnalyze.Version. Re-running the whole analyzer would
-/// double accumulated testimony; this lane writes only the new bounded tactic statistics and its
-/// own marker.
+/// Derives tactic-pattern testimony for already-recorded games under its own completion marker,
+/// separate from ChessAnalyze's, so running it does not re-emit the analyzer's testimony.
 /// </summary>
 public sealed class ChessTacticOutcomesDecomposer
     : ComposeDecomposer<ChessTacticOutcomeRecord>, IIngestNoOpExplainer

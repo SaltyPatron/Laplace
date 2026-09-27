@@ -28,8 +28,8 @@ internal static class InferenceEndpoints
             if (payload.Messages is null || payload.Messages.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'messages' must contain at least one message.");
 
-            // Conversation state is substrate-resident: only the newest user turn is
-            // consumed; any resent history is ignored by construction (spec 34).
+            // Only the newest user turn is the observation; earlier turns are already
+            // witnessed under the session, so resent history is not read.
             var prompt = payload.Messages
                 .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
                          && !string.IsNullOrWhiteSpace(m.Content))
@@ -86,8 +86,8 @@ internal static class InferenceEndpoints
                 return EndpointJson.BadRequest("invalid_scope",
                     "Tenant-scoped reads are only available on the converse model lane.");
 
-            // Reject invalid input and an offline writer before the billing gate:
-            // plan-backed authorization can itself debit an included credit.
+            // Input and turn-witness availability are checked before the billing gate,
+            // because plan-backed authorization can debit an included credit.
             if (converseModel && !string.IsNullOrWhiteSpace(payload.Shape))
             {
                 var shapes = await substrate.QueryShapesAsync(ct);
@@ -108,13 +108,13 @@ internal static class InferenceEndpoints
 
             await CatalogConversationAsync(identityStore, scope, prompt, ct);
 
-            // The session key travels back on every response shape so the client can
-            // continue the conversation without resending history.
+            // The session key returns on every response shape; the client continues the
+            // conversation by sending it back.
             request.HttpContext.Response.Headers[SessionHeader] = scope.SessionKey;
 
 
-            // Default = act as a whole (global consensus). scope:"tenant" re-folds the
-            // tenant's own witnessed world and reads inside it (spec 34 isolation).
+            // By default the pass reads global consensus. scope:"tenant" folds consensus
+            // over only this tenant's prompt and response sources and reads that.
             var tenantScope = ConversationContent.Resolve(scope.Tenant);
             var converseOptions = new ConverseOptions(
                 payload.Shape, payload.Bands, payload.Elaborate,
@@ -182,10 +182,8 @@ internal static class InferenceEndpoints
                 await ServerSentEvents.WriteDoneAsync(response, ct);
                 return Results.Empty;
             }
-            // Non-streamed ordinary Chat (including paid retry) must expose proof from
-            // the SAME native invocation that produced the response. Do not fall back to
-            // ConverseAsync here: that would make the proof disappear on a second Chat
-            // transport path and would force any inspector to replay the prompt.
+            // The non-streamed forward turn consumes the same observed event stream, so
+            // its forward proof comes from the invocation that produced the reply.
             if (!payload.Stream && !inspection && !tenantScoped)
             {
                 var forwardEvents = new List<ForwardObservedEvent>();
@@ -251,8 +249,7 @@ internal static class InferenceEndpoints
                 : await substrate.ConverseAsync(
                     prompt, scope.SessionId.ToBytes(), converseOptions, ct);
             converseSubstrateClock.Stop();
-            // Empty consensus is reported truthfully: empty content + reply_rows 0.
-            // The client renders the absence; the substrate never fakes prose.
+            // No rows means empty content and reply_rows 0; nothing substitutes a reply.
             var content = string.Join("\n", rows.Select(r => r.Reply));
             var conversePerformance = BuildPerformance(
                 content, converseSubstrateClock, totalClock,
@@ -297,9 +294,7 @@ internal static class InferenceEndpoints
                 Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", content), "stop")],
                 Billing: null,
                 Metadata: new ChatMetadata(
-                    // Null when NO row carries a count (the converse.chat() lane) — a sum of
-                    // absences is not 0, it is absence (same rule as bool_or over
-                    // zero rows in the read path).
+                    // Null when no row carries a count: absent counts do not sum to 0.
                     Witnesses: rows.Any(r => r.Witnesses is not null)
                         ? rows.Sum(r => r.Witnesses ?? 0L) : null,
                     ReplyRows: rows.Count,
@@ -448,10 +443,8 @@ internal static class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            // Resolve the batch with bounded fan-out instead of one serial
-            // round trip per input — an OpenAI-style batch array's latency
-            // scaled linearly with its size. Order is preserved; the pooled
-            // NpgsqlDataSource absorbs the concurrency.
+            // Inputs resolve concurrently in groups of maxParallel on the pooled
+            // datasource; result order matches input order.
             var results = new EmbeddingResult[inputs.Count];
             const int maxParallel = 8;
             for (int start = 0; start < inputs.Count; start += maxParallel)
@@ -499,11 +492,10 @@ internal static class InferenceEndpoints
     }
 
     /// <summary>
-    /// The turn's full provenance scope: tenant (resolved, validated), user-within-
-    /// tenant (OpenAI-standard 'user' field), and the session — client-supplied KEY
-    /// re-minted server-side into the canonical session id (never raw id bytes;
-    /// tenant-in-the-key makes cross-tenant session forgery structurally impossible).
-    /// Absent a client key the server mints a fresh one and returns it.
+    /// The turn's provenance scope: the resolved tenant, the user within it (an authenticated
+    /// user_id claim overrides the body's 'user'), and the session. The session id is
+    /// computed server-side from (tenant, session key), so a key cannot address another
+    /// tenant's session. Without a client key the server mints one and returns it.
     /// </summary>
     internal readonly record struct TurnScope(
         string Tenant, string? UserKey, Guid? UserId, string SessionKey, Hash128 SessionId);

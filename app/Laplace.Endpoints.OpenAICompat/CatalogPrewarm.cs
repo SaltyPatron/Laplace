@@ -1,14 +1,8 @@
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Fills the explore-catalog cache once at startup so the first UI landing hit never pays
-/// the cold load (the bounded exact-aggregate attempts cost ~15s live). Failure is
-/// non-fatal: the first request then loads it synchronously as before.
-///
-/// The chess roster used to be warmed here too. It no longer needs to be: each game folds
-/// its result onto the player at ingest, so the ranking is an indexed read of consensus
-/// cells rather than a ten-second corpus aggregate. Nothing to warm is better than a warm
-/// cache.
+/// Loads the explore catalog once at startup so the first request finds it cached. On
+/// failure the first request loads it instead.
 /// </summary>
 internal sealed class CatalogPrewarmService : BackgroundService
 {

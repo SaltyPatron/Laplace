@@ -44,8 +44,7 @@ public sealed class EtlInventoryEstimateTests
             long est = EtlInventory.EstimateNewlineCount(path);
             sw.Stop();
 
-            // Sample estimate must finish well under a full-scan budget (72 MiB sequential
-            // at ~100 MB/s ≈ 0.7s; sampled 64 MiB worst-case, but typically ≪ full).
+            // The sampled estimate reads at most the sample budget, not the whole file.
             Assert.True(sw.ElapsedMilliseconds < 15_000,
                 $"estimate took {sw.ElapsedMilliseconds}ms — looks like a full scan");
 
@@ -86,8 +85,8 @@ public sealed class EtlInventoryEstimateTests
     [Fact]
     public void EstimateNewlineCounts_ManySmallFiles_RespectsSharedBudget()
     {
-        // Death-by-thousand-cuts: N files each under ExactScanThreshold must not
-        // exact-scan N × threshold bytes. Shared MultiFileInventoryBudgetBytes caps IO.
+        // N files each under ExactScanThreshold do not exact-scan N × threshold bytes:
+        // MultiFileInventoryBudgetBytes caps the I/O across the whole set.
         string dir = Directory.CreateDirectory(
             Path.Combine(Path.GetTempPath(), "laplace-mf-" + Guid.NewGuid().ToString("N"))).FullName;
         try
@@ -117,8 +116,7 @@ public sealed class EtlInventoryEstimateTests
 
             Assert.Equal(fileCount, units.Length);
             Assert.All(units, u => Assert.True(u > 0));
-            // Full exact-scan of 160 MiB at ~100 MB/s ≈ 1.6s; budgeted path must be faster
-            // and finish well under a multi-file full-scan ceiling.
+            // The budgeted path finishes under a multi-file full-scan ceiling.
             Assert.True(sw.ElapsedMilliseconds < 15_000,
                 $"multi-file estimate took {sw.ElapsedMilliseconds}ms — looks unbounded");
 
@@ -135,8 +133,8 @@ public sealed class EtlInventoryEstimateTests
     [Fact]
     public async Task ConceptNet_DescribeInput_Uncapped_DoesNotRequireFullRead()
     {
-        // Cap path already tested elsewhere; uncapped must call EstimateNewlineCount
-        // (sample) — prove a multi-threshold file returns promptly with a sane count.
+        // Uncapped, a file over the threshold is estimated by sampling
+        // (EstimateNewlineCount) and returns promptly with a plausible count.
         string dir = Directory.CreateDirectory(
             Path.Combine(Path.GetTempPath(), "laplace-cn-" + Guid.NewGuid().ToString("N"))).FullName;
         try

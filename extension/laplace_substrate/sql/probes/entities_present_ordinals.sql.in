@@ -7,9 +7,6 @@ CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[])
     SUPPORT @extschema@.array_length_rows_support
     ROWS 100;
 
--- The old (ids,tiers) plpgsql overload materialized a temp table, built an index,
--- looped tiers, and dynamically relied on per-iteration planning. It has no caller:
--- the hot tier-keyed route is laplace.entities_stored_bitmap/tier_batch_existence_probe,
--- whose native implementation owns the routing directly. Keep one operation, not a
--- second SQL implementation that can drift back onto the hot path.
+-- Tier is not an entity key, so the (ids, tiers) form is dropped; tier-keyed
+-- rounds use entities_stored_bitmap / tier_batch_existence_probe.
 DROP FUNCTION IF EXISTS laplace.entities_present_ordinals(bytea[], smallint[]);

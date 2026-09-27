@@ -4,11 +4,9 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// One canonical realization for identities whose stable id is governed independently
-/// from the human-readable bytes that name them. The identity stays unchanged; its
-/// physicality is a deterministic projection onto canonical content emitted through the
-/// ordinary content spine. This is the shared replacement for bare source/type/relation
-/// vocabulary entities.
+/// Realizes an identity whose stable id is governed separately from the bytes that name
+/// it, such as a source. The id is unchanged; its physicality is a deterministic projection
+/// onto the name's content, which is composed through the ordinary content spine.
 /// </summary>
 public static class CanonicalNamedIdentity
 {
@@ -31,8 +29,8 @@ public static class CanonicalNamedIdentity
 
         builder.AddEntity(id, tier, typeId);
 
-        // When the governed id is itself the ordinary content root, the content spine
-        // already emitted the exact physicality. Do not invent a second representation.
+        // When the governed id is the content root itself, the content spine already
+        // emitted its physicality; no second one is staged.
         if (component.Id == id)
             return id;
 

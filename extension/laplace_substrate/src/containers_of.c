@@ -9,8 +9,10 @@
 #include "content_membership_read.h"
 #include "laplace/core/relation_law.h"
 
-/* Native breadth-first containment. One indexed set probe per frontier, then
- * one hydration read for the selected ids. Labels are a subsequent operation. */
+/* Walks the containment face upward, breadth first: each hop reads, in one
+ * membership-index probe, the entities whose trajectories contain any frontier
+ * id. `hops` and `limit` bound the walk. One facet read then hydrates tier and
+ * type for the selected containers; labels are not read here. */
 typedef struct {
     hash128_t id;
     int ordinal;
@@ -23,10 +25,9 @@ typedef struct {
 } ContainerHit;
 static SPIPlanPtr facets_plan;
 
-/* An identifier (an ILI key) is contained by nothing: text contains the words
- * bound to it. Its containers are therefore read through its bindings, the same
- * way display realizes an identifier through them. This module reads them with
- * one catalog query (it does not link the execution library's consensus scan). */
+/* The start frontier also holds every surface bound to the entity by HAS_SENSE,
+ * so an entity that occurs in no trajectory itself reaches the structures that
+ * contain its bound surfaces. */
 static SPIPlanPtr bindings_plan;
 
 static SPIPlanPtr

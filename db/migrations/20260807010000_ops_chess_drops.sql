@@ -1,7 +1,5 @@
--- ops.chess_drops — CHESS_DROPPED tallies persisted as CSV (GH #813 drop ledger).
--- ChessDropLedger still prints to stdout; it also appends one row per reason to
--- laplace-chess-drops.csv under LaplaceInstall.OpsLogDirectory. Queryable via
--- ops.chess_drops() / op(name => 'chess_drops'). Same file_fdw server as app_log.
+-- ops.chess_drops exposes laplace-chess-drops.csv (LaplaceInstall.OpsLogDirectory), one row
+-- per CHESS_DROPPED reason written by ChessDropLedger, through the ops_log_files server.
 
 CREATE SCHEMA IF NOT EXISTS ops;
 CREATE EXTENSION IF NOT EXISTS file_fdw;

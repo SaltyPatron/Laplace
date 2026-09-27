@@ -1,25 +1,18 @@
--- ops.app_log — the .NET console apps' diagnostics, queryable in SQL (GH #602 follow-up,
--- closes the loop opened by GH #601). The shared logging foundation writes one RFC 4180 CSV
--- per role under LaplaceInstall.OpsLogDirectory — laplace-{role}.csv — with the column subset
--- ops.pg_log shares. This exposes those files through file_fdw, reusing the ops_log_files
--- server that the ops_logs migration already created. No third-party log service; no log rows
--- in substrate tables.
+-- ops.app_log exposes each application role's RFC 4180 CSV log
+-- (LaplaceInstall.OpsLogDirectory/laplace-{role}.csv) through the ops_log_files file_fdw
+-- server. No log row is written into a substrate table.
 --
--- Per-role files, not one shared file, so `tail -f laplace-uci.csv` still works — which means
--- a role that has never run on this host has no file, and file_fdw errors on a missing file.
--- ops.app_log() (a function, not a view) wraps each role's read in its own handler and skips
--- the absent ones, so the unified query never fails just because, say, no UCI engine has run.
---
--- The rotating-vs-stable question ops.pg_log has does not arise: the sink uses a STABLE
--- filename per role (size-rolled to timestamped archives), so once repointed the tables never
--- need repointing again. DbUp wraps each script in one transaction.
+-- Each role writes its own file, so a role that has never run on this host has none and its
+-- foreign table errors on read. ops.app_log() is a function that reads each role under its
+-- own exception handler and skips the missing ones. Role filenames are stable (size-rolled
+-- archives take timestamped names), so one repoint is enough.
 
 CREATE SCHEMA IF NOT EXISTS ops;
 CREATE EXTENSION IF NOT EXISTS file_fdw;
 CREATE SERVER IF NOT EXISTS ops_log_files FOREIGN DATA WRAPPER file_fdw;
 
--- One foreign table per known role. Placeholder filenames are never read (ops.repoint_app_log
--- sets the live paths); the 6-column shape is OpsLogCsvFormatter.Columns verbatim.
+-- One foreign table per known role; ops.repoint_app_log sets the filenames. The 6-column
+-- shape is OpsLogCsvFormatter.Columns.
 DO $$
 DECLARE r text;
 BEGIN
@@ -40,10 +33,9 @@ BEGIN
     END LOOP;
 END $$;
 
--- Aim every per-role table at <p_dir>/laplace-{role}.csv. p_dir is the deploy's shared
--- LaplaceInstall.OpsLogDirectory (set LAPLACE_OPS_LOG_DIR to one path for all apps so a single
--- directory holds every role's file). Unlike ops.pg_log, Postgres cannot discover this path
--- itself, so a deploy step or the always-on API calls this once after publish:
+-- Points every per-role table at <p_dir>/laplace-{role}.csv, where p_dir is
+-- LaplaceInstall.OpsLogDirectory (LAPLACE_OPS_LOG_DIR). PostgreSQL cannot discover this path,
+-- so a deploy step or the API calls it after publish:
 --   SELECT ops.repoint_app_log('/opt/laplace/app/logs');
 CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_dir text)
     RETURNS text
@@ -64,9 +56,8 @@ BEGIN
 END;
 $$;
 
--- The unified read. A role that has never logged on this host has no CSV file, so its foreign
--- table errors — caught per role and skipped, so `SELECT * FROM ops.app_log()` returns whatever
--- is actually there instead of failing wholesale. application_name distinguishes the roles.
+-- Unified read across roles; a role whose file is missing or unreadable is skipped.
+-- application_name distinguishes the roles.
 CREATE OR REPLACE FUNCTION ops.app_log()
     RETURNS TABLE(
         log_time         timestamptz,

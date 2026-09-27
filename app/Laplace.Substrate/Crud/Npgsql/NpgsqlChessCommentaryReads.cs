@@ -4,9 +4,10 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Bounded, chess-specific read surface for live commentary. The chess service supplies the
-/// line entity type and projection physicality type; this layer only performs indexed
-/// composition/provenance reads and never guesses a textual sense for a motif.
+/// Occurrence read for one position entity: which game-line trajectories contain it and
+/// the recorded playings behind those lines. The caller supplies the line entity type and
+/// the projection physicality type; the read is a bounded trajectory-constituent probe
+/// followed by provenance joins.
 /// </summary>
 public static class NpgsqlChessCommentaryReads
 {
@@ -21,9 +22,9 @@ public static class NpgsqlChessCommentaryReads
         string? Result);
 
     /// <summary>
-    /// Recorded playings whose calculated line projection contains the exact position id.
-    /// The reverse trajectory probe uses the constituent GIN expression directly and is bounded
-    /// before joining playing provenance so live chat cannot become an unbounded corpus scan.
+    /// Recorded playings whose line trajectory contains <paramref name="positionId"/> as a
+    /// constituent. The reverse probe uses the trajectory-constituent GIN expression and is
+    /// capped at <paramref name="containerLimit"/> lines before provenance is joined.
     /// </summary>
     public static Task<IReadOnlyList<PositionHistoryRow>> PositionHistoryAsync(
         NpgsqlDataSource dataSource,

@@ -4,14 +4,9 @@ using Xunit;
 namespace Laplace.Decomposers.WordNet.Tests;
 
 /// <summary>
-/// index.sense ships TWO frequency signals and the parser read only one. 82% of
-/// WordNet-3.0 senses (171,463 / 206,941) carry tag_cnt = 0, so their HAS_SENSE
-/// magnitude was 0 — score exactly 0.5, a draw — and every sense of such a lemma
-/// folded to an identical rating. Any reader that ranks on the fold then sees zero
-/// information for those tokens, which is measurable on the live substrate: `what`
-/// and `the` have eff_mu spread 0.0 across their senses while chess/pawn/dog measure
-/// 95.9/80.4/77.5. sense_number is WordNet's own ordering (1 = most common) and
-/// separates them.
+/// index.sense carries two frequency signals, tag_cnt and sense_number (WordNet's own
+/// ordering, 1 = most common). HAS_SENSE magnitude uses both, so senses with
+/// tag_cnt = 0 still fold to distinct standings.
 /// </summary>
 public sealed class WordNetSenseNumberTests
 {
@@ -42,9 +37,8 @@ public sealed class WordNetSenseNumberTests
     [Fact]
     public void TagCount_Stays_Dominant_Where_The_Corpus_Reports_It()
     {
-        // A sense witnessed once in the semantic concordance outranks an unwitnessed
-        // sense that merely sorts first — the 1/n term is bounded by 1 and cannot
-        // overturn real occurrence evidence.
+        // A sense tagged once in the concordance outranks an untagged first sense: the
+        // 1/n term is bounded by 1 and cannot overturn occurrence counts.
         Assert.True(Magnitude(NewSense(1, 9)) > Magnitude(NewSense(0, 1)));
     }
 

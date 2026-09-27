@@ -1,9 +1,6 @@
--- ops.metric_ladder — every rung of the comparison ladder for two entities, in
--- one result, ordered by how much of the trajectory each rung forgets.
---
--- The rungs are not interchangeable and the collisions are deliberate. From
--- MODEL_INGESTION_DESIGN.md: "a slice coordinate is a bucket, not an identity."
--- Geometry proposes candidates; typed evidence governs selection.
+-- ops.metric_ladder: every comparison rung for two entities, ordered by how
+-- much of the trajectory each rung forgets. Geometry proposes candidates;
+-- typed evidence governs selection, so a coordinate is a bucket, not identity.
 --
 --   rung             operates on              order      cat/tac/act
 --   ---------------- ----------------------- ---------- ----------------
@@ -13,31 +10,16 @@
 --   frechet          realized curve as a PATH preserved  separate
 --   merkle_id        ordered childIds         preserved  separate exactly
 --
--- REALIZED CURVES, NOT PACKED TRAJECTORIES. structural.entity_curve rebuilds
--- ST_MakeLine(child.coord ORDER BY ordinal) -- actual placements in trajectory
--- order. The `trajectory` column is mantissa-packed identity payload: entity id,
--- ordinal and flags encoded into double mantissas. Feeding it to a geometric
--- metric compares packed hashes as if they were positions, which is the error
--- the placement law forbids ("packed trajectory vertices ... must never be
--- presented as spatial coordinates") and which commit 2537fcd7 already fixed
--- once. Symptom if it regresses: Hausdorff between two anagrams returns ~1e-16
--- instead of exactly 0, because the ordinal differs in the low mantissa bits.
+-- Curves are REALIZED: structural.entity_curve reads each child's coordinate
+-- in ordinal order. The trajectory column's packed values (child id, ordinal,
+-- flags) are not positions and are never fed to a metric; if they were,
+-- Hausdorff between anagrams would read ~1e-16 instead of exactly 0.
 --
--- Each metric is evaluated ONCE, in the CTE, and reused for both `value` and
--- `collides`. The prior revision computed every metric twice -- including
--- Frechet, the expensive one -- by repeating the call in the collides column.
---
--- BEGIN ATOMIC, not AS $$ (G12 / GH #764). Two consequences visible below: the
--- 4D metric functions are schema-qualified, because an atomic body resolves
--- names at CREATE time and pins the OID rather than re-resolving through
--- search_path per call; and every literal in the UNION carries an explicit cast,
--- because the parsed body must match the declared return type exactly instead of
--- coercing an `unknown` at first execution.
--- DROP ORDER IS LOAD-BEARING: metric_ladder_words is BEGIN ATOMIC and pins
--- this function's OID in pg_depend, so on a live-DB extension UPDATE (where
--- both already exist) the base cannot drop while the words wrapper stands.
--- Fresh installs never notice — which is how the wrong order survived until
--- the first post-#764 upgrade ran against a populated cluster (2026-08-13).
+-- Each metric is evaluated once in the CTE and reused for value and collides.
+-- The BEGIN ATOMIC body schema-qualifies the 4D metric functions and casts
+-- every UNION literal, because an atomic body binds names and types at CREATE.
+-- metric_ladder_words pins this function's oid, so its shape check runs first:
+-- the base cannot be dropped while the wrapper stands.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -64,7 +46,7 @@ RETURNS TABLE(rung          text,
 LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH pt AS (
-        -- one scan, both entities, pivoted; not six scalar subqueries
+        -- One scan of both entities, pivoted.
         SELECT (array_agg(s.coord         ORDER BY s.ord))[1] AS ca,
                (array_agg(s.coord         ORDER BY s.ord))[2] AS cb,
                (array_agg(s.hilbert_index ORDER BY s.ord))[1] AS ha,
@@ -100,7 +82,7 @@ COMMENT ON FUNCTION ops.metric_ladder(bytea, bytea) IS
     'Hausdorff collide on anagrams by design; Frechet and Merkle id separate them.';
 
 
--- ops.metric_ladder_words — same ladder addressed by surface, for interactive use.
+-- ops.metric_ladder_words: the same ladder addressed by surface.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN

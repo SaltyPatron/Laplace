@@ -8,12 +8,12 @@ using Laplace.Ingestion;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Persists the ingest run ledger (laplace.ingest_run_journal): one row per run,
-/// 'running' at start, driven to a terminal status on every exit path. Run-status writes
-/// are synchronous; high-cardinality file events queue and flush in array-backed batches
-/// so file workers never block on journal I/O. Journaling is ops metadata, so a write
-/// failure logs loudly and never aborts the ingest itself. One runner drives one run at a
-/// time (the ingest mutex), so a single current-run id suffices.
+/// Receipt ledger for ingest runs: <c>laplace.ingest_run_journal</c> (one row per run,
+/// 'running' at start, driven to a terminal status on every exit path) and
+/// <c>laplace.ingest_file_journal</c> (one row per artifact). Run-status writes are
+/// synchronous; per-file events are queued and flushed as array-bound batches so file
+/// workers never wait on journal I/O. The journal is operational metadata: a write
+/// failure is logged and never aborts the ingest. One instance tracks one current run.
 /// </summary>
 public sealed class NpgsqlIngestObservability : IIngestObservability
 {
@@ -22,10 +22,9 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 
     /// <summary>
     /// classid of the per-run session advisory lock (objid = hashtext(run_id::text)).
-    /// The server releases this beacon when its session dies. Canonical liveness
-    /// in ops.ingest_run_live accepts either this beacon or a fresh heartbeat;
-    /// losing a pooled connection must not cancel a still-running ingest.
-    /// Both managed reconciliation and deployment consult that SQL predicate.
+    /// The server releases it when the holding session dies. <c>ops.ingest_run_live</c>
+    /// treats a run as live if it holds this lock or has a fresh heartbeat, so losing one
+    /// pooled connection does not orphan a running ingest.
     /// </summary>
     private const int RunLivenessLockClass = 0x4C504C4B; // "LPLK"
 
@@ -70,10 +69,10 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Persist one already-accepted runtime artifact as a complete one-file run. Unlike the
-    /// asynchronous ingest-run callbacks, this method is an admission boundary: it returns only
-    /// after the run and occurrence rows commit together, so a successful API response cannot
-    /// silently lose the supplied size or modification-time observation.
+    /// Receipt for one already-applied artifact as a complete one-file run. Unlike the
+    /// queued run callbacks, the run row and the file row commit in one transaction before
+    /// this returns, so the recorded size and modification time are durable once the
+    /// caller reports success.
     /// </summary>
     public async Task RecordAcceptedArtifactAsync(
         string sourceName,
@@ -178,8 +177,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         string staging = path + "." + _runId.ToString("N") + ".pending";
         try
         {
-            // A caller owns a fresh path for this invocation. Publish only after the
-            // journal INSERT commits; never replace an older invocation's receipt.
+            // Written only after the journal INSERT commits, via a staged file and a
+            // non-overwriting move, so an existing receipt at the path is never replaced.
             string json = System.Text.Json.JsonSerializer.Serialize(new
             {
                 run_id = _runId,
@@ -285,18 +284,12 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Hold the per-run session advisory lock for the run's lifetime on a dedicated
-    /// connection. It is CHECKED OUT OF THE INGEST POOL and never returned until the
-    /// run ends, so it is a permanent pool owner, not -- as this comment previously
-    /// claimed -- a connection "pinned outside the pool". Idle pruning cannot reclaim
-    /// it precisely because it is never returned, so the lock is safe under a live
-    /// run; what it is not is free. PostgresResourcePlan.ObservabilityConnectionOwners
-    /// budgets this slot together with the file-journal pump and the run-journal
-    /// writer. Do not add another connection owner to this class without moving that
-    /// number. Failure to acquire logs loudly and never aborts
-    /// the ingest — same law as every other journal write in this class — but a
-    /// run without the lock is indistinguishable from a corpse to the deploy
-    /// gate, so the log line matters.
+    /// Holds the per-run session advisory lock for the run's lifetime on a connection
+    /// checked out of the ingest pool and not returned until the run ends, so idle pruning
+    /// cannot reclaim it. That connection counts against
+    /// PostgresResourcePlan.ObservabilityConnectionOwners together with the file-journal
+    /// pump and the run-journal writer. Failure to acquire is logged and the ingest
+    /// proceeds, but without the lock the run reads as orphaned once its heartbeat is stale.
     /// </summary>
     private void AcquireLivenessLock()
     {
@@ -321,16 +314,12 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Take the measurement lane SHARED on the run's liveness connection, so the run
-    /// holds it for exactly as long as it can write and the server drops it the instant
-    /// this process dies.
+    /// Takes the measurement lane SHARED on the run's liveness connection, so the run holds
+    /// it exactly as long as it can write and the server drops it when this process dies.
     ///
-    /// <para>Blocks while a measurement holds the lane EXCLUSIVE — that is the contract,
-    /// not a stall. It blocks in bounded windows and names the holder each time, because
-    /// the failure this must never reproduce is AdvisoryTxLock's original form: an
-    /// unbounded silent wait that presented as "ingest hung at the end" with nothing to
-    /// act on. An unlocked ingest would silently corrupt every number a measurement is
-    /// taking, so unlike the liveness beacon this one is not optional — it waits.</para>
+    /// <para>Blocks while a measurement holds the lane EXCLUSIVE, waiting in bounded
+    /// windows and logging the holder each time. Unlike the liveness lock this wait is not
+    /// optional: an ingest writing during a measurement would change what is measured.</para>
     /// </summary>
     private void AcquireMeasurementLane(NpgsqlConnection conn)
         => AdvisoryTxLock.HoldMeasurementLaneAsync(
@@ -348,8 +337,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Use the same heartbeat-plus-beacon predicate as Operator and deployment.
-    /// The canonical operation closes the orphan and its unfinished files together.
+    /// Closes runs that fail the heartbeat-or-lock liveness predicate, together with their
+    /// unfinished file rows, via <c>ops.ingest_reconcile_orphans</c>.
     /// </summary>
     private void ReconcileOrphanedRuns() => Execute(
         "SELECT * FROM ops.ingest_reconcile_orphans(interval '90 seconds')",
@@ -440,26 +429,22 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         if (!_active) return;
         _active = false;
         StopFileJournalPump();
-        // error is written HERE, not by a follow-up OnRunFailed: that method returns early
-        // once the run is terminal, so every failure reaching this path landed in the ledger
-        // as status=failed with error NULL. MEASURED 2026-08-10: the document lane recorded
-        // failed at files_done=199/207 twice, with no diagnostic in the row either time.
+        // The error is written in this terminal UPDATE: OnRunFailed returns early once
+        // the run is terminal, so it cannot attach the error afterwards.
         Execute(
             "UPDATE laplace.ingest_run_journal SET "
             + "status = $2, phase = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'complete' END, "
             + "ended_at = now(), "
-            // Persist the same runner stopwatch that emits INGEST_COMPLETE elapsed_s.
-            // started_at is journal-entry time, after decomposer initialization/inventory,
-            // so deriving throughput from ended_at-started_at would compare a shorter
-            // clock against the historical runner-clock baselines migrated by #1080.
+            // Throughput uses the runner's wall clock, not ended_at - started_at:
+            // started_at is journal-entry time, after initialization and inventory,
+            // while throughput baselines are measured on the runner clock.
             + "throughput_elapsed_ms = $13, "
             + "units_attempted = $3, units_applied = $4, units_failed = $5, "
             + "entities = $6, physicalities = $7, attestations = $8, "
             + "error = COALESCE($9, error), "
-            // File and input counters rode ONLY the throttled progress UPDATE, so fast
-            // runs routinely ended with stale ledger values. The terminal result is the
-            // authoritative snapshot. Totals are assigned directly because extraction
-            // can lawfully refine an inventory estimate downward as well as upward.
+            // The terminal result overwrites the throttled progress counters. Totals are
+            // assigned, not maxed, because extraction may refine an inventory estimate
+            // in either direction.
             + "files_done = $10, "
             + "input_units_done = $11, input_units_total = $12 "
             + "WHERE run_id = $1",
@@ -494,10 +479,9 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Emit the substrate-owned verdict after the terminal journal transition. The
-    /// trigger is the authority; this is deliberately a readback rather than a second
-    /// throughput calculation. Every ingest entry point uses this observer, so a slow,
-    /// unmeasured, or unbaselined run is visible even when no Actions gate follows it.
+    /// Reads back the throughput verdict that the journal trigger computed on the terminal
+    /// transition and prints it as the run's INGEST_THROUGHPUT receipt line; no throughput
+    /// is recalculated here.
     /// </summary>
     private void ReportThroughputVerdict(string sourceName)
     {
@@ -550,9 +534,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Per-run insert counts are operational telemetry, not a closure proof: an
-    /// entity or physicality may already exist globally and therefore insert zero
-    /// rows in this run. The runner's committed source-closure check is authoritative.
+    /// Diagnostic only. Per-run insert counts are not a closure proof: content that already
+    /// converged to an existing entity or physicality inserts zero rows in this run.
     /// </summary>
     private void ReportEntityPhysicalityInsertDelta(string sourceName, IngestRunResult result)
     {
@@ -583,9 +566,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             ReleaseLivenessLock();
             return;
         }
-        // Failure before OnRunStart (init/inventory) — journal it as its own terminal row
-        // so an early crash is still diagnosable. After OnRunFinished, the run is already
-        // terminal (e.g. the empty-noop throw) and this is a no-op.
+        // A failure before OnRunStart (initialization or inventory) gets its own terminal
+        // row. After OnRunFinished the run is already terminal and this is a no-op.
         if (_runId != Guid.Empty) return;
         Execute(
             "INSERT INTO laplace.ingest_run_journal "
@@ -615,12 +597,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             });
 
     /// <summary>
-    /// Per-file ledger rows (laplace.ingest_file_journal). Calls only enqueue; the file
-    /// journal pump bulk-flushes them. A journal failure logs and never aborts the ingest.
+    /// Per-file ledger rows (<c>laplace.ingest_file_journal</c>). Calls only enqueue; the
+    /// file journal pump flushes them in batches.
     ///
-    /// ON CONFLICT DO UPDATE, not DO NOTHING: a file re-opened inside one run (a retry)
-    /// is the same unit, and the second attempt is the one that decides its outcome.
-    /// Leaving the first row in place would report a retried file by its failed attempt.
+    /// Started upserts and resets the row: a file re-opened within one run is the same
+    /// unit, and the latest attempt decides its outcome.
     /// </summary>
     public void OnFileStarted(string sourceName, string fileLabel, long bytes = 0) =>
         OnFileStarted(sourceName, fileLabel, bytes, modifiedAt: null);
@@ -644,10 +625,9 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Advisory counter update for a file still in flight. Never inserts and never
-    /// changes status -- the UPDATE is guarded on status = 'running' -- so a progress
-    /// event that loses a race with Composed or a terminal status is discarded by
-    /// the server rather than resurrecting a stale count onto a finished row.
+    /// Counter update for a file still in flight. It never inserts or changes status; the
+    /// UPDATE is guarded on status = 'running', so a progress event that loses a race with
+    /// Composed or a terminal status is discarded instead of overwriting a finished row.
     /// </summary>
     public void OnFileProgress(
         string sourceName, string fileLabel,
@@ -716,10 +696,10 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Drain file lifecycle events into at most three array-backed statements in one
-    /// network round-trip. File workers only enqueue; they never wait on journal I/O.
-    /// Events are grouped in lifecycle order because a file has at most one attempt in a
-    /// run: started, composed, then terminal. True-skips intentionally omit started.
+    /// Drains queued file events into one batch: an optional run heartbeat, then one
+    /// array-bound statement per event kind in lifecycle order (started, progress,
+    /// composed, finished). Grouping by kind is safe because a file's events arrive in
+    /// that order; a finished event with no started row inserts its own row.
     /// </summary>
     private void FlushFileJournalEvents()
     {
@@ -736,8 +716,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             {
                 using var conn = _ds.OpenConnection();
                 using var batch = new NpgsqlBatch(conn);
-                // The existing pump remains alive while parsing/apply produces no
-                // progress events. Use its pooled connection, not a new owner.
+                // The heartbeat rides the pump's batch, so a run with no file events
+                // still refreshes liveness without another connection owner.
                 if (heartbeatDue)
                 {
                     var heartbeat = new NpgsqlBatchCommand(
@@ -771,9 +751,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     batch.BatchCommands.Add(cmd);
                 }
 
-                // Coalesced to the LAST event per file: counters are cumulative, so
-                // within one flush only the newest sample carries information and
-                // sending the rest would be N round-trip rows for one final value.
+                // Counters are cumulative, so only the last progress event per file in
+                // this flush is sent.
                 var progress = events
                     .Where(e => e.Kind == FileJournalEventKind.Progress)
                     .GroupBy(e => e.FileLabel, StringComparer.Ordinal)
@@ -781,9 +760,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     .ToArray();
                 if (progress.Length > 0)
                 {
-                    // UPDATE, never INSERT: a progress event for a file with no row is
-                    // meaningless (Started owns row creation), and status = 'running'
-                    // keeps a straggler from overwriting a composed or terminal row.
+                    // UPDATE only: Started creates the row, and status = 'running' keeps a
+                    // late progress event from overwriting a composed or terminal row.
                     var cmd = new NpgsqlBatchCommand(
                         "UPDATE laplace.ingest_file_journal f SET "
                         + "records = u.records, entities = u.entities, "

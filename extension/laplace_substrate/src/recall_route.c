@@ -1,13 +1,6 @@
-/* String helpers and the canonical intent vocabulary for the recall responders.
- *
- * This file used to hold a ~30-pattern English regex ladder (route_prompt_impl)
- * that guessed a read intent and a relation type from the surface form of a
- * prompt: "^what\s+does\s+(.+?)\s+mean", "^is\s+(?:a|an|the)\s+", "vs\.?",
- * "^tell\s+me\s+about", and so on. It was the one place where a substrate whose
- * identity law is content-addressed and language-agnostic could only be
- * questioned in English. Callers now pass the intent structurally — see
- * converse.recall_intent() and converse.query_shapes().
- */
+/* String helpers and the intent vocabulary for recall. The read intent is an
+ * argument of converse.recall_intent(); nothing here infers it from the
+ * surface form of the observation. */
 
 #include "postgres.h"
 
@@ -59,8 +52,8 @@ lower_dup(const char *s)
                                                 CStringGetTextDatum(s)));
 }
 
-/* The read shapes converse.recall_intent() dispatches. Kept in one place so the C
- * dispatch, the SQL catalog (query_shapes) and any UI stay in parity. */
+/* The read shapes converse.recall_intent() dispatches; converse.query_shapes()
+ * publishes the same set. */
 static const char *const route_intents[] = {
     "define",                   /* witnessed glosses, sense-disambiguated */
     "what_is",                  /* gloss + IS_A ladder upward */

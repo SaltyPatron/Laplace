@@ -20,7 +20,7 @@ export interface TerminalLine {
   direction?: TerminalDirection | null;
 }
 
-/** Client-side scrollback. The server ring is 4000; keeping a little more costs nothing. */
+/** Client-side scrollback, sized above the server's replay ring. */
 const MAX_LINES = 6000;
 
 /**
@@ -119,8 +119,7 @@ export function defaultFilter(): TerminalFilter {
   return {
     stdout: true,
     stderr: true,
-    // Off by default: the engine handshake alone is ~200 lines, and the harness's own
-    // narration is what you want first. One click turns the firehose on.
+    // Raw UCI traffic starts hidden so the runner's own lines lead the transcript.
     uci: false,
     engines: new Set(),
     directions: new Set<TerminalDirection>(['send', 'recv']),
@@ -209,11 +208,9 @@ export function clockOf(at: string): string {
  * Keeps a scroll region pinned to the bottom until the reader scrolls up, and re-pins when
  * they come back down.
  *
- * The naive version — recompute `follow` from every scroll event — detaches by itself during
- * a busy run. Appending lines fires scroll, trimming the rendered window moves scrollTop out
- * from under the reader, and the browser clamps scrollTop when content shrinks; all three
- * look exactly like "the user scrolled up" to a distance-from-bottom test. Only a scroll that
- * moves the viewport UP is the reader's intent, and content growth can never do that.
+ * Only an upward scroll detaches. Appends, window trimming and browser scrollTop clamping
+ * also fire scroll events and change the distance from bottom, but none of them moves the
+ * viewport up.
  */
 export function useStickToBottom(deps: unknown[]) {
   const ref = useRef<HTMLDivElement | null>(null);

@@ -24,14 +24,14 @@ public sealed class CILIReferenceAdmissionTests
             + "  dc:source pwn30:02084072-n .\n"
             + "<i35547> a <Concept> ;\n"
             + "  skos:definition \"a native CILI definition\"@en .\n");
-        // Three serializations of the same PWN 3.0 mapping are packaging, not
-        // three witnesses. The native dc:source row is authoritative when ili.ttl exists.
+        // Three serializations of one PWN 3.0 mapping are packaging, not three
+        // witnesses; the dc:source row in ili.ttl is the one admitted.
         await File.WriteAllTextAsync(Path.Combine(dir, "ili-map-pwn30.tab"),
             "i35545\t02084071-n\n");
         await File.WriteAllTextAsync(Path.Combine(dir, "ili-map-wn30.ttl"),
             "ili:i35545 owl:sameAs pwn30:02084071-n .\n");
-        // PWN 3.1 publishes both shapes. RDF is selected once and its leading
-        // namespace/version marker decodes to the same 8-digit native key as tab.
+        // PWN 3.1 ships both shapes; the RDF file is selected once and its
+        // namespace/version prefix decodes to the same 8-digit key as the tab file.
         await File.WriteAllTextAsync(Path.Combine(dir, "ili-map-pwn31.tab"),
             "i35545\t02084071-n\n");
         await File.WriteAllTextAsync(Path.Combine(dir, "ili-map-wn31.ttl"),
@@ -63,8 +63,8 @@ public sealed class CILIReferenceAdmissionTests
                 ReferenceIdentityKind.CiliMapVersion, "pwn31")!.Value;
 
             Assert.Equal(key, pwn31Key);
-            // References are content entities: what they denote is stated by the claims
-            // that use them (rdf:type as IS_TYPED_AS, HAS_SYNSET_KEY), not by an entity type.
+            // References are content entities; what they denote is stated by the
+            // attestations over them (IS_TYPED_AS, HAS_SYNSET_KEY), not by an entity type.
             Assert.Contains(entities, e => e.Id == ili);
             Assert.Contains(entities, e => e.Id == key);
             Assert.Contains(entities, e => e.Id == version);
@@ -99,9 +99,8 @@ public sealed class CILIReferenceAdmissionTests
                 a.SubjectId == ili && a.TypeId == typedAs
                 && a.ObjectId == EntityTypeRegistry.WordNetSynset);
 
-            // PWN-backed ili.ttl glosses are the same authority later admitted by
-            // WordNetDecomposer, not an independent CILI vote. The mapping survives;
-            // a native CILI-only concept still owns and emits its definition.
+            // A PWN-backed gloss in ili.ttl is WordNet's testimony, not a second witness,
+            // so no HAS_DEFINITION is attested for it; a CILI-only concept's definition is.
             Hash128 hasDefinition = RelationTypeRegistry.RelationTypeId("HAS_DEFINITION");
             Assert.DoesNotContain(attestations, a =>
                 a.SubjectId == ili && a.TypeId == hasDefinition);

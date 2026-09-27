@@ -4,15 +4,12 @@ using Xunit;
 namespace Laplace.Chess.Modality.Tests;
 
 /// <summary>
-/// Board now carries piece bitboards alongside the 0x88 Squares array, maintained incrementally
-/// through Board.Set. Two representations of one fact is a standing invitation to divergence,
-/// and the failure is SILENT: no exception, just move generation answering from stale bits.
-///
-/// So this walks the real game tree and re-checks the invariant after EVERY make and EVERY
-/// unmake, on the positions whose mutation paths differ — captures, en passant, promotion,
-/// castling (including the Chess960 case where the king can castle without moving and its
-/// destination can hold the rook). A write site that bypasses Set shows up here as a hard
-/// failure at the exact ply it happened.
+/// Board keeps piece bitboards beside the 0x88 Squares array, updated incrementally through
+/// Board.Set; a divergence would be silent (move generation reading stale bits). These tests
+/// walk the game tree and check the invariant after every make and unmake on positions whose
+/// mutation paths differ: captures, en passant, promotion, castling (including Chess960, where
+/// the king can castle without moving and its destination can hold the rook). A write that
+/// bypasses Set fails at the ply where it happened.
 /// </summary>
 public class BoardBitboardConsistencyTests
 {
@@ -77,9 +74,9 @@ public class BoardBitboardConsistencyTests
     }
 
     /// <summary>
-    /// The maintained bitboards must equal what Bitboards.FromBoard derives from scratch —
-    /// otherwise everything already built on Bitboards (PositionContent.Surface's pawn features,
-    /// material counts) would disagree with anything built on the Board's own set.
+    /// The maintained bitboards equal what Bitboards.FromBoard derives from scratch, so
+    /// features built on Bitboards (PositionContent.Surface pawn features, material counts)
+    /// agree with the Board's own set.
     /// </summary>
     [Theory]
     [InlineData(Startpos)]
@@ -104,8 +101,8 @@ public class BoardBitboardConsistencyTests
     public void RebuildBitboards_RecoversFromADirectWrite()
     {
         var b = Board.FromFen(Startpos);
-        b.Squares[Board.Sq(4, 3)] = Piece.WQueen;      // deliberate bypass
-        Assert.False(b.BitboardsConsistent());          // the invariant must NOTICE
+        b.Squares[Board.Sq(4, 3)] = Piece.WQueen;      // write that bypasses Set
+        Assert.False(b.BitboardsConsistent());          // detected as inconsistent
         b.RebuildBitboards();
         Assert.True(b.BitboardsConsistent());
     }

@@ -1,17 +1,13 @@
--- Retired into consensus_subject. Fresh installs create the combined
--- subject/effective-μ covering index here and must not maintain a
--- second tree with the same ordered prefix.
+-- consensus_subject: the subject star in standing order. Every star read
+-- filters on subject_id; bounded reads take the top of it by the conservative
+-- estimate (rating - 2*rd), and INCLUDE makes both full and top-k star reads
+-- index-only. It subsumes consensus_subject_eff_mu_btree, which shares its
+-- ordered prefix.
 --
--- A populated pre-combination database is deliberately left unchanged during
--- extension upgrade.  Replacing a partitioned index cannot use CONCURRENTLY
--- inside the extension transaction, and dropping a live read path during deploy
--- violates the online-index law.  Its next greenfield reseed gets the combined
--- shape.  An empty old-schema database can be corrected in place safely.
---
--- Effective μ is the second key because bounded subject reads order by it. On
--- a real 746k-row default leaf the former covering + rank trees occupied
--- 83 MB + 28 MB; this combined shape occupied 69 MB and preserved the measured
--- index-only full and top-k plans.
+-- A populated database whose consensus_subject lacks the expression key keeps
+-- both indexes: a partitioned index cannot be rebuilt CONCURRENTLY inside the
+-- extension transaction, and a live read path is never dropped during deploy.
+-- An empty consensus is rebuilt in place.
 CREATE INDEX IF NOT EXISTS consensus_subject
     ON consensus (subject_id, ((rating - 2*rd)) DESC)
     INCLUDE (object_id, rating, rd);

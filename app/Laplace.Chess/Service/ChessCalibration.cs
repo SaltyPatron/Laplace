@@ -4,7 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Read the measured calibration selected by the ordinary desktop installer.</summary>
+/// <summary>Reads the calibration report the installed desktop manifest selects, checking its
+/// SHA-256 and whether the current Stockfish binary matches the one it measured.</summary>
 public static class ChessCalibration
 {
     public sealed record Snapshot(string Status, string? Message = null,
@@ -78,12 +79,9 @@ public static class ChessCalibration
         return result.ToArray();
     }
 
-    // These are the application-owned measurement envelopes emitted by
-    // benchmark-chess-environment.py and the desktop installer.
-    // Like ChessExperimentEvidence, this boundary reads typed receipt fields;
-    // source chess containers continue through their registered grammar.
-    // Omitted members (process logs, environment, runtime observations) are never
-    // deserialized into the browser projection, including inside nested records.
+    // Typed receipt envelopes written by benchmark-chess-environment.py and the desktop
+    // installer. Only the declared members deserialize; process logs, environment and runtime
+    // observations never reach the browser projection, nested records included.
     private static readonly JsonSerializerOptions DesktopJson = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase

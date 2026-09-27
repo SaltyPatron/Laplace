@@ -29,10 +29,7 @@ public readonly struct Atomic2020Source : ISeedSource
         ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"),
         ("CapableOf", "CAPABLE_OF"), ("Desires", Desires), ("HasProperty", "HAS_PROPERTY"),
         // A denial is an outcome, not a different relation: NotDesires maps onto DESIRES
-        // and the row folds with a negative magnitude, so it contests the very cell the
-        // positive form asserts. As NOT_DESIRES it landed in a separate positive type
-        // where it could never meet what it denies. Same fix as ConceptNet's four Not*
-        // relations; see docs/evidence-flattening-2026-08-23.md.
+        // and folds with a negative magnitude, refuting the cell the positive form confirms.
         ("MadeUpOf", "MadeUpOf"), ("NotDesires", Desires),
     ];
 

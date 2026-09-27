@@ -10,11 +10,9 @@ import { TaxonomyTree } from './TaxonomyTree';
 import styles from './TopicView.module.css';
 
 /**
- * The topic page: ask once, see EVERYTHING. No shape dropdown, no mode picking —
- * every read the substrate can serve about a topic loads as its own section, in
- * parallel: glosses, the IS_A tree, the strongest facts by band, translations
- * (the ILI hub meshing languages), the mesh position, and the verdict record.
- * The Query console remains the advanced surface for dials; this is the answer.
+ * Topic view: resolves the topic to its entity, then runs every read of that one
+ * entity in parallel, each as its own section — definitions, band facts,
+ * translations, the IS_A taxonomy, the mesh position and the entity record.
  */
 export function TopicView() {
   const { ref = '' } = useParams();
@@ -64,7 +62,7 @@ function TopicBody({ topicRef }: { topicRef: string }) {
       if (!hit || hit.exists === false) { setNotFound(true); return; }
       setIdHex(hit.id_hex); setLabel(hit.label);
 
-      // Everything, in parallel — each section lands when it lands.
+      // Independent reads; each section renders when its read returns.
       runQuery({ topic: topicRef, shape: 'define' }).then((r) => !stale && setDefine(r)).catch(() => {});
       runQuery({ topic: topicRef, shape: 'band_facts', limit: 30 }).then((r) => !stale && setFacts(r)).catch(() => {});
       runQuery({ topic: topicRef, shape: 'translate' }).then((r) => !stale && setTranslations(r)).catch(() => {});

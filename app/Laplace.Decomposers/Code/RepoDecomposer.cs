@@ -170,10 +170,9 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
     {
         b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId));
 
-        // repoId is a stable governed handle for this repository. The canonical path text is
-        // actual content and therefore enters through the normal text Merkle DAG all the way
-        // to Unicode/codepoints. The handle's spatial placement is a Projection onto that
-        // content root; treating the handle itself as atomic Content forged a fake leaf.
+        // repoId is a stable governed handle for the repository. The canonical path text is
+        // content and composes through the ordinary text Merkle DAG down to codepoints; the
+        // handle is placed as a Projection onto that content root, not as a content leaf.
         Hash128 pathRoot = ContentEmitter.Emit(b, repoCanonical, Source)
             ?? throw new InvalidOperationException("repository canonical path did not produce content");
         if (!TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
@@ -230,8 +229,8 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
 
     public static string? VerifiedModalityFor(string file, string? requiredModality = null)
     {
-        // A declared C++ repository gives .h its C++ translation-unit context.
-        // Loose-file ingestion keeps its existing extension classification.
+        // A declared C++ repository gives .h its C++ translation-unit context; loose files
+        // are classified by extension.
         string? modality = requiredModality == "cpp" && Path.GetExtension(file) == ".h"
             ? "cpp" : ModalityFor(file);
         return modality is not null && GrammarDecomposer.LookupById(modality) != IntPtr.Zero ? modality : null;

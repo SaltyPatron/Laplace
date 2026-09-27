@@ -57,7 +57,7 @@ public sealed class ChessPositionIdentityCacheTests
             var digest = UncachedAtomId(ChessPositionIdentity.Atom.Scalar(7, value));
             var atom = ChessPositionIdentity.Atom.Rule(digest);
             Assert.Equal(UncachedAtomId(atom), ChessPositionIdentity.AtomId(atom));
-            // HasDigest remains authoritative even for a domain with scalar entries.
+            // HasDigest decides the atom's form even in a domain that has scalar entries.
             var digestInScalarDomain = new ChessPositionIdentity.Atom(
                 ChessPositionIdentity.SideDomain, 1, digest, true);
             Assert.Equal(UncachedAtomId(digestInScalarDomain),
@@ -129,8 +129,8 @@ public sealed class ChessPositionIdentityCacheTests
         });
     }
 
-    // Reference the pre-lookup native calculation. This deliberately retains
-    // the actual byte-atom and Merkle entrypoints, not a second hash algorithm.
+    // Reference id computed without the lookup cache, through the same byte-atom and
+    // Merkle entry points rather than a second hash algorithm.
     internal static Hash128 UncachedAtomId(in ChessPositionIdentity.Atom atom)
     {
         Span<byte> bytes = stackalloc byte[33];

@@ -8,10 +8,9 @@ using Xunit;
 namespace Laplace.Decomposers.Code.Tests;
 
 /// <summary>
-/// Pure extraction-side coverage for the generic <see cref="ParquetDecomposer"/> —
-/// the container-strip reader (<see cref="SharedParquetRecordStream.ReadGenericRowsAsync"/>)
-/// and the cell-normalization the decomposer applies before witnessing. No DB / native
-/// perfcache dependency: these exercise the record-production boundary only.
+/// Extraction-side tests for <see cref="ParquetDecomposer"/>: the row reader
+/// (<see cref="SharedParquetRecordStream.ReadGenericRowsAsync"/>) and the cell
+/// normalization applied before composition. No database or native perfcache is used.
 /// </summary>
 public sealed class ParquetDecomposerTests
 {

@@ -25,10 +25,9 @@ public sealed record ChessWitnessedGame(
     public Hash128 TrunkRootId => PlayingId;
 
     /// <summary>
-    /// The line's ordered typed move ids — the stored record itself, as unpacked from the
-    /// line's Content trajectory during hydration. Carried so calculated lanes fold on the
-    /// move OBJECTS directly; re-deriving them from the SAN strings would be a second
-    /// resolution of ids the hydrator already held.
+    /// The line's ordered typed move ids, unpacked from its Content trajectory during
+    /// hydration, so calculation witnesses attest on the move entities directly instead of
+    /// resolving SAN again.
     /// </summary>
     public IReadOnlyList<Hash128> MoveIds { get; init; } = Array.Empty<Hash128>();
 
@@ -36,7 +35,7 @@ public sealed record ChessWitnessedGame(
     /// Null means this record was constructed without that native readback.</summary>
     public Hash128? StartPositionId { get; init; }
 
-    /// <summary>Derived complete replay retained only by the byte-preflighted strict read owner.
-    /// This is transient export work, not witnessed testimony or a content constituent.</summary>
+    /// <summary>Complete replay set only by the strict, byte-preflighted read. Transient export
+    /// work: neither testimony nor a content constituent.</summary>
     internal ChessReplayResult? AdmittedReplay { get; init; }
 }

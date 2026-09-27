@@ -4,26 +4,14 @@ using System.Numerics;
 namespace Laplace.Decomposers.Tatoeba;
 
 /// <summary>
-/// Transient Tatoeba-row-id → CONTENT ROOT map, built once at initialize and discarded
-/// with the run.
+/// Transient Tatoeba row id → content root map, discarded with the run. links.csv names
+/// sentences by row id; the id is packaging, so it is resolved to the sentence's content
+/// root and gets no entity, geometry or trajectory. The row order is not recorded either:
+/// it describes the source database's layout, not language.
 ///
-/// WHY THIS EXISTS: links.csv references sentences by Tatoeba's row number, so the link
-/// lane has to turn an integer into the sentence it names. The previous answer was to mint
-/// a `tatoeba/sentence/{id}` ENTITY per referenced id and attest IS_TRANSLATION_OF between
-/// those — source-keyed identity, which is the entity-resolution table content addressing
-/// exists to abolish, and measured at ~1.56 entity rows per link (the single largest row
-/// category during the link phase). The id is SCAFFOLDING: it exists only because the links
-/// file cannot inline the text. It is not knowledge, so it gets no entity, no geometry, and
-/// no trajectory — it gets resolved and thrown away.
-///
-/// NOT a stored index and NOT a trajectory. Tatoeba's row order is an artifact of their
-/// database; recording it would attest a fact about their file layout, not about language.
-///
-/// Chunked flat array rather than a Dictionary: ids are dense (MEASURED 13,262,153 rows
-/// spanning ids 1..13,730,510 = 96.6% occupancy), so direct indexing costs 16 B/slot
-/// (~220 MB at present corpus size) against roughly 3x that for a hashtable, with no
-/// rehash and O(1) lookup. Writes happen once per id from the parallel build; reads happen
-/// only afterwards.
+/// A chunked flat array rather than a dictionary: row ids are dense, so direct indexing
+/// costs 16 bytes per slot with O(1) lookup and no rehash. Each id is written once by the
+/// parallel sentence pass; reads happen only afterwards.
 /// </summary>
 internal sealed class TatoebaIdMap
 {
@@ -43,8 +31,8 @@ internal sealed class TatoebaIdMap
     public long Count => Interlocked.Read(ref _count);
 
     /// <summary>
-    /// Default(Hash128) is the ABSENT sentinel — an all-zero BLAKE3 root is not reachable
-    /// for any real sentence, so no valid root is mistaken for a miss.
+    /// Default(Hash128) marks an absent slot; no real sentence root is all-zero, so no
+    /// valid root reads as a miss.
     /// </summary>
     public void Set(long id, Hash128 root)
     {

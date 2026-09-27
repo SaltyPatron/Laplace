@@ -1,16 +1,9 @@
--- ops.source_status(): is this source ingested, and how do you know?
---
--- WHY THIS EXISTS. There was no standardized answer to the most basic operational
--- question in the system, so every caller assembled one, and every assembly was wrong in
--- a different way. The source inventory therefore comes from the substrate itself, while
--- the journal remains authority for the most recent operation and its measured health.
---
--- Throughput is the same rule: UI/API/MCP/CLI and CI must not independently parse logs
--- and invent different answers. The latest clean run carrying a throughput verdict is
--- projected alongside the latest run status. A later marker skip may be the latest run
--- while the previous real run remains the relevant throughput observation; an
--- `unmeasured` clean run is itself a verdict and must remain visible rather than exposing
--- an older green comparison.
+-- ops.source_status(): is this source ingested, and how is that known? The
+-- source inventory comes from the substrate itself (a source witnesses only
+-- through attestations); the journal is authority for the last run and its
+-- measured throughput. The latest clean run carrying a throughput verdict is
+-- projected beside the latest run status, so a later marker skip does not hide
+-- it, and an `unmeasured` verdict stays visible.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -42,9 +35,9 @@ WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
     FROM ops.source_counts_approx() s
 ),
--- Journal is ops metadata: authoritative about the LAST RUN, never about substrate
--- existence. Keep this separate from by_throughput because a marker skip must not erase
--- the last real throughput verdict.
+-- The journal is authoritative about the last run, never about what the
+-- substrate holds. Separate from by_throughput so a marker skip does not erase
+-- the last throughput verdict.
 by_journal AS (
     SELECT DISTINCT ON (j.source_name)
            j.source_name, j.source_id, j.status, j.started_at
@@ -70,15 +63,13 @@ ids AS (
 ),
 rolled AS (
     SELECT i.source_id,
-           -- EXACT FOR THE TAIL, ESTIMATE FOR THE HEAD. ops.source_counts_approx()
-           -- derives evidence from planner MCV statistics. The estimator can miss a
-           -- small source, so count only that tail exactly instead of scanning the head.
+           -- Estimate for sources in the MCV statistics, exact count for the
+           -- small ones the estimate misses.
            COALESCE(ev.evidence_approx,
                     (SELECT count(*) FROM @extschema@.attestations a
                       WHERE a.source_id = i.source_id))             AS evidence_approx,
-           -- Entities are source-independent; a source only ever witnesses
-           -- through attestations. Per-source content presence is therefore
-           -- attestation presence, not entity ownership.
+           -- Entities are source-independent; a source's content presence is
+           -- its attestation presence.
            COALESCE(ev.evidence_approx,
                     (SELECT count(*) FROM @extschema@.attestations a
                       WHERE a.source_id = i.source_id)) > 0          AS has_entities,
@@ -117,10 +108,8 @@ matched AS (
            r.throughput_rows_per_s,
            r.throughput_baseline_rows_per_s,
            r.throughput_slowdown_ratio
-    -- The journal's recorded name beats realize.render(). A carried sub-source such as
-    -- PredicateMatrix has no independent run row, so strip only the governed source
-    -- envelope from its rendered identity rather than exposing
-    -- "substrate/source/PredicateMatrixDecomposer/v1" as the operator label.
+    -- The journal's recorded name wins; a source with no run row of its own
+    -- shows its realized id with the substrate/source/.../v1 envelope stripped.
     FROM rolled_numbered r CROSS JOIN rendered x
     WHERE p_source IS NULL
        OR r.journal_name = p_source
@@ -128,7 +117,7 @@ matched AS (
 )
 SELECT * FROM matched
 UNION ALL
--- A named query always returns one row: absence must not be overloaded with a typo.
+-- A named query always returns one row, so an unknown name reads as known = false.
 SELECT p_source,
        @extschema@.source_id(p_source),
        false,

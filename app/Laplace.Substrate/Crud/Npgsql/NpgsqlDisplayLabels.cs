@@ -5,16 +5,12 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Human-facing labels for bounded visualization/result sets.
+/// Display labels for a bounded id set, realized by the installed <c>display.labels</c>
+/// catalog statement so every surface shows the same label for the same entity.
 ///
-/// Identity and display are deliberately separate: the caller keeps the complete canonical
-/// hash id, while this read chooses a Unicode/name/metadata surface a person can inspect.
-/// If friendly realization is exhausted, the shared projection includes a short canonical id
-/// in the fallback label rather than replacing a known entity with generic unresolved text.
-///
-/// The projection law lives in the installed extension (`realize.display_label_batch`) so
-/// every client can share it and pg_regress can prove it. High-tier rendering is
-/// containment-owned per GH #804; entity.type_id is descriptive fallback metadata only.
+/// Identity and display stay separate: the caller keeps the canonical id, and the label is
+/// a realization of it. When no readable realization exists the label carries a short
+/// form of the canonical id rather than generic unresolved text.
 /// </summary>
 public static class NpgsqlDisplayLabels
 {
@@ -63,10 +59,9 @@ public static class NpgsqlDisplayLabels
     }
 
     /// <summary>
-    /// Entity tier/type/existence without rendering the entity body. The old explorer facet
-    /// helper performed render_text_fast(id, 8) merely to learn these fields, which meant
-    /// opening a high-tier entity could reconstruct the document before the page had even
-    /// elected what to show. Display text is owned by <see cref="ReadAsync"/> instead.
+    /// Entity tier, type label and existence without realizing the entity body, so a
+    /// high-tier entity is not reconstructed just to learn its facets. Display text comes
+    /// from <c>ReadAsync</c>.
     /// </summary>
     public static async Task<DisplayFacetRow?> FacetAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,

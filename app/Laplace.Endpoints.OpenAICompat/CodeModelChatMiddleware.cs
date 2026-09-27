@@ -4,11 +4,10 @@ using Laplace.Api.Contracts;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// OpenAI compatibility adapter for an explicit governed code-construction request.
-/// laplace-code-001 is a transport/catalog selector, not a separately trained or
-/// separately intelligent code model. With code_language it binds the same governed
-/// constructor/toolchain surface as /v1/code/completions; without that explicit target
-/// contract it falls through rather than silently promoting a generic prose request.
+/// Chat-completions transport for code construction. <c>laplace-code-001</c> is a selector,
+/// not a separate model: with <c>code_language</c> the request runs
+/// <see cref="CodePlayerService"/>, the same construction /v1/code/completions runs;
+/// without it the request continues down the pipeline unchanged.
 /// </summary>
 internal sealed class CodeModelChatMiddleware(RequestDelegate next)
 {

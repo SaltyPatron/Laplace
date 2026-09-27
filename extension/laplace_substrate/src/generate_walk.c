@@ -49,86 +49,23 @@ ensure_edge_plan(void)
 }
 
 /*
- * walk_branches' batched edge fetch -- the native-C-does-the-heavy-lifting
- * replacement for calling consensus.walk_edges() once per frontier node.
- * consensus.walk_edges() did real per-call work in SQL: fetch + compute an
- * unindexed `consensus.relation_rank_resolved(type_id) * consensus.eff_mu(rating,rd)` sort key
- * per candidate row + ORDER BY + LIMIT, AND an O(path length) `= ANY(exclude)`
- * scan per row against a path array that grows every level. Multiplied by an
- * unbounded, non-deduplicated frontier (see below), a depth=6/breadth=12 walk
- * on "chess" measured 4+ minutes with no sign of finishing.
+ * One consensus read per walk level: every frontier id's outbound cells, and
+ * the inbound cells of symmetric relation types ($3), in one query tagged by
+ * frontier ordinal. SQL only hands over rows; relation-rank weighting,
+ * dedup, mask gating and beam selection run in C. There is no per-subject
+ * LIMIT: SQL cannot order by the relation-rank-weighted key the beam uses.
  *
- * This fetches raw, unranked, unfiltered candidate edges for the ENTIRE
- * current level's frontier in ONE query (unnest(...) WITH ORDINALITY, same
- * batching idiom as recall.c's word_shape_peers_fast), then does ranking,
- * refutation/relation-type filtering, and beam selection entirely in C via
- * qsort -- SQL never sorts or filters here, it only hands over rows.
- */
-/*
- * NOTE: a per-subject CROSS JOIN LATERAL + LIMIT bound (using
- * consensus_subject_eff_mu_btree) was tried here and reverted -- EXPLAIN
- * ANALYZE confirmed it correctly used the index (0.98ms for a single-subject
- * probe), but it did not improve full-walk wall time (45.6s/172,196 nodes vs
- * a 45.8s/155,157-node baseline -- no real change) and introduced a real
- * behavior wrinkle: the LATERAL LIMIT pre-filters by raw (rating-2*rd), but
- * the final beam selection below ranks by relation_rank*eff_mu -- a
- * different key -- so for high-fan-out subjects it could silently exclude a
- * true top-beam candidate that didn't make the raw-eff_mu top-N cut. This
- * batch query only executes once per LEVEL (max_depth times total), not
- * once per subject, so per-subject row volume was never the dominant cost
- * at scale -- the real cost is the sheer number of distinct subjects in a
- * wide frontier (grows with beam^level), which a per-subject LIMIT doesn't
- * touch. Left unbounded per subject; see .scratchpad/02_Identified_Issues.txt
- * Issue 28 update for the measurement.
- */
-/*
- * 3Cb/3Cc: highway_mask (native bit-gate, gated in C against p_intent_mask)
- * and subject/object point coordinates (S3 angular beam term) ride the same
- * per-level batch query -- no extra round trip. Coordinates are fetched via
- * ST_X/Y/Z/M (liblwgeom isn't linked, same constraint as recall.c's
- * word_shape_peers_fast_impl) with LEFT JOINs so a coord-less entity (no
- * point physicality yet) degrades to "unknown geometry", never an error.
- * tableoid on each side gives the physicalities partition. That partition is
- * HASH(id) over 64 partitions -- NOT a hilbert band -- so tableoid equality
- * certifies only "same hash bucket", which carries no locality. The +1.0 it
- * used to add scored a hash collision; the bonus is gone, not merely gated.
+ * A symmetric relation is stored as one cell with subject = min(subject,
+ * object) by id bytes, so a read keyed only on subject_id would reach it from
+ * one end. The inbound arm reads it from the other end, through
+ * (object_id, type_id). Inbound cells of asymmetric types are not traversed:
+ * reading those backwards would be a different claim.
  *
- * GEOMETRY IS OPT-IN because physicalities is HASH(id)-partitioned while this
- * joins on entity_id: the key cannot prune, so each side fans out across all
- * 64 partitions, twice per candidate edge. MEASURED live on a 200-node
- * frontier (21,413 candidate edges): 30,305ms with the two LEFT JOINs vs
- * 408ms without -- 74x, to fund an ordering tie-break against folded belief.
- * Identical pathology to ordinal_continuity_distance below,
- * which was already made opt-in for it; this sibling was never rewired.
- */
-/*
- * A SYMMETRIC RELATION IS ONE CELL, SO THE READ MUST PROBE BOTH ENDS.
- *
- * laplace_attestation_orient() canonicalises a symmetric assertion to
- * subject = min(subject, object) by hash bytes, so the unordered pair {a,b}
- * folds into exactly one consensus cell instead of two half-rated ones. That
- * is correct and load-bearing on the WRITE side -- all evidence for the pair
- * accumulates in one place.
- *
- * It also means `c.subject_id = frontier` alone can only ever traverse such a
- * pair from its lesser-hashed end. Measured on the live substrate 2026-08-24:
- * of 133,019 symmetric cells (DERIVATIONALLY_RELATED, IS_ANTONYM_OF,
- * IS_SIMILAR_TO, CONFUSABLE_WITH, IN_VERB_GROUP_WITH) 133,019 are stored
- * subject < object and 0 the other way -- so the reverse direction of every
- * symmetric edge in the substrate was unreachable. Concretely: the antonym
- * cell ('avant jesus christ', IS_ANTONYM_OF, 'apres jesus christ') answered
- * the question asked from `avant` and returned NOTHING asked from `apres`.
- * Same cell, same rating; the hash order of the id decided whether the
- * substrate appeared to know the fact.
- *
- * The reverse arm is restricted to symmetric type ids ($3): traversing an
- * ASYMMETRIC edge backwards would be a different claim (IS_A up is not IS_A
- * down), so it stays forbidden. steer_candidates.c already unions both
- * directions; this is retrieval agreeing with steering about which edges
- * exist, the same way walk_score.h makes them agree about what one is worth.
- *
- * Indexed, not a scan: consensus_object_type_btree (object_id, type_id)
- * WHERE object_id IS NOT NULL exists on every partition.
+ * This geometry variant also carries each endpoint's point coordinate (XYZM,
+ * extracted in SQL because liblwgeom is not linked) for the angular tie-break,
+ * with LEFT JOINs so an endpoint without a point physicality has unknown
+ * geometry. The physicalities partition key is a hash of id, so these joins
+ * cannot prune and fan out across every partition; the variant is opt-in.
  */
 static const char *WALK_BATCH_QUERY =
     "SELECT e.idx, e.neighbor, false, "
@@ -157,9 +94,8 @@ static const char *WALK_BATCH_QUERY =
     "LEFT JOIN laplace.v_word_points ps ON ps.id = e.anchor "
     "LEFT JOIN laplace.v_word_points po ON po.id = e.neighbor";
 
-/* Same edge set, no coordinate fetch. The geometry columns are read
- * conditionally in the fetch loop, so this plan's narrower tuple descriptor is
- * the only difference the caller sees. */
+/* The same edge set without coordinates; the fetch loop reads columns 9..18
+ * only from the geometry plan. */
 static const char *WALK_BATCH_QUERY_NOGEO =
     "SELECT e.idx, e.neighbor, false, "
     "e.type_id, e.rating, e.rd, e.witness_count, "
@@ -219,11 +155,8 @@ ensure_walk_batch_plan(void)
 }
 
 /*
- * The per-edge score (relation_rank x Glicko-complete signed weight, doc 15
- * Phase 3Ca / doc 14 P5) now lives in walk_score.h, shared with S7
- * (steer_candidates.c) so retrieval and steering cannot disagree about what an
- * edge is worth. The full rationale, including why the SPI-fallback rank path
- * is deliberately not replicated, moved with it.
+ * Edge score is walk_relation_rank x laplace_walk_edge_weight (walk_score.h),
+ * the same value steering assigns an edge.
  */
 
 typedef struct RawEdge
@@ -235,7 +168,7 @@ typedef struct RawEdge
     int64  rating;
     int64  rd;
     int64  witnesses;
-    Datum  highway_mask;   /* bytea(32), may be (Datum) 0 if NULL (not yet backfilled) */
+    Datum  highway_mask;   /* bytea(32); (Datum) 0 when the entity has no mask */
     bool   subj_coord_ok;
     double subj_xyzm[4];
     Oid    subj_partoid;   /* InvalidOid if no point physicality */
@@ -268,14 +201,13 @@ typedef struct RankedEdge
 } RankedEdge;
 
 /*
- * Belief first, always. Base is the relation rank times the signed Glicko
- * expectation of the folded state. The remaining dimensions are ordered facts,
- * not a weighted score: caller topic membership, exact trajectory distance,
- * then exact S3 distance. They break belief ties only and therefore cannot
- * replace or reverse the adjudicated verdict.
+ * Consensus belief first: relation rank times the signed Glicko expectation of
+ * the cell. The remaining keys are ordered facts, not weights: caller topic
+ * membership, trajectory ordinal distance, then S3 angle. They only break
+ * belief ties, so they cannot reverse the consensus verdict.
  *
- * Final key is the object id, so otherwise-equal candidates emit in
- * one fixed order. qsort is unstable and SS15 requires byte-identical output.
+ * The last key is the object id, so equal candidates emit in one fixed order
+ * under the unstable qsort.
  */
 static int
 ranked_edge_cmp_score_desc(const void *a, const void *b)
@@ -311,16 +243,10 @@ ranked_edge_cmp_score_desc(const void *a, const void *b)
 }
 
 /*
- * 3Cb gating: p_intent_mask is an opaque caller-supplied bytea(32) -- the
- * intent->band decision itself lives at the SQL call site (doc 22 Phase B's
- * frame-evocation intent_band(prompt) isn't built yet, so
- * recall_walk_response.sql.in resolves a band from route.intent via
- * highway_band_mask(band) as a stopgap and passes the resulting mask in
- * here). Swapping in real intent_band(prompt) later is a SQL-only change --
- * this native gate has no intent vocabulary baked into it.
- *
- * laplace_mask256_t <-> bytea(32), matching pg_laplace_highway_mask_from_bits'
- * own layout assumption (highway_mask.c) -- direct memcpy, no byte-swap. */
+ * Gate a candidate by its entity Highway mask against the caller's 256-bit
+ * mask. The caller decides which relation bits to pass; this gate carries no
+ * intent vocabulary. bytea(32) and laplace_mask256_t share one layout
+ * (highway_mask.c), so the copy is a plain memcpy. */
 static bool
 mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
 {
@@ -328,40 +254,22 @@ mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
     laplace_mask256_t cand, overlap;
 
     if (highway_mask_bytea == (Datum) 0)
-        return true; /* unknown mask: never gate on absence of information */
+        return true; /* no mask: absence is not exclusion */
     b = DatumGetByteaPP(highway_mask_bytea);
     if (VARSIZE_ANY_EXHDR(b) != (int) sizeof(laplace_mask256_t))
-        return true; /* malformed/legacy row: fail open, don't silently drop candidates */
+        return true; /* wrong-width mask: admit rather than drop */
     memcpy(&cand, VARDATA_ANY(b), sizeof(laplace_mask256_t));
     overlap = highway_table_mask_and(cand, *intent_mask);
     return highway_table_mask_any(&overlap) != 0;
 }
 
 /*
- * 3Cc trajectory-ordinal continuity: mirrors containers_of.c's exact idiom
- * (SPI_prepare/SPI_keepplan once, ensure_*_plan() pattern) rather than doing
- * raw float math on physicalities.trajectory -- those vertices are
- * intentionally mantissa-packed hash/ordinal/run_length payloads (see
- * mantissa.h), packed specifically so structural lookups like this stay
- * GIN-index-backed. Finds ONE trajectory containing both the walk's current
- * subject and a candidate object (single LIMIT 1, not the unbounded
- * ST_DumpPoints-over-every-match scan containers_of.c's own comment warns
- * against for large arrays), dumps its points, and mantissa_unpacks each
- * vertex looking for the two target ordinals. Applied only to the
- * exact post-belief-sort admission set. Belief is the primary ordering key and
- * continuity is only a tie-break, so only candidates through the full belief
- * tie at the requested beam boundary can affect the result.
- */
-/*
- * Single-key containment ONLY (proven ~2ms/GIN-index-backed regardless of
- * table size, per containers_of.c's own measurement) -- the object entity
- * alone selects the candidate trajectory. Whether that trajectory also
- * contains the subject is checked in C during the vertex-decode loop below,
- * NOT pushed into a second SQL key. A two-key `@> ARRAY[$1,$2]` probe was
- * tried here first and hit exactly the anti-pattern containers_of.c's header
- * comment warns about (planner abandons the GIN index for a full/bitmap
- * scan on a multi-key bound array) -- caught live via a 24s regress test
- * that should have run in milliseconds.
+ * Trajectory-ordinal continuity between the walk's current subject and a
+ * candidate: find one trajectory containing the candidate (GIN containment on
+ * its unpacked child ids, single key, LIMIT 1), dump its packed vertices in
+ * order and unpack each to child id and run length. Whether that trajectory
+ * also contains the subject is decided in C; a two-key containment array
+ * makes the planner abandon the GIN index.
  */
 static const char *ORDINAL_CONTINUITY_QUERY =
     "WITH t AS ( "
@@ -393,14 +301,9 @@ ensure_ordinal_continuity_plan(void)
 }
 
 /*
- * Returns true and the exact |ordinal_delta| when both subject_entity and
- * object_entity are found as vertices of the SAME
- * trajectory selected by the object's own (fast, single-key) containment
- * probe; false otherwise (no such trajectory, that trajectory doesn't also
- * carry the subject, or coordinate/mantissa data didn't decode -- never an
- * error). Trades a little converse.recall(a
- * DIFFERENT trajectory might contain both when the object's first match
- * doesn't) for guaranteed single-key-probe performance.
+ * True with |ordinal delta| when subject and object are both constituents of
+ * the one trajectory the object's containment probe selects; false otherwise,
+ * never an error. Another trajectory containing both is not searched.
  */
 static bool
 ordinal_continuity_distance(Datum subject_entity, Datum object_entity,
@@ -409,8 +312,8 @@ ordinal_continuity_distance(Datum subject_entity, Datum object_entity,
     Datum  args[1];
     int    rc;
     bool   have_subj = false, have_obj = false;
-    /* int64, not uint16: the ordinal is DERIVED from vertex position here (see
-     * the loop), so it is no longer bounded by the packed field's width. */
+    /* Ordinals are derived from vertex position, so not bounded by the packed
+     * field's width. */
     int64  subj_ord = 0, obj_ord = 0;
     hash128_t subj_h, obj_h;
 
@@ -423,19 +326,10 @@ ordinal_continuity_distance(Datum subject_entity, Datum object_entity,
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return false;
 
-    /* ORDINAL IS DERIVED FROM VERTEX POSITION, NOT READ OUT OF THE PACKED FIELD.
-     * The query above is ORDER BY (dp.path)[1], so vertices arrive in sequence
-     * and the running sum of run_length IS the ordinal -- exact for both vertex
-     * shapes (run_length is 1 on every plain trajectory, making the sum the
-     * position; it is the true source ordinal on a run-length vertex, where
-     * position deliberately does not track it).
-     *
-     * The packed copy is 16 bits and stops being able to state the position past
-     * 65,535 constituents, where the writer now stores 0 rather than a wrapped
-     * value. Reading it directly there would give both endpoints ordinal 0, hence
-     * delta 0, hence the minimum distance for any pair in a wide
-     * trajectory -- silently, since this path never errors by contract. Deriving
-     * costs nothing and removes the width from the equation entirely. */
+    /* The ordinal is the running sum of run lengths over vertices in path
+     * order, not the packed ordinal field: that field is 16 bits and cannot
+     * state a position past 65,535 constituents, where it would give both
+     * endpoints ordinal 0. */
     int64 ordinal = 1;
 
     for (uint64 r = 0; r < SPI_processed; r++)
@@ -453,8 +347,7 @@ ordinal_continuity_distance(Datum subject_entity, Datum object_entity,
         vertex[3] = DatumGetFloat8(SPI_getbinval(tup, td, 4, &isnull[3]));
         if (isnull[0] || isnull[1] || isnull[2] || isnull[3])
         {
-            /* Undecodable vertex: its run_length is unknown, so advance by the
-             * minimum a vertex can cover rather than desynchronising the count. */
+            /* Undecodable vertex: advance by the minimum a vertex covers. */
             ordinal += 1;
             continue;
         }
@@ -477,12 +370,10 @@ ordinal_continuity_distance(Datum subject_entity, Datum object_entity,
 
         ordinal += run;
     }
-    /* SPI_tuptable freed automatically at the enclosing SPI_finish/next
-     * SPI_execute_plan call -- this function borrows no pointers past return. */
     if (!have_obj || !have_subj)
         return false;
     {
-        int64 delta = obj_ord - subj_ord;   /* int64: ordinals are no longer 16-bit */
+        int64 delta = obj_ord - subj_ord;
         if (delta < 0) delta = -delta;
         *distance = (uint64) delta;
         return true;
@@ -502,11 +393,8 @@ typedef struct WalkNode
     int64   witnesses;
 } WalkNode;
 
-/* Final ordering key: depth ascending, path_mu descending, creation order
- * ascending — the same total order the previous per-comparison numeric_cmp
- * insertion sort produced (insertion sort was stable, so creation index is
- * the exact tie-break), at O(n log n) native compares instead of O(n²)
- * numeric function calls. */
+/* Emission order: depth ascending, path mu descending, creation order
+ * ascending. */
 typedef struct WalkOrderKey
 {
     int     depth;
@@ -562,7 +450,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(0))
     {
-        /* An unresolved prompt has no start node: abstain with no rows. */
+        /* No resolved start entity: no rows. */
         InitMaterializedSRF(fcinfo, 0);
         return (Datum) 0;
     }
@@ -590,24 +478,14 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                           &topic_bias, &bias_nulls, &n_topic_bias);
     }
     /*
-     * Opt-in, default false: ordinal_continuity_distance's containment probe
-     * has no locality restriction, so physicalities (HASH-partitioned
-     * 64 ways) pays a 64-partition Append scan on every miss -- measured
-     * 42ms/call live via EXPLAIN ANALYZE, and misses are the COMMON case
-     * (most walked entities aren't a trajectory constituent of anything).
-     * Per-candidate calls across an unfiltered deep walk were
-     * caught turning a sub-second regress test into 24s. Needs a
-     * hilbert-band-scoped search before it's cheap enough to default on --
-     * tracked as follow-up, not shipped silently slow. recall_walk_response
-     * (the live-served path) does not opt in.
+     * Opt-in: the continuity probe is one containment query per shortlisted
+     * candidate, with no locality restriction on the hash-partitioned
+     * physicalities, so a miss scans every partition.
      */
     ordinal_continuity_enabled = (PG_NARGS() > 6 && !PG_ARGISNULL(6)) ? PG_GETARG_BOOL(6) : false;
     /*
-     * Opt-in, default false, for the reason given above WALK_BATCH_QUERY: the
-     * coordinate fetch costs 74x the whole edge scan and buys an ordering
-     * nudge bounded at +2.0. Off, the walk ranks on adjudicated belief alone,
-     * which is what INVENTION SS9 rules anyway -- geometry is instrument-tier
-     * and point proximity is not the relatedness signal.
+     * Opt-in: selects the coordinate-carrying plan (see WALK_BATCH_QUERY).
+     * Geometry only breaks belief ties; point proximity is not relatedness.
      */
     use_geometry = (PG_NARGS() > 7 && !PG_ARGISNULL(7)) ? PG_GETARG_BOOL(7) : false;
 
@@ -633,15 +511,9 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     n_nodes = 1;
 
     /*
-     * Global dedup across the whole walk, not just per-path -- the actual
-     * fix for the exponential blowup. The original per-path exclusion array
-     * only stopped a node from revisiting its OWN ancestors; it did nothing
-     * to stop sibling/cousin branches from independently re-discovering and
-     * re-expanding the same popular hub entity, which is exactly what turns
-     * a beam search into an unbounded tree. Once an entity has been placed
-     * anywhere in the walk (necessarily via the best-ranked edge that could
-     * reach it, since edges are processed in rank order), a worse/deeper
-     * rediscovery adds no information a beam search should keep.
+     * Dedup across the whole walk, not per path: an entity is placed once,
+     * under the first frontier member at the first level that reaches it, so
+     * sibling branches never re-expand the same hub.
      */
     {
         HASHCTL ctl;
@@ -674,10 +546,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
             n_frontier = frontier_end - frontier_start;
 
-            /* This level can add at most p_breadth children per frontier
-             * member. Reserve that exact requested work once, rather than
-             * repeatedly doubling a guessed capacity and then failing at an
-             * unrelated fixed global node count. */
+            /* A level adds at most beam children per frontier member;
+             * reserve exactly that. */
             {
                 int64 level_capacity = (int64) n_nodes
                                      + (int64) n_frontier * (int64) beam;
@@ -790,20 +660,17 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     double    base;
 
                     /*
-                     * 3Ca: refutation is no longer a hard drop -- signed
-                     * folded belief (below) naturally pushes refuted consensus.edges(eff_mu
-                     * below neutral) to a negative base, so they qsort last
-                     * but still appear in output (doc 15 I2: confirming a
-                     * response = confirming the edges it walked; refuting
-                     * must be equally visible, not silently absent).
+                     * Refuted cells are not filtered here: signed belief gives
+                     * them a negative base, so they sort last and the placement
+                     * loop below stops before them.
                      */
                     if (raw[j].object_is_relation_type)
-                        continue; /* object is itself a RelationType meta-entity */
+                        continue; /* object is a relation type */
                     obj_id = datum_to_hash128(raw[j].object);
                     hash_search(seen, &obj_id, HASH_FIND, &found2);
                     if (found2)
                         continue; /* already placed elsewhere in this walk */
-                    /* 3Cb: hard-gate on the caller's intent mask, if given. */
+                    /* Gate on the caller's relation mask, if given. */
                     if (have_intent_mask && !mask_overlaps(raw[j].highway_mask, &intent_mask))
                         continue;
 
@@ -821,13 +688,12 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                             ? math4d_angular_distance(raw[j].subj_xyzm, raw[j].obj_xyzm)
                             : 0.0;
                     /*
-                     * No partition-band bonus. laplace.physicalities is
-                     * HASH(id) over 64 partitions, not RANGE over hilbert
-                     * bands, so equal tableoids mean "same hash bucket" and
-                     * nothing else -- the bonus was paid on collision.
+                     * Partition oids are read but not scored: physicalities is
+                     * hash-partitioned by id, so equal partitions carry no
+                     * locality.
                      */
 
-                    /* 3Cd: session/topic frontier bias. */
+                    /* Membership in the caller's topic set (a tie-break). */
                     if (topic_bias != NULL)
                     {
                         for (int t = 0; t < n_topic_bias; t++)
@@ -857,11 +723,9 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
 
                 /*
-                 * 3Cc trajectory-ordinal continuity: belief remains the
-                 * primary key and continuity only breaks equal-belief ties.
-                 * Probe the exact admission prefix through the complete tie
-                 * at the beam boundary; a fixed beam multiplier can truncate
-                 * a larger tie and silently choose the wrong members.
+                 * Continuity only breaks equal-belief ties, so probe the beam
+                 * prefix extended through the whole tie at the beam boundary,
+                 * then re-sort.
                  */
                 if (ordinal_continuity_enabled)
                 {
@@ -875,7 +739,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                             shortlist_n++;
                     }
                     for (int s = 0; s < shortlist_n; s++)
-                        if (cands[s].base > 0.0) /* confirmed-only, same gate as 3Cc */
+                        if (cands[s].base > 0.0) /* only placeable candidates */
                         {
                             cands[s].continuity_known = ordinal_continuity_distance(
                                 nodes[f].entity,
@@ -892,17 +756,9 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     bool found3;
 
                     /*
-                     * Scoring is signed (3Ca) so refutation is visible in
-                     * ranking rather than silently dropped from
-                     * consideration -- but a net-negative candidate must
-                     * still never become a WALKED node, even when it's the
-                     * only option at this step (caught live in regress,
-                     * converse.sql's deliberate "syn_bad" refuted-edge
-                     * fixture: a beam with nothing else available must dead-
-                     * end, not walk into the refuted claim by default).
-                     * cands[] is sorted belief-descending, so the first
-                     * non-positive belief means every remaining candidate is
-                     * also non-positive -- stop placing, don't just skip.
+                     * A non-positive belief is never walked, even when it is
+                     * the only candidate: the branch dead-ends. cands[] is
+                     * belief-descending, so the first one ends placement.
                      */
                     if (cands[k].base <= 0.0)
                         break;
@@ -940,7 +796,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
         }
         qsort(keys, n_nodes, sizeof(WalkOrderKey), walk_order_cmp);
 
-        /* keys[0] is the root (unique depth 0) — skipped, as before. */
+        /* keys[0] is the root (the only depth-0 node); it is not emitted. */
         for (int oi = 1; oi < n_nodes; oi++)
         {
             int    i = keys[oi].idx;
@@ -977,7 +833,7 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(0))
     {
-        /* An unresolved prompt has no start node: abstain with no rows. */
+        /* No resolved start entity: no rows. */
         InitMaterializedSRF(fcinfo, 0);
         return (Datum) 0;
     }
@@ -985,9 +841,8 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
     type_null = PG_ARGISNULL(1);
     if (!type_null)
         type_datum = PG_GETARG_DATUM(1);
-    /* NULL means walk until the strongest chain ends or reaches an entity it
-     * has already seen. The old implicit depth 8 truncated a cycle-safe greedy
-     * chain for reasons unrelated to either the data or the caller. */
+    /* NULL depth walks until the strongest chain ends or would revisit an
+     * entity already in it. */
     max_depth = PG_ARGISNULL(2) ? PG_INT32_MAX : PG_GETARG_INT32(2);
     if (max_depth < 0)
         ereport(ERROR, (errmsg("walk_strongest: depth must be >= 0")));
@@ -1068,9 +923,10 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 #define VFLAG_ATOM_SHIFT 31
 #define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
 
-/* One batch closure request supplies native assembly. constituents_closure.c
- * owns the shared frontier walk and deterministic manifest selection; this
- * renderer consumes ordered edges and expands their run lengths into text. */
+/* REALIZE of compositions to content: one closure read
+ * (realize.constituents_closure, constituents_closure.c) returns every
+ * reachable parent's ordered children with run lengths and flags; the
+ * renderer expands them recursively into bytes, emitting atoms by codepoint. */
 static const char *CLOSURE_QUERY =
     "SELECT parent_id, child_id, run_length, flags "
     "FROM realize.constituents_closure($1, $2) "
@@ -1182,8 +1038,8 @@ closure_parent_push(ClosureParent *p, Datum child, int32 run, int64 flags)
 }
 
 /*
- * Bulk-fetch the constituent DAG for every root in one SPI round-trip.
- * Returns an HTAB keyed by parent entity id (16-byte blob).
+ * The constituent DAG of every root in one SPI call, as an HTAB keyed by
+ * parent id (16 bytes) holding ordered children.
  */
 static HTAB *
 fetch_constituents_closure(Datum *roots, int n_roots, int32 max_depth)
@@ -1340,8 +1196,7 @@ Datum pg_laplace_render_text_batch(PG_FUNCTION_ARGS);
 Datum pg_laplace_render_bytes_batch(PG_FUNCTION_ARGS);
 static Datum render_batch(FunctionCallInfo fcinfo, bool as_bytes);
 
-/* Scalar entry points use the same batch operation, including closure selection,
- * validation, cycle handling and native assembly. */
+/* Scalar entry points are one-element calls of the batch operation. */
 static Datum
 render_single(Datum id, int32 max_depth, bool as_bytes, bool *isnull)
 {
@@ -1486,8 +1341,8 @@ render_batch(FunctionCallInfo fcinfo, bool as_bytes)
         }
         int rendered_length;
         rendered = render_node(closure, memo, elems[i], 0, max_depth, &rendered_length);
-        // PostgreSQL text cannot represent U+0000. The bytea content surface can;
-        // never truncate an admitted Unicode sequence to fit a text result.
+        // text cannot hold U+0000; such content is NULL as text and whole as
+        // bytea, never truncated.
         if (rendered == NULL || rendered_length == 0
             || (!as_bytes && memchr(rendered, 0, rendered_length) != NULL))
             out_nulls[i] = true;

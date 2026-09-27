@@ -1,25 +1,16 @@
 namespace Laplace.Modality.Chess;
 
 /// <summary>
-/// What a GAME proves about the rules it was played under — and therefore which rule sets
-/// it could be, rather than which one a tag claims.
+/// What a game's moves prove about the rules it was played under, and therefore which rule
+/// sets it could be. The PGN <c>[Variant "..."]</c> tag is one witness; the moves are read
+/// for constraints: material appearing without a capture proves drops, a capture removing
+/// bystanders proves atomic, a king ending on a centre square without mate is evidence of
+/// King of the Hill.
 ///
-/// WHY EVIDENCE AND NOT A TAG. The PGN <c>[Variant "..."]</c> header is one witness, and a
-/// weak one: sites spell it differently, omit it, and get it wrong. The MOVES cannot lie.
-/// A piece that appears with no capture to explain it proves drops. A capture that removes
-/// bystanders proves atomic. A king that ends on a centre square with the opponent not
-/// mated is evidence of King of the Hill. So the game is read for constraints and the
-/// constraints pick out candidates.
-///
-/// A SET, NOT AN ANSWER. Most games are consistent with several rule sets, because most
-/// games never exercise the rule that distinguishes them — a King-of-the-Hill game decided
-/// by ordinary checkmate is indistinguishable from standard, and saying "standard" would be
-/// a guess dressed as a fact. So this narrows and stops. One candidate: attest it. Several:
-/// attest the observations and not the guess. None: the rules are ones nobody pre-seeded,
-/// which is not an error — the rule surface mints its own id and the substrate has learned
-/// a variant by being shown one.
-///
-/// Unattested is not attested-false, applied to rules instead of to relations.
+/// The result is a candidate set, not an answer: most games never exercise the rule that
+/// distinguishes variants, and an unexercised rule is unknown, not false. When no pre-seeded
+/// set survives, <c>Observed</c> gives the rules the game does prove, whose rule
+/// surface has its own content id.
 /// </summary>
 public sealed record ChessVariantEvidence
 {
@@ -58,8 +49,7 @@ public sealed record ChessVariantEvidence
     /// The pre-seeded rule sets this evidence does NOT rule out, most specific first.
     ///
     /// Elimination, not scoring: a candidate survives only if nothing observed contradicts
-    /// it. Rules that were never exercised cannot eliminate anything, which is why the
-    /// result is usually a set.
+    /// it. Unexercised rules eliminate nothing, so the result is usually a set.
     /// </summary>
     public IReadOnlyList<(string Name, ChessVariantRules Rules)> Candidates()
     {
@@ -67,9 +57,8 @@ public sealed record ChessVariantEvidence
         foreach (var (name, rules) in ChessVariants.Conventional)
             if (!Contradicts(rules)) live.Add((name, rules));
 
-        // A claimed tag does not decide, but among survivors it ranks: the source's own
-        // statement is evidence, and where the moves have not contradicted it, it is the
-        // best evidence available.
+        // The claimed tag does not decide, but it ranks first among survivors the moves
+        // have not contradicted.
         if (ChessVariants.ByName(ClaimedVariant) is { } claimed)
             live.Sort((a, b) => (b.Item2 == claimed).CompareTo(a.Item2 == claimed));
         return live;
@@ -84,25 +73,17 @@ public sealed record ChessVariantEvidence
 
     /// <summary>
     /// The rules this game proves it was played under, whether or not anyone named them.
-    /// Observations become axes directly; unexercised axes keep the standard default. This
-    /// is what gets an id when no pre-seeded set matches — the variant nobody registered.
+    /// Observations become axes directly; unexercised axes keep the standard default.
     /// </summary>
     public ChessVariantRules Observed() => new()
     {
         Files = Files,
         Ranks = Ranks,
         Pieces = PiecesSeen.Length > 0 ? PiecesSeen : ChessVariantRules.Standard.Pieces,
-        // ONLY RAISE FROM POSITIVE EVIDENCE, NEVER LOWER FROM ABSENCE.
-        //
-        // Castling stays at the standard default whatever was observed. Seeing a castle
-        // proves castling exists; NOT seeing one proves nothing — most games never castle.
-        // An earlier cut wrote `Castling = CastlingObserved || ...`, so a game that merely
-        // never castled minted the rule surface "nocastle:1,atomic:1" instead of "atomic:1"
-        // — a DIFFERENT variant from the one it actually was, and two recordings of the same
-        // rules stopped colliding. That is unattested read as attested-false, in the one
-        // place this design cannot afford it.
-        //
-        // Nothing a game does can prove castling is forbidden, so nothing here lowers it.
+        // Axes are raised only by positive evidence, never lowered by absence. Seeing a castle
+        // proves castling exists; not seeing one proves nothing, and no game can prove castling
+        // forbidden, so castling stays at the standard default and a game that never castled
+        // has the same rule surface as one that did.
         Castling = ChessVariantRules.Standard.Castling,
         Drops = MaterialAppeared,
         CaptureExplodes = CollateralCapture,

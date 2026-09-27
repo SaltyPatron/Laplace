@@ -23,24 +23,21 @@ public sealed record ChessReplayResult(
     string? Truncated);
 
 /// <summary>
-/// Replays typed move trajectories or parses PGN supplied at an interchange boundary.
-/// The stored record is the former: reusable move objects ordered by the reusable line's
-/// physicality, with sparse playing-specific source annotations in parallel trajectories.
+/// Replays a line's typed move trajectory, or PGN supplied at an interchange boundary. The
+/// stored form is the trajectory: reusable move entities ordered by the line's physicality,
+/// with sparse playing-specific annotations in parallel trajectories.
 ///
-/// The positions are NOT reconstructed-and-thrown-away, though. Every board here is
-/// hashed through ChessCompose to the same perfcache address used by the analyzer. A line's
-/// evictable position projection carries those points without depositing a SQL entity tree for
-/// every board or duplicating each adjacent pair as a MOVE consensus row.
+/// Every replayed board is composed through ChessCompose to the same perfcache address the
+/// analyzer uses; a line's evictable position projection carries those points without a SQL
+/// entity tree per board or a MOVE consensus row per adjacent pair.
 ///
-/// SAN never gets parsed twice. Resolution goes through San.Resolve against the engine's
-/// own legal-move list, the same call the analyzer and the book decomposer make.
+/// SAN resolves once, through San.Resolve against the engine's legal-move list.
 /// </summary>
 public static partial class ChessReplay
 {
-    // Movetext dialect: braced comments ({[%clk ...]}, annotations), NAGs ($1), move
-    // numbers ("12." / "12..."), RAV variations, and the trailing result token. The book
-    // decomposer's tokenizer handles the PROSE dialect (bare algebraic in running text)
-    // and is deliberately not reused here — different input, different noise.
+    // PGN movetext grammar: braced comments ({[%clk ...]}, annotations), NAGs ($1), move
+    // numbers ("12." / "12..."), RAV variations and the trailing result token. Bare
+    // algebraic in running prose is a different grammar, tokenized by the book decomposer.
     [GeneratedRegex(@"\{[^{}]*\}")]
     private static partial Regex CommentRegex();
 
@@ -53,10 +50,9 @@ public static partial class ChessReplay
     private static readonly string[] ResultTokens = ["1-0", "0-1", "1/2-1/2", "*"];
 
     /// <summary>
-    /// Replay a movetext. Returns every ply it could legally play; if a token fails to
-    /// resolve, the walk STOPS there and says so in <c>Truncated</c> rather than skipping
-    /// it — a move that will not play means the boards after it are fiction, and serving
-    /// fiction next to witnessed record is the one thing this must not do.
+    /// Replay a movetext. Returns every ply it could legally play; at the first token that
+    /// does not resolve the walk stops and sets <c>Truncated</c>, since every board after an
+    /// unplayable move would be invented.
     /// </summary>
     public static ChessReplayResult Replay(string? movetext, int maxPlies = 1024)
     {

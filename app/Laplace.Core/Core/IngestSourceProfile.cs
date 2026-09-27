@@ -8,26 +8,17 @@ namespace Laplace.Engine.Core;
 public sealed record IngestSourceProfile(
     int EstBytesPerRecord,
     int EstComposeUnitsPerRecord = 1,
-    // RESIDENT BYTES PER COMPOSE UNIT — NOT INPUT BYTES. EstBytesPerRecord carried both
-    // meanings and they are not the same quantity: record scheduling uses serialized input
-    // width, while WorkingSetBytesPerRecord uses the size of the NATIVE COMPOSE TREES a
-    // record leaves resident. A CoNLL-U sentence is ~2 KB of text and composes into
-    // trees whose geometry is two orders of magnitude larger, so one constant could not be
-    // right for both and the working-set arm was the one that was wrong.
-    //
-    // This is why the record cap could not act as the backstop
-    // ResolveFlushEnvelopeRecordCap's summary claims: the cap exists to bound the set when
-    // StagedBytesEstimate under-reports resident cost, but it is DERIVED from this same
-    // per-record model, so an under-declaration here propagates into the guard against it.
-    //
-    // Null = keep the old behaviour (resident == EstBytesPerRecord), so every source that
-    // has not been measured is unchanged by this field's existence.
+    // Resident bytes of the native compose trees one compose unit leaves live, distinct
+    // from serialized input width: record scheduling uses EstBytesPerRecord, while
+    // WorkingSetBytesPerRecord uses this. The flush record cap is derived from it, so an
+    // under-declaration here weakens the guard against under-reported staged bytes.
+    // Null means resident width equals EstBytesPerRecord.
     int? ResidentBytesPerComposeUnit = null)
 {
     public static readonly IngestSourceProfile Default =
         new(IngestSizing.DefaultEstBytesPerRecord, 1);
 
-    /// <summary>Unicode codepoint — tens of bytes, one compose tree.</summary>
+    /// <summary>Unicode codepoint record — tens of bytes, one compose tree.</summary>
     public static readonly IngestSourceProfile Unicode = new(48, 1);
 
     /// <summary>
@@ -37,65 +28,33 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile RelationTriple = new(8_192, 2);
 
     /// <summary>UD sentence — a few KB of CoNLL-U tokens per record.</summary>
-    // The UD content forest reuses nodes already present in the sentence tree and
-    // builds independent trees only for content absent from it (differing lemmas,
-    // Gloss/Translit, MWT surfaces). This multiplier must track that fan: it is the denominator of
-    // ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes.
-    //
-    // RESIDENT BYTES MEASURED FROM THE OOM ITSELF, 2026-08-17. The kernel killed
-    // pid 2554813 at anon-rss 81,742,592 kB (78.0 GiB) on file 25/686, run
-    // 31986555723. The enforcement chain was working: ShouldCloseWorkingSet took
-    // Math.Min(commit_rows 24576, flushEnvelopeCap 3276) = 3,276 records per set, and
-    // file_workers=10 sets ran concurrently, so the resident population was
-    // 10 x 3,276 x 32 = 1,048,320 compose units. 83,729,502,208 B / 1,048,320 =
-    // 79,870 B per unit, against the 2,048 the input-size constant implied — a 39x
-    // under-declaration, which is why a correctly-enforced 512 MiB envelope held 7.8 GiB.
-    //
-    // 80,000 attributes ALL of RSS to compose trees and so slightly OVER-states them
-    // (the content bank, GC heap and Npgsql buffers are in that number too). For a
-    // memory bound, over-stating is the safe direction: it closes sets earlier. The
-    // honest reading is "no more than 80 KB per tree", not "exactly".
-    //
-    // That run predated constituent reuse and therefore measured the old 32-tree
-    // forest. The current real-corpus gate measures 14,676 independent trees over
-    // 2,000 sentences (7.34/sentence) from the largest v2.17 file. Sixteen leaves
-    // >2x average headroom, while the 2.5 resident slack still covers adversarial
-    // sentences whose source text is absent and cannot supply token-form nodes.
+    // The sentence's content forest reuses nodes already present in the sentence tree
+    // and builds independent trees only for content absent from it (differing lemmas,
+    // Gloss/Translit, multiword surfaces). The compose-unit count tracks that fan and is a
+    // denominator of ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes. The
+    // resident width is an upper bound per tree: over-stating closes sets earlier.
     public static readonly IngestSourceProfile UdSentence =
         new(2_048, 16, ResidentBytesPerComposeUnit: 80_000);
 
     /// <summary>Kaikki wiktextract JSON — tens of KB per entry, many tier trees each.</summary>
-    // MEASURED 2026-08-01 over 20,000 records of the 20.4 GB raw-wiktextract-data.jsonl:
-    // the mean record is 6,158 bytes. The previous 12,000 was an estimate nothing ever
-    // checked, and it is the denominator of the per-worker memory calculation, so it
-    // needlessly shrank every batch across a 20 GB corpus. Rounded up to 6,500 for tail
-    // variation.
-    // IngestRecordSizeMeasurementTests keeps this honest against the real file.
-    //
-    // EstComposeUnits sizes ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes.
-    // Sampled ~26 surfaces/entry. Units=1 under-counted and packed ~0.8M-row verifies;
-    // units=64 over-sharded (~500 records/apply) and paid ~1.3–2.5s verify fixed cost
-    // per shard → ~100 committed input/s (measured 2026-08-06). Units=12 targets
-    // ~recordCap≈2.7k so verify amortizes without returning to the mega-flush.
+    // Byte width is the corpus mean record rounded up for tail variation; a test checks
+    // it against the source file. The compose-unit count sizes
+    // ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes so one working set
+    // amortizes presence verification without growing into a single oversized flush.
     public static readonly IngestSourceProfile Wiktionary = new(6_500, 12);
 
     /// <summary>Document ingest — large text blobs per file chunk.</summary>
     public static readonly IngestSourceProfile Document = new(64_000, 1);
 
     /// <summary>
-    /// Chess PGN game. OTB-2025 measures 256,162,073 bytes / 221,634 games =
-    /// 1,156 serialized bytes/game. The pre-normalization writer measured about 291
-    /// staged rows/game (~44 KiB of tuple payload at the apply estimator's 152 B/row),
-    /// so 64 KiB is the conservative resident compose width. Keeping input width and
-    /// resident width separate removes the former magic 256,001-byte sentinel whose only
-    /// purpose was to enter a special sizing branch.
+    /// PGN game — about 1.2 KB serialized, with a resident compose width covering the
+    /// staged rows one game expands into.
     /// </summary>
     public static readonly IngestSourceProfile ChessPgn =
         new(1_200, 1, ResidentBytesPerComposeUnit: 64_000);
 
     /// <summary>
-    /// Chess analysis derive — same working-set class as <see cref="ChessPgn"/>
-    /// (fused Compose and standalone chess-analyze share the explosion shape).
+    /// Game-analysis derivation — the same working-set shape as <see cref="ChessPgn"/>.
     /// </summary>
     public static readonly IngestSourceProfile ChessAnalyze =
         new(1_200, 1, ResidentBytesPerComposeUnit: 64_000);
@@ -103,15 +62,10 @@ public sealed record IngestSourceProfile(
     /// <summary>WordNet synset/sense line — small text, many emitted rows per line.</summary>
     public static readonly IngestSourceProfile WordNet = new(4_096, 4);
 
-    // The profiles below replace hardcoded record-batch literals that lived in individual
-    // decomposers (`options.BatchSize > 1 ? options.BatchSize : 2048`) and bypassed this
-    // memory model entirely — a per-source constant cannot track the box, which is the
-    // whole reason IngestSizing/MemoryTopology exist. Values are per-record BYTE estimates,
-    // not batch sizes: IngestSizing.ResolveRecordBatch turns them into a batch under the
-    // RAM budget, so they are bounded by construction.
+    // Values are per-record byte estimates, not batch sizes:
+    // IngestSizing.ResolveRecordBatch turns them into a batch under the RAM budget.
 
-    /// <summary>Tatoeba CSV row — id + lang + one sentence. Was borrowing Wiktionary's
-    /// 12 KB profile, over-estimating a ~100-byte row by ~100x.</summary>
+    /// <summary>Tatoeba CSV row — id, language, and one sentence.</summary>
     public static readonly IngestSourceProfile Tatoeba = new(512, 1);
 
     /// <summary>CILI line — an ILI id and a short definition.</summary>
@@ -138,14 +92,14 @@ public sealed record IngestSourceProfile(
         new(384, 1, ResidentBytesPerComposeUnit: 2_048);
 
     /// <summary>
-    /// Image packaging → RGBA recovery buffer size dominates; scalar channel roots
-    /// are reusable content and image occurrences/shape are completed under #1134.
+    /// Image packaging; the recovered RGBA buffer dominates resident size. Channel values
+    /// compose from reusable scalar content.
     /// </summary>
     public static readonly IngestSourceProfile MediaImage = new(256_000, 1);
 
     /// <summary>
-    /// Audio packaging → PCM16 mono recovery size dominates; exact integer sample
-    /// roots are reusable scalar content and rate/channel/occurrence state is #1134.
+    /// Audio packaging; the recovered PCM16 mono buffer dominates resident size. Integer
+    /// samples compose from reusable scalar content.
     /// </summary>
     public static readonly IngestSourceProfile MediaAudio = new(128_000, 1);
 
@@ -159,7 +113,7 @@ public sealed record IngestSourceProfile(
     /// <summary>
     /// Bytes retained before a record has been composed: the parsed/source record plus
     /// the declared deferred-compose residency. Once a deferred unit exists the pipeline
-    /// replaces the latter estimate with the unit's actual native tree capacity.
+    /// sizes it by its native tree capacity instead.
     /// </summary>
     public long UncomposedResidentBytesPerRecord => checked(
         (long)Math.Max(1, EstBytesPerRecord) + WorkingSetBytesPerRecord);

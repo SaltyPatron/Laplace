@@ -5,8 +5,8 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessCorpusCompletionTests
 {
-    // All inline PGNs below are synthetic controls for parser policy, not corpus
-    // acquisitions or throughput evidence. The recorded fixture is read unchanged.
+    // Inline PGNs below are synthetic parser-policy inputs; the recorded fixture is read
+    // unchanged.
     private static string Pgn(string moves, string? result = "1-0", string extra = "") =>
         "[Event \"Synthetic corpus completion control\"]\n"
         + "[Site \"test-only\"]\n[Date \"2026.09.16\"]\n[Round \"1\"]\n"

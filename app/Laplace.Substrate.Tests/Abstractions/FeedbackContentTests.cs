@@ -21,7 +21,7 @@ public class FeedbackContentTests
     [Fact]
     public void TryResolveRelation_OrdinaryTokensAndAliases_Rejected()
     {
-        // Lowercase words must never be misread as relations (triple-mode guard).
+        // A lowercase word is never read as a relation.
         Assert.False(FeedbackContent.TryResolveRelation("cat", out _));
         Assert.False(FeedbackContent.TryResolveRelation("is_a", out _));
         Assert.False(FeedbackContent.TryResolveRelation("", out _));
@@ -43,7 +43,7 @@ public class FeedbackContentTests
         Assert.Equal(AttestationOutcome.Confirm, ca.Outcome);
         Assert.Equal(AttestationOutcome.Refute, ra.Outcome);
 
-        // Same triple ⇒ same consensus arena: subject/type/object identical.
+        // Same triple, same consensus cell: subject, type and object are identical.
         Assert.Equal(RelationTypeRegistry.RelationTypeId("IS_A"), ca.TypeId);
         Assert.Equal(ca.SubjectId, ra.SubjectId);
         Assert.Equal(ca.TypeId, ra.TypeId);

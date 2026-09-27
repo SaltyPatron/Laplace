@@ -13,14 +13,13 @@ extern "C" {
 #endif
 
 /*
- * Entity-type labels for the current image/audio ladder.
+ * Entity-type labels for the image/audio ladder.
  * Image: Codepoint/Number/Channel/Pixel/Patch/Region/Image.
  * Audio: Codepoint/Sample/Window/OnsetSegment/Phrase/Track.
  *
  * Number/Sample scalar content is composed from canonical codepoint sequences and
  * reused across occurrences. The modality-number ROM accelerates common 0..255 roots;
- * it does not define the numeric domain. GH #1134 owns exact media occurrence,
- * rate/channel/precision/shape and reconstruction semantics.
+ * it does not define the numeric domain.
  */
 hash128_t laplace_modality_tier_type_id(laplace_modality_t modality, uint8_t tier);
 
@@ -39,7 +38,7 @@ int laplace_audio_tree_build(
 /*
  * Emit a composed modality tree into intent_stage. Codepoint leaves are not emitted
  * because they already exist in the shared floor; reusable scalar roots/higher
- * structures are staged as needed. GH #1134 owns remaining occurrence metadata.
+ * structures are staged as needed.
  */
 int laplace_modality_witness_emit_tree(
     intent_stage_t*       stage,

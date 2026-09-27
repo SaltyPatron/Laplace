@@ -1,4 +1,3 @@
--- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace.arena_counts();
 CREATE OR REPLACE FUNCTION ops.arena_counts()
     RETURNS TABLE(type text, type_id bytea, relations bigint, witnesses bigint,

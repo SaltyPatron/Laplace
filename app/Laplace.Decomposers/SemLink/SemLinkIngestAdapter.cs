@@ -22,8 +22,8 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
         byte[]? utf8 = await ReadFileBytesAsync(_path, ct);
         if (utf8 is null || utf8.Length == 0) yield break;
 
-        // Span discovery is Utf8JsonReader (one sequential pass) — not a full Grammar AST
-        // of the document followed by a reparse of every pair.
+        // Span discovery is one sequential Utf8JsonReader pass, not a full grammar AST of
+        // the document plus a reparse of every pair.
         var pairSpans = ReadTopLevelPairSpans(utf8, recipe);
         if (pairSpans.Count == 0) yield break;
 
@@ -55,8 +55,8 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
     }
 
     /// <summary>
-    /// Top-level object property byte ranges. Prefer <see cref="Utf8JsonReader"/>;
-    /// fall back to a single Grammar AST walk only when the JSON reader rejects the file.
+    /// Top-level object property byte ranges, from <see cref="Utf8JsonReader"/>; a file the
+    /// JSON reader rejects is read with one grammar AST walk instead.
     /// </summary>
     internal static List<(uint Start, uint End)> ReadTopLevelPairSpans(byte[] utf8, IntPtr recipe)
     {
@@ -67,7 +67,7 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
         }
         catch (JsonException)
         {
-            // Fall through to Grammar AST.
+            // Read with the grammar AST below.
         }
 
         var spans = new List<(uint, uint)>();

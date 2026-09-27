@@ -32,8 +32,8 @@ public static class ChessGuiGameEvidence
             || PgnGames.TagStr(text, "Variant") is not ("" or "standard"))
             throw new InvalidDataException("GUI acceptance requires the orthodox initial board");
 
-        // The established owner parses the complete native grammar and replays all
-        // legal SAN. Clock losses are reported separately from board terminal proof.
+        // ChessPgnDecomposer parses the complete grammar and replays all SAN legally; a
+        // clock loss is reported separately from a board-terminal finish.
         bool boardTerminal = termination.Length == 0;
         var game = ChessPgnDecomposer.TryParseGame(text,
             requireNormalCompletion: boardTerminal, requireCompleteSource: true)

@@ -1,10 +1,8 @@
 namespace Laplace.Agents;
 
 /// <summary>
-/// The request/response shapes used by installed hosted models. A
-/// provider is not a protocol: xAI, Groq, DeepSeek, Mistral, OpenRouter and
-/// Ollama all speak <see cref="OpenAiChat"/>, so they cost one table row each
-/// rather than one client each.
+/// The request/response body shapes an external model host speaks. Many providers
+/// share <see cref="OpenAiChat"/>, so a provider is a table row, not a client.
 /// </summary>
 public enum AgentWire
 {
@@ -22,10 +20,8 @@ public enum AgentWire
 }
 
 /// <summary>
-/// How a credential is presented. Separate from <see cref="AgentWire"/> because the
-/// two are independent: Anthropic's Messages wire takes a key on <c>x-api-key</c>
-/// but an OAuth access token on <c>Authorization: Bearer</c>, and an SSO gateway in
-/// front of any provider takes a bearer token whatever the body shape is.
+/// How a credential is presented, independent of <see cref="AgentWire"/>: the same
+/// body shape can take a key on the provider's header or a bearer token.
 /// </summary>
 public enum AgentAuth
 {
@@ -38,14 +34,9 @@ public enum AgentAuth
 
 /// <summary>
 /// One external model host: where to POST, how to authenticate, and which
-/// environment variables carry its key.
-///
-/// NO DEFAULT MODEL IS GUESSED. Only <c>anthropic</c> carries one, because it is
-/// the only vendor whose current model id this repository can state from a
-/// checked-in reference rather than from memory. Every other provider requires
-/// the caller (or <c>agents.json</c>) to name the model — an invented id fails as
-/// a 404 at the vendor, which reads as "the agent is down" rather than "nobody
-/// said which model to use".
+/// environment variables carry its key. <see cref="DefaultModel"/> is null unless a
+/// model id is declared in the table; otherwise the caller or <c>agents.json</c>
+/// must name the model.
 /// </summary>
 public sealed record AgentProvider(
     string Id,
@@ -59,9 +50,7 @@ public sealed record AgentProvider(
     string KeyHeader = "Authorization")
 {
     /// <summary>
-    /// Base URLs all end at the version segment, so the wire's path suffix is the
-    /// only thing that varies. Getting this wrong is a 404 that looks like an
-    /// outage, so the invariant is stated once here rather than per call site.
+    /// Base URLs end at the version segment; the wire supplies the path suffix.
     /// </summary>
     public string ResolveBaseUrl(string? overrideUrl) =>
         (string.IsNullOrWhiteSpace(overrideUrl) ? DefaultBaseUrl : overrideUrl!).TrimEnd('/');
@@ -78,17 +67,15 @@ public static class AgentProviders
             ["OPENAI_API_KEY"], MaxTokensField: "max_completion_tokens"),
         new("openai-responses", AgentWire.OpenAiResponses, "https://api.openai.com/v1",
             ["OPENAI_API_KEY"], MaxTokensField: "max_output_tokens"),
-        // x-api-key by default. An OAuth profile token instead rides
-        // Authorization: Bearer with the oauth beta header — set auth "bearer" and
-        // a token_command on the agent; see AgentCatalog.
+        // Key on x-api-key; an agent with auth "bearer" and a token_command sends an
+        // OAuth token on Authorization instead (see AgentCatalog).
         new("anthropic", AgentWire.AnthropicMessages, "https://api.anthropic.com/v1",
             ["ANTHROPIC_API_KEY"], DefaultModel: "claude-opus-5",
             Auth: AgentAuth.KeyHeader, KeyHeader: "x-api-key"),
         new("xai", AgentWire.OpenAiChat, "https://api.x.ai/v1",
             ["XAI_API_KEY"]),
-        // The Generative Language API takes a key header. Vertex AI is OAuth/ADC on
-        // a different base URL — reach it as an openai-compatible or bearer agent
-        // with a token_command, not by flipping a flag here.
+        // Key header on the Generative Language API. An OAuth-fronted host is an
+        // agent with its own base_url, bearer auth and token_command.
         new("google", AgentWire.GoogleGenerative, "https://generativelanguage.googleapis.com/v1beta",
             ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
             Auth: AgentAuth.KeyHeader, KeyHeader: "x-goog-api-key"),
@@ -100,22 +87,20 @@ public static class AgentProviders
             ["DEEPSEEK_API_KEY"]),
         new("mistral", AgentWire.OpenAiChat, "https://api.mistral.ai/v1",
             ["MISTRAL_API_KEY"]),
-        // Local and self-hosted runtimes: an unauthenticated loopback server is the
-        // normal case, so a missing key is not an error for these three.
+        // Local and self-hosted routes: a missing key is not an error.
         new("ollama", AgentWire.OpenAiChat, "http://127.0.0.1:11434/v1",
             ["OLLAMA_API_KEY"], RequiresKey: false),
         new("openai-compatible", AgentWire.OpenAiChat, "",
             ["LAPLACE_AGENT_API_KEY"], RequiresKey: false),
-        // Laplace's own OpenAI-compatible surface. Present so an agent can ask the
-        // substrate the same way it asks a vendor, through one tool.
+        // This install's OpenAI-compatible interface; base URL is resolved from
+        // LaplaceInstall.EndpointBaseUrl by AgentCatalog.
         new("laplace", AgentWire.OpenAiChat, "",
             ["LAPLACE_API_KEY"], RequiresKey: false),
     ];
 
     /// <summary>
-    /// Vendor-branded prefixes only. A bare "llama" or "qwen" is served by a dozen
-    /// hosts, so inferring one would silently route the call to the wrong bill;
-    /// those names must arrive as <c>provider/model</c> or through an alias.
+    /// Vendor-branded prefixes only. Names served by many hosts are not inferred and
+    /// must arrive as <c>provider/model</c> or through an alias.
     /// </summary>
     private static readonly (string Prefix, string Provider)[] NamePrefixes =
     [
@@ -160,9 +145,8 @@ public static class AgentProviders
 }
 
 /// <summary>
-/// A configuration or transport fault on the external-agent lane. Distinct from
-/// <see cref="ArgumentException"/> so a caller can tell "you asked wrongly" from
-/// "the vendor is unreachable" without parsing message text.
+/// A configuration or transport fault calling an external model host. A distinct
+/// type so callers can separate it from argument errors without parsing text.
 /// </summary>
 public sealed class AgentException(string message, Exception? inner = null)
     : Exception(message, inner);

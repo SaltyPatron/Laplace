@@ -1,6 +1,6 @@
--- CREATE TABLE IF NOT EXISTS does not widen an installed table. Preserve existing
--- evidence with its original neutral opponent while allowing the new COPY layout
--- to write explicit opponent ratings; this recurses to existing partitions too.
+-- CREATE TABLE IF NOT EXISTS does not widen an installed table. Existing
+-- evidence keeps the neutral opponent rating and stays replayable; the bulk
+-- COPY writer sets both columns explicitly. ADD COLUMN recurses to partitions.
 ALTER TABLE attestations ADD COLUMN IF NOT EXISTS opponent_rating_fp1e9
     bigint NOT NULL DEFAULT 1500000000000;
 ALTER TABLE attestations ADD COLUMN IF NOT EXISTS fold_replayable

@@ -1,7 +1,7 @@
 DROP FUNCTION IF EXISTS laplace.top_relations(integer, bytea);
 CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
--- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+-- No SET search_path: the clause blocks inlining and the consensus index path.
     LANGUAGE sql STABLE
 BEGIN ATOMIC
 

@@ -9,29 +9,18 @@ using System.Text;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The chess reading room: who played, what they played, and how it went. Chess is
-/// the proving domain because its ground truth is objectively checkable, and this is
-/// where that shows — every number served here is counted off game headers the PGN
-/// decomposer transcribed, so a career record can be checked against the games it came
-/// from, and every game mainline can be replayed from its typed move trajectory.
+/// Chess presentation over the shared web. A player row is the player's folded result
+/// standing (games, rating, rd, eff_mu) read directly from consensus with no cache; a game
+/// is its source headers plus a mainline replayed from the typed move trajectory.
 ///
-/// NOTHING HERE IS CACHED, and that is the point. The roster used to be a corpus-wide
-/// GROUP BY over every game header (~400k rows, ~10s) hidden behind a TTL cache and a
-/// startup prewarm — a cache standing in for a fold. Each game now carries its result
-/// onto the player in the aggregating lane at ingest, so a record is one consensus
-/// cell: witness_count IS games played, eff_mu IS the conservative strength. Ranking
-/// is an ORDER BY over a single relation partition. No TTL, no prewarm, no stale
-/// window, nothing to repopulate.
-///
-/// Exact names still use their content address. Partial names and nearby spellings
-/// use the indexed constituent set of name trajectories to find a bounded candidate
-/// set, then apply human-name matching. That reaches beyond the first ranked page
-/// without turning the player index into a corpus-wide rendered substring scan.
+/// An exact name resolves by the player's content id. Partial names and nearby spellings
+/// go through the indexed constituents of name trajectories to a bounded candidate set,
+/// then human-name matching.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
     /// <summary>
-    /// The ranked roster, straight off the folded cells. Paging is an OFFSET over an index.
+    /// The ranked roster, read from the folded standing cells; paging is an indexed OFFSET.
     /// </summary>
     public Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(
         int limit, int offset, CancellationToken ct)
@@ -47,12 +36,9 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Players whose name begins with a given letter, ranked by strength within it.
-    ///
-    /// Not a rendered sort and not a cached window: a name's first codepoint is vertex 1 of
-    /// its trajectory, so this is an equality test on an indexed expression over the
-    /// authoritative geometry. Browsing reaches every player in the corpus, not just the
-    /// ones a warm list happened to hold.
+    /// Players whose name begins with a given letter, ranked within it. A name's first
+    /// codepoint is vertex 1 of its trajectory, so the filter is an equality test on an
+    /// indexed expression over that trajectory rather than a sort of rendered names.
     /// </summary>
     public async Task<IReadOnlyList<ChessPlayerRow>> ChessPlayersByInitialAsync(
         string initial, int limit, int offset, string sort, string direction,
@@ -61,7 +47,7 @@ internal sealed partial class SubstrateClient
         var rows = await NpgsqlSubstrateReads.ChessPlayersByInitialAsync(
             _dataSource, initial, limit, offset, sort, direction, ct, TranslateReadError);
 
-        // Rank is positional within the letter; the fold's ordering already decided it.
+        // Rank is the row's position within the letter's ordered page.
         return [.. rows.Select((r, i) => new ChessPlayerRow(
             offset + i + 1, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu))];
     }
@@ -131,9 +117,9 @@ internal sealed partial class SubstrateClient
         };
 
     /// <summary>
-    /// Name to player by the decomposer's content address. The same candidate SQL used by
-    /// the roster search owns the standing-cell selection, so exact search cannot fall back
-    /// to an arbitrary OUTCOME edge while the list is scoped to Chess_Result.
+    /// Name to player by content id: runs the roster search's exact candidate read and
+    /// returns only the row whose id equals <c>ChessVocabulary.PlayerId(name)</c>, so the
+    /// standing cell is the same one the roster lists.
     /// </summary>
     public async Task<ChessPlayerRow?> ChessFindPlayerAsync(string name, CancellationToken ct)
     {
@@ -156,9 +142,8 @@ internal sealed partial class SubstrateClient
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        // Validation is ordered because the remaining reads are meaningful only for a player.
-        // Release that connection immediately after the type gate; do not hold it idle while
-        // independent datasource reads execute.
+        // The type check runs first on its own connection, released before the
+        // dependent reads start.
         NpgsqlDisplayLabels.DisplayFacetRow? facet;
         await using (var validation = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
             facet = await NpgsqlDisplayLabels.FacetAsync(
@@ -167,9 +152,8 @@ internal sealed partial class SubstrateClient
             || !playerFacet.TypeId.AsSpan().SequenceEqual(ChessVocabulary.PlayerType.ToBytes()))
             return null;
 
-        // The career record, source ratings, opponents, display surface and identity-profile
-        // evidence are independent once the player gate passes. Let the shared datasource own
-        // bounded connection allocation instead of forcing five request/response turns in series.
+        // Record, source ratings, opponents, display label, and identity-profile edges are
+        // independent reads; they run concurrently on the pooled datasource.
         var recordTask = NpgsqlSubstrateReads.ChessPlayerRecordAsync(
             _dataSource, id, ct, TranslateReadError);
         var ratingsTask = NpgsqlSubstrateReads.ChessPlayerRatingsAsync(
@@ -196,8 +180,7 @@ internal sealed partial class SubstrateClient
             overall,
             MapRecord(record.FirstOrDefault(x => x.AsWhite is true)),
             MapRecord(record.FirstOrDefault(x => x.AsWhite is false)),
-            // Peak is the highest Elo any source ever tagged him with. Ratings come
-            // back rating-descending, so it is the first row — no client-side max.
+            // Peak is the highest source-tagged rating; ratings arrive descending.
             ratingRows.Count == 0 ? null : ratingRows[0].Rating,
             ratingRows, opponentRows, profiles);
     }
@@ -287,8 +270,8 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Reconstruct boards from the playing's associated line trajectory. SAN/PGN/FEN are output
-    /// encodings generated here; none is the stored identity of the moves or positions.
+    /// Reconstructs boards from the playing's line trajectory. SAN, PGN, and FEN are
+    /// realized here as output encodings; none is the stored identity of a move or position.
     /// </summary>
     public async Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct)
     {
@@ -328,9 +311,8 @@ internal sealed partial class SubstrateClient
         if (lineId is null)
             return Laplace.Chess.Service.ChessReplay.Replay(Array.Empty<Laplace.Engine.Core.Hash128>());
 
-        // Once the line identity is known, the line/playing trajectory fetch and setup-position
-        // lookup are independent. Start both before awaiting either; setup decoding remains
-        // ordered because it depends on the optional setup identity.
+        // The line/playing trajectory read and the setup-position lookup run concurrently;
+        // setup decoding follows because it needs the setup id.
         var rowsTask = NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
             _dataSource, [lineId, playingId],
             [PhysicalityType.Content, PhysicalityType.ChessComment],
@@ -340,11 +322,8 @@ internal sealed partial class SubstrateClient
         await Task.WhenAll(rowsTask, setupIdTask).ConfigureAwait(false);
 
         var rows = rowsTask.Result;
-        // The canonical line Content preimage is [start-position, move-1, ... move-N].
-        // The old reader passed the start-position id to ChessReplay as move zero, so the
-        // replay stopped immediately and perfectly valid stored games surfaced as carrying
-        // no playable moves. Preserve the content identity contract and decode only the
-        // tail as moves.
+        // The line's Content trajectory is [start-position, move-1, ... move-N]; only the
+        // tail is replayed as moves, and the head is checked against the setup.
         var content = rows.Where(r => r.Type == PhysicalityType.Content
                                     && r.ParentId.AsSpan().SequenceEqual(lineId))
             .OrderBy(static r => r.Ordinal)
@@ -368,9 +347,9 @@ internal sealed partial class SubstrateClient
 
         if (content.Length == 0)
         {
-            // A true zero-ply playing has ordinary singleton identity: line == start.
-            // Any other line id proves that moves existed in the line preimage, so an
-            // absent Content carrier is missing durable structure, not an empty game.
+            // A zero-ply line is the one-child composition, so its id equals the start
+            // position. Any other line id with no Content trajectory is missing structure,
+            // not an empty game.
             var storedLine = Laplace.Engine.Core.Hash128.FromBytes(lineId);
             if (storedLine != expectedStart)
                 return Laplace.Chess.Service.ChessReplay.Replay(

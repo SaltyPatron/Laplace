@@ -1,22 +1,12 @@
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// The one place C# composes a substrate canonical key.
-///
-/// Canonical ids resolve through the native hash used by realize.canonical_id(),
-/// source_id(), relation_type_id(), and consensus_id().
-/// 152 hand-typed canonical-key literals (raw <c>OfCanonical</c> calls) were scattered
-/// across the app, where a single typo mints a DIFFERENT entity and nothing complains:
-/// the write succeeds, the id is simply wrong forever.
-///
-/// These builders produce byte-identical keys to the SQL surface. Proven, not assumed:
-/// <c>source_id('WordNetDecomposer')</c> and
-/// <c>realize.canonical_id('substrate/source/WordNetDecomposer/v1')</c> both resolve to
-/// 4b1ee33be3034910df7629b2948cde35 on the live DB, and SubstrateCanonicalIdsTests
-/// pins that shape.
-///
-/// Segments are validated rather than trusted: an empty segment or one containing a
-/// path separator would silently change the key, so both throw.
+/// Builders for substrate canonical keys (<c>substrate/…/v1</c>). A key's id resolves
+/// through the same native hash as SQL realize.canonical_id(), source_id(),
+/// relation_type_id(), and consensus_id(), and the builders produce byte-identical keys to
+/// that SQL surface: <c>source_id('X')</c> equals
+/// <c>realize.canonical_id('substrate/source/X/v1')</c>. A mistyped key is a different
+/// entity, so segments are validated: an empty segment or one containing '/' throws.
 /// </summary>
 public static class SubstrateCanonicalKeys
 {
@@ -26,9 +16,8 @@ public static class SubstrateCanonicalKeys
     public static string Source(string name) => Versioned("source", name);
 
     /// <summary>
-    /// Key for a conversation session — the conversational analogue of a chess game id.
-    /// Tenant is part of the key, so a session key can never resolve into another
-    /// tenant's session (spec 34).
+    /// Key for a conversation session. Tenant is part of the key, so a session key can
+    /// never resolve into another tenant's session.
     /// </summary>
     public static string ConversationSession(string tenant, string sessionKey)
     {
@@ -38,9 +27,8 @@ public static class SubstrateCanonicalKeys
     }
 
     /// <summary>
-    /// Free-form key under the substrate root: <c>substrate/a/b/c</c>. Use when the
-    /// family has no dedicated builder above; prefer adding a builder over spreading
-    /// raw segment lists back through the codebase.
+    /// Free-form key under the substrate root: <c>substrate/a/b/c</c>, for families with
+    /// no dedicated builder above.
     /// </summary>
     public static string Of(params string[] segments)
     {

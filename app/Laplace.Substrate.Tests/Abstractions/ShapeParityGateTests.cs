@@ -4,37 +4,28 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// ISA gate G5 — shape parity
-/// (<c>docs/specs/37_Substrate_Operation_ISA.md</c> §7: <i>"converse.query_shapes(), the C dispatch,
-/// and the client menu are not all generated from the §3 table"</i>; plan
-/// <c>docs/plan/W6_Architecture_Gates.md</c> §3/§8.3).
+/// Query-shape parity: every place that names the recall shape vocabulary agrees with the
+/// <c>converse.query_shapes()</c> catalog, and a drifting site fails by name. One of the
+/// sites is prose in an MCP tool description, so agreement is checked rather than generated.
 ///
-/// <para><b>Pin agreement, not generation.</b> W6 §8.3: the fifth declaration is PROSE in
-/// an MCP tool description, and <i>"generating that string is a code change, not a gate."</i>
-/// So this gate asserts the five hand-written declarations agree, and fails by name when
-/// one drifts — which is what the elector invariant (#771) proved is the failure mode
-/// worth catching, a set growing a site while its prose stayed behind.</para>
-///
-/// <para><b>The five declarations</b>, measured 2026-08-05, all currently in agreement —
-/// <b>zero violations</b>, no allowlist:</para>
+/// <para><b>The declarations:</b></para>
 /// <list type="number">
-///   <item><c>converse/query_shapes.sql.in</c> — the catalog: 14 shapes with
-///     <c>needs_topic2</c> / <c>needs_type</c> / <c>accepts_lang</c>. THE SOURCE for
+///   <item><c>converse/query_shapes.sql.in</c> — the catalog: shapes with
+///     <c>needs_topic2</c> / <c>needs_type</c> / <c>accepts_lang</c>; the source for
 ///     everything below.</item>
 ///   <item><c>src/recall_route.c</c> <c>route_intents[]</c> — the C membership test
-///     behind <c>route_intent_known()</c>. Same 14, same order.</item>
+///     behind <c>route_intent_known()</c>; same shapes, same order.</item>
 ///   <item><c>src/recall.c</c> <c>kSingleArgIntents[]</c> — the uniform single-argument
 ///     responders. A SUBSET, so it is gated as a subset, not as equality.</item>
-///   <item><c>src/recall.c</c> two <c>errhint</c>s — the only correct way for C to name
-///     the vocabulary: point at <c>converse.query_shapes()</c> rather than list it a third
-///     time.</item>
+///   <item><c>src/recall.c</c> two <c>errhint</c>s — they point at
+///     <c>converse.query_shapes()</c> rather than list the vocabulary.</item>
 ///   <item><c>Laplace.Endpoints.Mcp/SubstrateTools.cs</c> — the client menu, as English
 ///     prose. Both the shape list AND the three requirement clauses are derived from the
 ///     catalog's boolean columns and checked against it.</item>
 /// </list>
 ///
-/// <para><c>converse/chat.sql.in</c> is a sixth site in practice — it branches on shape
-/// name literals — and is gated as a subset for the same reason as kSingleArgIntents.</para>
+/// <para><c>converse/chat.sql.in</c> branches on shape name literals and is gated as a
+/// subset, like kSingleArgIntents.</para>
 /// </summary>
 public sealed class ShapeParityGateTests
 {
@@ -67,13 +58,11 @@ public sealed class ShapeParityGateTests
         @"\{\s*""(?<name>[a-z_]+)""\s*,", RegexOptions.Compiled);
 
     /// <summary>
-    /// The MCP menu. Anchored on "names the SHAPE" so a reworded sentence around it does
-    /// not silently stop being checked — the anchor missing is itself a failure.
+    /// The MCP menu, anchored on "names the SHAPE"; a missing anchor is itself a failure.
     /// </summary>
     private static readonly Regex McpShapeMenu = new(
-        // Purpose-schema rename: converse.query_shapes() is the live catalog
-        // (laplace.query_shapes is retired). Accept either spelling so an old
-        // comment cannot green a drifted menu.
+        // The menu may cite the catalog as converse.query_shapes() or laplace.query_shapes();
+        // either way its shape list is checked.
         @"names the SHAPE\s*[—-]\s*(?<list>[a-z_,\s]+?)\s*\(SELECT \* FROM (?:laplace|converse)\.query_shapes\(\)",
         RegexOptions.Compiled);
 
@@ -127,9 +116,7 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// Declaration 2. Order matters as much as membership: the two lists are read side by
-    /// side by anyone adding a shape, and an equal-set-but-shuffled pair is exactly the
-    /// state in which a reviewer stops diffing them.
+    /// Declaration 2: same shapes in the same order as the catalog.
     /// </summary>
     [Fact]
     public void ShapeParity_CDispatchMatchesCatalog_InOrder()
@@ -157,9 +144,8 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// Declaration 5, part two — the requirement clauses. These are the part of the prose
-    /// most likely to rot: adding a shape that needs <c>topic2</c> changes a boolean column
-    /// in SQL and an English clause in C#, and nothing connects them but this test.
+    /// Declaration 5, part two — the requirement clauses in the menu prose match the
+    /// catalog's <c>needs_topic2</c> / <c>needs_type</c> / <c>accepts_lang</c> columns.
     /// </summary>
     [Fact]
     public void ShapeParity_McpRequirementProseMatchesCatalogFlags()
@@ -183,9 +169,8 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// Declaration 3 — a subset by design (one table replacing N copy-pasted if-arms), so
-    /// the fact is containment: a single-arg responder for a shape the catalog does not
-    /// publish is unreachable through <c>recall_intent</c>, which rejects unknown shapes.
+    /// Declaration 3 — a subset: a single-argument responder for a shape the catalog does
+    /// not publish is unreachable through <c>recall_intent</c>, which rejects unknown shapes.
     /// </summary>
     [Fact]
     public void ShapeParity_SingleArgRespondersAreCatalogShapes()
@@ -200,9 +185,8 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// Declaration 4 — the two <c>recall_intent</c> rejections. The gate's real content is
-    /// that C refers callers to the catalog instead of enumerating the vocabulary a third
-    /// time; a hint that listed the shapes inline would be a sixth declaration.
+    /// Declaration 4 — the two <c>recall_intent</c> rejections refer callers to the catalog
+    /// instead of enumerating the vocabulary.
     /// </summary>
     [Fact]
     public void ShapeParity_UnknownShapeErrorsPointAtTheCatalog()
@@ -213,9 +197,8 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// The default intent must be a published shape. <c>converse.recall()</c> with no explicit shape
-    /// routes through <c>ROUTE_DEFAULT_INTENT</c>, so a default that fell out of the catalog
-    /// would break the bare-prompt path and nothing else would say so.
+    /// The default intent is a published shape: <c>converse.recall()</c> with no explicit
+    /// shape routes through <c>ROUTE_DEFAULT_INTENT</c>.
     /// </summary>
     [Fact]
     public void ShapeParity_DefaultIntentIsAPublishedShape()
@@ -226,9 +209,8 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// The sixth site W6 does not count: <c>converse.chat()</c> branches on shape name literals.
-    /// Subset, because chat deliberately special-cases only some shapes and delegates the
-    /// rest to <c>recall_intent</c>.
+    /// <c>converse.chat()</c> branches only on catalog shapes. Subset: chat special-cases some
+    /// shapes and delegates the rest to <c>recall_intent</c>.
     /// </summary>
     [Fact]
     public void ShapeParity_ChatBranchesOnCatalogShapesOnly()

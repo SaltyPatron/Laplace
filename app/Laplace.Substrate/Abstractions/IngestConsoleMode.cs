@@ -1,9 +1,8 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Where ingest narration goes. The durable surface is
-/// <c>laplace.ingest_run_journal</c> (+ ops CSV). Console is for operators;
-/// CI must not be a second log warehouse.
+/// Console verbosity of ingest narration. The durable record is
+/// <c>laplace.ingest_run_journal</c> and the ops CSV; the console is for operators.
 /// </summary>
 public enum IngestConsoleVerbosity
 {
@@ -31,7 +30,7 @@ public static class IngestConsoleMode
         }
     }
 
-    /// <summary>Test/override hook — clears on next process naturally.</summary>
+    /// <summary>Overrides the resolved verbosity for this process; null re-resolves.</summary>
     public static void Override(IngestConsoleVerbosity? value) => _cached = value;
 
     private static IngestConsoleVerbosity Resolve()
@@ -44,7 +43,7 @@ public static class IngestConsoleMode
             if (raw.Equals("quiet", StringComparison.OrdinalIgnoreCase))
                 return IngestConsoleVerbosity.Ci;
         }
-        // Actions / CI: journal + file sinks are the record; don't flood the job log.
+        // Under CI the journal and file sinks are the record; keep the job log terse.
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS")))
             return IngestConsoleVerbosity.Ci;
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")))

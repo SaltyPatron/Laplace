@@ -14,7 +14,7 @@ public sealed class PngRgbaDecoderTests
         Assert.Equal(5u, w);
         Assert.Equal(5u, h);
         Assert.Equal(5 * 5 * 4, rgba.Length);
-        // Opaque expansion: every alpha byte is 0xFF for RGB source.
+        // An RGB source expands to opaque RGBA: every alpha byte is 0xFF.
         for (int i = 3; i < rgba.Length; i += 4)
             Assert.Equal(0xFF, rgba[i]);
     }

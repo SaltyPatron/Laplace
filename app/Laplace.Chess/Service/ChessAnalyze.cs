@@ -8,13 +8,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED layer. Derives positions / geometry / motifs / opening classification /
-// consensus by REPLAYING a game's witnessed movetext. Pure deterministic function of the witnessed
-// inputs (movetext + start FEN + per-ply annotation tokens the recorder stored). Emitted under the
-// analysis source and stamped ANALYZED_AT=Version so the analyzer scan skips already-derived games.
-//
-// Scan driver: <see cref="ChessWitnessHydrator"/> reads witnessed attestations from Postgres.
-// PGN path is legacy bootstrap only when an explicit file path is passed.
+// Versioned calculation over a recorded playing: replays its witnessed movetext (plus start FEN
+// and per-ply clock/eval/quality tokens) and derives opening classification, think-time and
+// tactic outcomes, motifs and the line trajectory. Deterministic in those inputs. Testimony is
+// attested under the analysis source, a calculation witness distinct from the recording source,
+// and each playing is stamped with its analysis-version marker and unit completion. Inputs come
+// either from a just-parsed game or from ChessWitnessHydrator reading the recorded attestations.
 public static class ChessAnalyze
 {
     public const int Version = 3;
@@ -22,8 +21,8 @@ public static class ChessAnalyze
 
     private const double MoveWeight = 0.7;
     private const double MetaWeight = 0.7;
-    // Entry point for the analyzer decomposer: assemble DeriveGame's inputs from a parsed game
-    // (the witnessed content), derive, and stamp the (game, version) marker the scan probes.
+    // Assembles DeriveGame's inputs from a parsed game, derives, and stamps the
+    // (playing, version) marker the analysis scan probes.
     internal static bool DeriveFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
         => DeriveFromParsed(b, parsed, ChessPgnDecomposer.MaterializeParsedReplay(parsed));
 
@@ -57,7 +56,7 @@ public static class ChessAnalyze
                        spentSeconds, replay))
             return false;
 
-        // Analyzer unit = PLAYING (not tournament Chess_Event). Marker per playing.
+        // The analysis unit is the playing; one marker and completion per playing and version.
         var marker = ChessVocabulary.AnalysisMarkerId(playingId, Version);
         b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, marker, SourceId, 21);
@@ -76,7 +75,7 @@ public static class ChessAnalyze
 
         int mc = moves.Count;
         var clockTokens = PgnClocks.ClockTokens(gameText, mc);
-        // cutechess dialect: no remaining-clock tokens, but per-move spent time (GH #494).
+        // cutechess dialect: no remaining-clock tokens, but per-move spent time.
         var spentSeconds = clockTokens is null ? PgnClocks.SpentSeconds(gameText, mc) : null;
         var evalTokens = PgnEvals.EvalTokens(gameText, mc);
         var qualityTokens = new string?[walk.Mainline.Count];
@@ -95,8 +94,8 @@ public static class ChessAnalyze
 
     // Derive one playing's calculated layer from its witnessed inputs. `sans` is the replayed
     // movetext; token arrays are indexed by ply (sparse allowed); `evals` are centipawns (mover
-    // POV pre-sign). GH #736: line-grain facts (opening/motif) subject onto the LINE; per-playing
-    // testimony carries ctx = the EVENT.
+    // POV pre-sign). Line-grain facts (opening, motif) take the LINE as subject; per-playing
+    // testimony carries the playing as context.
     internal static bool DeriveGame(
         SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result,
         IReadOnlyList<string> sans, string? startFen,
@@ -107,9 +106,7 @@ public static class ChessAnalyze
         ChessParsedReplay? replay = null)
     {
         var m = new ChessModality();
-        // Unreadable start = derive nothing. The recorder already refused this game, and
-        // deriving from a substituted board is how a game we could not read became a game we
-        // invented.
+        // An unreadable start position derives nothing; no substitute board is assumed.
         if (InitialState(startFen, m) is not { } start) return false;
         var (initial, standardStart) = start;
 
@@ -118,11 +115,9 @@ public static class ChessAnalyze
                        spentSeconds, standardStart, replay))
             return false;
 
-        // Watermark: this playing is now derived at the current analysis version.
-        // Metadata on the trunk, not rated testimony -- see ChessVocabulary
-        // .AnalysisVersionMetaTypeId. A substrate meta-type is not in relation_types.toml
-        // and therefore never folds, so this stops minting one unrateable consensus cell
-        // per analysed game.
+        // Records the analysis version on the playing under a meta-type
+        // (ChessVocabulary.AnalysisVersionMetaTypeId). A meta-type is not a governed relation,
+        // so this is provenance on the trunk and never folds into a consensus cell.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
             b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
                     BootstrapIntentBuilder.RelationTypeMetaTypeId)
@@ -135,18 +130,9 @@ public static class ChessAnalyze
     }
 
     /// <summary>
-    /// The game's starting board, or NULL when the PGN asserted a start position this parser
-    /// cannot model.
-    ///
-    /// This used to swallow the FormatException and return m.Initial() — the STANDARD start —
-    /// with StandardStart=true. A Chess960 game (chess.com exports X-FEN castling for every
-    /// one) was therefore replayed from rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR, and
-    /// whatever SAN happened to resolve against that wrong board was recorded, folded into
-    /// consensus, and reported under a run whose status said ok and failed=0. A game we could
-    /// not read was not dropped; it was invented.
-    ///
-    /// Null instead. The caller refuses the game and counts it. An unreadable record is not a
-    /// standard record, and it is not this layer's business to guess which board was meant.
+    /// The game's starting board, or null when the PGN asserts a start position this parser
+    /// cannot model (for example X-FEN castling). The caller refuses and counts the game; the
+    /// standard start is used only when no start FEN is given.
     /// </summary>
     public static (ChessState Initial, bool StandardStart)? InitialState(string? startFen, ChessModality m)
     {
@@ -160,9 +146,8 @@ public static class ChessAnalyze
         }
     }
 
-    // Line-grain classification: every playing is a witness that the LINE is that opening /
-    // exhibits that trap, so the subject is the line and re-derivation per event is the
-    // intended duplication (each playing corroborates the categorical cell).
+    // Line-grain classification: the subject is the line, and each playing of it is one more
+    // witness to the same categorical consensus cell.
     private static void ClassifyOpening(
         SubstrateChangeBuilder b, Hash128 lineId, IReadOnlyList<string> sans, ChessModality m)
     {
@@ -186,17 +171,16 @@ public static class ChessAnalyze
     {
         var src = SourceId;
         double medianSpent = PgnClocks.MedianSpent(spentSeconds);
-        // Think-lens thresholds, all from the game's OWN clock story (no constants):
-        // per-side median remaining (parity = ply mod 2 — same-parity plies are one
-        // player's regardless of who moved first) is the low-clock line; medianDrop is
-        // the flagging line. Both 0 for the spent dialect (no remaining clock witnessed).
+        // Think-lens thresholds come from this game's own clocks: per-side median remaining
+        // (parity = ply mod 2; same-parity plies are one player's regardless of who moved
+        // first) is the low-clock line; medianDrop is the flagging line. Both are 0 for the
+        // spent-time dialect, which has no remaining clock.
         double medianRemEven = PgnClocks.MedianRemaining(clocks, 0);
         double medianRemOdd = PgnClocks.MedianRemaining(clocks, 1);
 
-        // Replay builds the ONE ordered line physicality. Its vertices are deterministic move
-        // points (the positions before/after each move), resolved from the chess perfcache or
-        // the identical compose fallback. They are not independently deposited SQL position
-        // entities/physicalities merely because this game passed through them.
+        // Replay builds the one ordered line trajectory. Its vertices are the composed
+        // position points before/after each move (from the parsed replay or composed here);
+        // passing through a position does not deposit that position's own rows.
         bool useReplay = replay is not null
             && replay.Boards.Length == sans.Count + 1
             && replay.Positions.Length == replay.Boards.Length
@@ -217,9 +201,8 @@ public static class ChessAnalyze
             ChessNode to;
             if (useReplay)
             {
-                // The parser already resolved and validated this move against this
-                // board. Share that result with motifs and outcomes as well as the
-                // composed positions; resolving SAN again repeats legal-move work.
+                // The parser already resolved and validated this move against this board;
+                // its move and positions are reused instead of resolving SAN again.
                 mv = replay!.Moves[ply];
                 from = replay.Positions[ply].Position;
                 to = replay.Positions[ply + 1].Position;
@@ -240,9 +223,8 @@ public static class ChessAnalyze
             played.Add(mv);
         }
 
-        // Complete the legal replay before publishing any owner output. Keep
-        // the successful emission order unchanged: opening labels, then per-ply
-        // think observations, motifs, tactic output and the trajectory.
+        // Nothing is emitted until the whole replay is legal. Emission order: opening
+        // labels, per-ply think outcomes, motifs, tactic outcomes, then the trajectory.
         if (standardStart) ClassifyOpening(b, lineId, sans, m);
         for (int ply = 0; ply < sans.Count; ply++)
         {
@@ -273,10 +255,9 @@ public static class ChessAnalyze
             }
         }
 
-        // A motif is a property of the played line/window. Keep the descriptive line labels,
-        // but ALSO fold the reusable tactical geometry against the game's result. That bounded
-        // pattern->OUTCOME layer is what lets motif knowledge participate in future searches;
-        // the label alone is not learning.
+        // Motifs are attested on the line as labels; the tactical patterns are also attested
+        // against the game's result (ChessTacticOutcomes), which is the pattern → outcome
+        // standing search reads.
         var motifs = ChessMotifs.DetectGame(
             new ChessMotifs.ReplayWindow(boards, played, evals, standardStart));
         for (int ply = 0; ply < played.Count; ply++)
@@ -288,12 +269,10 @@ public static class ChessAnalyze
             b, boards, result, eventId,
             ChessTacticOutcomes.SourceId, witnessWeight: 0.9);
 
-        // One linestring per LINE, deposited once the whole line is known. A game whose SAN
-        // failed to resolve returned early above and deposits nothing — a partial line would
-        // be a path the game never took. GH #736: the trajectory is a pure function of the
-        // line, so it is deposited under the ChessTrajectory source (one lane = one source =
-        // one evictable unit, #508) and stamped with the trajectory lane's own per-line
-        // marker, so the standalone backfill skips lines this fused pass already carried.
+        // One trajectory per line, deposited only once the whole line resolved (an unresolved
+        // SAN returned above, so no partial path is written). The trajectory is a function of
+        // the line alone, so it is attributed to the trajectory source and stamped with the
+        // per-line trajectory marker that ChessTrajectoryDecomposer's scan skips.
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,

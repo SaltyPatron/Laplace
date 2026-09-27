@@ -158,8 +158,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
 
         if (canonicalNames is { Count: > 0 })
         {
-            // Names become durable before the file's completion marker,
-            // through the existing shared registry owner.
+            // Canonical names are registered before the batch's completion receipt
+            // commits, through the process-wide registry.
             using var registryDiagnostic = MeasureApplyPhase("canonical-registration");
             var registration = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
                 _ds, canonicalNames, ct);
@@ -184,13 +184,10 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
             copyTransactionsStarted = r.copy.Started;
             copyTransactionsCommitted = r.copy.Committed;
 
-            // Apply-side bitmap verify is the presence gate: compose descent
-            // stages the working set (content-addressed, deduped in the
-            // content bank), apply probes claimed-novel ids and COPYs only
-            // survivors (present attestations merge via attestation_merge).
-            // Skipped rows are therefore EXPECTED — shared substrate already
-            // committed by an earlier working set or source, not an error and
-            // not a race. Logged at info for volume visibility.
+            // Convergence: apply probes the staged ids and bulk-copies only the absent
+            // ones, and present attestations merge into their existing rows. Skipped
+            // entities and physicalities are content another working set or source
+            // already persisted, so they are logged at info, not treated as errors.
             if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
             {
                 _log.LogInformation(
@@ -202,9 +199,9 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
 
         else if (!completions.IsEmpty)
         {
-            // A change carrying only completion state (the terminal layer completion,
-            // a file boundary whose rows already committed) records it in its own
-            // transaction; there is no evidence here for it to ride with.
+            // A change carrying only completion receipts (a layer completion, or a
+            // file boundary whose rows already committed) records them in their own
+            // transaction.
             using var completionDiagnostic = MeasureApplyPhase("completion-only");
             await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -214,13 +211,10 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
             completionDiagnostic?.Complete();
         }
 
-        // Caller-owned prebuilt stages are retired ONLY on success. On a failed
-        // apply the batch may be retried wholesale (IngestRunner's transient-error
-        // loop re-submits the same SubstrateChange objects); disposing here on the
-        // failure path turned every retry into an ObjectDisposedException that
-        // masked the real error (.scratchpad/02 Issues 15/17). IntentStage is a
-        // SafeHandle, so stages abandoned by a fatal abort are still reclaimed by
-        // the finalizer.
+        // Caller-built stages are disposed only on success: a failed apply may be
+        // retried with the same SubstrateChange objects, which must still hold
+        // their stages. IntentStage is a SafeHandle, so a stage abandoned by a
+        // fatal abort is reclaimed by its finalizer.
         foreach (var pre in prebuiltStages) pre.Dispose();
 
         sw.Stop();
@@ -249,16 +243,15 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
     }
 
 
-    // Opt-in, one scope per batch boundary through the existing logger. Disposal
-    // records an interrupted window as well as successful return. These logs are
-    // diagnostic child windows, not durable-success receipts.
+    // One diagnostic log scope per apply phase, only when Information logging is
+    // enabled. Disposal logs an interrupted window as well as a completed one; these
+    // are diagnostics, not durable receipts.
     private ApplyDiagnosticPhase? MeasureApplyPhase(string phase, string? table = null,
         int? lane = null, int? chunkStart = null, int? rows = null)
     {
-        // Diagnostics cannot reject an apply, including context/name allocation.
-        // Table names come from the three existing COPY owners; lane and chunk
-        // ordinals stay fields, never phase names. Parallel/nested durations are
-        // overlapping observations, not additional exclusive writer time.
+        // A diagnostic failure never rejects the apply. Lane and chunk ordinals stay
+        // fields, not part of the phase name. Parallel or nested phases overlap, so
+        // their durations do not sum to writer time.
         try
         {
             return _log.IsEnabled(LogLevel.Information)
@@ -336,10 +329,10 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
     }
 
     /// <summary>
-    /// The completion state a batch of changes carries: unit and layer completions,
+    /// The completion receipts a batch of changes carries: unit and layer completions,
     /// deduplicated. Inserted into laplace.ingest_unit_completion /
-    /// laplace.ingest_layer_completion on the control transaction that accepts the
-    /// batch's evidence, never as attestations.
+    /// laplace.ingest_layer_completion in the transaction that accepts the batch's
+    /// evidence, never as attestations.
     /// </summary>
     internal sealed class IngestCompletionRows
     {
@@ -446,8 +439,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
             var seenEntity = new HashSet<Hash128>();
             var seenPhys = new HashSet<Hash128>();
 
-            // One canonical row per content id: the first managed row for an id
-            // owns its staged tuple, so COPY cannot manufacture a second entity.
+            // One staged row per entity and physicality id (the first seen); equal
+            // content is one entity, so later rows for the same id are dropped.
             foreach (var c in changes)
                 foreach (var e in c.Entities)
                 {
@@ -465,19 +458,15 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                 StageManagedPhysicalities(managedStage,
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(selectedPhysicalities),
                     IngestSizing.ResolveWorkingSetBudgetBytes(), ct);
-            // No dedup here: duplicate attestation ids across changes carry
-            // real observation counts. The apply core collapses them exactly
-            // like apply_batch did (latest-ts representative, summed games)
-            // instead of dropping the later observations on the floor.
-            // Bulk door: marshal each change's attestations into the native arena in
-            // BOUNDED chunks. `atts.Length * 32` is int*int and the arrays are MANAGED, so a
-            // monolithic change (the tier-0 completeness preamble, or a UD/ConceptNet flush =
-            // tens of millions of rows) would overflow int AND blow the ~2 GiB managed-array
-            // limit in ONE marshal. AttestationStagedBatchAdd APPENDS to the arena, so N
-            // chunked calls stage the exact same content as one call -- bit-identical, just
-            // wall-safe. Buffers are sized once to the first chunk and reused across chunks
-            // (n <= cap always, so no re-alloc and no LOH churn); the native call only reads
-            // the first `n` rows / `n*32` mask bytes.
+            // Attestations are not deduplicated: repeated ids across changes carry
+            // separate observations, which the apply core collapses to one row with
+            // the latest timestamp and summed observation count.
+            // Each change's attestations are marshalled into the native arena in
+            // bounded chunks, so a very large change cannot overflow the int-sized
+            // mask arithmetic or the managed array limit. The native add appends, so
+            // chunked calls stage exactly what one call would. The row and mask
+            // buffers are sized once per change and reused; the native call reads
+            // only the first n rows and n*32 mask bytes.
             int stagedBytes = System.Runtime.InteropServices.Marshal.SizeOf<AttestationStagedNative>();
             int maxAttsPerMarshal = (int)Math.Max(1, Math.Min(
                 Array.MaxLength / 32L,

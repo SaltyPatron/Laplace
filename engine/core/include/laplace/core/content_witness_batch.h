@@ -11,12 +11,9 @@
 extern "C" {
 #endif
 
-/* THE content tier -> entity type id map, for EVERY lane that stages content.
- * 0 Codepoint, 1 Grapheme, 2 Word, 3 Sentence, 4+ Document -- the five names the
- * text ladder has always used. Exported because the grammar compose lane needs
- * the SAME answer: it was minting its own parallel vocabulary
- * (blake3("substrate/type/grammar/<modality>/<tree-sitter node>/v1")) and
- * stamping tree-sitter's private symbol names onto substrate entities. */
+/* The content tier -> entity type id map for every caller that stages content:
+ * 0 Codepoint, 1 Grapheme, 2 Word, 3 Sentence, 4+ Document. Grammar composition
+ * uses this same map, so parser symbol names never become entity types. */
 hash128_t laplace_content_tier_type_id(uint8_t tier);
 
 int content_witness_batch_add(
@@ -27,8 +24,7 @@ int content_witness_batch_add(
     hash128_t*       out_root_id);
 
 /* Same content/witness law with an explicit physical worker grant for one
- * semantic DAG. The grant changes execution only; scalar content_witness_batch_add
- * remains the compatibility/oracle path. */
+ * semantic DAG. The grant changes execution only; ids equal content_witness_batch_add. */
 int content_witness_batch_add_workers(
     intent_stage_t*  stage,
     const uint8_t*   utf8,
@@ -120,8 +116,8 @@ int laplace_content_root_id(
     size_t         len,
     hash128_t*     out_root_id);
 
-/* Legacy placement lookup address: (entity_id, physicality_type). Preserve its
- * exact layout for existing typed readers and rows. It is not an immutable
+/* Placement lookup address: (entity_id, physicality_type). Typed readers and
+ * stored rows depend on its exact layout. It is not an immutable
  * identity for every body that may be observed at that address. An exact body
  * can be represented as ordinary content by physicality_descriptor without
  * changing this address or the realized entity's identity. Derived geometry
@@ -132,7 +128,7 @@ void laplace_physicality_id_compute(
     hash128_t* out);
 
 /* Tier-floor collapse — single-child, span-identical wrappers walk to the
- * stored identity. Exported for C#/C parity (GH #904); mirrors
+ * stored identity (a one-child composition is the child). Mirrors
  * TierTree.CollapseIndex. */
 uint32_t laplace_tier_tree_collapse_index(const tier_tree_t* tree, uint32_t idx);
 
@@ -140,7 +136,7 @@ typedef void (*laplace_word_emit_fn)(void* ctx, uint32_t ordinal,
                                      const uint8_t* word_utf8, uint32_t word_len,
                                      const hash128_t* id);
 
-/* Emit-callback contract (#1039): word_utf8 points into the TREE's own
+/* Emit-callback contract: word_utf8 points into the TREE's own
  * post-NFC text buffer, which is freed when this call returns. Consume the
  * bytes inside the callback (copy if needed) and NEVER compute offsets by
  * pointer arithmetic against the caller's input buffer — NFC changes byte

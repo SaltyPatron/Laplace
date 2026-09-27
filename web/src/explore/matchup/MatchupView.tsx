@@ -9,9 +9,9 @@ import { GatePrompt } from '../components/GatePrompt';
 import styles from './MatchupView.module.css';
 
 /**
- * Head-to-head. Generic entities use graph contrast. Chess_Player pairs are detected
- * server-side and use chess-owned folds instead of pretending lexical contrast is a
- * player comparator.
+ * Head-to-head of two entities: their facts, standing and the verdict path between them.
+ * When the server attaches a `chess` record to a side, that side shows its witnessed game
+ * record and peak source Elo from the folded game results.
  */
 export function MatchupView() {
   const { x = '', y = '' } = useParams();
@@ -49,8 +49,7 @@ export function MatchupView() {
       })
       .finally(() => { if (!stale) setLoading(false); });
 
-    // The verdict rides its own request — path search runs seconds; never let
-    // it hold up the cards and the tape.
+    // The verdict is a separate path-search request so the cards and tape render without it.
     exploreMatchupVerdict(decodeURIComponent(x), decodeURIComponent(y), opts)
       .then((v) => { if (!stale) setVerdict(v); })
       .catch((e) => {

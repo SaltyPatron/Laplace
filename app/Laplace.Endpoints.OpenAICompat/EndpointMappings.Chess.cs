@@ -24,9 +24,9 @@ internal static class ChessEndpoints
         app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, req.Moves, ct))).WithTags("chess");
 
-        // Opening explorer / player repertoire over the rated MOVE consensus.
-        // player is a display name ("Magnus Carlsen", "magnuscarlsen") — resolved
-        // through the same PlayerAlias canonicalization the ingest lanes use.
+        // Continuations from a position read from MOVE consensus, optionally scoped to a
+        // player. The player name is canonicalized by PlayerAlias, as at ingest, so it
+        // resolves to the same player id.
         app.MapPost("/chess/explore", async (ExploreRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.ExploreAsync(req.Fen, req.Player, req.Limit ?? 12, ct))).WithTags("chess");
 
@@ -43,11 +43,9 @@ internal static class ChessEndpoints
         app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
-        // Tenant provenance is request authority, never caller-supplied content. The
-        // API-key middleware already resolves /chess/* through ITenantResolver; bind
-        // the session to that exact tenant so a body cannot deposit another tenant's
-        // witnessed game. User remains optional caller metadata until #938's user-
-        // identity contract is defined.
+        // The session's tenant comes from the resolved request authority, not the body,
+        // so a recorded game is witnessed only under the caller's own tenant. User is
+        // optional caller metadata.
         app.MapPost("/chess/play/start", async (HttpContext ctx, PlayStartRequest req,
             ChessEngineService svc, Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
@@ -97,10 +95,8 @@ internal static class ChessEndpoints
         app.MapGet("/chess/lichess/status", async (ILichessStatusClient lichess, CancellationToken ct) =>
             Results.Json(await lichess.StatusAsync(ct))).WithTags("chess");
 
-        // These are part of the chess product surface and use the same /chess/*
-        // tenancy/API-key policy as the rest of it. The previous second shared-secret
-        // operator token and HTTPS-only browser gate were temporary scaffolding, not
-        // the product auth model.
+        // Starts and stops the managed Lichess service under the /chess/* tenancy and
+        // API-key policy; its configuration is server-side only.
         app.MapPost("/chess/lichess/start", async (LichessStartRequest req,
             IServiceControl services, CancellationToken ct) =>
         {
@@ -141,10 +137,8 @@ internal static class ChessEndpoints
             });
         }).WithTags("chess-lab");
 
-        // What the gauntlet WOULD run, resolved against this host's binaries. The form shows
-        // it live as the knobs move, so the operator reads the real argv before spending an
-        // hour of engine time — and it comes from CutechessRunner.BuildArguments, the same
-        // function the job uses, so the preview cannot drift from the thing it previews.
+        // The argv a cutechess job would run on this host, built by the same
+        // CutechessRunner.BuildArguments the job uses.
         app.MapGet("/chess/lab/cutechess/preview", (
             int? rounds, int? depth, double? st, int? elo, int? concurrency, bool? limitStrength,
             string? stockfishThreads, string? stockfishHashMb, string? stockfishNumaPolicy, string? stockfishSyzygyPath) =>
@@ -211,9 +205,7 @@ internal static class ChessEndpoints
             });
         }).WithTags("chess-lab");
 
-        // Chess Lab job authorization is owned by the normal /chess/* tenancy/API-key
-        // middleware. Do not layer a second shared-secret credential onto this surface;
-        // that was a temporary local-operator shortcut and is not the product auth model.
+        // Lab jobs are authorized by the /chess/* tenancy and API-key middleware.
         app.MapPost("/chess/lab/start", (LabStartRequest req, ChessLabService lab) =>
         {
             if (!Enum.TryParse<ChessLabJobKind>(req.Kind?.Replace("-", ""), ignoreCase: true, out var kind)
@@ -248,18 +240,16 @@ internal static class ChessEndpoints
             ctx.Response.Headers.CacheControl = "no-cache";
             await foreach (var evt in reader.ReadAllAsync(ct))
             {
-                // Match the camelCase used by Results.Json elsewhere; default options emit
-                // PascalCase, which never matched the web client's field checks.
+                // camelCase, matching Results.Json elsewhere.
                 var json = JsonSerializer.Serialize(evt, evt.GetType(), LabEventJson);
                 await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
             }
         }).WithTags("chess-lab");
 
-        // The raw process transcript, separate from /events on purpose: it replays scrollback
-        // to a viewer that arrives late, serves any number of viewers at once, and cannot
-        // starve the structured event channel. `after` resumes a dropped connection — the
-        // client passes the last seq it rendered and gets everything the ring still holds.
+        // The raw process transcript, a separate stream from /events: it replays the ring
+        // to late viewers and serves any number of them. `after` is the last seq a client
+        // rendered; the stream resumes from the next line the ring still holds.
         app.MapGet("/chess/lab/jobs/{jobId}/terminal", async (
             HttpContext ctx, string jobId, long? after, ChessLabService lab, CancellationToken ct) =>
         {
@@ -267,7 +257,7 @@ internal static class ChessEndpoints
             if (terminal is null) { ctx.Response.StatusCode = 404; return; }
             ctx.Response.Headers.ContentType = "text/event-stream";
             ctx.Response.Headers.CacheControl = "no-cache";
-            // Proxies that buffer an event stream turn a live transcript into a batch report.
+            // Disables proxy buffering of the event stream.
             ctx.Response.Headers["X-Accel-Buffering"] = "no";
             await foreach (var line in terminal.ReadAsync(after ?? -1, ct))
             {
@@ -278,8 +268,7 @@ internal static class ChessEndpoints
 
         app.MapGet("/chess/lab/jobs/{jobId}/terminal.txt", (string jobId, ChessLabService lab) =>
         {
-            // Prefer the on-disk transcript: the in-memory ring is bounded, so for any run
-            // long enough to be worth saving it is the truncated copy.
+            // The on-disk transcript is complete; the in-memory ring is bounded.
             if (lab.GetJob(jobId)?.Artifacts.TryGetValue("transcript.log", out var file) == true
                 && File.Exists(file))
                 return Results.File(file, "text/plain; charset=utf-8", $"{jobId}-transcript.log");
@@ -296,8 +285,7 @@ internal static class ChessEndpoints
             var job = lab.GetJob(jobId);
             if (job is null || !job.Artifacts.TryGetValue(name, out var path) || !File.Exists(path))
                 return Results.NotFound();
-            // Artifacts are no longer all PGN — a transcript served as x-chess-pgn opens in
-            // whatever the browser reserves for chess files instead of as text.
+            // Content type follows the artifact's extension.
             var contentType = Path.GetExtension(path).ToLowerInvariant() switch
             {
                 ".pgn" => "application/x-chess-pgn",

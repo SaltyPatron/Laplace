@@ -85,10 +85,9 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
             if (utf8.Length > MaxCandidateBytes)
                 return new Result(modality, candidate, null, false, "candidate_too_large", receipts);
 
-            // The candidate is checked by the same native Tree-sitter recipe before
-            // toolchain adjudication. The ordinary grammar admission below parses it
-            // again for retained composition; parser identity is the same governed
-            // recipe and diagnostics are witnessed alongside compiler output.
+            // The native Tree-sitter parse yields syntax diagnostics for the toolchain
+            // check; grammar admission below parses again under the same recipe to
+            // compose and persist the candidate.
             using var syntaxAst = GrammarDecomposer.Parse(utf8, modality);
             GrammarAstDiagnostics syntax = GrammarSourceFileSupport.RequireNativeSourceAst(syntaxAst);
 

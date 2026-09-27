@@ -6,14 +6,12 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// The chess read surface: roster, career, game log, game. Shapes and status codes
-/// over the FakeSubstrateClient — the same contract the SPA consumes.
+/// Chess reads over <c>FakeSubstrateClient</c>: roster, career, game log, game, plies —
+/// shapes and status codes of the contract the SPA consumes.
 ///
-/// The drill is the thing being pinned. Every id a page hands back has to be an id
-/// the next page accepts, or the navigation dead-ends: roster gives player ids,
-/// a player's game log gives game ids AND opponent ids, and a game gives both
-/// players' ids back. These tests walk that loop rather than checking rows in
-/// isolation.
+/// Every id a response returns is an id the next read accepts: the roster yields
+/// player ids, a game log yields game and opponent ids, and a game yields both players'
+/// ids. The tests walk that loop.
 /// </summary>
 public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
 {
@@ -45,7 +43,7 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     [Fact]
     public async Task Players_Paginate()
     {
-        // OFFSET over an index — no cached ranking to page within, so there is no depth limit.
+        // The second page of one begins at rank 2.
         using var response = await _client.GetAsync("/v1/chess/players?limit=1&offset=1");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
@@ -139,8 +137,7 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
         Assert.NotNull(body);
         Assert.Equal(TalIdHex, body!.IdHex);
 
-        // The colour splits come from one GROUPING SETS pass over the same
-        // evidence as the total, so they must reconcile exactly.
+        // The colour splits count the same evidence as the total, so they reconcile exactly.
         Assert.Equal(body.Overall.Games, body.AsWhite.Games + body.AsBlack.Games);
         Assert.Equal(body.Overall.Wins, body.AsWhite.Wins + body.AsBlack.Wins);
         Assert.Equal(body.Overall.Draws, body.AsWhite.Draws + body.AsBlack.Draws);
@@ -252,8 +249,7 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
             Assert.Equal(i % 2 == 0, body.Plies[i].WhiteMoved);
         }
 
-        // Every board is addressable as a substrate entity — that is what makes this a
-        // walk into the graph rather than a private replay.
+        // Every board carries its position entity id, so a ply steps into the shared web.
         Assert.All(body.Plies, p => Assert.Equal(32, p.PositionId.Length));
         Assert.All(body.Plies, p => Assert.NotEmpty(p.Fen));
         Assert.All(body.Plies, p => Assert.Equal(4, p.Uci.Length));
@@ -292,8 +288,7 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     [Fact]
     public async Task Players_BrowseByInitial_ReachesPlayersByFirstLetter()
     {
-        // Browse exists at all — before this the only way to find a player was to spell
-        // his name exactly as the source recorded it.
+        // Browse by initial reaches players without spelling a name as the source recorded it.
         using var response = await _client.GetAsync("/v1/chess/players?initial=T&limit=10");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();

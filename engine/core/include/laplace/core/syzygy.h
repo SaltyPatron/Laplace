@@ -4,11 +4,9 @@
  * Syzygy tablebase probe kernel — the thin Laplace ABI over the vendored
  * Fathom prober (external/fathom, MIT, pinned submodule).
  *
- * A probe is a memory-mapped table lookup, the exact thing an in-process
- * kernel is for ("compute at ingest" — subprocess probing over millions of
- * positions was rejected in the campaign design). The chess lane converts a
- * board to bitboards on the C# side and calls these entry points through
- * NativeInterop, like every other laplace_core kernel.
+ * A probe is a memory-mapped table lookup run in process at ingest. Callers
+ * convert a position to bitboards and call these entry points through
+ * NativeInterop.
  *
  * POV and rule-50 law: results are side-to-move POV. Laplace position
  * identity excludes the halfmove clock (PositionContent carries stm/castling/

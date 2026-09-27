@@ -1,5 +1,5 @@
--- CREATE OR REPLACE cannot widen a function's result set, so the upgrade path
--- has to drop first — adding `kind` below is exactly that change.
+-- CREATE OR REPLACE cannot change a function's result columns, so a
+-- differently shaped installed ops.api is dropped first.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -10,13 +10,9 @@ BEGIN
     END IF;
 END $upgrade_shape$;
 
--- `kind` distinguishes a function from a procedure, and it is not cosmetic: a
--- procedure is invoked with CALL and a function with SELECT, so a caller that
--- cannot tell them apart issues the wrong statement and gets
--- "ops.evict_source(...) is a procedure" from the parser instead of running it.
--- pg_get_function_result already returns NULL for procedures, but inferring the
--- kind from a null return is reading a side effect; the column states it.
--- Appended last so existing named-column readers are unaffected.
+-- `kind` says function or procedure: a procedure is invoked with CALL and a
+-- function with SELECT, so a caller needs it to issue the right statement.
+-- It is the last column, so positional readers are unaffected.
 CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text, kind text)
     LANGUAGE sql STABLE
@@ -37,8 +33,8 @@ BEGIN ATOMIC
                 'laplace','consensus','converse','lexical','taxonomy',
                 'generation','structural','chess','realize','ops'
             ])
-            -- Load-bearing public C helpers agents must discover through the
-            -- catalog rather than reimplementing them (GH #533).
+            -- Public native helpers listed so callers find them in the catalog
+            -- instead of reimplementing them.
             OR (n.nspname = 'public' AND p.proname = ANY (ARRAY[
                 'laplace_frechet_4d',
                 'laplace_hilbert_encode',

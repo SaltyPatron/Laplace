@@ -179,17 +179,15 @@ int hash_composer_run_workers(
     if (worker_count == 1) return hash_composer_run(tree, resolver, resolver_user_data);
 
 #ifdef _WIN32
-    /* The production managed host is POSIX today. Preserve exact semantics on
-     * Windows until its native worker primitive is admitted rather than hiding
-     * a second scheduler behind this ABI. */
+    /* Windows has no admitted native worker primitive; it runs the serial
+     * composer rather than a second scheduler behind this ABI. */
     return hash_composer_run(tree, resolver, resolver_user_data);
 #else
     hash_composer_arrays_t arrays;
     if (hash_composer_arrays_init(tree, resolver, resolver_user_data, &arrays) != 0)
         return -1;
-    /* A frontier narrower than the admitted worker set has no useful internal
-     * fan-out. Keep tiny content on the scalar oracle rather than manufacturing
-     * more native threads than semantic work items. */
+    /* A tree with no more nodes than workers has no useful fan-out; it runs
+     * the serial composer. */
     if (arrays.count <= worker_count)
         return hash_composer_run(tree, resolver, resolver_user_data);
 

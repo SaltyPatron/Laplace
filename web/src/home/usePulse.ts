@@ -23,10 +23,8 @@ export interface PulseState {
 }
 
 /**
- * The live scoreboard feed. Polls /v1/pulse on an interval and derives the fold
- * rate from consecutive samples — the substrate at rest reads zero, a source at
- * bat reads its throughput. Cheap by construction (estimate counts + a 1.5ms
- * recency query), so a few-second cadence costs nothing.
+ * Polls /v1/pulse while the document is visible and derives the attestation fold
+ * rate from consecutive samples (zero at rest).
  */
 export function usePulse(intervalMs = 4000): PulseState {
   const [pulse, setPulse] = useState<Pulse | null>(null);

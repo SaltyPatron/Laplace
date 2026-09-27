@@ -77,10 +77,9 @@ public sealed class DocumentIngestPipelineTests
         Assert.Equal(0, reader.ScalarSourceCompletedCalls);
         Assert.Equal(1, reader.BatchedSourceCompletedCalls);
         Assert.True(ContentEntityCount(changes) <= ContentEntityCount(baseline));
-        // Pillar-3a: the re-witness grind is gone — documents emit ZERO distributional
-        // attestations, on present trees or otherwise (sequence = trajectory geometry).
-        // Present content WITHOUT a per-file completion marker still deposits the marker
-        // (Pillar 0: the file's trunk-grain witness) — that is provenance, not re-witness.
+        // Documents emit no distributional attestations: sequence is the trajectory.
+        // Present content without a per-file completion marker still deposits the
+        // marker, the file's receipt, not a re-witness.
         Assert.Equal(0, NonMarkerAttestationCount(changes));
         Assert.Equal(records.Count, UnitCompletionCount(changes));
     }
@@ -92,8 +91,8 @@ public sealed class DocumentIngestPipelineTests
             .Select(i => ContentRecord($"completed document {i}"))
             .ToList();
 
-        // Root entities present AND per-file completion markers present: the existence
-        // gate must skip every file before compose — zero rows, zero testimony, no merge.
+        // Root entities and per-file completion markers both present: every file is
+        // skipped before compose, with no rows and no testimony.
         var reader = new ProbeTrackingReader(present: true) { SourceCompleted = (_, _) => true };
         var changes = new List<SubstrateChange>();
         await foreach (var c in IngestBatchPipeline.RunAsync(
@@ -129,8 +128,8 @@ public sealed class DocumentIngestPipelineTests
         Assert.Equal(0, reader.BatchedSourceCompletedCalls);
     }
 
-    // GH #596: invalid UTF-8 must not throw out of ResolveRoot / OpenAsync — one bad
-    // file in a directory ingest skips; the run continues.
+    // Invalid UTF-8 resolves to no root instead of throwing, so one bad file in a
+    // directory ingest is skipped and the run continues.
     [Fact]
     public void ResolveRoot_InvalidUtf8_ReturnsNull()
     {
@@ -304,10 +303,9 @@ public sealed class DocumentIngestPipelineTests
         try
         {
             int envelope = IngestSizing.ResolveContiguousPayloadBytes();
-            // Sparse file: Length crosses the live contiguous-array envelope without
-            // allocating the bytes. The boundary is resource/runtime-derived, not 2 GiB.
-            // Point the stream at the FILE (not the dir): directory enumeration skips
-            // >2MB blobs via VendoredPathFilter before OpenAsync ever runs.
+            // A sparse file one byte past the runtime-derived contiguous compose envelope,
+            // without allocating it. The path names the file itself because directory
+            // enumeration skips >2MB blobs through VendoredPathFilter before OpenAsync.
             using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
                 fs.SetLength((long)envelope + 1);
 

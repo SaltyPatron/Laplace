@@ -33,14 +33,10 @@ internal static class AttestationMergeMath
     public static long SafeAddGames(long left, long right) => checked(left + right);
 
     /// <summary>
-    /// Net outcome of an aggregated (games, sum_score_fp) cell.
-    ///
-    /// CALLS NATIVE, DOES NOT RESTATE IT (2026-07-21). This method used to
-    /// reimplement laplace_attestation_outcome_from_totals_fp in managed code
-    /// against its own copy of the 500,000,000 draw threshold — a second,
-    /// independently-editable definition of what "draw" means, sitting on the
-    /// ingest path. The rule and the constant live in attestation_engine.c; this
-    /// is a call.
+    /// Net outcome (confirmation, draw, refutation) of an aggregated
+    /// (games, sum_score_fp) cell. The draw threshold and the classification rule
+    /// are the native <c>laplace_attestation_outcome_from_totals_fp</c>; managed code
+    /// holds no copy of either.
     /// </summary>
     public static unsafe AttestationOutcome ClassifyOutcome(long games, long sumScoreFp1e9)
     {

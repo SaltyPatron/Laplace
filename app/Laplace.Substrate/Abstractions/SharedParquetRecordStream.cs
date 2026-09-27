@@ -6,7 +6,7 @@ using Parquet.Schema;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Shared parquet row streaming for Stack/TinyCodes code corpora. Pure extract —
+/// Parquet row streaming for providers that read parquet containers. Extraction only:
 /// no builder logic, no SQL.
 /// </summary>
 public static class SharedParquetRecordStream
@@ -16,11 +16,9 @@ public static class SharedParquetRecordStream
     public readonly record struct GenericCell(string Column, object? Value);
 
     /// <summary>
-    /// Generic flat-schema row reader — the container-strip primitive for the generic
-    /// <c>ParquetDecomposer</c>. Streams every row as one <see cref="GenericCell"/> per
-    /// top-level data field, values in their native CLR type. Makes no schema
-    /// assumptions beyond a flat (non-nested) column layout, so ANY tabular parquet
-    /// file/dataset can be witnessed column-by-column without bespoke plumbing.
+    /// Flat-schema row reader used by <c>ParquetDecomposer</c> to strip the container.
+    /// Streams every row as one <see cref="GenericCell"/> per top-level data field, values in
+    /// their native CLR type; it assumes only a flat (non-nested) column layout.
     /// </summary>
     public static async IAsyncEnumerable<IReadOnlyList<GenericCell>> ReadGenericRowsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
@@ -56,10 +54,9 @@ public static class SharedParquetRecordStream
         }
     }
 
-    // Parquet.Net 6 exposes no public DataColumn/ReadColumn — reads go through the
-    // typed ReadAsync&lt;T&gt;(field, Memory&lt;T&gt;, …) overloads. This resolves the right
-    // overload from the field's nullability-aware CLR type once and reads a whole
-    // column into a boxed Array, so the generic reader stays type-agnostic.
+    // Parquet.Net 6 exposes no public DataColumn/ReadColumn; reads go through the typed
+    // ReadAsync&lt;T&gt;(field, Memory&lt;T&gt;, …) overloads. The overload is resolved once from
+    // the field's nullability-aware CLR type and reads a whole column into a boxed Array.
     private static readonly MethodInfo[] ReadAsyncOverloads = typeof(ParquetRowGroupReader)
         .GetMethods()
         .Where(m => m.Name == nameof(ParquetRowGroupReader.ReadAsync)
@@ -129,9 +126,8 @@ public static class SharedParquetRecordStream
     }
 
     /// <summary>
-    /// Exact row count from parquet metadata — row-group headers only, no
-    /// column data decoded. Feeds IngestInventory so single-container corpora
-    /// report real progress instead of input_units=0 (blind "0/N intents").
+    /// Exact row count from parquet metadata (row-group headers only, no column data
+    /// decoded). Feeds IngestInventory as the input-unit denominator of a container.
     /// </summary>
     public static async Task<long> CountRowsAsync(string path, CancellationToken ct = default)
     {
@@ -232,8 +228,8 @@ public static class SharedParquetRecordStream
             for (int i = 0; i < count; i++)
             {
                 string? lang = langs?[i];
-                // A packaging location is not a witnessed code concept. The
-                // physical file journal owns row progress when task_id is absent.
+                // A row's position is packaging, not content; with no task_id the key is
+                // null and row progress is tracked by the file journal.
                 string? key = taskIds?[i];
                 yield return (key, lang, prompts[i], resps[i]);
             }

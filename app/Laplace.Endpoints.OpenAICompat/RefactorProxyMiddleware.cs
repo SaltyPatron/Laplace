@@ -24,8 +24,8 @@ internal static class RefactorProxyRegistration
     }
 }
 
-// Transport only: Refactor owns its public assets and explicit operator bearer policy.
-// There is deliberately no configurable destination or credential lookup here.
+// Streams /refactor/* to a fixed loopback origin. The destination is not configurable
+// and no credential is added; the upstream applies its own auth.
 internal sealed class RefactorProxyMiddleware(
     RequestDelegate next, IHttpClientFactory clients, ILogger<RefactorProxyMiddleware> logger)
 {

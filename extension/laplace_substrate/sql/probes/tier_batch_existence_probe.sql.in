@@ -1,18 +1,13 @@
--- One round of the trunk-to-leaf content-addressed existence probe.
---
--- The C# orchestrator still descends by structural tier so it can stop walking
--- children of a proven content node. That scheduling fact does not make tier an
--- entity key: canonical storage is id-only/HASH(id), and a present content id
--- proves the content regardless of which interpretation/floor led the caller to
--- it. Bits are set only by a positive perfcache/codepoint or committed-row hit.
+-- One round of the trunk-to-leaf existence probe. The caller descends by tier
+-- so it can stop at children of a proven node; tier schedules the walk but is
+-- not a key. Presence is by content id alone, and a bit is set only by a
+-- positive perfcache/codepoint hit or a committed row.
 CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[])
     RETURNS bytea
     AS 'EXECUTION_LIBRARY', 'pg_laplace_tier_batch_existence_probe'
     LANGUAGE C STABLE;
 
--- Compatibility overload for callers whose round state already carries tiers.
--- Tier participates in traversal scheduling only; it is intentionally ignored
--- by canonical presence.
+-- Two-array call shape for rounds that carry tiers; tiers are ignored.
 CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[], tiers smallint[])
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL RESTRICTED

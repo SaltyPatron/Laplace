@@ -33,12 +33,8 @@ public class GrammarSpineConformanceTests
     }
 
     /// <summary>
-    /// Comments are stripped before the needle search. Without that, a needle naming a base
-    /// class is satisfied by any file that MENTIONS it — which is what happened: after
-    /// WiktionaryDecomposer moved to ComposeDecomposer (PR #944), the "GrammarIngestDecomposer"
-    /// needle kept passing on the strength of one doc-comment in WiktionaryGrammarWitness.cs,
-    /// so the gate reported a spine the code had already left. A conformance test that a
-    /// sentence can satisfy measures prose, not structure.
+    /// Comments are stripped before the needle search, so a needle naming a base class is
+    /// satisfied by code that declares it, not by a comment that mentions it.
     /// </summary>
     private static string StripComments(string source)
     {
@@ -69,21 +65,19 @@ public class GrammarSpineConformanceTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var grammarSpine = new (string Project, string[] Needles)[]
         {
-            // Wiktionary left the GrammarIngestDecomposer base in PR #944 for the native
-            // per-row parse; the compose lane, not the tree-sitter row spine, is what it
-            // actually runs. The needle now names the base it declares.
+            // Wiktionary composes natively parsed rows through ComposeDecomposer.
             ("Wiktionary", ["ComposeDecomposer<WiktionaryEntry", "WiktionaryEmit.Emit"]),
             ("SemLink", ["GrammarWitnessIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
-            // Tatoeba is two PHASES (sentences then links) rather than parallel files —
-            // the link phase needs the id -> content-root map the sentence phase produces.
-            // Both phases use the generic direct-compose path; TSV packaging is not content.
+            // Tatoeba runs sentences then links as phases: links resolve row ids through the
+            // id → content-root map the sentences build. Both phases compose directly; TSV
+            // packaging is not content.
             ("Tatoeba", ["DecomposerPhase<TatoebaIngestRecord", "StreamingUtf8LineReader",
                 "DirectComposeHandler<TatoebaIngestRecord>", "TatoebaEmitter"]),
-            // ConceptNet: monolith triple — ExtractFileAsync unit on RelationTripleDecomposerBase.
+            // ConceptNet: one triple file, ExtractFileAsync on RelationTripleDecomposerBase.
             ("ConceptNet", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleDecomposerBase"]),
             ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
                 "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
-            // Atomic: multi-file triple — same ExtractFileAsync unit via RelationTripleMultiFile.
+            // Atomic: several triple files, the same ExtractFileAsync unit via RelationTripleMultiFile.
             ("Atomic2020", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleMultiFileDecomposerBase"]),
         };
 

@@ -6,7 +6,7 @@ namespace Laplace.Cli.Spectre;
 /// <summary>
 /// Bridges Spectre.Console.Cli command construction to Microsoft.Extensions.DependencyInjection,
 /// so a command can constructor-inject the shared services (ILoggerFactory / ILogger, the seed
-/// decomposer resolver, DB access) instead of reaching into a static locator. GH #603.
+/// decomposer resolver, DB access) instead of reaching into a static locator.
 /// </summary>
 public sealed class DiTypeRegistrar : ITypeRegistrar
 {

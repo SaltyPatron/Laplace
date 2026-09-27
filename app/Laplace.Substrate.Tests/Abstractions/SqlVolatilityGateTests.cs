@@ -4,14 +4,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// PostgreSQL volatility is planner law, not documentation. A routine declared
-/// STABLE/IMMUTABLE promises that repeated calls may be folded/reordered; calling a
-/// VOLATILE primitive from that body makes those rewrites observably wrong.
-///
-/// GH #991 records two regressions that survived until review because this invariant
-/// existed only in prose. This gate owns the mechanical half of that issue. The
-/// separate "STABLE scalar inside WHERE" rule needs a measured shrink-only allowlist
-/// and intentionally does not belong in this zero-exception check.
+/// PostgreSQL volatility is a planner contract. A routine declared STABLE/IMMUTABLE lets
+/// the planner fold or reorder repeated calls; calling a VOLATILE primitive from its body
+/// makes those rewrites observably wrong. This check allows no exceptions.
 /// </summary>
 public sealed class SqlVolatilityGateTests
 {
@@ -31,11 +26,8 @@ public sealed class SqlVolatilityGateTests
         @"\bBEGIN\s+ATOMIC\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // PostgreSQL classifies these as VOLATILE because they change per call or have
-    // side effects. Deliberately absent: now()/transaction_timestamp() and
-    // statement_timestamp(), which PostgreSQL classifies STABLE. #991's original
-    // prose grouped now() with random(); the executable gate follows PostgreSQL's
-    // actual contract rather than preserving that stale diagnosis.
+    // Builtins PostgreSQL classifies VOLATILE (they change per call or have side
+    // effects). now()/transaction_timestamp()/statement_timestamp() are STABLE and absent.
     private static readonly Regex VolatileBuiltinCall = new(
         @"(?<![A-Za-z0-9_])(?<name>random|setseed|clock_timestamp|timeofday|nextval|setval|pg_sleep|pg_sleep_for|pg_sleep_until)\s*\(",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -143,8 +135,7 @@ public sealed class SqlVolatilityGateTests
     private static string ExecutableSql(string body)
     {
         // Remove quoted data before comments so a literal containing "--" or "/*"
-        // cannot change where comment stripping starts. Dynamic SQL is deliberately
-        // outside this cheap gate; the repository SQL auditor owns that wider class.
+        // cannot move where comment stripping starts. Dynamic SQL text is not inspected.
         string executable = SingleQuoted.Replace(body, "''");
         executable = BlockComment.Replace(executable, " ");
         return LineComment.Replace(executable, " ");

@@ -7,19 +7,10 @@ using Xunit;
 
 namespace Laplace.Decomposers.Tatoeba.Tests;
 
-// sentences.csv is the ENTITY file; links.csv is the ATTESTATION file.
-//
-// Tatoeba asserts two things and no more: this text exists in this language, and this text
-// translates that text. Both are facts about SENTENCES, so both are attested on the
-// content-addressed roots. The numeric row id is scaffolding — it exists only because the
-// links file cannot inline the text — so it is resolved at initialize and never stored.
-//
-// These tests previously asserted the opposite: that links minted a `tatoeba/sentence/{id}`
-// entity per side and attested between those, with the real sentence-level translation left
-// as a read-side join across HAS_EXTERNAL_ID. That is source-keyed identity — a row number
-// promoted to an entity id — which is the entity-resolution table content addressing exists
-// to abolish, and it cost ~1.56 entity rows per link (measured: the largest row category of
-// the link phase).
+// Tatoeba testifies that a text is in a language and that one text translates another.
+// Both are attested on the content-addressed sentence roots. The numeric row id is packaging
+// that lets links.csv refer to a sentence; it is resolved to the content root during
+// initialization and never becomes an entity.
 public sealed class TatoebaDecomposerTests
 {
     static TatoebaDecomposerTests()
@@ -40,9 +31,8 @@ public sealed class TatoebaDecomposerTests
     {
         var dec = new TatoebaDecomposer();
         var ctx = new FakeContext(dir, new NullWriter());
-        // InitializeAsync builds the id -> content-root map the link lane resolves through.
-        // IngestRunner calls it before DecomposeAsync (IngestRunner.cs:106); the decomposer
-        // throws rather than silently dropping every link if it was skipped.
+        // InitializeAsync builds the row id → content root map that links resolve through;
+        // DecomposeAsync throws if it was not called.
         await dec.InitializeAsync(ctx);
 
         var attestations = new List<AttestationRow>();
@@ -79,8 +69,8 @@ public sealed class TatoebaDecomposerTests
             Hash128 enRoot = ContentTierSpine.ResolveRoot(EnText)!.Value;
             Hash128 frRoot = ContentTierSpine.ResolveRoot(FrText)!.Value;
 
-            // The translation is between the SENTENCES. IS_TRANSLATION_OF is symmetric —
-            // endpoints canonicalize by hash order — so assert the endpoint SET.
+            // The translation joins the sentence roots. IS_TRANSLATION_OF is symmetric and
+            // its endpoints canonicalize by hash order, so the endpoint set is asserted.
             var edges = attestations.Where(a => a.TypeId == translationType).ToList();
             Assert.Single(edges);
             var endpoints = new HashSet<Hash128> { edges[0].SubjectId };
@@ -93,17 +83,16 @@ public sealed class TatoebaDecomposerTests
             Assert.Contains(enRoot, langSubjects);
             Assert.Contains(frRoot, langSubjects);
 
-            // The row number is scaffolding: no entity anywhere carries a surrogate id, and
-            // HAS_EXTERNAL_ID is not emitted at all.
+            // The row number is packaging: no entity carries a surrogate id and
+            // HAS_EXTERNAL_ID is not in the source's relations.
             Hash128 surrogate1 = Hash128.OfCanonical("tatoeba/sentence/1");
             Hash128 surrogate2 = Hash128.OfCanonical("tatoeba/sentence/2");
             Assert.DoesNotContain(surrogate1, entities.Select(e => e.Id));
             Assert.DoesNotContain(surrogate2, entities.Select(e => e.Id));
             Assert.DoesNotContain("HAS_EXTERNAL_ID", TatoebaSource.Relations);
 
-            // TSV is transport packaging, not content. The entire phase must place exactly
-            // the two selected sentences — no extra tree for ids, language fields, tabs, or
-            // serialized rows.
+            // TSV is packaging: the run places exactly the physicalities of the two
+            // sentences, with no tree for ids, language fields, tabs or rows.
             var expectedBuilder = new SubstrateChangeBuilder(
                 TatoebaDecomposer.Source, "tatoeba-expected-content");
             Assert.True(ContentTierSpine.TryStageIntoBuilder(
@@ -139,9 +128,8 @@ public sealed class TatoebaDecomposerTests
 
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
 
-            // An edge between an id we cannot resolve to text asserts nothing about language.
-            // It is DROPPED — not grounded on a bare synthetic node that would read as an
-            // unattested entity pretending to be a sentence.
+            // A link to an id with no sentence text asserts nothing; it is dropped rather
+            // than attached to a synthetic entity.
             Assert.DoesNotContain(attestations, a => a.TypeId == translationType);
             Assert.DoesNotContain(Hash128.OfCanonical("tatoeba/sentence/999"), entities.Select(e => e.Id));
         }

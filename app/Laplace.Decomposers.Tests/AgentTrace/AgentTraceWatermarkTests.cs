@@ -9,9 +9,9 @@ using Xunit;
 namespace Laplace.Decomposers.AgentTrace.Tests;
 
 /// <summary>
-/// Grown-log re-witness protection: the watermark entity is content-addressed over the
-/// composed-turn prefix, the resolve-path ids match the witness-path ids (the drift
-/// guard), and a re-ingest with a deeper log witnesses ONLY the delta.
+/// The watermark entity is content-addressed over the composed-turn prefix; the ids the
+/// presence probe resolves equal the ids the witness path composes; re-ingesting a
+/// grown log witnesses only the turns past the deepest present watermark.
 /// </summary>
 public sealed class AgentTraceWatermarkTests
 {
@@ -92,8 +92,8 @@ public sealed class AgentTraceWatermarkTests
             await WriteFixtureAsync(dir, BaseLines);
             var (entities, _) = await RunAsync(dir, new NullReader());
 
-            // Recompute the candidate ids the PROBE would use; the deposited watermark
-            // must be exactly the deepest one, or grown-log resume can never hit.
+            // The deposited watermark must equal the deepest candidate id the presence
+            // probe computes, or a grown log can never match it.
             var session = await ParseSessionAsync(dir);
             var turnIds = AgentTraceEmitter.ComputeComposedTurnIds(session);
             Assert.Equal(2, turnIds.Count);
@@ -159,8 +159,8 @@ public sealed class AgentTraceWatermarkTests
             var present = first.Entities.Select(e => e.Id).ToHashSet();
 
             var second = await RunAsync(dir, new SeededReader(present));
-            // The spine still deposits per-file completion markers (plumbing); the LANE
-            // owes zero testimony — nothing carries the session as context.
+            // Per-file completion markers are still deposited; no attestation carries
+            // the session as context.
             Hash128 sessionId = ConversationContent.SessionId("claude-code", SessionKey);
             Assert.DoesNotContain(second.Attestations, a => a.ContextId == sessionId);
         }

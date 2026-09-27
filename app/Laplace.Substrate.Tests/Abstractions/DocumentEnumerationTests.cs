@@ -9,11 +9,9 @@ using Xunit;
 
 namespace Laplace.Substrate.Tests.Abstractions;
 
-// Pins GH #608: DocumentDecomposer must share the ONE VendoredPathFilter
-// (Laplace.Core) that Code/RepoDecomposer use, so vendored/junk .txt inside an
-// ecosystem tree never gets enumerated for document ingest under the corpus's
-// identity. Before the fix, EnumerateInputFiles was a bare EnumerateFiles with
-// no filter.
+// Document enumeration applies the same VendoredPathFilter (Laplace.Core) as code and
+// repository enumeration, so vendored or build-tree .txt files inside a tree are not
+// admitted as that tree's documents.
 [Collection("GrammarPerfcache")]
 public sealed class DocumentEnumerationTests
 {

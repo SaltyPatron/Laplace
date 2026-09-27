@@ -1,7 +1,5 @@
--- entities is LIST(tier)-partitioned, so tier is constant inside every leaf
--- (including the tier=2 HASH subpartitions). A BRIN on tier alone cannot exclude
--- any page range (min=max for every range) while still charging write-time
--- maintenance — Copilot #859. Drop on upgrade; new installs never create it.
+-- Drops entities_tier_brin. Entities are HASH(id), so rows lie in hash order
+-- and a BRIN on tier excludes no page range while charging every insert.
 DO $do$
 BEGIN
     BEGIN

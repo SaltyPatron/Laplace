@@ -3,11 +3,10 @@ using System.Runtime.InteropServices;
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// The single authority for physical-memory-derived sizing, the memory counterpart to
-/// <see cref="CpuTopology"/>. Every RAM-scaled value — the working-set apply budget and the
-/// Postgres memory GUCs (shared_buffers/work_mem/maintenance_work_mem/wal) — derives from
-/// here so a box's real RAM, not a scattered literal, denotes them. Nothing downstream may
-/// hardcode a byte budget or re-probe RAM independently.
+/// Physical-memory-derived sizing, the memory counterpart to <see cref="CpuTopology"/>.
+/// The working-set apply budget, the PostgreSQL memory settings surfaced from
+/// <see cref="PostgresResourcePlan"/>, and the per-row resident/transit widths that turn
+/// byte envelopes into row counts all resolve here from detected RAM.
 /// </summary>
 public static class MemoryTopology
 {
@@ -17,9 +16,7 @@ public static class MemoryTopology
     /// <summary>
     /// Resident owners that can coexist with a working-set buffer: one owner per active
     /// apply partition, plus compose, apply metadata, exact caches, and fold/mask state.
-    /// The latter four are real simultaneously-live ownership classes, not a tuning value.
-    /// This replaces the historical RAM/16 plus 4-GiB clamp: a 12-partition machine still
-    /// has sixteen owners, while another topology scales instead of inheriting its number.
+    /// The latter four are simultaneously-live ownership classes, not a tuning value.
     /// </summary>
     public static int WorkingSetResidentOwners =>
         checked(CpuTopology.ResolveApplyPartitions() + 4);
@@ -37,9 +34,8 @@ public static class MemoryTopology
     /// <summary>
     /// Byte budget for one working-set apply. Every simultaneously-live client owner
     /// receives one equal share of PostgresResourcePlan's client domain; PostgreSQL shared
-    /// cache/private backends and the OS page cache are therefore not promised to the
-    /// ingest heap a second time. The only floor is enough transport pages for active apply
-    /// partitions; there is no corpus- or machine-specific byte ceiling.
+    /// cache/private backends and the OS page cache are not promised to the ingest heap a
+    /// second time. The floor is one transport page per active apply partition.
     /// </summary>
     public static long WorkingSetBudgetBytes => Math.Max(
         (long)CopyStartupBytesPerConnection * CpuTopology.ResolveApplyPartitions(),
@@ -48,23 +44,16 @@ public static class MemoryTopology
     /// <summary>
     /// Resident-memory ceiling for ONE working set before it is closed and handed to
     /// apply. <see cref="WorkingSetBudgetBytes"/> is already one working-set owner's
-    /// share of the client-memory domain. Dividing that share by apply parallelism here
-    /// and then dividing it by the same connection fan again in ResolveApplyIo /
-    /// ResolveConsensusFold made the hot path scale as 1/p²: on a 12-P-core host one
-    /// logical working set was cut to 1/12 of its owned memory before its 12 database
-    /// lanes split it again. That produced tens-of-thousands-row executor calls against
-    /// million-row sets and recreated RBAR as repeated medium packets.
-    ///
-    /// Parallel connection transit is accounted when the apply/fold plan divides this
-    /// envelope among its live connections. When several independent working sets are
+    /// share of the client-memory domain, so it is not divided by apply parallelism here:
+    /// the apply/fold plans divide this envelope among their live connections exactly
+    /// once. When several independent working sets are
     /// genuinely resident at once, callers use
     /// IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(concurrentWorkingSets) to divide
     /// this owner share exactly once across those sets.
     /// </summary>
     public static long WorkingSetFlushEnvelopeBytes => WorkingSetBudgetBytes;
 
-    // ---- Postgres memory GUC derivations (single source for tune-pg) --------------------
-    // All are functions of physical RAM. tune-pg emits these; nothing hardcodes a GB literal.
+    // ---- PostgreSQL memory settings, surfaced from PostgresResourcePlan ------------------
 
     /// <summary>PostgreSQL's shared-cache domain; no machine-size ceiling.</summary>
     public static long SharedBuffersBytes => PostgresResourcePlan.Current.SharedBuffersBytes;
@@ -79,24 +68,11 @@ public static class MemoryTopology
     public static long WorkMemBytes => PostgresResourcePlan.Current.WorkMemBytes;
 
     /// <summary>
-    /// Approx resident bytes one accumulated consensus relation holds in the client-side fold
-    /// dictionary: a (3×16B) key + the Acc state + Dictionary node/bucket overhead.
-    ///
-    /// MEASURED on the production runner by FoldMemoryTopologyMeasurementTests with the current
-    /// accumulator shape -- Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with an inline first
-    /// rating period, optional overflow dictionary reference, and aggregate totals. Before the
-    /// measurement was isolated from parallel xUnit collections, the same 200,000-entry probe
-    /// reported 103, 125, and 163 bytes/entry on the production runner. The 192-byte envelope
-    /// covers the largest observation while remaining below 2x the smallest observation.
-    ///
-    /// The measurement test now runs in a non-parallel collection because GC.GetTotalMemory is
-    /// process-wide; unrelated concurrent test allocations must not be charged to this shape.
-    /// The remaining headroom is deliberate: accumulatorCapacity = budget / this, so
-    /// over-reserving directly increases flush frequency and calls to consensus.upsert_type,
-    /// while under-reserving can outrun back-pressure.
-    ///
-    /// The test pins both directions -- below the measurement is an under-reserved envelope,
-    /// above 2x is memory reserved for nothing.
+    /// Resident bytes one accumulated consensus cell holds in the client-side fold
+    /// dictionary: the (3×16B) key, the Delta state (inline first rating period, optional
+    /// overflow reference, aggregate totals), and Dictionary node/bucket overhead.
+    /// Fold delta capacity is envelope / this, so over-reserving raises flush frequency
+    /// and under-reserving can outrun back-pressure; a test bounds it from both sides.
     /// </summary>
     public const int ConsensusFoldBytesPerRelation = 192;
 
@@ -105,26 +81,22 @@ public static class MemoryTopology
     /// managed byte arrays, the Npgsql write buffer, PostgreSQL arrays, native cell-id
     /// construction, and per-type slices. This is byte accounting, not a row-count cap:
     /// 3 varlena ids/references + 4 scalar arrays + wire copy + server arrays/slices.
-    ///
-    /// UNMEASURED, and it divides the envelope to produce chunkCells -- the number of cells
-    /// one consensus_upsert carries. FoldMemoryTopologyMeasurementTests pins only that it
-    /// exceeds the resident cost above, because the wire portion cannot be measured from
-    /// managed heap accounting alone. Measuring it needs instrumentation on a live fold.
+    /// A connection's envelope share divided by this is the cells one fold upsert carries; it must
+    /// exceed <see cref="ConsensusFoldBytesPerRelation"/> since it includes that residency.
     /// </summary>
     public const int ConsensusFoldTransitBytesPerCell = 512;
 
     /// <summary>
     /// Conservative resident cost for one HashSet entry carrying two Hash128 values,
-    /// including slot/bucket overhead. Used to derive the run-scoped mask dedup capacity
-    /// from the compose envelope instead of fixing it at 8,388,608 entries.
+    /// including slot/bucket overhead. The run-scoped mask dedup capacity is the fold
+    /// envelope divided by this.
     /// </summary>
     public const int ConsensusMaskPairResidentBytes = 64;
 
     /// <summary>
     /// Conservative resident cost of one Hash128 key in a ConcurrentDictionary,
     /// including the key/value, node, bucket, and allocator overhead. Run-scoped
-    /// presence and content-ladder caches are sized from bytes with this value;
-    /// they never own an unrelated fixed entry cap.
+    /// presence and content-ladder caches are sized from bytes with this value.
     /// </summary>
     public const int ConcurrentHash128ResidentBytes = 64;
 
@@ -150,8 +122,7 @@ public static class MemoryTopology
     /// <summary>
     /// Resident/wire allowance for one ingest-file journal event: the event object,
     /// file/source/status strings, array slots, Npgsql framing, and PostgreSQL array
-    /// values. Journal batching divides a real byte envelope by this measured shape;
-    /// it does not own an unrelated event-count cap.
+    /// values. Journal batching divides a byte envelope by this shape.
     /// </summary>
     public const int FileJournalTransitBytesPerEvent = 512;
 
@@ -166,12 +137,9 @@ public static class MemoryTopology
     /// Minimum useful payload for another COPY connection. 8192 is PostgreSQL's
     /// physical page size and Npgsql's default write buffer: below one buffer/page
     /// there is no payload to amortize an additional connection and transaction.
-    /// This is a transport unit, not a corpus row-count threshold.
     /// </summary>
     public const int CopyStartupBytesPerConnection = 8 * 1024;
 
-    // ---- Aggregate budget: the invariant nothing computed ------------------------------
-    //
     /// <summary>Combined ingest/client and OS page-cache memory domains.</summary>
     public static long OsReserveBytes =>
         PostgresResourcePlan.Current.ClientBudgetBytes
@@ -199,10 +167,10 @@ public static class MemoryTopology
         }
         catch
         {
-            // fall through to the GC estimate — NEVER throw from a sizing probe
+            // A failed OS probe falls through to the GC view; sizing never throws.
         }
 
-        // Fallback: the runtime's available-memory view (container limit or heap ceiling).
+        // The runtime's available-memory view: container limit or heap ceiling.
         long gc = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
         DetectionSource = "gc-fallback";
         return gc > 0 ? gc : (4L << 30);

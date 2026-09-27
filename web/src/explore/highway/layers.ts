@@ -1,37 +1,30 @@
 /**
- * The language highway, as a league table of divisions.
+ * Highway layers: named groups of governed relation types over the one consensus web,
+ * each presented as a division with a roster and standings.
  *
- * Every entry is grounded in relation types that actually exist in
- * `laplace.canonical_names` — nothing here is aspirational vocabulary. A layer
- * whose read is not yet exposed over the API says so in `readGap` rather than
- * rendering an empty table that reads as "no data witnessed".
- *
- * `band` is the salience band that carries the layer's edges, and is what the
- * standings table reads via `/v1/query/leaders?bands=…`. Layers whose relations
- * are spread across bands (frames) or which are not relation-shaped at all
- * (the highway mask) carry no band and show their roster a different way.
+ * `band` is the salience band that carries the layer's consensus cells; standings read it
+ * via `/v1/query/leaders?bands=…`. A layer whose relations span bands, or that is not
+ * relation-shaped, has no band. `readGap` states that no API read serves a layer's roster,
+ * so an empty table never stands in for absence of witnesses.
  */
 export interface HighwayLayer {
   /** URL segment. */
   slug: string;
   /** Division name. */
   name: string;
-  /** Short type tag, as the mesh landing uses. */
+  /** Short type tag. */
   tag: string;
   /** What this layer is, in one sentence. */
   blurb: string;
-  /** Relation types that constitute the layer. Verified present. */
+  /** Relation types that constitute the layer. */
   relations: string[];
-  /** Salience band carrying these edges, when they sit in one. */
+  /** Salience band carrying these relations, when they sit in one. */
   band?: number;
   /** The standardized read: how you query this layer, exactly. */
   read: string;
-  /**
-   * What this layer contributes to inference — the question the detail page
-   * exists to answer. Kept as prose until there is a metric behind it.
-   */
+  /** What this layer contributes to the web, as prose shown on the layer page. */
   contributes: string;
-  /** Set when the API cannot yet serve this layer's roster. */
+  /** Why no API read serves this layer's roster; shown in place of standings. */
   readGap?: string;
 }
 

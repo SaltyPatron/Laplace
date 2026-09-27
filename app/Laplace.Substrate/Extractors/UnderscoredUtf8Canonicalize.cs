@@ -3,8 +3,8 @@ using System.Text;
 namespace Laplace.Decomposers.Extractors;
 
 /// <summary>
-/// ConceptNet/Atomic2020-style underscore normalization: multi-word terms use '_'
-/// as a word separator; swap to ASCII space (UTF-8 safe — '_' is single-byte).
+/// Underscore normalization for sources that separate the words of a term with '_':
+/// each '_' becomes an ASCII space (UTF-8 safe, since '_' is a single byte).
 /// </summary>
 public static class UnderscoredUtf8Canonicalize
 {

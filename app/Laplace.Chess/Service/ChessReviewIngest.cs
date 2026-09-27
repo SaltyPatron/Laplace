@@ -13,10 +13,8 @@ public static class ChessReviewIngest
     public static int IngestPath(SubstrateChangeBuilder b, ChessModality m, string path, int depth = 4)
     {
         int n = 0;
-        // Sorted for the reason IngestInput.ResolveFiles documents: EnumerateFiles returns
-        // filesystem order, which makes the order of a multi-file source an input the
-        // filesystem chooses. Batch boundaries move with it and the working-set dedup only
-        // absorbs a repeat WITHIN a batch.
+        // Sorted: EnumerateFiles returns filesystem order, and batch boundaries (hence which
+        // repeats working-set dedup absorbs) would otherwise depend on it.
         IEnumerable<string> files = Directory.Exists(path)
             ? Directory.EnumerateFiles(path, "*.pgn", SearchOption.AllDirectories)
                        .OrderBy(static p => p, StringComparer.Ordinal)
@@ -37,9 +35,8 @@ public static class ChessReviewIngest
         if (ChessGameReview.ReviewGameText(gameText, depth) is not { } reviewed) return;
         if (reviewed.Worst.Count == 0) return;
 
-        // GH #736: one parse+identity path for every lane — TryParseGame replays the
-        // mainline and mints the line/event pair; the review's per-position judgments
-        // carry the PLAYING (the event) as provenance context.
+        // The shared PGN parse: TryParseGame replays the mainline and composes the line and
+        // event; the review's per-position judgments carry the playing (event) as context.
         if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed) return;
         var eventId = parsed.PlayingId;
         var src = ChessVocabulary.ReviewSourceId;
@@ -58,11 +55,8 @@ public static class ChessReviewIngest
             foreach (var w in reviewed.Worst)
             {
                 if (w.MoveNo != moveNo || w.White != white || w.Played != uci) continue;
-                // A blunder is a move-quality judgment, not game-outcome evidence — it must not
-                // write to OutcomeType/OutcomeObject, the same (subject,type,object) pair real
-                // game results use (ChessGraph's outcome helper). Doing so used
-                // to fold synthetic "Loss" evidence onto a position regardless of what the game
-                // actually resulted in. MOVE_QUALITY below is the correctly-scoped signal for this.
+                // A blunder is a move-quality judgment, not game-outcome testimony: it is attested
+                // as MOVE_QUALITY, never into the OUTCOME cell real game results fold into.
                 if (MoveQuality.FromReviewTag(w.Tag) is { } q)
                     ChessGraph.AppendMoveQuality(b, fromKey, q, QualityGames, ReviewWitnessWeight, src, eventId);
             }

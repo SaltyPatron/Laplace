@@ -14,9 +14,9 @@ public sealed class FoldMemoryTopologyMeasurementCollection
 }
 
 /// <summary>
-/// MemoryTopology's fold constants size the ingest memory envelope. This test must
-/// mirror the CURRENT retained accumulator shape; a stale surrogate is worse than no
-/// measurement because it gives a precise-looking justification to the wrong batch size.
+/// Measures retained bytes per consensus-fold accumulator entry, which MemoryTopology's
+/// fold constants use to size the ingest memory envelope. The local Delta must match the
+/// production accumulator's shape for the measurement to mean anything.
 /// </summary>
 [Collection("Fold memory topology measurement")]
 public sealed class FoldMemoryTopologyMeasurementTests
@@ -29,10 +29,8 @@ public sealed class FoldMemoryTopologyMeasurementTests
         public long SumScoreFp1e9;
     }
 
-    // Mirrors ConsensusAccumulatingWriter.Delta as of the grouped-rating-period path:
-    // two inline structs, an optional dictionary reference, and three aggregate longs.
-    // The previous test modeled four longs and therefore stopped measuring production
-    // when exact grouped periods were added.
+    // Mirrors ConsensusAccumulatingWriter.Delta: two inline structs, an optional
+    // dictionary of additional rating periods, and three aggregate longs.
     private struct Delta
     {
         public PeriodKey FirstPeriod;

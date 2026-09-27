@@ -4,10 +4,9 @@ using Xunit;
 namespace Laplace.Chess.Modality.Tests;
 
 /// <summary>
-/// Motif detection from geometry, and — the point of the exercise — motif KEYS that are
-/// position-independent so the cell they name accumulates witnesses across every game the
-/// motif ever appears in. A position appears once (92.0% of MOVE cells have witness_count = 1);
-/// "knight forks king and rook" appears constantly.
+/// Motifs are detected from geometry, and a motif's key is position-independent, so the
+/// consensus cell it names accumulates witnesses from every game the motif appears in rather
+/// than one per position.
 /// </summary>
 public class ChessTacticGeometryTests
 {
@@ -35,8 +34,8 @@ public class ChessTacticGeometryTests
     [Fact]
     public void Fork_IgnoresDoubleAttacksOnLesserPieces()
     {
-        // A queen attacking two pawns is not a fork anyone plays for; the attacker-value test
-        // is what keeps the motif alphabet meaningful instead of firing every move.
+        // A queen attacking two pawns is not a fork: a victim counts only if it is worth at
+        // least the attacker or is the king.
         var forks = ChessTacticGeometry.Forks(Board.FromFen("8/8/1p1p4/8/2Q5/8/8/4K2k w - - 0 1"), byWhite: true);
         Assert.Empty(forks);
     }
@@ -73,8 +72,8 @@ public class ChessTacticGeometryTests
     }
 
     /// <summary>
-    /// THE property that makes this worth attesting: the same motif in two unrelated positions
-    /// must produce the SAME key, so its consensus cell accumulates rather than splitting.
+    /// The same motif in two unrelated positions produces the same key, so its consensus
+    /// cell accumulates rather than splitting.
     /// </summary>
     [Fact]
     public void Key_IsIdenticalForTheSameMotifInUnrelatedPositions()
@@ -102,7 +101,7 @@ public class ChessTacticGeometryTests
     [Fact]
     public void Key_IsColourNormalised_SoMirroredMotifsShareACell()
     {
-        // Black knight forking a white king+rook is the SAME claim as the white version.
+        // A black knight forking white king+rook is the same motif key as the white version.
         var white = ChessTacticGeometry.Forks(Board.FromFen(KnightForksKingRook), byWhite: true)[0];
         var black = ChessTacticGeometry.Forks(
             Board.FromFen("4k3/8/8/8/8/3n4/8/2R1K3 b - - 0 1"), byWhite: false);

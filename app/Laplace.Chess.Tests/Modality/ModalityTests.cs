@@ -139,7 +139,7 @@ public class ModalityTests
     [Fact]
     public void Threefold_FromFenAlone_DoesNotSeeHistory()
     {
-        // HTTP play used to rebuild from FEN each ply — that cannot detect threefold.
+        // Threefold needs the session's history; a state rebuilt from FEN alone has none.
         var s = M.FromFen("4k1n1/8/8/8/8/8/8/4K1N1 w - - 0 1");
         s = Play(s, "g1f3");
         s = Play(s, "g8f6");

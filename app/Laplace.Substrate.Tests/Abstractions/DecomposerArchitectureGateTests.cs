@@ -7,9 +7,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Unified ingest pipeline architecture gate: decomposers subclass
-/// <see cref="Decomposer{TRecord}"/> (or documented allowlist); no inline SQL,
-/// no direct pipeline bypass, no hand SubstrateChangeBuilder in DecomposeAsync.
+/// Every source provider admits through the one shared ingest recipe: it subclasses
+/// <see cref="Decomposer{TRecord}"/> (or is listed below), carries no inline SQL, does not
+/// bypass the pipeline, and hand-builds no SubstrateChangeBuilder in DecomposeAsync.
 /// </summary>
 public sealed class DecomposerArchitectureGateTests
 {
@@ -51,7 +51,7 @@ public sealed class DecomposerArchitectureGateTests
     };
 
     /// <summary>
-    /// DecomposerOrchestrator was removed in Wave 3 — multi-phase sources use
+    /// Sources whose structure is recovered in ordered phases, through
     /// <see cref="DecomposerMultiPhase"/> with nested ComposeDecomposerPhase types.
     /// </summary>
     // The generic decomposer itself: every recipe source runs through it, so the gates that
@@ -65,20 +65,20 @@ public sealed class DecomposerArchitectureGateTests
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
-        // Two phases: sentences.csv (entities) then links.csv (attestations). The second
-        // needs the id -> content-root map the first produces as a free side effect.
+        // links.csv resolves row ids through the id → content-root map built from
+        // sentences.csv, so sentences precede links.
         "Laplace.Decomposers/Tatoeba/TatoebaDecomposer.cs",
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
         "Laplace.Decomposers/WordNet/WordNetDecomposer.cs",
     };
 
-    /// <summary>Direct IngestBatchPipeline in *Decomposer.cs until orchestrator migrates.</summary>
+    /// <summary>*Decomposer.cs files permitted to call IngestBatchPipeline directly.</summary>
     private static readonly HashSet<string> PipelineInDecomposerAllowlist = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Direct IngestBatchPipeline in *Ingest*.cs adapter modules pending spine migration.</summary>
+    /// <summary>*Ingest*.cs modules permitted to call IngestBatchPipeline directly.</summary>
     private static readonly HashSet<string> PipelineInIngestAdapterAllowlist = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Hand-rolled parallel file workers pending spine migration.</summary>
+    /// <summary>Files permitted their own parallel file workers outside ParallelIngestWork.</summary>
     private static readonly HashSet<string> ParallelIngestAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "Laplace.Chess/Service/ChessLabService.cs",
@@ -93,15 +93,10 @@ public sealed class DecomposerArchitectureGateTests
         RegexOptions.Compiled);
 
     /// <summary>
-    /// Worker-pool plumbing — what makes a bounded channel an INGEST FAN rather than
-    /// just a channel. The law here is "do not reimplement ParallelIngestWork", and
-    /// ParallelIngestWork is precisely a bounded channel PLUS a bounded worker pool
-    /// over ingest work. A bounded channel with none of this is a different mechanism:
-    /// ChessLabTerminal publishes terminal scrollback to N UI subscribers, one
-    /// DropOldest channel per subscriber, with no work fan, no worker count, and no
-    /// shared primitive that could own it — routing it through ParallelIngestWork would
-    /// be nonsense. Matching the bare channel turned that correct code into main's only
-    /// red test (build/deploy/test runs 32593699371, 32593689674 and predecessors).
+    /// Worker-pool plumbing: what makes a bounded channel an ingest fan. ParallelIngestWork
+    /// is a bounded channel plus a bounded worker pool over ingest work, so only that
+    /// combination reimplements it; a bounded channel alone (e.g. a per-subscriber
+    /// DropOldest broadcast channel) is a different mechanism and is not flagged.
     /// </summary>
     private static readonly Regex IngestFanShape = new(
         @"\bParallel\.ForEachAsync\b|\bMaxDegreeOfParallelism\b|\bIngestTopology\b"
@@ -115,10 +110,9 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     /// <summary>
-    /// Decomposer implementations do not interpret the raw batch option. Conditional,
-    /// clamp and fallback variants all fork operator semantics and the machine sizing model.
-    /// IngestPipelineDefaults is the one resolver; a source that needs different sizing adds
-    /// an IngestSourceProfile and passes the complete DecomposerOptions through.
+    /// Decomposers do not interpret the raw batch option; IngestPipelineDefaults is the one
+    /// resolver. A source that needs different sizing declares an IngestSourceProfile and
+    /// passes the complete DecomposerOptions through.
     /// </summary>
     private static readonly Regex HandRolledBatch = new(
         @"\boptions\.BatchSize\b|\bDefaultBatchSize\b|\bBatchConfigDefaults\b",
@@ -131,20 +125,12 @@ public sealed class DecomposerArchitectureGateTests
     };
 
     /// <summary>
-    /// ISeedSource.Profile is the RUN-LEVEL sizing authority: it reaches
-    /// IDecomposer.SizingProfile, then IngestCommands.BuildIngestOptions, and sets
-    /// record_batch / commit_rows / ws_record_cap / probe_chunk / max_intents_per_commit
-    /// for the entire run (the `ingest_source_sizing:` log line).
-    ///
-    /// It is a SEPARATE declaration site from the per-file IngestBatchConfig, and that is
-    /// how it went stale: IngestSourceProfile.Tatoeba was added and wired into the
-    /// decomposer's ConfigForFile while TatoebaSource.Profile still returned Default, so a
-    /// live ingest sized itself off Default and nothing said so. Same for Omw, Iso, Cili
-    /// and FrameNet.
-    ///
-    /// If a profile exists bearing a source's name, that source must use it. A source with
-    /// no dedicated profile legitimately returns Default or a shared one (RelationTriple,
-    /// Wiktionary, …) and is not flagged.
+    /// ISeedSource.Profile sizes the whole run: it reaches IDecomposer.SizingProfile, then
+    /// IngestCommands.BuildIngestOptions, and sets record_batch / commit_rows /
+    /// ws_record_cap / probe_chunk / max_intents_per_commit. It is declared apart from the
+    /// per-file IngestBatchConfig, so when an IngestSourceProfile bears a source's name,
+    /// that source's Profile must return it. A source with no dedicated profile may return
+    /// Default or a shared one.
     /// </summary>
     [Fact]
     public void SeedSources_UseTheirOwnSizingProfile_WhenOneExists()
@@ -211,35 +197,18 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     /// <summary>
-    /// A decomposer must not hand-roll a parser for a format the grammar registry
-    /// already covers.
-    ///
-    /// The law is written in this repo: "Tree-sitter's job is narrow: unpack container
-    /// formats, then hand off." 299 grammars are vendored and ~70 are registered in
-    /// engine/core/src/grammar_registry.c -- including xml, json, csv, tsv, tab, conllu,
-    /// ttl, markdown and sql. Nine decomposers route through them. Fourteen parse around
-    /// a grammar that exists for their exact format, and UD is the sharpest case: conllu
-    /// is registered specifically for it and the decomposer still hand-rolls.
-    ///
-    /// It was recorded twice before and fixed neither time -- .scratchpad/34 for PGN
-    /// ("a direct violation of this project's own stated law; PGN is a container format;
-    /// nothing here currently hands it to tree-sitter") and .scratchpad/30 for the
-    /// vendored gitcommit/gitdiff grammars left unregistered. .scratchpad/13 names the
-    /// mechanism: "every new source is written by copying the nearest neighbor, forking
-    /// further." Ten other decomposer laws have a gate here. This one had none, which is
-    /// why it drifted for three sessions.
-    ///
-    /// SHRINK-ONLY. The allowlist is the measured population as of 2026-08-10, so the
-    /// gate lands enumerated instead of red on merge day. Removing an entry is the fix;
-    /// adding one is a regression that must be argued for in the diff.
+    /// A provider does not hand-roll a parser for a format the grammar registry
+    /// (engine/core/src/grammar_registry.c) already unpacks; container formats are unpacked
+    /// by the registered grammar and handed off. The allowlists enumerate the files that
+    /// still parse such a format by hand; the fix removes an entry, never adds one.
     /// </summary>
     [Fact]
     public void DecomposerProjects_NoHandRolledParserForARegisteredGrammar()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
 
-        // Formats the registry already unpacks. Parsed from the registry itself rather
-        // than hardcoded, so registering a new grammar tightens this gate automatically.
+        // Formats the registry unpacks, read from the registry itself, so registering a
+        // grammar tightens this gate.
         var registryPath = Path.Combine(repoRoot, "engine", "core", "src", "grammar_registry.c");
         var registered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (File.Exists(registryPath))
@@ -253,11 +222,8 @@ public sealed class DecomposerArchitectureGateTests
             (new Regex(@"\bJsonDocument\b|\bUtf8JsonReader\b", RegexOptions.Compiled), "json"),
         };
 
-        // Measured population 2026-08-10, shrink-only. NINETEEN files, not the fourteen
-        // a grep over *Decomposer.cs suggested -- the hand-rolling lives in helper types
-        // (WiktionaryEntry, LlamaTokenizerParser, ConceptNetUri, LanguageGraph), which is
-        // exactly how it stayed invisible: the decomposer looks clean and the parser sits
-        // one file over.
+        // Files that parse XML/JSON by hand. Helper types beside a decomposer count as
+        // the decomposer's parser.
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs",
@@ -279,18 +245,8 @@ public sealed class DecomposerArchitectureGateTests
             "app/Laplace.Decomposers/Model/RecipeDescriptor.cs",
             "app/Laplace.Decomposers/Model/RecipeExtractor.cs",
 
-            // Over HTTP, and still violations. An earlier draft of this gate exempted
-            // anything touching HttpClient on the reasoning that "a REST reply is a wire
-            // format, not a container." That is wrong: a response carries a Content-Type
-            // and a body, the body is the same container it would be on disk, and
-            // Content-Type IS the format declaration. Transport does not change payload.
-            //
-            // The two files prove it. ChessGameFetcher sends
-            // `Accept: application/x-chess-pgn` -- it requests a PGN container, and `pgn`
-            // is registered. LichessBot reads NDJSON with ReadLineAsync and a bare
-            // `catch { }` that swallows every unparseable line. The exemption was written
-            // to make this gate pass, which is the same defect as adjusting a test to fit
-            // the code. Listed as measured violations instead.
+            // HTTP transport does not change the payload: a response body is the same
+            // container it would be on disk, and its Content-Type declares the format.
             "app/Laplace.Chess/Service/ChessGameFetcher.cs",
             "app/Laplace.Chess/Service/LichessBot.cs",
         };
@@ -314,26 +270,10 @@ public sealed class DecomposerArchitectureGateTests
             }
         }
 
-        // LINE-ORIENTED FORMATS. The block above only knows two idioms -- XDocument and
-        // JsonDocument -- so it scores zero for every lane that hand-rolls a delimited
-        // format, and TEN registered grammars were invisible to it: conllu, csv, tsv,
-        // tab, pgn, markdown, md, ttl, turtle, sql.
-        //
-        // The commit that introduced this gate said "UD is the sharpest: conllu is
-        // registered specifically for it and the decomposer still hand-rolls." That
-        // sentence was written in the commit message of a gate that could not detect it.
-        // UdConlluParser uses neither XDocument nor JsonDocument, so it was never in the
-        // allowlist and never could have been -- and UD is the slowest lane on the box.
-        // "Nineteen violations" measured which C# TYPE was used, not which law was broken.
-        //
-        // Format association is by DIRECTORY, not by file. UDDecomposer.cs names
-        // "*.conllu"; UdConlluParser.cs one file over does the parsing and names no
-        // extension at all. File-local matching finds 2 files and misses UD entirely --
-        // the same "the parser sits one file over" evasion recorded above.
-        //
-        // Detection requires BOTH line reading AND delimiter field extraction, because
-        // directory scope alone over-reports badly (38 files, including IngestInventory
-        // and LanguageFilter, which merely live beside a file that names a format).
+        // Line-oriented formats (conllu, csv, tsv, tab, pgn, markdown, ttl, ...). A file is
+        // associated with a format by its directory, since the parser often sits beside the
+        // file that names the extension. A file is flagged only when it both reads lines and
+        // extracts delimited fields; directory scope alone would flag bystanders.
         var lineFormats = new[] { "conllu", "csv", "tsv", "tab", "pgn", "markdown", "md", "ttl", "turtle" }
             .Where(registered.Contains).ToArray();
         var extPattern = new Regex(
@@ -346,20 +286,17 @@ public sealed class DecomposerArchitectureGateTests
             @"Split\s*\(\s*['""]?\\?[t,|]|IndexOf\s*\(\s*\(?byte\)?\s*['""]\\?[t,|]|\bTryField\b|['""]\\t['""]",
             RegexOptions.Compiled);
 
-        // GrammarRowReader.ReadFieldsAsync(path, modalityId) IS the compliant route for a
-        // line format -- it takes the modality and reads fields through the grammar. It
-        // reads lines and splits fields BECAUSE it is the bridge, so exempting it is not
-        // a carve-out; flagging it would be flagging the fix. Everything else has this
-        // available and does not call it.
+        // GrammarRowReader.ReadFieldsAsync(path, modalityId) is the route for a line
+        // format: it reads fields through the grammar, so its own line reading is exempt.
         var lineExempt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "app/Laplace.Substrate/Abstractions/GrammarRowReader.cs",
         };
 
-        // Measured 2026-08-10, shrink-only. THREE, each with GrammarRowReader available:
-        //   UdConlluParser.cs        conllu, registered FOR UD. The 3,124s lane.
-        //   TabBridgeHelpers.cs      .tab rows straight through StreamingUtf8LineReader.
-        //   ChessOpeningsDecomposer  ReadLineAsync + line.Split('\t').
+        // Files that split line formats by hand instead of using GrammarRowReader:
+        //   UdConlluParser.cs        conllu
+        //   TabBridgeHelpers.cs      .tab rows through StreamingUtf8LineReader
+        //   ChessOpeningsDecomposer  ReadLineAsync + line.Split('\t')
         var lineAllowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "app/Laplace.Decomposers/UD/UdConlluParser.cs",
@@ -641,10 +578,9 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     /// <summary>
-    /// Multi-file is already file-major (<see cref="DecomposerMultiFile{TRecord}"/>).
-    /// Nesting it inside MultiPhase (FrameNet's old FnMultiFilePhase ×3) restarts the
-    /// file pool per phase — phase-outer, not file-outer. ComposeDecomposerPhase over
-    /// monolith streams is fine; MultiFile inside MultiPhase is not.
+    /// Multi-file ingest is file-major (<see cref="DecomposerMultiFile{TRecord}"/>).
+    /// Nesting it inside MultiPhase would restart the file pool per phase, making the
+    /// run phase-outer; ComposeDecomposerPhase over a single stream is permitted.
     /// </summary>
     [Fact]
     public void MultiPhase_DoesNotNest_DecomposerMultiFile()
@@ -661,7 +597,7 @@ public sealed class DecomposerArchitectureGateTests
             if (nest.IsMatch(File.ReadAllText(path)))
                 violations.Add(rel);
         }
-        // Also scan any *Decomposer.cs that still declares MultiPhase (stale allowlist race).
+        // Also scan every *Decomposer.cs that declares MultiPhase, listed or not.
         foreach (var dir in DecomposerProjectRoots(repoRoot))
         {
             if (!Directory.Exists(dir)) continue;
@@ -852,12 +788,11 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     /// <summary>
-    /// MultiPhase orchestrators must call <c>RunPhaseAsync</c>. Hand
-    /// <c>new SubstrateChangeBuilder</c> / <c>Writer.ApplyAsync</c> /
-    /// <c>yield return Build*</c> inside <c>RunIngestAsync</c> reinvent the
-    /// wheel (Unicode #776/#779). Nested <see cref="ComposeDecomposerPhase{T}"/>
-    /// Compose callbacks are fine — the pipeline owns the builder.
-    /// Model still hand-builds inside RunIngestAsync; shrink this allowlist only.
+    /// MultiPhase providers run each phase through <c>RunPhaseAsync</c>; a hand
+    /// <c>new SubstrateChangeBuilder</c>, <c>Writer.ApplyAsync</c> or
+    /// <c>yield return Build*</c> inside <c>RunIngestAsync</c> bypasses the shared recipe.
+    /// Compose callbacks of nested <see cref="ComposeDecomposerPhase{T}"/> are permitted:
+    /// the pipeline supplies their builder. Listed files still hand-build.
     /// </summary>
     private static readonly HashSet<string> MultiPhaseRunIngestHandAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {

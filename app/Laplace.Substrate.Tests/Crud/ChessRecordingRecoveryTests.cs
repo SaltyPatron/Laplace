@@ -49,8 +49,8 @@ public sealed class ChessRecordingRecoveryTests(LocalPgFixture pg)
             string? acceptedRecord = null;
             if (recordOnly)
             {
-                // An earlier record-only ingest is valid source testimony, but it does
-                // not prove that the current calculated owners have been accepted.
+                // A record-only ingest is valid recorded testimony but is not the
+                // versioned calculation; the two are different witnesses.
                 await using var seedWriter = new ConsensusAccumulatingWriter(
                     new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource, persistEvidence: true);
                 await seedWriter.ApplyAsync(recorded);
@@ -58,9 +58,9 @@ public sealed class ChessRecordingRecoveryTests(LocalPgFixture pg)
             }
             else
             {
-                // Establish the exact durable carriers independently of COPY lane
-                // scheduling. A single-partition apply otherwise rolls E/P back with
-                // its failed control transaction, which is also correct behavior.
+                // Land the durable entity/physicality rows first, independent of COPY
+                // scheduling; a single-partition apply would roll them back with its failed
+                // control transaction.
                 foreach (var change in new[] { recorded, analyzed })
                     Assert.All(change.IntentStages, stage => Assert.Equal(0, stage.AttestationCount));
                 var carrierWriter = new NpgsqlSubstrateWriter(pg.DataSource);
@@ -72,8 +72,8 @@ public sealed class ChessRecordingRecoveryTests(LocalPgFixture pg)
                 Assert.Empty(await beforeFailure.PresentAttestationIdsAsync(
                     ChessVocabulary.PlaysLineType, [witnessId]));
 
-                // Now exercise real control failure and retry against pre-landed
-                // content, with unchanged production constraints and canonical IDs.
+                // Control failure and retry against already-landed content, with production
+                // constraints and canonical ids.
                 await InstallFailureAsync(witnessId);
                 try
                 {

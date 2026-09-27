@@ -1,41 +1,20 @@
 #pragma once
 
 /*
- * absence_filter — a NO-FALSE-NEGATIVE membership filter over content ids.
+ * absence_filter — a no-false-negative Bloom membership filter over content ids.
  *
- * WHY THIS EXISTS
+ * DIRECTION
  *
- * The working-set apply proves novelty by probing every staged id against the
- * substrate. entities_present_ordinals is already about as tight as an exact
- * answer gets — LIST(tier) parent pruned at plan time, HASH(id) leaf pruned per
- * row, one btree descent per id, whole batch in one round trip. The cost is not
- * the query shape, it is the descent count: on the 2026-07-26 wiktionary seed a
- * single batch probed 1,602,715 attestation ids and found 13,901 present. 99.1%
- * of those descents walked to a leaf page, pulled it off disk, and learned that
- * nothing was there. As the table outgrew shared_buffers (229M rows) that phase
- * went from 25s to 117s per batch while every other number in the batch held
- * constant.
+ * Only absence is a proof. Skipping rows believed present would let a false
+ * positive drop a novel row, so the filter is never read that way:
  *
- * DIRECTION MATTERS
+ *     maybe_present == false  ->  the id is not in the set; it is novel without
+ *                                 an exact probe.
+ *     maybe_present == true   ->  present or a false positive; the caller still
+ *                                 performs the exact probe.
  *
- * NpgsqlWorkingSetApply rejects a probabilistic filter, correctly, for the
- * direction it considers: using one to skip rows believed PRESENT would let a
- * false positive drop a genuinely novel row. That reasoning is sound and this
- * filter does not weaken it.
- *
- * This filter is used the other way. A Bloom filter has no false negatives, so
- * "definitely absent" is a PROOF:
- *
- *     maybe_present == false  ->  the id is not in the set. Novel by proof.
- *                                 Skip the probe, COPY it.
- *     maybe_present == true   ->  might be present, might be a false positive.
- *                                 Probe exactly as before.
- *
- * Behaviour on the maybe-present path is bit-identical to today, so the merge
- * semantics that require a re-seen attestation to accumulate its observation
- * count are untouched. The only thing that changes is how many descents never
- * happen. A false positive costs one probe — exactly what is paid today — never
- * correctness. There is no tuning knob that can trade away a row.
+ * A false positive costs one exact probe, never a row or a merge of a re-seen
+ * observation.
  *
  * HASHING
  *

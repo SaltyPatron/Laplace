@@ -10,8 +10,8 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Cold read-only evidence export through the existing bounded witness read owner.
-/// Independent page reads describe an observation interval, never a historical snapshot.</summary>
+/// <summary>Read-only evidence export through the bounded witness reads. Pages are read
+/// independently, so the export describes an observation interval, not a snapshot.</summary>
 internal static class ChessStartingSideInventory
 {
     internal const string Mode = "inventory-starting-sides";
@@ -383,8 +383,8 @@ internal static class ChessStartingSideInventory
                 ("ChessSelfPlay", ChessVocabulary.SourceId)
             })
             {
-                // The existing read row has no Source column. Singleton source admission
-                // binds every returned row to its exact provenance without a new SQL owner.
+                // The read row has no Source column; querying one source at a time binds
+                // every returned row to its provenance.
                 var rows = await NpgsqlSubstrateReads.ChessWitnessInputsAsync(ds, subjects,
                     [relation.ToBytes()], [source.ToBytes()], null, budget, ct).ConfigureAwait(false);
                 foreach (var row in rows)

@@ -1,32 +1,16 @@
--- physicalities: HASH-partitioned on id — 64 uniform buckets.
+-- physicalities: the typed physical realizations of an entity (entity_id,
+-- type): coord (PointZM in the unit 4-ball), hilbert_index (its Hilbert
+-- locality key), and, for compositions, the GeometryZM trajectory manifest of
+-- ordered constituents. Geometry reads
+-- (KNN over coord, constituent GIN probes) and REALIZE all read this face.
 --
--- Was RANGE(hilbert_index), 64 fixed bands on the leading byte, justified as
--- "KNN prunes to the bands its query region spans". MEASURED 2026-08-04: no
--- installed read supplies a hilbert_index range predicate, so no query has ever
--- pruned — structural_neighbors orders by `coord <<->> $1` with no partition-key
--- filter, and every KNN already descends all 64 bands. The claimed benefit was
--- never collected.
---
--- What the band split did produce is skew. hilbert_index is a space-filling-curve
--- POSITION, not a hash: uniform byte boundaries over a clustered distribution put
--- 58.96% of 70M rows and 56 of 95 GB into physicalities_ba0 alone (48.81% on
--- 2026-08-03 — the skew grows with the seed). The apply path splits its parallel
--- COPY lanes on the partition key, so 8 lanes degenerated to 1: measured 212,125
--- rows in 402,196ms (527 rows/s) with one backend working and 21 idle at COMMIT,
--- against 27,315 rows/s on id-keyed entities in the same batch.
---
--- HASH(id) makes every lane 1/64 of the write. Ids are content hashes — uniform by
--- construction, which is the property the band boundaries wrongly assumed of the
--- hilbert index. attestations already partitions HASH(subject_id); this table was
--- the only RANGE-partitioned table in the schema.
---
--- PK is (id) alone: a hash partition key must be a subset of every unique
--- constraint, and (id) subsumes the old physicalities_id_btree — which existed
--- solely because the PK led with hilbert_index. One fewer index insert per row.
--- Deterministic DDL — no data-dependent bounds. entity_id lookups use
--- physicalities_entity_btree per bucket (cheap probes).
--- FK to entities dropped (see consensus.sql.in).
--- GREENFIELD: db-reset + reseed is the upgrade path.
+-- HASH(id): ids are content hashes, so the 64 leaves are uniform and parallel
+-- bulk COPY splits evenly. hilbert_index is a curve position, not a hash, so it
+-- is indexed, not used as the partition key. PK (id) alone: a hash partition
+-- key must be in every unique constraint. entity_id lookups use
+-- physicalities_entity_btree. No FK to entities (see consensus.sql.in).
+-- GREENFIELD: a database with any other partition layout is recreated and
+-- reseeded, not repartitioned in place.
 CREATE TABLE IF NOT EXISTS physicalities (
     id                 bytea            NOT NULL CHECK (octet_length(id) = 16),
     entity_id          bytea            NOT NULL,
@@ -34,9 +18,8 @@ CREATE TABLE IF NOT EXISTS physicalities (
     coord              geometry(PointZM)    NOT NULL,
     hilbert_index      bytea                NOT NULL CHECK (octet_length(hilbert_index) = 16),
     trajectory         geometry(GeometryZM),
-    -- W16 / GH #912: one definition — public.laplace_radius_origin (native C
-    -- IMMUTABLE STRICT). The open-coded ST_X²+… form was a second copy of the
-    -- same 4D radius; greenfield DDL calls the installed function.
+    -- 4D distance from the origin, computed by the native
+    -- public.laplace_radius_origin so there is one definition of the radius.
     radius_origin      double precision GENERATED ALWAYS AS (
         public.laplace_radius_origin(coord)
     ) STORED,
@@ -59,13 +42,9 @@ BEGIN
     IF to_regclass(current_schema() || '.physicalities_h00') IS NOT NULL THEN
         RETURN;  -- buckets already exist
     END IF;
-    -- A pre-repartition database still has the RANGE(hilbert_index) parent and its
-    -- physicalities_b* bands. CREATE TABLE IF NOT EXISTS above no-ops against it, so
-    -- without this check the loop below hangs MODULUS/REMAINDER bounds off a RANGE
-    -- parent and PostgreSQL answers "invalid bound specification for a range
-    -- partition" — which names neither the table nor the remedy, and fails the whole
-    -- extension UPDATE. Say what is actually wrong. The upgrade path is a reset:
-    -- repartitioning in place would mean rewriting 95 GB under an ALTER.
+    -- CREATE TABLE IF NOT EXISTS no-ops against a parent partitioned any other
+    -- way; refuse by name instead of letting MODULUS/REMAINDER bounds fail with
+    -- an error that names neither the table nor the remedy.
     IF (SELECT p.partstrat FROM pg_partitioned_table p
         WHERE p.partrelid = (current_schema() || '.physicalities')::regclass) <> 'h' THEN
         RAISE EXCEPTION
@@ -81,10 +60,9 @@ BEGIN
         EXECUTE format('CREATE TABLE physicalities_h%s PARTITION OF physicalities'
                        || ' FOR VALUES WITH (MODULUS 64, REMAINDER %s)',
                        suffix, b);
-        -- Per-LEAF tuning (PG forbids storage params on partitioned parents):
-        -- skip the expensive PostGIS ND-stats on the geometry columns (the
-        -- pipeline reaches them via the GiST KNN, never via histograms — the
-        -- measured 160x ANALYZE win), and fire autoanalyze at 2% / 100k changes.
+        -- Per-leaf tuning (PG forbids storage params on partitioned parents):
+        -- no PostGIS ND-stats on the geometry columns, which are reached through
+        -- GiST KNN and GIN probes, never histograms; autoanalyze at 2% / 100k.
         EXECUTE format('ALTER TABLE physicalities_h%s ALTER COLUMN coord SET STATISTICS 0,'
                        || ' ALTER COLUMN trajectory SET STATISTICS 0',
                        suffix);

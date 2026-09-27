@@ -11,35 +11,12 @@ CREATE OR REPLACE FUNCTION ops.index_usage_report(p_min_bytes bigint DEFAULT 0)
 
 BEGIN ATOMIC
 
-    -- What the index set COSTS versus what anything has ever READ.
-    --
-    -- Every index is maintained on every insert. An index nothing reads is pure write
-    -- amplification -- random read-modify-write into a structure that returns nothing --
-    -- and there is no signal that it exists. MEASURED 2026-08-03, mid-ingest:
-    --
-    --   heap                                146 GB
-    --   indexes                             178 GB   <- more index than data
-    --     in use (>=100 lifetime scans)     114 GB across   928 indexes
-    --     scanned <100x ever                 41 GB across 1,249 indexes
-    --     never scanned                      23 GB across 1,726 indexes
-    --
-    -- 64 GB maintained on every write for fewer than 100 lifetime reads apiece. On
-    -- physicalities_ba0 alone, two indexes served all 105M scans while six others totalling
-    -- 10.8 GB had been scanned nine times between them -- including a 5,261 MB GIN over
-    -- trajectory constituent ids (one entry per constituent per row, billions of entries;
-    -- GIN insertion during bulk load is the random write behind 50 MB/s of WAL producing
-    -- 2.5 MB/s of net data growth) with ONE lifetime scan.
-    --
-    -- READ THE COUNTS CORRECTLY. idx_scan is cumulative since the last stats reset, NOT
-    -- since the index was built. pg_stat_database.stats_reset was NULL when the numbers
-    -- above were taken, so they covered the database's whole life -- but this database is
-    -- reseeded, and after a reseed every counter starts at zero. A zero here means "nothing
-    -- has needed it since the last reset", which is not the same claim as "nothing needs
-    -- it". Check the read surface before dropping anything: an index serving a quarterly
-    -- report is indistinguishable here from an index serving nothing.
-    --
-    -- Statistics only (pg_stat_user_indexes + pg_relation_size). No scans.
-    -- Companion: ops.index_usage_detail() for the per-index rows behind these buckets.
+    -- What the index set costs versus what has read it, bucketed by lifetime
+    -- scans. Every index is maintained on every insert, so an unread index is
+    -- pure write amplification. idx_scan is cumulative since the last stats
+    -- reset, not since the index was built: zero means "not needed since the
+    -- reset", not "never needed". Statistics only, no scans; per-index rows are
+    -- ops.index_usage_detail().
     WITH ix AS (
         SELECT s.indexrelname,
                s.idx_scan,
@@ -73,9 +50,8 @@ CREATE OR REPLACE FUNCTION ops.index_usage_detail(p_table text DEFAULT NULL, p_l
 
 BEGIN ATOMIC
 
-    -- The per-index rows behind index_usage_report()'s buckets, biggest first. This is the
-    -- form that names a specific drop candidate; the bucket form only sizes the problem.
-    -- Same caveat: idx_scan is cumulative since the last stats reset, not since build.
+    -- The per-index rows behind index_usage_report()'s buckets, largest first.
+    -- idx_scan is cumulative since the last stats reset, not since build.
     SELECT s.relname::text,
            s.indexrelname::text,
            s.idx_scan,

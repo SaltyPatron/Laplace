@@ -139,8 +139,8 @@ public sealed class LichessGameReplayTests
         await Observe(replay, "e2e4 e7e5 g1f3 b8c6", written);
         Assert.Equal(new[] { 1, 2, 3, 4 }, written.Select(p => p.Ply));
 
-        // The host opens a fresh live session on a new game stream. No old pending
-        // search evidence is reconstructed from a POST or attached on reconnect.
+        // A new game stream opens a fresh live session; no pending search evidence is
+        // rebuilt from a POST or attached on reconnect.
         var reopened = new LichessGameReplay("startpos");
         var replayed = new List<LichessStreamedPly>();
         await Observe(reopened, "e2e4 e7e5 g1f3 b8c6", replayed);

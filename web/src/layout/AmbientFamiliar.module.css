@@ -2,9 +2,8 @@
   .layer {
     position: fixed;
     inset: 0;
-    /* Decoration belongs behind the workspace. A z-index of 900 put the familiar
-       over chat composers, data controls and cards even though it ignored pointer
-       events; visually obscuring controls is still a broken interaction. */
+    /* Behind the workspace: ignoring pointer events is not enough, the familiar
+       must never visually cover composers, controls or cards. */
     z-index: 0;
     overflow: hidden;
     pointer-events: none;

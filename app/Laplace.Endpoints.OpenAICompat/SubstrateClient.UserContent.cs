@@ -23,8 +23,8 @@ internal sealed partial class SubstrateClient
         IReadOnlyList<NpgsqlSubstrateReads.PackedTrajectoryVertexRow>? artifactVertices = null;
         IReadOnlyList<string>? promptContexts = null;
 
-        // Membership/trajectory proof and prompt-context proof share one short-lived connection.
-        // Do not keep that backend leased while content reconstruction opens its own pooled reads.
+        // The occurrence and trajectory checks share one connection, released before
+        // reconstruction opens its own pooled reads.
         await using (var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             if (await NpgsqlSubstrateReads.HasConfirmedUserArtifactOccurrenceAsync(
@@ -70,9 +70,7 @@ internal sealed partial class SubstrateClient
                 return null;
             }
 
-            // Observation metadata is independent of reconstructing the already-validated
-            // content root. Run both through the datasource instead of serializing them or
-            // parking the membership connection above.
+            // Content reconstruction and the observation read run concurrently.
             var contentTask = NpgsqlContentReconstructor.ReconstructUtf8Async(
                 _dataSource, contentId, fileMetadata.Modality, ct);
             var observationTask = NpgsqlSubstrateReads.UserArtifactObservationAsync(

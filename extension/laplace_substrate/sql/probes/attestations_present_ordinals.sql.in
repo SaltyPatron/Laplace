@@ -1,7 +1,6 @@
--- Id-only attestation presence is a diagnostic/preflight surface. It cannot prune
--- LIST(type_id)->HASH(subject_id) because those keys are not supplied, so the hot
--- ingest path must never use it; the native keyed bitmap route owns that operation.
--- Keep this one fixed set function because intent_preflight still calls it.
+-- Id-only attestation presence for diagnostics and preflight. Without the
+-- subject key it cannot prune HASH(subject_id); bulk persist uses the keyed
+-- native bitmap instead. intent_preflight calls this form.
 CREATE OR REPLACE FUNCTION laplace.attestations_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL RESTRICTED
@@ -13,7 +12,5 @@ AS $$
     JOIN laplace.attestations a ON a.id = u.id
 $$;
 
--- RETIRED: keyed presence is implemented by descent_probe.c's native per-type
--- routing. The former three-array plpgsql body built a temp table + index + ANALYZE
--- and looped types, duplicating an operation the native path already owns.
+-- Keyed presence is native (descent_probe.c); the three-array SQL form is dropped.
 DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[], bytea[], bytea[]);

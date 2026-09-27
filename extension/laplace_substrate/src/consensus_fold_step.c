@@ -210,12 +210,9 @@ pg_laplace_consensus_fold_final(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     /* One aggregate invocation is one Glicko rating period. Every source/
-     * opponent partial belongs to that period and must be accumulated before
-     * the state transition. Applying each aggregate row immediately made the
-     * result order-sensitive and repeatedly shrank RD as though one logical
-     * period were many sequential periods; sufficiently large later partials
-     * could then drive a valid fold into the solver's inadmissible/stall path.
-     * The native write lane already uses this grouped-period kernel. */
+     * opponent partial is accumulated first and applied in one grouped-period
+     * transition, so the folded standing is independent of row order and RD
+     * shrinks once per period. The native bulk fold uses the same kernel. */
     if (state->group_count > 0 &&
         glicko2_fold_grouped_period(&state->st,
                                     state->opponent_ratings,

@@ -31,9 +31,10 @@ static SPIPlanPtr session_coords_plan = NULL;
 static SPIPlanPtr session_write_plan = NULL;
 static SPIPlanPtr session_observation_plan = NULL;
 
-/* A stable session handle owns a mutable projection of its ordered turns.
- * Each turn retains its canonical Content physicality through governed apply.
- * The session handle is not the content hash of the changing turn sequence. */
+/* A session's turns are one Projection physicality (type 3) of the session
+ * entity: a trajectory over the turn ids in order, rewritten on each append.
+ * The session id is a stable handle, not the content hash of the changing
+ * sequence; each turn keeps its own content physicality. */
 enum { SESSION_MANIFEST_TYPE = 3 };
 
 static SPIPlanPtr
@@ -97,8 +98,8 @@ emit_session_turn(void *context, size_t ordinal, const hash128_t *id, uint64 fla
     return output->limit_reached ? 1 : 0;
 }
 
-/* Read the session's persisted order authority once. Topic summaries and
- * per-process transcripts cannot supply or reorder these occurrences. */
+/* Turn ids in order from the session's Projection trajectory, up to limit.
+ * A Content-typed (type 1) manifest for the session is refused, not read. */
 Datum
 pg_laplace_session_turn_ids(PG_FUNCTION_ARGS)
 {
@@ -151,10 +152,8 @@ pg_laplace_session_turn_ids(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-/* Projection bodies are observations made by the native session operator.
- * The ordinary fixed source has the repository's explicit AppDerived prior;
- * a tenant, prompt or response identity does not imply this derivation prior. */
-/* Seven outer set executions plus at most seven initial plan preparations. */
+/* Operations reserved from the operation grant for this call's set
+ * executions and plan preparations. */
 #define SESSION_OPERATION_RESERVATION 14
 
 typedef struct SessionAdmission {
@@ -248,9 +247,11 @@ collect_session_turn(void *context, size_t ordinal, const hash128_t *id, uint64 
     return 0;
 }
 
-/* Invoked by the canonical writer inside the same journaled transaction as
- * turn evidence and consensus. The shared database apply lock precedes the
- * session row lock; no process-local transcript supplies the persisted order. */
+/* Appends turn ids to the session's Projection trajectory: locks the session
+ * row, reads the prior manifest under a fresh snapshot, reads every turn's
+ * placement, and writes the flagged-RLE trajectory with the centroid of the
+ * turn coordinates and its Hilbert index. Byte, operation and logical-work
+ * grants bound the call. */
 Datum
 pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
 {
@@ -310,9 +311,8 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
     laplace_physicality_id_compute(session_id, SESSION_MANIFEST_TYPE, &physicality_id);
     laplace_physicality_id_compute(session_id, 1, &legacy_id);
 
-    /* Validate the common writer isolation contract before taking the session
-     * row lock. A statement that waited for that row must not retain its
-     * pre-wait provider snapshot. */
+    /* READ COMMITTED is required: after waiting on the session row lock the
+     * manifest is re-read under the latest snapshot, not the pre-wait one. */
     if (XactIsoLevel != XACT_READ_COMMITTED)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("session_append_turns requires READ COMMITTED")));
@@ -396,8 +396,8 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         int16 tier = DatumGetInt16(SPI_getbinval(row, desc, 2, &isnull));
         if (isnull || tier < 0 || tier > UINT8_MAX)
             elog(ERROR, "session_append_turns: invalid turn floor");
-        /* Batch projections may predate contextual flags. Populate absent flags
-         * from this same set read; retain any existing typed occurrence payload. */
+        /* A turn without vertex flags takes its tier flags from this placement
+         * read; existing flags are kept. */
         if (i >= previous_count || members.flags[i] == 0)
             members.flags[i] = laplace_vertex_flags((uint8) tier, false, 0);
         for (int axis = 0; axis < 4; ++axis)

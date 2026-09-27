@@ -1,4 +1,3 @@
--- Identity helper: stays in the extension schema (no identity purpose schema).
 -- A governed entity type's id, from the native entity-type law.
 CREATE OR REPLACE FUNCTION laplace.entity_type_id(p_name text) RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_entity_type_id'

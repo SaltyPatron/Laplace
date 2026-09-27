@@ -16,47 +16,23 @@
 #include "laplace/core/mantissa.h"
 
 /*
- * structural.geometry_successors_batch(points, limit, window)
+ * structural.geometry_successors_batch(points, limit, window, backward, type)
  *   -> TABLE(point_id bytea, successor_id bytea, seen bigint)
  *
- * A sequence-projection operator: for a content POINT, walk every trajectory
- * that CONTAINS it and return the next CONTENT constituent in each, aggregated
- * by frequency. "What follows X in the projected content stream" is read from the
- * content-addressed geometry -- the same knowledge PRECEDES materialized and
- * gen_corpus rebuilt into a flat RAM suffix array, needed by neither: the
- * trajectory already holds the ordered sequence.  Removing separators is an
- * explicit property of THIS text-generation projection.  It does not assert a
- * direct semantic edge between the two surviving entities: composition remains
- * point -> containing trajectory -> constituent (for example, Captain -> the
- * composed "Captain Ahab" observation -> Ahab).
+ * Sequence projection over the trajectory face: for each requested point, every
+ * trajectory of the given physicality type that contains it yields the nearest
+ * non-separator constituent after (or before) the point's first occurrence,
+ * within `window` positions. Successors are counted per point and the top
+ * `limit` per point are returned by count. Separators are the ids
+ * generation.separator_ids() declares. The pair is a co-occurrence read off
+ * trajectory order; it does not assert a relation between the two entities.
  *
- * WHY NATIVE (the valet/orchestrator law): SQL cannot do this at scale -- a
- * per-row LATERAL unpack + per-token whitespace render times out. The walk
- * (find the point, skip separators, take the successor, aggregate) is
- * pointer/loop work in C.
- *
- * TWO set-oriented wins over the naive shape:
- *   1. ONE containment+unpack query (`&& $1`, GIN-served) for every requested
- *      root, streamed and grouped by container in C -- not one query per root.
- *   2. ONE separator-alphabet read per call.  Membership is then an O(1) hash
- *      probe; no backend-local classification cache can go stale or impose a
- *      multi-second first-call tax on every connection.
- *
- * Correctness: laplace_trajectory_constituents() is the FULL, non-deduped,
- * ordinal-ordered sequence (unlike laplace_trajectory_constituent_ids(), which
- * dedups for the containment index and would break adjacency).
+ * One GIN-served containment query covers every requested point; each matching
+ * trajectory arrives as one LINESTRING ZM WKB whose vertex order is ordinal
+ * order, so vertices are decoded here with mantissa_unpack and run lengths are
+ * expanded to the full, non-deduplicated sequence that adjacency requires.
  */
 
-/* MEASURED 2026-08-21, the reason this is ONE WKB BLOB PER TRAJECTORY and not the
- * former per-vertex LATERAL: the start position is a constituent of ~1.64M type-3
- * trajectories, and `CROSS JOIN LATERAL laplace_trajectory_constituents(...)
- * ORDER BY p.id, c.ordinal` materialized AND SORTED ~140M SPI tuples to answer a
- * 20-row question -- 136.7s for one call, which was the entire /chess/explore
- * latency (receipt on #939). The vertex order inside a LINESTRING ZM WKB IS the
- * ordinal order, so the sort bought nothing and every per-vertex tuple carried
- * ~60 bytes of executor overhead around 32 bytes of payload. One row per
- * trajectory, vertices decoded here with the same mantissa_unpack the rest of
- * the tree uses. */
 static const char *BATCH_UNPACK_QUERY =
     "SELECT public.ST_AsBinary(p.trajectory) "
     "FROM laplace.physicalities p "
@@ -117,17 +93,10 @@ ensure_plans(void)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, INT2OID };
         /*
-         * SPI_prepare_cursor(..., CURSOR_OPT_PARALLEL_OK), not SPI_prepare.
-         *
-         * SPI_prepare plans with parallelism DISABLED. This probe is a GIN containment
-         * scan across all 64 hash partitions of laplace.physicalities -- the partition key
-         * is `id` and the predicate is on constituents, so nothing prunes and every
-         * partition is scanned. Standalone the planner uses a Parallel Append with 7
-         * workers and finishes in ~42 ms; planned through SPI_prepare the identical query
-         * runs serially.
-         *
-         * The plan is read-only (SPI_execute_plan passes read_only = true), which is what
-         * makes it eligible.
+         * SPI_prepare plans with parallelism disabled. The containment
+         * predicate is on constituents while physicalities is hash-partitioned
+         * by id, so nothing prunes and every partition is scanned; a read-only
+         * CURSOR_OPT_PARALLEL_OK plan lets that scan run as a Parallel Append.
          */
         SPIPlanPtr plan = SPI_prepare_cursor(BATCH_UNPACK_QUERY, 2, argtypes,
                                             CURSOR_OPT_PARALLEL_OK);
@@ -245,8 +214,8 @@ scan_batch_trajectory(const char *raw, int n_raw, HTAB *roots, int n_roots,
         {
             const char *candidate = raw + (Size) j * 16;
 
-            /* The scalar forward walk ignores later occurrences of its root;
-             * preserve that exact window accounting in the batched form. */
+            /* A forward window skips later occurrences of its own point
+             * without counting them against the window. */
             if (!backward && memcmp(candidate, root->key, 16) == 0)
                 continue;
 

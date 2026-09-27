@@ -274,7 +274,7 @@ export function ChatView() {
 
   async function retryWithQuote() {
 
-    // Same law as the live path: resend only the newest user turn + session key.
+    // Retry sends only the newest user turn and the session key.
     const lastUser = [...messages]
       .reverse()
       .find((m) => m.role === 'user' && !m.streaming && !m.error);
@@ -420,9 +420,8 @@ export function ChatView() {
 
               <div>
 
-                {/* A finished turn with nothing in it must still say so — an
-                    empty string renders an invisible bubble, which reads as
-                    "the question was never asked" rather than "no reply". */}
+                {/* A finished empty turn says so; an empty string would render an
+                    invisible bubble. */}
                 {m.content || (m.streaming ? '…' : m.error ? '' : <span className={styles.messageEmpty}>no reply — the substrate returned nothing for this turn</span>)}
 
                 {m.error && <span className={styles.messageError}> [{m.error}]</span>}
@@ -455,11 +454,9 @@ export function ChatView() {
 
               )}
 
-              {/* This surface promises μ and witness counts on every reply. When
-                  the endpoint returns `laplace: {}` for the content chunk there
-                  is nothing to bind a badge to, and silently rendering no
-                  badges reads as "this reply has no witnesses" rather than
-                  "the receipt did not come back". Say which it is. */}
+              {/* A reply whose content chunk carried `laplace: {}` has no receipt to
+                  bind μ/witness badges to; that absence is stated, so it is not read
+                  as a reply with zero witnesses. */}
               {m.role === 'assistant' && !m.streaming && !m.error && m.content && m.provenance.length === 0 && (
 
                 <Muted className={styles.noReceipts}>

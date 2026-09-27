@@ -49,11 +49,9 @@ internal sealed class WitnessCatalog
     public IReadOnlyList<string> FeaturedRefsList() => FeaturedRefs;
 
     /// <summary>
-    /// The cli↔source-key bridge. Live sources are keyed by decomposer name
-    /// ("substrate/source/WordNetDecomposer/v1"); the cadence manifest speaks
-    /// cli names ("wordnet"). Strip the path, the Decomposer suffix and the
-    /// version, lowercase — this was missing, so the stage→source drill never
-    /// matched a live source and stages rendered with zero live data.
+    /// Maps an admitted source key ("substrate/source/WordNetDecomposer/v1") to the cadence
+    /// manifest's cli name ("wordnet"): the path segment ending in Decomposer (else the
+    /// last non-version segment), without that suffix, lowercased.
     /// </summary>
     public static string CliForSourceKey(string key)
     {

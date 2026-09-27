@@ -20,20 +20,11 @@ public static class ChessPositionIdentity
     internal const int MaxHeaderAtoms = 5;
 
     /// <summary>
-    /// Upper bound on the atoms <see cref="FillAtoms"/> can emit: the header plus ONE atom per
-    /// OCCUPIED SQUARE. The bound is 64 because the board has 64 squares -- NOT 32, because
-    /// "32 pieces" is a rule of legal chess and this function hashes whatever board it is
-    /// handed. Both call sites previously stackalloc'd a bare 40, which is 5 + 35: enough for
-    /// any legal position and nothing else.
-    ///
-    /// Chess.com "Odds Chess" ships FENs like
+    /// Upper bound on the atoms <see cref="FillAtoms"/> can emit: the header plus one atom per
+    /// occupied square. The bound is 64 squares, not 32 pieces: this hashes whatever board it is
+    /// handed, and odds-chess FENs such as
     ///   rnbqkbnr/pppppppp/8/8/PPPPPPPP/PPPPPPPP/PPPPPPPP/4K3 w kq - 0 1
-    /// -- 41 occupied squares. FillAtoms wrote atom 41 into a 40-slot span and threw
-    /// IndexOutOfRangeException out of PositionId, through ChessModality.FromFen, through
-    /// TryParseGame, which does not catch it. The whole FILE died, not the game:
-    /// Firouzja2003_chesscom.pgn and Hikaru_chesscom.pgn each carry exactly one such game
-    /// (2 of 37,099 scanned) and each failed its ingest unit -- seed runs 32438771887 and
-    /// 32439795126, "2 unit(s) failed to apply".
+    /// occupy 41 squares.
     /// </summary>
     internal const int MaxAtoms = MaxHeaderAtoms + 64;
 
@@ -123,16 +114,9 @@ public static class ChessPositionIdentity
     /// <summary>
     /// Reverse map for the five MOVE atom domains: atom id -> (domain, value).
     ///
-    /// A move id is not opaque. FillMoveAtoms composes it from piece, from-square,
-    /// to-square, flags and promotion, and each domain's value space is tiny -- 12
-    /// pieces, 64 squares, a handful of flags -- so the whole table is ~160 entries
-    /// built once. That is what makes a stored move decodable without a board:
-    /// ChessReplay resolves an id by generating every legal action and hashing each
-    /// one (~35 hashes per ply) purely because it treats the id as opaque. A fold
-    /// over recorded games does not need to search for a move that already happened.
-    ///
-    /// VERIFIED 2026-08-21 against a stored corpus move: fe6ea447... decodes to
-    /// WPawn, e2, e4, DoublePush, no promotion -- 1.e4, all five atoms exact.
+    /// A move id is the composition of piece, from-square, to-square, flags and promotion
+    /// atoms (FillMoveAtoms), and each domain's value space is small, so this table of about
+    /// 160 entries decodes a stored move's constituents without a board or move generation.
     /// </summary>
     public static IReadOnlyDictionary<Hash128, (byte Domain, ushort Value)> MoveAtomIndex =>
         MoveAtomIndexLazy.Value;
@@ -163,9 +147,8 @@ public static class ChessPositionIdentity
         return CalculateAtomId(atom);
     }
 
-    // This is the canonical native calculation used both to initialize the
-    // finite lookup and for misses. Rule digests and rare rook overrides are
-    // not accumulated in a process-wide memo.
+    // The native atom-identity calculation, used both to build the finite lookup and for
+    // misses. Rule digests and rook overrides are not memoized process-wide.
     private static Hash128 CalculateAtomId(in Atom atom)
     {
         Span<byte> bytes = stackalloc byte[33];
@@ -177,11 +160,9 @@ public static class ChessPositionIdentity
 
     private static class ScalarAtomIds
     {
-        // 1,023 immutable values (16,368 ID bytes). The native build-time chess
-        // alphabet uses the same domain/value encoding. No emitted table API
-        // resolves a domain/value before its ID is known, so derive these once
-        // through the existing native identity body. Flags/promotion retain
-        // the full small ranges accepted by MoveAtomIndex.
+        // 1,023 immutable ids, derived once through the native identity calculation with
+        // the same domain/value encoding as the build-time chess alphabet. Flags and
+        // promotion keep the full small ranges MoveAtomIndex accepts.
         private static readonly Hash128[]?[] ByDomain = Build();
 
         internal static bool TryGet(byte domain, ushort value, out Hash128 id)
@@ -265,8 +246,8 @@ public static class ChessPositionIdentity
                     break;
                 }
                 case RulesDomain:
-                    // Rule identity is orthogonal to the board payload. PGN setup replay uses
-                    // the board plus its encoded Chess960 rook geometry below.
+                    // The rules atom does not change the board payload; Chess960 rook geometry
+                    // is read from its own atom below.
                     break;
                 default:
                     return false;

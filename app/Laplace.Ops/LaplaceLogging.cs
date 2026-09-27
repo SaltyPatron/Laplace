@@ -7,20 +7,16 @@ using Serilog.Extensions.Logging;
 namespace Laplace.Ops;
 
 /// <summary>
-/// The one shared logging foundation for every Laplace console deployable (Cli, Migrations,
-/// Endpoints.Mcp, Chess.Uci, and the OpenAICompat host) — GH #602, rebuilt on Serilog
-/// (GH #635 follow-up). Every path writes the CSV ops sink (read back as SQL through
-/// ops.app_log); they differ only in whether a human-facing console sink rides along:
+/// Logging shared by every Laplace process. Every path writes the CSV ops sink, which SQL
+/// reads back through ops.app_log; they differ only in whether a console sink is added:
 ///
-///   ConsoleAndFile(role) — stderr text + CSV file. For apps whose stdout is free.
-///   FileOnly(role)       — CSV file only. For apps whose stdout is a wire protocol
-///                          (Endpoints.Mcp JSON-RPC, Chess.Uci) — nothing can leak onto it.
+///   ConsoleAndFile(role) — stderr text + CSV file.
+///   FileOnly(role)       — CSV file only, for processes whose stdout is a wire protocol
+///                          (MCP stdio JSON-RPC, UCI).
 ///
-/// role becomes the CSV application_name and the per-role file laplace-{role}.csv. The file
-/// sink is a STABLE filename (Serilog shared-file append, no size roll) so the ops.app_log
-/// foreign table never needs repointing; rotation is left to logrotate copytruncate, which
-/// preserves the inode. Serilog owns the hard parts — cross-process shared append, buffering,
-/// flush — that were hand-rolled before.
+/// role becomes the CSV application_name and the file laplace-{role}.csv. The filename is
+/// stable (Serilog shared-file append, no size roll) so the ops.app_log foreign table never
+/// needs repointing; rotation is external (logrotate copytruncate keeps the inode).
 /// </summary>
 public static class LaplaceLogging
 {
@@ -32,8 +28,8 @@ public static class LaplaceLogging
 
     private static ILoggerFactory Factory(string role, bool console, LogEventLevel min)
     {
-        // CSV file keeps full Information. Console in CI is Warning+ so WS_APPLY
-        // prep spam stays in laplace-cli.csv / ingest_run_journal, not Actions.
+        // The CSV file keeps the full minimum level; LAPLACE_INGEST_CONSOLE=ci|quiet (or
+        // GITHUB_ACTIONS with it unset) raises only the console sink to Warning.
         LogEventLevel consoleMin = min;
         string? mode = Environment.GetEnvironmentVariable("LAPLACE_INGEST_CONSOLE");
         bool ci = string.Equals(mode, "ci", StringComparison.OrdinalIgnoreCase)
@@ -50,15 +46,13 @@ public static class LaplaceLogging
     }
 
     /// <summary>
-    /// Attach the shared ops sinks to any LoggerConfiguration — used by the console factories
-    /// above and by the OpenAICompat host's UseSerilog so the API writes laplace-api.csv too.
-    /// The CSV file sink is always present; the console sink is optional.
+    /// Attach the shared ops sinks to any LoggerConfiguration (the console factories above and
+    /// the OpenAI-compatible host's UseSerilog). The CSV file sink is always present; the
+    /// console sink is optional.
     ///
-    /// consoleToStdErr routes the console to STDERR — correct for the console apps, whose stdout
-    /// carries command output. The web host passes FALSE (stdout): the build-time OpenAPI generator
-    /// (dotnet-getdocument) runs the app and treats ANY stderr output as a build failure, so a host
-    /// that logs its startup to stderr breaks `dotnet build`. stdout matches the host's prior
-    /// WriteTo.Console() and is journald-captured all the same.
+    /// consoleToStdErr sends console output to stderr, keeping stdout for command output. The
+    /// web host passes false because the build-time OpenAPI generator runs the app and treats
+    /// any stderr output as a build failure.
     /// </summary>
     public static LoggerConfiguration ApplyLaplaceSinks(
         this LoggerConfiguration config, string role, bool console, bool consoleToStdErr = true,
@@ -88,9 +82,8 @@ public static class LaplaceLogging
     }
 
     /// <summary>
-    /// umask 022 clears group write on a directory created under a setgid
-    /// laplace-runner parent, leaving mode 2755. The other writer cannot unlink
-    /// that directory. setup-host repairs the same trees with chmod g+rws.
+    /// Adds g+rwxs to a directory under the install root, since umask 022 leaves a
+    /// directory created under a setgid parent without group write for the other writer.
     /// </summary>
     internal static void ShareInstallDirectory(string path, string installRoot = "/opt/laplace")
     {

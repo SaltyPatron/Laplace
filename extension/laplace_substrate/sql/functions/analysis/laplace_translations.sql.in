@@ -1,7 +1,6 @@
--- lexical.translations — peer subjects sharing a band-typed object (sense /
--- translation-shaped co-denotation). Prefer lexical over taxonomy: the row is
--- a same-plane peer set, not a hierarchy walk. Old names dropped (#532).
--- BEGIN ATOMIC: GH #764.
+-- lexical.translations: peer subjects that share a band-typed object with the
+-- entity under the same relation, both cells positive-standing; the shared
+-- object (a sense, a synset) is the co-denotation.
 DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
 DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.

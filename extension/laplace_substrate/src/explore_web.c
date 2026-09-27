@@ -1,14 +1,11 @@
 /*
- * explore_web.c — SPI beam crawl for the explore consensus-web viz.
- *
- * Unlike generation.foundry_crawl(vocab / tier-2 emit only), this:
- *   - walks undirected consensus (out ∪ in) from one or more seeds via one
- *     batched frontier probe/hop
- *   - admits every tier
- *   - admits ≤ fanout NEW nodes per frontier member (pool-safe: one SPI connection)
- *   - emits typed edges for the retained subgraph
- *
- * C# then labels endpoints with render_text_fast / label_or_hex in one query.
+ * Sparse star expansion over the consensus face. From a seed set, each hop
+ * reads every frontier member's neighbors in both orientations through one
+ * batched laplace_consensus_neighbors() call, then admits at most `fanout`
+ * newly discovered nodes per frontier member, strongest edge-strength first,
+ * until `hops` or `max_nodes` is reached. Every tier and relation type is
+ * eligible. Each admitting edge is handed to the caller's visitor with its hop
+ * and standing; labels are realized by a later operation.
  */
 
 #include "postgres.h"
@@ -92,10 +89,9 @@ emit_edge(const EdgeOut *e, void *context)
 	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 }
 
-/* explore_web elects a bounded vertex set. This second operation returns the
- * actual induced testimony graph over those vertices. Discovery edges are not
- * topology: dropping cross-links/cycles erases the conductance that spectral
- * belief geometry is supposed to expose. */
+/* explore_web elects a bounded vertex set. This operation returns every stored
+ * binary consensus cell among those vertices (the induced subgraph), including
+ * cross-links and cycles that the discovery edges alone do not carry. */
 static void
 emit_induced_edge(const LaplaceConsensusRow *row, void *context)
 {
@@ -136,10 +132,8 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 	bool		spi_top = false;
 	if (seeds_a == NULL || visit == NULL)
 		ereport(ERROR, (errmsg("explore_web: seeds must not be NULL")));
-	/* PostgreSQL represents a canonical empty typed array with ARR_NDIM == 0.
-	 * That is a valid empty seed set, not a malformed multidimensional operand.
-	 * Keep NULL and dimensions >1 rejected, but let the existing zero-seed
-	 * abstention below return an empty crawl instead of throwing XX000. */
+	/* PostgreSQL represents an empty typed array with ARR_NDIM == 0; that is a
+	 * valid empty seed set and yields an empty expansion. */
 	if (ARR_ELEMTYPE(seeds_a) != BYTEAOID ||
 		(ARR_NDIM(seeds_a) != 0 && ARR_NDIM(seeds_a) != 1))
 		ereport(ERROR, (errmsg("explore_web: seeds must be an empty or 1-D bytea array")));
@@ -155,7 +149,7 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 		int64 derived = n_seed_datums;
 		int64 width = n_seed_datums;
 
-		/* Per-frontier fanout is a tree capacity, not the old linear beam. */
+		/* Default budget: the full tree capacity seeds * sum(fanout^h). */
 		for (int i = 0; i < hops; i++)
 		{
 			if (fanout != 0 && width > (PG_INT32_MAX - derived) / fanout)
@@ -222,11 +216,11 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 		int			probe_limit = n_seen + admit_target;
 		int64		required_cands = (int64) n_front * (int64) probe_limit;
 
-		/* SQL returns one ranked, neighbour-distinct head per frontier member. At
-		 * most n_seen entries in any head can already be retained, so
-		 * n_seen+admit_target proves enough room for fanout new nodes from each
-		 * frontier member. The exact union is n_front*probe_limit; C applies the
-		 * per-root quota while globally deduplicating newly discovered nodes. */
+		/* The neighbor read returns one ranked, neighbor-distinct head per
+		 * frontier member. At most n_seen entries of a head can already be
+		 * retained, so n_seen+admit_target leaves room for fanout new nodes
+		 * from each member. The per-member quota and global deduplication of
+		 * new nodes are applied below. */
 		if ((uint64) required_cands > (uint64) (MaxAllocSize / sizeof(EdgeCand))
 			|| required_cands > PG_INT32_MAX)
 			ereport(ERROR, (errmsg("explore_web: candidate budget exceeds PostgreSQL allocation capacity")));
@@ -245,14 +239,9 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 		frontier_array = construct_array(frontier_datums, n_front,
 									 BYTEAOID, -1, false, 'i');
 
-		/* Highway masks are rebuildable accelerator projections. A non-NULL mask
-		 * cannot prove that every current consensus relation bit is present: mask
-		 * maintenance may be queued, unavailable, or deliberately skipped under
-		 * write contention. Deriving a hard type filter here therefore turned an
-		 * accelerator miss into missing knowledge. Explore the canonical consensus
-		 * set instead. Explicit caller-supplied type scope remains available through
-		 * the typed consensus-neighbor operation; this unconstrained crawl does not
-		 * manufacture that scope from cached mask state. */
+		/* No relation-type filter: the expansion reads the canonical consensus
+		 * set, not a derived mask, so no cache state can narrow the world it
+		 * sees. Type scope is an explicit operand of the typed neighbor read. */
 		int neighbor_count;
 		LaplaceNeighbor *neighbors = laplace_consensus_neighbors(
 			frontier_array, NULL, probe_limit,
@@ -290,9 +279,8 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 			oe = (SeenNode *) hash_search(seen, &nbr, HASH_FIND, &ofound);
 			if (ofound)
 			{
-				/* A crawl edge must discover a node. Re-emitting links to the seed or
-				 * any earlier frontier made later hops fold back over the graph that
-				 * was already displayed, producing cycles instead of expansion. */
+				/* An expansion edge must discover a node; links back to seen
+				 * nodes are left to the induced-edge read. */
 				continue;
 			}
 
@@ -319,9 +307,8 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 
 		qsort(cands, n_cands, sizeof(EdgeCand), cand_cmp_desc);
 
-		/* Preserve a fanout quota for every frontier member. The old global quota
-		 * made a wide first level consume the whole next level. Shared neighbours
-		 * still enter once, through their strongest eligible parent. */
+		/* Each frontier member has its own fanout quota. A neighbor shared by
+		 * several members enters once, through its strongest eligible parent. */
 		{
 			HTAB	   *picked;
 			HTAB	   *per_root;

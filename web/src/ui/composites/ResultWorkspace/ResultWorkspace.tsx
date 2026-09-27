@@ -32,7 +32,7 @@ export interface ResultWorkspaceProps<T extends object> {
   rowKey?: (row: T, index: number) => string;
   filterText?: string;
   onFilterTextChange?: (text: string) => void;
-  /** Operational receipt surfaces can opt out of generic working-set selection controls. */
+  /** Receipt tables can opt out of working-set selection controls. */
   selectable?: boolean;
   /** Compress explanatory chrome without changing the received-row boundary or export semantics. */
   compact?: boolean;

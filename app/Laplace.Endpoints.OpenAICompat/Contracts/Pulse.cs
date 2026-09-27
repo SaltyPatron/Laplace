@@ -3,10 +3,8 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// The live scoreboard. The running totals of the witnessed graph plus the
-/// ingest heartbeat — when a source is folding, these numbers climb and the
-/// flush clock ticks. It is deliberately cheap (estimate counts + a 1.5ms
-/// recency query) so a client can poll it every few seconds without cost.
+/// Estimated totals of entities, attestations, consensus, and physicalities, plus recent
+/// working-set flush activity. Estimates and one recency read keep it cheap to poll.
 /// </summary>
 public sealed record PulseResponse(
     [property: JsonPropertyName("object")] string Object,
@@ -15,8 +13,7 @@ public sealed record PulseResponse(
     [property: JsonPropertyName("attestations")] long Attestations,
     [property: JsonPropertyName("consensus")] long Consensus,
     [property: JsonPropertyName("physicalities")] long Physicalities,
-    // The heartbeat: flushes are working-set applies. Recent flushes mean a
-    // source is at bat right now.
+    // Flushes are working-set applies; recent ones mean a source is being folded.
     [property: JsonPropertyName("last_flush_at")] long? LastFlushAt,
     [property: JsonPropertyName("flushes_last_min")] long FlushesLastMin,
     [property: JsonPropertyName("folding")] bool Folding);

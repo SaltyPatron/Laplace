@@ -5,13 +5,13 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Exact canonical UTF-8 reconstruction from one text-content id. The database operation owns
-/// the complete cycle-safe DAG walk, native assembly, and identity check; this managed surface
-/// only binds the id and transports the returned bytes.
+/// REALIZE for text content: <c>realize.reconstruct_content</c> walks the composition DAG
+/// natively, assembles the UTF-8 bytes and verifies they re-hash to the requested id; this
+/// class binds the id and optional modality and returns the bytes.
 ///
-/// Plain-text admission returns canonical normalized UTF-8. A declared source grammar
-/// returns its source-preserving UTF-8 representation. Other encodings and container
-/// packaging require their own artifact reconstruction operation.
+/// Plain-text content returns canonical normalized UTF-8; content composed under a declared
+/// source grammar returns its source-preserving UTF-8. A null result (absent, incomplete,
+/// cyclic, non-text or identity mismatch) throws.
 /// </summary>
 public static class NpgsqlContentReconstructor
 {

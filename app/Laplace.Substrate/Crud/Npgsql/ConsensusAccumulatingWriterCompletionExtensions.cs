@@ -1,6 +1,6 @@
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-// Compatibility type only. The writer owns real instance completion barriers.
+// Empty; completion barriers are instance members of ConsensusAccumulatingWriter.
 public static class ConsensusAccumulatingWriterCompletionExtensions
 {
 }

@@ -80,8 +80,8 @@ public sealed record MachineCostResponse(
     [property: JsonPropertyName("witness_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WitnessId);
 
 /// <summary>
-/// Receipt from one routing/election event of the canonical native forward pass.
-/// These fields are execution facts, not a reconstruction from a separate graph walk.
+/// Receipt from one routing or selection event of the native forward pass, as the pass
+/// recorded it.
 /// </summary>
 public sealed record ForwardTraceStep(
     [property: JsonPropertyName("step")] int Step,
@@ -111,8 +111,8 @@ public sealed record ForwardTraceStep(
     [property: JsonPropertyName("event")] string Event,
     [property: JsonPropertyName("routing_round")] int RoutingRound);
 
-// Legacy graph-walk response retained only for consumers that still call the old
-// ExplainTraceAsync surface. /v1/explain/report and the Explore UI use ForwardTraceStep.
+// One step of a consensus.walk_branches trace with sampled evidence, returned by
+// ExplainTraceAsync. Forward-pass receipts are ForwardTraceStep.
 public sealed record ExplainTraceStep(
     int Depth,
     IReadOnlyList<string> PathHex,

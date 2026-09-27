@@ -4,8 +4,8 @@ using System.Xml;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Shared XML file enumeration for PropBank framesets and VerbNet VNCLASS roots.
-/// Pure extract — load document, yield matching root element per file.
+/// XML file enumeration for frameset-shaped sources (PropBank framesets, VerbNet VNCLASS
+/// roots). Extraction only: load each document and yield its matching root element.
 /// </summary>
 public static class SharedXmlFramesetReader
 {

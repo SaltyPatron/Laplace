@@ -4,9 +4,9 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Central admission decision for adapters whose entity type is only known at runtime.
-/// Known source-keyed identities use <see cref="ReferenceAnchor"/>; human-readable
-/// semantic category labels continue through <see cref="CategoryAnchor"/>.
+/// Admission choice for a key whose kind is known only at runtime: an external reference
+/// key goes through <see cref="ReferenceAnchor"/>, a readable category label through
+/// <see cref="CategoryAnchor"/>.
 /// </summary>
 public static class AnchorAdmission
 {

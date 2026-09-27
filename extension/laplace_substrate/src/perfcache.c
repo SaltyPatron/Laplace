@@ -188,7 +188,7 @@ laplace_chess_position_ready(void)
 
 PG_FUNCTION_INFO_V1(pg_laplace_chess_position_ready);
 
-/* () -> bool: whether the chess compose-floor blob is mmap'd (GH #822). */
+/* () -> bool: whether the chess position map (position id -> coordinate) is mapped. */
 Datum
 pg_laplace_chess_position_ready(PG_FUNCTION_ARGS)
 {
@@ -197,8 +197,8 @@ pg_laplace_chess_position_ready(PG_FUNCTION_ARGS)
 
 
 
-/* PostgreSQL and managed callers share the core reverse index. Complete its
- * initialization in the postmaster so backends inherit one read-only index. */
+/* Builds the codepoint reverse index (id -> codepoint) by round-tripping one
+ * codepoint and fails if the round trip does not hold. */
 static void
 rev_index_ensure(void)
 {
@@ -213,13 +213,11 @@ laplace_substrate_perfcache_prewarm(void)
 {
     int rc;
 
-    /* Only under shared_preload_libraries: the postmaster loads once and
-     * every forked backend inherits the mmap'd blobs, the CRC validation,
-     * and the reverse index copy-on-write. Without preload, backends keep
-     * the lazy first-call load (a postmaster-less CREATE EXTENSION session
-     * has no fork to amortize into). Failures WARN instead of ERROR — a
-     * stale path must not stop the whole cluster from starting; the lazy
-     * path's ERROR still fires with full detail on first real use. */
+    /* Only under shared_preload_libraries: the postmaster maps and validates
+     * each blob and builds the reverse index once, and forked backends inherit
+     * them copy-on-write. Otherwise each backend loads on first use. A load
+     * failure here warns so the cluster still starts; the first-use load
+     * raises the error with its detail. */
     if (!process_shared_preload_libraries_in_progress)
         return;
 
@@ -356,8 +354,8 @@ pg_laplace_is_all_whitespace(PG_FUNCTION_ARGS)
         (const uint8_t *) VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t)) != 0);
 }
 
-/* GH #813: atom_window is the configured T0 N, not a SQL literal. Read from the
- * same constant the perfcache blob loader validates against. */
+/* The admitted Tier-0 window: the record count the T0 blob loader validates
+ * against, so SQL reads the window from the native constant. */
 PG_FUNCTION_INFO_V1(pg_laplace_atom_window);
 
 Datum

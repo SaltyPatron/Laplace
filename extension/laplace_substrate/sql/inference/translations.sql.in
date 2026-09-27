@@ -6,11 +6,9 @@ CREATE OR REPLACE FUNCTION converse.translations(p_word bytea, p_limit int DEFAU
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
  AS $$
-    -- Dedup and rank by (member, lang) id pair, never by rendered surface: the
-    -- old DISTINCT ON (realize.render_text(member)) collapsed distinct translations --
-    -- even across different languages -- whenever their surfaces coincided.
-    -- render_text/label run above the sort, streaming off the ranked candidates
-    -- only until p_limit rows survive the empty-surface filter.
+    -- Dedup and rank by (member, lang) id pair, never by rendered surface, so
+    -- translations whose surfaces coincide stay distinct. render_text/label run
+    -- above the sort, only until p_limit rows survive the empty filter.
     WITH src_langs AS (
         SELECT c.object_id AS id FROM laplace.consensus c
         WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')

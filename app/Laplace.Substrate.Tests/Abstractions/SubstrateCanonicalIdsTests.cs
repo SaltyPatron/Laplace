@@ -5,18 +5,15 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Pins the canonical-key builders (#275) and gates the literals from coming back.
-///
-/// Law: ids are NEVER constructed outside the system. A hand-typed
-/// "substrate/source/WordnetDecomposer/v1" (note the case) is not a compile error and
-/// not a runtime error — it silently mints a different entity that no query will ever
-/// join to. The builder plus the gate below is what makes that class of typo impossible.
+/// Pins the canonical-key builders and forbids raw canonical-key literals elsewhere. A
+/// hand-typed key with a different spelling or case is a different content id that nothing
+/// joins to, so every key goes through the builder.
 /// </summary>
 public sealed class SubstrateCanonicalIdsTests
 {
-    // Byte-for-byte agreement with the SQL surface. source_id('WordNetDecomposer') and
-    // realize.canonical_id('substrate/source/WordNetDecomposer/v1') both resolve to this on the
-    // live DB, so C# and SQL cannot drift apart without failing here.
+    // The id SQL's source_id('WordNetDecomposer') and
+    // realize.canonical_id('substrate/source/WordNetDecomposer/v1') resolve to; the C#
+    // builder must produce the same bytes.
     private const string WordNetSourceIdHex = "4b1ee33be3034910df7629b2948cde35";
 
     private static string Hex(Hash128 h) => Convert.ToHexStringLower(h.ToBytes());
@@ -38,8 +35,7 @@ public sealed class SubstrateCanonicalIdsTests
         Assert.Equal("substrate/test/word/v1", SubstrateCanonicalKeys.OfVersioned("test", "word"));
     }
 
-    // Case and spelling matter: these must be DIFFERENT ids, which is exactly why the
-    // literals were dangerous.
+    // Case and spelling change the content, so these are different ids.
     [Fact]
     public void NearMissesAreDistinctIds()
     {
@@ -64,9 +60,8 @@ public sealed class SubstrateCanonicalIdsTests
     }
 
     /// <summary>
-    /// The gate: no raw substrate canonical-key literal anywhere in app/, except inside
-    /// the builder that defines the shape. Without this the 152 literals grow back one
-    /// convenient copy-paste at a time.
+    /// No raw substrate canonical-key literal appears anywhere in app/ outside the builder
+    /// that defines the shape.
     /// </summary>
     [Fact]
     public void NoRawCanonicalKeyLiteralsOutsideTheBuilder()

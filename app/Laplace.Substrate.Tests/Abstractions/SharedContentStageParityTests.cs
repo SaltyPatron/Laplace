@@ -71,16 +71,13 @@ public sealed class SharedContentStageParityTests
     [Theory]
     [InlineData("dog", 2)]
     [InlineData("ab", 2)]
-    // Tier is a FLOOR: a single-codepoint grapheme IS the codepoint (same bytes,
-    // same hash, one id) — the root of "A" is the tier-0 codepoint, not a
-    // pass-through tier-1 wrapper. Only a genuinely multi-codepoint cluster
-    // (c + combining cedilla) roots at the grapheme tier.
+    // A one-child composition is the child: the root of "A" is the tier-0 codepoint,
+    // not a tier-1 wrapper. Only a multi-codepoint cluster roots at the grapheme tier.
     [InlineData("A", 0)]
     [InlineData("̐", 0)]
     [InlineData("\u00e7", 0)]
-    // NFC composes c+cedilla to U+00E7 at the text-lane boundary (text_decomposer.c)
-    // -> single codepoint -> floor 0. q+combining-acute has NO precomposed form,
-    // so it survives NFC as a genuine 2-codepoint cluster -> grapheme tier 1.
+    // NFC (text_decomposer.c) composes c+cedilla to U+00E7, one codepoint → tier 0.
+    // q+combining-acute has no precomposed form, so it stays a 2-codepoint cluster → tier 1.
     [InlineData("c\u0327", 0)]
     [InlineData("q\u0301", 1)]
     public void RootTier_Is_The_Natural_Unit(string s, int expected)

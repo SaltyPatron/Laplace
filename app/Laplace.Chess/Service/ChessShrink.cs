@@ -3,10 +3,10 @@ using Laplace.Modality;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Witness-count shrinkage toward the neutral prior, shared by every consensus-reading chess
-/// ranker (SubstrateTurnHost move scoring, SubstrateRootBias). K0 = 15k is calibrated for
-/// corpus scale; at sub-corpus scale it crushes nearly all signal into a ~0.4-point eff_mu
-/// spread (doc 04), so hosts running against small folds can dial it via LAPLACE_CHESS_SHRINK_K0.
+/// Shrinks a consensus rating toward the neutral prior by witness count:
+/// neutral + (eff_mu − neutral) · w / (w + K0). Used wherever chess ranking reads standing
+/// (SubstrateTurnHost move scoring, SubstrateRootBias). K0 defaults to 15,000 and is
+/// overridden by LAPLACE_CHESS_SHRINK_K0; a large K0 flattens standings folded from few witnesses.
 /// </summary>
 public static class ChessShrink
 {

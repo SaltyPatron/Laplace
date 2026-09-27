@@ -90,14 +90,8 @@ public static class CpuTopology
 
 
 
-    // TestPoolsOverride has to reach Current, and it did not. LazySnapshot caches the
-    // FIRST snapshot it computes, so once any test touched Current the cached value was
-    // returned forever and a later TestPoolsOverride silently stopped affecting anything --
-    // a seam that looks like it works. Measured 2026-08-24: synthetic layout tests passed
-    // individually and failed in a group, whichever ran second onward.
-    //
-    // When a pools override is installed, derive the snapshot from it rather than from the
-    // cache. The uncached path is only ever taken under an override.
+    // LazySnapshot caches the first snapshot forever, so an installed pools override
+    // derives the snapshot uncached; that path is taken only under an override.
     private static CpuSnapshot Current =>
         TestOverride ?? (TestPoolsOverride is not null ? DetectPlatform() : LazySnapshot.Value);
 
@@ -155,9 +149,8 @@ public static class CpuTopology
 
 
 
-    // Maintenance is CPU-bound work and can consume the same physical P-core pool as
-    // parallel query. The former (P+1)/2 rule was an unexplained throughput limiter;
-    // backend memory is now budgeted for every parallel owner by PostgresResourcePlan.
+    // Maintenance is CPU-bound and uses the same physical P-core pool as parallel query;
+    // PostgresResourcePlan budgets backend memory for every parallel owner.
     public static int ParallelMaintenanceWorkers => Math.Max(1, PerformanceCoreCount);
 
 
@@ -501,13 +494,9 @@ public static class CpuTopology
 
                 return ApplyOverrides(lin);
 
-            // NON-HYBRID Linux, and CONTAINERS. TryDetectLinuxSysfsPools keys on
-            // /sys/devices/cpu_core/cpus, which the kernel publishes only for hybrid P/E
-            // parts -- it was written against a 14900KS. On every other CPU that file is
-            // absent and the detector returns false SILENTLY (the catch above only fires on
-            // an exception), so detection fell through to Uniform(Environment.ProcessorCount)
-            // and reported SMT threads as physical cores: GH #986 measured p_physical=12 on
-            // a 6-core i7-6850K, and every ingest pool is sized from that doubled base.
+            // Non-hybrid Linux and containers: /sys/devices/cpu_core/cpus exists only on
+            // hybrid P/E parts, so the generic per-CPU topology resolves physical cores
+            // (not SMT threads) everywhere else.
             if (OperatingSystem.IsLinux() && TryDetectLinuxGenericSysfsPools(out var gen))
 
                 return ApplyOverrides(gen);
@@ -516,10 +505,8 @@ public static class CpuTopology
 
         catch (Exception ex)
         {
-            // NEVER silent: a swallowed detection failure collapses the topology to a
-            // uniform fallback, which silently mis-sizes every ingest worker pool
-            // (apply partitions, compose/commit workers) and single-threads the pipeline
-            // with no visible cause. Surface it so a wrong core count is diagnosable.
+            // A detection failure leaves a uniform logical-count topology that mis-sizes
+            // every worker pool, so it is reported rather than swallowed.
             Console.Error.WriteLine(
                 $"cpu_topology: detection FAILED, falling back to uniform logical "
                 + $"({Environment.ProcessorCount} cores) — worker pools will be mis-sized. "
@@ -534,15 +521,12 @@ public static class CpuTopology
 
     }
 
-    // --- Operator overrides for a degraded / marginal CPU (env-driven, read once) ---------
-    // LAPLACE_EXCLUDE_LPS: comma list of primary logical-processor indices (the values shown
-    //   as p_primary_lps in the ingest_topology log, e.g. "6") to DROP from the compute pool.
-    //   Laplace then never pins work onto that core — a surgical alternative to a BIOS core
-    //   disable: every OTHER process still uses the core; only Laplace's sustained-AVX load
-    //   routes around it. Worker sizing falls automatically (fewer P-cores => fewer workers).
-    // LAPLACE_NO_PIN: 1/true/yes disables affinity pinning entirely, letting the OS scheduler
-    //   place freely across P+E (spreads load instead of concentrating it on the P-cores).
-    // Unset = current behavior, byte-for-byte.
+    // --- Operator overrides (env-driven, read once) ----------------------------------------
+    // LAPLACE_EXCLUDE_LPS: comma list of primary logical-processor indices (as logged in
+    //   p_primary_lps) removed from the compute pool. Work is never pinned there, and worker
+    //   sizing shrinks with the pool; other processes still use the core.
+    // LAPLACE_NO_PIN: 1/true/yes disables affinity pinning, leaving placement across P+E to
+    //   the OS scheduler.
     internal static readonly bool PinDisabled =
         EnvFlag.IsSet("LAPLACE_NO_PIN");
 
@@ -627,22 +611,10 @@ public static class CpuTopology
 
 
 
-        // NON-HYBRID took Environment.ProcessorCount as the PHYSICAL core count and threw
-        // pools.PhysicalPCores away. That is the actual mechanism of GH #986, and it is NOT
-        // the sysfs detector: on an i7-6850K (6c/12t) detection now correctly resolves 6
-        // primaries via linux-sysfs-generic, and this line reported 12 anyway, because
-        // ProcessorCount counts LOGICAL processors. Every pool derived from
-        // PerformanceCoreCount -- applyPartitions, the connection pool, compose/commit and
-        // maintenance workers -- was sized from a doubled base on every non-hybrid SMT host.
-        //
-        // Trust the detector where it produced a real reading. The Uniform() fallbacks set
-        // PhysicalPCores to the logical count, so this is byte-identical wherever detection
-        // genuinely failed and differs only where it genuinely succeeded.
-        // The clamp uses the POOLS' logical count, not Environment.ProcessorCount. Both
-        // detectors set LogicalCount from ProcessorCount, so this is identical on every real
-        // path -- but reading the ambient machine here makes a synthetic layout impossible to
-        // test: a 64-core pools override clamped to this box's 12 and the layout tests could
-        // not distinguish the rule from the hardware they ran on.
+        // Non-hybrid: the detected physical core count, not ProcessorCount (which counts
+        // SMT threads), sizes every pool derived from PerformanceCoreCount. Uniform pools set
+        // PhysicalPCores to the logical count. The clamp reads the pools' logical count rather
+        // than the ambient machine so a synthetic pools override is honored.
         int logical = pools.LogicalCount > 0
             ? pools.LogicalCount
             : Math.Max(1, Environment.ProcessorCount);
@@ -1173,7 +1145,7 @@ public static class CpuTopology
     /// still sees every host CPU there, so `present` would size a 2-CPU container's pools for
     /// a 64-core machine. Cpus_allowed_list is what this process may actually run on.
     ///
-    /// The result is additionally clamped to Environment.ProcessorCount, which on .NET also
+    /// The result is additionally clamped to Environment.ProcessorCount, which on .NET
     /// honours a cgroup CPU QUOTA (cpu.max) -- a quota restricts how much CPU time the
     /// process gets without restricting WHICH cpus it may touch, so it is invisible to the
     /// affinity mask and has to be applied separately.

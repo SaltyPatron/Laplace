@@ -4,11 +4,9 @@ using Xunit;
 namespace Laplace.Modality.Chess.Tests;
 
 /// <summary>
-/// The generic chess modality: rule sets as content, detected from evidence rather than
-/// declared from a list.
-///
-/// The first group is the safety property everything else depends on — standard chess must
-/// be identity-neutral, or adding variant support silently reseeds a 214 GB substrate.
+/// Rule sets are content, detected from the evidence of a game rather than declared from a
+/// list. The first group pins that standard chess is identity-neutral: its positions keep the
+/// same ids whether or not variant rules are known.
 /// </summary>
 public class ChessVariantTests
 {
@@ -27,9 +25,8 @@ public class ChessVariantTests
                      PositionContent.Surface(b, "-", ChessVariantRules.Standard));
     }
 
-    /// <summary>Chess960 is STANDARD RULES with a different array — so it must resolve to
-    /// the standard rule set, and its positions must be able to collide with standard ones.
-    /// This is the surprising-but-correct answer the whole taxonomy turns on.</summary>
+    /// <summary>Chess960 is standard rules with a different starting array, so it resolves to
+    /// the standard rule set and its positions can share ids with standard ones.</summary>
     [Fact]
     public void Chess960_IsStandardRules_NotAVariantRuleSet()
     {
@@ -39,8 +36,8 @@ public class ChessVariantTests
         Assert.True(ChessVariants.ByName("dfrc")!.IsStandard);
     }
 
-    /// <summary>A rule variant DOES move identity — that is the point. Same placement, same
-    /// side to move, different futures, different id.</summary>
+    /// <summary>A rule variant changes identity: same placement and side to move, different
+    /// futures, different id.</summary>
     [Fact]
     public void RuleVariant_ProducesADifferentPositionThanStandard()
     {
@@ -53,7 +50,7 @@ public class ChessVariantTests
         Assert.DoesNotContain("rules:", std);
     }
 
-    /// <summary>Distinct rule sets are distinct surfaces — no two variants collide.</summary>
+    /// <summary>Distinct rule sets are distinct surfaces; no two variants collide.</summary>
     [Fact]
     public void EveryConventionalRuleSet_HasItsOwnSurface()
     {
@@ -70,8 +67,8 @@ public class ChessVariantTests
     // ---- detection --------------------------------------------------------------------
 
     /// <summary>
-    /// An ordinary game exercises no distinguishing rule, so it is consistent with several
-    /// rule sets and the honest answer is "several" — not a guess.
+    /// An ordinary game exercises no distinguishing rule, so it stays consistent with several
+    /// rule sets and no single one is resolved.
     /// </summary>
     [Fact]
     public void OrdinaryGame_NarrowsToSeveral_AndResolvesToNone()
@@ -82,8 +79,8 @@ public class ChessVariantTests
         Assert.Null(e.Resolved());                                        // so: no verdict
     }
 
-    /// <summary>Evidence eliminates. Castling was played, so rule sets without castling are
-    /// out — however a tag might be spelled.</summary>
+    /// <summary>Evidence eliminates: castling was played, so rule sets without castling are
+    /// excluded whatever the tag says.</summary>
     [Fact]
     public void PlayedCastle_EliminatesCastlelessRuleSets()
     {
@@ -107,8 +104,8 @@ public class ChessVariantTests
         Assert.Equal("Atomic", Assert.Single(e.Candidates()).Name);
     }
 
-    /// <summary>The moves outrank the tag. A source claiming Standard while material appears
-    /// from nowhere is a source that is wrong.</summary>
+    /// <summary>The moves outrank the tag: a Standard tag on a game where material appears
+    /// from nowhere does not keep Standard as a candidate.</summary>
     [Fact]
     public void MovesOutrankTheClaimedTag()
     {
@@ -119,8 +116,8 @@ public class ChessVariantTests
         Assert.Equal("Crazyhouse", Assert.Single(e.Candidates()).Name);
     }
 
-    /// <summary>Among survivors the tag ranks, because the source's statement is evidence
-    /// where nothing has contradicted it.</summary>
+    /// <summary>Among rule sets the moves leave standing, the tag ranks first: the source's
+    /// statement is testimony where nothing contradicts it.</summary>
     [Fact]
     public void ClaimedTag_RanksAmongSurvivors()
     {
@@ -128,35 +125,34 @@ public class ChessVariantTests
         Assert.Equal("KingOfTheHill", e.Candidates()[0].Name);
     }
 
-    // ---- the hidden feature -----------------------------------------------------------
+    // ---- unseen rule sets --------------------------------------------------------------
 
     /// <summary>
-    /// A rule set nobody pre-seeded is NOT an error. The evidence mints its own rule surface
-    /// and the substrate has learned a variant by being shown one — the same way it learns a
-    /// word. A 10x8 board with an Archbishop matches nothing in the conventional list and is
-    /// still a perfectly well-identified rule set.
+    /// A rule set with no pre-seeded candidate is not an error: the evidence composes its own
+    /// rule surface, content-addressed like any other. A 10x8 board with an Archbishop
+    /// matches no listed variant and is still a fully identified rule set.
     /// </summary>
     [Fact]
     public void UnknownRuleSet_MintsItsOwnIdentity_RatherThanFailing()
     {
         var e = new ChessVariantEvidence { Files = 12, Ranks = 8, PiecesSeen = "KQRBNPZ" };
 
-        Assert.Empty(e.Candidates());          // nothing pre-seeded fits...
+        Assert.Empty(e.Candidates());          // no listed variant fits
         Assert.Null(e.Resolved());
 
-        var observed = e.Observed();           // ...and it is still fully identified
+        var observed = e.Observed();           // the observed rule set is still identified
         Assert.False(observed.IsStandard);
         Assert.Contains("dim:12x8", observed.Surface());
         Assert.Contains("pc:KQRBNPZ", observed.Surface());
 
-        // And it is a position-identity-bearing rule set like any other.
+        // It enters position identity like any other rule set.
         var b = Board.FromFen(Startpos);
         Assert.NotEqual(PositionContent.Surface(b, "-", ChessVariantRules.Standard),
                         PositionContent.Surface(b, "-", observed));
     }
 
-    /// <summary>Two sources describing the same rules collide, with nobody registering
-    /// anything — which is the entire mechanism.</summary>
+    /// <summary>Two sources describing the same rules reach the same rule-set id, with no
+    /// registration.</summary>
     [Fact]
     public void SameRulesFromTwoSources_Collide()
     {

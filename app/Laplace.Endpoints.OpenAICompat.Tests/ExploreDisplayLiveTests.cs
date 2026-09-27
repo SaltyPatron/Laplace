@@ -5,11 +5,11 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Product receipt for the failure that was visible in the CILI consensus-web screenshot:
-/// a valid 128-bit entity id was being promoted into the human label when realization
-/// abstained. Tier=live is intentional because the proof needs the standing CILI estate and
-/// its real HAS_DEFINITION provenance; the seed-independent pg_regress fixture owns the
-/// mechanical display-law proof.
+/// Live: for a CILI concept with a witnessed HAS_DEFINITION, the entity preview and its
+/// consensus-web neighborhood never display an entity id (or a long id prefix) as a
+/// label, and relation types never display as bare hashes. Identity and realized label
+/// stay separate when realization abstains. Needs the standing CILI estate; the
+/// pg_regress fixture proves the display law without a seed.
 /// </summary>
 [Trait("Tier", "live")]
 public sealed class ExploreDisplayLiveTests
@@ -46,9 +46,8 @@ public sealed class ExploreDisplayLiveTests
         Assert.False(string.Equals(preview.Label, "Unrealized entity", StringComparison.OrdinalIgnoreCase),
             "a CILI concept with a witnessed definition should have a readable definition/name display");
 
-        // Keep the live receipt bounded. The bug did not depend on a 1024-node crawl; it was
-        // the post-election label projection. Two hops are enough to force mixed relation/
-        // reference/content nodes through the same graph response used by the 8-hop UI.
+        // Two hops already route relation, reference and content nodes through the same
+        // label projection the neighborhood response uses at any depth.
         var graph = await client.ExploreConsensusGraphAsync(
             idHex!, hops: 2, fanout: 8, maxNodes: 64, CancellationToken.None);
         Assert.NotNull(graph);
@@ -71,9 +70,8 @@ public sealed class ExploreDisplayLiveTests
         var text = label.Trim();
         if (string.Equals(text, idHex, StringComparison.OrdinalIgnoreCase)) return true;
 
-        // The old UI also truncated a raw hash for sprites. Treat an ellipsized/prefix form
-        // as the same identity leak while leaving an actual user string of a few hex digits
-        // alone. Sixteen hex digits is already 64 bits of unmistakable internal identity.
+        // An ellipsized or prefix form of the id is the same leak. Sixteen hex digits
+        // (64 bits) is the threshold, so a short real string of hex digits is not flagged.
         var prefix = text.TrimEnd('…');
         if (prefix.EndsWith("...", StringComparison.Ordinal)) prefix = prefix[..^3];
         return prefix.Length >= 16

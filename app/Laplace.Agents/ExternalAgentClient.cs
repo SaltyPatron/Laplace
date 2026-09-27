@@ -7,14 +7,10 @@ using System.Text.Json.Nodes;
 namespace Laplace.Agents;
 
 /// <summary>
-/// The transport for the external-agent lane: one POST, bounded retries, and a
-/// wall-clock deadline the caller sets.
-///
-/// The client is per-process and long-lived on purpose — a fresh HttpClient per
-/// call leaks sockets in TIME_WAIT, and this lane is called from a stdio server
-/// that may live for a whole session. Everything that varies per call lives in
-/// <see cref="AgentTarget"/> and <see cref="AgentRequest"/>, so one instance serves
-/// every provider.
+/// HTTP transport to an external model host: one POST, bounded retries on
+/// throttling and transient 5xx, and a caller-set wall-clock deadline. One
+/// long-lived instance serves every provider; everything per-call is in
+/// <see cref="AgentTarget"/> and <see cref="AgentRequest"/>.
 /// </summary>
 public sealed class ExternalAgentClient : IDisposable
 {
@@ -39,10 +35,8 @@ public sealed class ExternalAgentClient : IDisposable
         int maxAttempts = 3)
     {
         _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
-        // The deadline is the caller's, enforced by a linked token below. A second
-        // ceiling on the HttpClient would cut a legitimately slow model at a limit
-        // nobody asked for — reasoning turns on the current frontier models run for
-        // minutes.
+        // No HttpClient ceiling; the caller's deadline is the only limit, enforced by
+        // a linked token in AskAsync.
         _http.Timeout = Timeout.InfiniteTimeSpan;
         _http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "laplace-agents/1.0");
         _retryBaseDelay = retryBaseDelay ?? TimeSpan.FromSeconds(1);
@@ -143,10 +137,8 @@ public sealed class ExternalAgentClient : IDisposable
     }
 
     /// <summary>
-    /// The vendor's own Retry-After when it sent one (capped), else fixed backoff.
-    /// Uncapped honouring of Retry-After would let a provider park the call past the
-    /// caller's deadline; the deadline token cuts it either way, so the cap only
-    /// decides whether the last attempt is spent sleeping or asking.
+    /// The vendor's Retry-After capped at 30 s when sent, else linear backoff from the
+    /// base delay. The caller's deadline still cancels the wait.
     /// </summary>
     private TimeSpan RetryDelay(int attempt, HttpResponseMessage? response)
     {
@@ -185,11 +177,8 @@ public sealed class ExternalAgentClient : IDisposable
     }
 
     /// <summary>
-    /// Vendors quote the rejected credential back in their own 401 text — OpenAI
-    /// does it verbatim. Forwarding that unchanged writes the key into the caller's
-    /// context, its transcript, and any log downstream of it, from a code path that
-    /// only fires when something is already wrong. The key is a value this process
-    /// holds, so redacting it is exact rather than a pattern guess.
+    /// Replaces the exact key value wherever a vendor's error text echoes it, so the
+    /// credential never reaches the caller, its transcript, or logs.
     /// </summary>
     private static string Redact(string text, string? key) =>
         string.IsNullOrEmpty(key) || key.Length < 4

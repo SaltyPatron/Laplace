@@ -1,49 +1,23 @@
 /*
- * fold_route.c — native keyed routing for the two fold WRITE sites
- * (attestation_merge, consensus_upsert). Completes GH #565: the probe half
- * landed in descent_probe.c; this is the write half.
+ * fold_route.c — the consensus fold write: a set of attested evidence deltas
+ * folded into their consensus cells in one call (ingest's "fold in sets").
  *
- * Both tables are partitioned LIST(type_id) -> HASH(subject_id), and both
- * callers hold the partition keys for every row (the ids were computed FROM
- * them). Routing is therefore the caller's knowledge, not the planner's to
- * rediscover — binding law: routing/math in C/SPI, SQL orchestrates.
+ * laplace.consensus is HASH(subject_id) partitioned. Input arrives as runs of
+ * one relation type; each run uses session-cached plans whose type_id is a hex
+ * literal in the plan text, and its subjects are routed in C through
+ * PostgreSQL's own HASH partition function so each exact leaf receives only
+ * the rows it owns. A type split across runs executes its plans twice on
+ * disjoint rows.
  *
- * What this replaces, and why (all measured on live seeds):
- *  - The plpgsql bodies materialized every batch into a fresh temp table
- *    (CREATE TEMP TABLE + CREATE INDEX + ANALYZE per call) purely so a
- *    per-type loop could bind the partition key to a variable/literal.
- *  - attestation_merge went further: EXECUTE format(%L) per type — correct
- *    pruning, but a full re-plan of a partitioned UPDATE for every type of
- *    every chunk of every apply, forever. (An UPDATE's result relations are
- *    locked at PLAN time, so only a literal key prunes; a generic plan opens
- *    all ~1,300 leaves — the disease its comment documents.)
+ * Per run: read and row-lock stored priors from their exact leaves, fold every
+ * cell natively (matched cells from their prior, novel cells from the neutral
+ * prior) with the glicko2 kernels the SQL scalar
+ * laplace_glicko2_accumulate_period also wraps, then persist matched rows by
+ * keyed update and novel rows by bulk COPY. A MERGE runs only when a
+ * concurrent insert collides with a row classified novel.
  *
- * The native shape: group the batch by type in C (run detection — the caller
- *  contract already sorts by (type, subject, id), and correctness does not
- *  depend on it: a type split across runs just executes its plan twice on
- *  disjoint rows), then execute a SESSION-CACHED prepared plan per type whose
- *  type_id is a hex LITERAL in the plan text, kept in an HTAB of
- *  type_id -> SPI_keepplan'd SPIPlanPtr in TopMemoryContext. Plan-time LIST
- *  pruning excludes unrelated types. Consensus phase 1 additionally applies
- *  PostgreSQL's HASH partition function in C and gives each exact leaf only the
- *  rows it owns; phase 3 persists matched rows through the primary-key conflict
- *  arbiter and novel rows as target-free inserts. The old MERGE remains only
- *  as a bounded concurrent-insert collision fallback. No temp table, no
- *  per-batch ANALYZE, no volatility trap.
- *
- * Fold math stays one implementation per fact: both fold arms run the same
- * core (glicko2_init + glicko2_fold_grouped_period) the SQL scalar
- * (laplace_glicko2_accumulate_period) wraps — computed natively in one pass
- * per type run, matched cells from their stored prior, novel cells from the
- * neutral prior. The scalar remains only in the collision MERGE fallback for
- * a concurrently-inserted cell (see UPSERT_MERGE_SQL). The atomic evidence-backed
- * entry point instead folds ALL replayable testimony from neutral with the
- * same grouped-period kernel as consensus_fold; storage flushes are not periods.
- * Cells containing transient continuous evidence retain the explicit delta law.
- * consensus_id stays one implementation the same way: the SQL definition IS
- * blake3(subject || type || COALESCE(object, 16 zero bytes)) via the core
- * hash128_blake3; this file calls that exact core function over the exact
- * 48-byte layout.
+ * Cell id is blake3(subject || type || COALESCE(object, 16 zero bytes))
+ * through the core hash128_blake3, the byte layout of the SQL consensus_id.
  */
 #include "postgres.h"
 
@@ -94,16 +68,13 @@ typedef struct TypePlanEntry
 
 static HTAB *upsert_matched_plans = NULL; /* consensus PK-arbitrated updates  */
 static HTAB *upsert_novel_plans = NULL;   /* consensus target-free inserts    */
-static HTAB *upsert_merge_plans = NULL;   /* collision-only MERGE fallback    */
+static HTAB *upsert_merge_plans = NULL;   /* concurrent-insert collision MERGE */
 static HTAB *evidence_lock_plans = NULL;
 static HTAB *evidence_fold_plans = NULL;
 static HTAB *evidence_write_plans = NULL;
 
-/* The substrate contract is LIST(type_id) -> HASH(subject_id, 8). A prior
- * lookup must use BOTH pieces of routing information. Literal type pruning
- * alone still left eight leaves beneath the selected LIST partition, and a
- * join whose subject key came from unnest could probe/scan all eight for each
- * input row. Keep one exact-leaf plan per type/remainder instead. */
+/* One exact-leaf plan per (type, HASH remainder). A prior read whose subject
+ * keys come from unnest would otherwise probe every leaf for each input row. */
 
 typedef struct PriorRouteEntry
 {
@@ -205,7 +176,7 @@ prior_route_htab(void)
 }
 
 /* Consensus is HASH(subject_id); a relation type owns no partition of its own.
- * The per-type entry carries only that type's prepared leaf plans. */
+ * The per-type entry carries that type's prepared leaf plans. */
 static PriorRouteEntry *
 prior_route(const uint8_t *type16, Datum type_datum, const char *label)
 {
@@ -232,12 +203,9 @@ prior_route(const uint8_t *type16, Datum type_datum, const char *label)
     return entry;
 }
 
-/* Return the one physical consensus leaf that owns (type, subject).  Repair
- * and inference SQL occasionally need to mutate derived state outside the
- * ingest upsert.  Giving those callers the same native partition router keeps
- * them from issuing parent UPDATE/DELETE statements whose plans open every
- * HASH child.  This is routing metadata only; it never reads or changes a
- * consensus row. */
+/* The physical consensus leaf that owns (type, subject), so SQL that mutates
+ * consensus outside this fold can address one leaf instead of a parent
+ * statement that opens every HASH child. Reads no consensus row. */
 Datum
 pg_laplace_consensus_partition_leaf(PG_FUNCTION_ARGS)
 {
@@ -374,8 +342,8 @@ bytea16(Datum d, const char *label)
 
 /*
  * n copies of the neutral opponent, for callers that supply no per-witness
- * ratings. The collision-only MERGE fallback consumes this exact opponent, so
- * a concurrent insert cannot change the fold evidence (GH #1321).
+ * ratings. The collision MERGE consumes the same opponents as the native fold,
+ * so a concurrent insert cannot change the evidence folded.
  */
 static ArrayType *
 neutral_opponent_array(int n)
@@ -515,9 +483,9 @@ fold_prior_states_add(FoldPriorStates *states, SPITupleTable *rows,
     }
 }
 
-/* Existing cells update in exactly the HASH leaf that owns them: one keyed
- * UPDATE per touched leaf, the same routing the locked prior read used. The
- * delta folds onto the locked prior, so witnesses accumulate. */
+/* Existing cells update in the HASH leaf that owns them: one keyed UPDATE per
+ * touched leaf, routed as the locked prior read was. Witness count adds and
+ * last_observed_at takes the later time. */
 static SPIPlanPtr
 update_leaf_plan(PriorRouteEntry *route, int remainder, const char *label)
 {
@@ -561,11 +529,10 @@ update_leaf_plan(PriorRouteEntry *route, int remainder, const char *label)
     return plan;
 }
 
-/* Route each subject through PostgreSQL's own partition support function,
- * then read its stored state from exactly the one physical leaf that owns it.
- * The batch is partitioned once in native memory. Every exact-leaf statement
- * can choose an index, merge, or hash access path without an Append and without
- * multiplying the input by the number of HASH leaves. */
+/* Route each subject through PostgreSQL's partition support function, then
+ * read and FOR UPDATE lock its stored cell from the one leaf that owns it. The
+ * batch is partitioned once in native memory, so each leaf statement plans
+ * without an Append and sees only its own rows. */
 static FoldPriorStates *
 read_run_priors(const uint8_t *type16, Datum type_datum,
                 const Datum *cell_ids, const InArray *subjects,
@@ -631,10 +598,10 @@ read_run_priors(const uint8_t *type16, Datum type_datum,
     return states;
 }
 
-/* Fold is pure in these seven fixed-point inputs and the constant tau. Many
- * novel corpus cells share all seven; calculate each distinct state transition
- * once per batch, not once per edge. Never key only by evidence: matched cells
- * with different stored priors must remain different transitions. */
+/* The fold is pure in these seven fixed-point inputs and the constant tau, so
+ * each distinct transition is computed once per run. The key includes the
+ * prior: matched cells with different stored states are different
+ * transitions. */
 typedef struct FoldMemo
 {
     int64 input[7]; /* rating, rd, volatility, opponent, phi, games, score sum */
@@ -785,9 +752,9 @@ period_window(const PeriodArrays *periods, const InArray *cell_opponents,
     return window;
 }
 
-/* Failure-only evidence for the actual mapped provider. Disk hashes do not
- * identify a library inherited from an already-running postmaster. Preserve
- * Linux's device/inode/path and deleted marker without reading source content. */
+/* Error-detail only: the /proc/self/maps line (device, inode, path, deleted
+ * marker) of the library that holds `address`, which identifies the mapped
+ * code a running backend actually executes. */
 static char *
 fold_function_mapping(uintptr_t address)
 {
@@ -814,16 +781,16 @@ fold_function_mapping(uintptr_t address)
     return truncated ? psprintf("%s [truncated]", line) : pstrdup(line);
 }
 
-/* Fold one type run natively — matched cells from their stored prior
- * (`priors`: the FOR UPDATE read of this run; ord is 1-based within the run),
- * novel cells from the neutral prior. One tight native pass instead of a
- * record-returning SQL function crossing the executor once per matched row.
- * The novel half was already native (GH #565); this completes the symmetry.
+/* Fold one type run in one native pass: matched cells from their locked
+ * prior, novel cells from the neutral prior. A cell with one period group uses
+ * the uniform-period kernel; a cell with several uses the grouped-period
+ * kernel. Rows flagged in `recomputed` already hold their result and pass
+ * through.
  *
- * Bit parity with the SQL scalars is by construction: their bodies use
- * glicko2_init plus the same uniform/grouped period kernels, and consensus.glicko2_neutral_mu()
- * / consensus.glicko2_tau() are defined as exactly CONSENSUS_FOLD_NEUTRAL_MU /
- * LAPLACE_GLICKO2_DEFAULT_TAU (asserted by tests/sql/consensus_upsert.sql). */
+ * The SQL scalars use glicko2_init and the same period kernels, and
+ * consensus.glicko2_neutral_mu() / consensus.glicko2_tau() equal
+ * CONSENSUS_FOLD_NEUTRAL_MU / LAPLACE_GLICKO2_DEFAULT_TAU, so both paths
+ * produce identical bits. */
 static void
 fold_run_states(const InArray *phis, const InArray *opps,
                 const InArray *games, const InArray *sums,
@@ -849,8 +816,8 @@ fold_run_states(const InArray *phis, const InArray *opps,
 
     for (i = 0; i < run_n; i++)
     {
-        /* Evidence-backed cells already contain the canonical native aggregate
-         * result. Do not turn the transport delta into another rating period. */
+        /* An evidence-recomputed cell already holds the fold of its retained
+         * testimony; its incoming delta is not another rating period. */
         if (recomputed != NULL && recomputed[i])
         {
             seen[i] = BoolGetDatum(matched[i]);
@@ -863,9 +830,8 @@ fold_run_states(const InArray *phis, const InArray *opps,
         int period_start = -1;
         int period_group_n = 1;
         int64 phi = DatumGetInt64(phis->elems[run_start + i]);
-        /* The opponent this witness presents. opps->n == 0 means the caller did
-         * not supply ratings, which folds against neutral exactly as before
-         * (GH #1321). */
+        /* The opponent this witness presents; without supplied ratings (or a
+         * zero rating) it is the neutral opponent. */
         int64 opp = (opps != NULL && opps->n > 0)
                     ? DatumGetInt64(opps->elems[run_start + i])
                     : CONSENSUS_FOLD_NEUTRAL_MU;
@@ -1017,14 +983,14 @@ fold_run_states(const InArray *phis, const InArray *opps,
 }
 
 /* ------------------------------------------------------------------ */
-/* attestation_merge — routed present-row observation merge            */
+/* attestation_merge — replay of already-identified attestations       */
 /* ------------------------------------------------------------------ */
 
-/* Compatibility entry points for older typed callers. The five-tuple already
- * identifies the witnessed event: receiving that identity again cannot add
- * observations, advance its timestamp or change the original calibration.
- * Novel evidence is admitted by the shared writer and only that accepted set
- * reaches consensus. No SQL, row lock, tuple rewrite or WAL is needed here. */
+/* An attestation id already identifies the witnessed event, so receiving it
+ * again adds no observation, timestamp or calibration. These entry points
+ * validate the parallel arrays and write nothing (return 0); novel testimony
+ * is admitted by the shared attestation writer, and only that accepted set is
+ * folded into consensus. */
 static Datum
 attestation_replay(PG_FUNCTION_ARGS, bool single_type)
 {
@@ -1080,48 +1046,25 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 /* consensus_upsert — routed inline fold                               */
 /* ------------------------------------------------------------------ */
 
-/* The fold has three phases per type run:
+/* Three phases per type run:
  *
- *  1. read_run_priors partitions the input by PostgreSQL's own HASH support
- *     function, then reads and row-locks each stored cell from its exact owning
- *     leaf. A locked row cannot change between this read and persistence, so
- *     folding from the read state IS folding from the write-time state.
- *  2. fold_run_states() computes every outgoing (rating, rd, volatility) in
- *     one tight native pass — matched cells from their stored prior, novel
- *     cells from the neutral prior. Before this, only the novel half was
- *     native: every already-existing cell crossed into the record-returning
- *     scalar through the executor once per matched row — the last per-row
- *     fold work in the write path.
- *  3. UPSERT_MATCHED_SQL sends rows seen in phase 1 through the primary-key
- *     conflict arbiter. Newly folded rows stream through PostgreSQL COPY's
- *     bulk insertion machinery; SQL INSERT remains the policy/rewrite path.
- *     UPSERT_MERGE_SQL is reached only after a concurrent insert invalidates
- *     phase 1's novel classification.
+ *  1. read_run_priors routes the run by HASH leaf and reads and row-locks each
+ *     stored cell there. A locked row cannot change before persistence, so the
+ *     fold starts from the write-time state.
+ *  2. fold_run_states computes every outgoing (rating, rd, volatility).
+ *  3. Matched rows persist through a keyed update (UPSERT_MATCHED_SQL, the
+ *     primary-key conflict arbiter, when the native update declines); novel
+ *     rows stream through PostgreSQL's COPY bulk insertion (UPSERT_NOVEL_SQL
+ *     when a relation's rules or row policies require SQL INSERT). No phase-3
+ *     statement joins the batch back to the partitioned target.
  *
- * b.seen is the router's own matched prediction from phase 1. A MERGE-matched
- * row the router did NOT see can only be a cell inserted by a concurrent
- * writer between phases 1 and 3 (FOR UPDATE excludes the concurrent-update
- * case). Its precomputed state is a neutral fold — wrong to assign — so the
- * MATCHED arm falls back to the same scalar the pre-native plan called, which
- * folds the concurrent state correctly under EvalPlanQual. CASE keeps that
- * fallback lazy: it executes only for rows re-classified after a concurrent-
- * insert collision (see upsert_merge_with_retry), so the (f()).col triple
- * evaluation sits on a path whose executions round to zero. */
-
-/* Phase 3 has no target join on the ordinary path. Phase 1 already classified
- * and row-locked every existing cell. Persist those rows through the declared
- * primary-key arbiter; PostgreSQL routes the proposed row by type+subject and
- * probes the owning HASH leaf's unique index. Novel rows use a native binary
- * COPY callback without another target join or a client round trip. PostgreSQL
- * owns tuple routing, constraints, indexes, triggers and bulk heap insertion.
- * Relations with rewrite rules or active row policies retain SQL INSERT.
- *
- * A cell inserted by a concurrent writer after phase 1 makes the novel INSERT
- * raise unique_violation. upsert_persist_keyed_or_fallback rolls back this
- * phase-3 subtransaction and executes the old MERGE race fallback once; its
- * b.seen=false arm folds the newly committed prior correctly. Thus the bad
- * planner shape is no longer the production path without weakening the
- * concurrent-insert correctness contract. */
+ * A cell a concurrent writer inserts after phase 1 makes the novel insert
+ * raise unique_violation; the phase-3 subtransaction rolls back and
+ * UPSERT_MERGE_SQL runs instead. In it b.seen is phase 1's matched
+ * classification: a MATCHED row with b.seen false is that concurrent cell, and
+ * its precomputed neutral fold would be wrong, so the CASE arm folds the
+ * committed state through laplace_glicko2_accumulate_period under
+ * EvalPlanQual. The CASE keeps that scalar off every other row. */
 static const char *UPSERT_MATCHED_SQL =
     "INSERT INTO laplace.consensus AS c "
     "  (id, subject_id, type_id, object_id, rating, rd, volatility, "
@@ -1185,29 +1128,24 @@ static const char *UPSERT_MERGE_SQL =
     "VALUES (b.id, b.s, '\\x%s'::bytea, b.o, b.new_rating, b.new_rd, "
     "        b.new_volatility, b.games, b.ts)";
 
-/* NO mask queue here — parity with the plpgsql body this replaces
- * (2026-07-21): the caller deposits highway bits INLINE for this same delta
- * via highway_mask_deposit; highway_mask_dirty is populated only by the
- * repair verbs, which need to CLEAR bits (per-source evict). */
+/* This write queues no highway-mask work: the caller deposits highway bits for
+ * the same delta through highway_mask_deposit. */
 
-/* Duplicate-cell guard: parity with the plpgsql contract check. */
+/* Duplicate-cell guard: one call may name each cell once. */
 typedef struct CellSeen
 {
     char id[16];
 } CellSeen;
 
-/* Execute one consensus MERGE, absorbing the concurrent-insert race without
- * leaning on the global apply mutex: if another writer commits a cell of this
- * run between the prior-state read and this MERGE, the NOT MATCHED arm
+/* Execute one consensus MERGE, absorbing the concurrent-insert race: if another
+ * writer commits a cell of this run after the prior read, the NOT MATCHED arm
  * collides (MERGE has no ON CONFLICT) and raises unique_violation. The
- * colliding row is committed, so re-executing the same plan under a fresh
- * snapshot re-classifies it as MATCHED with b.seen = false — the lazy scalar
- * fallback arm then folds the concurrent state correctly. Everything the
- * failed attempt wrote rolls back with its subtransaction; the phase-1 FOR
- * UPDATE locks belong to the parent transaction and survive. Bounded: every
- * retry requires a fresh committed collision on this run's cells, so
- * exhausting the attempts signals something structurally wrong, and the last
- * error is rethrown as-is. */
+ * colliding row is committed, so re-executing under a fresh snapshot
+ * reclassifies it as MATCHED with b.seen false, and the CASE arm folds its
+ * committed state. A failed attempt rolls back with its subtransaction; the
+ * phase-1 FOR UPDATE locks belong to the parent transaction and survive. Each
+ * retry needs a fresh committed collision, so the attempts are bounded and the
+ * last error is rethrown. */
 #define UPSERT_MERGE_MAX_ATTEMPTS 4
 
 static uint64
@@ -1263,12 +1201,12 @@ upsert_merge_with_retry(SPIPlanPtr plan, Datum *vals, const char *label)
 }
 
 /* Persist a phase-1 classification without joining the batch back to the
- * partitioned target. Existing rows update on their already-known exact HASH
- * leaves when PostgreSQL policy semantics permit it; the parent PK-arbitrated
- * INSERT/ON CONFLICT remains the conservative fallback. Novel rows insert
- * directly. Both writes share a subtransaction so a concurrent insert of a
- * phase-1-novel cell can roll back any preceding matched updates before the
- * established MERGE race fallback reclassifies it under a fresh snapshot. */
+ * partitioned target. Matched rows update natively on their known HASH leaves
+ * when the relation's policy semantics permit, otherwise through the parent's
+ * primary-key-arbitrated INSERT ... ON CONFLICT. Novel rows insert by native
+ * COPY, otherwise by SQL INSERT. Both writes share a subtransaction, so a
+ * unique_violation from a concurrent insert rolls back the matched updates
+ * too before the MERGE reclassifies the run under a fresh snapshot. */
 static uint64
 upsert_persist_keyed_or_fallback(SPIPlanPtr matched_plan,
                                  SPIPlanPtr novel_plan,
@@ -1405,9 +1343,9 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
 
-    /* Cell ids natively: blake3(subject || type || COALESCE(object, zeros)) —
-     * the exact byte layout of the SQL consensus_id definition, through the
-     * same core hash. Doubles as the duplicate-cell contract check. */
+    /* Cell ids: blake3(subject || type || COALESCE(object, zeros)), the SQL
+     * consensus_id byte layout through the same core hash. The same pass
+     * rejects a cell named twice in one call. */
     memset(&ctl, 0, sizeof(ctl));
     ctl.keysize = 16;
     ctl.entrysize = sizeof(CellSeen);
@@ -1604,10 +1542,11 @@ typed_cell_ids(const uint8_t *type16,const InArray *subjects,
     return cell_ids;
 }
 
-/* Evidence-backed writes own their complete canonical target set before they
- * inspect testimony. ON CONFLICT ... WHERE false takes the conflicting row lock
- * without rewriting it; sorted input also serializes simultaneous novel keys.
- * Missing neutral rows are transaction-local until every result is installed. */
+/* Evidence-backed writes lock their complete target cell set before reading
+ * testimony. Missing cells are inserted at the neutral state; ON CONFLICT ...
+ * WHERE false takes the existing row's lock without rewriting it. Sorted input
+ * gives concurrent writers one lock order. Inserted neutral rows stay
+ * transaction-local until every result is written. */
 static const char *EVIDENCE_LOCK_SQL =
     "INSERT INTO laplace.consensus AS c "
     " (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
@@ -1617,11 +1556,9 @@ static const char *EVIDENCE_LOCK_SQL =
     "ORDER BY b.id,b.s "
     "ON CONFLICT (id,type_id,subject_id) DO UPDATE SET rating=c.rating WHERE false";
 
-/* PostgreSQL selects the complete typed workset once. Native code owns cell
- * qualification and grouped-period reduction. Preserve the aggregate's exact
- * evidence order without SQL window/flag/fold materializations and rejoins. */
-
-
+/* Result write for evidence-backed cells. Recomputed cells take their folded
+ * state and retained witness count/time outright; the others add their delta
+ * to the stored witness count and keep the later observation time. */
 static const char *EVIDENCE_WRITE_SQL =
     "WITH input AS MATERIALIZED ("
     " SELECT * FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
@@ -1685,6 +1622,10 @@ lock_evidence_targets(const uint8_t *type16, ArrayType *ids,
                               label,SPI_result_code_string(rc))));
 }
 
+/* Read the retained testimony of every target cell (rows grouped by cell
+ * ordinal) and refold each replayable cell from the neutral prior over all of
+ * it with the grouped-period kernel, recording its witness count and latest
+ * observation time. A cell without testimony is an error. */
 static FoldEvidenceStates *
 read_evidence_states(const uint8_t *type16, const InArray *subjects,
                      const InArray *objects, const InArray *games,
@@ -1703,8 +1644,8 @@ read_evidence_states(const uint8_t *type16, const InArray *subjects,
     if (games != NULL) memcpy(out->counts,games->elems,sizeof(Datum)*subjects->n);
     if (ts != NULL) memcpy(out->timestamps,ts->elems,sizeof(Datum)*subjects->n);
 
-    /* Non-readonly SPI takes a fresh READ COMMITTED snapshot AFTER all target
-     * locks. A writer which waited for another apply must see its committed A. */
+    /* Non-readonly SPI takes a fresh READ COMMITTED snapshot after the target
+     * locks, so a writer that waited on another sees its committed testimony. */
     int rc = SPI_execute_plan(plan,vals,NULL,false,0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "%s: durable evidence read failed", label);
@@ -1836,8 +1777,8 @@ write_evidence_states(const uint8_t *type16, ArrayType *ids,
     return affected;
 }
 
-/* One set write per run: existing cells by keyed UPDATE, novel cells by native
- * COPY into their leaves. */
+/* One set write per run: existing cells by keyed UPDATE per HASH leaf, novel
+ * cells by native COPY. */
 static void
 write_run(const uint8_t *type16, Datum type, ArrayType *ids,
                const InArray *subjects, const InArray *objects,
@@ -1920,9 +1861,10 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
     *affected += (int64) done;
 }
 
-/* Keep the explicit delta contract checked even when durable testimony supplies
- * the resulting state. Otherwise malformed incoming totals could be hidden by
- * an already populated replayable cell. */
+/* Validate the incoming delta (positive games, 0 <= score sum <= games * 1e9,
+ * non-negative phi, period groups summing to the cell totals) even where
+ * retained testimony supplies the resulting state, so a malformed delta is
+ * never hidden behind a populated cell. */
 static void
 validate_evidence_delta(const InArray *phis, const InArray *games,
                          const InArray *sums, const PeriodArrays *periods,
@@ -1961,9 +1903,9 @@ validate_evidence_delta(const InArray *phis, const InArray *games,
     }
 }
 
-/* Primary admission boundary for a complete mixed-type working set. The caller
- * crosses into PostgreSQL once; native code retains physical partition routing
- * by consuming adjacent type runs inside that one operation. */
+/* Fold a complete mixed-type working set of evidence deltas in one call. Type
+ * runs must be bytewise sorted; each run is folded onto its locked priors and
+ * written with write_run. */
 Datum
 pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
 {
@@ -2043,9 +1985,9 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
                               BYTEAOID, -1, false, 'i');
 
         /* Writers of one relation type serialize here for the rest of their
-         * transaction. Runs arrive in ascending type order in every call, so the
-         * locks are taken in one global order. The prior read below therefore
-         * sees every committed cell of this type: a novel cell is truly novel. */
+         * transaction. Runs arrive in ascending type order, so the locks are
+         * taken in one global order, and the prior read below sees every
+         * committed cell of this type: a cell read as novel is novel. */
         {
             uint64 key;
             memcpy(&key, type16, sizeof(key));
@@ -2075,9 +2017,10 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(affected);
 }
 
-/* Direct routed form for a caller-owned single type run. Besides eliminating
- * the redundant type array, this constructs the derived cell-id array exactly
- * once and passes every caller array straight through to the cached MERGE plan. */
+/* Single-type run. Caller arrays pass straight through to the cached plans.
+ * With from_evidence, target cells are locked first and each replayable cell is
+ * refolded from all of its retained testimony; otherwise the delta folds onto
+ * the locked prior. */
 static Datum
 consensus_upsert_type(FunctionCallInfo fcinfo, bool from_evidence)
 {
@@ -2231,8 +2174,9 @@ pg_laplace_consensus_upsert_evidence_type(PG_FUNCTION_ARGS)
     return consensus_upsert_type(fcinfo,true);
 }
 
-/* Maintenance uses the identical lock/snapshot/native-aggregate/write boundary
- * without pretending that retained evidence is an incoming score delta. */
+/* Refold existing cells from their retained testimony alone, through the same
+ * lock, snapshot, native fold and result write as the evidence path; there is
+ * no incoming delta. Every target must hold replayable testimony. */
 Datum
 pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
 {

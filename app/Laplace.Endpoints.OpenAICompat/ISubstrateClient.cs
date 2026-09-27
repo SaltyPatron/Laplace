@@ -121,8 +121,8 @@ internal interface ISubstrateClient
         int limit, bool includeGeometry, bool includeEvidence, CancellationToken ct);
 
     /// <summary>
-    /// Execute the same traceable native forward pass used by normal generation and
-    /// return its receipts. The controls are the forward operator controls, not graph-walk aliases.
+    /// Runs the native forward pass that generation runs and returns its receipts; the
+    /// controls are the forward pass's own.
     /// </summary>
     Task<IReadOnlyList<ForwardTraceStep>> ForwardTraceAsync(
         string prompt, int steps, int maxStride, double spread, int topK,
@@ -179,7 +179,7 @@ internal interface ISubstrateClient
     Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
         string idHex, int hops, int fanout, int maxNodes, CancellationToken ct);
 
-    /// <summary>Installed-catalog op invoker — MCP <c>op</c> / HTTP <c>POST /v1/op</c> (GH #812).</summary>
+    /// <summary>Invokes an installed catalog operation by name; the same call as MCP <c>op</c> and <c>POST /v1/op</c>.</summary>
     Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
         string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
         int timeoutSeconds, CancellationToken ct);

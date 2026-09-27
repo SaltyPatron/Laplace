@@ -14,10 +14,14 @@
 #include "laplace/core/math4d.h"
 #include "spi_common.h"
 
+/* Search over the consensus web: shortest path from one entity to a goal
+ * region, expanding each node's typed neighbors (directed or undirected)
+ * through consensus.neighbors_* and costing each edge by its folded standing.
+ * Emits the path as (step, entity, accumulated cost). */
 PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 
-/* Same local constant as generate_walk.c -- avoids relying on M_PI, which
- * isn't portably defined under MSVC without _USE_MATH_DEFINES. */
+/* Local constant: M_PI is not portably defined under MSVC without
+ * _USE_MATH_DEFINES. */
 #define ASTAR_PI 3.14159265358979323846
 
 static const char *Q_UNDIRECTED =
@@ -26,10 +30,8 @@ static const char *Q_UNDIRECTED =
 static const char *Q_DIRECTED =
     "SELECT nbr, rating, rd FROM consensus.neighbors_directed($1, $2, $3)";
 
-/* Single-key coordinate lookup, same ensure_*_plan cached-plan idiom as
- * containers_of.c and generate_walk.c's ordinal-continuity probe. Used only
- * when p_use_geometry is requested -- fetches one entity's own S3 point for
- * the admissible-heuristic closure below. */
+/* One entity's own point physicality, read only when geometry tie-ordering is
+ * requested. */
 static const char *Q_COORD =
     "SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord) "
     "FROM laplace.v_word_points WHERE id = $1 AND coord IS NOT NULL LIMIT 1";
@@ -52,10 +54,8 @@ ensure_coord_plan(void)
     }
 }
 
-/* Returns false if no point physicality is on file for this entity -- the
- * heuristic must degrade to 0.0 (still admissible), never error. `scratch`
- * is a caller-owned, reusable VARHDRSZ+sizeof(hash128_t) buffer (same
- * pattern as expand_ctx.nodebuf below) -- avoids a palloc per lookup. */
+/* Returns false when the entity has no point physicality. `scratch` is a
+ * caller-owned VARHDRSZ+sizeof(hash128_t) buffer reused across lookups. */
 static bool
 fetch_coord(const hash128_t *id, bytea *scratch, double out_xyzm[4])
 {
@@ -103,9 +103,9 @@ edge_cost(int64 rating, int64 rd)
 {
     double probability = laplace_edge_strength(rating, rd);
 
-    /* Independent-edge path likelihoods multiply; negative log turns that
-     * product into the non-negative additive cost Dijkstra requires. A zero
-     * expected score is not a traversable edge, handled by spi_expand. */
+    /* A path's consensus edge strengths multiply; negative log turns that
+     * product into the non-negative additive cost the search requires. A zero
+     * strength is not traversable and is dropped in spi_expand. */
     return -log(probability);
 }
 
@@ -178,12 +178,11 @@ spi_expand(void *ctxp, const hash128_t *node,
     return true;
 }
 
-/* p_use_geometry tie-order closure: goal coordinates are resolved once up
- * front and each call returns normalized angular distance. The core orders
- * primarily by exact accumulated cost and consults this only for equal-cost
- * ties. No relationship between S3 distance and consensus probability has
- * been proved, so geometry must not masquerade as an admissible cost bound.
- * A node or goal with no point physicality degrades to 0.0, never errors.
+/* Geometry tie-order: goal coordinates are resolved once and each call
+ * returns the node's normalized angular distance to the nearest goal. The core
+ * orders by accumulated consensus cost and consults this only for equal-cost
+ * ties; geometry is not a cost bound. A node or goal without a point
+ * physicality contributes 0.0.
  */
 typedef struct {
     double *goal_xyzm; /* goal_n * 4 doubles */

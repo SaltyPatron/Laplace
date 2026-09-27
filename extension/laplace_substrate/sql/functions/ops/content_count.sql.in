@@ -1,6 +1,5 @@
--- String body (not BEGIN ATOMIC): depends on v_word_points which extension
--- upgrades recreate in the same script; parse-time resolution can miss mid-upgrade
--- the same way source_roster hit v_attestation_readable (GH #764).
+-- Content entities (those with a Content physicality), overall or among one
+-- source's attestation subjects.
 DROP FUNCTION IF EXISTS laplace.content_count(bytea);
 
 CREATE OR REPLACE FUNCTION ops.content_count(p_source bytea DEFAULT NULL)
@@ -11,9 +10,8 @@ BEGIN ATOMIC
         WHEN p_source IS NULL THEN
             (SELECT count(*) FROM laplace.v_word_points)
         ELSE
-            -- Dedup the source's subjects FIRST (single hash-aggregate pass), THEN probe
-            -- v_word_points by id. The prior JOIN nested-looped every source attestation
-            -- into laplace.physicalities and exploded.
+            -- Dedup the source's subjects in one hash-aggregate pass, then probe
+            -- v_word_points by id, instead of joining every attestation row.
             (SELECT count(*)
              FROM (SELECT DISTINCT a.subject_id
                    FROM laplace.attestations a

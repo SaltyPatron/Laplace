@@ -56,10 +56,7 @@ export interface LabCatalog {
   engines: Record<string, LabEngine>;
 }
 
-/**
- * Server-sent events as a typed async iterator. Shared by the structured job feed and the
- * raw transcript so there is one frame parser, not two that drift.
- */
+/** Server-sent events as a typed async iterator; the one frame parser for the job feed and the raw transcript. */
 export async function* sseJson<T>(url: string, signal?: AbortSignal): AsyncGenerator<T> {
   const res = await fetch(url, { signal });
   if (!res.ok || !res.body) throw new Error(`${res.status} SSE failed`);

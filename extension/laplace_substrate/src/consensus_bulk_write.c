@@ -219,8 +219,8 @@ laplace_consensus_update_matched(Datum type, Datum *values, int count,
                         label, (unsigned long) total, (unsigned long) expected)));
 
     /* Decide the policy boundary before the first direct write. If one leaf
-     * would change parent-table trigger/RLS/ACL behavior, use the existing SQL
-     * parent path for the entire matched set. */
+     * would change parent-table trigger/RLS/ACL behavior, the whole matched set
+     * goes back to the caller's SQL path. */
     for (int remainder = 0; remainder < leaves->count; ++remainder)
     {
         if (counts[remainder] == 0) continue;

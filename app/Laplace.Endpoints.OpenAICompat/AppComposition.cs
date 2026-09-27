@@ -13,14 +13,14 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class AppComposition
 {
-    // OpenAPI generation runs this host during compilation. It must neither
-    // contact the payment database nor start writers or provision Stripe objects.
+    // OpenAPI generation runs this host during compilation; under it no hosted
+    // service starts and the billing stores are in-memory.
     private static bool IsOpenApiDocumentGeneration => string.Equals(
         System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name,
         "GetDocument.Insider", StringComparison.Ordinal);
 
-    // The existing worker-suppression switch does not make a running API's
-    // account database ephemeral. Only the actual schema generator does that.
+    // LAPLACE_SKIP_HOSTED_SERVICES=1 also suppresses hosted services, but unlike
+    // OpenAPI generation it leaves the billing store selection unchanged.
     private static bool IsDocumentGenerationHost => IsOpenApiDocumentGeneration
         || Environment.GetEnvironmentVariable("LAPLACE_SKIP_HOSTED_SERVICES") == "1";
 
@@ -156,10 +156,9 @@ internal static class AppComposition
                 ?? $"{externalBase}/billing/cancel";
             options.Bypass = FirstConfig("LAPLACE_BILLING_BYPASS")?.ToLowerInvariant() switch
             {
-                // Configuring Stripe activates the real catalog, checkout,
-                // webhook, portal and entitlement integrations. It must not
-                // silently turn a development installation into a paywall.
-                // Enforcement is a separate, explicit deployment decision.
+                // Unset means bypass: Stripe credentials enable the catalog,
+                // checkout, webhook, and portal integrations, but enforcement
+                // requires LAPLACE_BILLING_BYPASS=false.
                 null => true,
                 "true" or "1" => true,
                 "false" or "0" => false,
@@ -238,8 +237,8 @@ internal static class AppComposition
         return null;
     }
 
-    // Authenticated company hosts cannot silently lose payments, keys and
-    // allowances by falling back to an ephemeral store after a database error.
+    // With requireDurable (or LAPLACE_BILLING_STORE=postgres) a database error fails
+    // startup; only "auto" without requireDurable degrades to in-memory stores.
     private static void AddBillingStores(IServiceCollection services, bool requireDurable)
     {
         var requested = FirstConfig("LAPLACE_BILLING_STORE")?.ToLowerInvariant();

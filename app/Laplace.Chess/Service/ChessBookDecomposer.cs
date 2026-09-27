@@ -12,24 +12,18 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Chess literature → board modality. Reads book text files (the Gutenberg chess corpus) and
-/// grounds what the book asserts onto content-addressed board entities, under the reserved
-/// ChessBook source (curated trust):
+/// Provider for chess book text files. What a book asserts is grounded onto content-addressed
+/// board entities and attested under the ChessBook source (curated trust):
 ///
-///  - Embedded PGN games (annotated game collections) are recorded through the same witnessed
-///    shape as ChessPgnDecomposer — under ChessBook provenance — and picked up by the analyzer
-///    scan for the calculated ladder. Their inline {commentary} is additionally attested
-///    (comment, EXPLAINS, position-after-move): the book's judgment, tied to the exact position
-///    it judges.
-///  - Prose move lines — algebraic ("1. e4 e5 2. Nf3") or English descriptive ("1. P-K4, P-K4;
-///    2. Kt-KB3") — are replayed from the standard start; lines that ground legally emit one
-///    ordered line trajectory plus (paragraph, EXPLAINS, line). Fragments quoted from diagrams fail
-///    replay from the start position and are skipped by construction: only deterministic
-///    groundings are attested.
+///  - Embedded PGN games are recorded through ChessPgnDecomposer.RecordGame, as any game is.
+///    Inline {commentary} is also attested as (comment, EXPLAINS, position after the move).
+///  - Prose move lines, algebraic ("1. e4 e5 2. Nf3") or descriptive ("1. P-K4, P-K4;
+///    2. Kt-KB3"), are replayed from the standard start; a line that replays legally emits its
+///    ordered line trajectory plus (paragraph, EXPLAINS, line). A fragment that does not replay
+///    (typically quoted from a diagram) is counted in the drop ledger, not attested.
 ///
-/// The paragraph/comment text is minted through the same content law as the document lane, so a
-/// sentence already ingested as literature collides to the same id — the cross-modal mesh is a
-/// hash collision, never a resolution pass.
+/// Paragraph and comment text compose through the shared content recipe, so a sentence admitted
+/// from any other source is the same entity.
 /// </summary>
 public sealed partial class ChessBookDecomposer(bool recursive = false)
     : ComposeDecomposer<ChessBookRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
@@ -143,8 +137,8 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         {
             string? comment = mainline[ply].CommentText;
             if (string.IsNullOrWhiteSpace(comment)) continue;
-            // The validated replay carries the actual SetUp/FEN starting board.
-            // A partial reparse from the standard array cannot complete this unit.
+            // Positions come from the validated replay, which starts from the game's
+            // SetUp/FEN board, not from the standard start.
             var posId = ChessGraph.EmitPosition(b, replay.Boards[ply + 1], src);
             var commentId = ContentEmitter.Emit(b, comment.Trim(), src)
                 ?? throw new InvalidDataException("book commentary could not be admitted as content");
@@ -475,9 +469,8 @@ public sealed record ChessBookRecord(
     internal ChessGameRecord? Parsed { get; init; }
     internal Hash128 RootId { get; init; }
     internal Hash128 LineId { get; init; }
-    // The existing semantic root can be quoted with distinct commentary. Bind
-    // the unit completion to both actual text inputs without changing the
-    // playing, line, paragraph, or testimony identities.
+    // One root can be quoted with different commentary, so the completion key also binds
+    // both text inputs; playing, line, paragraph and testimony identities are unchanged.
     internal Hash128 CompletionContextId => Hash128.OfCanonical(
         $"chess/book-completion-input/v1/{RootId}/{ContentEmitter.RootId(Context)}/{ContentEmitter.RootId(GameText ?? string.Empty)}");
     internal IngestUnitCompletionKey CompletionKey => IngestUnitCompletion.Key(

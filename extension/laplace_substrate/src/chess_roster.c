@@ -6,10 +6,11 @@
 #include "spi_nested.h"
 #include "laplace/core/sql_catalog.h"
 
-/* Two disjoint ordered sets: canonical OUTCOME cells and typed players without
- * that cell. Taking K from each is sufficient for the first K of their union.
- * SQL retains its index order; C merges exact fixed-point keys and labels only
- * the requested page. Profile-only players remain navigable at neutral standing. */
+/* Ranks entities of one type by the standing of their (subject, OUTCOME, result)
+ * consensus cell. Two disjoint ordered reads, entities with that cell and named
+ * entities of the type without it (held at neutral rating and initial RD), each
+ * return offset+limit rows, which covers the first offset+limit of their union.
+ * C merges them on exact fixed-point keys and labels only the returned page. */
 typedef struct {
     hash128_t id;
     int64 games, rating, rd, key;
@@ -117,9 +118,11 @@ pg_laplace_chess_ranked(PG_FUNCTION_ARGS)
     return (Datum)0;
 }
 
-/* Resolve the exact identity once, then ascend witnessed ordered Content
- * trajectories on a miss. Standings use the roster's canonical arena. Native
- * sorting precedes pagination and the only label read covers that final page. */
+/* Resolves the query texts to the first typed entity whose exact identity has a
+ * witnessed outcome or name cell. On a miss, unless exact_only, the candidates
+ * are the entities whose witnessed name is a container of the query texts. Each
+ * candidate carries its outcome-cell standing (neutral when absent); C sorts,
+ * pages, and labels only the returned page. */
 PG_FUNCTION_INFO_V1(pg_laplace_chess_search_candidates);
 Datum
 pg_laplace_chess_search_candidates(PG_FUNCTION_ARGS)

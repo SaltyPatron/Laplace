@@ -23,8 +23,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     {
     }
 
-    // Keep transport replaceable for deterministic cache-lifetime controls.
-    // Production always uses the same PostgreSQL implementations below.
+    // Probe and eviction transports are injectable so cache-generation behavior can be
+    // exercised deterministically; the public constructor uses the PostgreSQL ones below.
     internal NpgsqlSubstrateReader(NpgsqlDataSource dataSource,
         Func<IReadOnlyList<Hash128>, CancellationToken, Task<byte[]>>? entityProbe,
         Func<Hash128, IReadOnlyList<Hash128>?, IReadOnlyList<Hash128>?,
@@ -105,8 +105,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     /// <summary>
     /// One round trip for N source witnesses against the layer completion key
-    /// (witness_id, layer). An unreadable completion surface means "not known complete",
-    /// never "complete": resuming re-observes; the opposite would silently skip work.
+    /// (witness_id, layer). An unreadable completion table yields "not known complete":
+    /// re-observation is idempotent, while a false "complete" would skip admission.
     /// </summary>
     public async Task<IReadOnlySet<Hash128>> HasSourcesCompletedAsync(
         IReadOnlyList<Hash128> sourceIds, int layerOrder, CancellationToken ct = default)
@@ -137,9 +137,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     }
 
     /// <summary>
-    /// One round trip for N file roots completed by one decomposer witness. This is the
-    /// per-file resume probe: FrameNet's 14,900 files once spent 37.7 ms each on scalar
-    /// probes (562 s of a 561 s run), so membership is always asked as one set.
+    /// Which of N file roots already carry a completion receipt from one decomposer
+    /// witness, asked as one set in one round trip.
     /// </summary>
     public async Task<IReadOnlySet<Hash128>> HasFilesCompletedAsync(
         IReadOnlyList<Hash128> fileIds, Hash128 decomposerSourceId, int layerOrder,
@@ -167,8 +166,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         catch (PostgresException)
         {
-            // Unreadable completion state means not known complete. Re-observation is
-            // safe; silently skipping a file is not.
+            // Unreadable completion state means not known complete; re-observation
+            // is idempotent, skipping a file is not.
             done.Clear();
         }
         return done;
@@ -347,21 +346,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
     /// <summary>
-    /// Ids confirmed present in the DB (or in this run's guaranteed-
-    /// committed set) via a real presence-query result -- NOT "ids seen at
-    /// least once". Only ever populate via <see cref="MarkProven"/> with an
-    /// already-filtered "confirmed present" subset of a probe round; never
-    /// with a probe round's whole, unfiltered candidate list. That
-    /// unconditional-population bug (TierTreeDescent.cs previously calling
-    /// MarkProven on an entire batch, including ids the same batch's
-    /// bitmap had just proven absent) permanently poisoned this
-    /// process-lifetime cache and caused every later occurrence of that
-    /// content anywhere in the ingest run to be silently treated as already
-    /// present -- see the dorian.txt repro in
-    /// .scratchpad/02_Identified_Issues.txt.
+    /// One generation of ids proven present (committed, or in this run's committed set)
+    /// by a presence-probe result, not ids merely seen. <see cref="MarkProven"/> must be
+    /// given only the confirmed-present subset of a probe round: an absent id entered
+    /// here would make every later occurrence of that content converge onto a row that
+    /// was never persisted.
     ///
-    /// Capacity comes from the shared cache byte envelope. Once full, misses fall
-    /// through to the DB; the useful hot prefix is not periodically erased.
+    /// Capacity comes from the shared cache byte envelope. Once full, further ids are
+    /// not added and misses go to the database; existing entries are never evicted.
     /// </summary>
     private sealed class ProvenPresence
     {
@@ -387,9 +379,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         ct.ThrowIfCancellationRequested();
         var bm = new byte[BitmapBits.ByteLength(n)];
         if (n == 0) return bm;
-        // A probe owns the cache generation it began with. Source eviction can
-        // detach it while native/database work is in flight; late results must
-        // never repopulate the replacement generation with deleted markers.
+        // A probe writes only to the cache generation it began with. Source eviction
+        // may swap generations while the probe is in flight, and late results must
+        // not repopulate the new generation with ids that eviction deleted.
         var proven = Volatile.Read(ref _proven);
         var unresolved = new List<Hash128>();
         var positions = new List<int>();
@@ -411,10 +403,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var dbUnknown = new Hash128[dbUnknownIdx.Count];
         for (int u = 0; u < dbUnknownIdx.Count; u++) dbUnknown[u] = candidates[dbUnknownIdx[u]];
 
-        // Every compose worker shares this reader. Root gates therefore join one
-        // array-in native probe instead of opening one connection per working set.
-        // The batcher deduplicates identities and restores each caller's positional
-        // bitmap; the native function still owns the actual committed-row decision.
+        // Concurrent compose workers share this reader; the batcher merges their
+        // misses into one deduplicated array probe of laplace.entities_exist_bitmap
+        // and returns each caller's positional bitmap.
         var dbBm = await _entityProbes.ProbeAsync(dbUnknown, EntityPresenceLane, ct)
             .ConfigureAwait(false);
 
@@ -452,8 +443,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     {
         if (ids is null || scope.State is not ProvenPresence proven
             || !ReferenceEquals(proven, Volatile.Read(ref _proven))) return;
-        // If eviction races this loop, the captured object becomes detached;
-        // neither these hints nor a late probe can enter its replacement.
+        // If eviction swaps generations during this loop, these ids land only in the
+        // detached generation, never in its replacement.
         for (int i = 0; i < ids.Count; i++) AddProven(proven, ids[i]);
     }
 
@@ -463,8 +454,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
-    // Same resource plan as _proven: canonical→root is deterministic, so a cache
-    // miss only costs a recompute.
+    // Bounded by the same resource plan as _proven. Canonical key -> root id is
+    // deterministic, so a miss only costs a recompute.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, Hash128> _rootCache = new();
     private int _rootCacheApprox;
     public bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) => _rootCache.TryGetValue(canonicalKey, out rootId);
@@ -522,9 +513,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     }
 
     /// <summary>
-    /// Resolve the immutable floor before transport. Only unresolved identities
-    /// enter the shared tier batch; native PostgreSQL probes confirm stored rows.
-    /// The positional map preserves duplicate inputs and their exact bit positions.
+    /// Ids in the codepoint perfcache floor are present without a probe; only the rest
+    /// enter the shared tier batch probe. Duplicate inputs keep their own bit positions.
     /// </summary>
     public async Task<byte[]> TierBatchExistenceProbeAsync(
         IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
@@ -666,10 +656,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
-        // Installed pair-scoring surface, not a hand-rolled join over the consensus
-        // table. The unattested->0 COALESCE this caller depends on is part of that
-        // function's contract and documented there as a deliberate tri-state collapse
-        // for scoring; presence questions use consensus_cell instead.
+        // consensus.pair_scores scores an unattested pair as 0, collapsing absence and
+        // a zero score; presence questions use consensus.cell instead.
         await using var cmd = _ds.CreateCommand(
             "SELECT score FROM consensus.pair_scores($1, $3, $2) ORDER BY ord");
         var p1 = cmd.Parameters.AddWithValue(subj); p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
@@ -683,12 +671,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     }
 
     /// <summary>
-    /// Retract a source's testimony and refold every cell it touched
-    /// (<c>ops.evict_source</c>, GH #508). The procedure COMMITs per batch and
-    /// RAISE LOGs progress server-side, so hours are legitimate on a large lane —
-    /// hence no command timeout. <paramref name="relationIds"/> and
-    /// <paramref name="markerTypeIds"/> are null to mean "every relation the source
-    /// has rows under" and "no marker cleanup" respectively.
+    /// Retracts a source's testimony and refolds every consensus cell it touched
+    /// (<c>ops.evict_source</c>). The procedure commits per batch, so it runs with no
+    /// command timeout. Null <paramref name="relationIds"/> means every relation the
+    /// source testified under; null <paramref name="markerTypeIds"/> means no marker
+    /// cleanup. The proven-presence cache generation is replaced afterwards.
     /// </summary>
     public async Task EvictSourceAsync(
         Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
@@ -700,10 +687,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         finally
         {
-            // The procedure commits in batches, so even a failed/cancelled call
-            // can have deleted marker entities. No pre-eviction presence claim
-            // may gate the next derivation. Swapping the generation also keeps
-            // delayed probes from restoring stale positives after invalidation.
+            // The procedure commits in batches, so even a failed or cancelled call
+            // may have deleted entities. Swapping the generation discards every
+            // pre-eviction presence claim and detaches in-flight probes.
             Interlocked.Exchange(ref _proven, new ProvenPresence());
         }
     }
@@ -727,7 +713,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
                 : (object)markerTypeIds.Select(m => m.ToBytes()).ToArray());
         await cmd.ExecuteNonQueryAsync(ct);
 
-        // Remove unphysical shells from the canonical entity table directly.
+        // Delete entities this source testified about as subject that have no
+        // physicality and appear in no attestation as subject, object or context.
         await using var cleanup = _ds.CreateCommand(
             "WITH invalid AS MATERIALIZED ("
             + " SELECT e.id"
@@ -753,9 +740,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     }
 
     /// <summary>
-    /// Surviving evidence rows under a source — the eviction receipt. Zero is the
-    /// expected answer after an unrestricted evict; a restricted one leaves the
-    /// relations it did not name in place.
+    /// Evidence rows still attributed to a source: the eviction receipt. Zero after an
+    /// unrestricted eviction; a restricted one leaves unnamed relations in place.
     /// </summary>
     public async Task<long> CountEvidenceBySourceAsync(Hash128 sourceId, CancellationToken ct = default)
     {

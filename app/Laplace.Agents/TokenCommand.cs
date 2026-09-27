@@ -4,24 +4,12 @@ using System.Text;
 namespace Laplace.Agents;
 
 /// <summary>
-/// Mints a short-lived credential by running an operator-configured command —
-/// the mechanism that makes OAuth and SSO usable on this lane at all.
+/// Mints a credential by running an operator-configured command (for example an
+/// OAuth token printer) and returning its single stdout line.
 ///
-/// Most vendors issue only static API keys, but the ones that do OAuth issue
-/// tokens that EXPIRE, so a value pasted into agents.env stops working in an hour
-/// and the failure looks like a revoked key. A command re-run per call always
-/// yields a live token: <c>ant auth print-credentials --access-token</c> for an
-/// Anthropic profile, <c>gcloud auth print-access-token</c> for Vertex, or any
-/// script an SSO gateway ships.
-///
-/// NOT CACHED. One process spawn per call is nothing beside a multi-second model
-/// turn, and a cache would need an expiry this layer cannot observe — the token
-/// carries its own lifetime and nothing here can read it. A stale token cached
-/// behind a working command is the exact failure the command exists to prevent.
-///
-/// NOT A SHELL. The command is split on whitespace and executed directly, so no
-/// pipeline, redirect, or substitution runs. A caller wanting shell semantics
-/// names the shell explicitly.
+/// Run on every resolve and never cached, since the token's lifetime is not visible
+/// here. The command is split with <see cref="Split"/> and executed directly, not
+/// through a shell: no pipeline, redirect, or substitution runs.
 /// </summary>
 public static class TokenCommand
 {
@@ -57,12 +45,8 @@ public static class TokenCommand
                 "An interactive login prompt will hang here — authenticate once outside Laplace first.");
         }
 
-        // WaitForExit(timeout) proves the CHILD has exited, but it does not guarantee that
-        // asynchronous OutputDataReceived/ErrorDataReceived callbacks have drained the redirected
-        // pipes. A fast command such as `dotnet --version` can therefore exit 0 while `stdout` is
-        // still empty, which made a valid token printer nondeterministically look like it emitted
-        // no credential. The parameterless wait returns immediately for the exited child and,
-        // critically, waits for the async stream handlers to finish before we inspect the buffers.
+        // WaitForExit(timeout) does not wait for the async stdout/stderr handlers to
+        // drain; the parameterless overload does, so the buffers are complete below.
         process.WaitForExit();
 
         if (process.ExitCode != 0)

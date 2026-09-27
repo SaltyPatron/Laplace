@@ -34,9 +34,10 @@ public interface ISubstrateWriter
     Task DrainFoldsAsync() => Task.CompletedTask;
 
     /// <summary>
-    /// Compatibility hook for writers that still own file-scoped work. The production
-    /// replayable bulk path withholds file-completion markers until its already-running
-    /// evidence refold finishes, so a file boundary never forces an apply/fold wait.
+    /// File-boundary hook for writers that hold file-scoped work. The replayable bulk
+    /// writer withholds file-completion markers until the refold already running for that
+    /// file's evidence finishes, so a file boundary never forces an apply/fold wait.
+    /// Default no-op.
     /// </summary>
     Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
         => Task.CompletedTask;
@@ -72,11 +73,10 @@ public interface ISubstrateWriter
         => ApplyManyAsync(changes, ct);
 
     /// <summary>
-    /// Applies one whole working set (Rule #8 step 6: the client dedups and
-    /// compose descent proves novelty; the writer apply-side bitmap-probes
-    /// claimed-novel ids, bulk-COPYs survivors, and attestation_merge handles
-    /// present rows). Implementations without a working-set lane fall back to a
-    /// plain apply.
+    /// Persists one whole working set in bulk: compose has deduplicated it and
+    /// descent has proven novelty; the writer bitmap-probes the claimed-novel ids,
+    /// COPYs the survivors, and merges testimony for rows already present.
+    /// The default is a plain <see cref="ApplyAsync"/>.
     /// </summary>
     Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyAsync(change, ct);
@@ -84,9 +84,9 @@ public interface ISubstrateWriter
     /// <summary>
     /// Applies a group of changes as ONE working set — one transaction, one
     /// verification pass, one idempotency token derived from every member's
-    /// intent hash. Physical file ownership stays on each change for resume and
-    /// observability; the runner is free to coalesce multiple files from the same
-    /// source until the real row/byte/admission envelope closes.
+    /// intent hash. Each change keeps its file label for resume and receipts; the
+    /// runner may coalesce several files from one source until the row/byte/admission
+    /// envelope closes.
     /// </summary>
     Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);

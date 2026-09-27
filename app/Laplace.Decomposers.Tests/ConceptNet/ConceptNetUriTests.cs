@@ -108,9 +108,8 @@ public sealed class ConceptNetUriTests
         Assert.False(ConceptNetUri.IsExternalUrlRelation("/r/RelatedTo"u8));
     }
 
-    // ConceptNet states how much support an assertion has in its "sources" array and it
-    // went nowhere: every row folded at observationCount 1, so an edge 465 sources agree
-    // on folded exactly as hard as one asserted once. 96,831 rows list two or more.
+    // The length of an assertion's "sources" array is its observation count, so the
+    // fold weighs an assertion by the support the corpus states for it.
     [Theory]
     [InlineData("{\"weight\": 1.0}", 1L)]
     [InlineData("{\"sources\": [], \"weight\": 1.0}", 1L)]

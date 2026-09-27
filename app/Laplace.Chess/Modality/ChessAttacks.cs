@@ -5,30 +5,21 @@ using System.Runtime.Intrinsics.X86;
 namespace Laplace.Modality.Chess;
 
 /// <summary>
-/// Precomputed attack tables — the lookup half of move generation.
+/// Precomputed attack tables, the lookup half of move generation. Attack geometry depends only
+/// on (square, occupancy), so every attack query is a table read instead of a ray walk.
 ///
-/// MoveGen resolves attacks by WALKING RAYS at runtime (`while (Board.OnBoard(t))`) over a 0x88
-/// mailbox, and IsSquareAttacked repeats that walk for every legality test: ~35 pseudo moves per
-/// position, each re-deriving the same geometry. MEASURED: replay is 46.7% of compose time and
-/// IsSquareAttacked is its bulk. None of that geometry depends on anything but (square,
-/// occupancy), so all of it is a table.
-///
-/// Layout, and why these sizes:
+/// Layout:
 ///   knight / king / pawn   64 entries each, dense — leapers have no occupancy dependence
 ///   bishop / rook          occupancy-indexed; the index is the RELEVANT occupancy only
 ///                          (interior ray squares; a blocker on the ray's last square changes
 ///                          nothing beyond it, so edges are excluded from the mask)
 ///   between / line         64x64, for pin and check-evasion masks
 ///
-/// Sliding index uses BMI2 PEXT when the CPU has it — this box is Broadwell-E (bmi2/avx2/popcnt
-/// confirmed), where PEXT is a 3-cycle hardware instruction. On AMD Zen 1/2 PEXT is microcoded
-/// and far slower than multiply-shift magics, so the portable fallback walks the ray directly
-/// rather than pretending one strategy fits every host. Correctness is identical either way;
-/// only the index derivation differs.
+/// The slider index is BMI2 PEXT when the CPU supports it, otherwise the same bit-packing
+/// computed in software; both yield the identical index.
 ///
-/// IDENTITY-NEUTRAL. This computes the same move sets the mailbox generator computes, so nothing
-/// here can move a hash. Perft is the gate: Startpos d6 = 119,060,324 and Kiwipete d5 =
-/// 193,690,690 fail loudly on a single wrong bit.
+/// The tables compute the same move sets as the mailbox generator, so position identity does
+/// not depend on them. Perft (startpos d6 = 119,060,324; Kiwipete d5 = 193,690,690) checks it.
 /// </summary>
 public static class ChessAttacks
 {

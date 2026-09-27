@@ -28,10 +28,7 @@ public sealed record AgentTarget(
     int? MaxTokens,
     double? Temperature,
     string? System,
-    // No default. A defaulted auth mode silently places the credential on the
-    // wrong header for any provider whose default is not Bearer, and the result
-    // is a correct request rejected as unauthenticated — so every construction
-    // states it.
+    // No default: every construction names the header the credential rides on.
     AgentAuth Auth,
     IReadOnlyDictionary<string, string>? Headers = null);
 
@@ -52,19 +49,14 @@ public sealed record AgentDescriptor(
 /// Resolves an agent reference — an alias, a <c>provider/model</c> pair, or a bare
 /// vendor-branded model id — into a callable <see cref="AgentTarget"/>.
 ///
-/// THREE CONFIG SOURCES, ONE PRECEDENCE. Keys come from the process environment
-/// first and then <c>secrets/agents.env</c> via <see cref="LaplaceInstall.TryReadConfig"/> —
-/// the same lane the API service already uses for Stripe and Lichess, so the MCP
-/// server finds credentials the host has even though an agent client launches it
-/// over stdio with an empty environment and no way to inject one. Aliases and
-/// base-URL overrides come from <c>agents.json</c>. THAT FILE NEVER HOLDS A SECRET:
-/// it names the environment variable to read (<c>api_key_env</c>) and nothing else,
-/// because the deploy syncs it into /opt/laplace/app where the API's own env file
-/// is deliberately excluded from the payload.
+/// Keys are read from the process environment, then <c>secrets/agents.env</c> through
+/// <see cref="LaplaceInstall.TryReadConfig"/>, so a stdio-launched MCP process with an
+/// empty environment still finds the host's credentials. Aliases and base-URL overrides
+/// come from the embedded defaults overlaid by <c>agents.json</c>; that file names the
+/// variable to read (<c>api_key_env</c>) and is rejected if it carries a secret.
 ///
-/// The catalog is re-read per call. An operator editing agents.json must not have
-/// to find and restart a process that is a stdio child of whatever client spawned
-/// it — the same reason <c>op</c> resolves against the live SQL catalog (GH #809).
+/// Each <see cref="Load()"/> re-reads the config, so an edit to agents.json takes effect
+/// on the next call without restarting the process that spawned this one.
 /// </summary>
 public sealed class AgentCatalog
 {
@@ -229,13 +221,8 @@ public sealed class AgentCatalog
     /// <summary>
     /// Where the config is looked for, first hit wins: an explicit
     /// LAPLACE_AGENTS_CONFIG, the deployed app directory, the repo's config/, then
-    /// the per-user XDG location.
-    ///
-    /// An explicit path that does not exist is an ERROR, not a fall-through. The
-    /// silent version of this loses every alias and reports the catalog as merely
-    /// empty, which reads as "my agents disappeared" rather than "that path has a
-    /// typo" — and the fall-through would then route the call to a different model
-    /// than the one the operator configured.
+    /// the per-user XDG location. An explicit path that does not exist throws rather
+    /// than continuing the search, so a typo cannot route a call to a different model.
     /// </summary>
     public static string? DiscoverConfigPath() => DiscoverConfigPath(Environment.GetEnvironmentVariable);
 
@@ -294,9 +281,8 @@ public sealed class AgentCatalog
         foreach (var (name, def) in _aliases.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {
             var provider = AgentProviders.Get(def.Provider);
-            // DESCRIBE NEVER RUNS THE TOKEN COMMAND. This surface is polled by a UI
-            // and read by models; spawning an auth subprocess per row per refresh
-            // would turn an inventory into a login storm.
+            // Describe never runs a token command: a configured command counts as
+            // credentialed without spawning an auth subprocess per row.
             var minted = !string.IsNullOrWhiteSpace(def.TokenCommand);
             var (key, keyEnv) = minted ? (null, "token_command") : ResolveKey(provider, def);
             rows.Add(new AgentDescriptor(
@@ -335,11 +321,9 @@ public sealed class AgentCatalog
     /// <summary>
     /// Resolve a reference to a callable target.
     ///
-    /// <paramref name="providerId"/> FORCES THE ROUTE: when it is given, the alias
-    /// table is skipped entirely and <paramref name="modelRef"/> is read as the
-    /// vendor's own model id. Overlaying an explicit provider onto an alias that
-    /// already names one would make 'which provider ran this' unanswerable from the
-    /// arguments alone, and that is the question a bill is settled with.
+    /// <paramref name="providerId"/> forces the route: the alias table is skipped and
+    /// <paramref name="modelRef"/> is read as that vendor's own model id, so the
+    /// arguments alone determine which provider serves the call.
     /// </summary>
     public AgentTarget Resolve(string? modelRef, string? providerId = null)
     {
@@ -406,9 +390,8 @@ public sealed class AgentCatalog
                 $"provider '{provider.Id}' has no base URL. Set \"base_url\" on the agent (or on " +
                 $"providers.{provider.Id}) in agents.json.");
 
-        // A token_command outranks every variable: the operator who configured one
-        // is saying this credential expires and must be minted, and reading a stale
-        // env var instead would be the failure the command exists to prevent.
+        // A token_command outranks every key variable: the credential is minted per
+        // resolve, never read from a possibly stale env var.
         string? key;
         string keyEnv;
         if (!string.IsNullOrWhiteSpace(definition?.TokenCommand))
@@ -441,7 +424,7 @@ public sealed class AgentCatalog
         if (_providerOverrides.TryGetValue(provider.Id, out var ov) && !string.IsNullOrWhiteSpace(ov.BaseUrl))
             return ov.BaseUrl!.TrimEnd('/');
 
-        // The self-route points at whatever this install serves, not a constant.
+        // The laplace route targets this install's own OpenAI-compatible interface.
         if (provider.Id == "laplace")
             return $"{LaplaceInstall.EndpointBaseUrl}/v1";
 
@@ -477,10 +460,8 @@ public sealed class AgentCatalog
     };
 
     /// <summary>
-    /// Extra request headers. This is how a provider's OAuth mode is completed —
-    /// Anthropic's needs <c>anthropic-beta: oauth-2025-04-20</c> alongside the
-    /// bearer token, and it is a header rather than a flag because gateways each
-    /// want their own.
+    /// Extra request headers sent verbatim, e.g. a provider's OAuth beta header that
+    /// accompanies a bearer token. Authorization is refused here.
     /// </summary>
     private static IReadOnlyDictionary<string, string>? ParseHeaders(string name, JsonNode? node)
     {
@@ -493,8 +474,6 @@ public sealed class AgentCatalog
         {
             var v = Str(value) ?? throw new AgentException(
                 $"agents config: '{name}'.headers['{header}'] must be a non-empty string");
-            // A credential belongs in an env var or a token_command, not in a file
-            // the deploy publishes — the same rule the inline api_key check states.
             if (header.Equals("Authorization", StringComparison.OrdinalIgnoreCase))
                 throw new AgentException(
                     $"agents config: '{name}'.headers may not set Authorization — that is what " +
@@ -505,9 +484,7 @@ public sealed class AgentCatalog
         return headers.Count == 0 ? null : headers;
     }
 
-    // A wrong type in the config is reported at its JSON path rather than
-    // coerced: a temperature written as "0.2" and silently dropped is a
-    // configuration that reads as applied and is not.
+    // A wrong JSON type throws at its path instead of being coerced or dropped.
     private static string? Str(JsonNode? node)
     {
         if (node is null) return null;

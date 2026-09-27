@@ -36,8 +36,8 @@ internal sealed class LiteralSafeUpgradeLog : IUpgradeLog
         }
         catch (FormatException)
         {
-            // Logging must never replace the operational failure it is describing.
-            // Preserve the original template and all argument values rather than throw.
+            // Logging never replaces the failure it describes: on a format error the
+            // template and every argument value are written as-is.
             var renderedArgs = string.Join(", ", args.Select(static value => value?.ToString() ?? "<null>"));
             return $"{format} [format-arguments: {renderedArgs}]";
         }

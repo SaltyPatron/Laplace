@@ -1,56 +1,36 @@
--- Containment index over a trajectory's constituent ids. THE read model stands on
--- this: compose a point locally from content (a hash, no round-trip), then ask which
--- trajectories CONTAIN it — constituent_ids(trajectory) @> ARRAY[point]. Precedes,
--- follows, contains, part-of and co-occurrence are that same probe read at different
--- offsets, and generation.trajectory_continuations() serves generation from it. Without this it
--- is a sequential scan of every trajectory in the substrate.
+-- Containment over a Content trajectory's constituent ids: which compositions
+-- contain this child, as constituent_ids(trajectory) @> ARRAY[child]. Contains,
+-- precedes, follows, part-of, and co-occurrence are that one probe read at
+-- different ordinals; generation.trajectory_continuations() reads it for
+-- PROPOSE. GIN writes one entry per array element, so this is the costliest
+-- index on the table to maintain; no row predicate narrows it further because
+-- entity type lives on entities.
 --
--- It is also the most expensive index here to maintain: GIN writes one entry per
--- array element and chess trajectories average 137 constituents, so it takes roughly
--- 96% of index-entry writes on this table. That is the price of the capability, not
--- waste. It cannot be narrowed by predicate — the only discriminator that would help
--- (entity type) lives on `entities`, not here.
---
--- fastupdate + the pending list are the lever that IS available. With fastupdate on
--- (the default) inserts land in an unordered pending list, and a backend flushes it
--- into the main structure once it exceeds the limit — in the FOREGROUND of whichever
--- backend crosses the threshold. At the 4 MB default and ~137 entries per row a bulk
--- seed crosses it constantly, so that stall recurs throughout the load; this is the
--- random-write behaviour behind the measured 50 MB/s of WAL producing 2.5 MB/s of net
--- data growth. A larger list batches more entries per merge, and GIN merges are much
--- more efficient in bulk because entries for the same key combine into one posting
--- list update.
---
--- The pending list is scanned LINEARLY on every search until it is flushed, so left
--- alone a raised limit would simply move the cost onto the probe this index exists to
--- serve. It is not left alone: NpgsqlIngestOps.CleanGinPendingListsAsync drains every
--- valid leaf GIN during shared writer completion, after queued writes drain, so the
--- limit is sized for write batching and readers never scan a populated list. That is
--- the whole trade-off removed rather than split — do not raise this without keeping
--- that flush, or the read path pays for the write path.
---
--- 32 MB (8x the default) is a CONSIDERED STARTING POINT, NOT A MEASURED OPTIMUM.
--- Re-measure on the next full seed and move it.
+-- fastupdate batches inserts in a pending list that is merged in bulk, where
+-- entries for one key combine into one posting-list update. Searches scan the
+-- pending list linearly, so the raised limit depends on
+-- NpgsqlIngestOps.CleanGinPendingListsAsync draining every leaf's list at
+-- writer completion; readers then never scan a populated list.
 CREATE INDEX IF NOT EXISTS physicalities_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WITH (fastupdate = on, gin_pending_list_limit = 32768)
     WHERE type = 1 AND trajectory IS NOT NULL;
 
--- Evictable calculated chess position paths use Projection physicalities. They need the
--- same containment operator without widening content queries to every projection type.
+-- Projection trajectories (type 3), the calculated and evictable ones, get the
+-- same containment probe without widening Content probes to them.
 CREATE INDEX IF NOT EXISTS physicalities_projection_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WITH (fastupdate = on, gin_pending_list_limit = 32768)
     WHERE type = 3 AND trajectory IS NOT NULL;
 
--- Ordered source annotations participate in structural coupling through their
--- own physicality domain. They must never enter text-continuation posting lists.
+-- Ordered source annotations (type 8) couple structurally through their own
+-- physicality domain and never enter Content continuation posting lists.
 CREATE INDEX IF NOT EXISTS physicalities_parse_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WHERE type = 8 AND trajectory IS NOT NULL;
 
--- Exact descriptor manifests retain opaque entity references without claiming
--- a selected Content curve. Keep their lookup separate from content continuation.
+-- Descriptor manifests (type 9) reference entities without being a Content
+-- curve; their containment lookup stays separate from continuation.
 CREATE INDEX IF NOT EXISTS physicalities_descriptor_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WHERE type = 9 AND trajectory IS NOT NULL;

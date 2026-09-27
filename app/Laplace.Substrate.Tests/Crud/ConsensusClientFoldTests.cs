@@ -5,13 +5,10 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
-/// The inline fold (consensus_upsert at apply time) must be numerically exact
-/// against the native glicko-2 scalar it dispatches to. Parity is checked the
-/// strongest way available: apply a batch through the writer, then recompute
-/// every edge with laplace_glicko2_accumulate_period() directly and demand
-/// exact int64 equality on rating/rd/volatility, plus witness accumulation and
-/// last_observed_at semantics across separately admitted durable evidence.
-/// A storage batch does not create another semantic rating period.
+/// The fold at apply time is exact against the native Glicko-2 scalar: every cell applied
+/// through the writer equals laplace_glicko2_accumulate_period() recomputed directly, as
+/// int64 rating/rd/volatility, with witness count and last_observed_at accumulating across
+/// separately admitted evidence. A storage batch is not another rating period.
 /// </summary>
 [Collection("substrate-pg")]
 [Trait("Tier", "db")]

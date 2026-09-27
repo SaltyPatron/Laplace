@@ -15,7 +15,7 @@ const SPEED_LABELS = ['Real time', 'Slow', 'Normal', 'Fast'] as const;
 const LABEL_OF: Record<Speed, string> = { clock: 'Real time', slow: 'Slow', normal: 'Normal', fast: 'Fast' };
 const SPEED_OF: Record<string, Speed> = { 'Real time': 'clock', Slow: 'slow', Normal: 'normal', Fast: 'fast' };
 
-/** Real time is capped: a 4-minute think is a fact worth showing, not worth sitting through. */
+/** Ceiling on one real-time wait; the recorded clock reading is still shown in full. */
 const MAX_REALTIME_MS = 6000;
 
 function mmss(seconds: number | null | undefined): string {
@@ -56,13 +56,10 @@ function realtimeGapMs(plies: ChessPlyRow[], i: number): number {
 }
 
 /**
- * The game, played back. The ply sequence is reconstructed server-side by replaying the
- * recorded movetext through the same engine that plays live chess — so what moves on this
- * board is the witnessed game, not a re-rendering of a stored picture of one.
- *
- * Each position carries its own content address, so any ply can be opened as the substrate
- * entity it is: the same board thousands of other games reached, with its rated
- * continuations attached. That link is the point of the whole page.
+ * Plays back the server-replayed ply sequence of one game. Each ply's `position_id` is the
+ * content address of the board after the move, linked to its entity page: the same position
+ * entity every other game that reached it shares, with its trajectories and rated
+ * continuations.
  */
 export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse; white: string; black: string }) {
   const { plies, start_fen: startFen, has_clocks: hasClocks } = data;
@@ -90,8 +87,7 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
     return () => clearTimeout(t);
   }, [playing, ply, atEnd, speed, plies]);
 
-  // Keep autoplay/stepping readable, but mutate only the move list's scrollTop.
-  // The page belongs to the user; a changing chess ply must never reclaim it.
+  // Scroll only the move list; the page's own scroll position is never moved by a ply change.
   useEffect(() => {
     const list = listRef.current;
     const active = list?.querySelector<HTMLElement>('[data-active="true"]');

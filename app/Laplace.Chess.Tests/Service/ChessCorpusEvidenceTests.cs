@@ -12,8 +12,8 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessCorpusEvidenceTests : IDisposable
 {
-    // These are synthetic evidence-transport controls. They exercise real disk
-    // retention/folding but provide no PostgreSQL, native chess, or throughput proof.
+    // Synthetic evidence-transport inputs: they exercise on-disk retention and folding
+    // without PostgreSQL or native chess.
     private readonly string _root = Path.Combine(Path.GetTempPath(),
         "laplace-corpus-evidence-" + Guid.NewGuid().ToString("N"));
     private static readonly CancellationToken Ct = CancellationToken.None;

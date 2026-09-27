@@ -6,8 +6,8 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-// The analyzer builds one ordered line physicality from deterministic perfcache move points.
-// It must not expand those points into SQL position/substructure trees or per-ply projections.
+// The analyzer composes one ordered line physicality from deterministic perfcache move points,
+// without expanding them into position/substructure trees or per-ply projections.
 public sealed class ChessAnalyzerTests
 {
     private const string Game =
@@ -111,8 +111,8 @@ public sealed class ChessAnalyzerTests
             actual = shared.Build();
 
             Assert.Equal(expected.Metadata.IntentId, actual.Metadata.IntentId);
-            // ImmutableArray.Equals compares its backing array. Select the
-            // sequence overload to compare every row field in original order.
+            // ImmutableArray.Equals compares backing arrays; the sequence overload
+            // compares every row in order.
             Assert.Equal<EntityRow>(expected.Entities, actual.Entities);
             Assert.Equal(expected.Attestations.Select(a => a with { LastObservedAtUnixUs = 0 }),
                 actual.Attestations.Select(a => a with { LastObservedAtUnixUs = 0 }));
@@ -180,8 +180,8 @@ public sealed class ChessAnalyzerTests
     {
         var change = Analyze(Game);
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
-        // GH #736: the analyzer's unit is the PLAYING, so the marker keys on the playing —
-        // the same id ChessAnalyze stamps. Keying it on the event made this probe miss.
+        // The analyzer's unit is the playing, so the analysis marker keys on the playing id,
+        // the same id ChessAnalyze stamps.
         var marker = ChessVocabulary.AnalysisMarkerId(parsed.PlayingId, ChessAnalyze.Version);
         Assert.Contains(change.Entities, e => e.Id == marker && e.TypeId == ChessVocabulary.AnalysisMarkerType);
     }

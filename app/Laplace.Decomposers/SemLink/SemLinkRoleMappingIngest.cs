@@ -10,9 +10,8 @@ internal static class SemLinkRoleMappingIngest
 {
     internal const string FileName = "VN-FNRoleMapping.txt";
 
-    // Ecosystem-local: the role mapping ships inside the SemLink unpack, so the shared
-    // ingest root is deliberately NOT searched. Root last — an unpacked
-    // other_resources/ outranks a stray copy at the top level.
+    // The role mapping ships inside the SemLink unpack, so only the SemLink directory is
+    // searched; other_resources/ outranks a copy at its top level.
     private static readonly IngestSourceLayout Layout = new()
     {
         Files = [IngestFileMatch.Name(FileName)],
@@ -60,8 +59,8 @@ internal static class SemLinkRoleMappingIngest
         }
     }
 
-    // Exact source-grain inventory without constructing the extraction DOM. A physical line is
-    // not a role mapping: the current v1.2 file has 4,026 lines but only 1,663 admitted roles.
+    // Counts role mappings without building the extraction DOM; a physical line is not a
+    // role mapping.
     internal static async Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct)
     {
         long count = 0;

@@ -4,22 +4,16 @@ using Xunit;
 namespace Laplace.Cli.Tests;
 
 /// <summary>
-/// The first tests this lane has ever had. FoundryExport is ~1,800 lines and
-/// FoundryCommands ~2,200, and until now nothing covered either: the only test naming
-/// them stubs the export service out entirely and writes four bytes of GGUF magic.
-///
-/// These pin the plane algebra — the pure functions between a substrate read and the
-/// eigensolver. They need no database, which is exactly why their absence was
-/// indefensible.
+/// Plane algebra of model export: the pure functions between a consensus read and the
+/// eigensolver. No database.
 /// </summary>
 public sealed class FoundryPlaneAlgebraTests
 {
     private static FoundryExport.PlaneCoo Plane(params (int R, int C, double W)[] cells)
         => new([.. cells.Select(c => c.R)], [.. cells.Select(c => c.C)], [.. cells.Select(c => c.W)]);
 
-    // The W-C defect, pinned on the C# side. A refuted edge is not affinity of equal
-    // magnitude, so the clamp must DROP it, never take its absolute value. The doc
-    // comment on PositivePart has always said "drop, not abs"; nothing enforced it.
+    // A refuted edge is not affinity of equal magnitude: PositivePart drops it rather than
+    // taking its absolute value.
     [Fact]
     public void PositivePart_DropsRefutedEdges_RatherThanFlippingThem()
     {
@@ -38,9 +32,8 @@ public sealed class FoundryPlaneAlgebraTests
         Assert.Equal(1.0, clamped.Vals[0]);
     }
 
-    // Union must NOT collapse duplicate (r,c) pairs. The native side sums them with a
-    // reducer in setFromTriplets, and that summation is the ONLY mechanism weighting one
-    // block against another. A dedup here would silently change the spectrum.
+    // Union keeps duplicate (r,c) pairs. The native side sums them in setFromTriplets, and
+    // that sum is what weights one plane against another.
     [Fact]
     public void Union_ConcatenatesWithoutCollapsingDuplicatePairs()
     {
@@ -63,10 +56,8 @@ public sealed class FoundryPlaneAlgebraTests
         Assert.Equal(0, merged.Nnz);
     }
 
-    // Normalize equalises PEAK magnitude, not total mass. That distinction is the reason
-    // block influence is still governed by edge count: a plane with ten million edges and
-    // one with five hundred both peak at 1.0 and contribute wildly different degree.
-    // Pinning the actual behaviour so the limitation stays visible rather than assumed away.
+    // Normalize scales peak magnitude to 1, not total mass, so a plane's influence on the
+    // union still follows its edge count.
     [Fact]
     public void Normalize_ScalesPeakToOne_AndPreservesSign()
     {
@@ -117,10 +108,8 @@ public sealed class FoundryPlaneAlgebraTests
         Assert.Equal(2, Enumerable.Range(0, coo.Nnz).Count(i => coo.Rows[i] == 0));
     }
 
-    // PPMI is the only real normalizer in the export, and it is applied to exactly one
-    // plane. Its defining property is that NEGATIVE pointwise mutual information is
-    // dropped, not kept and not made positive — a pair seen less often than chance is
-    // not evidence of association.
+    // Negative pointwise mutual information is dropped, not kept and not made positive: a
+    // pair seen less often than chance is not evidence of association.
     [Fact]
     public void ApplyPpmi_DropsNegativePointwiseMutualInformation()
     {

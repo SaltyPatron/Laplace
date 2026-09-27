@@ -9,10 +9,12 @@
 #include "laplace/core/sql_catalog.h"
 #include "laplace/core/trajectory.h"
 
-/* The GIN projection elects manifests by membership. Only the canonical native
- * ordinal visitor may interpret their order: the index's deduplicated id array
- * cannot represent repeated SPACE, words, or RLE runs. Keep one rolling window
- * per manifest rather than expanding each vertex into SQL executor rows. */
+/* Precedence read from trajectories. The membership index selects manifests that
+ * contain vocabulary ids; order comes only from the native ordinal visitor,
+ * because the index's deduplicated id set loses repeats and run lengths. A
+ * rolling window of gap+2 ordinals per manifest emits (subject, object) pairs
+ * `gap` ordinals apart, and (subject, separator, object) when a declared
+ * separator sits between them, each witnessed by the containing entity. */
 static SPIPlanPtr adjacency_manifests_plan, adjacency_separators_plan;
 
 static SPIPlanPtr

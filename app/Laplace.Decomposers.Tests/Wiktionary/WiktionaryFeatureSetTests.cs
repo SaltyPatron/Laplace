@@ -8,8 +8,8 @@ using Xunit;
 namespace Laplace.Decomposers.Tests.Wiktionary;
 
 /// <summary>
-/// The Wiktionary write path emits a form's morphological analysis as ONE composition, not as
-/// one edge per tag, so the analysis itself has an identity that witnesses can adjudicate.
+/// A form's morphological analysis is one set composition, not one attestation per tag, so
+/// the analysis has an identity witnesses can confirm or refute as a whole.
 /// </summary>
 public class WiktionaryFeatureSetTests
 {
@@ -71,8 +71,7 @@ public class WiktionaryFeatureSetTests
     [Fact]
     public void SingleTagFormStillPointsAtTheTagItself()
     {
-        // Tier-floor collapse: a one-member set IS its member, so the degenerate case must not
-        // mint a wrapper entity around a single tag.
+        // A one-member set is its member; a single tag gets no wrapper entity.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -101,8 +100,7 @@ public class WiktionaryFeatureSetTests
     [Fact]
     public void EveryDialectTagSurvivesAsTheTranscriptionContext()
     {
-        // attestations.context_id is one bytea, so the previous shape kept the first tag and
-        // dropped the rest across 5,192,208 TRANSCRIBES_AS rows. A set fits in the slot.
+        // context_id holds one id, so all dialect tags ride in it as one set composition.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -124,9 +122,7 @@ public class WiktionaryFeatureSetTests
     [Fact]
     public void MultipleRegisterTagsOnASenseComposeOneReading()
     {
-        // "archaic AND humorous" is one register reading, adjudicable as a whole. As separate
-        // edges a second witness could confirm "archaic" while refuting the reading it belongs
-        // to, and nothing could represent that.
+        // "archaic and humorous" is one register reading, confirmed or refuted as a whole.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -143,8 +139,7 @@ public class WiktionaryFeatureSetTests
     [Fact]
     public void NonRegisterTagsAreExcludedFromTheReading()
     {
-        // Only RegisterTags members participate; a grammatical tag must not join the register
-        // set, or the set id stops meaning "this register".
+        // Only RegisterTags members join the register set; grammatical tags stay out of it.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",

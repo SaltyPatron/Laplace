@@ -10,7 +10,7 @@ internal sealed partial class ChessRecordingMeasurement
     private int _progressChunkGames;
     public ProgressDiagnostics? Progress => _progress?.Diagnostics;
 
-    // Only the admission owner samples mutable counters. The heartbeat and writer
+    // Only the admitting thread samples mutable counters; the heartbeat and writer
     // logger receive immutable scalar copies and never inspect a game/change graph.
     internal async Task StartProgressAsync(string path, Action<string>? log = null)
     {
@@ -49,8 +49,8 @@ internal sealed partial class ChessRecordingMeasurement
                 Writer.ApplyCalls, Writer.CopyTransactionsCommitted, CommittedGames,
                 _streamedReadbackGames + Games.Count, _corpusEvidence?.ReadbackGames ?? 0,
                 _corpusEvidence?.NewlyRecordedGames ?? 0);
-            // Work timing belongs to the admission owner, just like its counters.
-            // Only this detached snapshot reaches the heartbeat.
+            // Work timing is sampled with the counters; only this detached snapshot
+            // reaches the heartbeat.
             var workTiming = new ProgressWorkTiming(_workPhase?.ToString(),
                 _workPhase is null ? 0 : Stopwatch.GetElapsedTime(_workPhaseStarted, now).TotalSeconds,
                 Work.ExclusiveSeconds);
@@ -89,8 +89,8 @@ internal sealed partial class ChessRecordingMeasurement
         public string Scope => "Cumulative closed writer and readback windows sampled through their synchronized aggregate owners. Writer and readback durations may overlap or nest inside admission work; do not add them to exclusive work or total elapsed time. Open calls are excluded. Returning does not establish successful validation or durable games.";
     }
 
-    // These aggregate owners synchronize their reads and return detached arrays.
-    // This callback never reads admission counters, games, changes, or Work.
+    // The aggregates synchronize their reads and return detached arrays; this callback
+    // never reads admission counters, games, changes or Work.
     private ProgressTimingAggregates CaptureProgressTimings() => new(
         Stopwatch.GetElapsedTime(_started).TotalSeconds,
         WriterLog.PhaseAggregates, WriterLog.UnaggregatedPhaseExits,

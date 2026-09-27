@@ -17,13 +17,13 @@ internal interface IFoundryExportService
 }
 
 /// <summary>
-/// Runs Mold-A-Model foundry export via CLI subprocess — writes GGUF to disk; never loads
-/// weights on the HTTP request path.
+/// Model export as a recipe over current standing and structure: runs the CLI's
+/// <c>synthesize substrate</c> in a subprocess, which writes the file to a work directory.
+/// No weights are loaded in the request process.
 /// </summary>
 internal sealed class CliFoundryExportService : IFoundryExportService
 {
-    /// <summary>Formats this service actually has a writer for. Kept beside the writer
-    /// selection so a format cannot be advertised that nothing emits.</summary>
+    /// <summary>Formats this route writes; any other requested format is refused.</summary>
     internal static readonly HashSet<string> WritableFormats =
         new(StringComparer.OrdinalIgnoreCase) { "gguf" };
 
@@ -36,9 +36,7 @@ internal sealed class CliFoundryExportService : IFoundryExportService
         string? filename,
         CancellationToken ct)
     {
-        // This route invokes the GGUF synthesis CLI. The native SafeTensors codec
-        // exists, but this route does not yet bind its tensors, metadata and receipts.
-        // Advertise a format only when the complete export path actually writes it.
+        // Only formats in WritableFormats are accepted; the default is gguf.
         string requested = (format ?? "").Trim();
         if (requested.Length == 0) requested = "gguf";
         if (!WritableFormats.Contains(requested))

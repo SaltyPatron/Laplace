@@ -1,7 +1,6 @@
 # Laplace
 
 [![Build, deploy, test](https://github.com/SaltyPatron/Laplace/actions/workflows/laplace.yml/badge.svg)](https://github.com/SaltyPatron/Laplace/actions/workflows/laplace.yml)
-[![Benchmark evidence](https://github.com/SaltyPatron/Laplace/actions/workflows/benchmark-evidence.yml/badge.svg)](https://github.com/SaltyPatron/Laplace/actions/workflows/benchmark-evidence.yml)
 
 **A deterministic, content-addressed AI substrate that stores exact structure once, learns by witnessing, and reasons by pulling an indexed web instead of rebuilding relevance from a dense parameter tensor on every request.**
 
@@ -33,7 +32,7 @@ Laplace is not a transformer implementation. It reconstructs many of the jobs fo
 
 ## What the architecture enables
 
-The mechanisms below are not isolated research curiosities. Together they imply product capabilities that must remain visible in design and implementation:
+These mechanisms compose into the product:
 
 - **Structural software construction:** code is grammar-derived recursive structure. Generation should reuse, compose or minimally mutate known canonical tier/trajectory structures before inventing new code; AST/CST is realized only when a consumer or toolchain requires it; compile/test/runtime outcomes witness the next repair.
 - **Duplicate-code convergence:** exact canonical tier/trajectory compositions converge automatically; derived AST shape, normalized structure, control/data flow, algebraic form and behavioral evidence can expose deeper duplicate implementations for consolidation.
@@ -43,13 +42,13 @@ The mechanisms below are not isolated research curiosities. Together they imply 
 - **One knowledge world with explicit authority and compute:** knowledge packages grant governed scope/capabilities over the shared world; billing meters how deeply and broadly the same intelligence searches it through hops, fanout and physical work.
 - **Governed abstention and security:** knowledge remains knowledge. Authority/firmware decides what may be coupled, derived, realized, exported or executed, with explicit WHY/WHY_NOT receipts.
 
-See [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the binding synthesis. Tests, gates, issues and benchmarks prove these capabilities; they are not substitutes for implementing them.
+See [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the binding synthesis.
 
 ## What is different
 
 - **Exact recursive identity.** Same canonical content under the same declared recipe means the same executable entity. Repetition does not mint another copy of `king`, the same chess line, the same code composition or the same document fragment; new occurrences add provenance and evidence around reusable structure.
 - **One composition is one entity everywhere.** [k,i,n,g] is the same king entity whether it is used as a word, name, title, label or constituent. Likewise, an exact 2x2 pixel composition inside an 8x8 region is that same global 2x2 entity wherever it occurs; parent/tier/role live in trajectories and occurrences, not the hash.
-- **Open Tier-0, bounded geometric realization.** Tier-0 has no architectural terminal rank; each selected executable generation materializes a finite set of ranks. The current Unicode generation places its finite standards window deterministically on the unit 3-sphere, while native composition remains on or inside the bounded 4D ball. Adding ranks densifies the same bounded world rather than increasing its geometric extent.
+- **Open Tier-0, bounded geometric realization.** Tier-0 has no architectural terminal rank; each selected executable generation materializes a finite set of ranks. The selected Unicode generation places its finite standards window deterministically on the unit 3-sphere, while native composition remains on or inside the bounded 4D ball. Adding ranks densifies the same bounded world rather than increasing its geometric extent.
 - **Lossless trajectories.** A content trajectory stores the exact ordered constituent identities. Packed trajectory vertices are reversible manifests, not fake spatial positions; realized curves resolve those identities back to child coordinates in ordinal order.
 - **Numbers are trajectories too.** Ordinary finite digital values do not consume new Tier-0 atoms. `0.34567` composes from `0 . 3 4 5 6 7` into one reusable scalar root; repeated samples/channels reference that root as new occurrences. A finite prefix of π is the same wide-composition mechanism.
 - **Perfcaches compose too.** Deterministic reusable tiers can be mmap ROMs: numbers feed pixels/samples, pixels feed patches/regions/images, audio samples feed windows/tracks, and video reuses the same image/audio cache generations. A complete parent hit short-circuits descendant recomposition; partial misses descend only into novel branches.
@@ -90,7 +89,7 @@ The speedup is therefore not merely “C++ is faster than SQL.” Laplace tries 
 
 ## Why four dimensions?
 
-The bounded-composition theorem does not require 4D. The current machine representation has a more concrete reason to like it.
+The bounded-composition theorem does not require 4D. The carrier format is why 4D is convenient.
 
 Each binary64 component provides 53 reversible carrier bits when Laplace fixes the exponent and uses the sign plus mantissa. One `GeometryZM` trajectory vertex therefore carries exactly:
 
@@ -105,7 +104,7 @@ Each binary64 component provides 53 reversible carrier bits when Laplace fixes t
 212
 ```
 
-`mantissa_pack()` and `mantissa_unpack()` round-trip that payload exactly. A 3D binary64 carrier still has room for the current 128-bit identity but less metadata; a 2D carrier does not fit that identity in one vertex. That is an implementation trade, not an information-theoretic limit on the invention.
+`mantissa_pack()` and `mantissa_unpack()` round-trip that payload exactly. A 3D binary64 carrier still has room for a 128-bit identity but less metadata; a 2D carrier does not fit that identity in one vertex. That is a format trade, not a limit on the invention.
 
 See [`engine/core/src/mantissa.c`](engine/core/src/mantissa.c), [`engine/core/src/trajectory.c`](engine/core/src/trajectory.c) and [`docs/INVENTION.md`](docs/INVENTION.md).
 
@@ -131,8 +130,6 @@ The important substitution is physical: a transformer repeatedly synthesizes rel
 
 The response is not collapsed immediately into one universal relevance scalar. Structure, relation identity, ordinal/gap state, evidence, contradiction, standing, source scope, geometry and provenance remain typed until the selected program decides which are gates, costs, ranking dimensions or evidence.
 
-Benchmark receipts live in [`docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`](docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md).
-
 ## Repository map
 
 ```text
@@ -140,8 +137,8 @@ engine/       native core, graph/math/dynamics, synthesis and format machinery
 extension/    PostgreSQL substrate: schema, indexes, native operators and SQL surfaces
 app/          .NET ingestion, services, APIs, MCP, chess, migrations and tests
 web/          Vite/React product surface
-scripts/      build, seed, benchmark, verification and CI entry points
-docs/         invention, architecture, specs, evidence, plans and generated inventory
+scripts/      build, seed, install and CI entry points
+docs/         invention, architecture, specs, guides and generated inventory
 ```
 
 Start with:
@@ -163,7 +160,7 @@ bash scripts/pipeline.sh build
 bash scripts/test-parallel.sh --engine
 ```
 
-The main delivery workflow handles build, install, database lifecycle, application publication and product proof on the managed host. Windows entry points live under `scripts/win/`.
+The main delivery workflow builds, installs, manages the database lifecycle and publishes the application on the managed host. Windows entry points live under `scripts/win/`.
 
 For substrate introspection after installation:
 

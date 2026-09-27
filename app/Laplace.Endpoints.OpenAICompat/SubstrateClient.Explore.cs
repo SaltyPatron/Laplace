@@ -16,9 +16,8 @@ internal sealed partial class SubstrateClient
 
     private static readonly WitnessCatalog WitnessCatalog = WitnessCatalog.Load();
 
-    // The catalog is tenant-independent substrate accounting; recomputing it per page
-    // load re-aggregated 100M+ row tables on every UI landing. One flight fills it,
-    // everyone reads it for the TTL.
+    // The catalog counts the whole admitted world and does not vary by tenant. One
+    // load fills it under _catalogGate and every caller reads it for the TTL.
     private static readonly TimeSpan CatalogTtl = TimeSpan.FromMinutes(5);
     private readonly SemaphoreSlim _catalogGate = new(1, 1);
     private ExploreCatalogResponse? _catalogCache;
@@ -32,9 +31,8 @@ internal sealed partial class SubstrateClient
 
         if (cached is not null)
         {
-            // Stale: serve it immediately and refresh once in the background. A cold
-            // load pays the doomed exact-aggregate budget attempts (~15s); no user
-            // request should wait on that when yesterday's counts are on hand.
+            // Past the TTL the stale catalog is returned at once and a single
+            // background load refreshes it.
             if (_catalogGate.Wait(0))
             {
                 _ = Task.Run(async () =>
@@ -46,7 +44,7 @@ internal sealed partial class SubstrateClient
                     }
                     catch
                     {
-                        // keep serving stale; the next expiry retries
+                        // The stale catalog stays; the next expiry retries.
                     }
                     finally
                     {
@@ -85,9 +83,8 @@ internal sealed partial class SubstrateClient
                 .Select(r => new SubstrateCount(r.Metric.TrimEnd(' ', '~'), r.Value))
                 .ToList();
 
-            // Approx variant only: the exact consensus.stats() is a minutes-long full
-            // aggregate and this is the UI landing call. The audit report is the place
-            // that attempts exactness (AuditReportAsync).
+            // Planner-estimate consensus stats only; AuditReportAsync is the read that
+            // attempts the exact full aggregate.
             ConsensusHealth? consensus = null;
             var approx = await NpgsqlSubstrateReads.ConsensusStatsApproxAsync(conn, ct);
             if (approx is { } s)
@@ -103,27 +100,10 @@ internal sealed partial class SubstrateClient
             var multiSource = await TryReadMultiSourceCountAsync(conn, budgetSeconds: 5, ct);
             var topRelations = await ReadTopRelationsAsync(conn, 20, ct);
 
-            // BOUNDED ONLY. ops.source_counts() is a full GROUP BY over attestations
-            // plus a count(DISTINCT) join — unbounded, and it does not belong on a
-            // request path at any budget.
-            //
-            // This used to attempt the exact form first with timeoutSeconds:10 and treat
-            // approx as the failure case. That guard could not work: timeoutSeconds sets
-            // Npgsql's CommandTimeout, which is a CLIENT wait. The client gives up at 10s,
-            // sends a best-effort cancel, renders this degraded page on schedule, and
-            // returns 200 — while the BACKEND keeps executing and keeps AccessShareLock.
-            //
-            // MEASURED 2026-08-10: a request issued this query, the endpoint answered
-            // normally, and the backend ran 21+ minutes holding the lock. ALTER EXTENSION
-            // laplace_substrate UPDATE queued behind it and the deploy job was cancelled
-            // at timeout. The same wedge is recorded at 2h08m on 2026-08-06 in
-            // NpgsqlSubstrateReads.TopRelationsAsync — a second query, same shape, and the
-            // fix applied there (Issue 52, bounded candidate form, 0.5s at 124M) was never
-            // generalized to this one.
-            //
-            // Serving reads the bounded form. The exact aggregate is an offline audit and
-            // has no caller here. Content count is unknown in approx and stays null: an
-            // estimate labelled, never a lying zero.
+            // Per-source counts come from the bounded estimate form only. The exact
+            // ops.source_counts() is an unbounded GROUP BY over attestations, and a
+            // client CommandTimeout does not stop the backend from running it and
+            // holding its lock. The estimate has no content count, so Content is null.
             var sources = new List<ExploreSourceRow>();
             var liveByKey = new Dictionary<string, ExploreSourceRow>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in await NpgsqlSubstrateReads.SourceCountsApproxAsync(
@@ -164,7 +144,7 @@ internal sealed partial class SubstrateClient
 
         var requested = reference.Trim();
 
-        // GH #575: FEN → composed position id before the lexical resolve arms.
+        // A FEN resolves as the id of its composed position.
         if (ChessPositionRef.TryComposeHex(reference) is { } fenHex)
             reference = fenHex;
 
@@ -188,12 +168,9 @@ internal sealed partial class SubstrateClient
                 }
             }
 
-            // A provider handle, surname, forename, or FIDE name-order spelling is a
-            // legitimate warehouse reference.  Player identities are governed handles,
-            // not lexical word ids, so the lexical resolver cannot discover them.  Reuse
-            // the indexed name-trajectory candidate path and its single human-name ranker;
-            // do not add a rendered corpus scan or a second player matching law here.
-            // Hex/FEN references remain exact and never fall through to name matching.
+            // A non-hex reference the lexical resolver did not realize may name a player
+            // handle. It is ranked through the same indexed name-trajectory candidates as
+            // ChessPlayersAsync. Hex and FEN references stay exact.
             if (!LooksLikeEntityHex(reference))
             {
                 var players = await ChessPlayersAsync(
@@ -249,9 +226,7 @@ internal sealed partial class SubstrateClient
             if (label is null) return null;
 
             var evidenceCount = await ReadEvidenceCountAsync(conn, id, ct);
-            // A resolvable-but-unwitnessed id has no facts to fetch; skip the
-            // salient-facts walk entirely for it. The not-found explorer
-            // (/v1/explore/notfound) serves the navigable view for these.
+            // An id that resolves but was never witnessed has no facts to read.
             var facts = exists
                 ? await ReadSalientFactsAsync(conn, id, 3, ct)
                 : (IReadOnlyList<SalientFactRow>)Array.Empty<SalientFactRow>();
@@ -271,18 +246,17 @@ internal sealed partial class SubstrateClient
         }
     }
 
-    // Neighbour search from a COMPUTED anchor (see ExploreDecomposeService /
-    // explore_anchor_neighbors). Used by the not-found explorer: the id resolved
-    // but was never witnessed, so there is no stored coord -- the anchor comes
-    // from HashComposer instead, and the KNN runs on bound parameters.
+    // Neighbour search from a computed anchor (ExploreDecomposeService): the id has no
+    // stored physicality, so its coordinate and trajectory are bound as parameters to
+    // explore_anchor_neighbors.
     public async Task<IReadOnlyList<ExploreAnchorNeighborRow>> ExploreAnchorNeighborsAsync(
         ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct)
     {
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            // Frechet over a bounded prefilter is the slow arm; keep it inside a
-            // real budget so the not-found page renders instead of hanging.
+            // The Fréchet arm over the prefiltered candidates dominates cost; it runs
+            // under at least a 20 s command budget.
             var rows = await NpgsqlSubstrateReads.ExploreAnchorNeighborsAsync(
                 conn, anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm, anchor.TrajectoryWkt,
                 geodesicK, frechetK, frechetMax, Math.Max(DefaultCommandTimeoutSeconds, 20), ct);
@@ -298,10 +272,8 @@ internal sealed partial class SubstrateClient
         }
     }
 
-    // Of a batch of candidate surfaces, which are witnessed words? Resolves each
-    // through word_id (the content hash) and keeps the ids that entity_exists.
-    // One round trip -> did-you-mean is an exact index probe over the edit-distance
-    // neighbourhood, no fuzzy extension or full-surface scan.
+    // Of a batch of candidate surfaces, keeps those whose content id (word_id) exists.
+    // One round trip of exact index probes; no fuzzy match or surface scan.
     public async Task<IReadOnlyList<WitnessedWord>> WitnessedWordsAsync(
         IReadOnlyList<string> surfaces, CancellationToken ct)
     {
@@ -406,9 +378,8 @@ internal sealed partial class SubstrateClient
             peers = p?.Peers ?? Array.Empty<ExplorePeerRow>();
         }
 
-        // EvidenceCount is the exact number of attestation rows owned by this
-        // entity. ObservationCount is multiplicity carried by those rows, not a
-        // second set of rows to add back on top of EvidenceCount.
+        // EvidenceCount is the exact number of attestation rows for this entity.
+        // ObservationCount is multiplicity carried by those rows, not additional rows.
         var witnessRows = entity.EvidenceCount;
         var consensusRows = entity.ConsensusOut.Count + entity.ConsensusIn.Count;
 
@@ -435,8 +406,7 @@ internal sealed partial class SubstrateClient
             var label = await ReadLabelAsync(conn, id, ct);
             if (label is null) return null;
 
-            // Entity-id KNN with real S³ coords — not label→prompt_state re-resolve,
-            // and not decorative Math.sin positions on the glome.
+            // KNN over the entity's own stored physicality coordinate.
             var structuralRows = await NpgsqlSubstrateReads.StructuralNeighborsAsync(conn, id, k, ct);
             var structuralLabels = await ReadDisplayLabelsAsync(
                 conn,
@@ -578,7 +548,7 @@ internal sealed partial class SubstrateClient
                     nodes[hex] = node with { Hop = candidateHop };
             }
 
-            // Phase 1: Glicko-ranked crawl elects only the bounded vertex set.
+            // Consensus-ranked crawl selects the bounded vertex set.
             var discovery = await NpgsqlSubstrateReads.ExploreWebAsync(
                 conn, seed, hops, fanout, maxNodes,
                 Math.Max(SubstrateClient.DefaultCommandTimeoutSeconds, 60), ct);
@@ -588,9 +558,8 @@ internal sealed partial class SubstrateClient
                 AdmitNode(row.ObjectIdHex.ToLowerInvariant(), row.Hop);
             }
 
-            // Phase 2: restore the exact graph among those survivors. A discovery
-            // crawl is a tree; using it as topology throws away corroborating
-            // cross-links, cycles and conductance before the spectral organ sees them.
+            // The crawl is a tree; the induced edges among the selected vertices restore
+            // cross-links and cycles before projection.
             var nodeIds = nodes.Keys
                 .OrderBy(static x => x, StringComparer.Ordinal)
                 .Select(Convert.FromHexString)
@@ -649,9 +618,8 @@ internal sealed partial class SubstrateClient
                 }
             }
 
-            // Phase 3: the shipped normalized-Laplacian eigensolver. Positive
-            // signed Glicko standing is affinity. Refuted/negative testimony stays
-            // visible, but never gets abs()'d into a force that pulls a cluster together.
+            // Native normalized-Laplacian eigenmap. Only positive, unrefuted standing
+            // is affinity; refuted edges remain in the response but add no weight.
             var belief = BuildBeliefProjection(nodes.Values, edges);
             if (belief is not null)
                 foreach (var (hex, xyz) in belief)
@@ -711,9 +679,7 @@ internal sealed partial class SubstrateClient
             rows[i] = row;
             cols[i] = col;
             weights[i] = weight;
-            // The native eigenmap symmetrizes W, so this is the same positive
-            // conductance test that decides whether a vertex belongs to the
-            // belief manifold at all.
+            // The native eigenmap symmetrizes W, so degree counts both endpoints.
             degree[row] += weight;
             degree[col] += weight;
         }
@@ -736,10 +702,8 @@ internal sealed partial class SubstrateClient
             ordered.Length, StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < ordered.Length; i++)
         {
-            // No positive conductance means no coordinate in the positive
-            // testimony manifold. Leaving it unprojected is intentional: the
-            // viewer scatters such dead ends outside the coherent basin instead
-            // of collapsing every zero-degree vertex onto the spectral origin.
+            // A vertex with no positive conductance gets no belief coordinate rather
+            // than the spectral origin.
             if (!(degree[i] > 0.0)) continue;
 
             var x = projected[i * dimensions];
@@ -835,9 +799,8 @@ internal sealed partial class SubstrateClient
 
     private static string TrimGraphLabel(string label, string? idHex = null)
     {
-        // Display labels are Unicode surfaces, not byte strings. Collapse UI-only
-        // whitespace and truncate on grapheme boundaries so an emoji/combining sequence is
-        // never split merely because the graph sprite has a compact text budget.
+        // Collapses whitespace and truncates at 48 text elements, on grapheme
+        // boundaries so combining sequences stay whole.
         label = string.Join(' ', label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (label.Length == 0) return IdentityDisplayLabel(idHex);
 
@@ -857,9 +820,9 @@ internal sealed partial class SubstrateClient
         => (await NpgsqlDisplayLabels.ReadOneAsync(conn, id, ct))?.Label;
 
     /// <summary>
-    /// Tier/type/existence are read without rendering the entity body; display text has its own
-    /// bounded policy in NpgsqlDisplayLabels. This prevents opening a high-tier document from
-    /// reconstructing it merely to paint the page heading.
+    /// Reads tier, type, and existence without realizing the entity body; the label comes
+    /// from the bounded display-label read, so a high-tier composition is not reconstructed
+    /// to name it.
     /// </summary>
     private static async Task<(string Label, short? Tier, string? Type, bool Exists)> ReadEntityFacetsAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct)

@@ -37,7 +37,7 @@ public static unsafe class HashComposer
 
     /// <summary>
     /// Compose one semantic DAG across native dependency frontiers under an explicit
-    /// caller-owned worker grant. The scalar <see cref="Run"/> remains the oracle.
+    /// caller-owned worker grant; identities equal those of the scalar <see cref="Run"/>.
     /// </summary>
     public static void RunWorkers(
         TierTree tree,

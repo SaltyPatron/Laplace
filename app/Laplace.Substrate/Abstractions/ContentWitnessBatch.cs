@@ -5,8 +5,7 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Back-compat surface over <see cref="ContentTierSpine"/>. New code should call
-/// the spine directly; this type remains so existing witnesses compile unchanged.
+/// Thin wrappers that stage or resolve content through <see cref="ContentTierSpine"/>.
 /// </summary>
 public static class ContentWitnessBatch
 {

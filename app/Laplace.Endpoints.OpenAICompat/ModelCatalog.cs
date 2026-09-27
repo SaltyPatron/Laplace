@@ -3,9 +3,9 @@ using Laplace.Api.Contracts;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The one authority for generally advertised model ids. A specialized model may own
-/// an exact endpoint before catalog promotion; catalog promotion is gated by live proof,
-/// never by a label alone.
+/// Model ids the OpenAI-compatible interface accepts. Each id selects an operation of the
+/// substrate, not a separate model. <see cref="All"/> is what /v1/models lists;
+/// <see cref="Code"/> is accepted by exact dispatch but not listed.
 /// </summary>
 internal static class ModelCatalog
 {
@@ -35,7 +35,8 @@ internal static class ModelCatalog
     public static bool IsCompletionsModel(string model) =>
         model is Completions;
 
-    /// <summary>False = unknown embedding model; includeMeaning distinguishes the two lanes.</summary>
+    /// <summary>False for an unknown embedding model; <paramref name="includeMeaning"/> is true for
+    /// the meaning model, which adds consensus neighbours to the physical form.</summary>
     public static bool TryEmbeddingModel(string model, out bool includeMeaning)
     {
         includeMeaning = string.Equals(model, EmbedMeaning, StringComparison.Ordinal);

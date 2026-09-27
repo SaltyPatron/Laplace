@@ -4,18 +4,14 @@ using Xunit;
 namespace Laplace.Chess.Modality.Tests;
 
 /// <summary>
-/// The table-driven attack test must agree with the mailbox ray walk it replaces, on every
-/// square of every position, for both colours. Anything less and the tables are a rewrite with
-/// a hope attached.
-///
-/// Positions are the standard perft suite plus endgame and Chess960 shapes, because the failure
-/// modes differ: file wrapping shows up on a/h-file pieces, blocker handling shows up in dense
-/// middlegames, and empty-board rays show up in endgames where a queen sees the whole board.
+/// The table-driven attack test agrees with the mailbox ray walk on every square of every
+/// position, for both colours. Positions are the perft suite plus endgame and Chess960 shapes:
+/// file wrapping shows on a/h-file pieces, blocker handling in dense middlegames, and long
+/// empty rays in endgames.
 /// </summary>
 public class MoveGenBitboardEquivalenceTests
 {
-    // The canonical perft positions — chosen originally because they exercise castling, en
-    // passant, promotion and pins, which is exactly the geometry an attack table can get wrong.
+    // The standard perft positions: they exercise castling, en passant, promotion and pins.
     private const string Startpos = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     private const string Kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     private const string Pos3 = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1";
@@ -57,9 +53,8 @@ public class MoveGenBitboardEquivalenceTests
     }
 
     /// <summary>
-    /// Walk the actual game tree a few plies deep and re-check after every make, so the
-    /// comparison covers occupancies that arise from real play rather than only hand-picked
-    /// FENs — captures, promotions and castles included.
+    /// Walks the game tree a few plies deep and re-checks after every make, covering
+    /// occupancies that arise from play (captures, promotions, castles), not only fixed FENs.
     /// </summary>
     [Theory]
     [InlineData(Startpos, 3)]

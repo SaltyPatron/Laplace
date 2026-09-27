@@ -19,9 +19,9 @@ public sealed class ForwardRealizationLawTests
         Assert.Contains("converse.prompt_language_top(p_prompt)", sql, StringComparison.Ordinal);
         Assert.Contains("has no truthful text surface", sql, StringComparison.Ordinal);
 
-        // A completed semantic act must not go back to the old direct label/render
-        // adapter. That path accepted NULL as a generated token and produced the
-        // live "trajectory token with zero words" failure.
+        // A completed semantic act realizes through realize.forward_text_batch, never
+        // through a direct label/render of the entities, which would accept NULL as a
+        // generated token.
         Assert.DoesNotContain(
             "SELECT realize.batch(entities) AS entities",
             sql,

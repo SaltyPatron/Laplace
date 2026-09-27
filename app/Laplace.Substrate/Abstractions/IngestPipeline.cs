@@ -16,10 +16,9 @@ public interface IRecordStream<TRecord>
 }
 
 /// <summary>
-/// One file of a multi-file source as an independently-openable record source. Opening is
-/// LAZY: <see cref="RecordsAsync"/> does the read+parse, and it runs inside the worker that
-/// claims this source — never in the dispatcher. So the expensive parse is parallel across
-/// files and no file is materialized into a list.
+/// One enumerated artifact of a multi-file source, opened lazily: <see cref="RecordsAsync"/>
+/// reads and parses inside the worker that claims it, never in the dispatcher, so parsing
+/// runs in parallel across files and no file is materialized into a list.
 /// </summary>
 public interface IFileRecordSource<TRecord>
 {
@@ -27,9 +26,9 @@ public interface IFileRecordSource<TRecord>
     IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Filesystem path when the source IS a plain file, else null (zip entries,
-    /// synthesized streams). Per-file resume (GH #898) needs the raw bytes to mint
-    /// the file's content identity; sources without a path simply never resume.
+    /// Filesystem path when the source is a plain file, else null (zip entries,
+    /// synthesized streams). Per-file resume fingerprints the raw bytes, so a source
+    /// without a path never resumes.
     /// </summary>
     string? FilePath => null;
 }
@@ -37,11 +36,10 @@ public interface IFileRecordSource<TRecord>
 public interface IMultiFileRecordStream<TRecord>
 {
     /// <summary>
-    /// The source's files as independently-openable record sources. Enumeration is CHEAP — it
-    /// yields file handles/specs and reads NOTHING; each worker opens and streams ONE source
-    /// through read + parse + compose. Finalized changes merge into the driver's bounded output
-    /// stream and the shared applier coalesces them into bulk database transactions. Files are
-    /// order-independent (references resolve content-addressed), so there is no ordering contract.
+    /// Enumerates the source's artifacts as independently openable record sources, reading
+    /// nothing; each worker opens and streams one through read, parse and compose. Finalized
+    /// changes merge into one bounded stream that the shared applier persists in bulk. Files
+    /// are order-independent because references resolve by content address.
     /// </summary>
     IAsyncEnumerable<IFileRecordSource<TRecord>> FilesAsync(CancellationToken ct = default);
 }
@@ -57,10 +55,9 @@ public sealed class DelegateFileRecordSource<TRecord>(
 }
 
 /// <summary>
-/// Multi-file stream whose per-file reader IS the single-file masticator.
-/// Enumeration is cheap (paths only); each worker calls
-/// <paramref name="extractFile"/> once for its claimed path — same function a
-/// monolith source uses for its one file.
+/// Multi-file stream whose per-file reader is the single-file extractor: enumeration
+/// yields paths only, and each worker calls <paramref name="extractFile"/> once for
+/// its claimed path, the same function a one-file source uses.
 /// </summary>
 public sealed class PathListMultiFileStream<TRecord>(
     IReadOnlyList<(string Path, string Label)> files,
@@ -82,10 +79,9 @@ public sealed class PathListMultiFileStream<TRecord>(
     }
 }
 
-/// <summary>Generic file-pool dispatch order. Full-corpus runs use longest-processing-
-/// time first with file bytes as the format-independent cost estimate; this prevents a
-/// giant file discovered late from becoming a one-worker serial tail. Capped runs retain
-/// the decomposer's declared order because their exact input prefix is operator-visible.</summary>
+/// <summary>File-pool dispatch order. Uncapped runs use longest-processing-time first, with
+/// file bytes as the format-independent cost, so a large file never becomes a one-worker
+/// tail. Capped runs keep the declared order so the admitted prefix is predictable.</summary>
 internal static class MultiFileScheduler
 {
     internal static IReadOnlyList<(string Path, string Label)> Schedule(
@@ -111,11 +107,9 @@ internal static class MultiFileScheduler
     }
 
     /// <summary>
-    /// Divide the compose pool across the first LPT wave. Every claimed file keeps one
-    /// independent pipeline; spare compose lanes go to the file with the largest current
-    /// cost-per-segment. This closes the many-files/one-giant-file hole: OMW had 1,226 files,
-    /// so the old "segment only when file count &lt;= workers" rule left its 526k-record
-    /// Japanese file on one core for 526 seconds even though it was scheduled first.
+    /// Divides the compose pool across the first LPT wave: each claimed file gets one
+    /// segment, and each spare compose worker goes to the file with the largest current
+    /// cost per segment, so one large file among many still composes in parallel.
     /// </summary>
     internal static int[] PlanInitialSegments(
         IReadOnlyList<long> costs,
@@ -148,8 +142,8 @@ internal static class MultiFileScheduler
 
 /// <summary>
 /// Shared bounded fan-out for ingest work whose one input may yield many output records.
-/// Vendors describe the work item and its async masticator; the pipeline owns worker
-/// concurrency, output backpressure, cancellation, and producer failure propagation.
+/// A caller supplies the work items and an async producer; worker concurrency, output
+/// backpressure, cancellation and producer-failure propagation happen here.
 /// </summary>
 public static class ParallelIngestWork
 {
@@ -164,9 +158,8 @@ public static class ParallelIngestWork
     }
 
     /// <summary>
-    /// Streaming-work overload for vendors whose input is generated lazily or is too large to
-    /// materialize. The shared primitive owns enumeration concurrency, output backpressure,
-    /// cancellation on consumer abandonment, and producer-failure propagation.
+    /// Streaming-work overload for input generated lazily or too large to materialize, with
+    /// the same concurrency, backpressure, abandonment cancellation and failure propagation.
     /// </summary>
     public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
         IAsyncEnumerable<TWork> work,
@@ -180,8 +173,7 @@ public static class ParallelIngestWork
             throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        // One result slot per active producer overlaps production and consumption
-        // without a vendor-supplied queue-depth multiplier.
+        // One result slot per active producer overlaps production and consumption.
         var output = Channel.CreateBounded<TResult>(new BoundedChannelOptions(maxConcurrency)
         {
             SingleReader = true,
@@ -252,9 +244,8 @@ public interface IIngestDeferredUnit : IDisposable
 
     /// <summary>
     /// Native/managed bytes retained by this unit but not visible in the change builder.
-    /// Zero asks the generic pipeline to measure exposed tier-tree capacity or fall back
-    /// to the source profile. Units which intentionally hide probe trees still report
-    /// their retained allocation here.
+    /// Zero lets the pipeline measure exposed tier-tree capacity or use the source profile;
+    /// a unit that hides its probe trees reports their allocation here.
     /// </summary>
     long ResidentBytes => 0;
 
@@ -272,10 +263,10 @@ public interface IMultiTreeIngestDeferredUnit : IIngestDeferredUnit
 }
 
 /// <summary>
-/// Record whose content-addressed trunk root is known before expensive compose work.
-/// Entity presence proves only that identity exists; it does not prove that this
-/// record's physicalities, observations and consensus were admitted. A record may
-/// authorize a full-record skip only through <see cref="IIngestCompletionRecord"/>.
+/// Record whose content-addressed trunk root is known before compose. Entity presence
+/// proves only that the identity exists, not that this record's physicalities,
+/// occurrences and testimony were admitted; only <see cref="IIngestCompletionRecord"/>
+/// can skip a record.
 /// </summary>
 public interface ITrunkRootRecord
 {
@@ -283,11 +274,10 @@ public interface ITrunkRootRecord
 }
 
 /// <summary>
-/// A record with an exact durable unit completion. The owner records it only after
-/// staging the complete source unit, in the same control transaction as its testimony
-/// and consensus. Content identity is insufficient. A missing completion requires
-/// ordinary composition, even when the trunk is present. Null: the record has no
-/// completion key and always composes.
+/// A record with an exact durable unit-completion receipt, written only after the whole
+/// source unit is staged, in the same transaction as its testimony and consensus fold.
+/// Without a receipt the record composes even when its trunk is present. Null: no
+/// completion key; the record always composes.
 /// </summary>
 public interface IIngestCompletionRecord
 {
@@ -297,9 +287,8 @@ public interface IIngestCompletionRecord
 public interface IIngestRecordHandler<TRecord>
 {
     /// <summary>
-    /// Whether creating deferred units performs independent compose work worth spreading
-    /// across the process compose budget. Direct handlers do their real work during the
-    /// later serial builder drain and opt out.
+    /// Whether creating deferred units does independent compose work worth spreading across
+    /// the compose pool. Handlers whose work happens in the serial builder drain opt out.
     /// </summary>
     bool ParallelizeDeferredUnitCreation => true;
 
@@ -332,10 +321,10 @@ public sealed class IngestBatchConfig
     public double WitnessWeight { get; init; } = 1.0;
 
     /// <summary>
-    /// Rule #8 working-set mode (06_Engineering_Ruleset.txt). One builder spans
-    /// the record stream; O(tiers) existence runs every flush interval (at most
-    /// five tier rounds per batch); one SubstrateChange per working set unless
-    /// the memory budget valve splits it. BatchSize is ignored in this mode.
+    /// Working-set mode (06_Engineering_Ruleset.txt rule 8): one builder spans the record
+    /// stream, the O(tiers) existence descent runs once per working set, and one
+    /// SubstrateChange is yielded per working set unless the memory budget closes it
+    /// early. BatchSize is ignored in this mode.
     /// </summary>
     public bool WorkingSet { get; init; }
 
@@ -343,10 +332,10 @@ public sealed class IngestBatchConfig
     public int? WorkingSetProbeInterval { get; init; }
 
     /// <summary>
-    /// Max records accumulated in one working set before descent/apply/yield.
-    /// Sized from <see cref="IngestSizing.ResolveWorkingSetRecordCap"/> for the source
-    /// profile — closes the set when deferred tier trees would exceed the RAM budget
-    /// even if <see cref="SubstrateChangeBuilder.StagedBytesEstimate"/> is still low.
+    /// Max records in one working set before descent, apply and yield. Sized by
+    /// <see cref="IngestSizing.ResolveWorkingSetRecordCap"/> for the source profile, so the
+    /// set closes before deferred tier trees exceed the memory budget even when
+    /// <see cref="SubstrateChangeBuilder.StagedBytesEstimate"/> is still low.
     /// </summary>
     public int? WorkingSetRecordCap { get; init; }
 
@@ -355,8 +344,8 @@ public sealed class IngestBatchConfig
 
     /// <summary>
     /// Working sets that may be resident concurrently in this process. Multi-file and
-    /// segmented lanes set this from their actual fan-out so each set receives a share of
-    /// the one compose-memory envelope instead of every set claiming the whole envelope.
+    /// segmented ingest set it from their fan-out, so each set gets a share of the one
+    /// compose-memory envelope.
     /// </summary>
     public int ConcurrentWorkingSets { get; init; } = 1;
     internal Func<int>? ActiveWorkingSetCount { get; init; }
@@ -395,9 +384,8 @@ public sealed class IngestBatchConfig
     internal Func<IReadOnlyCollection<string>>? CanonicalNamesProvider { get; init; }
 
     /// <summary>
-    /// Batch content surfaces and bulk-probe their resolved roots before materializing
-    /// tier rows. This keeps compose-time content checks on the indexed reader boundary.
-    /// It is effective only when a containment reader is present.
+    /// Batch content surfaces and bulk-probe their resolved roots before materializing tier
+    /// rows. Effective only when a containment reader is present.
     /// </summary>
     public bool EnableDeferredContentOnBuilder { get; init; } = true;
 
@@ -416,9 +404,8 @@ public sealed class IngestBatchConfig
             .SetCommitEpoch(CommitEpoch);
         if (EnableDeferredContentOnBuilder && ContainmentReader is not null)
             b.EnableDeferredContent(ContainmentReader);
-        // Presence oracle unconditionally when a reader exists — independent of deferred content,
-        // which is a separate opt-in. A composer that can ask "already deposited?" can skip
-        // STAGING a subtree instead of building it and having apply dedup it away.
+        // The presence oracle is set whenever a reader exists, independent of deferred
+        // content: a composer that can ask "already present?" skips staging that subtree.
         b.SetPresenceOracle(ContainmentReader);
         return b;
     }
@@ -426,13 +413,10 @@ public sealed class IngestBatchConfig
     internal (int Entities, int Physicalities, int Attestations) ResolveBuilderCapacities()
     {
         int batchRecords = Math.Max(1, BatchSize);
-        // Capacity is an INITIAL allocation, not the working-set limit. Preallocating
-        // the full machine-sized record cap in every concurrently-open file made physical
-        // source sharding dictate resident memory (thousands of one-record files each
-        // received a batch-sized builder). Start a working-set builder at one record's
-        // modeled row width and let the immutable builders grow geometrically as real rows
-        // arrive. The actual close/probe limits remain EffectiveWorkingSetRecordCap and the
-        // byte envelope; only speculative empty capacity disappears.
+        // Capacity is an initial allocation, not the working-set limit: a working-set builder
+        // starts at one record's modeled row width and grows as rows arrive, so many open
+        // small files do not each reserve a full batch. The close limits remain
+        // EffectiveWorkingSetRecordCap and the byte envelope.
         int residentRecords = WorkingSet ? 1 : batchRecords;
 
         return (
@@ -525,18 +509,18 @@ public static class IngestBatchPipeline
         current = fileId;
     }
 
-    /// <summary>How often a still-composing file republishes its counters. Advisory,
-    /// so the cost is one coalesced UPDATE per file per interval, never per change.</summary>
+    /// <summary>How often a still-composing file republishes its counters: one coalesced
+    /// UPDATE per file per interval, never per change.</summary>
     private const long FileProgressIntervalMs = 2_000;
 
     public const string PeriodBoundaryUnitPrefix = "period-boundary/";
     public const string SkippedBoundaryUnitPrefix = PeriodBoundaryUnitPrefix + "skipped-complete/";
     public const string CancelledBoundaryUnitPrefix = PeriodBoundaryUnitPrefix + "cancelled/";
 
-    /// <summary>Per-file failure marker (see IngestRunner.TrackIntent): emitted INSTEAD of the
-    /// file's period boundary when file-failure isolation is on and that file's read/parse/
-    /// compose threw. Zero rows, CountsAsUnit=false — it exists purely so the runner counts
-    /// the failure with its reason and the file is neither counted done nor marked complete.</summary>
+    /// <summary>Per-file failure receipt (see IngestRunner.TrackIntent), emitted instead of the
+    /// file's period boundary when file-failure isolation is on and that file's read, parse or
+    /// compose threw. Zero rows, CountsAsUnit=false: the runner records the failure and its
+    /// reason, and the file is neither counted done nor marked complete.</summary>
     public const string FileFailedUnitPrefix = "file-failed/";
     public const string ApplyBarrierUnitPrefix = "apply-barrier/";
 
@@ -583,14 +567,10 @@ public static class IngestBatchPipeline
     }
 
     /// <summary>
-    /// Per-file resume for multi-file sources (GH #898). Source layer completion is
-    /// recorded only at run end, so a killed multi-hour seed used to restart
-    /// from record zero and RE-FOLD everything already applied — testimony is not
-    /// idempotent, so the restart inflated witness counts on the whole applied
-    /// prefix. With this enabled, each finished file's boundary records a unit
-    /// completion on the FILE's content identity, and a restart true-skips
-    /// completed files before opening them. Blast radius of a kill
-    /// shrinks from the whole corpus to the one file that was mid-apply.
+    /// Per-file resume for multi-file sources. Testimony is not idempotent, so a restarted
+    /// run must not re-fold what was applied. Each finished file's boundary records a unit
+    /// completion keyed by the file's byte fingerprint, and a later run skips completed
+    /// files before opening them; an interrupted run redoes only the file in flight.
     /// </summary>
     public readonly record struct PerFileResumePlan(
         ISubstrateReader Reader,
@@ -599,38 +579,22 @@ public static class IngestBatchPipeline
         Hash128 DecomposerSourceId = default)
     {
         /// <summary>
-        /// Dispatcher-resolved (identity, already-complete) per file path, filled a chunk
-        /// at a time so the marker probe costs one round trip per CHUNK instead of one per
-        /// FILE. Absent entry = not yet resolved, and the worker falls back to the scalar
-        /// path — never to "skip", so a miss can only cost time, never silently drop a file.
+        /// Dispatcher-resolved (fingerprint, already-complete) per file path, filled a chunk
+        /// at a time so the marker probe costs one round trip per chunk. An absent entry
+        /// sends the worker to the scalar probe, never to a skip.
         /// </summary>
         public System.Collections.Concurrent.ConcurrentDictionary<string, (Hash128? Root, bool Skip)>? Resolved { get; init; }
     }
 
-    /// <summary>
-    /// Ceiling on how many files the dispatcher resolves per bulk marker probe.
-    ///
-    /// The chunk RAMPS from 1 to this value rather than starting here. A fixed chunk
-    /// makes the first file wait for the whole chunk to be read and hashed, and
-    /// TryResolveFileIdentity reads every byte -- MEASURED 2026-08-10: on 209 x 1 MB
-    /// files (the document corpus shape, 204 files / 208 MB with a 27.6 MB Webster in
-    /// it) time-to-first-file went 1.9 ms -> 506.7 ms, a 260x regression, because the
-    /// entire corpus is under a 512 chunk and so gets read before any row is written.
-    /// On 2000 x 64 KB it was 0.2 ms -> 104 ms, 504x.
-    ///
-    /// Ramping keeps both properties: the first file releases after ONE hash, and a
-    /// 14,900-file corpus still reaches full batching after ~10 doublings (~30 probes
-    /// total instead of 14,900).
-    /// </summary>
-    // Part of file-resume identity format v1: changing this block size changes the
-    // Merkle preimage and would invalidate existing completion markers. It is not an
-    // execution batch knob.
+    // The resume fingerprint is Merkle(domain, BLAKE3(length), BLAKE3 of each block of this
+    // size). The block size is part of that preimage, so changing it invalidates existing
+    // completion markers; it is not an execution batch knob.
     private const int ResumeFingerprintBlockBytes = 4 << 20;
     private static readonly Hash128 ResumeHashDomain =
         SubstrateCanonicalIds.OfVersioned("file-resume-fingerprint");
 
-    /// <summary>Input size for the ledger. Best-effort: a stream-backed source has no path,
-    /// and a missing file is the enumerator's problem, not the journal's.</summary>
+    /// <summary>Input size for the ledger; 0 when the source has no path or the file is
+    /// unreadable.</summary>
     public static long TryFileBytes(string? filePath)
     {
         if (string.IsNullOrEmpty(filePath)) return 0;
@@ -679,7 +643,7 @@ public static class IngestBatchPipeline
             or NotSupportedException
             or System.Security.SecurityException)
         {
-            return null; // unreadable/degenerate path: no resume identity, never a crash
+            return null; // unreadable path: no resume fingerprint
         }
         finally
         {
@@ -687,7 +651,7 @@ public static class IngestBatchPipeline
         }
     }
 
-    /// <summary>Boundary that ALSO records the file's unit completion (resume-enabled lanes).</summary>
+    /// <summary>Period boundary that also records the file's unit-completion receipt for resume.</summary>
     public static SubstrateChange BuildFileCompletion(
         Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder,
         IReadOnlyCollection<string>? canonicalNames = null)

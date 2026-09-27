@@ -6,25 +6,17 @@ using Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The operator surface's own endpoints — the parts that are NOT an installed SQL
-/// operation, and therefore cannot go through <c>POST /v1/op</c>.
+/// Admin endpoints for work that is not an installed SQL operation and so cannot go
+/// through <c>POST /v1/op</c>:
 ///
-/// Two things fall outside the catalog by nature:
+///   * <b>Agent routing.</b> <c>agents.json</c> is a host file, not substrate state;
+///     <c>ops.api()</c> cannot read or write it.
+///   * <b>VACUUM.</b> PostgreSQL refuses it inside a transaction block, and every
+///     procedure body is in one, so a client issues it on a connection outside a
+///     transaction.
 ///
-///   * <b>Agent routing.</b> <c>agents.json</c> is a file on the host, not a
-///     substrate relation. Nothing in <c>ops.api()</c> can read or write it.
-///   * <b>VACUUM.</b> Postgres refuses it inside a transaction block, and a
-///     PL/pgSQL procedure body is always in one, so it cannot be wrapped as an
-///     installed op at any nesting. It has to be issued by a client on a
-///     connection that is not in a transaction — this one.
-///
-/// Everything else the console does — activity, cancel, reindex, analyze, evict —
-/// IS an installed operation and goes through /v1/op against the live catalog,
-/// which is why those are absent here.
-///
-/// NO PRIVILEGE BOUNDARY. These endpoints sit beside the rest of the surface and
-/// inherit the deployment's auth mode; with auth stubbed they are open to anyone
-/// who can reach the host, exactly like /v1/op. The console banner says the same.
+/// These endpoints carry no privilege boundary of their own; they inherit the
+/// deployment's auth mode, as /v1/op does.
 /// </summary>
 internal static class AdminEndpoints
 {
@@ -52,8 +44,7 @@ internal static class AdminEndpoints
                         ["provider"] = d.Provider,
                         ["model"] = d.Model,
                         ["base_url"] = d.BaseUrl,
-                        // The VARIABLE NAME, never its value: this response is
-                        // rendered in a browser and read by models.
+                        // The environment variable's name, never its value.
                         ["key_env"] = d.KeyEnv,
                         ["credential_source"] = d.CredentialSource,
                         ["auth"] = d.Auth,
@@ -79,8 +70,8 @@ internal static class AdminEndpoints
                 ["object"] = "agent.config",
                 ["path"] = path,
                 ["exists"] = path is not null && File.Exists(path),
-                // A missing file is not an error — it is the state before the first
-                // write, and the console needs a target path to write to.
+                // A missing file is the state before the first write; write_path
+                // names where the PUT will create it.
                 ["write_path"] = path ?? AgentCatalog.ConfigCandidates().FirstOrDefault(),
                 ["content"] = path is not null && File.Exists(path) ? File.ReadAllText(path) : null,
             });
@@ -93,10 +84,8 @@ internal static class AdminEndpoints
             if (string.IsNullOrWhiteSpace(content))
                 return EndpointJson.BadRequest("invalid_request_error", "Body is empty.");
 
-            // PARSE BEFORE WRITING. A config saved and only rejected on the next
-            // `ask` breaks a lane that was working, at a moment nobody connects to
-            // the edit. Parse() applies every rule the runtime applies — including
-            // the refusal of an inline api_key.
+            // The body is parsed with the runtime's rules (including refusal of an
+            // inline api_key) before anything is written.
             AgentCatalog parsed;
             try
             {
@@ -115,8 +104,8 @@ internal static class AdminEndpoints
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                // Write-then-move: a half-written agents.json is read per call by
-                // every `ask`, so the file must never be observable mid-write.
+                // Write-then-move: every `ask` reads agents.json per call, so a
+                // partial file is never observable.
                 var temp = target + ".tmp";
                 await File.WriteAllTextAsync(temp, content, ct);
                 File.Move(temp, target, overwrite: true);
@@ -136,9 +125,8 @@ internal static class AdminEndpoints
             });
         }).WithTags("admin");
 
-        // Prove a route end to end from the console, with the same client the MCP
-        // `ask` tool uses. Without this, "is this agent configured correctly?" is
-        // only answerable by leaving the portal.
+        // Sends one prompt through a configured route with the same client the MCP
+        // `ask` tool uses.
         app.MapPost("/v1/admin/agents/ask", async (JsonObject payload, CancellationToken ct) =>
         {
             var prompt = payload["prompt"]?.GetValue<string>();
@@ -186,13 +174,8 @@ internal static class AdminEndpoints
 
         // ---- op policy ----------------------------------------------------
 
-        // Which installed operations may actually write, and which destroy
-        // testimony. The console previously GUESSED this from a regex over the
-        // operation name (`_close|_delete|_reset|…`), which is wrong in both
-        // directions: ops.evict_source matches nothing in that pattern and is the
-        // most destructive call on the surface, while any future ops.*_reset that
-        // is not allow-listed would be badged as a write it cannot perform. The
-        // server holds the real list; this hands it over rather than re-deriving it.
+        // The server's own lists of installed operations that may write and that
+        // destroy testimony, as InstalledOpInvoker enforces them.
         app.MapGet("/v1/admin/ops/policy", () => Results.Json(new JsonObject
         {
             ["object"] = "op.policy",
@@ -224,10 +207,9 @@ internal static class AdminEndpoints
             string sql;
             try
             {
-                // The table name reaches the planner as an identifier, so it is
-                // RESOLVED against the catalog rather than quoted and hoped for: the
-                // lookup both refuses an unknown name and returns the schema-qualified
-                // form, so the statement never depends on search_path.
+                // The table name is resolved against the catalog: an unknown name is
+                // refused, and the schema-qualified form means the statement does not
+                // depend on search_path.
                 string? qualified = null;
                 if (table is not null)
                 {
@@ -238,8 +220,7 @@ internal static class AdminEndpoints
                             $"'{table}' is not a table in the substrate schemas.");
                 }
 
-                // Ingest policy, not Serving: its timeout is unbounded and its
-                // auto-prepare is off, which is what an hours-long VACUUM needs.
+                // The Ingest datasource: unbounded timeout and no auto-prepare.
                 sql = await NpgsqlMaintenance.VacuumAsync(
                     dataSources.Ingest, qualified, full, analyze,
                     timeout, ct);
@@ -267,10 +248,8 @@ internal static class AdminEndpoints
     }
 
     /// <summary>
-    /// A typo'd LAPLACE_AGENTS_CONFIG is an error on the call path — a caller who
-    /// asked for that file must not silently get a different one. On the CONFIG
-    /// endpoints it is reported instead of thrown, because that is the screen an
-    /// operator opens to fix exactly this.
+    /// Config discovery that returns an unresolvable LAPLACE_AGENTS_CONFIG as
+    /// <paramref name="error"/> instead of throwing, so the config endpoints can report it.
     /// </summary>
     private static string? SafeDiscover(out string? error)
     {

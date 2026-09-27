@@ -1,14 +1,8 @@
--- Drive an orphaned journal row terminal: the typed form of the checkpoint
--- ops step ("mark a true orphan failed/cancelled — never leave 'running'
--- forever"). SQL cannot verify process liveness: the CALLER owes the check
--- that no live ingest owns the run (no active backend, no Laplace.Cli you did
--- not start) before closing. Refuses rows not currently 'running' and
--- statuses outside the cut-off terminal vocabulary.
---
--- Closing the run also closes every non-terminal file row. A cancelled run
--- with files left 'running'/'composed' is a false ledger: last night's
--- PropBank cut-off left 331 such rows. Qualification for this SQL is
--- native-dev / native-db, not the managed-dev ocean.
+-- Drives an orphaned 'running' journal row to a cut-off terminal status and
+-- closes every non-terminal file row of the run with it, so the ledger never
+-- shows files still running under a closed run. SQL cannot verify process
+-- liveness: the caller confirms no live ingest owns the run before closing.
+-- Refuses rows not currently 'running' and statuses outside that vocabulary.
 DROP FUNCTION IF EXISTS laplace.ingest_run_close(uuid, text);
 
 CREATE OR REPLACE FUNCTION ops.ingest_run_close_open_files(p_run_id uuid)

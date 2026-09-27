@@ -4,10 +4,9 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Read surface for the canonical query-relative forward program. This is not an
-/// explanation replay: <c>generation.forward_trace</c> is the same native pass that
-/// <c>generation.forward_prompt</c>, <c>generation.forward_text</c>, conversation and
-/// streaming project for ordinary execution.
+/// Per-step receipts of the forward program. <c>generation.forward_trace</c> runs the
+/// same native RESOLVE -> ... -> WITNESS pass that <c>generation.forward_prompt</c> and
+/// <c>generation.forward_text</c> run, and returns what each election saw and chose.
 /// </summary>
 public static partial class NpgsqlSubstrateReads
 {
@@ -40,8 +39,9 @@ public static partial class NpgsqlSubstrateReads
         int RoutingRound);
 
     /// <summary>
-    /// Execute the canonical native forward pass once and return its per-election
-    /// receipts. No consensus.walk_branches/replay path is involved.
+    /// Runs the native forward pass once and returns one receipt row per election:
+    /// candidates, channels, occurrence coverage, the supporting consensus cell and the
+    /// routing round.
     /// </summary>
     public static Task<IReadOnlyList<ForwardTraceRow>> ForwardTraceStepsAsync(
         NpgsqlDataSource dataSource,

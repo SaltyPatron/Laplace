@@ -115,8 +115,8 @@ public sealed class TabularDecomposer
     private static OrderedCompositionComponent EnsureColumn(SubstrateChangeBuilder b, string col)
     {
         OrderedCompositionComponent column = RequireComponent(b, col);
-        // The column is the witnessed column-name content with an additional source
-        // interpretation, not a second flat-string hash that must be reverse-registered.
+        // The column entity is the column-name content, typed as a column; no separate
+        // flat-string id is minted.
         b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId));
         return column;
     }
@@ -187,8 +187,8 @@ public sealed class TabularDecomposer
 
     private static IEnumerable<string> EnumerateCsv(string root)
     {
-        // The shared valet already reads "<path> is one file OR a corpus root"; a single
-        // file still has to BE a csv, which the recursive arm gets from the glob.
+        // IngestInput treats the path as one file or a corpus root; a single file must
+        // itself be a .csv, which the recursive branch gets from the glob.
         if (IngestInput.IsSingleFile(root))
             return root.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) ? [root] : [];
         return IngestInput.ResolveFiles(root, "*.csv").OrderBy(p => p, StringComparer.Ordinal);

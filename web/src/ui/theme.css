@@ -9,8 +9,8 @@
     --primitive-neutral-700: #eef3f6;
     --primitive-neutral-600: #c7d5de;
     --primitive-blue-500: #32749b;
-    /* Fill variant: white small text on blue-500 is 3.2:1 (fails WCAG 4.5:1, caught by
-       axe). blue-600 gives 5.2:1; use it wherever the accent is a text-bearing fill.
+    /* Fill variant: white small text on blue-500 is 3.2:1, under WCAG 4.5:1.
+       blue-600 gives 5.2:1; use it wherever the accent is a text-bearing fill.
        blue-500 stays for borders, glows and accents on dark surfaces. */
     --primitive-blue-600: #18577d;
     --primitive-teal-400: #006f6a;
@@ -58,9 +58,8 @@
     --color-draw: var(--primitive-yellow-500);
     --color-uncertain: var(--primitive-yellow-500);
 
-    /* WebGL/Three canvases are dark instruments inside the light product UI.
-       Their palette is a UI token contract too — do not duplicate legacy
-       purple/yellow/blue literals in renderer code. */
+    /* WebGL/Three canvases render dark inside the light UI. Renderers read these
+       tokens rather than carrying colour literals of their own. */
     --viz-bg: #0a2638;
     --viz-text: #eef6f9;
     --viz-muted: #b9cad4;
@@ -111,7 +110,7 @@
     --tooltip-bg: var(--color-bg-panel);
     --tooltip-fg: var(--color-text-primary);
 
-    /* Legacy aliases (migration) */
+    /* Short aliases onto the semantic tokens */
     --bg: var(--color-bg-surface);
     --panel: var(--color-bg-panel);
     --panel-2: var(--color-bg-panel-2);
@@ -127,9 +126,8 @@
     font-size: 16px;
   }
 
-  /* Follow the host OS/browser preference without returning to the almost-black
-     pre-reskin UI. The dark surface stays in the same blue instrument family as
-     the header, so switching between system modes changes luminance without a
+  /* Follows the OS/browser colour-scheme preference. The dark surface stays in the
+     header's blue family, so switching modes changes luminance without a
      white ↔ black flash. */
   @media (prefers-color-scheme: dark) {
     :root {
@@ -176,11 +174,9 @@
     outline-offset: 1px;
   }
 
-  /* A bare <a> otherwise falls back to the UA's #0000ee, which is 1.88:1
-     against the panel background — axe reports it as a serious contrast
-     violation for every such link (149 nodes on the Lab page alone). The Link
-     primitive styles itself; this covers the anchors that are not it, and sits
-     in `base` so any component rule still wins. */
+  /* A bare <a> otherwise takes the UA's #0000ee, 1.88:1 against the panel
+     background. The Link primitive styles itself; this covers other anchors and
+     sits in `base` so any component rule still wins. */
   a {
     color: var(--color-accent);
   }

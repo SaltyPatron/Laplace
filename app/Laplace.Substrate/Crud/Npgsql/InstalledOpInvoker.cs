@@ -8,7 +8,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// <summary>
 /// Call any installed substrate operation by name. The catalog from
 /// <c>ops.api()</c> is the allow-list — nothing outside it is callable.
-/// Shared by MCP <c>op</c> and OpenAICompat <c>POST /v1/op</c> (GH #812).
+/// MCP <c>op</c> and the OpenAI-compatible <c>POST /v1/op</c> both call through here,
+/// so every surface reaches the same installed operation.
 /// </summary>
 public static class InstalledOpInvoker
 {
@@ -19,29 +20,16 @@ public static class InstalledOpInvoker
     /// Installed operations permitted to run against a writable connection.
     ///
     /// Every other op resolves onto a <c>default_transaction_read_only=on</c>
-    /// datasource, so the catalog being an allow-list is not on its own enough
-    /// to make a mutation callable — it also has to be named here. This is a
-    /// second, deliberately short list rather than a flag on the catalog: adding
-    /// a write op to the substrate must not silently make it reachable over
-    /// HTTP; someone has to add it here on purpose.
+    /// datasource, so appearing in the catalog is not enough to make a mutation
+    /// callable; it must also be named here. Adding a write op to the substrate
+    /// therefore does not make it reachable from a surface until it is listed.
     ///
-    /// <c>ops.ingest_run_close</c> is the gate CI/CD pipelines wait on. Without
-    /// it a stuck run can only be cleared by hand against the database, which
-    /// leaves the pipeline blocked and the operator with no way to intervene.
-    ///
-    /// The cancel pair is here because closing the journal row without signalling
-    /// the process is the worse outcome, not the safer one: the row reads
-    /// cancelled, the pipeline gate goes green, and the ingest keeps writing.
-    ///
-    /// The repair pair is here because <c>ops.index_health</c> made the
-    /// 2026-08-13 shell class visible from every surface while the fix stayed a
-    /// hand-typed psql session — an operator who can see the damage from a console
-    /// and must leave it to act will eventually act on the wrong cluster.
-    ///
-    /// <c>ops.evict_source</c> DELETES ATTESTED TESTIMONY and refolds what
-    /// survives. It is on this list because retraction is a first-class operator
-    /// duty, not because it is safe: it is the one entry here that destroys data,
-    /// and with authentication stubbed anyone who can reach the host can call it.
+    /// <c>ops.ingest_run_close</c> closes a run's journal row, which pipelines wait on.
+    /// The cancel/terminate pair signals the backend itself, so a closed row never
+    /// reads cancelled while the ingest keeps writing. The reindex/analyze pair repairs
+    /// what <c>ops.index_health</c> reports. <c>ops.evict_source</c> deletes one
+    /// source's attested testimony and refolds the consensus that survives; it is the
+    /// only entry here that removes data (see <see cref="DestructiveOps"/>).
     /// </summary>
     public static readonly IReadOnlySet<string> WritableOps =
         new HashSet<string>(StringComparer.Ordinal)
@@ -82,10 +70,8 @@ public static class InstalledOpInvoker
     internal static int RequestedRowCount(int maxRows) => Math.Max(0, maxRows);
 
     /// <summary>
-    /// Preserve the caller's command budget exactly. Npgsql defines zero as no
-    /// command timeout; cancellation remains available through the request token.
-    /// Infrastructure must not silently replace an operator's budget with a fitted
-    /// ceiling that is unrelated to the operation or the live database.
+    /// The caller's command budget, unchanged. Npgsql defines zero as no command
+    /// timeout; cancellation remains available through the request token.
     /// </summary>
     public static int RequestedCommandTimeout(int timeoutSeconds)
     {
@@ -95,9 +81,8 @@ public static class InstalledOpInvoker
 
     /// <summary>
     /// Resolve <paramref name="name"/> against the live catalog, bind named args
-    /// with declared-type casts, and return rows. The endpoint hands ops a
-    /// read-only data source unless the name is on the <see cref="WritableOps"/>
-    /// allow-list, which resolves onto a writable connection instead.
+    /// with declared-type casts, and return rows. Callers pass a read-only data
+    /// source unless the name is on the <see cref="WritableOps"/> allow-list.
     /// </summary>
     public static async Task<OpResult> InvokeAsync(
         NpgsqlDataSource db,
@@ -108,11 +93,8 @@ public static class InstalledOpInvoker
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        // maxRows is the caller's transport budget. Preserve it exactly (apart
-        // from rejecting a negative count as an empty request); the former
-        // Clamp(..., 1, 2000) silently changed both zero and every larger
-        // explicitly requested page. Fetch one extra row only to report honest
-        // truncation without imposing another ceiling.
+        // maxRows is the caller's transport budget, kept exactly (a negative count
+        // is an empty request). One extra row is fetched only to report truncation.
         var rowCap = RequestedRowCount(maxRows);
         var rowsToFetch = (long)rowCap + 1L;
         var keys = args?.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
@@ -161,8 +143,7 @@ public static class InstalledOpInvoker
         var argText = string.Join(", ", call);
 
         // A procedure is CALLed and returns no result set; SELECT ... FROM it is a
-        // parse error, which is what every caller got before the catalog exposed
-        // `kind`. LIMIT rowCap + 1 on the function path so truncation is observable.
+        // parse error. LIMIT rowCap + 1 on the function path so truncation is observable.
         var sql = isProcedure
             ? $"CALL {QualifiedCatalogName(name)}({argText})"
             : $"SELECT * FROM {QualifiedCatalogName(name)}({argText}) LIMIT {rowsToFetch}";
@@ -239,12 +220,10 @@ public static class InstalledOpInvoker
     /// <summary>
     /// Split an argument list on top-level commas.
     ///
-    /// The plain toggle handles a doubled quote (<c>''</c>) correctly and needs no
-    /// escape case — reviewers have flagged it twice (GH #843) on the theory that
-    /// <c>DEFAULT 'a''b, c'</c> splits at the inner comma. It does not. The pair
+    /// The plain quote toggle handles a doubled quote (<c>''</c>) with no escape case:
+    /// <c>DEFAULT 'a''b, c'</c> does not split at the inner comma, because the pair
     /// toggles twice with no character between the quotes, so the momentary
-    /// unquoted state is never observed by any other branch; an explicit
-    /// doubled-quote arm is byte-for-byte equivalent on every input. Pinned by
+    /// unquoted state is never observed by any other branch. Pinned by
     /// <c>ParseSignature_DoubledQuoteInDefaultDoesNotSplitTheParameter</c>.
     ///
     /// What this does NOT handle: dollar-quoting and <c>E'\''</c> backslash escapes.
@@ -273,7 +252,7 @@ public static class InstalledOpInvoker
 
     /// <summary>
     /// Turn the exact name returned by <c>ops.api()</c> into a qualified SQL
-    /// identifier. Legacy <c>laplace</c> operations are catalogued without a
+    /// identifier. Operations in the <c>laplace</c> schema are catalogued without a
     /// schema; purpose-schema and public operations are catalogued as
     /// <c>schema.function</c>. Quote the two identifiers separately — quoting the
     /// whole catalog name would look for a function literally named
@@ -294,8 +273,7 @@ public static class InstalledOpInvoker
     /// literal mis-parses <em>silently</em>: an element holding a comma splits into
     /// two members, and braces, quotes, backslashes or edge whitespace shift the
     /// parse with no error. It also cannot express SQL NULL apart from the
-    /// four-character string <c>NULL</c>. Binding removes the quoting question
-    /// rather than answering it (GH #843).
+    /// four-character string <c>NULL</c>. Binding removes the quoting question.
     /// </summary>
     internal static object? OpValue(JsonNode? node) => node switch
     {

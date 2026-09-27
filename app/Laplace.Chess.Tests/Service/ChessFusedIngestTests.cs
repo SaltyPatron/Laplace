@@ -5,10 +5,9 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-// GH #600: `laplace ingest chess` records the witnessed layer AND derives the calculated
-// layer (positions, move edges, analysis-version watermark) in ONE fused Compose pass, reusing the
-// in-memory parse — no second Postgres hydrate + re-parse. These pin that the fused pass
-// emits both layers together, and that --no-analyze still yields the pure game-grain record.
+// Chess ingest composes the recorded layer and the calculated layer (positions, move edges,
+// analysis-version watermark) in one compose pass over the in-memory parse. These pin that
+// both layers arrive in the same change, and that --no-analyze yields the recorded layer only.
 public sealed class ChessFusedIngestTests
 {
     private const string Game =
@@ -70,7 +69,7 @@ public sealed class ChessFusedIngestTests
             if (analyzeInline)
             {
                 // Analysis content is emitted through native stages; the ordered
-                // position projection has the trajectory lane's own source.
+                // position projection carries the analyzer's source.
                 Assert.Contains(ChessAnalyze.SourceId, observedSources);
                 Assert.Contains(change.Physicalities,
                     row => row.SourceId == ChessVocabulary.TrajectorySourceId
@@ -88,7 +87,7 @@ public sealed class ChessFusedIngestTests
     {
         var change = Compose(analyzeInline: true);
 
-        // Witnessed layer: shared line owns one ordered typed-move trajectory.
+        // Recorded layer: the line carries one ordered typed-move trajectory.
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
         var lineId = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
         Assert.Contains(change.Physicalities,
@@ -96,9 +95,9 @@ public sealed class ChessFusedIngestTests
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
 
-        // Derived layer present in the SAME change: the line trajectory references ordinary
-        // typed position content. The perfcache accelerates composition; it does not replace
-        // the canonical entities/physicalities or leave trajectory children unresolved.
+        // Calculated layer in the same change: the line trajectory references ordinary typed
+        // position content. The perfcache only speeds composition; every trajectory child is
+        // still a canonical entity with its physicality.
         var positions = change.Entities
             .Where(e => e.TypeId == ChessVocabulary.PositionType)
             .Select(e => e.Id)
@@ -109,10 +108,8 @@ public sealed class ChessFusedIngestTests
         Assert.Contains(change.Attestations, a =>
             a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId);
 
-        // GH #547 / CONSOLIDATION: EmitGame stays a bare Document (spec 08 recorder);
-        // the fused calculated pass deposits the game-tier mantissa-packed trajectory
-        // on the LINE. Closing the claim that "EmitGame deposits a bare Document" as
-        // the whole story — bare on record, trajectory on analyze/fusion.
+        // The calculated pass deposits the line's projection trajectory over exactly the
+        // position set, each position with its content physicality.
         var gameTraj = Assert.Single(change.Physicalities,
             p => p.EntityId == lineId && p.Type == PhysicalityType.Projection);
         Assert.NotNull(gameTraj.TrajectoryXyzm);

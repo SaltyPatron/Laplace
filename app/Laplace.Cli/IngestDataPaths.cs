@@ -3,15 +3,10 @@ using Laplace.Engine.Core;
 namespace Laplace.Cli;
 
 /// <summary>
-/// Default on-disk location per ingest source, under the install's ingest root.
-/// NOT a copy of the dispatch roster, and not a copy of EtlSource.DataKey (which
-/// is a logical key, identical to the CLI name in every manifest row) — this is
-/// the one place that records a source's directory layout.
-///
-/// Legacy `image` / `audio` path keys remain for staged corpora under test-data/.
-/// Live media dispatch: `rgba-image` / `track-audio` / `frame-video` (generic lanes;
-/// stub ImageDecomposer/AudioDecomposer names stay banned by integrity gates).
-/// Corpora (e.g. Tatoeba) are sources, not media format keys.
+/// Default on-disk location per ingest source key, relative to the install's ingest root.
+/// This records directory layout only; which keys dispatch is IngestDispatchTable's.
+/// The media keys `rgba-image` / `track-audio` / `frame-video` share the staged
+/// test-data corpora with the `image` / `audio` path keys.
 /// </summary>
 internal static class IngestDataPaths
 {
@@ -57,8 +52,8 @@ internal static class IngestDataPaths
 
         string ingestRoot = LaplaceInstall.ResolveIngestRoot();
         string primary = Path.GetFullPath(Path.Combine(ingestRoot, relative));
-        // Coding corpora are also distributed in the sibling model vault. An
-        // explicit CLI path and an existing ingest-root corpus retain priority.
+        // Coding corpora may live in the sibling models directory; an explicit CLI path or
+        // an existing ingest-root corpus takes priority.
         if ((cliSource.Equals("stack", StringComparison.OrdinalIgnoreCase)
              || cliSource.Equals("tiny-codes", StringComparison.OrdinalIgnoreCase))
             && !Directory.Exists(primary) && !File.Exists(primary))

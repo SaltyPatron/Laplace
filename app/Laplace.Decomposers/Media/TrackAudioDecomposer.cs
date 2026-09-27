@@ -8,9 +8,9 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Thin multi-file audio lane: packaging → PCM recovery → <see cref="AudioIngestRecord"/>;
-/// <see cref="AudioTierSpine"/> owns codepoint-floor compose/emit. Not named
-/// AudioDecomposer (stub path banned). Not corpus-specific / not one container.
+/// Provider for audio files: packaging → PCM recovery → <see cref="AudioIngestRecord"/>.
+/// Composition over codepoint-floor atoms is <see cref="AudioTierSpine"/>; admission is the
+/// shared multi-file recipe. Not specific to any corpus or container.
 /// </summary>
 public sealed class TrackAudioDecomposer
     : DecomposerMultiFile<AudioIngestRecord, TrackAudioSource, FullScope>, IIngestInventoryProvider

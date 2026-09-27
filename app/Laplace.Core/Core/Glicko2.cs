@@ -35,11 +35,10 @@ public static unsafe class Glicko2
     public const long ScoreLoss = 0L;
 
     /// <summary>
-    /// Draw score. MIRRORS <c>kScoreHalfFp</c> in engine/core/src/attestation_engine.c,
-    /// which is the definition; <see cref="NativeDrawScoreFp"/> reads it back so a
-    /// drift between the two fails a test instead of silently reclassifying
-    /// outcomes. Nothing on a write path should branch on this constant — call
-    /// the native classifier (AttestationMergeMath.ClassifyOutcome).
+    /// Draw score, mirroring <c>kScoreHalfFp</c> in engine/core/src/attestation_engine.c,
+    /// which defines it; <see cref="NativeDrawScoreFp"/> reads the native value back for
+    /// parity checks. Outcome classification on write paths is the native classifier
+    /// (AttestationMergeMath.ClassifyOutcome), not a branch on this constant.
     /// </summary>
     public const long ScoreDraw = 500_000_000L;
 

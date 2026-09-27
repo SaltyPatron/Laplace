@@ -2,8 +2,7 @@ namespace Laplace.Engine.Core;
 
 /// <summary>
 /// Shared file-opening policy for ingest. Callers own their resource-derived read
-/// buffers, so the stream's internal buffer is deliberately disabled instead of
-/// layering a second scattered 4 KiB/64 KiB/1 MiB tuning value beneath them.
+/// buffers, so the stream's internal buffer is disabled rather than layered beneath them.
 /// </summary>
 public static class IngestIo
 {

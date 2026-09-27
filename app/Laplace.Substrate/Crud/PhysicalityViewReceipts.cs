@@ -4,8 +4,9 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD;
 
-/// <summary>Validates the native PostgreSQL result before retaining its optional-view receipts.
-/// This transports native identity and selection; it does not compute either.</summary>
+/// <summary>Validates the arrays returned by the native physicality-view call against the
+/// caller's byte and work grants, then copies them into retained receipts. It transports
+/// native identity and selection; it computes neither.</summary>
 internal static class PhysicalityViewReceipts
 {
     internal static long RetainedPayloadBytes(long forms, long missing)
@@ -51,9 +52,9 @@ internal static class PhysicalityViewReceipts
             if (count[i] > maximumLogicalWork - inspected)
                 throw new InvalidOperationException("physicality missing-reference validation exceeds its work grant");
             inspected += count[i];
-            // Native publishes newly encountered ranges in source-form order;
-            // repeated forms may reuse earlier ranges. This proves full coverage
-            // without allocating a bitmap proportional to the frontier.
+            // Native emits each new missing range in form order, and a repeated form
+            // may point back at an earlier range. Tracking only the high-water mark
+            // therefore proves gap-free coverage without a bitmap over the frontier.
             if (count[i] != 0)
             {
                 if (first[i] > covered)

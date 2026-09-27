@@ -16,10 +16,9 @@ public static class RelationTypeRegistry
         Hash128 Id, double Rank, Symmetry Symmetry, bool Flip, Hash128? ParentId, string Canonical,
         Mask256 Qualifier = default);
 
-    // Resolution is a pure function of the input string over small, bounded
-    // vocabularies (governed surfaces, ~50 UD deprels, feature names), but the
-    // native resolve is a P/Invoke plus 3-4 string allocations — and hot
-    // emitters call it per token edge. Memoize per distinct key.
+    // Resolution is a pure function of the surface over bounded vocabularies, and the
+    // native resolve is a P/Invoke plus several allocations called per emitted relation,
+    // so each distinct surface is memoized.
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> SurfaceCache = new(StringComparer.Ordinal);
 
     // LAPLACE_REL_RETIRED (relation_law.h): a retired relation keeps its bit and type id
@@ -68,13 +67,9 @@ public static class RelationTypeRegistry
         }
     }
 
-    // ResolveDbpedia was deleted here. It minted DBPEDIA_<REL> types from ConceptNet's
-    // dbpedia lane, which puts the SOURCE into the type name. consensus.id is
-    // blake3(subject‖type‖object), so a source-scoped type guarantees that the same
-    // triple witnessed by dbpedia and by prose hashes to two different consensus rows:
-    // they never merge, witness_count never climbs, RD never tightens. Provenance
-    // already has a slot — AttestationRow.SourceId. It does not belong in TypeId.
-    // It had zero callers. dbpedia edges map onto generic manifest relations instead.
+    // No relation type is source-scoped: consensus.id is blake3(subject‖type‖object), so a
+    // source in the type name would split one triple into per-source cells. The source
+    // is AttestationRow.SourceId.
 
     /// <summary>The live manifest relations; a retired relation (its meaning carried by a
     /// successor plus qualifiers) is not emittable vocabulary.</summary>
@@ -95,8 +90,7 @@ public static class RelationTypeRegistry
     {
         ArgumentNullException.ThrowIfNull(builder);
         _ = sourceId;
-        // Relation identity/rank/symmetry/family/bit live in the native manifest and
-        // highway perfcache. They are operator vocabulary, not reusable content
-        // entities. Do not deposit relation keys into entities/physicalities.
+        // Relation identity, rank, symmetry, family and bit live in the native manifest and
+        // highway perfcache; they are operator vocabulary, so nothing is staged here.
     }
 }

@@ -1,8 +1,7 @@
--- taxonomy.ancestry — hierarchy walk (spec 37 TRAVERSE). Filename keeps the
--- historical laplace_ancestry stem; CREATE drops the redundant project prefix
--- now that the schema names the family. Old laplace.laplace_ancestry (and any
--- taxonomy.laplace_ancestry mid-migration name) dropped rather than shimmed (#532).
--- BEGIN ATOMIC: GH #764.
+-- taxonomy.ancestry: TRAVERSE upward from an entity over the relation types in
+-- p_band_mask, following only positive-standing binary cells, cycle-free, to
+-- p_max_depth. Each ancestor is returned once at its shallowest depth with the
+-- strongest standing seen on any path to it.
 DROP FUNCTION IF EXISTS laplace.laplace_ancestry(bytea, bytea, integer);
 DROP FUNCTION IF EXISTS laplace.laplace_ancestry(bytea, bytea, integer);
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.

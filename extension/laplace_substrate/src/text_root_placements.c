@@ -14,11 +14,10 @@
 
 #include "perfcache_native.h"
 
-/* One native boundary for the requested complete texts. This is composition
- * inspection, with no entity lookup, evidence election, rendering or deposit.
- * The core owns normalization, decomposition, singleton collapse and placement.
- * Copy its root tuple before crossing back into PostgreSQL allocation/error
- * handling, so no native tree allocation can survive a backend longjmp. */
+/* Composes each input text under the Tier-0 perfcache and returns its canonical
+ * root: identity, tier, coordinate, Hilbert index and radius. No entity row is
+ * read or written. The native tree is freed before any PostgreSQL error can be
+ * raised, so no native allocation survives a backend longjmp. */
 PG_FUNCTION_INFO_V1(pg_laplace_text_root_placements);
 
 Datum

@@ -70,8 +70,8 @@ int laplace_attestation_id_compute(
 
 double laplace_attestation_witness_phi(double witness_weight);
 
-/* The opponent's RATING for this witness — the half that never existed. See the
- * note above the constants in attestation_engine.c. w=0.5 is exactly neutral. */
+/* The opponent rating a witness of this weight is folded against; see the note
+ * above the constants in attestation_engine.c. w=0.5 is exactly neutral. */
 double laplace_attestation_witness_opponent_rating(double witness_weight);
 
 int laplace_attestation_outcome_from_score(double score, int16_t* out_outcome);
@@ -86,8 +86,8 @@ int laplace_attestation_outcome_from_totals_fp(
 /* The draw threshold itself, so no other layer has to restate the literal. */
 int64_t laplace_attestation_score_draw_fp(void);
 
-/* Phase-5b agreement preserves both confirmations and refutations. A draw or
- * disagreement does not admit the pair. Input arrays are aligned candidate
+/* Two independent outcomes corroborate when they agree on confirmation or on
+ * refutation. A draw or disagreement does not admit the pair. Input arrays are aligned candidate
  * outcomes; the caller supplies one output byte per candidate. */
 int laplace_attestation_corroboration_mask(
     const int16_t* left, const int16_t* right, size_t count, uint8_t* admitted);
@@ -225,11 +225,9 @@ int laplace_attestation_categorical_add(
     int              confirm,
     int64_t          observation_count);
 
-/* Parameter order deliberately matches laplace_attestation_aggregated_build exactly.
- * These two must never diverge: a positional mismatch between them compiled silently
- * (int64<->double implicit conversions) and corrupted every attestation written through
- * this path (observation_count = games*1e9, sum_score truncated to 0, outcome forced
- * REFUTE) — see .scratchpad/02 Issue 32. */
+/* Parameter order matches laplace_attestation_aggregated_build exactly. int64 and
+ * double convert implicitly, so a positional mismatch would still compile while
+ * swapping observation count and score. */
 int laplace_attestation_aggregated_add(
     intent_stage_t*  stage,
     const hash128_t* subject,

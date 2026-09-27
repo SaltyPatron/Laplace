@@ -4,20 +4,12 @@ namespace Laplace.SubstrateCRUD;
 
 public static class PhysicalityId
 {
-    // Canonical address of the entity's typed native physicality. The Merkle
-    // entity identity owns structure and the physicality trajectory owns exact
-    // constituent order; ingestion must not serialize the row into a second
-    // ordinary-content descriptor graph.
-    // LAYOUT IS LITTLE-ENDIAN BY SPECIFICATION, not by host accident (GH #904).
-    // BitConverter writes the HOST's byte order, and the C twin
-    // (laplace_physicality_id_compute) memcpy'd an int16_t, also host order: the
-    // two agreed on every machine either has run on, and would mint DIFFERENT
-    // physicality ids on a big-endian host for byte-identical content. An identity
-    // axiom that holds only because nobody compiled it elsewhere is not an axiom.
-    // Both sides now write the two type bytes explicitly little-endian, so the
-    // pre-image is a property of the format rather than of the compiler. Output is
-    // byte-identical to the previous form on every host in service; no reseed.
-    // PhysicalityIdParityTests pins the 18-byte layout independently of this code.
+    // Address of one typed physicality of an entity: BLAKE3-128 over the 16-byte
+    // entity id followed by the physicality type as int16 little-endian (18 bytes).
+    // The entity id is the Merkle content identity; the physicality is a typed
+    // realization of that same entity, not a second identity. The type bytes are
+    // written little-endian explicitly so the pre-image is fixed by the format,
+    // not by host byte order, and matches native laplace_physicality_id_compute.
     public static Hash128 Compute(Hash128 entityId, PhysicalityType type)
     {
         Span<byte> span = stackalloc byte[18];

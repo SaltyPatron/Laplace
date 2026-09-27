@@ -24,16 +24,14 @@ public sealed class Board
 {
     public readonly Piece[] Squares = new Piece[128];
 
-    // Piece bitboards, kept in step with Squares so the attack tables (ChessAttacks) have
-    // something to index. Layout matches Bitboards.Of: slot = (int)piece + 6, bit =
-    // (rank << 3) | file. Occupied is derived on read rather than stored, so it can never be
-    // the thing that goes stale.
+    // Piece bitboards, kept in step with Squares so the attack tables (ChessAttacks) can index
+    // them. Layout matches Bitboards.Of: slot = (int)piece + 6, bit = (rank << 3) | file.
+    // Occupied is derived on read, never stored, so it cannot go stale.
     //
-    // MAINTAINED ONLY THROUGH Set(). Squares stays public for reads (See probes hypothetical
-    // occupancies over the raw array, and the mailbox generator still walks it), but every WRITE
-    // must go through Set or the two representations diverge SILENTLY — no exception, just wrong
-    // move generation. BoardBitboardConsistencyTests walks perft and re-checks after every
-    // make and unmake, which is what actually enforces this.
+    // Maintained only through Set(). Squares stays public for reads (See probes hypothetical
+    // occupancies over the raw array; the mailbox generator walks it), but every write must go
+    // through Set or the two representations diverge without any error, only wrong move
+    // generation. BoardBitboardConsistencyTests re-checks after every make and unmake in perft.
     private readonly ulong[] _bb = new ulong[13];
 
     public ulong PieceBB(Piece p) => _bb[(int)p + 6];
@@ -52,8 +50,8 @@ public sealed class Board
     }
 
     /// <summary>
-    /// THE only sanctioned way to change a square. Clears the outgoing piece's bit and sets the
-    /// incoming one, so Squares and the bitboards move together.
+    /// The only way to change a square. Clears the outgoing piece's bit and sets the incoming
+    /// one, so Squares and the bitboards move together.
     /// </summary>
     public void Set(int sq0x88, Piece p)
     {
@@ -100,17 +98,14 @@ public sealed class Board
     public int FullmoveNumber;
 
     /// <summary>
-    /// The FILE each castling rook started on. Chess960 (chess.com "Freestyle") shuffles
-    /// the back rank, so "the h-rook" is not a constant — X-FEN/Shredder writes the files
-    /// into the castling field ("FCfc") precisely because KQkq cannot express them.
+    /// The file each castling rook started on. Chess960 shuffles the back rank, so the
+    /// castling rook's file is not a constant; X-FEN/Shredder writes it into the castling
+    /// field ("FCfc") because KQkq cannot express it.
     ///
-    /// IDENTITY IS UNAFFECTED FOR STANDARD CHESS, AND THAT IS LOAD-BEARING. These default
-    /// to the standard files, and <see cref="CastleString"/> emits the classic KQkq
-    /// whenever they hold — so a standard position's content surface
-    /// (PositionContent.Surface, which embeds CastleString) is byte-identical to what it
-    /// was before Chess960 existed here. Same surface, same content id, no reseed. Only
-    /// positions whose castling rooks are NOT on a/h get new ids, and those are exactly
-    /// the positions the substrate does not contain, because these games were refused.
+    /// These default to the standard files, and <see cref="CastleString"/> emits KQkq
+    /// whenever they hold, so a standard position's content surface (PositionContent.Surface,
+    /// which embeds CastleString) and therefore its content id do not depend on this field.
+    /// Only positions whose castling rooks are off a/h have surfaces naming the files.
     /// </summary>
     public sbyte WhiteKingRookFile = 7;
     public sbyte WhiteQueenRookFile = 0;
@@ -142,9 +137,8 @@ public sealed class Board
             BlackQueenRookFile = BlackQueenRookFile,
         };
         Array.Copy(Squares, b.Squares, 128);
-        // Copy the maintained bitboards too. Array.Copy of Squares alone would leave the clone's
-        // bitboards empty while its Squares were full — the exact silent divergence Set() exists
-        // to prevent, arriving through the back door.
+        // Copy the maintained bitboards too; copying Squares alone would leave the clone's
+        // bitboards empty while its Squares are full.
         Array.Copy(_bb, b._bb, _bb.Length);
         return b;
     }
@@ -194,17 +188,11 @@ public sealed class Board
 
         b.WhiteToMove = parts[1] == "w";
 
-        // CASTLING, INCLUDING CHESS960. Three forms appear in the wild and all three are
-        // read here:
-        //   KQkq   classic. Resolved to the OUTERMOST rook on that flank, which is the
-        //          X-FEN semantic and is a/h in ordinary chess — so nothing moves.
+        // Castling field, including Chess960. Three forms are read:
+        //   KQkq   classic. Resolved to the outermost rook on that flank (the X-FEN
+        //          meaning), which is a/h in ordinary chess.
         //   AHah   Shredder: the rook's own file, explicitly.
         //   mixed  X-FEN uses KQkq when unambiguous and a file letter when not.
-        //
-        // This used to throw on anything but KQkq. That was the right call at the time —
-        // replaying a Chess960 game from the standard array records a game that was never
-        // played — but it refused 1,866 games (0.8% of the corpus, concentrated in the
-        // chess.com archives, every "Freestyle" game). Now they are read.
         b.Castle = CastleRights.None;
         if (parts[2] != "-")
         {
@@ -246,9 +234,8 @@ public sealed class Board
 
         b.EpSquare = parts[3] == "-" ? -1 : AlgebraicToSquare(parts[3]);
 
-        // Named, not raw. A bare int.Parse here reports ".. near offset N. Expected an ASCII
-        // digit" with no clue which field or which game, which is what a malformed counter in
-        // one record out of 190,705 used to look like.
+        // Parsed with the field name and the FEN, so a malformed counter reports which
+        // field of which position failed.
         b.HalfmoveClock = ParseCounter(parts, 4, 0, "halfmove clock", fen);
         b.FullmoveNumber = ParseCounter(parts, 5, 1, "fullmove number", fen);
         return b;
@@ -286,9 +273,9 @@ public sealed class Board
     }
 
     /// <summary>
-    /// The castling field. KQkq while the rooks are on their standard files — which is
-    /// ALWAYS true of ordinary chess, so this is byte-identical to the pre-Chess960
-    /// output and position identity does not move. Shredder file letters otherwise.
+    /// The castling field: KQkq while the rooks are on their standard files, as in every
+    /// ordinary chess position, so standard position identity is unaffected by Chess960
+    /// support; Shredder file letters otherwise.
     /// </summary>
     public string CastleString()
     {
@@ -318,9 +305,8 @@ public sealed class Board
 
     /// <summary>
     /// The outermost rook of this colour on <paramref name="rank"/>, scanning away from the
-    /// king in <paramref name="toward"/>. This is what a bare K/Q means under X-FEN, and in
-    /// ordinary chess it lands on h/a — which is why classic FENs keep behaving exactly as
-    /// they did.
+    /// king in <paramref name="toward"/>. This is what a bare K/Q means under X-FEN; in
+    /// ordinary chess it is the h/a rook.
     /// </summary>
     private static int OutermostRook(Board b, int rank, int kingFile, int toward, string fen)
     {

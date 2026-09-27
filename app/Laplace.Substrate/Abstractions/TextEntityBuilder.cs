@@ -45,11 +45,10 @@ public sealed class TextEntityBuilder
         using var stage = IntentStage.NewBounded(nodeCount, grant);
         if (!stage.EmitContentTree(_tree, _sourceId, _existingBitmap, out _))
             throw new InvalidOperationException("native content tree emission failed");
-        // The same native owner supplies all identities, tiers, geometry and RLE
-        // carriers; an atomic root uses its actual floor placement.
-        // This synchronous interval accounts actual managed export allocations,
-        // including temporary decoder/coverage collections and retained row arrays.
-        // It is a conservative allocation reservation, not a live-heap estimate.
+        // The native stage supplies every identity, tier, coordinate and RLE carrier; an
+        // atomic root keeps its floor placement. The allocation counter brackets the managed
+        // export (decoders, temporaries and retained row arrays) as a conservative charge
+        // against the grant, not a live-heap estimate.
         long exportAllocationStart = GC.GetAllocatedBytesForCurrentThread();
         var entities = CopyTupleParser.DecodeEntityRows([stage.TupleBuffer(IntentStageTable.Entities)])
             .ToImmutableArray();
@@ -61,9 +60,8 @@ public sealed class TextEntityBuilder
             throw new InvalidOperationException("native content stage and managed metadata exhausted the row-export allocation grant");
         stage.VisitPhysicalityRows(remaining, (inputs, origins, retainedCaptureBytes) =>
         {
-            // The native capture and managed trajectory copies coexist. Reject
-            // impossible trajectory payload before copying, then measure actual
-            // row/array allocation during that same capture lifetime.
+            // The native capture and the managed trajectory copies coexist, so trajectory
+            // payload that cannot fit the remaining grant is rejected before copying.
             long trajectoryPayloadBytes = 0;
             for (int i = 0; i < inputs.Length; ++i)
                 trajectoryPayloadBytes = checked(trajectoryPayloadBytes
@@ -215,12 +213,9 @@ public sealed class TextEntityBuilder
             var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;
             physicalities = ps;
-            // Pillar 3a: text emits its content DAG (entities + physicalities/trajectory) ONLY.
-            // Sequence lives in the trajectory geometry; containment is containers_of + the
-            // point-match; PRECEDES is a MODEL relation (token couplings from Q/K/V/O/gate/up/
-            // down/norms), NOT text word-adjacency. Jamming word->word PRECEDES + CONTAINS onto
-            // text was the error that produced millions of redundant attestations (the re-witness
-            // grind) and duplicated what the geometry already holds losslessly. Deleted.
+            // Text emits only its content DAG (entities and physicalities with trajectories).
+            // Order, containment and adjacency are facts of the trajectory, so no PRECEDES or
+            // CONTAINS attestations are emitted for text.
             _ = witnessWeight;
             attestations = ImmutableArray<AttestationRow>.Empty;
             return true;

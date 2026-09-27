@@ -3,10 +3,9 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// A node's position in the semantic mesh — the factorization of meaning made
-/// navigable: surface → lemma → sense → ILI concept → frame/class/roleset → roles.
-/// "belongs_to" walks UP the ladder (the hubs this node plays for), "roster"
-/// walks DOWN (its members). Every link re-centers the drill-down.
+/// One link of an entity's mesh position. <c>belongs_to</c> links go up to the entities it
+/// is a sense, instance, kind, part, or role of; <c>roster</c> links go down to its members.
+/// Each link is a consensus cell with its standing.
 /// </summary>
 public sealed record MeshLink(
     [property: JsonPropertyName("id")] string Id,
@@ -20,8 +19,7 @@ public sealed record MeshResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("label")] string Label,
-    // The division this node belongs to: WordNet_Synset, FrameNet_Frame,
-    // VerbNet_Class, PropBank_Roleset, WordNet_Sense — or null for a bare surface.
+    // The label of this entity's stored type; null when it has none.
     [property: JsonPropertyName("hub_type")] string? HubType,
     [property: JsonPropertyName("belongs_to")] IReadOnlyList<MeshLink> BelongsTo,
     [property: JsonPropertyName("roster")] IReadOnlyList<MeshLink> Roster);
@@ -33,10 +31,9 @@ public sealed record TaxonomyNode(
     [property: JsonPropertyName("eff_mu")] decimal? EffMu);
 
 /// <summary>
-/// The IS_A tree around a topic: the chain of parents climbing to the root
-/// (the ladder), and the strongest children (the branches). Rooted at the
-/// topic's top synset when the topic itself is a bare surface — taxonomy lives
-/// on concepts, not spellings.
+/// The IS_A tree around a topic: the strongest-parent chain upward and the strongest
+/// children. A topic that realizes a concept is rooted at that concept
+/// (taxonomy.top_synset); otherwise at the topic itself.
 /// </summary>
 public sealed record TaxonomyResponse(
     [property: JsonPropertyName("object")] string Object,

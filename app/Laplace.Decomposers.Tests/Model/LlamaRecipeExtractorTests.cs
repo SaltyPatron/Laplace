@@ -5,10 +5,8 @@ using Xunit;
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// LlamaRecipeExtractor.Parse now reads config.json through the NATIVE recipe parser
-/// (#263/#264) instead of a second managed JSON pass. These tests pin two things:
-/// the field values it extracts, and — critically — that RecipeEntityId is unchanged,
-/// because that id is content-addressed and moving it would re-mint every recipe entity.
+/// <c>LlamaRecipeExtractor.Parse</c> reads config.json through the native recipe parser.
+/// These tests pin the extracted field values and the content-addressed RecipeEntityId.
 /// </summary>
 public sealed class LlamaRecipeExtractorTests : IDisposable
 {
@@ -65,9 +63,8 @@ public sealed class LlamaRecipeExtractorTests : IDisposable
         Assert.Equal(1e-05, r.RmsNormEps);
     }
 
-    // Identity guard: the recipe id is BLAKE3 over the canonical JSON. Canonicalization
-    // deliberately stayed managed when field extraction moved native (#552 tracks moving
-    // it); this test fails if either side drifts and starts re-minting recipe entities.
+    // The recipe id is BLAKE3 over the canonical JSON: key order does not change it,
+    // a changed value does.
     [Fact]
     public void RecipeEntityIdIsContentAddressedAndStable()
     {
@@ -112,8 +109,8 @@ public sealed class LlamaRecipeExtractorTests : IDisposable
         Assert.Contains("hidden_size", ex.Message);
     }
 
-    // A present-but-malformed value must fail loudly. Silently falling back would
-    // record a wrong architecture as if the source had asserted it.
+    // A present but malformed value is refused, not defaulted, so no architecture the
+    // source did not state is recorded as its testimony.
     [Fact]
     public void MalformedOptionalValueIsRefusedNotDefaulted()
     {

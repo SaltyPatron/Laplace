@@ -1,17 +1,6 @@
--- Retired flat-schema copies of index_usage_report / index_usage_detail.
--- Live surfaces are ops.index_usage_report / ops.index_usage_detail (GH #813/#764).
---
--- entity_type_counts_approx / partition_pressure were retired here when they had
--- zero callers (g4_dead_canonical). They are live again as ops.* — do NOT re-drop them.
---
--- WHY A DROP MODULE AND NOT JUST DELETING THE .sql.in FILES. Removing a file from the
--- manifests stops FUTURE installs from creating the function. It does nothing to a database
--- that already ran an upgrade carrying it — ALTER EXTENSION ... UPDATE has no mechanism to
--- retract a CREATE that a previous version performed. Those catalogs would keep the
--- instruments indefinitely, and the gate would never flag them again because the gate
--- scans SOURCE, not pg_proc.
---
--- IF EXISTS throughout: a fresh install never created these, and this module runs there too.
--- Qualify laplace.* so this cannot delete the ops.* replacements installed earlier.
+-- Drops the laplace.* copies of index_usage_report / index_usage_detail; the
+-- ops.* functions are the live ones. Removing a file from the manifests does
+-- not retract a CREATE an installed database already ran, so the drop is its
+-- own module. IF EXISTS throughout; qualified laplace.* so it cannot touch ops.*.
 DROP FUNCTION IF EXISTS laplace.index_usage_report(bigint);
 DROP FUNCTION IF EXISTS laplace.index_usage_detail(text, integer);

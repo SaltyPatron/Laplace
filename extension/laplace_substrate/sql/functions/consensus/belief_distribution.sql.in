@@ -44,7 +44,7 @@ CREATE OR REPLACE FUNCTION consensus.belief_distribution(
         p_k        integer DEFAULT 20)
     RETURNS TABLE(object_id bytea, p double precision, logit double precision,
                   eff_mu numeric, rd bigint, witness_count bigint)
--- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+-- No SET search_path: the clause blocks inlining and the consensus index path.
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH cand AS (

@@ -14,27 +14,22 @@ interface Props {
 }
 
 /**
- * The landing. It answers the two questions a first visit actually has — "what
- * is this?" and "what can I do with it?" — before offering any input box.
- *
- * "What is this" is answered by the live scoreboard: the size of the
- * witnessed graph and whether a source is folding right now. "What can I do" is the three modes, named for the
- * distinct thing each one does, plus concrete example reads that deep-link into
- * the Query console already set up. Nothing here is decorative — every number
- * and every mode is a real capability of the substrate underneath.
+ * Landing view: the live Scoreboard and band Leaderboards read the standing web;
+ * mode cards route to Chat, Query, Explore and Chess; example reads deep-link to
+ * the topic view, a matchup, or a seeded Query console.
  */
 export function HomeView({ onGoto }: Props) {
   const nav = useNavigate();
   const setQuerySeed = useAppStore((s) => s.setQuerySeed);
 
   const runExample = (seed: QuerySeed) => {
-    // Two-topic comparisons have a home of their own — the matchup page.
+    // A two-topic reason/is_a read opens the matchup view.
     if (seed.topic2 && (seed.shape === 'reason' || seed.shape === 'is_a')) {
       nav(`/explore/matchup/${encodeURIComponent(seed.topic)}/${encodeURIComponent(seed.topic2)}`);
       return;
     }
-    // Shaped reads still seed the console; a bare topic goes to the topic page,
-    // which shows every read at once instead of making you pick one.
+    // A bare topic or a describe/band_facts/define read opens the topic view, which
+    // runs every read of that topic; other shapes seed the Query console.
     if (!seed.shape || seed.shape === 'describe' || seed.shape === 'band_facts' || seed.shape === 'define') {
       nav(`/topic/${encodeURIComponent(seed.topic)}`);
       return;
@@ -45,8 +40,7 @@ export function HomeView({ onGoto }: Props) {
 
   return (
     <div className={styles.home}>
-      {/* section + h2, not header + h1: the page's sole h1 and header landmark
-          belong to the app shell — doubling them broke the heading outline. */}
+      {/* section + h2: the app shell owns the page's h1 and header landmark. */}
       <section className={styles.hero}>
         <div className={styles.heroCopy}>
           <div className={styles.eyebrow}>

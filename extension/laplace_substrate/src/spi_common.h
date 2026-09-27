@@ -140,18 +140,17 @@ eff_mu_display_fp(int64 rating, int64 rd)
     return rounded > INT64_MAX ? INT64_MAX : rounded < INT64_MIN ? INT64_MIN : (int64)rounded;
 }
 
-/* Edge strength is the Glicko-2 expected score against the certain neutral
- * reference. It has no fitted scale or artificial floor: rating supplies the
- * verdict and RD attenuates uncertain states toward 0.5 through Glicko's own
- * g(phi) law. This is the one foundry/explore strength conversion. */
+/* The strength of a consensus cell as an edge: its Glicko-2 expected score
+ * against a certain neutral reference. Rating supplies the verdict and RD pulls
+ * an uncertain cell toward 0.5 through g(phi); there is no fitted scale or floor. */
 static inline double
 laplace_edge_strength(int64 rating, int64 rd)
 {
     return laplace_glicko2_expected_score(rating, rd);
 }
 
-/* Convert an int64 fp value (multiple of 1e6 from eff_mu_display_fp sums)
- * to the same 3-dscale numeric eff_mu_display_numeric-derived sums had. */
+/* Renders an int64 fp value (e.g. a sum of eff_mu_display_fp terms) as the
+ * same 3-decimal numeric eff_mu_display_numeric produces. */
 static inline Datum
 fp_display_numeric(int64 fp)
 {

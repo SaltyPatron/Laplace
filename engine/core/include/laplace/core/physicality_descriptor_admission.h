@@ -102,7 +102,7 @@ typedef struct {
     /* Exact source-unit receipt. It remains provenance metadata and is never
      * promoted to a semantic entity/context merely to describe a physical form. */
     hash128_t source_unit_id;
-    /* Transport compatibility only. Physical-form provenance is not testimony,
+    /* Carried for transport only. Physical-form provenance is not testimony,
      * so trust does not participate in descriptor identity, storage or standing. */
     double source_trust;
 } physicality_descriptor_source_observation_t;
@@ -167,7 +167,7 @@ enum {
     PHYSICALITY_MATERIALIZATION_GEOMETRY = 5,
     PHYSICALITY_MATERIALIZATION_VIEWS = 6,
     PHYSICALITY_MATERIALIZATION_PROVENANCE = 7,
-    /* Source compatibility name; phase 7 now carries structural provenance, not attestations. */
+    /* Alias of PROVENANCE: this stage carries structural provenance, not attestations. */
     PHYSICALITY_MATERIALIZATION_OBSERVATIONS = PHYSICALITY_MATERIALIZATION_PROVENANCE,
     PHYSICALITY_MATERIALIZATION_SERIALIZATION = 8,
     PHYSICALITY_MATERIALIZATION_COMPLETE = 9

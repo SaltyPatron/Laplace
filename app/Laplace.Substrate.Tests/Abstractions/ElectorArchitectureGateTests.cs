@@ -4,23 +4,15 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Prompt-topic election is one operation. It now has one BODY — converse.elect — and
-/// the callers that used to copy its key order delegate to it instead.
+/// Prompt-topic election is one operation with one body, converse.elect; every caller
+/// delegates to it (one canonical implementation per operation fact, spec 37).
 ///
-/// This gate used to assert that five separate ORDER BY clauses matched each other. That
-/// is a check this file's own history shows is not enough: it can prove five copies are
-/// IDENTICAL but never that they are RIGHT, and W4 recorded the consequence — "the gate
-/// is honest and the thing it guards is hollow". Spec 37's implementation law is the
-/// standard being enforced here instead: "There is one canonical implementation per
-/// operation fact… Endpoint-specific helpers delegate to the same program."
-///
-/// So the assertions are now asymmetric by design:
 ///   - the canonical body carries the key order,
-///   - the delegates carry NO election of their own (a copy reappearing is a failure),
-///   - the language-filtered electors, which rank a genuinely different candidate set,
-///     still key-match the canonical order,
-///   - explicitly declared per-constituent consumers may read every coherence row, but
-///     may not collapse those rows through converse.elect or regrow the election order.
+///   - the delegates carry no election of their own,
+///   - the language-filtered electors, which rank a different candidate set, key-match
+///     the canonical order,
+///   - declared per-constituent consumers read every coherence row, but neither collapse
+///     them through converse.elect nor carry the election order.
 /// </summary>
 public sealed class ElectorArchitectureGateTests
 {
@@ -31,10 +23,9 @@ public sealed class ElectorArchitectureGateTests
         "extension/laplace_substrate/sql/functions/converse/elect.sql.in";
 
     /// <summary>
-    /// These rank a LANGUAGE-FILTERED candidate set — a different program over the same
-    /// coherence rows, so they are not collapsible into converse.elect without changing
-    /// what they decide. They remain key-pinned to the canonical order: same judgement,
-    /// different candidates.
+    /// These rank a language-filtered candidate set over the same coherence rows, so
+    /// they cannot collapse into converse.elect without changing what they decide. They
+    /// are key-pinned to the canonical order: same judgement, different candidates.
     /// </summary>
     private static readonly string[] LanguageFilteredElectors =
     [
@@ -43,19 +34,18 @@ public sealed class ElectorArchitectureGateTests
     ];
 
     /// <summary>
-    /// These consume the PER-CONSTITUENT result of prompt_coherence rather than electing
-    /// one prompt topic. prompt_coherence already returns the best witnessed sense for
-    /// each prompt token; preserving all of those rows is a different operation from
-    /// converse.elect's OP6/OP7 prompt collapse. The forward pass is intentionally here:
-    /// replacing it with converse.elect would discard prompt constituents before ROUTE.
+    /// These consume prompt_coherence per constituent rather than electing one topic:
+    /// it returns the best witnessed sense for each prompt token, and keeping all of those
+    /// rows differs from converse.elect's OP6/OP7 collapse. The forward pass is one: using
+    /// converse.elect there would discard prompt constituents before ROUTE.
     /// </summary>
     private static readonly string[] PerConstituentCoherenceConsumers =
     [
     ];
 
     /// <summary>
-    /// Sites that USED to carry a copy of the election and now delegate. Listed so that a
-    /// re-inlined ORDER BY is a test failure rather than a silent regression to six bodies.
+    /// Sites that call converse.elect; an ORDER BY on the election keys inside one of them
+    /// fails the gate.
     /// </summary>
     private static readonly string[] DelegatingSites =
     [
@@ -68,14 +58,8 @@ public sealed class ElectorArchitectureGateTests
         => LanguageFilteredElectors.Prepend(CanonicalElector);
 
     /// <summary>
-    /// Every signal is a separate ordered dimension. Combining specificity and folded
-    /// evidence in a product made an implicit weighting policy out of unrelated units;
-    /// keeping them explicit makes the election stable as the seed grows.
-    ///
-    /// This list changed on 2026-08-11 and the change is why this gate exists. The
-    /// weighted order landed in chat.sql.in ALONE, leaving the other four sites on the
-    /// old keys — precisely the drift this file was written to catch, and it caught it.
-    /// Collapsing the copies into converse.elect is what removes the drift surface.
+    /// Each signal is its own ordered key; no product combines specificity with folded
+    /// evidence, so no implicit weighting of unrelated units enters the election.
     /// </summary>
     private static readonly string[] ExpectedElectorKeys =
     [
@@ -137,8 +121,7 @@ public sealed class ElectorArchitectureGateTests
     }
 
     /// <summary>
-    /// The collapse itself. A delegate that regrows an ORDER BY on the election keys has
-    /// re-forked the operation, which is the exact drift the six-copy arrangement caused.
+    /// A delegate carrying an ORDER BY on the election keys has forked the operation.
     /// </summary>
     [Fact]
     public void DelegatingSites_CarryNoElectionOfTheirOwn()

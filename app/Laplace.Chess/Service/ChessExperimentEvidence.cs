@@ -46,11 +46,9 @@ internal sealed record ChessExperimentEvidence(string ExperimentId, string PgnEv
         return new(envelope.ExperimentId, envelope.PgnEvent, JsonSerializer.Serialize(envelope));
     }
 
-    // This is the application-owned receipt emitted by CutechessExperimentReceipt,
-    // using the same typed serialization boundary as ChessPlayerModelExport. The PGN
-    // corpus still goes through its grammar; no receipt fields are parsed as chess data.
-    // Extension values remain opaque so recording an older envelope contract cannot
-    // silently discard new execution observations or round their numeric values.
+    // The receipt CutechessExperimentReceipt writes, read through a typed serialization
+    // boundary. The PGN goes through its grammar; no receipt field is parsed as chess data.
+    // Unknown members stay opaque so they are recorded verbatim, numbers unrounded.
     private sealed record ReceiptEnvelope(
         [property: JsonPropertyName("formatVersion")] int FormatVersion,
         [property: JsonPropertyName("experimentId")] string? ExperimentId,

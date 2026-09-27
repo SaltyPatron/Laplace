@@ -4,8 +4,8 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Imperative-compose pipeline entry for non-orchestrator code (e.g. ModelTokenEdgeETL).
-/// Multi-phase sources use nested <see cref="ComposeDecomposerPhase{T}"/> types instead.
+/// Entry to the shared ingest pipeline for callers that compose imperatively rather than
+/// through a decomposer (e.g. ModelTokenEdgeETL).
 /// </summary>
 public static class IngestComposePipeline
 {
@@ -45,7 +45,7 @@ public static class IngestComposePipeline
 }
 
 /// <summary>
-/// Handler for the imperative-compose model: no content-tree probe, the record's compose
+/// Handler for imperative compose: no content-tree existence probe; the record's compose
 /// callback runs in DrainInto against the shared working-set builder.
 /// </summary>
 public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>

@@ -6,8 +6,8 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Attribute-oriented access to an XML tree produced by the registered grammar.
-/// This keeps source-specific witnesses on the common grammar admission path while
-/// leaving interpretation of element and attribute names to the vendor decomposer.
+/// Every XML source is parsed by the one registered grammar; only the interpretation of
+/// element and attribute names belongs to the provider.
 /// </summary>
 public static class XmlGrammarHelper
 {

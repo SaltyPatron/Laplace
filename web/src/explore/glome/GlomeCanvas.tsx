@@ -102,13 +102,12 @@ export function carrierDisplayPos(n: GlomeNode): [number, number, number] {
 }
 
 /**
- * Placement is a 3-D view of the real PointZM ball, not a flat XYZ slice.
+ * Placement is a 3-D view of the PointZM point in the closed 4-ball, not a flat XYZ slice.
  *
- * First rotate the actual 4-D point through X-M and Z-M planes so M remains
- * observable in both screen width and camera depth. Then use the rotated XYZ
- * direction with radius_origin as radial depth. This preserves the useful part
- * of the Aug-9 M-aware projection without discarding the coherence/interior
- * radius that the earlier glome-ball view exposed.
+ * The 4-D point is rotated through the X-M and Z-M planes so M shows in both screen
+ * width and camera depth, then placed along the rotated XYZ direction at radius_origin
+ * (the rotated point's own 4-norm when radius_origin is absent), so interior depth in
+ * the ball stays visible.
  */
 export function placementBallPos(
   n: GlomeNode,

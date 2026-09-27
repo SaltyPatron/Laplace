@@ -167,9 +167,8 @@ public sealed class GooseAdapter : IAgentTraceAdapter
             || !SqliteSniff.HasTable(conn, "messages"))
             yield break;
 
-        // Stream sessions and their messages in one ordered scan. Previously every
-        // session reopened a parameterized messages command, making container decode
-        // O(session count) database round trips before ingestion even started.
+        // Stream sessions and their messages in one ordered scan: one command per
+        // container, not one per session.
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT s.id, s.description, s.working_dir, s.model_config_json, "

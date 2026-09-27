@@ -1,7 +1,6 @@
--- Shared predicate for the ~21 functions that each reimplemented
--- `NOT consensus.refuted(c.rating, c.rd)` inline as a WHERE clause. Not a duplicate of
--- v_consensus_edges (which additionally requires object_id IS NOT NULL AND
--- eff_mu_raw > 0 -- a different, narrower filter for a different purpose).
+-- Consensus cells that are not refuted (NOT consensus.refuted). Unary cells
+-- and non-positive-but-unrefuted cells stay; v_consensus_edges is the narrower
+-- binary, positive-standing view.
 CREATE OR REPLACE VIEW laplace.v_consensus_unrefuted AS
 SELECT c.*
 FROM laplace.consensus c

@@ -8,11 +8,10 @@
 #include "consensus_scan.h"
 
 /*
- * Operand role is an explicit input coordinate, not inferred from identity.
- * Equal content may occur in the current observation, prior discourse, a
- * semantic seed, a physicality crossing, or generated working state.  Those
- * occurrences may address the same relation cell while remaining distinct
- * evidence routes.
+ * Operand role is an explicit input coordinate, never inferred from identity.
+ * One entity may occur in the observation, prior discourse, a semantic seed, a
+ * physicality crossing, a geometric neighbor or generated working state; each
+ * occurrence addresses the same consensus cell as a distinct evidence route.
  */
 typedef enum LaplaceQueryOperandRole
 {
@@ -25,13 +24,11 @@ typedef enum LaplaceQueryOperandRole
 } LaplaceQueryOperandRole;
 
 /*
- * One query-side occurrence binding to one typed candidate/value address.
- *
- * This is deliberately not a relevance scalar.  The exact prompt occurrence
- * ordinal, relation identity and direction survive beside pooled standing and
- * the underlying attestation outcome/source/context topology.  Consumers may
- * calculate a query-relative operator from these channels; they may not erase
- * the channel identities and call the result equivalent evidence.
+ * One COUPLE channel: an operand occurrence bound through one typed relation
+ * cell to one candidate. It is not a relevance scalar: occurrence ordinal,
+ * relation and direction stay beside the cell's consensus standing and the
+ * attestation outcome/source/context topology behind it, so a query-relative
+ * operator can be computed downstream without erasing which route it came by.
  */
 typedef struct LaplaceQueryChannel
 {
@@ -42,17 +39,17 @@ typedef struct LaplaceQueryChannel
     hash128_t relation;         /* typed relation; never a generic adjacency         */
     bool outbound;              /* anchor is subject when true, object when false     */
 
-    /* Closed-epoch pooled standing for this exact relation cell. Keep every
-     * Glicko coordinate typed; volatility is state, not a hidden ranking term. */
+    /* Consensus standing of this relation cell as four typed Glicko-2
+     * coordinates; volatility is state, not a ranking term. */
     int64 rating;
     int64 rd;
     int64 volatility;
     int64 witnesses;
 
-    /* Raw witnessed topology retained separately from pooled standing. The
-     * provenance root is a canonical digest over the exact bound witness rows,
-     * including source/context identity, outcome and occurrence count. It keeps
-     * equal-cardinality provenance substitutions from collapsing to one state. */
+    /* Attestation topology of the cell, kept apart from standing. The
+     * provenance root is a Merkle digest over the bound attestation rows
+     * (source, context, outcome, occurrences), so two witness sets of equal
+     * size but different testimony stay distinct. */
     int64 confirm_occurrences;
     int64 draw_occurrences;
     int64 refute_occurrences;
@@ -62,11 +59,10 @@ typedef struct LaplaceQueryChannel
     int32 distinct_contexts;
     hash128_t provenance_root;
 
-    /* Deterministic provider/calculation witnesses remain a distinct response
-     * plane inside the exact same relation cell. They are a typed subset of the
-     * raw witness topology above: storage stays source-attributed testimony,
-     * while COUPLE retains which response state came from claims qualified
-     * derivation/calculation. No scalar authority is implied here. */
+    /* The subset of the topology above whose attestations carry the
+     * derivation/calculation qualifier: a versioned calculation witnessing
+     * the same cell, reported as its own response rather than folded into the
+     * recorded observations. */
     int64 calculation_confirm_occurrences;
     int64 calculation_draw_occurrences;
     int64 calculation_refute_occurrences;
@@ -89,15 +85,14 @@ typedef struct LaplaceQueryEvidenceStats
 typedef struct LaplaceQueryState LaplaceQueryState;
 
 /*
- * Build a bounded typed Q->K/evidence field over every ordered occurrence in
- * operands.  Candidate generation is bounded per occurrence after exact
- * relation-cell election.  Incoming asymmetric relations remain admissible as
- * evidence and are marked outbound=false; they are not silently inverted into
- * symmetric traversal.
+ * COUPLE over every ordered occurrence in operands: both directions of the
+ * consensus relation cells touching each operand, bounded to `fanout`
+ * candidates per (occurrence, relation, direction) plane, then bound to their
+ * attestation topology. Incoming cells are kept with outbound=false, never
+ * inverted into symmetric traversal.
  *
- * types == NULL means every stored relation family is eligible for candidate
- * generation.  An explicitly empty type array means the empty relation set.
- * The caller owns the returned array in CurrentMemoryContext.
+ * types == NULL makes every stored relation eligible; an empty array is the
+ * empty relation set. The result is allocated in CurrentMemoryContext.
  */
 extern LaplaceQueryChannel *laplace_query_evidence_channels(
     ArrayType *operands,
@@ -107,10 +102,9 @@ extern LaplaceQueryChannel *laplace_query_evidence_channels(
     LaplaceQueryEvidenceStats *stats);
 
 /*
- * Retain the query-side evidence field across one cognition pass.  Initial
- * prompt occurrences are admitted in one batch.  A selected value may then be
- * appended as a new working-state occurrence without rescanning unchanged
- * query operands; only the newly active identity is probed for proposal state.
+ * The coupled field retained across one cognition pass. Initial operands
+ * couple in one batch; selected values are appended later as new occurrences
+ * and only they are coupled, without rescanning earlier operands.
  */
 extern LaplaceQueryState *laplace_query_state_create(
     ArrayType *operands,
@@ -119,10 +113,9 @@ extern LaplaceQueryState *laplace_query_state_create(
     LaplaceQueryEvidenceStats *stats);
 
 /*
- * Rebind the already-scanned initial operands to their exact input roles.  The
- * role vector is positional and must match the retained operand array exactly.
- * This annotates the typed channels; it never changes standing or relation
- * semantics and therefore cannot turn discourse into testimony.
+ * Assign input roles to the retained operands (positional, one per operand)
+ * and relabel their channels. Roles annotate channels only; standing and
+ * attestations are untouched, so a role never becomes testimony.
  */
 extern void laplace_query_state_set_operand_roles(
     LaplaceQueryState *state,
@@ -134,8 +127,8 @@ extern void laplace_query_state_extend(
     Datum selected,
     LaplaceQueryEvidenceStats *stats);
 
-/* One indexed read for a complete admitted frontier. Scalar extension delegates
- * here; ordered duplicates and their occurrence ordinals are preserved. */
+/* Couple a whole selected frontier in one set read, as working-state
+ * occurrences; duplicates keep their own ordinals. */
 extern void laplace_query_state_extend_batch(
     LaplaceQueryState *state,
     ArrayType *selected,
@@ -152,16 +145,13 @@ extern const LaplaceQueryChannel *laplace_query_state_channels(
     int *count);
 
 /*
- * Adjudicate a bounded candidate set against every active ordered query
- * occurrence.  Unlike proposal generation, this reads every exact stored cell
- * between the active operands and candidates, including negative/refuted
- * standing, then binds the raw witness/source/context topology for those exact
- * typed cells.  This is the K->V/evidence binding stage after a bounded Q->K
- * proposal; it must not be replaced by a second top-K adjacency scan.
+ * Evidence for a proposed candidate set against every retained occurrence.
+ * Unlike coupling, this reads every stored cell between operands and
+ * candidates in both directions, including negative standing, with no fanout
+ * bound, then binds each cell's attestation topology.
  *
- * candidates is a 1-D bytea[] of addressed identities.  NULL means invalid;
- * empty means no candidate evidence.  Returned channels belong to the caller's
- * CurrentMemoryContext.
+ * candidates is a 1-D bytea[]; NULL is an error, empty yields no channels.
+ * The result is allocated in CurrentMemoryContext.
  */
 extern LaplaceQueryChannel *laplace_query_state_candidate_evidence(
     const LaplaceQueryState *state,
@@ -169,8 +159,8 @@ extern LaplaceQueryChannel *laplace_query_state_candidate_evidence(
     int *count,
     LaplaceQueryEvidenceStats *stats);
 
-/* Distinct candidate endpoints / relation ids represented by retained typed
- * proposal channels. Returned arrays are allocated in the caller's context. */
+/* Distinct candidates / relation ids across the retained channels, allocated
+ * in CurrentMemoryContext. */
 extern ArrayType *laplace_query_state_candidates(const LaplaceQueryState *state);
 extern ArrayType *laplace_query_state_relation_types(const LaplaceQueryState *state);
 

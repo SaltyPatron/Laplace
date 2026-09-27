@@ -5,15 +5,15 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Monolith / few-file relation-triple source. Subclass implements
-/// <see cref="RelationTripleDecomposer.ExtractFileAsync"/> (one file → records) and
-/// <see cref="RelationTripleDecomposer.ListInputFiles"/>. Compose/dedupe/COPY is
-/// <see cref="RelationTripleHandler"/> via the shared pipeline.
+/// Provider base for relation-triple sources read as one or a few files. A subclass
+/// implements <see cref="RelationTripleDecomposer.ExtractFileAsync"/> (one file → records)
+/// and <see cref="RelationTripleDecomposer.ListInputFiles"/>; compose, dedupe and bulk COPY
+/// are <see cref="RelationTripleHandler"/> in the shared pipeline.
 /// </summary>
 public abstract class RelationTripleDecomposerBase : RelationTripleDecomposer;
 
 /// <summary>
-/// Relation-triple lane with sealed Initialize from compile-time
+/// Relation-triple provider whose Initialize is sealed and driven by compile-time
 /// <typeparamref name="TSource"/> / <typeparamref name="TScope"/>.
 /// </summary>
 public abstract class RelationTripleDecomposerBase<TSource, TScope> : RelationTripleDecomposerBase
@@ -51,10 +51,10 @@ public abstract class RelationTripleDecomposerBase<TSource, TScope> : RelationTr
 }
 
 /// <summary>
-/// Multi-file relation-triple source. Per-file unit is
-/// <see cref="DecomposerMultiFile{TRecord}.ExtractFileAsync"/> — same masticate-to-
-/// <see cref="RelationTripleRecord"/> job as the monolith base; the pool calls it once
-/// per path. Handler is always <see cref="RelationTripleHandler"/>.
+/// Multi-file relation-triple provider. The per-file unit is
+/// <see cref="DecomposerMultiFile{TRecord}.ExtractFileAsync"/>, which yields
+/// <see cref="RelationTripleRecord"/>s; the shared multi-file pool calls it once per path,
+/// and <see cref="RelationTripleHandler"/> composes and persists them.
 /// </summary>
 public abstract class RelationTripleMultiFileDecomposerBase<TSource, TScope>
     : DecomposerMultiFile<RelationTripleRecord, TSource, TScope>

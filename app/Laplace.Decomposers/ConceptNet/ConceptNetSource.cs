@@ -14,8 +14,8 @@ public readonly struct ConceptNetSource : ISeedSource
         TrustClassRegistry.Id("UserCuratedResource");
 
     /// <summary>ConceptNet /r/ name → substrate relation canonical.</summary>
-    // Spelled once each: the positive mapping and the Not* denial that refutes it must
-    // never be able to drift onto different relations.
+    // Spelled once each, so a positive mapping and the Not* denial that refutes it cannot
+    // drift onto different relations.
     private const string Desires = "DESIRES";
     private const string UsedFor = "USED_FOR";
     private const string CapableOf = "CAPABLE_OF";
@@ -57,19 +57,10 @@ public readonly struct ConceptNetSource : ISeedSource
         ["MadeOf"] = "MadeOf",
         ["ReceivesAction"] = "RECEIVES_ACTION",
         ["InstanceOf"] = "IS_INSTANCE_OF",
-        // A DENIAL IS AN OUTCOME, NOT A DIFFERENT RELATION.
-        //
-        // These four mapped to NOT_DESIRES / NOT_USED_FOR / NOT_CAPABLE_OF /
-        // NOT_HAS_PROPERTY -- separate POSITIVE relation types. "a fish cannot walk" then
-        // folded into a different consensus cell than "a fish can swim", so the denial
-        // could never contest the assertion it denies: 29,547 rows of negative evidence
-        // that adjudicated nothing.
-        //
-        // They now map onto the relation they deny, and NegatedRelations below flips the
-        // sign of the source's own weight. laplace_score_fp(v, m) = 0.5*(1 + v/(m+|v|)),
-        // so a negative magnitude scores below 0.5 and folds as a Refute whose strength is
-        // ConceptNet's own confidence -- the sign channel the format always had and that
-        // the full 34M-row file never once used (0 negative weights).
+        // A denial is an outcome, not a different relation: each Not* maps onto the relation
+        // it denies and NegatedRelations flips the sign of ConceptNet's weight.
+        // laplace_score_fp(v, m) = 0.5*(1 + v/(m+|v|)), so a negative magnitude scores below
+        // 0.5 and folds as a refutation into the same cell the positive form confirms.
         ["NotDesires"] = Desires,
         ["NotUsedFor"] = UsedFor,
         ["NotCapableOf"] = CapableOf,
@@ -78,9 +69,8 @@ public readonly struct ConceptNetSource : ISeedSource
     };
 
     /// <summary>
-    /// ConceptNet relations whose assertion is a DENIAL of the mapped relation. The
-    /// magnitude is negated so the row folds as a Refute against the very cell the
-    /// positive form asserts.
+    /// ConceptNet relations whose assertion denies the mapped relation. The magnitude is
+    /// negated so the row folds as a refutation into the cell the positive form confirms.
     /// </summary>
     public static readonly HashSet<string> NegatedRelations = new(StringComparer.Ordinal)
     {

@@ -1,19 +1,13 @@
--- BEGIN ATOMIC: GH #764.
--- Census lives in ops (purpose), not the product/extension dump schema.
+-- Row-count census of the four substrate relations.
 DROP FUNCTION IF EXISTS laplace.substrate_counts();
 
 CREATE OR REPLACE FUNCTION ops.substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Planner estimates (pg_class.reltuples), NOT count(*). Full scans on 100M+ unvacuumed
-    -- tables hung every ingest tail. Read the LEAVES: a partitioned parent can retain
-    -- reltuples=-1 even while its 64 children contain millions of rows. Clamping that parent
-    -- value made a populated physicalities table appear as zero in the operator UI.
-    --
-    -- ANALYZE bounds estimate error; ops.evidence_count()/source_id() provide source precision.
-    -- Metric keys are relation roles (entities/…); oids name current storage homes until
-    -- the table cut. No install-time schema placeholder, no SET, no Brand.table metric labels.
+    -- Planner estimates (pg_class.reltuples summed over leaves), never count(*):
+    -- a partitioned parent can keep reltuples = -1 while its leaves hold rows.
+    -- ANALYZE bounds the error; ops.evidence_count() gives exact per-source counts.
     WITH targets(metric, relid, ordinal) AS (
         VALUES
             ('entities(ESTIMATE)'::text,      'laplace.entities'::regclass,      1),

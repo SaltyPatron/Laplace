@@ -750,13 +750,23 @@ internal sealed class SubstrateTools : IMcpTools
                 occurrenceKey: occurrenceKey, phase: ConversationContent.TurnPhase.Input)
             .GetAwaiter().GetResult())
             return ("The prompt did not commit to the substrate.", true);
-        var reply = inspection ? NpgsqlSubstrateReads.ChatAsync(
-            _db, prompt, sessionId.ToBytes(), default,
-            shape: shape, bands: bands, elaborate: elaborate,
-            language: language).GetAwaiter().GetResult()
-            : NpgsqlSubstrateReads.ForwardTurnAsync(
-                _db, prompt, sessionId.ToBytes(), steps, stride, spread, topK, default)
-                .GetAwaiter().GetResult();
+        string? reply;
+        JsonObject? terminal = null;
+        if (inspection)
+        {
+            reply = NpgsqlSubstrateReads.ChatAsync(
+                _db, prompt, sessionId.ToBytes(), default,
+                shape: shape, bands: bands, elaborate: elaborate,
+                language: language).GetAwaiter().GetResult();
+        }
+        else
+        {
+            // The same observed native invocation the HTTP chat surface reads: the
+            // reply is its emitted surfaces and the terminal row is its disposition,
+            // so an empty turn states why (unresolved, ambiguous, budget_exhausted)
+            // instead of collapsing to an absent reply.
+            (reply, terminal) = ObservedTurn(prompt, sessionId.ToBytes(), steps, stride, spread, topK);
+        }
 
         bool witnessed = string.IsNullOrEmpty(reply) || TurnCloser.CloseAsync(
             McpTenant, sessionId, prompt, reply, occurrenceKey: occurrenceKey,
@@ -768,8 +778,52 @@ internal sealed class SubstrateTools : IMcpTools
             ["session"] = sessionKey,
             ["witnessed"] = witnessed
         };
+        if (terminal is not null) result["forward"] = terminal;
         if (!witnessed) result["error"] = "The turn did not commit to the substrate.";
         return (result.ToJsonString(), !witnessed);
+    }
+
+    private (string? Reply, JsonObject? Terminal) ObservedTurn(
+        string prompt, byte[] session, int steps, int stride, double spread, int topK)
+    {
+        var text = new StringBuilder();
+        int emitted = 0;
+        NpgsqlSubstrateReads.ForwardTurnObservedRow? couple = null, last = null;
+        var rows = NpgsqlSubstrateReads.ForwardTurnObservedStepsAsync(
+            _db, prompt, session, steps, stride, spread, topK, default).GetAsyncEnumerator();
+        try
+        {
+            while (rows.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+                var row = rows.Current;
+                if (row.Event == "couple") couple = row;
+                if (row.Event is "complete" or "unresolved" or "ambiguous" or "budget_exhausted")
+                    last = row;
+                if (row.Event != "emit" || row.Surface is null) continue;
+                text.Append(row.Surface);
+                ++emitted;
+            }
+        }
+        finally { rows.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+
+        JsonObject? terminal = last is not { } t ? null : new JsonObject
+        {
+            ["event"] = t.Event,
+            ["disposition"] = t.Disposition,
+            ["completion"] = t.Completion,
+            ["root_id"] = t.RootIdHex,
+            ["program_id"] = t.ProgramIdHex,
+            ["required_obligations"] = t.RequiredObligations,
+            ["satisfied_obligations"] = t.SatisfiedObligations,
+            ["ordered_context"] = t.OrderedContextCount,
+            ["coupled_candidates"] = couple?.CandidateCount,
+            ["coupled_relation_families"] = couple?.RelationFamilies,
+            ["coupled_sources"] = couple?.SupportSources,
+            ["semantic_act_id"] = t.SemanticActIdHex,
+            ["output_fingerprint"] = t.OutputFingerprintHex,
+            ["emitted"] = emitted,
+        };
+        return (emitted == 0 ? null : text.ToString(), terminal);
     }
 
     // The agent write lane: mint a note as witnessed content and fold it, so the

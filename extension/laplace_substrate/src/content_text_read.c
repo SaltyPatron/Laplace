@@ -107,16 +107,16 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
                 if(node.parent_idx==TIER_TREE_INVALID && hash128_equals(&node.id,&root)) root_index=i;
             }
             if(root_index==TIER_TREE_INVALID) elog(ERROR,"text containment: missing root node");
-            /* Singleton sentence/document wrappers share their child's ID.
-             * Match the canonical node's actual operands, as ingestion does. */
+            /* A one-child composition is its child: collapse to the node whose
+             * children are the real operands. */
             root_index=laplace_tier_tree_collapse_index(tree,root_index);
             if(nodes>MaxAllocSize/sizeof(tier_node_view_t)) elog(ERROR,"text containment: input exceeds allocation capacity");
             hash128_t *pattern=palloc(Max(nodes,1)*sizeof(hash128_t));
             Datum *members=palloc(Max(nodes,1)*sizeof(Datum));
             tier_node_view_t *children=palloc(Max(nodes,1)*sizeof(tier_node_view_t));
             int width=0;
-            /* Immediate children retain word/grapheme boundaries, punctuation,
-             * whitespace, order and repeated IDs exactly as ingestion composed them. */
+            /* The pattern is the collapsed root's immediate children in text
+             * order, repeats included, as the recipe composed them. */
             for(uint32 i=0;i<nodes;++i)
             {
                 tier_node_view_t node;
@@ -146,9 +146,8 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
         PG_END_TRY();
         tier_tree_free(tree);
     }
-    /* A word may be witnessed as an operand of a name, that name as an operand
-     * of another composition. Ascend by complete native frontiers, not by
-     * querying the word's character IDs against every higher-tier manifest. */
+    /* Containers are themselves contained: ascend by whole frontiers through
+     * the membership read until no new entity appears. */
     ArrayType *frontier=set_array(match.ids);
     for(;;)
     {
@@ -168,8 +167,8 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
     }
     long total=hash_get_num_entries(match.ids);
     if(total>MaxAllocSize/sizeof(hash128_t)) elog(ERROR,"text containment: result exceeds allocation capacity");
-    /* Input composition can name an as-yet unobserved root. Return only stored
-     * entities, with one final typed facet read under the same snapshot. */
+    /* The composed root may not be stored: keep only ids with stored facets,
+     * read in one set query. */
     bool spi_top=false;
     if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT) elog(ERROR,"text containment: connect failed");
     Oid argtypes[]={BYTEAARRAYOID};Datum args[]={PointerGetDatum(set_array(match.ids))};
@@ -180,7 +179,7 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
     {
         bool isnull;
         hash128_t id=datum_to_hash128(SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&isnull));
-        /* The same identity can occur at multiple physical tiers. */
+        /* An id can return more than one facet row. */
         bool found;
         hash_search(match.ids,&id,HASH_REMOVE,&found);
         if(found) out[(*count)++]=id;

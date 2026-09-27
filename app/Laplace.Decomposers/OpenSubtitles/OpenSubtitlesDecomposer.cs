@@ -8,8 +8,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.OpenSubtitles;
 
 /// <summary>
-/// Multi-file aligned-corpus source. Each language-pair zip is decomposed by one
-/// per-file worker into bounded ordered alignment blocks; files run concurrently.
+/// Provider for aligned subtitle corpora. Each language-pair zip is one file of the shared
+/// multi-file ingest, read into bounded ordered alignment blocks; files run concurrently.
 /// </summary>
 public sealed class OpenSubtitlesDecomposer
     : DecomposerMultiFile<AlignedSubtitleBlock, OpenSubtitlesSource, FullScope>, IIngestInventoryProvider
@@ -59,9 +59,8 @@ public sealed class OpenSubtitlesDecomposer
         [EnumeratorCancellation] CancellationToken ct)
     {
         string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
-        // The generic cap is record-boundary based. Use one pair per record only for
-        // bounded diagnostic runs so a cross-file cap cannot overshoot by a partial block;
-        // full ingestion retains the 512-pair amortization.
+        // The input cap counts records, so a capped run uses one pair per record and
+        // cannot overshoot by a partial block; an uncapped run packs 512 pairs per record.
         int blockPairs = options.MaxInputUnits > 0 ? 1 : OpenSubtitlesZipIngest.BlockPairs;
         await foreach (var record in OpenSubtitlesZipIngest.ReadZipBlocksAsync(
                            filePath, pairStem, blockPairs, ct))

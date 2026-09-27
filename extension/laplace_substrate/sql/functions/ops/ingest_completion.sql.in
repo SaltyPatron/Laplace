@@ -1,6 +1,6 @@
--- Completion reads over laplace.ingest_unit_completion / ingest_layer_completion.
--- Operational state only: these answer "has this witness finished admitting",
--- never "is this true".
+-- Completion reads over ingest_unit_completion / ingest_layer_completion:
+-- operational state that answers "has this witness finished admitting", never
+-- "is this true".
 
 -- Has the witness completed the layer? NULL witness asks whether any witness has.
 CREATE OR REPLACE FUNCTION ops.layer_completed(p_witness bytea, p_layer int)

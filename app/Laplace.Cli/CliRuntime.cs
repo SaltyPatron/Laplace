@@ -20,9 +20,8 @@ internal static class CliRuntime
         Services.GetRequiredService<ISeedDecomposerResolver>();
 
     /// <summary>
-    /// The one CLI logger factory. ConsoleAndFile opens a file sink, so calling it per
-    /// command gave the process several independent Serilog pipelines writing the same
-    /// laplace-cli.csv concurrently. Lazy so nothing is opened for commands that never log.
+    /// The process-wide CLI logger factory. ConsoleAndFile opens a file sink, so there is
+    /// exactly one; lazy so commands that never log open nothing.
     /// </summary>
     private static readonly Lazy<ILoggerFactory> _loggerFactory =
         new(() => Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli"), isThreadSafe: true);
@@ -38,10 +37,8 @@ internal static class CliRuntime
     }
 
     /// <summary>
-    /// The CLI is an ingest path: hours-long COPY and fold statements are legitimate, so
-    /// the timeout stays unbounded and auto-prepare stays off. Byte-identical to the bare
-    /// install string it replaced — routed through the shared policy so there is one place
-    /// the choice is made rather than four.
+    /// Connection string under the shared Ingest access policy: long COPY and fold
+    /// statements are expected, so the timeout is unbounded and auto-prepare is off.
     /// </summary>
     public static string ConnString
         => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);

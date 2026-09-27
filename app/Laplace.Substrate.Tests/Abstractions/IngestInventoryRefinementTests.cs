@@ -185,8 +185,8 @@ public sealed class IngestInventoryRefinementTests
         inv.PublishObservedFloor(191_000);
         Assert.Equal(191_200, inv.EffectiveTotalInputUnits);
 
-        // Exact refinement may lawfully correct a sampled overestimate downward, but it
-        // can never move below units extraction has already observed.
+        // Exact refinement may correct a sampled overestimate downward, but never below
+        // the units extraction has already observed.
         var overestimated = IngestInventory.Single(250_000, "games");
         overestimated.PublishObservedFloor(190_705);
         overestimated.PublishExactTotal(190_000);

@@ -1,15 +1,9 @@
--- Ops logging, SQL-queryable (GH #601, campaign Workstream 1).
+-- The PostgreSQL csvlog is exposed read-only through file_fdw in the `ops` schema. Logs
+-- remain files on disk; no log row is written into a substrate table. The `ops` schema
+-- describes the deployment, not content or consensus.
 --
--- Logs stay plain files: if the database is down you still `less` the .log. They become
--- QUERYABLE through Postgres via file_fdw reading the csvlog sibling — no third-party log
--- service, and NO log rows are ever written into substrate tables. This is app-metadata
--- (the `ops` schema, DbUp), NOT the substrate extension: it describes the deployment, not
--- content/consensus. See db/migrations app_billing for the same app-schema precedent.
---
--- csvlog is enabled in the bootstrap managed block (log_destination = 'stderr,csvlog');
--- this migration applies cleanly whether or not that reload has reached the cluster yet —
--- repoint_pg_log() is a no-op until csvlog is live, then it aims ops.pg_log at the current
--- rotated file. DbUp wraps each script in one transaction.
+-- repoint_pg_log() returns a status string while csvlog is inactive, so this script applies
+-- before or after log_destination includes csvlog.
 
 CREATE SCHEMA IF NOT EXISTS ops;
 
@@ -17,9 +11,8 @@ CREATE EXTENSION IF NOT EXISTS file_fdw;
 
 CREATE SERVER IF NOT EXISTS ops_log_files FOREIGN DATA WRAPPER file_fdw;
 
--- The 26-column Postgres csvlog shape (verbatim from file-fdw.sgml's worked example, PG 18).
--- The rotating filename is set live by ops.repoint_pg_log(); the placeholder below is never
--- read (a SELECT before the first repoint returns "file not found", which is the honest state).
+-- The 26-column PostgreSQL csvlog shape. The filename is set by ops.repoint_pg_log(); until
+-- then a SELECT reports the file as missing.
 CREATE FOREIGN TABLE IF NOT EXISTS ops.pg_log (
     log_time timestamp(3) with time zone,
     user_name text,
@@ -50,11 +43,9 @@ CREATE FOREIGN TABLE IF NOT EXISTS ops.pg_log (
 ) SERVER ops_log_files
   OPTIONS (filename 'ops_pg_log_awaiting_repoint.csv', format 'csv');
 
--- Aim ops.pg_log at the cluster's CURRENT csvlog file. The collector rotates the file
--- (timestamped name), so this is re-run after each rotation to follow it — call it from a
--- postmaster-start hook or a cron, or by hand. Safe to call anytime: returns a status
--- string instead of raising when csvlog is not enabled, so the migration and any scheduler
--- never fail just because logging config hasn't caught up.
+-- Points ops.pg_log at pg_current_logfile('csvlog'). The collector rotates to timestamped
+-- names, so this must run again after each rotation. Returns a status string instead of
+-- raising when csvlog is not active.
 CREATE OR REPLACE FUNCTION ops.repoint_pg_log()
     RETURNS text
     LANGUAGE plpgsql AS $$
@@ -71,7 +62,3 @@ $$;
 
 SELECT ops.repoint_pg_log();
 
--- ops.app_log (the .NET side) is intentionally NOT created here: it reads a stable-filename
--- CSV sink that the shared Generic Host + logging foundation introduces (GH #602, Workstream
--- 2). A foreign table over a file no process writes would be dead scaffolding — it lands in
--- the same `ops` schema once that sink exists.

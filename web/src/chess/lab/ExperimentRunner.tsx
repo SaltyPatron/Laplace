@@ -124,15 +124,14 @@ function requiresFor(exp: LabExperiment | undefined): string[] {
 }
 
 export interface ExperimentRunnerProps {
-  /** Which category blocks this surface owns. Every lab operation lives in exactly one. */
+  /** Lab categories shown here; each experiment kind belongs to exactly one category. */
   categories: LabCategory[];
   initialKind: string;
 }
 
 /**
- * Pick an experiment, set its parameters, run it, watch the feed. Shared by every lab
- * surface that is "a list of jobs with forms" — the external gauntlet is not one of those,
- * which is why it has its own view instead of a seventh card in this grid.
+ * Pick an experiment from the given categories, set its parameters, start it as a server
+ * job, and stream its feed.
  */
 export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerProps) {
   const importSurface = categories.length === 1 && categories[0] === 'import';
@@ -206,8 +205,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
       ? 'Enter at least two characters for a FIDE search'
       : null;
 
-  // Only this surface's own runs: an experiments list that also showed gauntlet jobs is
-  // precisely the mixing this split undoes.
+  // Jobs whose kind belongs to one of this runner's categories.
   const visibleJobs = useMemo(
     () => jobs.filter((j) => {
       const exp = experimentFor(j.kind);
@@ -293,9 +291,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
 
   return (
     <div className={styles.runner}>
-      {/* Only when something on THIS surface needs an external binary. The strip used to
-          list cutechess, Stockfish and Qt above a page of in-process experiments that touch
-          none of them; binary readiness now lives on the surface that depends on it. */}
+      {/* Server binary readiness, shown only for binaries an experiment in these categories requires. */}
       {catalog && relevantEngines.length > 0 && (
         <section className={styles.engineBar} aria-label="Server engine status">
           <span className={styles.engineBarLabel}>Server tools</span>

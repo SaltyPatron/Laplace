@@ -1,6 +1,6 @@
--- Ranked surface sample for a source×tier (GH #813/#1008). Census answers
--- "how many"; this answers "what do they look like?". Source/tier/type are
--- structural interpretations; canonical entity identity is id-only.
+-- The entities one source attests at one tier, ranked by that source's
+-- observation count, with entity and type realized in one batch. Relation-law
+-- subjects are excluded. Tier and source select; identity is the id alone.
 DROP FUNCTION IF EXISTS laplace.surface_sample(bytea, smallint, int);
 
 CREATE OR REPLACE FUNCTION ops.surface_sample(

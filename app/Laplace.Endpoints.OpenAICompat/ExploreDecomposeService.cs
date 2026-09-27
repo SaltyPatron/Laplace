@@ -7,19 +7,17 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-// The computed geometric anchor for a surface, produced in-process by
-// TextDecomposer + HashComposer against the t0 perfcache -- NO database. Every
-// codepoint is pinned on S3 and the parent coord/trajectory are composed, so a
-// word that was never witnessed (content hash resolves but exists=false) still
-// has a fully determined position and shape. This is what the not-found explorer
-// hands to structural.explore_anchor_neighbors as a bound anchor.
+// The geometric anchor of a surface, computed in-process by TextDecomposer and
+// HashComposer over the T0 perfcache with no database read. Content determines the
+// id, coordinate, and realized curve, so an id that was never witnessed still has
+// them; structural.explore_anchor_neighbors takes them as bound parameters.
 internal sealed record ExploreAnchor(
     string WordIdHex,
     double Cx, double Cy, double Cz, double Cm,
     string? TrajectoryWkt,
     IReadOnlyList<DecomposeNodeRow> Decomposition);
 
-// A candidate surface that resolves to a witnessed word id.
+// A candidate surface whose content id exists in the substrate.
 internal sealed record WitnessedWord(string Surface, string IdHex, long Witnesses);
 
 internal sealed class ExploreDecomposeService
@@ -115,13 +113,13 @@ internal sealed class ExploreDecomposeService
     }
 
     /// <summary>
-    /// Exact, database-independent storage proof for a text surface.  The same
-    /// TextDecomposer + HashComposer kernels compute identity, 4-D placement and
-    /// Hilbert locality; the same flagged-RLE trajectory builder emits the
-    /// 212-bit-per-vertex carrier that Content witnessing writes.
+    /// Storage proof for a text surface, computed without the database by the same
+    /// TextDecomposer and HashComposer kernels that compute identity, 4-D placement, and
+    /// Hilbert locality, and the same flagged-RLE builder that emits the 212-bit-per-vertex
+    /// GeometryZM carrier Content witnessing writes.
     ///
-    /// Packed vertices are identity cargo, never spatial positions.  Realized
-    /// vertices are the immediate children's actual 4-D coordinates.
+    /// Packed vertices carry child identity, not position. Realized vertices are the
+    /// immediate children's 4-D coordinates.
     /// </summary>
     public StorageProofResponse StorageProof(string text)
     {
@@ -373,13 +371,11 @@ internal sealed class ExploreDecomposeService
             Nodes: rows);
     }
 
-        // Compute the anchor for a surface: the natural-unit centroid coord + a
-        // REALIZED grapheme-level curve WKT (LINESTRING ZM of child live coords),
-        // plus the decomposition tree for display. This is the Frechet operand
-        // (entity_curve shape), NOT the packed physicalities.trajectory manifest
-        // (Rule #3). Prefers tier-1 grapheme coords; falls back to tier-0
-        // codepoints; null for a degenerate <2-point curve (Frechet skipped,
-        // geodesic still runs).
+        // The anchor: the natural unit's centroid coordinate, the realized curve as
+        // LINESTRING ZM over tier-1 child coordinates (tier 0 when tier 1 has fewer than
+        // two points), and the emitted decomposition. The curve is the Fréchet operand,
+        // not the packed trajectory manifest; it is null below two points, leaving only
+        // the geodesic arm.
         public ExploreAnchor ComputeAnchor(string text)
     {
         ArgumentException.ThrowIfNullOrEmpty(text);
@@ -413,11 +409,8 @@ internal sealed class ExploreDecomposeService
         for (uint i = 0; i < tree.NodeCount; i++)
         {
             var n = tree.GetNode(i);
-            // Tier is a floor. Single-child, span-identical wrappers collapse to
-            // their child and are not stored substrate nodes. Showing those internal
-            // parser frames made one word appear to contain itself at tiers 3 and 4
-            // (and every one-codepoint grapheme appear twice), even though all rows
-            // shared the same identity. Display exactly the nodes the content spine emits.
+            // A one-child composition is its child, so only nodes the content spine
+            // emits as compositions are listed.
             if (n.Tier != 0 && !tree.ShouldEmitCompositional(i)) continue;
             rows.Add(new DecomposeNodeRow(
                 Ordinal: i,
@@ -460,9 +453,8 @@ internal sealed class ExploreDecomposeService
 
     private static void EnsurePerfcache()
     {
-        // The shared initializer waits for publication and reuses the mapping.
-        // A private once flag both published too early and reloaded/unmapped a
-        // cache already being read by turn witnessing and native reverse lookup.
+        // The shared process-wide load: it waits for publication and reuses one
+        // mapping with every other reader in the process.
         CodepointPerfcache.LoadDefault();
     }
 

@@ -57,8 +57,9 @@ typedef struct StructureConstituents
     size_t count;
 } StructureConstituents;
 
-/* A parse arrives in one of two layouts: the schema-v1 flat structure (unflagged
- * constituents) or the recipe layout (the token forms, each a PARSE vertex). */
+/* Collects a trajectory's constituents with their vertex flags. receive_parse
+ * reads the flags to tell a flat schema-marked structure (no flags) from one
+ * whose every vertex is a PARSE vertex. */
 static int
 receive_constituent(void *context, size_t ordinal, const hash128_t *id, uint64_t flags)
 {
@@ -369,6 +370,8 @@ receive_standing(const LaplaceConsensusRow *row, void *context)
         parse->positive_standing = laplace_walk_edge_weight(row->rating, row->rd) > 0.0;
 }
 
+/* A confirming occurrence with source and context stands unless a refutation
+ * from that same source and context exists. */
 static bool
 has_uncontested_witness(const LaplacePromptParse *parse)
 {
@@ -506,6 +509,10 @@ laplace_prompt_structure_couple(const LaplacePromptInput *input,
             if (parse->witness_count > 1)
                 qsort(parse->witnesses, parse->witness_count,
                        sizeof(*parse->witnesses), witness_order);
+            /* Within budget, a parse supports this observation when it aligns
+             * to every occurrence, its HAS_PARSE standing is positive and one
+             * witness is uncontested. Two or more supported parses mark the
+             * structure ambiguous. */
             parse->supported = !state->budget_exhausted && parse->aligned &&
                 parse->positive_standing && has_uncontested_witness(parse);
             if (parse->supported) ++supported;

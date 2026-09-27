@@ -11,13 +11,14 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Consensus accumulation is attached to every accepted working set. Online and
-/// transient-score writes fold atomically with evidence. Replayable BULK ingest commits
-/// evidence, immediately dispatches an idempotent evidence-backed refold for the touched
-/// cells, and lets the next working set compose/apply while that refold runs. There is no
-/// persistent fold queue and no source-end recomputation: completion only waits for work
-/// that was already launched per working set. Storage flush boundaries remain transport
-/// only; durable replayable testimony forms one canonical rating period per typed cell.
+/// Folds admitted testimony into consensus: the "fold in sets" step of the shared
+/// ingest recipe. Over the Npgsql writer, each working set's evidence COPY, the fold of
+/// exactly the attestations that transaction admitted, the highway-mask deposit, any
+/// conversation append and any pre-commit verifier run in one transaction, so a durable
+/// journal token implies current standing for the testimony it carries. Over any other
+/// inner writer the delta folds after the apply: inline outside a bulk run, or on the
+/// background per-type lanes during one, drained before the run completes. Evidence is
+/// always persisted; consensus is folded testimony, never a substitute for it.
 /// </summary>
 public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IPhysicalityClosure, IAsyncDisposable
 {
@@ -47,13 +48,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         return Volatile.Read(ref _directConsensusRoute) == 1;
     }
 
-    // Write-epoch bump gate (PR1 of the trusted-novelty series). Fold segment
-    // and highway-mask deposit transactions are write-lane transactions, so
-    // each bumps laplace.apply_write_epoch BEFORE its writes — the epoch is
-    // what lets a later apply prove "no writer intervened" instead of
-    // re-probing. Probed once and cached exactly like the direct-route gate
-    // above: an older installed extension has no sequence and every lane must
-    // degrade to the pre-epoch behavior, never fail the fold.
+    // Fold-segment and mask-deposit transactions bump laplace.apply_write_epoch
+    // before their writes, so a later apply can prove no writer intervened instead
+    // of re-probing. Probed once per writer, like the direct-route gate above; an
+    // installation without the sequence folds without the bump.
     private int _applyWriteEpochRoute = -1;
 
     private async ValueTask<bool> SupportsApplyWriteEpochAsync(
@@ -69,45 +67,31 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         return Volatile.Read(ref _applyWriteEpochRoute) == 1;
     }
 
-    // PER-TYPE FOLD LANES (2026-07-21), replacing a process-wide
-    // SemaphoreSlim(1,1) that let no two deltas overlap for any reason. Consensus
-    // is LIST-partitioned by type_id, so two types never share a row: lanes keyed
-    // by type can run concurrently without contending, and because a cell has
-    // exactly one type it stays on exactly one FIFO lane — which is what keeps the
-    // non-commutative Glicko fold deterministic. See DispatchDeltaAsync.
+    // Per-type fold lanes. Consensus is LIST-partitioned by type_id, so lanes keyed
+    // by type never share a row and run concurrently without contending. A cell has
+    // exactly one type, so it stays on one FIFO lane, which keeps the
+    // non-commutative Glicko-2 fold deterministic. See DispatchDeltaAsync.
     private readonly object _laneLock = new();
     private readonly Dictionary<Hash128, Task> _typeLanes = new();
 
-    // Stable entity-sharded mask lanes. An entity always maps to exactly one lane,
-    // across every delta in the run: lanes are row-disjoint and run in parallel,
-    // while deposits that can touch the same entity are FIFO. The former unchained
-    // per-delta tasks let six large deposits update the same hot entity rows at once;
-    // Atomic2020 measured fold throughput collapsing from 6,880 to 401-779 cells/s
-    // while the producer had already finished. PostgreSQL correctly serialized those
-    // row locks, but only after we had manufactured the contention.
+    // Stable entity-sharded mask lanes. An entity maps to exactly one lane for the
+    // whole run, so lanes are row-disjoint and run in parallel, while deposits that
+    // can touch the same entity are FIFO.
     private readonly Task[] _maskLanes =
         Enumerable.Repeat(Task.CompletedTask, MaskShards).ToArray();
 
-    // Fold pipeline (bulk runs only): the fold of batch N runs in the background
-    // so the apply lane starts probing/COPYing batch N+1 immediately — the fold
-    // leaves the critical path (it was the serial tail of every batch: 188s on an
-    // 11.9M-cell document delta). Ordering is now owned by the per-type lanes
-    // above, not by one global chain, so deltas whose types are disjoint overlap;
-    // this semaphore is purely RAM backpressure on how many deltas may be alive.
-    // Drained at FinalizeSource/CompleteBulkRun/Dispose so ingest completion is
-    // still fold completion. A fold failure poisons its lane and surfaces at the
-    // next apply call or at the drain — never silently. OUTSIDE a bulk run the
-    // fold is awaited inline: online lanes (feedback → immediate fold → next
-    // walk) require read-your-writes consensus.
-    // One sizing authority for the whole fold. The retired implementation fixed
-    // chunk=65,536, pipeline depth=6, mask cap=8,388,608 and segment floor=2,048
-    // independently, so none of them tracked RAM, row width, or connection fanout.
+    // Non-atomic bulk runs fold each delta in the background so the apply lane
+    // persists the next working set meanwhile. Ordering is the per-type lanes;
+    // _foldDepth bounds only how many deltas are alive in memory. Lanes are drained
+    // at FinalizeSource/CompleteBulkRun/Dispose, so ingest completion is fold
+    // completion, and a failed fold poisons its lane and surfaces at the next apply
+    // or at the drain. Outside a bulk run the fold is awaited inline so the next
+    // read sees it. FoldSizing is the one sizing authority for chunk width,
+    // pipeline depth, mask-pair capacity and connection fan-out.
     private static readonly IngestSizing.ConsensusFoldPlan FoldSizing =
         IngestSizing.ResolveConsensusFold(IngestTopology.Current.ApplyPartitions);
-    // The atomic evidence+consensus path owns exactly one PostgreSQL backend and
-    // one transaction. Reusing the parallel-lane chunk width divided its memory
-    // envelope by ApplyPartitions even though no parallel fold connections can
-    // exist inside that transaction, multiplying serial calls for no memory gain.
+    // The atomic evidence+consensus path runs on one backend in one transaction, so
+    // its chunk width is sized for one partition, not divided by ApplyPartitions.
     private static readonly int AtomicFoldChunkCells =
         IngestSizing.ResolveConsensusFold(1).ChunkCells;
     private readonly SemaphoreSlim _foldDepth =
@@ -134,15 +118,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     // independently, so masks and consensus remain work-conserving.
     private static readonly int MaskShards = FoldConnections;
 
-    // GLOBAL connection budget for the fold, shared by every type lane and the
-    // mask lane (2026-07-21). FoldConnections is a per-Parallel.ForEachAsync
-    // width; once per-type lanes could run concurrently, that width stopped
-    // bounding anything — 4 type lanes + a mask lane across 2 in-flight deltas
-    // is up to 120 simultaneous connections against a 12-core server, on top of
-    // the apply path's own id-range COPY connections. The single gate before the
-    // lanes existed (SemaphoreSlim(1,1) over the whole delta) had been holding
-    // that number down as a side effect. This makes the bound explicit and
-    // independent of how many lanes happen to be live.
+    // Global connection budget for the fold, shared by every type lane and every
+    // mask lane. FoldConnections bounds one Parallel.ForEachAsync; this gate bounds
+    // the total across all lanes and deltas live at once.
     private readonly SemaphoreSlim _foldConnections = new(FoldConnections, FoldConnections);
 
     // Run-scoped pair dedup, owned by the same stable shard as the entity. Each set
@@ -153,13 +131,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             .Select(_ => new HashSet<(Hash128 Ent, Hash128 Typ)>()).ToArray();
     private static int DepositedMaskPairsCap => FoldSizing.MaskPairCapacity;
 
-    // There is NO deferred mask phase (2026-07-21). Masks deposit inline in every
-    // lane, bulk included — see UpsertDeltaAsync. Both former deferral schemes are
-    // gone: the client-side touched-entity HashSet (capped, and any ingest past the
-    // cap discarded it and fell back to a full-substrate highway_mask_rebuild) and
-    // the server-side highway_mask_dirty queue drained at CompleteBulkRunAsync
-    // (exact and uncapped, but still an O(touched entities x consensus probes)
-    // recompute parked at the end of the run).
+    // Masks deposit inline in every lane, bulk included; nothing is deferred to the
+    // end of the run. See DispatchDeltaAsync.
 
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
@@ -288,12 +261,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             precommitVerifier: null, ct);
 
     /// <summary>
-    /// STRUCT, not a class (2026-07-21). One 32-byte heap allocation per merged
-    /// cell meant millions of Gen0 objects per working set, purely to hold four
-    /// longs the dictionary could store inline. Mutation happens through
-    /// <see cref="CollectionsMarshal.GetValueRefOrAddDefault"/>, which hands back a
-    /// ref INTO the dictionary's own storage — so the merge stays in-place and
-    /// allocation-free, with one hash lookup per attestation instead of two.
+    /// One rating period within a cell: the opponent rating and opponent deviation
+    /// (phi), fixed-point 1e9. Ordered so a cell's periods serialize stably.
     /// </summary>
     private readonly record struct PeriodKey(long OpponentRatingFp1e9, long PhiFp1e9)
         : IComparable<PeriodKey>
@@ -313,9 +282,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
 
     private struct Delta
     {
-        // Keep the overwhelmingly-common single witness shape inline. A dictionary
-        // is allocated only when one cell's rating period genuinely contains a
-        // second (opponent rating, opponent RD) pair.
+        // Held inline in the delta map and mutated through a ref from
+        // CollectionsMarshal.GetValueRefOrAddDefault, so a merge is in place with one
+        // lookup. The single-period shape is inline; a dictionary is allocated only
+        // when a cell holds a second (opponent rating, opponent deviation) pair.
         public PeriodKey FirstPeriod;
         public PeriodAggregate FirstAggregate;
         public Dictionary<PeriodKey, PeriodAggregate>? AdditionalPeriods;
@@ -347,8 +317,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             IReadOnlyList<SubstrateChange> evidenceChanges = changes;
 
             // A fold that already failed in the background poisons the run before any
-            // more evidence lands. This is observation of already-running ETL work, not
-            // a terminal deferred phase.
+            // more evidence lands.
             await ObserveFoldFailureAsync().ConfigureAwait(false);
 
             var forwarded = ForwardChanges(evidenceChanges);
@@ -391,8 +360,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                         if (appendConversation is not null)
                             await appendConversation(connection, transaction, token).ConfigureAwait(false);
 
-                        // Source-integrity verification remains on the evidence transaction.
-                        // Only the replayable consensus projection leaves that transaction.
+                        // Source-integrity verification runs inside the same transaction, after
+                        // the fold, so a failed check rolls back evidence and standing together.
                         if (precommitVerifier is not null)
                             await precommitVerifier(token).ConfigureAwait(false);
                     },
@@ -417,8 +386,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                         : await _inner.ApplyManyAsync(forwarded, ct);
             }
 
-            // Non-Npgsql / non-atomic bulk ownership retains the historical additive
-            // lane. Production corpus ingest takes the evidence-refold path above.
+            // A non-atomic inner writer has already committed; its delta folds now,
+            // on the background lanes during a bulk run and inline otherwise.
             if (!atomicWorkingSet && delta is { Count: > 0 } && !result.JournalReplayHit)
             {
                 if (_bulkRun) await EnqueueFoldAsync(delta, changes, CancellationToken.None);
@@ -437,11 +406,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null,
         IReadOnlyList<AttestationRow>? acceptedRows = null)
     {
-        // Flatten to the attestation arrays that actually carry testimony. The
-        // merge below is over a contiguous index space across those arrays, so
-        // sharding never has to care about change boundaries (one 512 MiB working
-        // set is often ONE change — splitting per change would leave every core
-        // but one idle).
+        // Flatten to the attestation arrays that carry testimony. The merge below
+        // runs over one contiguous index space across them, so sharding is
+        // independent of change boundaries (a working set is often one change).
         var ephemeralByReceipt = new Dictionary<Hash128, EphemeralFoldInput>();
         foreach (var c in changes)
         {
@@ -525,18 +492,11 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             throw new InvalidOperationException(
                 "ephemeral fold input has no matching foldable staged receipt");
 
-        // MERGE IS ORDER-INDEPENDENT, SO IT PARALLELIZES EXACTLY (2026-07-21).
-        // Every combine op is integer: SafeAddGames / SafeAddScores over
-        // fixed-point 1e9 longs, and max on the timestamp. Integer add and max
-        // are associative and commutative, so any shard split and any combine
-        // order yields the BIT-IDENTICAL delta a serial walk yields — this is a
-        // pure speedup, not an approximation, and it keeps the fold
-        // deterministic. (Float sums would NOT have this property; the
-        // fixed-point representation is what makes it sound.)
-        //
-        // The per-row Interlocked.Add on _observations is gone: it was a locked
-        // bus operation per attestation on what was a single-threaded loop.
-        // Shards count locally and publish once.
+        // The merge is order-independent: every combine is integer add over
+        // fixed-point 1e9 longs or max on the timestamp, both associative and
+        // commutative, so any shard split and combine order yields the
+        // bit-identical delta a serial walk yields. Shards count observations
+        // locally and publish once.
         int workers = _bulkRun
             ? (int)Math.Min(total, Math.Max(1, CpuTopology.PerformanceCoreCount))
             : 1;
@@ -759,9 +719,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         long MaskPairs);
 
     /// <summary>
-    /// Folds a journaled working set on the evidence writer's control transaction.
-    /// The v2 replay claim, additive attestation merge, consensus update, and mask
-    /// deposit therefore commit or roll back together.
+    /// Folds a journaled working set on the evidence writer's transaction. The
+    /// journal replay claim, attestation merge, consensus merge and mask deposit
+    /// commit or roll back together. Cells are sorted (type, edge id, subject) and
+    /// mask pairs (entity, type), the same lock order the lanes use.
     /// </summary>
     private async Task<AtomicFoldStats> UpsertDeltaInTransactionAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta,
@@ -825,9 +786,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandTimeout = 0;
-            // One set-sized boundary owns the complete mixed-type chunk. Native
-            // routing locks and folds each physical type run without managed
-            // per-type calls or a terminal drain of scalar work.
+            // One call folds the whole mixed-type chunk; native code groups it by
+            // type partition, locks and folds each type run.
             command.CommandText =
                 "SELECT consensus.merge_evidence($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
             command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, subjects);
@@ -890,61 +850,28 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     }
 
     /// <summary>
-    /// Dispatches one delta onto the per-type fold lanes and the mask lane, and
-    /// returns the task that completes when all of this delta's segments have
-    /// committed.
+    /// Dispatches one delta onto the per-type fold lanes and the entity-sharded mask
+    /// lanes, and returns the task that completes when all of this delta's segments
+    /// have committed.
     ///
-    /// PER-TYPE LANES, NOT ONE GLOBAL GATE (2026-07-21). The fold used to hold a
-    /// process-wide SemaphoreSlim(1,1) for the whole delta, so no two deltas
-    /// could ever overlap. That was tolerable only while deltas were enormous
-    /// (one delta held enough cells to saturate all FoldConnections by itself).
-    /// Now that the apply commits at file/envelope grain, a delta can be smaller
-    /// than one 65,536-cell chunk — under the old gate that meant ONE connection
-    /// working while eleven idled, with every other delta blocked behind it.
-    ///
-    /// Lanes are keyed by relation type, which is exactly the safety boundary:
-    /// consensus is LIST-partitioned by type_id, so two different types can never
-    /// touch the same consensus row, and their transactions can neither contend
-    /// nor deadlock.
-    ///
-    /// DETERMINISM IS PRESERVED, and this is the reason the split is by TYPE and
-    /// not by count. Glicko-2 accumulation is NOT commutative: folding delta A
-    /// then B into the same cell gives a different rating than B then A. A cell
-    /// has exactly ONE type, so it lives in exactly one lane, and each lane is a
-    /// strict FIFO chain — every cell therefore still sees its deltas in arrival
-    /// order, and consensus does not depend on scheduling. Splitting by count
-    /// would have broken that; splitting by type does not.
+    /// Lanes are keyed by relation type, which is the safety boundary: consensus is
+    /// LIST-partitioned by type_id, so two types never touch the same consensus row
+    /// and their transactions neither contend nor deadlock. Glicko-2 accumulation is
+    /// not commutative (folding A then B into a cell differs from B then A); a cell
+    /// has exactly one type, so it lives on one lane, and each lane is a strict FIFO
+    /// chain, so every cell sees its deltas in arrival order and consensus does not
+    /// depend on scheduling.
     /// </summary>
     private Task DispatchDeltaAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
     {
-        // Sort by type, then edge id, then subject, so every writer locks rows in
-        // one global order.
-        //
-        // TYPE LEADS because the per-type lanes below require cells grouped by
-        // type; that is unchanged. What changed is the tiebreak ORDER, and it is
-        // a physical-locality fix, not a cosmetic one.
-        //
-        // consensus_pkey is btree (id, type_id, subject_id) -- id LEADS -- while
-        // consensus is HASH (subject_id). Sorting (type, subject,
-        // id) put the PK's leading column LAST, so a 65,536-cell chunk descended
-        // the PK btree in an order uncorrelated with the btree, touching ~65,536
-        // distinct random pages across 88GB of consensus against a 31GB
-        // shared_buffers. MEASURED 2026-08-18 on a live UD run: 25.2k random read
-        // IOPS and 13.2k full-page images/s, 11.1% of WAL records carrying an 8KB
-        // FPI, ~2,300x write amplification against a <4GB corpus.
-        //
-        // Sorting by id after type puts each hash subpartition's accesses in PK
-        // order. Subject stays in the key as the final tiebreak: hash(subject_id)
-        // decides the subpartition and is not monotonic in subject, so the eight
-        // subpartitions still interleave -- but each is now walked ASCENDING
-        // instead of randomly, which is what the buffer cache can actually hold.
-        //
-        // The deadlock invariant is untouched: any TOTAL order avoids the lock
-        // cycle as long as every writer uses the same one, and (type, id, subject)
-        // is total exactly as (type, subject, id) was. Lane determinism is also
-        // untouched -- Glicko-2's non-commutativity is ordered by the per-type
-        // FIFO chain below, never by position within a delta.
+        // Sort by (type, edge id, subject): one total order, so every writer locks
+        // rows in the same order and no lock cycle can form. Type leads because the
+        // lanes take type runs. Edge id follows because consensus_pkey is btree
+        // (id, type_id, subject_id) with id leading while consensus is HASH
+        // (subject_id): each subpartition is then walked in ascending PK order
+        // instead of at random pages. Glicko-2 order within a cell comes from the
+        // per-type FIFO chain, never from position within a delta.
         var cells = new ((Hash128 S, Hash128 T, Hash128? O) Key, Hash128 Cid, Delta D)[delta.Count];
         int n = 0;
         foreach (var (key, d) in delta)
@@ -957,26 +884,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             return c != 0 ? c : x.Key.S.CompareToBytewise(y.Key.S);
         });
 
-        // Mask pairs from the same delta: (subject, type) + (object, type).
-        //
-        // DEPOSIT IS THE POPULATION, IN EVERY LANE (2026-07-21). This used to be
-        // built for online lanes only; bulk runs skipped the deposit entirely and
-        // paid a terminal highway_mask_drain() instead. That trade was backwards.
-        // highway_mask_deposit is O(pairs the fold already holds in RAM) — an
-        // OR-accumulate with ZERO consensus re-reads. The deferred path replaced
-        // it with highway_mask_refresh over every touched entity, which recomputes
-        // each mask from that entity's full consensus edge set: the object-side
-        // join whose leaf probes were MEASURED at 75s of a 118s fold. Deferring
-        // therefore swapped an O(touched pairs) write for an
-        // O(touched entities x consensus probes) recompute AND parked it at the
-        // end of the run as one serial pass.
-        //
-        // The stated reason for deferring — "~2M entity UPDATEs contending with
-        // the concurrent COPY" — is an argument against per-batch UPDATE CHURN,
-        // not against deposit: the run-scoped pair dedup below means each pair is
-        // written at most once per run, so the total UPDATE volume is strictly
-        // LOWER than the drain's, and it is spread across the run instead of
-        // landing in one lump at the end.
+        // Mask pairs from the same delta: (subject, type) + (object, type). Every
+        // lane deposits as it folds. highway_mask_deposit OR-accumulates pairs the
+        // fold already holds, with no consensus re-read, and the run-scoped pair
+        // dedup writes each pair at most once per run.
         var maskPairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(n * 2);
         foreach (var cell in cells)
         {
@@ -1000,14 +911,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         long folded = 0, masks = 0;
         var completions = new List<Task>(runs.Count + 1);
 
-        // The lane bodies are STARTED OUTSIDE THE LOCK (Task.Run), and only the
-        // chain pointers are swapped under it (2026-07-21). Invoking an async
-        // method inside the lock runs its synchronous prefix on the calling
-        // thread while the lock is held — for these bodies that prefix reaches
-        // Parallel.ForEachAsync and can open connections and dispatch the first
-        // consensus_upsert before it ever suspends, so every other delta's
-        // dispatch blocked behind one delta's first DB round trip. Starting the
-        // body on the pool keeps the critical section to dictionary writes.
+        // Lane bodies start on the pool (Task.Run); only the chain pointers are
+        // swapped under the lock. Invoking an async body inside the lock would run
+        // its synchronous prefix, which reaches Parallel.ForEachAsync and can open
+        // connections and issue the first upsert, while the lock is held.
         lock (_laneLock)
         {
             for (int runIndex = 0; runIndex < runs.Count; runIndex++)
@@ -1021,10 +928,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                 completions.Add(next);
             }
 
-            // Partition by a FIXED entity hash. The earlier bucketed implementation
-            // changed bucket count with each delta, so the same entity moved between
-            // lanes and the buckets were only disjoint within one call. Fixed shards
-            // preserve disjointness across the whole run.
+            // Partition by a fixed entity hash: an entity lands in the same shard in
+            // every delta, so shards stay disjoint across the whole run.
             var buckets = new List<(Hash128 Ent, Hash128 Typ)>?[MaskShards];
             foreach (var pair in maskPairs)
             {
@@ -1074,19 +979,12 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             // every later segment on it (and the drain) sees the failure.
             await prior.ConfigureAwait(false);
 
-            // Fixed-size chunks WITHIN the type run, folded on PARALLEL
-            // connections — the same width the COPY apply uses. Safety inside a
-            // run does not come from partition boundaries: cells are
-            // CLIENT-DEDUPED, so no two chunks can touch the same consensus row
-            // — row locks are disjoint by construction, inserts are unique by
-            // construction, and consensus_upsert's per-type loop still gives
-            // every call runtime-pruned, type-major-ordered writes. Each chunk
-            // commits its own transaction.
-            // Connection width is allocated across ALL type runs in this delta by
-            // actual run size. There is no minimum-cell threshold: a single-type
-            // delta receives the live topology, while many independent type runs
-            // each receive a lane and share the global gate. ChunkCells remains
-            // only the byte-derived maximum parameter-array residency per command.
+            // Segments within the type run fold on parallel connections. Cells are
+            // client-deduplicated, so no two segments touch the same consensus row:
+            // row locks are disjoint and inserts unique by construction. Each segment
+            // commits its own transaction. Connection width is allocated across all
+            // type runs in this delta by run size; ChunkCells bounds only the
+            // parameter-array residency of one command.
             int segLen = Math.Min(
                 FoldSizing.ChunkCells,
                 (run.Len + connectionWidth - 1) / connectionWidth);
@@ -1113,11 +1011,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                 string foldSql = directRoute
                     ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
                     : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
-                // Keep the epoch and fold in one server statement.  The former
-                // two-command shape paid a client/server round trip per consensus
-                // chunk solely to bump the sequence. MATERIALIZED makes nextval
-                // execute before the write function while retaining positional
-                // parameters and a preparable single statement.
+                // The epoch bump and the fold are one server statement. MATERIALIZED
+                // makes nextval execute before the write function while keeping one
+                // preparable statement with positional parameters.
                 up.CommandText = epochBump
                     ? "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
                         + foldSql + " FROM epoch"
@@ -1231,56 +1127,36 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         {
             if (pairs.Count == 0) return;
 
-            // Never resend a pair this run already deposited — masks only ACCRETE,
-            // so a pair deposited once is permanently satisfied, and the server-side
-            // no-op still costs ~6 tier-leaf probes per pair. This shard's FIFO is
-            // the synchronization; no cross-shard pair can share an entity.
+            // Never resend a pair this run already deposited: masks only accrete, so
+            // a deposited pair stays satisfied, and a server-side no-op still costs
+            // index probes. This shard's FIFO is the synchronization; no pair in
+            // another shard shares an entity.
             var deposited = _depositedMaskPairs[shard];
             pairs.RemoveAll(deposited.Contains);
             if (pairs.Count == 0) return;
             var todo = pairs;
 
-            // SORT BY ENTITY ID BEFORE CHUNKING — the transaction-scope half of the
-            // deadlock fix, and the half #729 missed. The native ordered locking
-            // inside highway_mask_deposit makes acquisition ascending
-            // WITHIN one statement, but this transaction runs a SEQUENCE of chunk
-            // statements while holding every prior chunk's locks — and chunks cut
-            // from an unordered set interleave id ranges arbitrarily between
-            // concurrent deposits, which is an AB/BA cycle across statements.
-            // Measured on the Wiktionary seed 2026-07-29 (post-#729): 40P01 with
-            // BOTH parties inside highway_mask_deposit, ten retries lost.
-            // Sorted, every deposit transaction acquires ascending across its
-            // WHOLE chunk sequence; two ascending acquirers cannot form a cycle.
-            // CompareToBytewise is the native memcmp order — identical to the
-            // bytea ordering the server-side ORDER BY uses, one comparator, not two.
+            // Sort by entity id before chunking. highway_mask_deposit acquires rows
+            // ascending within one statement, but a transaction holding earlier
+            // chunks' locks while running later chunks would form an AB/BA cycle with
+            // a concurrent deposit if chunks interleaved id ranges. Sorted, every
+            // deposit acquires ascending across its whole chunk sequence, and two
+            // ascending acquirers cannot cycle. CompareToBytewise is memcmp order,
+            // the same as the server-side bytea ORDER BY.
             todo.Sort(static (a, b) => a.Ent.CompareToBytewise(b.Ent));
 
-            // ONE statement per chunk, on ONE connection, ONE TRANSACTION PER CHUNK.
+            // One statement per chunk, one transaction per chunk. highway_mask_deposit
+            // reduces pairs, relation bits and entity masks in native memory before
+            // its indexed probe and keyed update; entity shards make concurrent calls
+            // row-disjoint, and native code locks any externally-overlapping rows in
+            // deterministic order.
             //
-            // highway_mask_deposit reduces pairs, relation bits, and entity masks in
-            // native memory before its indexed row probe and keyed storage update.
-            // This writer now partitions work by a stable
-            // entity shard BEFORE statements are built, so concurrent shard calls are
-            // row-disjoint. Native code acquires any externally-overlapping target rows in a
-            // deterministic order; it no longer collapses the disjoint ingest calls
-            // behind one global advisory lock.
-            //
-            // WHY PER-CHUNK COMMITS, measured 2026-07-29 on the Wiktionary seed:
-            // deposits from different deltas always overlap on hot words, so with
-            // ordered acquisition (the deadlock fix) concurrent deposits QUEUE on
-            // the first shared row -- and under one all-or-nothing transaction the
-            // waiter waits for the holder's ENTIRE remaining chunk sequence. That
-            // convoy took the epoch fold from 177s (3,305 masks/s, the crashing
-            // run) to 1,238s (333 masks/s): correct, forty minutes of it per hour.
-            // Committing per chunk caps every wait at one chunk's work while
-            // keeping the acquisition order global (todo is sorted; chunk k+1's
-            // ids all sort after chunk k's), so the no-cycle proof is unchanged --
-            // stronger, even: one statement per transaction.
-            //
-            // All-or-nothing was never load-bearing: OR-accumulate is idempotent,
-            // a failure mid-sequence leaves earlier chunks committed (bits on,
-            // correct) and the WHOLE deposit's pairs unmarked below, so the resend
-            // re-runs every chunk as a server-side no-op.
+            // Committing per chunk bounds a concurrent deposit's wait on a shared row
+            // to one chunk's work while acquisition stays globally ascending (chunk
+            // k+1's ids all sort after chunk k's). OR-accumulate is idempotent: a
+            // failure mid-sequence leaves earlier chunks committed and this deposit's
+            // pairs unmarked below, so a resend re-runs each chunk as a server-side
+            // no-op.
             long dep = 0;
             for (int off = 0; off < todo.Count; off += FoldSizing.ChunkCells)
             {
@@ -1340,10 +1216,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         => (int)((uint)entity.GetHashCode() % (uint)MaskShards);
 
     /// <summary>
-    /// Drops lanes whose chain has completed. Without this the map retains one
-    /// entry per relation type ever folded — bounded (the governed type count) but
-    /// pointlessly resident, and every drain would await hundreds of finished
-    /// tasks. Faulted lanes are KEPT: the drain has to observe their exception.
+    /// Drops lanes whose chain completed successfully, so the map holds only live
+    /// relation-type lanes. Faulted lanes are kept: the drain has to observe their
+    /// exception.
     /// </summary>
     private void PruneCompletedLanes()
     {
@@ -1362,18 +1237,19 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         => TimeSpan.FromSeconds(ticks / (double)System.Diagnostics.Stopwatch.Frequency);
 
     /// <summary>
-    /// Inline fold: dispatch and AWAIT. Online lanes (feedback → immediate fold →
-    /// next walk) require read-your-writes consensus.
+    /// Inline fold: dispatch and await, so the next read after an online apply sees
+    /// the standing it produced.
     /// </summary>
     private Task UpsertDeltaAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
         => DispatchDeltaAsync(delta, ct);
 
     /// <summary>
-    /// Bulk fold: dispatch onto the per-type lanes and return as soon as the
-    /// delta is QUEUED, so the apply lane starts probing/COPYing the next working
-    /// set immediately — the fold leaves the critical path. Bounded to
-    /// The machine-sized fold plan's outstanding deltas act as backpressure on RAM.
+    /// Bulk fold: dispatch onto the lanes and return once the delta is queued, so the
+    /// apply lane moves to the next working set. <c>_foldDepth</c> (from the fold
+    /// plan) bounds outstanding deltas as memory backpressure. Each dispatched fold
+    /// is tracked under every file label in <paramref name="changes"/> for
+    /// <see cref="CompleteFileAsync"/>.
     /// </summary>
     private async Task EnqueueFoldAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta,
@@ -1420,10 +1296,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     }
 
     /// <summary>
-    /// Every fold dispatched and not yet observed — the type lanes plus the mask
-    /// lane, per delta. Completed entries are swept on each snapshot; faulted ones
-    /// are retained until a drain or the next apply observes them, so a background
-    /// fold failure can never vanish silently.
+    /// Every fold dispatched and not yet observed. Completed entries are swept on
+    /// each snapshot; faulted ones are retained until a drain or the next apply
+    /// observes them, so a background fold failure always surfaces.
     /// </summary>
     private readonly List<Task> _outstanding = new();
     private readonly Dictionary<string, List<Task>> _fileFolds = new(StringComparer.Ordinal);
@@ -1477,8 +1352,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     }
 
     /// <summary>
-    /// Await only consensus work already dispatched by the per-working-set ETL pipeline.
-    /// This method does not discover, batch, queue, or start additional folds.
+    /// Awaits consensus work already dispatched per working set, then rethrows any
+    /// lane failure. Starts no fold of its own.
     /// </summary>
     public async Task DrainFoldsAsync()
     {
@@ -1558,16 +1433,11 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         }
         LastWriterMaintenanceWallClock = phaseSw.Elapsed;
 
-        // NO terminal mask pass (2026-07-21). Masks are deposited inline by every
-        // fold, in every lane — see UpsertDeltaAsync. There is nothing left to
-        // defer: by the time the last fold drains above, every pair this run
-        // touched has already had its bits OR'd in, spread across the run instead
-        // of landing as one serial recompute after the loader finishes.
-        //
-        // highway_mask_dirty / highway_mask_drain() survive as the REPAIR verbs
-        // (per-source evict has to CLEAR bits, which an OR-accumulate deposit
-        // cannot do), alongside highway_mask_rebuild for highway bit renumbering.
-        // Nothing on the ingest hot path populates or drains the queue.
+        // No mask pass here: every fold deposited its pairs' bits inline, so once
+        // the drain above completes every pair this run touched is set.
+        // highway_mask_dirty / highway_mask_drain() and highway_mask_rebuild are
+        // repair verbs (evict must clear bits; renumbering rewrites them) and are
+        // not on the ingest path.
         _ = wasBulk;
 
         if (foldFailure is not null && completionFailure is not null)

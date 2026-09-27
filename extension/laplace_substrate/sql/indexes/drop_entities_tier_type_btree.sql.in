@@ -1,10 +1,6 @@
--- entities is LIST(tier)-partitioned. A (tier, type_id) btree is redundant with
--- partition pruning + entities_type_btree(type_id): every tier+type lookup prunes
--- to one leaf and seeks type_id there. The compound index doubles secondary
--- maintenance on every INSERT/COPY (MEASURED: homogeneous 500k binary COPY
--- ~350k rows/s at 2-way with both indexes vs ~510k with type alone; 8-way with
--- both clears 500k). Keep entities_type_btree and the cheap tier/tier_type BRINs.
--- Drop the compound btree on upgrade; new installs never create it.
+-- Drops entities_tier_type_btree. Type lookups use entities_type_btree; a
+-- compound (tier, type_id) btree doubles secondary maintenance on every bulk
+-- COPY for no additional read.
 DO $do$
 BEGIN
     BEGIN

@@ -32,11 +32,9 @@ public static class LaplaceInstall
     public static string WebRoot => Path.Combine(InstallRoot, "wwwroot");
 
     /// <summary>
-    /// Where the console apps write their CSV diagnostic logs (read back as SQL through
-    /// ops.app_log / file_fdw — see db/migrations ops_logs, GH #601/#602). Env
-    /// LAPLACE_OPS_LOG_DIR overrides, and the deployed path is set there by
-    /// scripts/pipeline.sh, so the defaults below govern ad-hoc runs only.
-    /// Installed: $InstallRoot/logs, the directory bootstrap-host.sh provisions.
+    /// Where the console apps write their CSV diagnostic logs, which SQL reads back through
+    /// ops.app_log / file_fdw. LAPLACE_OPS_LOG_DIR overrides; an installed binary uses
+    /// $InstallRoot/logs; a binary inside a working tree uses a per-user state directory.
     /// Created on first use by the file sink.
     /// </summary>
     public static string OpsLogDirectory
@@ -47,12 +45,9 @@ public static class LaplaceInstall
             if (!string.IsNullOrWhiteSpace(fromEnv))
                 return Path.GetFullPath(fromEnv.Trim());
 
-            // NEVER inside a working tree. For a repo build $InstallRoot is
-            // app/<proj>/bin/<cfg>/<tfm>, so the sink would create logs/ there owned by
-            // whoever ran the binary; a checkout carrying a directory owned by another
-            // user cannot be cleaned by actions/checkout, which fails the job before any
-            // step of it runs. A per-user state dir is outside every checkout and has one
-            // owner by construction.
+            // Never inside a working tree: a repo build's $InstallRoot is under app/, and a
+            // logs/ directory owned by whoever ran the binary would block cleaning the
+            // checkout. A per-user state directory is outside every checkout.
             if (!InBuildTree()) return Path.Combine(InstallRoot, "logs");
 
             var state = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -65,7 +60,7 @@ public static class LaplaceInstall
 
     /// <summary>
     /// True when the running binary sits under a repo working tree. Walks up from
-    /// AppContext.BaseDirectory only: TryRepoRoot's stamped fallback resolves a repo root
+    /// AppContext.BaseDirectory only: TryRepoRoot's stamped path resolves a repo root
     /// for INSTALLED binaries too, which inverts the question asked here.
     /// </summary>
     private static bool InBuildTree()
@@ -120,11 +115,8 @@ public static class LaplaceInstall
         string s;
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
-            // Precedence: an explicit caller argument (tests, Migrations --database)
-            // overrides the env; otherwise an explicit Database= inside LAPLACE_DB is
-            // AUTHORITATIVE. The old code re-resolved the default even when LAPLACE_DB
-            // named a database, silently stomping the deployed service's
-            // Database=laplace — the config knob said one thing and the code did another.
+            // Precedence: an explicit non-default caller argument overrides the env;
+            // otherwise an explicit Database= inside LAPLACE_DB is kept as given.
             if (database != "laplace")
                 s = WithDatabase(fromEnv.Trim(),
                     OperatingSystem.IsWindows() ? database : ResolveLinuxDatabaseName(database));
@@ -193,9 +185,8 @@ public static class LaplaceInstall
     }
 
     /// <summary>
-    /// Mask the password in a connection string for safe logging. The one shared
-    /// redactor -- CLI, chess service, and migrations all call this instead of each
-    /// keeping their own copy. Covers both the `Password=` and `Pwd=` spellings.
+    /// Mask the password in a connection string for safe logging. Covers both the
+    /// `Password=` and `Pwd=` spellings.
     /// </summary>
     public static string RedactConnectionString(string conn) =>
         string.IsNullOrEmpty(conn)
@@ -213,9 +204,8 @@ public static class LaplaceInstall
         {
             var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_t0_perfcache.bin");
             if (File.Exists(fromBuild)) return fromBuild;
-            // Sorted: a build tree with two matching blobs (a stale out-of-source dir beside a
-            // fresh one) otherwise resolves to whichever the filesystem lists first, so the
-            // codepoint table backing every ingest could change between runs of the same binary.
+            // Sorted so a build tree holding more than one matching blob resolves the same
+            // codepoint table on every run, independent of filesystem listing order.
             foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_t0_perfcache.bin", SearchOption.AllDirectories)
                                          .OrderBy(static p => p, StringComparer.Ordinal))
                 return hit;
@@ -229,12 +219,7 @@ public static class LaplaceInstall
             if (hit is not null) return hit;
         }
 
-        // NAME WHAT WAS ACTUALLY SEARCHED. This threw a hardcoded Windows path --
-        // D:\Data\Laplace\build-win\... -- on every platform, including Linux hosts that
-        // have no D: drive and never looked there. MEASURED 2026-08-16: 590 tests failed
-        // with that message and it sent the reader to a nonexistent Windows build tree
-        // while the file sat at build/engine/core/perfcache/. An error that names a path
-        // the code did not probe is worse than one that names none.
+        // The error names exactly the locations this resolution probed.
         throw new InvalidOperationException(
             "T0 perfcache not found. Searched: "
             + $"LAPLACE_PERFCACHE_BIN={Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN") ?? "(unset)"}; "
@@ -443,9 +428,8 @@ public static class LaplaceInstall
     }
 
     /// <summary>
-    /// One database: laplace. PGDATABASE may override the default (CI/ingest);
-    /// any other explicit name is used as-is. (The former laplace-dev sandbox
-    /// was retired 2026-07-17 — dev and pipeline share the one laplace DB.)
+    /// The default database is laplace; PGDATABASE overrides the default, and any other
+    /// explicit name is used as-is.
     /// </summary>
     private static string ResolveLinuxDatabaseName(string database)
     {

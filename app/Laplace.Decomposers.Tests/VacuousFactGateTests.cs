@@ -9,23 +9,16 @@ using Xunit;
 namespace Laplace.Decomposers.Tests;
 
 /// <summary>
-/// A deposited fact must be able to be false. These three writes emitted claims that could
-/// not: an edge whose object IS its subject, and one gloss cut into fragments that then
-/// competed with the whole for the same rating.
-///
-/// Each test names the substrate rows the defect produced, measured 2026-08-16, so a
-/// regression is recognisable as the same thing rather than as a new mystery.
+/// A deposited fact must be able to be false: no attestation whose object is its subject,
+/// and no gloss cut into fragments that compete with the whole for one consensus cell.
 /// </summary>
 public sealed class VacuousFactGateTests
 {
     // ---- WordNet: one synset, one gloss -------------------------------------------------
 
     /// <summary>
-    /// laplace.consensus held synset f59f0970 (cat) with THREE HAS_DEFINITION facts:
-    /// the whole gloss (deposited by OMW/CILI, which do not split), plus
-    /// "...domestic cats" and "wildcats" from splitting this one on ';'. The whole and
-    /// the fragment "wildcats" both landed at eff_mu 1319.9, so which one a read returned
-    /// as the top definition was a tie-break rather than a rating.
+    /// A WordNet gloss containing ';' stays one definition, so it lands in the same
+    /// HAS_DEFINITION cell as the unsplit gloss other sources testify to.
     /// </summary>
     [Fact]
     public void WordNetGloss_WithSemicolon_StaysOneDefinition()
@@ -67,17 +60,10 @@ public sealed class VacuousFactGateTests
     // ---- ISO 639-3: a name is not a definition ------------------------------------------
 
     /// <summary>
-    /// ISO 639-3 publishes codes and names, no glosses. Both emit sites attested the
-    /// language's own name as HAS_DEFINITION, producing rows that render
-    /// "Batui HAS_DEFINITION Batui" — 8,336 of them, 19% of that source's 42,931 rows.
-    /// The relation is gone from the source's declared vocabulary, which is what this
-    /// asserts: a relation nothing emits must not be declared.
-    /// </summary>
-    /// <summary>
-    /// Read from source, not from the loaded type: touching ISOSource.Relations runs a static
-    /// initializer that P/Invokes laplace_core, which is not beside the test binary — so a
-    /// reflection-based assertion fails on the native load rather than on the declaration it
-    /// is meant to check. The declaration is the artifact under test.
+    /// ISO 639-3 publishes codes and names, no glosses, so a language's name is HAS_NAME and
+    /// HAS_DEFINITION is neither declared nor emitted. The source files are read as text
+    /// because touching <c>ISOSource.Relations</c> runs a static initializer that loads
+    /// laplace_core, which is not beside the test binary.
     /// </summary>
     [Fact]
     public void IsoSource_NoLongerDeclares_HasDefinition()

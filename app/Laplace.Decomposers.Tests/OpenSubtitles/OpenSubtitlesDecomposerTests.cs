@@ -136,10 +136,9 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.NotNull(whatId);
             Assert.NotNull(comoId);
 
-            // GH #1180: a sequence is the ordered content composition itself. The
-            // OpenSubtitles transport namespace must not enter the Merkle preimage,
-            // otherwise another source admitting the same sentence sequence mints a
-            // different alleged-content id.
+            // A sequence is the ordered composition of its sentences; no source schema
+            // id enters the Merkle preimage, so any source admitting the same sequence
+            // reaches the same entity.
             Hash128 sequenceSchema =
                 Hash128.OfCanonical("opensubtitles/sequence-block512/schema/v1");
             Hash128 leftSequence = Hash128.Merkle(
@@ -197,8 +196,8 @@ public sealed class OpenSubtitlesDecomposerTests
 
         Assert.Contains(boot.Entities, e =>
             e.Id == OpenSubtitlesDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        // Type and relation ids are the content ids of their labels: vocabulary keys are
-        // never rows (764bb0bf7).
+        // Type and relation ids are the content ids of their labels; vocabulary keys
+        // are never entity rows.
         Assert.DoesNotContain(boot.Entities, e =>
             e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId
             || e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId);

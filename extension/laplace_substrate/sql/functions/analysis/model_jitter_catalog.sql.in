@@ -1,14 +1,9 @@
--- The jitter catalog: convicted training artifacts, as one indexed query.
--- A model-witnessed coupling is ARTIFACT-shaped when it is asserted (the
--- evidence row CONFIRMS: outcome=2) but corroborated by nobody: exactly one
--- witness on the consensus cell and wide RD (the fold never earned
--- confidence). Real structure replicates across independently trained
--- checkpoints (hash collision at the shared cell) and against lexical
--- witnesses; per-run noise cannot. p_rd_floor is the "still uncertain"
--- bound (fp1e9 Glicko-1 scale). Set-returning; the LIMIT belongs to the
--- caller (top-k is only ever a query LIMIT).
--- BEGIN ATOMIC: GH #764.
--- Model artifact scan → generation (ELECT / forward-pass family).
+-- Model-witnessed cells that are asserted but corroborated by nobody: a
+-- confirming attestation (outcome 2) on a cell with exactly one witness and RD
+-- still at or above p_rd_floor (fp1e9). Structure that replicates across
+-- independently trained checkpoints or lexical witnesses lands on the same
+-- content-addressed cell and gains witnesses; per-run noise does not. Defaults
+-- to the model relation family. Set-returning; the caller applies LIMIT.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN

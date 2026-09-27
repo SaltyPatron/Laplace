@@ -2,9 +2,8 @@ using System.Text.Json;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Verifies the exact historical recording scope of an explicit selected corpus.
-/// It reads current native game bodies and retained testimony twice without admitting or
-/// repairing newer completion metadata. Ordinary ingestion semantics are unchanged.</summary>
+/// <summary>Verifies the recorded scope of an explicitly selected corpus: reads the current
+/// native game bodies and retained testimony twice, admitting and repairing nothing.</summary>
 public static class ChessRecordedCorpusVerification
 {
     public sealed record Options(string ManifestPath, string ExpectedSha256,

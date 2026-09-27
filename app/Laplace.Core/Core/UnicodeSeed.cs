@@ -25,9 +25,9 @@ public static unsafe class UnicodeSeed
 }
 
 /// <summary>
-/// Immutable native Unicode source snapshot used only while admitting the Unicode floor.
-/// PostgreSQL receives rows staged from this object; the runtime perfcache is downstream
-/// derived state and is deliberately absent from this API.
+/// Immutable native Unicode source snapshot used while admitting the Tier-0 codepoint
+/// window. PostgreSQL receives rows staged from this object; the runtime perfcache is
+/// derived from that admitted state and is not reachable through this API.
 /// </summary>
 public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
 {

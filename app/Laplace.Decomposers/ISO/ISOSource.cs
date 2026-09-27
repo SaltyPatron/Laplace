@@ -17,14 +17,13 @@ public readonly struct ISOSource : ISeedSource
     [
         "IS_LANGUAGE_CODE", "HAS_SCRIPT",
         "HAS_PART", "HAS_LANGUAGE_SCOPE",
-        // HAS_DEFINITION dropped: ISO 639-3 publishes codes and names, no glosses. Both
-        // emit sites were depositing the language's own NAME as its definition.
+        // No HAS_DEFINITION: ISO 639-3 publishes codes and names, no glosses.
         "HAS_LANGUAGE_TYPE", "HAS_VARIANT_OF",
         // One relation per meaning: a language's ISO 639-1/-2B/-2T codes are
         // HAS_EXTERNAL_ID qualified identifier/iso639-*, and its reference and print
         // names are HAS_NAME qualified name/reference and name/print.
         "HAS_EXTERNAL_ID", "HAS_NAME",
-        // SUPERSEDED_BY is the retirement lane's edge.
+        // SUPERSEDED_BY links a retired code to its successors.
         "SUPERSEDED_BY",
         // A macrolanguage HAS_PART its individual languages {member}, stated from the member.
         "IS_MEMBER_OF",

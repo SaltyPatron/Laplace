@@ -102,14 +102,10 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                     id, CILISource.IsTypedAsTypeId, typeId,
                     Source, null, TC.AcademicCurated));
 
-            // A CILI-native concept owns its own gloss. But ili.ttl also republishes
-            // Princeton WordNet concepts with dc:source pwn30:/pwn31:. Those glosses
-            // are packaging of the same PWN authority that WordNetDecomposer admits
-            // onto this exact ILI/synset identity. Counting the copied serialization
-            // as a second CILI witness makes one source corroborate itself.
-            //
-            // Keep the ILI<->PWN mapping below, but let WordNet own the PWN gloss.
-            // Native CILI-only records still contribute their definition normally.
+            // ili.ttl republishes Princeton WordNet glosses (dc:source pwn30:/pwn31:) that
+            // WordNet ingest already attests on the same synset identity; attesting the copy
+            // again would count one authority twice. Only a CILI-only concept's definition
+            // is attested here; the ILI↔PWN mapping below is kept for every record.
             bool pwnBacked = rec.SourceKey is { Length: > 0 }
                 && rec.SourceVersion is "pwn30" or "pwn31";
             if (!pwnBacked
@@ -137,9 +133,8 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
     }
 
     /// <summary>
-    /// changes-in-&lt;release&gt;.csv: Status,ILI,WN30,WN31,Synset. Only the withdrawals are
-    /// recorded here -- the "new" rows assert a mapping the ili-map file already carries,
-    /// so re-asserting them would double-witness the same triple from one source.
+    /// changes-in-&lt;release&gt;.csv: Status,ILI,WN30,WN31,Synset. Only withdrawals are
+    /// recorded: a "new" row states a mapping the ili-map file already carries.
     /// </summary>
     private sealed class IliStatusPhase : CiliComposePhase<(string Ili, string Status, string Version)>
     {
@@ -165,8 +160,7 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                 b, ReferenceIdentityKind.CiliMapVersion, rec.Version,
                 EntityTypeRegistry.SourceVersion, Source);
 
-            // The status key is a relation/operator key. It is not content and
-            // must not be materialized as an Entity merely so an attestation can use it.
+            // The status key is a relation key, not content; no entity is materialized for it.
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 iliId, CILISource.IliStatusMetaTypeId, statusId,
                 Source, verCtx, TC.AcademicCurated));
@@ -409,10 +403,9 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
 
     private static byte[] NormalizeMapKey(string version, byte[] key)
     {
-        // The PWN 3.1 RDF namespace serializes the 8-digit offset with a
-        // version marker prefix (`3xxxxxxxx-p`); the tab and native WordNet
-        // forms use the underlying 8-digit key. Decode the serialization before
-        // governed identity so both forms cannot mint parallel references.
+        // The PWN 3.1 RDF namespace prefixes the 8-digit offset with a version marker
+        // (`3xxxxxxxx-p`); the tab and WordNet forms use the bare key. Decoding first makes
+        // both forms compose to one reference.
         if (version == "pwn31" && key.Length == 11 && key[0] == (byte)'3'
             && key[9] == (byte)'-')
             return key[1..];
@@ -462,10 +455,9 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                 Path.GetExtension(path).Equals(".tab", StringComparison.OrdinalIgnoreCase)))
             .Where(map => !(conceptsContainPwn30 && map.Version == "pwn30"));
 
-        // Each version is one mapping, even when the repository publishes it
-        // simultaneously as RDF and tab packaging. Prefer RDF because the PWN
-        // 3.1 file contains 27 mappings absent from its tab export; older releases
-        // with only tab data remain admitted. File formats are not witnesses.
+        // Each version is one mapping even when published as both RDF and tab; file
+        // formats are not witnesses. RDF is preferred because the PWN 3.1 RDF file holds
+        // mappings its tab export lacks; a version with only tab data is still admitted.
         return candidates
             .GroupBy(map => map.Version, StringComparer.Ordinal)
             .Select(group => group
@@ -477,10 +469,9 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
             .ToList();
     }
 
-    // The unit numerator counts parsed concept/map records. CILI's main Turtle
-    // serialization is four physical lines per record; map serializations are
-    // one record per data line with only a small fixed header. The live observed
-    // floor remains authoritative when a future package changes either layout.
+    // Estimates parsed concept/map records: ili.ttl spends four lines per record; map
+    // files spend one line per record after a small header. The observed count at run
+    // time supersedes this estimate.
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         string root = context.EcosystemPath;

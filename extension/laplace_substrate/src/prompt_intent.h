@@ -22,8 +22,9 @@
 #include "spi_common.h"
 #include "walk_score.h"
 
-/* Bindings carry exact current-prompt occurrence ordinals. History and emitted
- * identities can supply evidence, but cannot become new instruction cues. */
+/* An identity bound to the current observation, with the ordinals of the
+ * current occurrences it is reached from. Discourse identities never gain
+ * origins here; they stay in their own response plane. */
 typedef struct LaplacePromptIntentBinding
 {
     hash128_t id;
@@ -35,11 +36,12 @@ typedef struct LaplacePromptOperand
     hash128_t id;
     hash128_t witness;
     Bitmapset *origins;
-    int requirement; /* runtime input identity coordinate, distinct from surface ordinals */
+    int requirement; /* distinct-input ordinal, not an occurrence ordinal */
 } LaplacePromptOperand;
 
-/* Explicit whole-observation invocation, with the actual source occurrence
- * retained. Naming knowledge alone never creates one of these records. */
+/* One invocation compiled from witnessed CALLS and HAS_INPUT declarations on
+ * the whole observation: the result relation, the declaring source and context,
+ * and each input operand with the occurrence origins that bind it. */
 typedef struct LaplacePromptRelationRead
 {
     hash128_t result_relation, source, context, call_witness;
@@ -202,8 +204,8 @@ laplace_prompt_same_inputs(const LaplacePromptRelationRead *a,
     return bms_equal(a->operand_origins, b->operand_origins);
 }
 
-/* Protocol relations describe an invocation; they are not result transitions.
- * Keep their channels in COUPLE but never use their endpoints as answer proof. */
+/* 1 for the CALLS family, 2 for HAS_INPUT, 0 otherwise. These relations declare
+ * an invocation; their endpoints are not result transitions. */
 static inline int
 laplace_prompt_contract_relation(const hash128_t *relation)
 {
@@ -214,10 +216,10 @@ laplace_prompt_contract_relation(const hash128_t *relation)
     return member ? 2 : 0;
 }
 
-/* These are typed naming/interpretation relations, not surface-word rules.
- * Reverse access means finding what a surface names/evokes; it does not invert
- * the result operation (for example, HAS_PART remains directed). Definitions
- * and arbitrary semantic associations are deliberately not naming evidence. */
+/* A binding channel is a positively standing naming or interpretation cell:
+ * the HAS_NAME, HAS_SENSE, IS_LEMMA_OF or EVOKES_FRAME families, or the root
+ * CORRESPONDS_TO relation. No other relation binds a candidate to the
+ * observation's occurrences, and binding never inverts a result relation. */
 static inline bool
 laplace_prompt_binding_channel(const LaplaceQueryChannel *channel)
 {
@@ -351,11 +353,10 @@ laplace_prompt_geometry_append(LaplacePromptIntent *intent,
         memcpy(target->hilbert_delta, hilbert_delta, sizeof(target->hilbert_delta));
 }
 
-/* The whole admitted observation is one geometric source.  The angular plan
- * is the exact indexed S3 KNN used by generation.nearest_entity. The Hilbert
- * plan reads at most fanout equal/predecessor/successor keys from the btree and
- * C ranks their exact unsigned 128-bit scalar deltas. No candidate causes an
- * additional SPI operation. */
+/* Geometry response of one anchor: an indexed S3 angular KNN over same-tier
+ * points, then at most fanout equal, predecessor and successor Hilbert keys
+ * each from the btree, ranked in C by exact unsigned 128-bit delta. Two SPI
+ * reads per anchor, whatever the candidate count. */
 static inline void
 laplace_prompt_geometry_scan_anchor(
     LaplacePromptIntent *intent, const hash128_t *source, uint32 node,
@@ -468,10 +469,9 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, uint32 root_node,
         (Size) child_count > MaxAllocSize / sizeof(Datum))
         elog(ERROR, "prompt geometry: realized root curve is invalid");
 
-    /* Match structural.entity_curve exactly: one point per immediate ordered
-     * constituent of the active root.  Using all graphemes in a multi-word
-     * prompt compares different composition levels and is not a Frechet metric
-     * over the same declared physicality. */
+    /* One point per immediate ordered constituent of the root: the level
+     * structural.entity_curve realizes for each candidate. Points from another
+     * composition level would not give a Frechet distance over one physicality. */
     int point_count = (int) child_count;
     Datum *x = palloc(sizeof(Datum) * point_count);
     Datum *y = palloc(sizeof(Datum) * point_count);
@@ -629,10 +629,8 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     if (root_node == TIER_TREE_INVALID)
         elog(ERROR, "prompt geometry: admitted root is absent from canonical tree");
 
-    /* Geometry is a whole-observation operator.  The canonical root already
-     * carries every exact current occurrence as provenance, so one indexed read
-     * per metric plane preserves the complete prompt without RBAR SPI over its
-     * codepoints/graphemes/tokens. */
+    /* The root carries every current occurrence as provenance, so geometry
+     * reads once per metric plane from the root, not once per occurrence. */
     if ((Size) fanout > MaxAllocSize / sizeof(hash128_t))
         elog(ERROR, "prompt geometry: fanout exceeds allocation capacity");
     hash128_t *root_angular = palloc(sizeof(hash128_t) * (Size) fanout);
@@ -641,8 +639,8 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
         intent, &intent->root, root_node, fanout, angular_plan, hilbert_plan,
         root_angular, &root_angular_count);
 
-    /* Shape refinement is deliberately over the declared root angular KNN
-     * population: no hidden 500-row probe and never packed trajectory bits. */
+    /* Frechet refinement ranks only the root's angular KNN population, over
+     * each candidate's realized curve rather than its packed trajectory values. */
     laplace_prompt_geometry_shape(
         intent, root_node, fanout, frechet_plan,
         root_angular, root_angular_count);
@@ -682,11 +680,10 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     MemoryContextSwitchTo(previous);
 }
 
-/* The input scope has already bound exact occurrences at every canonical cut.
- * Pull their complete ordered successor set before ORIENT and retain that route
- * independently in the physicality response. This is not an n-gram edge and
- * does not synthesize testimony: it is the exact continuation of the whole
- * admitted observation at a witnessed trajectory occurrence. */
+/* Merge the ordered trajectory continuations of the observation's occurrences
+ * into the structural response as CONTINUATION crossings from the root, summing
+ * occurrence counts per continuation. They remain trajectory facts, never
+ * testimony. */
 static inline int
 laplace_prompt_merge_continuations(LaplacePromptIntent *intent,
                                    LaplaceTrajectoryScope *trajectory_scope)
@@ -819,14 +816,12 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         root_binding->origins = bms_add_member(root_binding->origins, i);
     }
 
-    /* Physicality participates in COUPLE before ORIENT. The native scope is the
-     * same one later used for ordered continuation, so containment, membership,
-     * predecessor/successor, co-occurrence and exact whole-observation
-     * continuation are not a second semantic engine. Stage one structural round
-     * from the exact root/current occurrences and exact ordered occurrence state,
-     * retain the typed crossings separately, then expose newly reached identities
-     * as a semantic query frontier. No structural fact is synthesized as a
-     * testimony relation. */
+    /* Physicality couples before ORIENT. One trajectory scope yields container,
+     * constituent, predecessor, successor and co-occurrence crossings from the
+     * root and every current occurrence, plus ordered continuation. Crossings
+     * stay typed in `structural`; identities they first reach join the bindings
+     * with their sources' origins and form the structural frontier. No
+     * crossing becomes testimony. */
     result.structural_frontier = construct_empty_array(BYTEAOID);
     if (trajectory_scope)
     {
@@ -1028,18 +1023,16 @@ laplace_prompt_witness_compare(const void *left, const void *right)
     return memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
 
-/* The caller declares the active invocation context. A source witnesses
- * R CALLS O and R HAS_INPUT I in that exact context, with a common source.
- * R is the current whole observation; I has exact current occurrence provenance
- * through witnessed naming/sense bindings. The result anchor must be exactly I.
+/* Compile invocations in the caller's active context. One source witnesses
+ * R CALLS O and R HAS_INPUT I in that context, where R is the whole
+ * observation and I is bound to current occurrences; O becomes the result
+ * relation, anchored exactly at I.
  *
- * Read ALL typed declarations before checking standing. Missing/negative
- * standing for a declared input invalidates the contract; top-K cannot silently
- * erase it. The one native set read retains witnesses, followed by one set
- * consensus probe. Exceeding fanout never authorizes a retained prefix.
- *
- * This executes explicit program data. It does not infer a speech act from an
- * alias, a frame, the availability of an answer, or a historical text match. */
+ * All typed declarations are read before standing is checked: a declared
+ * input that is refuted or lacks positive standing invalidates the whole call.
+ * One set observation read, then one set consensus probe. Exceeding fanout
+ * marks the intent budget-exhausted instead of compiling a retained prefix.
+ * Only witnessed declarations create an invocation. */
 static inline void
 laplace_prompt_intent_compile(LaplacePromptIntent *intent,
                               const hash128_t *active_context, int fanout)

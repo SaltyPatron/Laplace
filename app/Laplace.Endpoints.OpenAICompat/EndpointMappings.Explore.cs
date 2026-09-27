@@ -32,8 +32,8 @@ internal static class ExploreEndpoints
                 return EndpointJson.ServiceUnavailable("decompose_unavailable", ex.Message);
             }
 
-            // NAME discovery consumes the same word-tier identities emitted by the
-            // native text spine. No UI tokenizer and no rendered substring scan.
+            // Browse members are the word-tier ids the native text spine emitted for
+            // the query, not a tokenization or substring scan of rendered text.
             var memberIds = decomposition.Nodes
                 .Where(static n => n.Tier == EntityTier.Word)
                 .Select(static n => n.IdHex)
@@ -94,11 +94,10 @@ internal static class ExploreEndpoints
         .Produces<ExploreEntityPreviewResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        // Not-found explorer: keyed by the SURFACE (a content hash can't be
-        // reversed to recover "conflagurate"), so the caller passes the original
-        // reference. The anchor is computed in-process; neighbours come from the
-        // bound-anchor KNN. Returns 200 with navigable neighbours, never a 503,
-        // for a valid-but-unwitnessed word.
+        // An unwitnessed reference, keyed by its surface because a content id does
+        // not reverse to text. Its anchor is computed in-process from content and its
+        // neighbours come from the bound-anchor KNN; absence of the entity is answered
+        // with navigable structure, not an error.
         app.MapGet("/v1/explore/notfound", async (
             string? reference,
             int? geodesic_k,
@@ -121,11 +120,8 @@ internal static class ExploreEndpoints
                 Math.Clamp(frechet_max ?? 0.5, 0.0, 2.0),
                 ct);
 
-            // Did-you-mean by surface edit distance: witnessed words within one
-            // edit of what was typed. Deterministic and exact -- no fuzzy index,
-            // no scan -- because we generate the edit-distance-1 neighbourhood and
-            // keep only the word ids that entity_exists. "conflagrate" is one
-            // deletion from "conflagurate", so it surfaces directly.
+            // Did-you-mean: the edit-distance-1 surfaces whose content id exists,
+            // ranked by distance then witness count. Exact index probes, no scan.
             var refLower = surface.ToLowerInvariant();
             var witnessed = await substrate.WitnessedWordsAsync(
                 EditDistance1Candidates(refLower), ct);
@@ -502,11 +498,9 @@ internal static class ExploreEndpoints
         return (int)total;
     }
 
-    // The edit-distance-1 neighbourhood of a lowercase word: deletions,
-    // substitutions, insertions, and adjacent transpositions over [a-z]. ~54n
-    // strings for length n -- resolved in one batched entity_exists round trip,
-    // so did-you-mean is an exact index probe, not a fuzzy scan. Work is linear
-    // in the caller's surface length; there is no unrelated spelling-length cap.
+    // The edit-distance-1 neighbourhood of a lowercase surface: deletions,
+    // substitutions, insertions, and adjacent transpositions over [a-z], about 54n
+    // strings for length n, resolved in one batched existence probe.
     private static IReadOnlyList<string> EditDistance1Candidates(string word)
     {
         if (string.IsNullOrEmpty(word))
@@ -563,9 +557,8 @@ internal static class ExploreEndpoints
 
     private static void MapMatchupEndpoints(WebApplication app)
     {
-        // The entity's verdict record — confirmed/contested/refuted/thin counts
-        // from the canonical epistemic_status logic. Preview-class information,
-        // served ungated like the entity preview.
+        // Mesh, source roster, taxonomy, and verdict record are served without the
+        // billing gate, as the entity preview is.
         app.MapGet("/v1/explore/entities/{idHex}/mesh", async (
             string idHex, int? relations, int? members,
             ISubstrateClient substrate, CancellationToken ct) =>
@@ -622,8 +615,7 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        // Head-to-head, fast half: both cards + the tale of the tape. Gated as
-        // an inspect-class read.
+        // Head-to-head cards and tape, gated as an inspect-class read.
         app.MapGet("/v1/explore/matchup", async (string? x, string? y, HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
@@ -642,9 +634,8 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        // Head-to-head, slow half: the witnessed path and the verdict.
-        // relation_summary runs a deep path search (measured 6-14s under an
-        // active seed) — a separate fetch so the tape never waits on it.
+        // Head-to-head verdict. relation_summary runs a path search, so it is a separate
+        // request from the cards and tape.
         app.MapGet("/v1/explore/matchup/verdict", async (string? x, string? y, HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))

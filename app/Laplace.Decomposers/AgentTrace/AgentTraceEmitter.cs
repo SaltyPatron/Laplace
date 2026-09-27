@@ -8,22 +8,22 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
-/// The one compose path for a normalized <see cref="AgentSession"/> (spec 34 identity
-/// hierarchy, batch counterpart of TurnCloser):
+/// Composes a normalized <see cref="AgentSession"/> into the same identities TurnCloser
+/// composes for live conversation:
 ///
 ///   part text     → tiered content DAG (TextEntityBuilder), same roots as live turns
 ///   turn          → ordered composition of its part roots: merkle id + Content
-///                   physicality whose trajectory IS the part order (Pillar 3a)
+///                   physicality whose trajectory is the part order
 ///   tool call     → Tool_Invocation composition of input/result roots, CALLS / HAS_INPUT
 ///                   / HAS_RESULT edges
 ///   session       → stable governed identity (tenant=provider, key=session id) whose
 ///                   Projection physicality is the ordered, growing turn manifest.
 ///                   The handle is deliberately not the content hash of that manifest.
 ///
-/// Membership rides the per-tenant UserPrompt@/Response@ sources so replayed
-/// logs fold onto the SAME consensus cells as live conversation; structure, usage
-/// scalars and retained metadata ride the AgentTrace lane source. Every attestation
-/// and composed physicality carries the LOG's event time, not ingest time.
+/// Membership is attested under the per-tenant UserPrompt@/Response@ sources, so replayed
+/// logs fold into the same consensus cells as live conversation; structure, usage and
+/// retained metadata are attested under the AgentTrace source. Every attestation and
+/// composed physicality carries the log's event time, not ingest time.
 /// </summary>
 public static class AgentTraceEmitter
 {
@@ -100,8 +100,8 @@ public static class AgentTraceEmitter
         b.DeclareSourcePrior(LaneSource, TC.AppDerived)
             .DeclareSourcePrior(scope.Tenant.PromptSource, TC.UserPrompt)
             .DeclareSourcePrior(scope.Tenant.ResponseSource, TC.Response)
-            // This prior describes the application-captured tool-result structure,
-            // not a claim that the external tool output is true.
+            // The prior covers the application-captured tool-result structure, not the
+            // truth of the external tool's output.
             .DeclareSourcePrior(scope.ToolSource, TC.AppDerived);
         Hash128 sessionId = ConversationContent.SessionId(
             session.Provider, SanitizeKey(session.SessionKey));
@@ -162,8 +162,8 @@ public static class AgentTraceEmitter
                 tid, Rel(AgentRelation.AppearsIn), sessionId, roleSource, sessionId,
                 TC.AppDerived));
 
-            // A role, a model id and a tool name are content: the text itself is the
-            // entity, and the claim that uses it says what it is.
+            // A role, a model id and a tool name are content: the text is the entity,
+            // and the attestation that uses it says what it is.
             if (ContentEmitter.Emit(b, turn.Role, LaneSource) is { } role)
                 AttestCanonical(b, ts, tid, Rel(AgentRelation.HasRole), role, sessionId);
             if (IsRealModelId(turn.Model) && ContentEmitter.Emit(b, turn.Model!, LaneSource) is { } model)

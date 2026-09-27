@@ -3,8 +3,9 @@
 
 #include "postgres.h"
 
-/* Shared ISO-WKB framing for native trajectory readers. Vertex payloads are
- * copied into aligned doubles by the caller before canonical mantissa decode. */
+/* ISO-WKB framing of a stored trajectory: POINT ZM (one vertex) or LINESTRING ZM,
+ * four binary64 per vertex. Returns the first vertex; callers copy vertices into
+ * aligned doubles before unpacking the manifest (child id, ordinal, run, flags). */
 static inline const unsigned char *
 laplace_trajectory_wkb_points(const bytea *wkb, uint32 *count)
 {

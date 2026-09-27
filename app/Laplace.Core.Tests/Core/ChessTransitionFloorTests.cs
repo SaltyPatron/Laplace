@@ -4,13 +4,12 @@ using Xunit;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// Blob-format pins for <see cref="ChessTransitionFloor"/>: write → load → lookup, and the
-/// four ways a bad blob must refuse to load. The floor is a deterministic ROM the compose
-/// path trusts without re-deriving, so a blob that loads is a blob whose every record is
-/// believed — the failure modes matter as much as the happy path.
+/// Blob-format pins for <see cref="ChessTransitionFloor"/>, a read-only perfcache map from
+/// a transition key to its composed id: write → load → lookup, and each way a malformed
+/// blob is refused at load, since compose trusts every record of a loaded blob.
 ///
-/// Serialised with the other perfcache tests: the floor is process-wide static state
-/// (mmap handle + base pointer), so two tests loading at once would fight over it.
+/// In the Perfcache collection because the floor is process-wide static state (mmap handle
+/// and base pointer).
 /// </summary>
 [Collection("Perfcache")]
 public sealed class ChessTransitionFloorTests
@@ -18,9 +17,8 @@ public sealed class ChessTransitionFloorTests
     private static Hash128 K(string s) => Hash128.OfCanonical("k:" + s);
     private static Hash128 V(string s) => Hash128.OfCanonical("v:" + s);
 
-    /// <summary>WriteBlob demands sorted-unique input, in the same bytewise order the
-    /// binary search assumes. Sorting here rather than hand-ordering literals keeps the
-    /// test honest if Compare ever changes.</summary>
+    /// <summary>WriteBlob requires sorted-unique input in the bytewise order the binary
+    /// search uses; the fixture sorts with that comparer.</summary>
     private static List<(Hash128 Key, Hash128 To)> Pairs(params string[] names)
     {
         var list = names.Select(n => (Key: K(n), To: V(n))).ToList();
@@ -358,9 +356,8 @@ public sealed class ChessTransitionFloorTests
             ChessTransitionFloor.Load(path);
             Assert.True(ChessTransitionFloor.TryLookup(before[0].Key, out _));
 
-            // Incremental catalog builds compose before emitting. That warmup maps the
-            // previous destination in this same process; publication must not truncate
-            // or collide with its own live ROM.
+            // Rewriting the path this process has mapped replaces it without truncating
+            // or colliding with the live mapping.
             ChessTransitionFloor.WriteBlob(path, after);
             ChessTransitionFloor.Load(path);
 

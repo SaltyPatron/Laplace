@@ -11,13 +11,9 @@ import styles from './ChessDb.module.css';
 const PAGE = 25;
 
 /**
- * A career. The headline record, the colour splits, the Elo the sources tagged,
- * the rivals, and the games themselves — each one a drill into the game page,
- * each opponent a drill into his own career.
- *
- * The splits are not computed here: they arrive already reconciled with the
- * total from one pass over the same evidence, so what this page shows is what
- * the substrate counted, not what a client re-derived.
+ * One player entity: witnessed record and colour splits, source-tagged ratings, opponents,
+ * and games, each game and opponent linked to its own page. Every count is read from the
+ * server as folded; the page derives none of them.
  */
 export function PlayerPage() {
   const { idHex } = useParams();

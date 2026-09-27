@@ -1,17 +1,8 @@
--- Containment index over a SET physicality's member ids (PhysicalityType.Set = 5).
---
--- Separate from physicalities_constituents_gin rather than widening its `type = 1`
--- predicate. Two reasons, both structural. The text index is the most expensive one on
--- this table -- ~96% of its index-entry writes -- and admitting a second shape into it
--- would put set writes behind the same pending-list flush that the text seed already
--- saturates. And the two shapes answer different questions: a text trajectory's
--- constituent order carries sequence, while a set's does
--- not, so a probe that means "contains this token at some offset" and one that means
--- "this member is in the set" must not share a posting list.
---
--- Set identities are content-addressed, so repeated member sets reuse one physicality.
--- This index scales with distinct compositions rather than the number of attributes that
--- point at them. Pending-list tuning remains measurement-driven.
+-- Membership over a Set physicality's member ids (type 5). A Content
+-- trajectory's order carries sequence and a set's does not, so "contains this
+-- child at some ordinal" and "this member is in the set" keep separate posting
+-- lists, and set writes stay out of the Content index's pending list. Set ids
+-- are content-addressed, so the index grows with distinct member sets.
 CREATE INDEX IF NOT EXISTS physicalities_set_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WHERE type = 5 AND trajectory IS NOT NULL;

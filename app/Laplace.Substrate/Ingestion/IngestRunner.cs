@@ -197,10 +197,9 @@ public sealed class IngestRunner
                     stageBytes += s.TotalTupleBytes;
                     stageAtt += s.AttestationCount;
                 }
-                // Commit grain must cover actual held native allocations.
-                // The serialized E/P/A
-                // metric remains unchanged and repeated references retain their
-                // existing transport estimate without double-counting ownership.
+                // Commit grain covers the native allocations actually held. The serialized
+                // E/P/A metric is unchanged, and a stage referenced more than once is not
+                // counted twice.
                 stageBytes = Math.Max(stageBytes,
                     IngestAdmissionSizing.HeldNativeStageBytes(c.IntentStages));
             }
@@ -332,13 +331,10 @@ public sealed class IngestRunner
                     sbatchSource ??= intent.Metadata.SourceId;
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
-                    // File boundaries are semantic/journal markers, not transaction-size
-                    // boundaries. Tiny-file estates such as PropBank can contain thousands
-                    // of one-record XML files; flushing on every boundary turns the source
-                    // layout into thousands of database transactions. Keep the boundary in
-                    // the same capacity-governed batch as its file data (and neighboring
-                    // files). The marker is applied atomically with the batch, and
-                    // CompleteFileAsync below still closes each file only after that apply.
+                    // A file boundary is a journal marker, not a transaction boundary: it stays
+                    // in the same capacity-bounded batch as its file's data and neighboring
+                    // files, applies atomically with that batch, and CompleteFileAsync closes
+                    // the file only after the apply.
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
                     {
                         LogAdmissionWindow(sbatch.Count);
@@ -413,12 +409,9 @@ public sealed class IngestRunner
                     }
                 }, "ingest-decompose-pcore", pipelineCts.Token);
 
-                // Apply batching is source-owned, not file-owned. The previous file-label
-                // bucket made the physical source packaging dictate the database cadence:
-                // a corpus with 7,567 one-record XML files could never coalesce those rows
-                // into a normal working-set transaction. File labels remain on every change
-                // for resume, observability, and fold ownership; only the apply accumulator
-                // is shared across files of the same source.
+                // Apply batches accumulate per source, not per file, so the source's file
+                // packaging does not set the transaction cadence. File labels stay on every
+                // change for resume, observability and fold attribution.
                 var buckets = new Dictionary<Hash128, ApplyBatchBucket>();
 
                 ApplyBatchBucket BucketFor(SubstrateChange intent)
@@ -493,11 +486,10 @@ public sealed class IngestRunner
                         long ib = queued.SerializedBytes;
                         var admission = queued.Admission;
 
-                        // A terminal marker is ordinary zero/small-row control state for
-                        // batching purposes. It stays behind that file's already-produced
-                        // data in the stream and can share a transaction with other files.
-                        // ProcessBatchAsync calls CompleteFileAsync only after the atomic
-                        // apply returns, so files_done cannot outrun their durable rows.
+                        // A terminal marker batches like any small control row: it follows its
+                        // file's data in the stream and may share a transaction with other
+                        // files. CompleteFileAsync runs only after the atomic apply returns,
+                        // so files_done never outruns durable rows.
 
                         if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                                 bucket.Source, intent.Metadata.SourceId))
@@ -581,11 +573,9 @@ public sealed class IngestRunner
             }
         }
 
-        // File progress is a durability statement, not a compose statement.
-        // Pipelined consensus may finish after its evidence apply returned; every
-        // terminal observer above was registered without blocking the apply lane.
-        // By run completion the writer has drained those continuations, so join the
-        // counter/observability tasks before deciding filesComplete/source completion.
+        // File progress states durability, not composition. A pipelined fold can finish after
+        // its evidence apply returned, so the pending completion observers are joined before
+        // file and source completion are decided.
         await counters.DrainPendingFileCompletionsAsync().ConfigureAwait(false);
 
         unitsAttempted = counters.UnitsAttempted;
@@ -606,10 +596,9 @@ public sealed class IngestRunner
             && failures.Count == 0
             && filesComplete;
 
-        // A resumed multi-file run does not observe the input units inside marker-skipped
-        // files. Publishing this run's observed suffix as the source's exact total shrinks the
-        // inventory (VerbNet: 329 files became input_total=142 after 187 files were reused).
-        // Preserve the declared/previous inventory whenever any file was reused complete.
+        // A resumed run does not observe the input units of files skipped by their markers,
+        // so when any file was reused the declared/previous inventory total is kept rather
+        // than replaced by this run's partial count.
         if (fullSuccessfulExtraction
             && inventory is not null
             && counters.InputUnitsDone > 0
@@ -687,8 +676,8 @@ public sealed class IngestRunner
             capped: options.DecomposerOptions.MaxInputUnits > 0,
             filesDone: counters.FilesDone,
             filesTotal: declaredFiles);
-        // An explanation may name an otherwise complete no-op. It cannot
-        // override failed units, unfinished files, or an explicit input cap.
+        // An explanation may name an otherwise complete no-op; it never overrides failed
+        // units, unfinished files or an explicit input cap.
         if (status == "ok" && explained is { } exp)
             status = exp.Status;
         log.LogInformation(
@@ -784,10 +773,9 @@ public sealed class IngestRunner
             return;
         }
 
-        // CompleteFileAsync is a durability observer. For ordinary pipelined bulk
-        // ingest it waits for the already-dispatched consensus/mask continuation
-        // that owns this file's completion marker. Do not await it on the apply
-        // lane: doing so would serialize the next working set behind every refold.
+        // CompleteFileAsync observes durability: under pipelined bulk ingest it waits for the
+        // dispatched fold/mask continuation carrying this file's completion marker. It is not
+        // awaited here, so the next working set's apply does not wait behind the fold.
         Task durable = _writer.CompleteFileAsync(fileLabel, CancellationToken.None);
         if (durable.IsCompletedSuccessfully)
         {
@@ -837,9 +825,9 @@ public sealed class IngestRunner
     {
         if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsAttempted);
 
-        // Native stages are caller-owned only until the writer accepts them. Successful
-        // apply retires those stages, so inspect E/P closure here while the exact source
-        // tuples are still available. The tracker is idempotent across a retry.
+        // Native stages are disposed once the writer accepts them, so entity/physicality
+        // closure is checked here while the staged rows exist. The tracker is idempotent
+        // across a retry.
         counters.EntityAdmission.Observe(intent);
 
         Exception? lastEx = null;
@@ -959,8 +947,7 @@ public sealed class IngestRunner
         foreach (var c in batch) if (c.CountsAsUnit) unitCount++;
         Interlocked.Add(ref counters._unitsAttempted, unitCount);
 
-        // Same ownership boundary as the scalar path: validate the complete staged
-        // source stream before a successful writer call disposes transferred stages.
+        // As in the single-intent path: check closure before the writer disposes the stages.
         foreach (var intent in batch)
             counters.EntityAdmission.Observe(intent);
 
@@ -1164,9 +1151,9 @@ public sealed class IngestRunner
             return;
         }
 
-        // The stream is diagnostic: a source may reuse an entity whose physicality
-        // was committed by an earlier source/run. Durable source closure below is
-        // the authority and blocks completion when an identity is truly unplaced.
+        // Diagnostic only: an entity may already be placed by an earlier source or run. The
+        // durable source-closure check below decides, and blocks completion when an entity
+        // is truly unplaced.
         string examples = string.Join(", ", pending.Take(8).Select(static item =>
             $"{item.Id}:{item.TypeId}@{item.UnitName}"));
         log.LogWarning(

@@ -7,9 +7,9 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static partial class NpgsqlSubstrateReads
 {
     /// <summary>
-    /// One admitted materialization envelope. Charges encoded inputs and conservative
-    /// managed/native row and replay reservations before their materialization.
-    /// This is an input/work allowance, not a measurement of process RSS.
+    /// Byte allowance for one hydration of recorded playings. Encoded inputs, row
+    /// transport and replay work are reserved against it before they are materialized;
+    /// exceeding it throws. It bounds work, it does not measure process memory.
     /// </summary>
     public sealed class ChessWitnessReadBudget(long maximumBytes)
     {
@@ -29,7 +29,8 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct ChessContentVertexRow(
         byte[] Parent, int Ordinal, byte[] Child, int RunLength);
 
-    /// <summary>Selected recorded sources, subjects and, for headers, playing contexts.</summary>
+    /// <summary>Recorded testimony for the selected subjects, types and sources (and, when
+    /// given, contexts), capped by the budget's row limit.</summary>
     public static async Task<IReadOnlyList<ChessWitnessInputRow>> ChessWitnessInputsAsync(
         NpgsqlDataSource ds, byte[][] subjects, byte[][] types, byte[][] sources,
         byte[][]? contexts, ChessWitnessReadBudget budget, CancellationToken ct)
@@ -50,9 +51,9 @@ public static partial class NpgsqlSubstrateReads
         {
             if (result.Count == limit)
                 throw new InvalidDataException("Chess playing header fanout exceeds its admitted materialization envelope.");
-            // Selected subject/type predicates and bounded object/context projections
-            // constrain transport before Npgsql can allocate a malformed large field.
-            // Null objects/non-null invalid line contexts are rejected by the caller.
+            // The catalog statement bounds object/context projections server-side, so
+            // each row fits its fixed reservation. The caller validates object and
+            // context shapes.
             budget.Reserve(256);
             result.Add(new((byte[])reader[0], (byte[])reader[1],
                 reader.IsDBNull(2) ? null : (byte[])reader[2],
@@ -63,9 +64,10 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// Admit stored geometry bytes/vertices before the native compressed-trajectory
-    /// reader runs; then reserve actual expanded RLE work before any expanded read
-    /// or chess replay. Source n_constituents metadata is not trusted as the count.
+    /// Reads the Content trajectory vertices of <paramref name="ids"/> in two passes: a
+    /// preflight reserves the stored geometry bytes and vertex counts, then the carrier
+    /// read reserves each vertex's expanded run before it is returned. The vertex count
+    /// comes from the stored geometry, not from n_constituents.
     /// </summary>
     public static async Task<IReadOnlyList<ChessContentVertexRow>> ChessContentShapeAsync(
         NpgsqlDataSource ds, byte[][] ids, ChessWitnessReadBudget budget,
@@ -96,8 +98,8 @@ public static partial class NpgsqlSubstrateReads
                 selectedEntities.Add((byte[])reader[0]);
                 selectedPhysicalities.Add((byte[])reader[1]);
                 long bytes = reader.GetInt64(2), points = reader.GetInt64(3);
-                // Geometry decoding may retain the serialized value and native XYZM
-                // buffer together. Stored-vertex result rows need their own allowance.
+                // Decoding may hold the serialized geometry and the native XYZM buffer
+                // at once; each stored vertex row is reserved separately.
                 budget.Reserve(checked(bytes * 2));
                 budget.Reserve(checked(points * 256));
                 vertices = checked(vertices + points);
@@ -105,9 +107,9 @@ public static partial class NpgsqlSubstrateReads
         }
 
         var result = new List<ChessContentVertexRow>();
-        // Reuse the native set-sized carrier owner for exactly the preflighted
-        // physicalities. It validates canonical entity/Content identity bindings;
-        // unrelated alternate physicalities cannot replace an admitted carrier.
+        // Carrier vertices for exactly the preflighted (entity, physicality) pairs; the
+        // native reader checks each Content physicality against its entity id, so a
+        // different physicality cannot stand in for the preflighted one.
         await using (var command = NpgsqlRead.CreateCommand(ds, SqlCatalog.Get("content.carrier_vertices_selected"),
             parameters =>
             {
@@ -131,7 +133,7 @@ public static partial class NpgsqlSubstrateReads
         return result;
     }
 
-    /// <summary>Render only a preflighted finite canonical text graph.</summary>
+    /// <summary>Realizes the given result ids as text, bounded by <paramref name="maximumDepth"/>.</summary>
     public static async Task<string[]?> RenderPreflightedChessResultsAsync(
         NpgsqlDataSource ds, byte[][] ids, int maximumDepth, CancellationToken ct)
     {

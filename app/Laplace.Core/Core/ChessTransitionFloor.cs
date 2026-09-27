@@ -4,10 +4,10 @@ using System.Runtime.InteropServices;
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// Chess move/transition compose floor — (from_position, move) → to_position.
-/// Deterministic ROM for state→state dedupe (operator law / GH #822 companion).
-/// Not testimony. Not a ConcurrentDictionary presented as the ROM; the mmap blob is.
-/// A bounded process-local derived cache reuses novel transitions; collisions evict cache entries only.
+/// Transition perfcache over game positions — (from_position, move) → to_position — as a
+/// memory-mapped, read-only ROM derived from canonical structure. It is a calculation, not
+/// testimony. A bounded process-local cache reuses transitions composed in this process;
+/// collisions evict only that cache.
 /// </summary>
 public static unsafe class ChessTransitionFloor
 {
@@ -169,7 +169,7 @@ public static unsafe class ChessTransitionFloor
         => AppDomain.CurrentDomain.ProcessExit += static (_, _) => Unload();
 
     /// <summary>
-    /// Hash the complete mapped body through the existing native size_t interface.
+    /// Hash the complete mapped body through the native size_t interface.
     /// A mapping may exceed the length of one managed span; no prefix checksum or
     /// managed-sized copy is needed.
     /// </summary>
@@ -241,9 +241,8 @@ public static unsafe class ChessTransitionFloor
 
     /// <summary>
     /// Resolve one deterministic transition and report whether it came from the installed
-    /// memory-mapped catalog or from a transition composed earlier in this process.  Keeping
-    /// those two sources distinct makes the runtime receipt prove that the generated catalog
-    /// is actually serving decisions instead of counting process-local saturation as a ROM hit.
+    /// memory-mapped catalog or from a transition composed earlier in this process, so the
+    /// runtime receipt distinguishes ROM hits from process-local reuse.
     /// </summary>
     public static bool TryLookup(Hash128 key, out Hash128 toId, out LookupSource source)
     {
@@ -282,9 +281,9 @@ public static unsafe class ChessTransitionFloor
 
     private static int Bucket(Hash128 key) => key.GetHashCode() & (NovelCapacity - 1);
 
-    /// <summary>Reuse an actually composed deterministic transition in this process.
+    /// <summary>Reuse a deterministic transition already composed in this process.
     /// The fixed-size derived cache may evict on collisions; misses recompute normally.
-    /// No file, PostgreSQL record, testimony or historical provenance is created.</summary>
+    /// No file, PostgreSQL record, testimony or provenance is created.</summary>
     public static void Remember(Hash128 key, Hash128 toId)
     {
         while (true)
@@ -345,7 +344,7 @@ public static unsafe class ChessTransitionFloor
         WriteBlob(path, sortedUnique, (ulong)sortedUnique.Count);
     }
 
-    /// <summary>Write one sorted, unique stream in the unchanged v1 layout. The declared
+    /// <summary>Write one sorted, unique stream in the v1 layout. The declared
     /// count is checked against the actual single enumeration; invalid input or cancellation
     /// cannot publish a prefix or discard the currently serving map. No collection-sized
     /// allocation or int-sized checksum span is used.</summary>
@@ -367,8 +366,8 @@ public static unsafe class ChessTransitionFloor
             $".{Path.GetFileName(fullPath)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
         try
         {
-            // Unique same-directory temporary files preserve atomic replacement and the
-            // exact zero-filled reserved header bytes of the existing serializer.
+            // A unique same-directory temporary file gives atomic replacement; reserved
+            // header bytes are written zero-filled.
             using (var fs = new FileStream(temporary, FileMode.CreateNew,
                        FileAccess.ReadWrite, FileShare.None))
             {
@@ -435,7 +434,7 @@ public static unsafe class ChessTransitionFloor
                 }
                 else
                 {
-                    // Keep the existing Windows mapped-destination release contract.
+                    // Windows cannot replace a mapped file: release the mapping, then rename.
                     if (replacingMapped)
                     {
                         Interlocked.Exchange(ref _state, new State(null));

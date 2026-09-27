@@ -4,8 +4,8 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Presentation of the same installed signatures and policy the invoker consumes.
-/// No client-side SQL-signature parser, guessed write-name rules, or new authority.
+/// Describes an installed operation from the catalog row, with the signature parse and
+/// write/destructive policy <see cref="InstalledOpInvoker"/> itself applies.
 /// </summary>
 internal static class OpCatalogProjection
 {

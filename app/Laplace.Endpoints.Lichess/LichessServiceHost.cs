@@ -48,16 +48,14 @@ internal static class LichessServiceHost
         builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(40));
         builder.Services.AddHostedService<LichessWorker>();
         var app = builder.Build();
-        // The listener has no start/stop route and is loopback-only. All service
-        // mutations go through the separately authenticated API/control helper.
+        // Loopback-only and read-only: health, status and per-game chat. Nothing here
+        // starts or stops the worker.
         app.MapGet("/health/live", () => Results.Json(new { service = "laplace-lichess", live = true }));
         app.MapGet("/health/ready", (ILichessConnection bot) =>
         {
             var status = bot.Status();
-            // Deployment readiness proves that the configured worker process is alive
-            // and can serve its status/control surface. Lichess connectivity is an
-            // external product integration and may flap independently; /status and
-            // post-delivery QA report it without rolling a healthy API/SPA payload back.
+            // Ready means configured; upstream connectivity is reported in the body
+            // but does not gate readiness.
             bool ready = status.Configured;
             return Results.Json(new
             {

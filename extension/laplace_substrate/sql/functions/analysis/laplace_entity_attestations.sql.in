@@ -1,7 +1,5 @@
--- ops.entity_attestations — inspect/census listing of consensus cells for a
--- subject (spec 37 WITNESS). Attestation listing is ops, not the fold itself.
--- Old names dropped (#532), including a mid-migration consensus.* placement.
--- BEGIN ATOMIC: GH #764.
+-- ops.entity_attestations: a subject's binary consensus cells at or above an
+-- effective-standing floor, strongest first (WITNESS read of the star).
 DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
 DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.

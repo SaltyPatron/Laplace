@@ -4,15 +4,11 @@ using Laplace.Engine.Core;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// ConsensusKeys.EdgeId is the single client-side implementation of the
-/// substrate's consensus edge id and must stay byte-identical to SQL
-/// laplace.consensus_id (blake3 over subject(16)‖type(16)‖object-or-zero(16),
-/// FOLD_IDENT_LEN = 48). The expected values below were captured from the
-/// live extension: SELECT encode(laplace.consensus_id(...), 'hex') on
-/// 2026-07-02 (laplace_substrate current build). If this test fails, the
-/// client and server disagree on edge identity and every client-side
-/// consensus read/fold is addressing the wrong rows — fix the divergence,
-/// never the fixture.
+/// ConsensusKeys.EdgeId is byte-identical to SQL laplace.consensus_id (BLAKE3 over
+/// subject(16)‖type(16)‖object-or-zero(16), FOLD_IDENT_LEN = 48), so one typed triple's
+/// consensus cell has one id in C# and in the extension. Expected values are
+/// laplace.consensus_id outputs; a failure is a divergence to fix in code, not in the
+/// fixture.
 /// </summary>
 public class ConsensusKeysParityTests
 {

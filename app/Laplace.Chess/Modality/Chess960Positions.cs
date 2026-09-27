@@ -3,36 +3,18 @@ using System.Collections.Frozen;
 namespace Laplace.Modality.Chess;
 
 /// <summary>
-/// The 960 Chess960 ("Freestyle") starting arrays, by their canonical SP number — the
-/// Scharnagl numbering chess.com, Lichess and FIDE all use. Standard chess is SP 518.
+/// The 960 Chess960 starting arrays by Scharnagl SP number (the numbering chess.com, Lichess
+/// and FIDE use); standard chess is SP 518.
 ///
-/// THIS IS A NAMING TABLE, NOT A VALIDATOR, AND THE DIFFERENCE IS THE WHOLE POINT.
+/// A naming table, not a validator: legality comes from the rules (bishops on opposite
+/// colours, king between the rooks), and an arrangement outside the enumeration, such as a
+/// Double Fischer Random start with different back ranks per side, replays the same and
+/// simply has no number. Absence of a number is unknown, not false. Replay never consults
+/// this table; castling geometry comes from the board's rook files, because a mid-game
+/// position carries its rook files but not its starting back rank.
 ///
-/// The 960 is SOMEBODY ELSE'S ENUMERATION — Scharnagl's, which chess.com, Lichess and FIDE
-/// adopted. What makes a Freestyle position legal is the RULES (bishops on opposite
-/// colours, king between the rooks), not membership of anyone's list. The two coincide for
-/// symmetric single-array Chess960, and they stop coinciding the moment a source ships
-/// something the list does not cover — Double Fischer Random, where White and Black get
-/// DIFFERENT back ranks, is legal under the format and has no SP number at all.
-///
-/// So membership decides whether we can NAME the variant, never whether we can play it.
-/// Nothing in the replay path consults this table; castling geometry comes off the board's
-/// rook files and works for any arrangement. A position outside the enumeration replays
-/// exactly the same and simply carries no board number — unattested, which is not
-/// attested-false. Treating a missing number as a corrupt record would be this codebase's
-/// own EXISTS-collapses-the-distinction mistake in a new place.
-///
-/// What it is for: PROVENANCE. "Freestyle #376" is the game's variant, named, in one
-/// number rather than a back-rank string — a fact worth attesting when it exists.
-///
-/// DERIVED, NOT TYPED OUT. 960 literals would be 960 chances to fat-finger one, and the
-/// derivation is eight lines. Built once on first use and frozen; the reverse map is the
-/// O(1) direction, which is the one every caller wants.
-///
-/// The engine does NOT key on these. Castling geometry lives on the Board as rook files,
-/// because a MID-GAME position (ChessPositionRef composes ids from arbitrary FENs) carries
-/// its castling rook files but not its starting back rank — position #376 at move 40 looks
-/// like nothing in this table. SP is a start-position fact; rook files are a position fact.
+/// Derived from the numbering, not typed out; built once on first use and frozen, with an
+/// O(1) back-rank → number map.
 /// </summary>
 public static class Chess960Positions
 {
@@ -58,7 +40,7 @@ public static class Chess960Positions
 
     /// <summary>
     /// The SP number of a back rank, or null when the arrangement is not one of the 960.
-    /// O(1) — a frozen dictionary probe, which is the direction callers actually need.
+    /// One frozen-dictionary probe.
     /// </summary>
     public static int? TryNumber(string backRank)
         => Table.Value.ByRank.TryGetValue(backRank, out int n) ? n : null;
@@ -68,13 +50,11 @@ public static class Chess960Positions
     /// number to give: a mid-game position, an asymmetric (Double Fischer Random) start, or
     /// any legal arrangement outside the standard enumeration.
     ///
-    /// Null means "no name for this", not "reject this". The caller attests the number when
-    /// it exists and attests nothing when it does not.
+    /// Null means "no name for this", not "reject this".
     ///
-    /// A numbered start is: both back ranks the SAME arrangement, both pawn ranks full,
-    /// nothing anywhere else. Checking the whole board rather than just rank 1 is
-    /// deliberate — otherwise a middlegame that happens to have an intact back rank reports
-    /// a variant it was never played under.
+    /// A numbered start has both back ranks the same arrangement, both pawn ranks full and
+    /// nothing anywhere else. The whole board is checked, so a middlegame with an intact back
+    /// rank is not given a number.
     /// </summary>
     public static int? TryNumberOfStart(Board b)
     {
@@ -96,24 +76,14 @@ public static class Chess960Positions
     }
 
     /// <summary>
-    /// The castling geometry of a starting array: where the king and its two rooks begin,
-    /// and — the reason this is cached rather than recomputed — whether a castle on either
-    /// flank SHARES ITS KING DESTINATION with an ordinary one-square king move.
+    /// The castling geometry of a starting array: where the king and its two rooks begin, and
+    /// whether a castle on either flank shares its king destination with a one-square king
+    /// move.
     ///
-    /// That last pair is a real hazard, not a curiosity. A castle is spelled O-O / O-O-O
-    /// and a king step is spelled Kc1 / Kg1, but they can be the same (from, to): a king
-    /// starting on d1 steps to c1, and the queen-side castle also ends on c1. A resolver
-    /// matching a piece-move SAN by destination sees two candidates and either picks the
-    /// wrong one or refuses the game. It cost a 58-ply game before it was found, on ONE
-    /// archive, by accident.
-    ///
-    /// It is not rare: 480 of the 960 arrays — exactly half — can produce it. Enumerating
-    /// it here turns "we hit this once" into "we know which boards do this", and gives the
-    /// SAN tests an oracle instead of an anecdote.
-    ///
-    /// Ordinary chess is not among them, which is why this never surfaced before: the king
-    /// starts on e1, both castle destinations are two squares away, and no legal king move
-    /// reaches them.
+    /// A castle (O-O / O-O-O) and a king step (Kc1 / Kg1) can share (from, to): a king on d1
+    /// steps to c1, and the queen-side castle also ends on c1, so a SAN resolver matching by
+    /// destination sees two candidates. Half of the 960 arrays can produce this; standard
+    /// chess cannot, since its king starts two files from both destinations.
     /// </summary>
     public readonly record struct CastleGeometry(
         int KingFile,
@@ -122,7 +92,7 @@ public static class Chess960Positions
         bool KingSideSharesDestinationWithKingMove,
         bool QueenSideSharesDestinationWithKingMove)
     {
-        /// <summary>Either flank can be confused with a plain king move on this array.</summary>
+        /// <summary>Either flank's castle shares its king destination with a plain king move on this array.</summary>
         public bool CanCollideWithKingMove
             => KingSideSharesDestinationWithKingMove || QueenSideSharesDestinationWithKingMove;
     }
@@ -140,9 +110,8 @@ public static class Chess960Positions
         int kRook = rank.LastIndexOf('R');             // the rook right of the king
         return new CastleGeometry(
             king, kRook, qRook,
-            // A king ADJACENT to the destination can step onto it. A king already ON it
-            // castles without moving, so "Kg1"/"Kc1" is not a legal move and nothing
-            // collides — hence == 1, not <= 1.
+            // A king adjacent to the destination can step onto it. A king already on it
+            // castles without moving and has no king step there, hence == 1, not <= 1.
             Math.Abs(king - KingSideKingFile) == 1,
             Math.Abs(king - QueenSideKingFile) == 1);
     }

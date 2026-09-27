@@ -218,10 +218,9 @@ public sealed class IngestBatchPipelineTests
     [Fact]
     public async Task Tier01Completion_FlatProbeMarksPresentWhenTrunksAbsent()
     {
-        // q+combining-acute survives NFC (no precomposed form), so this word still
-        // carries a tier-1 grapheme row the present-probe can prune. Plain ASCII
-        // ("dog") no longer can: the grapheme floor collapses single-codepoint
-        // clusters, making the word the smallest emission unit.
+        // q+combining-acute survives NFC (no precomposed form), so this word carries a
+        // tier-1 grapheme row the presence probe can prune. A single-codepoint cluster
+        // is its codepoint, so in plain ASCII the word is the smallest emission unit.
         var records = new[] { ContentRecord("q́x") };
         var reader = new Tier01PresentReader();
 
@@ -335,21 +334,9 @@ public sealed class IngestBatchPipelineTests
     }
 
     /// <summary>
-    /// The per-file resume probe must cost ONE round trip per chunk, not one per file.
-    ///
-    /// MEASURED 2026-08-10 (knowledge seed, live): FrameNet deposited 1,042,471 rows
-    /// across 14,900 files in 561s — 1,857 rows/s, against OMW's 22,462 rows/s on the
-    /// same run and Unicode's 61,285. Per-file cost was 37.7 ms, and 14,900 × 37.7 ms =
-    /// 562s, i.e. per-file overhead accounted for essentially the entire runtime while
-    /// the payload was ~70 rows per file. The dominant term was this probe: one
-    /// `ops.evidence_count(...) > 0` round trip per file, counting rows to answer an
-    /// existence question, called serially inside the worker loop.
-    ///
-    /// This is a GATE, not a benchmark. `PerFileResume` is ON BY DEFAULT for every
-    /// DecomposerMultiFile, so a regression to the scalar form silently taxes every
-    /// multi-file lane in the repo — and the failure mode is invisible in output
-    /// (identical rows, identical markers, just slower). Asserting the call SHAPE is the
-    /// only thing that catches it.
+    /// The per-file resume probe is a set operation: one round trip per chunk of files,
+    /// never one per file. <c>PerFileResume</c> is on for every DecomposerMultiFile, and a
+    /// scalar probe produces identical rows and markers, so the call shape is asserted.
     /// </summary>
     [Fact]
     public async Task MultiFileResume_MarkerProbeIsBatchedNotPerFile()
@@ -412,12 +399,8 @@ public sealed class IngestBatchPipelineTests
 
             Assert.True(seen > 0, "the run must actually produce changes");
 
-            // The LAW is "probes scale sub-linearly with files, and none are scalar" --
-            // not any particular chunk count. An earlier version asserted exactly one
-            // batched call, which pinned a fixed 512-file chunk; when that chunk had to
-            // ramp (a fixed chunk made the first file wait for the whole corpus to be
-            // hashed -- 260x on the document lane) the assertion failed even though the
-            // property it existed to protect was intact. Assert the property.
+            // Probes scale sub-linearly with files and none are scalar; the chunk size
+            // ramps, so no particular call count is asserted.
             Assert.Equal(0, reader.ScalarSourceCompletedCalls);
             Assert.True(reader.BatchedSourceCompletedCalls > 0,
                 "the batched probe must actually be used");
@@ -432,8 +415,8 @@ public sealed class IngestBatchPipelineTests
     }
 
     /// <summary>
-    /// GH #898: kill after file 2 applies → restart true-skips marker-complete
-    /// files 1–2 (zero fold / zero units) and only re-opens file 3.
+    /// Killed after file 2 applies, a restart skips marker-complete files 1–2 (no fold,
+    /// no units) and re-opens only file 3.
     /// </summary>
     [Fact]
     public async Task MultiFileResume_MarkerCompleteFilesTrueSkip()
@@ -498,18 +481,10 @@ public sealed class IngestBatchPipelineTests
                 resume: resume))
                 changes.Add(change);
 
-            // A marker-complete file is SKIPPED (zero rows, zero testimony, no re-fold) but
-            // it still COUNTS. This assertion used to read "marker-complete files emit
-            // nothing", which pinned a real defect: files_total counts every enumerated
-            // file while files_done only advances on a period boundary, so a silent skip
-            // made an already-ingested file read as unfinished. MEASURED 2026-08-10 on the
-            // document lane — 209 enumerated, 8 marker-complete, files_done 201, and the
-            // run failed with "8 file(s) did not reach completion; their content is absent
-            // from the substrate" when its PRESENCE was what caused the skip.
-            //
-            // The contract is therefore: one boundary per file, always; rows only from the
-            // files actually read; the completion marker only from the file that just
-            // finished (a skipped file already carries its own).
+            // A marker-complete file is skipped (no rows, no testimony, no re-fold) but still
+            // counts: files_done advances only on a period boundary, so every file emits one
+            // boundary; rows come only from files actually read, and the completion marker
+            // only from a file that just finished (a skipped file already carries its own).
             Assert.Equal(3, changes.Count(c =>
                 c.Metadata.SourceContentUnitName.StartsWith(
                     IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
@@ -565,9 +540,9 @@ public sealed class IngestBatchPipelineTests
         Assert.Equal(4, changes.Sum(c => c.Metadata.InputUnitsConsumed));
     }
 
-    // Guards the regression: the parallel pool must OPEN files concurrently (each worker opens its
-    // own source), never funnel every file through one dispatcher that slams whole files into lists.
-    // Each source records the live open-count; with 4 workers over 6 held-open files, opens overlap.
+    // The parallel pool opens files concurrently (each worker opens its own source) rather than
+    // funnelling every file through one dispatcher. Each source records the live open count;
+    // with 4 workers over 6 held-open files, opens overlap.
     [Fact]
     public async Task MultiFileParallel_OpensFilesConcurrently()
     {

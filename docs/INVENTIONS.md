@@ -1,8 +1,6 @@
 # Laplace invention catalog
 
-This catalog names the mechanisms and preservation laws of the invention without pretending to report implementation status. The complete argument and proofs belong in [INVENTION.md](INVENTION.md); architecture-as-built belongs in [ARCHITECTURE.md](ARCHITECTURE.md); active acceptance belongs in GitHub; annotated historical catalogs remain under `docs/archive/`.
-
-The catalog is deliberately implementation-aware without making today's finite machine choices into mathematical limits.
+This catalog names the mechanisms and preservation laws of the invention. The complete argument is [INVENTION.md](INVENTION.md); how this repository realizes it is [ARCHITECTURE.md](ARCHITECTURE.md). Finite machine choices named here are executable windows, not mathematical limits.
 
 ## Identity, bounded physicality and exact composition
 
@@ -11,27 +9,27 @@ The catalog is deliberately implementation-aware without making today's finite m
 3. **Tier as compositional altitude rather than ontology.** Tier describes a selected decomposition/composition ladder; it does not redefine canonical content identity or impose one semantic hierarchy on every modality.
 4. **Open Tier-0 address law; finite observed generations.** Tier-0 ranks are not bounded by Unicode or a terminal population `N`; the abstract law admits `n ∈ N`. Any concrete perfcache/database/observation is finite. Unicode's 1,114,112 positions are one selected finite standards window, not Tier-0 capacity.
 5. **Countably unbounded finite composition family.** A finite or countable observed/admitted basis can form countably unbounded finite recursive compositions; finite trees/DAGs over a countable basis remain countable.
-6. **Bounded recursive placement.** Under the current native centroid law, children in a closed bounded ball produce a parent in that same ball; induction keeps every finite recursive composition inside the fixed domain.
+6. **Bounded recursive placement.** Under the native centroid law, children in a closed bounded ball produce a parent in that same ball; induction keeps every finite recursive composition inside the fixed domain.
 7. **Navigable bounded knowledge world.** The finite geometric extent is traversable through typed locality/geometry/trajectory and semantic/evidence planes; concept-to-concept movement is not reduced to one scalar distance, and multiple distinct structures may occupy the same coordinate/region.
 8. **Convex realized-path closure.** A realized trajectory resolves child physicality coordinates; line segments between points inside a convex ball also remain inside it.
 9. **Radix- and dimension-independent construction law.** The recursive/countability and convex-closure arguments do not depend on binary notation or exactly four dimensions. Radix, dimension and numeric format are executable representation choices.
-10. **S³ Super-Fibonacci atom placement.** The current text/primitive generation uses deterministic, near-uniform placements on the unit 3-sphere as the boundary of the current 4D frame.
+10. **S³ Super-Fibonacci atom placement.** The text/primitive generation uses deterministic, near-uniform placements on the unit 3-sphere as the boundary of the current 4D frame.
 11. **Hilbert content locality.** A locality-preserving serialized address supports indexed physical discovery without becoming canonical identity.
 12. **Typed physicalities.** One canonical entity may participate in point, trajectory, factor, projection, board, model and other typed physical realizations without multiplying identity.
 13. **Lossless constituent trajectories.** Ordered composition retains the exact constituent identities/order required to reconstruct the composition independently of a conventional tokenizer context window.
 14. **Exact 212-bit GeometryZM carrier.** Four binary64 components provide four 53-bit reversible carrier slots: exactly 128 constituent-id bits + 16 packed ordinal bits + 16 run-length bits + 52 flags/typed metadata bits.
 15. **Carrier width is not composition width.** Packed ordinal/run fields are local carrier fields; logical positions and split runs allow compositions wider than the packed field itself.
 16. **Packed manifest versus realized curve.** Mantissa-packed vertices are exact constituent manifests, not semantic positions. Geometry resolves the child ids to their live physicality coordinates and orders those coordinates by logical ordinal before curve operations.
-17. **Dimension/payload trade.** The current 4D binary64 carrier fits the complete 212-bit vertex payload exactly. 3D still fits the current 128-bit id with less metadata; 2D does not fit that id in one current carrier vertex. This is a format trade, not a theorem that 2D composition is impossible.
+17. **Dimension/payload trade.** The 4D binary64 carrier fits the complete 212-bit vertex payload exactly. 3D still fits a 128-bit id with less metadata; 2D does not fit that id in one carrier vertex. This is a format trade, not a theorem that 2D composition is impossible.
 18. **Exact occurrence by indexed containment.** A canonical entity can reach trajectories/compositions containing it without rescanning source text or relying on ANN guesses. Packed ordinals already are precedes; shared parent/run is co-occurrence; child-id membership is contains. Those are trajectory facts, not GPU kernels.
 19. **Perfcache as derived ROM.** Deterministic mmap/read-mostly structures accelerate canonical state while remaining rebuildable derivatives rather than a second authority. After T0 is seeded, codepoints are not re-recorded as ingest novelty.
-20. **Current finite machine windows are replaceable.** Hash width, binary64, Unicode generation, ordinal carrier fields, CPU address width and database capacity constrain one executable generation; they do not redefine the abstract invention.
+20. **Finite machine windows are replaceable.** Hash width, binary64, Unicode generation, ordinal carrier fields, CPU address width and database capacity constrain one executable generation; they do not redefine the abstract invention.
 
 ## Evidence, relations and consensus
 
 21. **Universal attestation reduction.** Facts from corpora, users, tools, games, code and checkpoints reduce to typed subject/relation/object/source/context/outcome evidence.
 22. **Content/evidence/consensus separation.** Identity converges, witnesses remain attributable and propositions acquire standing without erasing their evidence roots.
-23. **Glicko-2 epistemology.** Rating, deviation, volatility, source semantics, witness count and conservative score retain support and uncertainty rather than one opaque confidence number.
+23. **Glicko-2 epistemology.** Rating, deviation, volatility, source semantics, witness count and conservative score retain support and uncertainty rather than one opaque confidence number. A claim is a game series: games plus a score in [0,1], a draw is 0.5.
 24. **Signed three-valued testimony.** Confirmation, draw/indeterminate evidence and refutation remain distinct; absence is not silently converted into falsehood.
 25. **Provenance/aggregation duality.** Context-scoped occurrences and folded proposition standing coexist without erasing one another.
 26. **Record-versus-calculate boundary.** Literal observation and versioned deterministic/analytic calculation remain distinguishable witnesses.

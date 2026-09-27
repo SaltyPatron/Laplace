@@ -49,19 +49,8 @@ BEGIN
 END $$;
 
 
--- The covering/ranked index for the subject access pattern. The PK leads on `id` because a unique
--- constraint on a partitioned table must contain the partition keys, and `id` is
--- what makes it unique -- but nothing reads consensus by its own row identity.
--- Every read is "what does this subject assert": consensus_step_edge, related_in,
--- relate_path, walk_branches, bubble_up, the crawl, and the resolve stage all
--- filter on subject_id.
---
--- Without a subject-leading index that filter has no access path, so the planner
--- fans a single probe across all 244 partitions -- seq-scanning the ones with no
--- usable index and full-scanning the PK on the rest, since a scan of
--- (id, type_id, subject_id) cannot seek on the third column. Measured against the
--- live cluster 2026-08-16, one subject probe returning ZERO rows: 321,831 buffers
--- touched, 279,753 of them read from disk. ~2.5 GB of I/O per entity lookup, which
--- is the read path underneath every slow surface in the system.
---
+-- The PK leads on id only because a unique constraint on a partitioned table
+-- must contain the partition key; no read seeks consensus by row id. Every star
+-- read filters on subject_id, so its access paths are the subject-leading
+-- indexes in indexes/consensus_subject_*.
 SELECT pg_extension_config_dump('consensus', '');

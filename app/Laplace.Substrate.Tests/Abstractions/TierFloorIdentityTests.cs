@@ -6,11 +6,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Tier is a floor, not identity (05_Substrate_Invariants #1b): same content =
-/// same hash at every tier; `tier` records the lowest
-/// form only. A one-word content unit IS the word — "dog" ingested alone
-/// must not mint a separate sentence/document entity wrapping the word;
-/// its root id must equal the word's id.
+/// Tier is altitude, not identity: equal content is one hash at every tier. A one-child
+/// composition is the child, so "dog" admitted alone has the word's id as its root, with
+/// no sentence or document entity wrapping it.
 /// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class TierFloorIdentityTests

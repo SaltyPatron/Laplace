@@ -5,17 +5,14 @@ using Laplace.Decomposers.Model;
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// Plan Phase 3 gate (2026-07-08): the foundry now ships the tokenizer.json as
-/// type "BPE" with trained merges instead of "WordLevel". The token→entity-hash
-/// contract must be invariant under that switch — a vocab entry's EntityId
-/// derives from its canonical form only, never from the model type — and the
-/// merges must round-trip through ParseMerges.
+/// A vocab entry's EntityId derives from its canonical content only, so a BPE
+/// tokenizer.json and a WordLevel one map the same token to the same entity; BPE
+/// merges round-trip through ParseMerges.
 /// </summary>
 public class BpeTokenizerRoundTripTests
 {
-    // Token entity ids resolve through the codepoint perfcache; loading here (the
-    // assembly's per-class idiom) removes the order dependence on another test
-    // class having loaded the process-global blob first.
+    // Token entity ids resolve through the process-global codepoint perfcache; each
+    // test class loads it so the result does not depend on test order.
     static BpeTokenizerRoundTripTests()
     {
         if (!Laplace.Engine.Core.CodepointPerfcache.IsLoaded)

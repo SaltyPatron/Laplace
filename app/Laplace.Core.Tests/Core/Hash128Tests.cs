@@ -71,11 +71,9 @@ public class Hash128Tests
     [Fact]
     public void Merkle_TierIsNotPartOfIdentity()
     {
-        // CONTENT-ADDRESSING LAW: same content = same hash. The id is a
-        // function of the child-id sequence only. word_id('a') == grapheme
-        // 'a' == codepoint 'a' is by design, not a collision. There is one
-        // canonical entity id/row; tier/type uses are separate interpretation /
-        // physicality / occurrence state, never another entity key.
+        // Same content, same id: the id is a function of the child-id sequence only,
+        // so word 'a', grapheme 'a' and codepoint 'a' are one entity. Tier and role are
+        // physicality/occurrence state, never part of the key.
         var a = Hash128.Blake3("x"u8);
         var t1 = Hash128.Merkle(1, new[] { a });
         var t2 = Hash128.Merkle(2, new[] { a });

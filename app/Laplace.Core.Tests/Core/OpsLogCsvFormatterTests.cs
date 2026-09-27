@@ -4,9 +4,8 @@ using Xunit;
 
 namespace Laplace.Engine.Core.Tests;
 
-// The CSV shape is a wire contract shared with ops.app_log (file_fdw reads it) — GH #601/#602.
-// These pin the column order and RFC 4180 escaping so a schema drift can't silently make the
-// foreign table unreadable.
+// The CSV shape is what the ops.app_log file_fdw table reads; these pin column order and
+// RFC 4180 escaping.
 public class OpsLogCsvFormatterTests
 {
     private static readonly DateTimeOffset When =

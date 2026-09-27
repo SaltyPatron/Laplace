@@ -19,9 +19,9 @@ public enum RoleIdentityKind : ushort
 
 /// <summary>
 /// Identity for a role slot under its proposition-defining parent. The human-readable
-/// label is canonical content; the role itself is the witnessed structure
-/// [role-schema, role-system, parent, label]. It therefore owns an exact trajectory and
-/// typed physicality instead of living in a separate domain-hashed identity universe.
+/// label is canonical content; the role is the composition
+/// [role-schema, role-system, parent, label], with its own trajectory and typed physicality
+/// under the one Merkle identity law.
 /// </summary>
 public static class RoleAnchor
 {

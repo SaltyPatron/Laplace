@@ -2,8 +2,8 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-// The factor-trajectory layout LAW — the single shared convention between the
-// deposit side (ModelTokenEdgeETL) and every reader (gates, item-B scorer).
+// Factor-trajectory layout shared by the writer that deposits model factors and every
+// reader of them.
 //
 //   vertex 0                  : ARENA factor vertex — the raw f32 arena scalar
 //                               (score-law inversion needs it; f32 because

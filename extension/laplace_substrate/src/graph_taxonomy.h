@@ -8,11 +8,8 @@
 
 #include "laplace/core/hash128.h"
 
-/* Initial buffer sizing only — the walk grows its buffers as needed. A fixed
- * 2048-node cap used to hard-error here ("taxonomy walk node cap exceeded"):
- * at live scale ordinary words exceed it (emperor's depth-7 IS_A closure =
- * 8,225 nodes, measured 2026-07-24). The walk is finitely bounded by depth ×
- * the deduped closure, never by an invented cap. */
+/* Initial buffer sizing only; the walk grows its buffers. It is bounded by
+ * depth and the deduplicated closure, not by a node cap. */
 #define TAX_WALK_INITIAL 2048
 
 
@@ -39,10 +36,10 @@ extern int tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
                       const hash128_t *up_types, int up_type_n,
                       TaxNode **nodes_out);
 
-/* Weighted form used when entering the taxonomy is itself an attested edge
- * (for example word -> lexical sense). Among paths reaching the same node at
- * the same minimum depth, retain the widest bottleneck. NULL seed arrays mean
- * that the first traversed edge starts the bottleneck. */
+/* Upward walk over consensus relation cells whose seeds carry their own
+ * standing (a seed reached through an attested edge). Among paths reaching a
+ * node at the same minimum depth, the one with the widest bottleneck effective
+ * mu is kept. NULL seed arrays: the first traversed edge starts the bottleneck. */
 extern int tax_bfs_up_weighted(const hash128_t *seeds,
                                const int64_t *seed_mu,
                                const bool *seed_mu_valid,

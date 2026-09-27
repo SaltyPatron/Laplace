@@ -36,9 +36,8 @@ internal sealed partial class ChessRecordingMeasurement
         && (IsCorpus ? CorpusReplayScopesUnchanged : ReplayScopes.Count > 0
             && ReplayScopes.All(s => s.Unchanged && ScopeRowsEqual(s.Before, s.After)));
 
-    // This is a typed projection of CutechessExperimentReceipt written by this
-    // service. Source PGN still enters through the registered native grammar;
-    // replay transport does not inspect or decompose a source JSON container.
+    // Typed projection of the CutechessExperimentReceipt this service writes. Source PGN
+    // enters through the registered native grammar; the receipt JSON is not decomposed.
     private sealed record RetainedMatchReceipt(
         [property: JsonRequired] string? ExperimentId,
         [property: JsonRequired] string? MatchState,

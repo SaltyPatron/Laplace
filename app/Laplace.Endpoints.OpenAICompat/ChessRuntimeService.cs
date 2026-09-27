@@ -3,10 +3,9 @@ using Laplace.Chess.Service;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Generic-Host-owned lifetime for the shared chess datasource/write spine.
-/// Construction is cheap; the first operation that actually needs the substrate starts
-/// initialization asynchronously. Status and pure endpoints never perform database work
-/// merely because DI resolved one of their services.
+/// Host-owned lifetime of the shared <see cref="ChessLiveGameHost"/> (datasource and
+/// witness writer). Initialization starts on the first <c>GetAsync</c>; resolving the
+/// service does no database work.
 /// </summary>
 internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
 {
@@ -58,9 +57,8 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
             var lifetime = _stopping
                 ?? throw new InvalidOperationException("chess runtime has not started");
             lifetime.Token.ThrowIfCancellationRequested();
-            // A connection/schema failure is not a process-lifetime state. Every caller in
-            // one attempt shares the same task, while the first caller after a fault starts
-            // one fresh attempt instead of requiring an application restart.
+            // Concurrent callers share one initialization task; after a fault or
+            // cancellation the next caller starts a fresh attempt.
             if (_initialization is { IsFaulted: true } or { IsCanceled: true })
                 _initialization = null;
             initialization = _initialization ??= InitializeAsync(lifetime.Token);

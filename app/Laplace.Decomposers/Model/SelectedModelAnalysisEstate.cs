@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Model;
 
 /// <summary>
-/// Owns the complete two-artifact selection for one explicit analysis run.
+/// Holds the two selected model artifacts for one explicit analysis run.
 /// Config, tokenizer, headers and tensors are all consumed through the two
 /// held snapshots; disposal happens only after every atomic working set applied.
 /// </summary>

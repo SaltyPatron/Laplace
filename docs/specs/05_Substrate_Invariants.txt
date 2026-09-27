@@ -1,8 +1,7 @@
 SUBSTRATE INVARIANTS
 ====================
 
-This file is normative. It does not report implementation progress. A violation is a defect
-even when a historical report or issue says otherwise.
+This file is normative. Code that violates a rule here is a defect.
 
 Rule #1 — Content identity is exact
 -----------------------------------

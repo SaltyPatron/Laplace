@@ -9,9 +9,8 @@ namespace Laplace.Cli.Tests;
 public sealed class IngestRosterParityTests
 {
     /// <summary>
-    /// Runtime-only maintenance and alias routes that are deliberately absent from
-    /// the seed-cadence manifest. This allowlist may only shrink as the roster is
-    /// generated; a new route must be classified explicitly.
+    /// Routes that dispatch but are absent from the seed-cadence manifest; every such
+    /// route must be listed here explicitly.
     /// </summary>
     private static readonly HashSet<string> OperationalOnlyRoutes =
         new(StringComparer.OrdinalIgnoreCase)
@@ -43,38 +42,10 @@ public sealed class IngestRosterParityTests
             "track-audio",
         };
 
-    // 14 -> 15 for chess-opening-match, taken visibly as this shrink-only ceiling
-    // requires. It is an operational lane of exactly the shape already listed here:
-    // substrate-sourced, marker-gated, no manifest entry because the witness manifest
-    // describes the foundation/knowledge ladder and this is a chess-modality pass, like
-    // chess-syzygy and chess-trajectory beside it.
-    // 15 -> 18 for the media-ladder lanes (frame-video / rgba-image / track-audio):
-    // generic media format lanes, deliberately OUTSIDE the seed-cadence manifest —
-    // no corpus seed is ordered for them (modality-ladder campaign law: identity
-    // locks land first, seeds only on operator order), so operational-only is the
-    // truthful classification until a media corpus enters the ladder.
-    // 19 -> 20 for agents: AI-agent session logs (Claude Code, Codex, Gemini,
-    // Antigravity, Copilot, Cursor, ...). Witness-unit lane whose boundary is an
-    // operator-supplied path -- or, with no path, this user's own provider roots.
-    // No witness-manifest entry because the seed cadence orders corpora under
-    // DATA_ROOT and a personal session-log tree is neither a corpus nor orderable
-    // by the ladder; the same classification code/repo/tabular already carry.
-    // 18 -> 19 for chess-move-outcomes: substrate-sourced, marker-gated chess-modality
-    // pass (the move-outcome fold onto the bounded MOVE vocabulary), the same shape and
-    // the same reasoning as chess-opening-match/chess-eval/chess-trajectory above it.
-    // 20 -> 21 for chess-transitions: the dedicated substrate-sourced backfill
-    // for deterministic position transitions. Keeping it separate from analysis
-    // prevents a transition upgrade from replaying unrelated testimony.
-    // 22 -> 23 for model-corroborate: an operator-supplied analysis across two
-    // already-deposited model snapshots. It consumes substrate/model state and is not
-    // a seed-cadence source, so operational-only is the explicit classification.
-    // 23 -> 24 for chess-tactic-outcomes: marker-gated historical backfill for the
-    // bounded fork/pin/skewer outcome provider. New/fused analysis writes the same lane;
-    // this route exists so already-recorded games can populate it without replaying the
-    // rest of ChessAnalyze testimony.
-    // 24 -> 25 for chess-player-context-outcomes: marker-gated A8 backfill over already
-    // witnessed playings. It folds player×phase/clock context cells without replaying the
-    // analyzer or entering the seed-cadence corpus ladder.
+    // Upper bound on OperationalOnlyRoutes, so adding a route outside the manifest is an
+    // explicit edit here. These routes read admitted structure or an operator-supplied path
+    // (derivation lanes over recorded games, media format lanes, agents, code/tabular/parquet,
+    // model-corroborate) rather than a corpus the seed cadence orders.
     private const int OperationalOnlyRouteCeiling = 25;
 
     [Fact]

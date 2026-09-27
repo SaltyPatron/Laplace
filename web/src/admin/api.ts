@@ -89,10 +89,9 @@ export interface OpResult<T> {
  *
  * `POST /v1/op` resolves the name against `ops.api()` and refuses anything
  * outside it, so this is a named call and never SQL text. The endpoint binds a
- * read-only data source (SubstrateClient.InvokeOpAsync) for every op EXCEPT
+ * read-only data source (SubstrateClient.InvokeOpAsync) for every op except
  * those on the write allow-list (InstalledOpInvoker.WritableOps), which get a
- * writable connection — see `closeIngestRun` below for the one op currently on
- * that list. Every other catalog write fails read-only.
+ * writable connection. Every other catalog write fails read-only.
  */
 export function callOp<T = Record<string, unknown>>(
   name: string,
@@ -118,7 +117,7 @@ export function listOps(like?: string, opts: ApiOptions = {}) {
   return callOp<OpSignature>('ops.api', like ? { p_like: like } : undefined, 2000, undefined, opts);
 }
 
-/** The ingest journal — the record CI/CD pipelines gate on. */
+/** Recent rows of the ingest run journal, via `ops.ingest_runs`. */
 export function ingestRuns(limit = 25, opts: ApiOptions = {}) {
   return callOp<IngestRun>('ops.ingest_runs', { p_limit: limit }, limit, undefined, opts);
 }
@@ -283,7 +282,8 @@ export function sourceStatus(opts: ApiOptions = {}) {
 /**
  * Lawful retraction of one source's testimony: delete its evidence, refold every
  * touched cell from what survives, cull cells left with zero witnesses, and drain
- * the mask-repair queue. IRREVERSIBLE — re-deriving it means re-running the lane.
+ * the mask-repair queue. Irreversible: the testimony returns only by re-ingesting
+ * that source.
  */
 export function evictSource(
   sourceIdHex: string,
@@ -344,9 +344,8 @@ export interface AgentConfigSaved {
 }
 
 /**
- * Parsed server-side BEFORE it is written, by the same parser every `ask` uses —
- * an invalid document is refused rather than saved and discovered later, when
- * nobody connects the broken lane to the edit that broke it.
+ * Parsed server-side by the same parser every `ask` uses before it is written; an
+ * invalid document is refused, not saved.
  */
 export function saveAgentConfig(content: string, opts: ApiOptions = {}) {
   return apiPutText<AgentConfigSaved>('/v1/admin/agents/config', content, opts);

@@ -8,10 +8,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED stockfish pass (GH #573): scan witnessed LINES (GH #736 — distinct
-// PLAYS_LINE objects) lacking the ChessStockfishEval marker, hydrate via content
-// roundtrip, evaluate every position with stockfish, attest HAS_EVAL + eval-delta
-// MOVE_QUALITY under the ChessStockfish source.
+// Calculation witness over the admitted web: scans witnessed lines (distinct PLAYS_LINE
+// objects) lacking the ChessStockfishEval marker, hydrates each from its trajectory,
+// evaluates every position with Stockfish, and hands HAS_EVAL and eval-delta MOVE_QUALITY
+// testimony under the ChessStockfish source to the shared writer.
 // Run: `laplace ingest chess-eval [--depth N | --nodes N]`  (no path — substrate is the source)
 public sealed class ChessStockfishEvalDecomposer
     : ComposeDecomposer<ChessStockfishEvalRecord>, IIngestNoOpExplainer

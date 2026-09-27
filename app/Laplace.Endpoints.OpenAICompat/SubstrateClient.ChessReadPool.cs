@@ -5,9 +5,8 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal sealed partial class SubstrateClient
 {
     /// <summary>
-    /// Server-enforced read-only datasource for chess inference. Pure board/eval/explore
-    /// routes borrow this existing serving pool instead of resolving ChessRuntimeService,
-    /// which owns the ingest-capable live writer.
+    /// The server-enforced read-only serving pool, for chess reads that must not resolve
+    /// <see cref="ChessRuntimeService"/> and its writer.
     /// </summary>
     internal NpgsqlDataSource ChessReadOnlyDataSource => _dataSourceReadOnly;
 }

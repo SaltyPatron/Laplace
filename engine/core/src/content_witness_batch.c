@@ -17,10 +17,9 @@
 #include "laplace/core/trajectory.h"
 
 
-/* Five constant BLAKE3 digests, computed once per thread — this was a fresh
- * BLAKE3 per emitted node across whole-corpus ingests. Thread-local avoids
- * cross-platform atomics (compose workers call this concurrently); the
- * digests are deterministic, so per-thread recompute is harmless. */
+/* Five constant BLAKE3 digests, computed once per thread. Thread-local storage
+ * avoids atomics while compose workers call this concurrently; the digests are
+ * deterministic, so per-thread computation yields the same ids. */
 #ifdef _WIN32
 #define LAPLACE_TIER_TLS __declspec(thread)
 #else
@@ -50,21 +49,13 @@ static int codepoint_resolver(uint32_t atom, void* ctx,
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 
-/* This is the compatibility address for the current typed placement of E.
- * Immutable physicality bodies have their own ordinary descriptor content;
- * multiple such forms can refer to one unchanged E and this same lookup key.
- * Exact descriptor fields do not redefine E or certify a divergent geometry
- * calculation: recipe/observation validation remains a separate obligation. */
-/* LAYOUT IS LITTLE-ENDIAN BY SPECIFICATION, not by host accident (GH #904).
- * `memcpy(&physicality_type, 2)` wrote the host's byte order. The C# twin
- * (PhysicalityId.Compute) used BitConverter, also host order, so the two agreed
- * on every machine either has ever run on -- and would silently mint DIFFERENT
- * physicality ids on a big-endian host, for content that is byte-identical. An
- * identity axiom that holds only because nobody has compiled it elsewhere is not
- * an axiom. Both sides now write the two type bytes explicitly little-endian, so
- * the pre-image is a property of the format instead of the compiler. On every
- * host in service this produces byte-identical output to the previous form; no
- * reseed is owed. */
+/* Placement address of E for one physicality type. Immutable physicality bodies
+ * have their own ordinary descriptor content; several such forms can refer to one
+ * unchanged E under this same key. Descriptor fields do not redefine E or certify
+ * a divergent geometry calculation. */
+/* The pre-image is entity_id followed by the type as two little-endian bytes,
+ * written explicitly so the id is a property of the format, not of host byte
+ * order. PhysicalityId.Compute writes the same bytes. */
 void laplace_physicality_id_compute(hash128_t entity_id, int16_t physicality_type,
                                     hash128_t* out) {
     uint8_t buf[18];
@@ -102,17 +93,14 @@ int content_witness_emit_floor_atom(
 
 
 
-/* Tier is a FLOOR: a composition whose content equals its sole child's content
- * IS that child -- same bytes, same blake3, ONE identity. This walks any chain
- * of single-child, span-identical wrappers down to the lowest node that carries
- * the content, INCLUDING the grapheme tier: a single-codepoint UAX29 cluster is
- * a pass-through scaffold node in the in-memory tree (the tree format needs the
- * uniform grapheme level because parents reference children as a contiguous
- * index range), but it must never be EMITTED -- the tier-0 codepoint leaf is
- * the stored identity, and word constituents reference it directly. The old
- * `tier <= 1` stop minted a tier-1 entity row for every single-cp character
- * (same id as the codepoint, wrong stored tier). */
-/* Exported as laplace_tier_tree_collapse_index for C#/C parity (GH #904). */
+/* Tier is a floor: a composition whose content equals its sole child's content
+ * is that child -- same bytes, same blake3, one identity. This walks any chain of
+ * single-child, span-identical wrappers down to the lowest node that carries the
+ * content, including the grapheme tier: a single-codepoint UAX29 cluster is a
+ * scaffold node in the in-memory tree (parents reference children as a contiguous
+ * index range, so every level is present), but it is never emitted -- the tier-0
+ * codepoint leaf is the stored identity and words reference it directly. */
+/* Exported as laplace_tier_tree_collapse_index; TierTree.CollapseIndex mirrors it. */
 uint32_t laplace_tier_tree_collapse_index(const tier_tree_t* tree, uint32_t idx) {
     for (;;) {
         tier_node_view_t node;
@@ -310,10 +298,9 @@ int laplace_content_word_segment(
     }
     qsort(words, nw, sizeof(seg_order_t), seg_order_cmp);
 
-    /* Offsets are POST-NFC (#1039): slice the tree's own buffer, never the
-     * caller's. NFD input mis-sliced words mid-UTF-8 here, and NFC-expanding
-     * codepoints (U+0958 class) read past the caller's allocation — the bytes
-     * went straight into cstring_to_text_with_len as SQL results. */
+    /* Offsets are post-NFC: slice the tree's own buffer, never the caller's. NFC
+     * changes byte positions and lengths, so the caller's buffer would be sliced
+     * mid-UTF-8 or read past its end. */
     size_t tree_text_len = 0;
     const uint8_t* tree_text = tier_tree_text(tree, &tree_text_len);
     if (!tree_text) { free(words); tier_tree_free(tree); return -2; }
@@ -357,16 +344,9 @@ int laplace_content_word_segment(
 
 void content_witness_reset(void) { }
 
-/* One document can emit close to a million compositional nodes.  The old emit
- * loop allocated child_ids, flags, and trajectory separately for every node,
- * then freed all three immediately after intent_stage_add_physicality copied
- * the row.  That made the native bulk path perform millions of allocator
- * operations for a large file even though only the widest node determines the
- * required temporary capacity.
- *
- * Keep one grow-only workspace for the whole tree emission.  It is scratch
- * only: identities, traversal order, trajectory construction, and the bytes
- * copied into the IntentStage are unchanged. */
+/* One grow-only workspace for a whole tree emission, sized by the widest node.
+ * It is scratch only: identities, traversal order, trajectory construction and
+ * the bytes copied into the IntentStage do not depend on it. */
 typedef struct {
     hash128_t* child_ids;
     uint64_t*  flags;
@@ -441,12 +421,9 @@ static int emit_node(
 
     double* traj = NULL;
     size_t m = node.child_count;
-    /* A composition of exactly one child is content-identical to that child (same law as
-     * "cat has no separate sentence entity -- a one-word reply IS the sentence"): building an
-     * explicit length-1 trajectory here manufactures a distinct physicality id for something
-     * that should hash identically to its sole child's own physicality, which is exactly what
-     * silently duplicated physicality rows against BuildTier0Seed's atomic (no-trajectory)
-     * seeding of the same content -- see .scratchpad/02 Issue 25 residual. */
+    /* A composition of exactly one child is that child, so no length-1 trajectory
+     * is built: it would give the same content a second physicality body beside
+     * the child's own atomic (trajectory-free) placement. */
     size_t n_traj = 0;
     if (m > 1) {
         if (emit_scratch_reserve(scratch, m) != 0) return -2;

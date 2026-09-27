@@ -57,8 +57,7 @@
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md, 8px);
     background: var(--color-bg-panel-2);
-    /* <button> does not inherit color; without this the title rendered UA-default
-       black on the dark panel (contrast 1.32 — invisible; caught by axe). */
+    /* <button> does not inherit color from the panel. */
     color: var(--color-text-primary);
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
@@ -75,9 +74,8 @@
   }
 
   .experimentCardBlocked {
-    /* Blocked is signaled by the warning badge and the "engine ✗" chip, not by
-       dimming the whole card — a 0.72 opacity dragged the muted tagline under
-       4.5:1 (axe serious). Desaturate the surface instead, leaving text legible. */
+    /* Blocked is signaled by the warning badge and the "engine ✗" chip; the surface
+       changes instead of the opacity so text keeps its contrast. */
     background: var(--color-bg-surface);
     border-style: dashed;
   }
@@ -86,8 +84,7 @@
     font-weight: 600;
     font-size: var(--text-sm);
     line-height: 1.25;
-    /* The badge is absolutely positioned in this corner; without the reserve the title
-       ran underneath it ("Substrate lift testRECORDS"). */
+    /* Reserves the corner the absolutely positioned badge occupies. */
     padding-right: 3.6rem;
   }
 

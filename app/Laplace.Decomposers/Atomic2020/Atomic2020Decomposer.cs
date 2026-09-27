@@ -9,9 +9,9 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Atomic2020;
 
 /// <summary>
-/// Multi-file relation-triple source. train/dev/test.tsv each go through
-/// <see cref="ExtractFileAsync"/> — the same StreamingUtf8LineReader masticator
-/// ConceptNet uses for its monolith file; the multi-file pool runs those units in parallel.
+/// Provider for ATOMIC2020 relation triples. train/dev/test.tsv are each a file unit read by
+/// <see cref="ExtractFileAsync"/> with the shared StreamingUtf8LineReader; the shared
+/// multi-file recipe runs the units in parallel and admits the triples.
 /// </summary>
 public sealed class Atomic2020Decomposer
     : RelationTripleMultiFileDecomposerBase<Atomic2020Source, FullScope>, IIngestInventoryProvider
@@ -76,7 +76,7 @@ public sealed class Atomic2020Decomposer
         return list;
     }
 
-    // head <TAB> relation <TAB> tail — UTF-8 span parse, same reader as ConceptNet.
+    // head <TAB> relation <TAB> tail, parsed as UTF-8 spans.
     protected override async IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
@@ -108,21 +108,14 @@ public sealed class Atomic2020Decomposer
         string rel = Encoding.UTF8.GetString(relBytes);
         if (!RelTypeId.TryGetValue(rel, out var relType)) return false;
 
-        // Sign is the outcome: a negated relation folds as a Refute against the cell its
-        // positive form asserts (laplace_score_fp scores v < 0 below 0.5).
+        // Sign is the outcome: a negated relation folds as a refutation into the cell its
+        // positive form confirms (laplace_score_fp scores v < 0 below 0.5).
         double magnitude = Atomic2020Source.NegatedRelations.Contains(rel) ? -1.0 : 1.0;
 
-        // ATOMIC2020 spells "no tail exists for this head under this relation" as the
-        // literal tail "none" -- 147,608 of 1,331,113 rows, 11.09%. That is the corpus
-        // stating a negative, not omitting a row, and it entered the fold as a CONFIRM
-        // toward the entity `none`: the substrate was told the head DOES stand in that
-        // relation to something. Measured on the 2026-08-23 seed: 83,224 such edges.
-        //
-        // A null object is the record's way of carrying an asserted absence, and the spine
-        // folds it as an object-null REFUTE. This does NOT filter the entity: `none` is a
-        // real word, content-addressed like any other, and WordNet and OMW witness it here
-        // as the same id. Only this decomposer knows ATOMIC's grammar spells absence that
-        // way, which is why the test is here and not in the spine.
+        // ATOMIC2020 spells "this head has no tail under this relation" as the literal
+        // tail "none". That tail becomes a null object, which the shared fold scores as an
+        // object-null refutation. Only the tail column is read this way: the word `none`
+        // elsewhere keeps its ordinary content identity.
         bool assertsAbsence = tail.SequenceEqual("none"u8);
 
         record = new RelationTripleRecord(

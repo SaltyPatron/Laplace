@@ -5,13 +5,9 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
-/// The ingest connection equation must CLOSE. PostgresResourcePlan sizes the pool as
-/// 1 control + 2p (COPY fan + fold fan) + observability, and MaxPoolSize is set from
-/// it — so every simultaneously-live owner class has to fit inside it. The COPY fan
-/// silently exceeded its half once the physicalities and attestations phases began
-/// overlapping (each fanning to ApplyParallelism groups), and the pool answered with
-/// "connection pool has been exhausted (currently 28)" after a 15s rent timeout,
-/// killing seed runs mid-corpus. Arithmetic, so it holds on every machine shape.
+/// The ingest connection budget closes: PostgresResourcePlan sizes the pool as
+/// 1 control + COPY fan + fold fan + observability, and MaxPoolSize is set from it, so
+/// every simultaneously live owner fits. Pure arithmetic, so it holds on every machine shape.
 /// </summary>
 [Collection("cpu-topology-global")]
 public sealed class ApplyConnectionBudgetTests
@@ -21,9 +17,8 @@ public sealed class ApplyConnectionBudgetTests
     {
         var plan = PostgresResourcePlan.Current;
         int copy = NpgsqlSubstrateWriter.ResolveCopyConnectionBudget();
-        // The fold half, from the fold lane's OWN sizing — not an assumption of
-        // symmetry. ConsensusAccumulatingWriter has always bounded itself with a
-        // SemaphoreSlim(FoldConnections); the COPY fan was the unbounded half.
+        // The fold fan comes from the fold's own sizing (FoldConnections), not an
+        // assumption that it mirrors the COPY fan.
         int foldFan = IngestSizing.ResolveConsensusFold(
             IngestTopology.Current.ApplyPartitions).Connections;
         Assert.True(
@@ -37,8 +32,7 @@ public sealed class ApplyConnectionBudgetTests
     {
         int copy = NpgsqlSubstrateWriter.ResolveCopyConnectionBudget();
         Assert.True(copy >= 1);
-        // Overlapping phases must not be able to claim more than one phase's worth of
-        // connections between them.
+        // Overlapping phases together claim no more than one phase's fan-out.
         Assert.True(copy <= NpgsqlSubstrateWriter.ApplyParallelism,
             $"copy budget {copy} exceeds one phase's fan-out {NpgsqlSubstrateWriter.ApplyParallelism}");
     }

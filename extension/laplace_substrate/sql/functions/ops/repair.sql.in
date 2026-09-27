@@ -1,22 +1,13 @@
--- ops.reindex_invalid / ops.analyze_substrate — the repair half of the operator
--- surface. ops.index_health names the damage; these fix it.
+-- ops.reindex_invalid / ops.analyze_substrate: repair what ops.index_health
+-- reports.
 --
--- The 2026-08-13 cycle-shell incident left all 28 partitioned-parent secondaries
--- as empty invalid shells while every row count read green. index_health made
--- that VISIBLE as an installed operation; the repair was still hand-typed psql,
--- which is the same gap one step later — an operator who can see the damage from
--- the console and must leave it to fix the damage will eventually fix it wrong.
+-- One COMMIT per index, so the rebuild is resumable and interruptible:
+-- cancelling loses only the index in flight.
 --
--- ONE COMMIT PER INDEX, so a rebuild of 28 partitioned parents is resumable and
--- interruptible: ops.cancel_backend on this procedure's pid loses the index in
--- flight and keeps every index already rebuilt. A single-transaction repair
--- would lose all of it and hold the locks for the whole run.
---
--- NOT CONCURRENTLY. REINDEX CONCURRENTLY is barred inside a transaction block,
--- and a PL/pgSQL procedure body is always in one (COMMIT starts the next). A
--- plain REINDEX takes an exclusive lock on the index's table for the rebuild —
--- which is the correct trade here, because the indexes this targets are ALREADY
--- INVALID: reads cannot use them, so the outage began before the repair did.
+-- Not CONCURRENTLY: REINDEX CONCURRENTLY is barred inside a transaction block,
+-- and a procedure body is always in one. A plain REINDEX locks the index's
+-- table exclusively, and the targets are already invalid, so no read was
+-- using them.
 --
 -- No SET clause: a procedure carrying one may not COMMIT, so references are
 -- schema-qualified instead (the ops.evict_source rule).
@@ -44,9 +35,8 @@ BEGIN
 
         t_index := clock_timestamp();
         RAISE LOG 'reindex_invalid: rebuilding %.% on %', ix.schema_name, ix.index_name, ix.table_name;
-        -- %I on identifiers the catalog itself supplied, never caller text. The
-        -- schema is load-bearing: index names are unique per schema, and the four
-        -- substrate schemas hold same-named indexes on partitioned mirrors.
+        -- %I on identifiers the catalog supplied, never caller text. The schema
+        -- is needed: index names are unique only per schema.
         EXECUTE format('REINDEX INDEX %I.%I', ix.schema_name, ix.index_name);
         IF NOT EXISTS (
             SELECT FROM pg_catalog.pg_index i
@@ -75,10 +65,8 @@ COMMENT ON PROCEDURE ops.reindex_invalid(boolean) IS
     'touching anything. Not CONCURRENTLY: barred inside a procedure, and the '
     'targets are already unusable for reads. CALL ops.reindex_invalid();';
 
--- ANALYZE, unlike VACUUM, is legal inside a transaction and therefore inside a
--- procedure. VACUUM is NOT and cannot be wrapped here at any nesting — it has to
--- be issued by a client on a connection that is not in a transaction block, which
--- is why the maintenance endpoint owns it and this file does not pretend to.
+-- ANALYZE is legal inside a transaction and so inside a procedure; VACUUM is
+-- not, so a client issues it outside a transaction block.
 
 CREATE OR REPLACE PROCEDURE ops.analyze_substrate(p_tables text[] DEFAULT NULL)
     LANGUAGE plpgsql AS $$

@@ -5,7 +5,9 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Installed foundry/synthesis plane readers. Hosts map token slots; SQL stays here.
+/// Set reads over the installed <c>generation.*</c> planes that model export composes from
+/// current standing: consensus planes, trajectory order, geometry keys and highway masks.
+/// Callers assign vocabulary slots; the planes are computed in the extension.
 /// </summary>
 public static class NpgsqlFoundryReads
 {
@@ -16,8 +18,8 @@ public static class NpgsqlFoundryReads
     public readonly record struct SurfaceWeightRow(string Surface, long Weight);
     public readonly record struct CoordRow(byte[] EntityId, double X, double Y, double Z, double M);
     /// <summary>
-    /// One row of <c>generation.entity_hilbert_keys</c>. Index is the 128-bit 1D Hilbert
-    /// value of the physicality centroid (collisions = shared S³ locality).
+    /// One row of <c>generation.entity_hilbert_keys</c>: the 128-bit Hilbert index of the
+    /// entity's coordinate physicality. Equal indexes mean shared S³ locality, not identity.
     /// </summary>
     public readonly record struct EntityHilbertKey(byte[] EntityId, Hilbert128 HilbertIndex);
     public readonly record struct GapEdgeRow(int Gap, byte[] SubjectId, byte[] ObjectId, double W);
@@ -313,7 +315,8 @@ public static class NpgsqlFoundryReads
             p => p.AddWithValue("s", source), ct: ct, label: "source_id");
 
     /// <summary>
-    /// Exact surfaces for crawl-seed pinning over a text array.
+    /// Realized surfaces of the inputs that resolve to a word entity; unresolved inputs are
+    /// dropped.
     /// </summary>
     public static Task<IReadOnlyList<string>> RenderResolvedWordSurfacesAsync(
         NpgsqlDataSource ds, string[] surfaces, CancellationToken ct = default) =>
@@ -334,7 +337,8 @@ public static class NpgsqlFoundryReads
             }, timeoutSeconds: 120, ct: ct, label: "render_resolved_word_surfaces");
 
     /// <summary>
-    /// Init SQL that shadows <c>laplace.consensus</c> with a source-scoped re-fold in pg_temp.
+    /// Init SQL that shadows <c>laplace.consensus</c> with a pg_temp table holding
+    /// consensus re-folded from only the given sources' testimony.
     /// </summary>
     public static string ScopedConsensusTempInitSql(IReadOnlyList<byte[]> sourceIds)
     {
@@ -350,8 +354,8 @@ public static class NpgsqlFoundryReads
 
     /// <summary>
     /// Ingest datasource; when <paramref name="scopeSourceIds"/> is set, every physical
-    /// connection installs the scoped consensus temp table (NoResetOnClose — pool reset
-    /// would drop it and silently unscope later readers).
+    /// connection installs the source-scoped consensus temp table. NoResetOnClose keeps the
+    /// pool reset from dropping it, which would silently unscope later readers.
     /// </summary>
     public static NpgsqlDataSource CreateIngestDataSource(
         string? connString, IReadOnlyList<byte[]>? scopeSourceIds = null)
@@ -380,7 +384,9 @@ public static class NpgsqlFoundryReads
 
     public readonly record struct AttributeOutRow(byte[] SubjectId, byte[] NeighbourId, double W);
 
-    /// <summary>Outbound attribute edges via consensus.edges_raw(walk_edge_weight, clamped ≥ 0).</summary>
+    /// <summary>Outbound consensus edges of one relation type per vocabulary subject, ranked by
+    /// effective rating and capped at <paramref name="degreeCap"/>; weight is
+    /// <c>walk_edge_weight</c> clamped at zero.</summary>
     public static Task<IReadOnlyList<AttributeOutRow>> AttributeOutboundAsync(
         NpgsqlDataSource ds, string relationType, byte[][] vocab, int degreeCap,
         CancellationToken ct = default) =>

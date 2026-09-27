@@ -1,32 +1,14 @@
--- ops.refold_source — the NON-DESTRUCTIVE half of evict_source (GH #1176).
+-- ops.refold_source: rebuild the consensus a source's testimony touches,
+-- deleting nothing. Consensus is derived: each cell is the fold of its
+-- surviving attestations. For every relation the source attests, the cells
+-- its testimony touches are refolded natively from ALL their evidence and
+-- upserted, so a cell whose evidence is durable but whose fold never landed is
+-- inserted, not only updated. Idempotent; never mutates evidence.
 --
--- THE INCIDENT THIS REPAIRS, measured 2026-08-21: the conceptnet ingest (run
--- 32502815485) applied all 651 units and then died mid-fold on pool exhaustion
--- (#1271). The ledger says applied; the folds never drained. Result: relation
--- aa43543b… holds 163,585 attestations but 28,793 consensus rows; 3d5f97dc…
--- 108,863 vs 66,789 — lanes whose folds finished are exact. Per-file resume
--- true-skips the files (their unit completion rows exist), so re-running
--- repairs nothing, and until this procedure existed the ONLY recovery was
--- evict + full re-ingest: destroying 963,549 evidence rows to rebuild rows
--- that are all still present.
+-- Commits per relation, so a cancelled run keeps every relation already
+-- refolded. No SET clause (a procedure carrying one may not COMMIT); every
+-- reference is schema-qualified.
 --
--- Consensus is DERIVED state: every cell is exactly the consensus_fold of its
--- surviving attestations. evict_source already proves it — its step (b) refolds
--- every touched cell in place after deleting testimony. This is the complete
--- rebuild form of that arm with NOTHING deleted: enumerate the cells the source's
--- testimony touches, refold each from ALL evidence in one grouped rating period,
--- with a neutral-prior seed, and UPSERT the derived row. The stable traversal
--- (last_observed_at, id) does not invent a separate period for each observation.
--- The INSERT half matters: an interrupted first fold can leave durable evidence
--- with no consensus row at all, and UPDATE-only repair cannot reconstruct it.
--- Idempotent by construction — a second run recomputes identical values. Touches
--- only laplace.consensus rows whose evidence justifies them; never mutates evidence.
---
--- Batched COMMITs exactly like evict_source, so a canceled repair keeps every
--- relation already refolded. No SET clause (a procedure carrying one may not
--- COMMIT); references schema-qualified instead — the ops.evict_source rule.
---
--- Run (operator, via the measurement lane like evict):
 --   CALL ops.refold_source('ConceptNetDecomposer');
 DROP PROCEDURE IF EXISTS ops.refold_source(text, boolean);
 
@@ -49,10 +31,9 @@ BEGIN
         RAISE EXCEPTION 'refold_source: unknown source %', p_source_name;
     END IF;
 
-    -- A transient-calibration receipt has already consumed its continuous
-    -- native score inside the original atomic write.  It is durable provenance,
-    -- not a replayable fold input; rebuilding a cell from its categorical
-    -- receipt would silently replace the original model result with 0/½/1.
+    -- A transient-calibration receipt (fold_replayable = false) consumed its
+    -- continuous score in the original write; refolding its cell would replace
+    -- that result with the categorical 0/½/1, so the source is refused.
     IF EXISTS (
         SELECT 1
         FROM laplace.attestations source_evidence
@@ -67,8 +48,8 @@ BEGIN
             p_source_name;
     END IF;
 
-    -- Match ConsensusAccumulatingWriter's operational namespace.
-    -- These rows prove admission; they never supply rating observations.
+    -- Operational relation types (the writer's admission receipts) are never
+    -- rating observations and are not refolded.
     operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
 
     SELECT array_agg(DISTINCT a.type_id) INTO rels
@@ -105,11 +86,10 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- The native repair owner takes the same sorted canonical target locks
-        -- as admission, then reads a fresh READ COMMITTED snapshot of ALL A.
-        -- It checks replayability again inside that lock window, so a concurrent
-        -- transient receipt cannot be replaced with its categorical value.
-        -- No incoming delta is fabricated and no neutral placeholder is committed.
+        -- Native refold: takes the same sorted target-cell locks as admission,
+        -- reads a fresh snapshot of all evidence for those cells, and rechecks
+        -- replayability inside the lock window. It adds no observation and
+        -- commits no placeholder cell.
         SELECT consensus.refold_evidence_type(
             rel,
             array_agg(subject_id ORDER BY subject_id, object_id NULLS FIRST),

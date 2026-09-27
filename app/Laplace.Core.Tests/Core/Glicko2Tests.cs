@@ -28,10 +28,8 @@ public class Glicko2Tests
     }
 
     /// <summary>
-    /// The draw threshold is DEFINED in engine/core/src/attestation_engine.c
-    /// (kScoreHalfFp). The managed constant mirrors it for callers that only need
-    /// the value; if the two ever drift, every aggregated outcome silently
-    /// reclassifies. Pin them together.
+    /// The managed draw threshold equals kScoreHalfFp in engine/core/src/attestation_engine.c,
+    /// which separates confirmation, draw and refutation in every aggregated outcome.
     /// </summary>
     [Fact]
     public void ScoreDraw_MatchesNativeDefinition()

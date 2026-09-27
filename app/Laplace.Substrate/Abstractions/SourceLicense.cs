@@ -1,9 +1,8 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// SPDX / attribution metadata for a seed source. Deposited as witnessed credit
-/// attestations in Wave 5; Wave 2+ carries it on <see cref="ISeedSource"/> /
-/// <see cref="ISourceManifest"/> so Initialize can register the hook point.
+/// SPDX / attribution metadata for a source, carried on <see cref="ISeedSource"/> /
+/// <see cref="ISourceManifest"/>; <c>SourceVocabularyBootstrap</c> attests it on the source entity.
 /// </summary>
 public sealed record SourceLicense(
     string Name,

@@ -26,9 +26,8 @@
     min-width: 0;
   }
 
-  /* The authored-content editor used to determine the height of the entire first grid
-     row, leaving a mostly-empty file-selection card and pushing Selected artifacts below
-     the fold. Keep the editor useful but compact; it remains vertically resizable. */
+  /* A compact, vertically resizable editor, so it does not set the height of the whole
+     first grid row and push Selected artifacts below the fold. */
   .inputs textarea {
     height: 8rem;
     min-height: 7rem;

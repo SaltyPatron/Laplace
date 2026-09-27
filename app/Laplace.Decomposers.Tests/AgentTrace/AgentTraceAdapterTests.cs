@@ -6,8 +6,8 @@ using Xunit;
 namespace Laplace.Decomposers.AgentTrace.Tests;
 
 /// <summary>
-/// Pure-parser tests: provider fixture → normalized model. Fixtures mirror the
-/// on-disk schemas observed from real installations (August 2026).
+/// Parser tests: provider transcript fixture → normalized <c>AgentSession</c>.
+/// Each fixture follows that provider's on-disk transcript schema.
 /// </summary>
 public sealed class AgentTraceAdapterTests : IDisposable
 {
@@ -92,8 +92,8 @@ public sealed class AgentTraceAdapterTests : IDisposable
     [Fact]
     public async Task ClaudeCode_Sidechain_Gets_Its_Own_Session_Identity()
     {
-        // A subagent transcript carries the PARENT's sessionId; keying on that alone
-        // collapsed every subagent onto the parent and overwrote its trajectory.
+        // A subagent transcript carries its parent's sessionId; the agent id from the
+        // file name qualifies the session key so the subagent is its own trajectory.
         string path = await WriteAsync("agent-ab36cc5409c73748d.jsonl", ClaudeFixture);
         var s = Assert.Single(await ParseAllAsync(new ClaudeCodeAdapter(), path));
         Assert.Equal(
@@ -316,7 +316,7 @@ public sealed class AgentTraceAdapterTests : IDisposable
         Assert.Equal("22:57:48 up 2 days", call.ResultText);
     }
 
-    // ── Generic fallback + routing ────────────────────────────────────────────────
+    // ── Generic adapter + routing ─────────────────────────────────────────────────
 
     [Fact]
     public async Task Generic_Parses_OpenAI_Style_Messages_Document()
@@ -346,8 +346,8 @@ public sealed class AgentTraceAdapterTests : IDisposable
 }
 
 /// <summary>
-/// The HAS_POS law, closed over the typed vocabulary: every relation the emitter can
-/// reference must be declared in the source roster (and derive to a resolvable name).
+/// Every typed agent relation surfaces to a name declared in the source's relation
+/// roster, so each emitted relation resolves through the governed vocabulary.
 /// </summary>
 public sealed class AgentRelationVocabularyTests
 {

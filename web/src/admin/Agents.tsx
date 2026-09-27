@@ -10,18 +10,14 @@ import {
 import styles from './Admin.module.css';
 
 /**
- * External agent routing — the outbound lane, where this substrate is the CLIENT
- * of other models rather than the server.
+ * External agent routes: the providers the `ask` operation calls out to. Shows each
+ * route, whether its credential resolves now, the editable agents.json, and a live
+ * ask that proves a route end to end — a misconfigured route otherwise fails the
+ * same way as an absent one.
  *
- * Three things an operator needs and could not get anywhere else: which routes
- * exist, whether each one's credential actually resolves right now, and whether a
- * route works end to end. The last matters because a misconfigured route fails
- * identically to an absent one from every other surface.
- *
- * CREDENTIAL VALUES ARE NEVER FETCHED. The server sends the variable NAME a key
- * would be read from and a resolved/not-resolved verdict; the value never leaves
- * the host. agents.json holds no secrets either — the parser refuses an inline
- * api_key, because that file rides the deploy payload into a shared directory.
+ * Credential values are never fetched: the server sends the variable name a key is
+ * read from and a resolved flag. The agents.json parser refuses an inline api_key,
+ * since that file ships in the deploy payload.
  */
 export function Agents() {
   const { tenant } = useAppStore();
@@ -135,9 +131,8 @@ export function Agents() {
                       </td>
                       <td>{r.provider}</td>
                       <td className={r.model ? undefined : styles.cancelled}>
-                        {/* A null model is not a broken route — it is a route
-                            nobody has named a model for. Only anthropic ships a
-                            default, so this is the normal state for the rest. */}
+                        {/* A null model means no model is named for the route; only
+                            the anthropic provider declares a default model. */}
                         {r.model ?? 'not set — name one as provider/model'}
                       </td>
                       <td>{r.auth}</td>
@@ -180,8 +175,8 @@ export function Agents() {
               {reply.input_tokens ?? '—'} in / {reply.output_tokens ?? '—'} out ·{' '}
               {Math.round(reply.provider_ms)}ms · attempt {reply.attempts}
             </Muted>
-            {/* A refusal or a block returns an EMPTY reply with a reason. Rendering
-                only the text would show nothing at all and read as a dead route. */}
+            {/* A refusal or block returns an empty reply with its reason in `note`;
+                the note is rendered so an empty reply is not read as a dead route. */}
             {reply.note && <Banner variant="warning">{reply.note}</Banner>}
             <pre className={styles.replyBox}>{reply.reply || '(empty)'}</pre>
           </>

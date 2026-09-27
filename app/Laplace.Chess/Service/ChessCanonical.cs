@@ -37,11 +37,9 @@ public static class ChessCanonical
     };
 
     /// <summary>
-    /// Board-state phase, not move-number folklore. This uses the same PeSTO phase material
-    /// weights as the evaluator (N/B=1, R=2, Q=4; starting total 24) and names a reusable
-    /// context content value. Because the class is derived from the board itself it works for
-    /// arbitrary FENs, transpositions and non-standard starts instead of assuming that move 12
-    /// must be "opening" or move 40 must be "endgame".
+    /// Game phase from the board's material, using the evaluator's PeSTO phase weights
+    /// (N/B=1, R=2, Q=4; starting total 24), as a reusable context content value. Derived from
+    /// the board, not the move number, so it holds for any FEN, transposition or start.
     /// </summary>
     public static string PhaseClass(Board board)
     {
@@ -68,15 +66,12 @@ public static class ChessCanonical
     }
 
     /// <summary>
-    /// Phase × clock × spent lens over one ply, refining <see cref="ThinkClass"/> with
-    /// the game's OWN distributions — no operator constants anywhere: the spent cut
-    /// points are ThinkClass's existing factor thresholds (relative to the game's median
-    /// think), the low-clock threshold is the player's own median remaining
-    /// (<see cref="PgnClocks.MedianRemaining"/>), the flagging threshold is the game's
-    /// median per-move cost, and the phase bound is a tertile of the game's own length.
-    /// Clock lenses derive only when the source witnessed a remaining clock — the
-    /// cutechess spent dialect carries none, and fabricating one would mint a quantity
-    /// the source never asserted.
+    /// Phase × clock × spent lens over one ply, refining <see cref="ThinkClass"/> with the
+    /// game's own distributions: spent cut points are ThinkClass's factor thresholds (relative
+    /// to the game's median think), the low-clock threshold is the player's median remaining
+    /// (<see cref="PgnClocks.MedianRemaining"/>), the flagging threshold is the game's median
+    /// per-move cost, and the phase bound is the first third of the game's length. Clock lenses
+    /// need a recorded remaining clock; the cutechess spent-time dialect has none.
     ///
     ///   flagging      — remaining below the game's own median per-move cost: the clock
     ///                   cannot fund one more typical think, so speed is forced.
@@ -85,10 +80,8 @@ public static class ChessCanonical
     ///   planned_quick — early-phase fast move with no clock pressure: book-consistent
     ///                   preparation, not haste.
     ///
-    /// The fourth lens of the family — late, fast, low clock — IS the base "rushed"
-    /// class (same content value, deposited by ThinkClass already); returning it here
-    /// would double-witness the same cell from one ply, so this returns null and the
-    /// read side gets that lens from the base deposit. Null = no lens adds information.
+    /// Late, fast, low-clock play is the base "rushed" class ThinkClass already attests, so
+    /// it is not returned again from the same ply. Null = no lens adds information.
     /// </summary>
     public static string? ThinkLens(
         int ply, int plyCount, double thinkFactor,

@@ -76,9 +76,8 @@ cognition_domain(const char *name)
     return id;
 }
 
-/* Fingerprint the source-attributed invocation, the complete pre-ORIENT
- * response field, and exact input occurrences. Integers use portable byte
- * order so receipts are content identities rather than host-layout artifacts. */
+/* Program and output fingerprints encode integers big-endian so the program
+ * id is a content identity independent of host layout. */
 static void
 program_fingerprint_u32(StringInfo bytes, uint32 value)
 {
@@ -377,10 +376,9 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
                     int initial_channel_count)
 {
     StringInfoData bytes;
-    /* v9 additionally binds the deterministic geometry response plane.
-     * Equal canonical ids reached through current observation, prior discourse,
-     * physicality, geometry, and generated working state remain distinct program
-     * coordinates instead of collapsing into one semantic bag. */
+    /* Each response plane is encoded as its own section, so one canonical id
+     * reached through the observation, discourse, structure, geometry and typed
+     * channels stays a distinct program coordinate per plane. */
     hash128_t domain = cognition_domain("laplace:cognition-program:v9");
     int member = -1;
     initStringInfo(&bytes);
@@ -397,11 +395,11 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
         appendBinaryStringInfo(&bytes, (const char *) &id, sizeof(id));
     }
 
-    /* COUPLE is part of the executable program state, not disposable setup.
-     * Bind every exact prompt-relative identity route, native physicality crossing,
-     * deterministic geometry response and retained typed semantic response into
-     * the program id before ORIENT/ROUTE output can be claimed. Physicality and
-     * geometry remain typed response data; neither becomes semantic testimony. */
+    /* The whole COUPLE response (bindings, structural trajectory crossings,
+     * geometry neighbors, discourse, typed consensus channels) and any declared
+     * operations are bound into the program id, each plane sorted canonically.
+     * Structure and geometry are fingerprinted as response data only; they do
+     * not enter semantic provenance. */
     program_fingerprint_bindings(&bytes, intent);
     program_fingerprint_structural(&bytes, intent);
     program_fingerprint_geometry(&bytes, intent);
@@ -589,9 +587,8 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     SemanticOriginEntry *anchor;
     SemanticOriginEntry *candidate;
 
-    /* A relation reached from a geometry responder remains a geometry-routed
-     * semantic observation. It is fingerprinted in the program, but proximity
-     * cannot satisfy prompt semantic obligations or mint semantic ancestry. */
+    /* A channel anchored by a geometry neighbor is fingerprinted but never
+     * propagates semantic ancestry: proximity is not testimony. */
     if (channel->operand_role == LAPLACE_QUERY_OPERAND_GEOMETRY)
         return;
 
@@ -607,9 +604,9 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     candidate = semantic_origin_get(program, &channel->candidate, true);
     candidate->origins = bms_add_members(candidate->origins, anchor->origins);
 
-    /* The exact declared input, not inherited lexical/semantic ancestry,
-     * establishes that this candidate satisfies an invocation input. Keep that
-     * proof separate until the candidate is actually selected. */
+    /* A channel of a declared operation's result relation, anchored at one of
+     * its exact inputs, marks the candidate as answering that input. The mark
+     * counts only when the candidate is emitted. */
     for (int i = 0; i < program->operation_relation_count; ++i)
     {
         const LaplacePromptRelationRead *operation = &program->operations[i];
@@ -625,18 +622,6 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     }
 }
 
-/*
- * Default conversation obligations are semantic-content coordinates, not every
- * surface/function-word occurrence. The whole prompt/parse/binding field still
- * participates in COUPLE/ORIENT and in the program fingerprint; this function
- * only says which current occurrences an ordinary semantic act must actually
- * ground before completion.
- *
- * Source-declared task/invocation contracts do not use this reduction: their
- * explicit operand obligations retain the existing stricter whole-prompt law.
- * With no supported aligned parse, return NULL and preserve the conservative
- * all-semantic-occurrence requirement.
- */
 bool
 laplace_upos_is_content(const hash128_t *upos)
 {
@@ -654,6 +639,10 @@ laplace_upos_is_content(const hash128_t *upos)
     return false;
 }
 
+/* Obligations from supported, aligned parses of the observation: the
+ * occurrences whose parsed UPOS is a content tag. NULL when no parse is
+ * supported, leaving every eligible occurrence required. Only obligation
+ * closure is narrowed; the whole observation still shapes the program id. */
 static Bitmapset *
 program_content_origins(const LaplacePromptIntent *intent, int prompt_origin_count)
 {
@@ -681,12 +670,11 @@ program_content_origins(const LaplacePromptIntent *intent, int prompt_origin_cou
 }
 
 /*
- * With no supported parse of the whole observation, each occurrence's own
- * evidence still separates content coordinates from structure. An occurrence
- * whose text is all White_Space, or whose strongest witnessed universal part of
- * speech is a function tag (the complement of the content set above), grounds
- * nothing by itself. An occurrence with no such evidence stays required:
- * missing evidence never erases an obligation.
+ * Without a supported parse, each occurrence's own consensus decides: one
+ * HAS_POS scan over the occurrence forms keeps, per form, the object with the
+ * highest conservative rating (rating - 2 rd). An occurrence whose text is all
+ * White_Space, or whose best UPOS is not a content tag, is not an obligation.
+ * An occurrence with no HAS_POS standing stays required: absence is not false.
  */
 typedef struct ObservedUpos
 {
@@ -813,8 +801,8 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         ereport(ERROR,
                 (errmsg("cognition program: prompt occurrence projections disagree")));
 
-    /* Default unresolved program: every semantic coordinate remains required.
-     * Missing evidence cannot silently erase an obligation. */
+    /* Eligible obligations are the occurrences at tier >= 2 in the canonical
+     * observation tree. */
     for (int i = 0; i < prompt_origin_count; ++i)
     {
         int32 node;
@@ -829,18 +817,15 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
             eligible = bms_add_member(eligible, i);
     }
 
-    /* For ordinary, uncontracted conversation, grammar distinguishes the
-     * semantic content coordinates from determiners/auxiliaries/punctuation.
-     * Every parse and binding still shapes the program; only obligation
-     * closure is narrowed. Declared operations retain their exact contract. */
+    /* With no declared operation, obligations narrow to content occurrences:
+     * from a supported parse, else from per-occurrence HAS_POS consensus. */
     if (operation_count == 0)
         content_required = program_content_origins(intent, prompt_origin_count);
     if (operation_count == 0 && !content_required && eligible)
         content_required = program_observed_content_origins(
             input, context_values, node_values, prompt_origin_count, eligible);
 
-    /* An explicit whole-root contract binds exact input occurrences. Lexical
-     * naming paths never assign request roles or erase other obligations. */
+    /* Declared operations add their operand occurrences as obligations. */
     for (int i = 0; i < operation_count; ++i)
     {
         const LaplacePromptRelationRead *operation = &intent->operations[i];
@@ -860,10 +845,9 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     program->explicit_invocation = intent && intent->explicit_invocation;
     if (program->explicit_invocation) program->active_context = intent->active_context;
     program->disposition = LAPLACE_COGNITION_OPEN;
-    /* A declared task keeps the existing whole-prompt + exact-input closure.
-     * Ordinary conversation instead requires the supported parse's semantic
-     * content occurrences. The exact whole observation still controls coupling,
-     * orientation and the program fingerprint. */
+    /* Content occurrences when narrowed; otherwise every eligible occurrence
+     * plus declared operands. A declared operation below widens this to every
+     * occurrence and adds one obligation per distinct input identity. */
     program->required = operation_count == 0 && content_required
         ? bms_copy(content_required)
         : bms_add_members(bms_copy(eligible), compiled_required);
@@ -914,16 +898,14 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
 
     if (!program->required && prompt_origin_count > 0)
     {
-        /* A punctuation-only/unknown prompt still has an exact observation.
-         * Keep it as an unresolved requirement rather than auto-completing an
-         * empty semantic program. */
+        /* An observation with no eligible occurrence still requires all of its
+         * occurrences, so an empty program cannot complete vacuously. */
         for (int i = 0; i < prompt_origin_count; ++i)
             program->required = bms_add_member(program->required, i);
     }
 
-    /* Semantic provenance starts at the admitted required prompt occurrences.
-     * Supplemental history/frontier ids remain usable guidance but never become
-     * completion obligations for this turn. */
+    /* Semantic provenance is seeded from the required occurrences' ids and the
+     * observation root, which carries their union. */
     for (int i = 0; i < prompt_origin_count; ++i)
     {
         bytea *value;
@@ -942,10 +924,9 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         root->origins = bms_add_members(root->origins, program->required);
     }
 
-    /* Retain every prompt-relative route established by COUPLE. Structural
-     * crossings have already populated these bindings with exact source
-     * occurrence ancestry; importing the binding does not turn that route into
-     * testimony or let it close a semantic obligation by itself. */
+    /* COUPLE bindings seed provenance with their required origins. A binding
+     * alone still cannot close an obligation: emit also requires semantic
+     * support. */
     if (intent && intent->bindings)
     {
         HASH_SEQ_STATUS sequence;
@@ -963,10 +944,9 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         }
     }
 
-    /* Proposal channels are not completion by themselves, but they establish
-     * typed semantic reachability from the exact prompt/trunk. Incoming
-     * asymmetric testimony is retained elsewhere as evidence and cannot be
-     * inverted into a semantic transition here. */
+    /* Initial channels extend provenance anchor -> candidate along salient,
+     * positively rated relations traversed outbound or symmetric; an inbound
+     * asymmetric relation is not inverted. */
     for (int i = 0; i < initial_channel_count; ++i)
         record_semantic_channel(program, &initial_channels[i]);
 
@@ -1042,9 +1022,9 @@ laplace_cognition_program_note_emit(LaplaceCognitionProgram *program,
         ++program->semantic_output_count;
     }
 
-    /* Structural ancestry cannot satisfy a semantic requirement. The selected
-     * identity must have positive typed reachability from the same prompt
-     * coordinates that the executor reports in its provenance. */
+    /* An emitted id satisfies obligations only where the caller's reported
+     * origins intersect its typed semantic provenance. Emitting an answer to
+     * every declared input satisfies all occurrence obligations. */
     if (semantic_support && origins && program->required)
     {
         SemanticOriginEntry *grounding = semantic_origin_get(program, selected, false);
@@ -1124,9 +1104,8 @@ laplace_cognition_program_receipt(const LaplaceCognitionProgram *program,
     MemSet(receipt, 0, sizeof(*receipt));
     if (!program)
         return;
-    /* Surface occurrences and declared semantic input identities are different
-     * obligations. Several inputs may share one surface occurrence; closing its
-     * ancestry must not hide the still-unanswered input identities in receipts. */
+    /* Occurrence obligations and declared input-identity obligations are
+     * counted separately and summed. */
     required = (int64) bms_num_members(program->required) +
                bms_num_members(program->invocation_required);
     satisfied = (int64) bms_num_members(program->satisfied) +

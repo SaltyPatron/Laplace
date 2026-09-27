@@ -29,10 +29,7 @@ const SPEC: Record<keyof QueryDials, DialSpec> = {
   use_geometry: { label: 'geometry heuristic', help: 'Admissible A* using S³ distance. Off is plain Dijkstra.' },
 };
 
-/**
- * Only the dials the chosen shape consumes. The previous surface accepted
- * top_k, top_p, window and topic_boost on every request and read none of them.
- */
+/** Renders only the dials the chosen shape consumes (`SHAPE_DIALS`). */
 export function DialPanel({ shape, dials, onChange }: Props) {
   const keys = SHAPE_DIALS[shape] ?? [];
   if (keys.length === 0) {

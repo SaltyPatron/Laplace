@@ -8,10 +8,9 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.SemLink;
 
 /// <summary>
-/// The SemLink distribution is not only its three mapping files. <c>instances/semlink-2</c>
-/// contains the manually aligned predicate occurrences: OntoNotes source position, lemma,
-/// VN class, FN frame, PB roleset/sense group, and argument-span role alignments. Treating
-/// the JSON maps as the whole source discarded 148,653 of the distribution's 154k records.
+/// Reads <c>instances/semlink-2</c>, SemLink's manually aligned predicate occurrences:
+/// OntoNotes source position, lemma, VN class, FN frame, PB roleset/sense group, and
+/// argument-span role alignments.
 /// </summary>
 internal static class SemLinkInstanceIngest
 {
@@ -75,8 +74,8 @@ internal static class SemLinkInstanceIngest
             || !int.TryParse(fields[2], out int token))
             return false;
 
-        // New SemLink 2 normally omits the historical "gold" column. The official
-        // annotation.py reader inserts it before indexing; accept both serializations.
+        // SemLink 2 rows may omit the "gold" column that the official annotation.py reader
+        // inserts before indexing; both serializations are accepted.
         int value = fields[3].Equals("gold", StringComparison.OrdinalIgnoreCase) ? 4 : 3;
         if (fields.Length <= value + 4) return false;
         string lemma = fields[value].EndsWith("-v", StringComparison.Ordinal)
@@ -180,15 +179,10 @@ internal static class SemLinkInstanceIngest
             ? EmitReference(builder, $"ontonotes-sense\0{record.Lemma}\0{group}")
             : null;
 
-        // These fields annotate THIS predicate occurrence. Writing them onto the
-        // shared lemma and using the occurrence only as context projected corpus
-        // occurrences into global word-type testimony: a frequent lemma accumulated
-        // thousands of direct HAS_SENSE/EVOKES_FRAME/class evidence rows even though
-        // the source names sentence/token coordinates explicitly.
-        //
-        // Keep lemma -> APPEARS_IN -> occurrence for lexical discovery; semantic
-        // annotation belongs to the occurrence identity itself. Word-level promotion,
-        // when wanted, is a derived/elected operation rather than ingest-time spray.
+        // These fields annotate this predicate occurrence, so they are attested on the
+        // occurrence entity, not on the shared lemma; the lemma reaches the occurrence
+        // through APPEARS_IN. Word-level standing is derived from occurrences, not attested
+        // at ingest.
         if (vnClass is { } verbNetClass)
             Add(builder, occurrence, InstanceOf, verbNetClass, occurrence);
         if (frame is { } frameId)
@@ -350,9 +344,9 @@ internal static class SemLinkInstanceIngest
             public Unit(Record record)
             {
                 _record = record;
-                // This is the only content-tree work in the instance row. Constructing it
-                // here lets the shared compose workers fan out; the ordered builder drain
-                // below only emits the prebuilt tree plus governed reference testimony.
+                // The lemma tree is the row's only content-tree work; building it here runs
+                // on the shared compose workers, and the ordered builder drain below only
+                // emits the prebuilt tree and the reference attestations.
                 _lemmaTree = ContentTierSpine.BuildTree(Encoding.UTF8.GetBytes(record.Lemma));
             }
 

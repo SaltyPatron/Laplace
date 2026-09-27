@@ -11,7 +11,6 @@
 -- is false. No caller passes NULL expecting to distinguish those; the presence
 -- probes pass ids they just computed.
 DROP FUNCTION IF EXISTS laplace.entity_exists(bytea);
--- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.entity_exists(p_id bytea)
     RETURNS boolean
     LANGUAGE sql STABLE PARALLEL SAFE

@@ -5,9 +5,8 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Shared exact reads over durable attestation testimony. Consumers must not carry
-/// private SQL for presence/migration probes: this keeps partition routing and the
-/// query shape in one substrate-owned implementation.
+/// Exact set reads over durable attestation testimony. Every predicate carries the
+/// relation type so the LIST-partitioned attestation table prunes before the id probe.
 /// </summary>
 public static class NpgsqlAttestationReads
 {
@@ -18,9 +17,9 @@ public static class NpgsqlAttestationReads
     public readonly record struct WitnessScope(
         Hash128 SubjectId, Hash128 TypeId, Hash128 SourceId, Hash128? ContextId);
 
-    /// <summary>Read complete witness bodies in the exact selected proposition scopes.
-    /// Objects and outcomes remain unfiltered so conflicting testimony is observable.
-    /// The relation predicate retains partition pruning in one set-sized read.</summary>
+    /// <summary>Reads every witness in the selected (subject, type, source, context) scopes
+    /// in one set-sized read. Object and outcome are not filtered, so confirming,
+    /// drawing and refuting testimony on the same scope all come back.</summary>
     public static Task<IReadOnlyList<WitnessRow>> WitnessesAsync(
         NpgsqlDataSource dataSource, IReadOnlyList<WitnessScope> scopes, CancellationToken ct)
     {
@@ -43,10 +42,9 @@ public static class NpgsqlAttestationReads
     }
 
     /// <summary>
-    /// Return the subset of <paramref name="ids"/> already present in one relation partition.
-    /// <paramref name="typeId"/> is required because attestations are LIST-partitioned by
-    /// type_id; keeping the partition key in the predicate lets PostgreSQL prune before the
-    /// bytea-id probe instead of opening every relation family.
+    /// Returns the subset of <paramref name="ids"/> already present in the
+    /// <paramref name="typeId"/> partition. The partition key in the predicate lets
+    /// PostgreSQL prune to one relation family before the bytea-id probe.
     /// </summary>
     public static Task<IReadOnlyList<byte[]>> PresentIdsAsync(
         NpgsqlConnection conn, byte[] typeId, byte[][] ids, CancellationToken ct,

@@ -4,11 +4,8 @@ using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// Boundary tests for the native tensor dtype codec (engine/synthesis/src/tensor_dtype_codec.c).
-/// The managed decode switch that used to live in WeightTensorETL is gone; these pin the
-/// replacement against a managed ORACLE so a drift in the native lane is caught here rather
-/// than silently changing what gets attested. The oracle is test-only — production decode is
-/// native, per the layer law (C/C++ does the math).
+/// Checks the native tensor dtype codec (engine/synthesis/src/tensor_dtype_codec.c)
+/// against a test-only managed oracle. Production decode is native only.
 /// </summary>
 public sealed class TensorDtypeCodecTests
 {
@@ -32,7 +29,7 @@ public sealed class TensorDtypeCodecTests
         Assert.Equal((nuint)size, SynInterop.TensorDtypeSize(code));
     }
 
-    // Block-quant containers must NOT resolve — ingesting them as zeros would attest garbage.
+    // Block-quantized containers do not resolve to a dtype, so they are never decoded as zeros.
     [Theory]
     [InlineData("Q4_K")]
     [InlineData("Q6_K")]

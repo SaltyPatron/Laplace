@@ -13,39 +13,18 @@
 /*
  * chess.learned_moves(p_games)
  *
- * The learned table this substrate can actually key on. A piece-square cell is a
- * DOT PRODUCT -- "a pawn on e4" must be projected over every way of arriving there
- * (e2e4, e3e4, d3xe4, ...) at query time. A move is a LOOKUP: pe2e4 is a stored
- * tier-2 object with an id, O(1) perfcache geometry, and a containment set. So the
- * statistic is keyed on the move, and the classical piece-square shape falls out as
- * a projection over arrival squares whenever a caller wants that shape.
- *
- * MEASURED 2026-08-21 on the live corpus: 1,622,897 games carry HAS_RESULT and the
- * whole move vocabulary is 7,797 distinct tier-2 move entities, so this folds an
- * unbounded testimony set into a small bounded one. No board is reconstructed and no
- * legal move is generated: the game already happened, the ordered move ids are the
- * record, and ply parity gives the mover. The previous managed implementation
- * replayed every line through MoveGen + a hash of all ~35 legal actions per ply to
- * map an opaque id back to a move -- 73 games/s -- which this does not need at all.
- *
- * Split of labour is the same one trajectory_continuations.c states: SQL owns
- * candidate reduction (one index scan on HAS_RESULT joined to the game's Content
- * trajectory, unnested by the LATERAL), C owns the ordinal work -- orient each ply
- * by parity, accumulate per move id, rank.
+ * Folds recorded games into per-move statistics keyed on the move entity. SQL
+ * selects the subjects of HAS_RESULT cells whose result realizes to a score and
+ * expands each one's ordered trajectory into (constituent, ordinal) rows, one
+ * per run-length repeat. C names the mover by ply parity, accumulates plays and
+ * mover score per constituent id, and returns them ranked by plays. The ordered
+ * constituents are the record: no position is replayed and no move generated.
+ * p_games <= 0 reads every game.
  */
 
-/* MEASURED 2026-08-21, and the reason both CTEs are MATERIALIZED.
- *
- * The first cut wrote `WITH res AS (SELECT DISTINCT object_id, realize.realize(object_id) ...)`
- * and assumed the DISTINCT meant realize ran three times -- there are exactly three result
- * tokens in the corpus. It does not: without the barrier the planner inlines the CTE and
- * evaluates realize.realize across the HAS_RESULT scan, so the call lands in
- * realize.constituents_closure per row over 1.6M rows and the query does not return. That is
- * a function in a subquery doing RBAR work, and it was mine.
- *
- * With MATERIALIZED the token resolution is 309ms for 3 rows, and the whole fold over 20,000
- * games -- 2,412,665 plies, 7,723 distinct moves -- runs in 18s.
- */
+/* Both CTEs are MATERIALIZED: without the barrier the planner inlines them and
+ * evaluates realize.realize once per HAS_RESULT row instead of once per
+ * distinct result entity. */
 static const char *FOLD_QUERY =
     "WITH ids AS MATERIALIZED ("
     "  SELECT DISTINCT c.object_id AS id"
@@ -164,9 +143,8 @@ pg_laplace_chess_learned_moves(PG_FUNCTION_ARGS)
             if (isnull) continue;
             white_score = DatumGetFloat8(d_score);
 
-            /* Ply parity is the mover: constituent ordinals are 1-based, so an odd
-             * ordinal is White's move. The record already fixes who moved; nothing
-             * here needs the board to work it out. */
+            /* Ordinals are 1-based, so an odd ply is White's and scores white_score;
+             * an even ply scores its complement. */
             mover_score = (ordinal % 2 == 1) ? white_score : 1.0 - white_score;
 
             entry = (MoveEntry *) hash_search(moves, VARDATA_ANY(id),

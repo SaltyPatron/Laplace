@@ -9,16 +9,17 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Spec 34 §5 acceptance test, live: the same exchange deposited under two fresh
-/// tenants proves — on the real writer spine and the real fold —
-///   (1) evidence rows carry the per-tenant source AND the session as context,
-///   (2) the two tenants' testimony is distinct evidence (provenance unmashed),
-///   (3) ordered message occurrences remain distinct while exact content is shared,
-///   (4) scoped_consensus isolates tenant A's world from tenant B's,
-///   (5) exact session recall returns both surfaces and roles without writing.
-/// Tenants/content are unique per run (fresh guid) so cells carry no prior
-/// history — same discipline as ConverseLoopLiveTests. Tier=live: this is a
-/// seeded/shared product acceptance probe, not a database-health fixture.
+/// Spec 34 §5, live: the same exchange deposited under two fresh tenants, through the
+/// writer and the inline fold, proves
+///   (1) tenant A's prompt attestations carry the tenant source and the session as context,
+///   (2) the tenants' turn ids differ and each session manifest lists only its own turns,
+///   (3) each reply DEPENDS_ON its prompt under the tenant's Response source and session,
+///       folded to one witness,
+///   (4) both tenants' message occurrences bind the same exact content roots,
+///   (5) scoped_consensus over tenant A's sources sees A's session membership, not B's,
+///   (6) session_turns in a read-only transaction returns both roles and surfaces.
+/// Tenants and content carry a per-run guid so cells have no prior history. Tier=live:
+/// writes to the seeded shared substrate; not a database-health gate.
 /// </summary>
 [Trait("Tier", "live")]
 public sealed class ConversationProvenanceLiveTests

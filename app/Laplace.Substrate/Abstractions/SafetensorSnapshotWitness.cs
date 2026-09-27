@@ -1,11 +1,10 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Witness unit for a safetensors model directory: config + tokenizer + weight blobs.
-/// Unlike GGUF, safetensors are not self-contained — the directory is the unit.
-/// Hugging Face hub caches nest the real bundle under <c>models--*/snapshots/&lt;rev&gt;/</c>;
-/// <see cref="ResolveCompleteDir"/> walks that layout the same way
-/// <c>BenchCommands.EnumerateHubModels</c> already does, so ingest and bench agree.
+/// Input unit for a safetensors model directory: config + tokenizer + weight blobs.
+/// Safetensors files are not self-contained, so the directory is the unit. Hugging Face
+/// hub caches nest the bundle under <c>models--*/snapshots/&lt;rev&gt;/</c>;
+/// <see cref="ResolveCompleteDir"/> walks that layout as <c>BenchCommands.EnumerateHubModels</c> does.
 /// </summary>
 public static class SafetensorSnapshotWitness
 {

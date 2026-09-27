@@ -87,7 +87,7 @@ public sealed class VerbNetDecomposerTests
         var memberId = LexicalMemberAnchor.Id(
             LexicalMemberIdentityKind.VerbNet, classId!.Value, "lend#1");
         Assert.NotNull(memberId);
-        // One element: the class HAS_PART the member, qualified meronymy/member.
+        // One attestation: the class HAS_PART the member, with meronymy/member qualifier bits.
         Mask256 member = ClaimQualifiers.Of("meronymy", "member");
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PART")
@@ -100,7 +100,7 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PART")
             && a.SubjectId == classId!.Value && a.ObjectId == lendId!.Value);
 
-        // An entity's type is its row's type, never source testimony (304f7a73a).
+        // An entity's type is its row's type, never an IS_TYPED_AS attestation.
         Assert.DoesNotContain(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
             && a.SubjectId == classId!.Value);
@@ -220,8 +220,8 @@ public sealed class VerbNetDecomposerTests
     [Fact]
     public void NumericClassId_Strips_Lemma_Prefix()
     {
-        // Canonical helper (wrappers deleted); cross-source law lives in
-        // SourceEntityIdConventionsTests — these cases guard VerbNet-specific shapes.
+        // VerbNet class-id shapes; the shared cross-source cases are in
+        // SourceEntityIdConventionsTests.
         Assert.Equal("13.1", SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"));
         Assert.Equal("13.1-1", SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"));
         Assert.Equal("10.11-2", SourceEntityIdConventions.NumericVerbNetClassId("resign-10.11-2"));
@@ -304,8 +304,8 @@ public sealed class VerbNetDecomposerTests
         var boot = writer.Captured[0];
         Assert.Contains(boot.Entities, e =>
             e.Id == VerbNetDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        // Type and relation ids are the content ids of their labels: vocabulary keys are
-        // never rows (764bb0bf7).
+        // Type and relation ids are the content ids of their labels; vocabulary keys
+        // are never entity rows.
         Assert.DoesNotContain(boot.Entities, e =>
             e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId
             || e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId);
@@ -314,10 +314,8 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_TRUST_CLASS"));
     }
 
-    // VerbNet negates a predicate with bool="!" and marks an optional one with bool="?".
-    // verbnet-master ships 2,860 negated and 39 optional PREDs across 19,490 total. The
-    // attribute was never read, so every one of the 2,860 was deposited as a positive
-    // ENTAILS -- the substrate asserting the negation of what the source states.
+    // VerbNet negates a predicate with bool="!" and marks an optional one with bool="?";
+    // the attribute sets the ENTAILS outcome.
     private const string BoolClassXml = """
 <VNCLASS ID="escape-51.1">
  <MEMBERS><MEMBER name="escape" verbnet_key="escape#1" wn="" grouping="" fn_mapping="" features=""/></MEMBERS>

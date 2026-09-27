@@ -5,26 +5,18 @@ namespace Laplace.Engine.Core;
 public static class IngestSizing
 {
 
-    // Fallback only — real bytes/record comes from IngestSourceProfile.
+    // Bytes/record used when neither a source profile nor a measurement supplies one.
     public const int DefaultEstBytesPerRecord = 512;
 
     /// <summary>
-    /// MEASURE bytes/record from the file about to be read, instead of trusting the
-    /// per-source constant declared in <c>IngestSourceProfile</c>.
+    /// Mean UTF-8 bytes per non-blank line (newline included) of the file about to be
+    /// read. Record width is the denominator of the per-worker memory share, so this
+    /// measured value sizes batches from the artifact itself rather than from the
+    /// profile's declared estimate.
     ///
-    /// Those constants are estimates that nothing ever checked against a corpus, and they
-    /// are wrong by enough to matter. MEASURED 2026-08-01 on
-    /// /vault/Data/Wiktionary/raw-wiktextract-data.jsonl (20.4 GB): the mean over the
-    /// first 20,000 records is 6,158 bytes. <c>IngestSourceProfile.Wiktionary</c> declares
-    /// 12,000 — 1.95x too high.
-    ///
-    /// The error is in the slow direction, not the dangerous one: record width is
-    /// the denominator of the per-worker memory share, so an over-estimate shrinks
-    /// every batch and increases scheduling/probe overhead for the whole corpus.
-    ///
-    /// By default it samples one machine-derived sequential-I/O window; tests and
-    /// diagnostics may request an exact record count. Returns <paramref name="fallback"/>
-    /// on unreadable/empty input. Sizing must never be the thing that throws.
+    /// Samples one sequential-I/O window by default, or exactly
+    /// <paramref name="sampleRecords"/> lines when given. Returns
+    /// <paramref name="fallback"/> on missing, unreadable, or empty input; sizing never throws.
     /// </summary>
     public static int MeasureBytesPerRecord(
         string path,
@@ -59,36 +51,28 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Per-tuple byte estimate used by the ingest runner's apply gate
-    /// (<c>IngestRunner.BytesOf</c>) for entities / physicalities / attestations.
+    /// Per-row byte estimate the apply gate bills for each entity, physicality, and
+    /// attestation row.
     /// </summary>
     public const int ApplyTupleByteEstimate = 152;
 
     /// <summary>
     /// Wire ceiling for one array-carrying statement (bytea[]/int8[] parameters
-    /// marshalled in a single Bind message). PostgreSQL's frontend protocol rejects
-    /// a message whose declared length reaches ~1 GiB — the server logs
-    /// "invalid message length" and resets the connection, which the ingest runner
-    /// then misreads as a transient batch failure and retries from scratch. Half
-    /// the ceiling leaves headroom for protocol framing plus the server-side
-    /// unnest/hash of one chunk under typical tune-pg work_mem. Statements whose
+    /// marshalled in a single Bind message). PostgreSQL's frontend protocol rejects a
+    /// message whose declared length reaches ~1 GiB and resets the connection; this
+    /// ceiling leaves headroom for protocol framing plus the server-side unnest/hash of
+    /// one chunk. Statements whose
     /// parameters exceed this MUST chunk and loop inside the caller's transaction;
     /// chunking changes transport grain only, never the admitted set.
     /// </summary>
     public const long MaxArrayStatementWireBytes = 256L * 1024 * 1024;
 
     /// <summary>
-    /// Extra apply-cost billed per attestation on top of staged/COPY tuple bytes.
-    ///
-    /// MUST stay 0 for chess-shaped traffic. MEASURED 2026-08-04: surcharge 2048
-    /// shrunk applies to ~220k present merges each and cut committed rate
-    /// ~63 g/s → ~21 g/s. Cause: present attestation ids are content-addressed and
-    /// shared across games; one large apply collapses duplicate ids to a single
-    /// <c>attestation_merge</c> with summed observations, while many small applies
-    /// re-merge the same id once per apply — more total merge work, same merge
-    /// rows/s (~10–25k/s). Wall-clock needs fewer applies (coalesce), not a
-    /// tighter envelope. Speedup belongs in merge throughput / run-scoped fold,
-    /// not BytesOf inflation.
+    /// Extra apply cost billed per attestation on top of staged/COPY row bytes. Zero:
+    /// attestation ids are content-addressed and recur across inputs, and one large
+    /// apply collapses duplicate ids into a single merge with summed observations,
+    /// whereas inflating the per-attestation cost splits the same ids across more
+    /// applies and re-merges each id once per apply.
     /// </summary>
     public const int AttestationApplySurchargeBytes = 0;
 
@@ -128,8 +112,8 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Per-source ingest plan derived from Intel topology (P/E pools), RAM budget,
-    /// and the source byte/compose model. Single entry point for pipeline config.
+    /// Per-source ingest plan derived from CPU topology (P/E pools), RAM budget,
+    /// and the source byte/compose model.
     /// </summary>
     public sealed record SourcePlan(
         long WorkingSetBudgetBytes,
@@ -176,8 +160,7 @@ public static class IngestSizing
     /// <summary>
     /// Machine-derived sizing for the consensus fold. These are one plan because
     /// chunk width, connection fanout, retained deltas, and mask-pair residency
-    /// consume the same process/backend memory envelope; tuning them independently
-    /// is how fixed powers of two accumulated in the writer.
+    /// consume the same process/backend memory envelope.
     /// </summary>
     public sealed record ConsensusFoldPlan(
         int Connections,
@@ -234,10 +217,9 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Kept at 0: the fold's slack is now PROVISIONED in the pool
-    /// (PostgresResourcePlan.foldPoolHeadroom) instead of being subtracted from the
-    /// fold's own width. Paying for pool slack with fold throughput is what made the
-    /// fold narrower than the producer it is 2.8x dearer than.
+    /// Connections the fold cedes from its apply-partition width. Zero: the pool
+    /// provisions the fold's slack itself (<see cref="PostgresResourcePlan"/>), so the
+    /// fold runs at full apply width.
     /// </summary>
     public const int ConsensusFoldPoolHeadroom = 0;
 
@@ -252,23 +234,10 @@ public static class IngestSizing
         long? workingSetBudgetBytes = null,
         long? flushEnvelopeBytes = null)
     {
-        // The fold SHARES one ingest pool with the apply fan: the pool is sized
-        // 1 + 2·applyPartitions (control + COPY fan + fold fan, see
-        // PostgresResourcePlan.Resolve), and by design the fold of batch N runs
-        // WHILE batch N+1 probes/COPYs. Taking the full apply width here made the
-        // planned owners sum to EXACTLY the pool — fold p + apply p + control 1 =
-        // 1 + 2p — so the first unplanned renter queued behind long-held fold
-        // connections until Npgsql's rent timeout killed the run.
-        // MEASURED 2026-08-20 on the syzygy seed (run 32417964629): pool 25
-        // exhausted at 908s, the mask deposit lane and the apply COPY fan both
-        // starving at 15s. The fold is the elastic background owner, so it cedes
-        // the headroom: its global connection gate stays BELOW its pool share —
-        // control 1 + COPY fan p + fold (p − headroom) + free headroom = 1 + 2p —
-        // and the fold back-pressures on its own semaphore instead of exhausting
-        // the pool.
-        // Full width. The pool carries the fold's slack explicitly now, so the fold no
-        // longer cedes throughput to buy it. The back-pressure story is unchanged: the
-        // fold still gates on its own semaphore rather than exhausting the pool.
+        // The fold shares the ingest pool with the apply COPY fan and runs the fold of
+        // one batch while the next batch probes/COPYs. The pool provisions the fold's
+        // slack, so the fold takes full apply width and back-pressures on its own
+        // connection gate rather than exhausting the pool.
         int connections = Math.Max(1, applyPartitions - ConsensusFoldPoolHeadroom);
         long budget = Math.Max(1, workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes());
         long envelope = Math.Clamp(
@@ -281,10 +250,9 @@ public static class IngestSizing
         int chunkCells = IntCount(perConnectionBytes
             / MemoryTopology.ConsensusFoldTransitBytesPerCell);
 
-        // This budget is already the fold/mask owner's share of the client domain;
-        // compose, apply transit, and exact caches have their own shares in
-        // MemoryTopology.WorkingSetResidentOwners. Subtracting those owners again
-        // was double-accounting and became an unexplained "-4" throughput limiter.
+        // The budget is already the fold/mask owner's share of the client domain;
+        // compose, apply transit, and exact caches hold their own shares in
+        // MemoryTopology.WorkingSetResidentOwners, so none is subtracted here.
         int pipelineDepth = IntCount(budget / envelope);
 
         int deltaCapacityCells = IntCount(envelope
@@ -409,8 +377,7 @@ public static class IngestSizing
     /// <summary>
     /// Row capacity for one array/COPY-style transit operation. Active connections
     /// divide a single process envelope; <paramref name="transitBytesPerRow"/> is the
-    /// row's actual client/wire/server resident shape. This is the common replacement
-    /// for fixed 4K/64K/etc. bulk-operation caps.
+    /// row's actual client/wire/server resident shape.
     /// </summary>
     public static int ResolveTransitBatchRows(
         int transitBytesPerRow,
@@ -439,9 +406,9 @@ public static class IngestSizing
     public static long TotalPhysicalMemoryBytes() => MemoryTopology.TotalPhysicalBytes;
 
     /// <summary>
-    /// Per-worker sequential I/O window. All active I/O workers share one compose
-    /// envelope, so file readers no longer each allocate an unrelated 1 MiB buffer.
-    /// PostgreSQL/Npgsql's transport page is the forward-progress floor.
+    /// Per-worker sequential I/O window: the compose flush envelope divided across the
+    /// active I/O workers, floored at one COPY transport page and capped at the CLR
+    /// array limit.
     /// </summary>
     public static int ResolveSequentialIoBufferBytes(int? ioWorkers = null)
     {
@@ -454,9 +421,8 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Largest payload one parser may require as one contiguous managed buffer. It is
-    /// bounded by both the compose envelope and the CLR's actual array addressability;
-    /// there is no format-specific 64/256 MiB rejection threshold.
+    /// Largest payload one parser may require as one contiguous managed buffer, bounded
+    /// by the compose envelope and the CLR's array addressability.
     /// </summary>
     public static int ResolveContiguousPayloadBytes() =>
         (int)Math.Max(1, Math.Min(
@@ -464,19 +430,16 @@ public static class IngestSizing
             ResolveWorkingSetFlushEnvelopeBytes()));
 
     /// <summary>
-    /// Working-set apply byte budget — delegated to <see cref="MemoryTopology"/>, the single
-    /// RAM authority. The budget is real RAM divided across the topology's simultaneously
-    /// resident owners. Historical 1/4-GiB and RAM/16 clamps are gone; COPY now streams and
-    /// every managed allocation obeys the runtime's actual array-addressability boundary.
+    /// Working-set apply byte budget from <see cref="MemoryTopology"/>: physical RAM
+    /// divided across the topology's simultaneously resident owners.
     /// </summary>
     public static long ResolveWorkingSetBudgetBytes() => MemoryTopology.WorkingSetBudgetBytes;
 
     /// <summary>
-    /// Compose-side flush envelope (resident-memory bound that closes a working set before
-    /// its builder + content bank are reset) — delegated to <see cref="MemoryTopology"/>.
-    /// One apply-partition share of the apply budget so compose flushes continuously and
-    /// stays fast; see
-    /// <see cref="MemoryTopology.WorkingSetFlushEnvelopeBytes"/> for the rationale.
+    /// Compose-side flush envelope — the resident-memory bound that closes a working set
+    /// before its builder and content bank are reset — from
+    /// <see cref="MemoryTopology.WorkingSetFlushEnvelopeBytes"/>, divided across
+    /// <paramref name="concurrentWorkingSets"/>.
     /// </summary>
     public static long ResolveWorkingSetFlushEnvelopeBytes(int concurrentWorkingSets = 1) =>
         Math.Max(1, MemoryTopology.WorkingSetFlushEnvelopeBytes
@@ -497,7 +460,7 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Resolve a full per-source plan from live Intel topology + RAM. Call after
+    /// Resolve a full per-source plan from live CPU topology and RAM. Call after
     /// <see cref="IngestTopology.EnsureReady"/> so worker pools are initialized.
     /// </summary>
     public static SourcePlan ResolveForSource(
@@ -537,9 +500,9 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Max input records per working set before descent/apply — derived from the RAM budget
-    /// and per-source staged-byte model. The live pipeline replaces this pre-compose
-    /// estimate with actual native tree capacity as soon as each unit is built.
+    /// Max input records per working set before apply, from the smaller of the RAM budget
+    /// and the flush envelope over the per-source resident-byte model. This is a
+    /// pre-compose estimate; the pipeline sizes each built unit by its native tree capacity.
     /// </summary>
     public static int ResolveWorkingSetRecordCap(
         IngestSourceProfile profile, long? workingSetBudgetBytes = null)
@@ -600,7 +563,8 @@ public static class IngestSizing
 
     /// <summary>
     /// Record batch from RAM budget, per-record bytes, P-core count, and compose parallelism.
-    /// Cheap records (unicode) scale up; fat records (wiktionary, relation triples) scale down.
+    /// Narrow records yield larger batches; wide records or many compose units per record
+    /// yield smaller ones.
     /// </summary>
     public static int ResolveRecordBatch(
         int performanceCoreCount,
@@ -645,10 +609,8 @@ public static class IngestSizing
     /// <summary>
     /// How many records accumulate in <c>pending</c> before
     /// <c>FlushPending</c> runs. MUST be ≤ the compose flush record cap: the close
-    /// check reads <c>state.InBatch</c>, which only advances inside FlushPending.
-    /// Wiktionary with EstComposeUnits=64 resolved probe=32768 (batch×units clamp)
-    /// while flush recordCap≈516 — an 8k-line uncapped slice never FlushPending'd
-    /// mid-stream and applied as intents=1 / ~281k entity verify (measured 2026-08-06).
+    /// check reads <c>state.InBatch</c>, which only advances inside FlushPending, so a
+    /// larger interval would let pending records outrun the envelope close.
     /// </summary>
     public static int ResolveWorkingSetProbeInterval(
         int recordBatchSize, IngestSourceProfile profile, long? flushEnvelopeBytes = null)
@@ -659,13 +621,8 @@ public static class IngestSizing
         return (int)Math.Max(1, Math.Min(raw, flushCap));
     }
 
-    // Presence probes are ROUND-TRIP dominated (~10ms fixed cost each, id
-    // arrays are 16 bytes/id); the old [128, 2048] clamp turned big-source
-    // descent into thousands of serial 512-id round trips — the tiny-codes /
-    // Wiktionary "no progress, never finishes" signature (measured
-    // 2026-07-16: continuous 10-12ms probe stream, zero writes). The WS-apply
-    // probe already runs 131,072-id chunks through the same functions; match
-    // its scale. 32k ids = 512KB parameter — noise.
+    // Presence probes are round-trip dominated at 16 bytes per id, so the chunk is the
+    // apply-IO transit share per connection rather than a small fixed id count.
     public static int ResolveProbeChunk(int applyPartitions = 1) =>
         ResolveApplyIo(Math.Max(1, applyPartitions)).ProbeChunkIds;
 

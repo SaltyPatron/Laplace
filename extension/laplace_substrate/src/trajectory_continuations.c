@@ -20,11 +20,10 @@
 #include "content_membership_read.h"
 #include "observation_read.h"
 
-/* GIN supplies containing trajectories, not sequence truth. Native matching
- * reads the mantissa-packed ordered occurrences once, including all runs and
- * separators. A suffix proposal narrows through progressively shorter indexed
- * suffix operands. The native matcher still elects the greatest exact stride;
- * a full-context miss does not immediately discard all but the final ID. */
+/* Membership (GIN) nominates trajectories that contain the context operands;
+ * order comes only from the native matcher reading the packed ordered
+ * occurrences, runs and separators included. The matcher elects the greatest
+ * exact stride. */
 
 typedef struct ScopedTrajectory
 {
@@ -162,13 +161,11 @@ receive_binding(int ordinal, int16 role, const LaplaceObservation *observation, 
     MemoryContextSwitchTo(previous);
 }
 
-/* Each distinct observed identity is bound once, each resulting root loaded
- * once, under the caller's snapshot. The ordered physicality is retained as
- * packed WKB; no per-codepoint SQL, flattened corpus or label lookup. A miss
- * remains a miss and cannot silently reopen the whole corpus. A relation's
- * object is not its observation context: routing to a label, category or frame
- * does not license continuing that object's spelling. Result-bearing objects
- * are proposed separately through the caller's typed output operation. */
+/* Each new operand's observation context roots are read once and each new
+ * root's trajectory is loaded once as packed WKB under the caller's snapshot.
+ * An operand with no observation adds nothing. A relation object is not an
+ * observation context, so routing to one does not add its trajectory; typed
+ * output objects are proposed by the caller's own operation. */
 void
 laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operands)
 {
@@ -264,11 +261,10 @@ record_successor(void *context, size_t ordinal, size_t stride,
     bool found;
     size_t matched_stride = stride;
     CHECK_FOR_INTERRUPTS();
-    /* The shared matcher visits packed-vertex boundaries with stride zero
-     * and no successor so long scans remain cancellable. Test that contract
-     * before translating an actual match to the whole-input stride. Otherwise
-     * a nonempty input turns the progress callback into a match and dereferences
-     * its NULL successor. Terminal occurrences likewise nominate no output. */
+    /* The matcher also calls back at packed-vertex boundaries with stride zero
+     * and no successor so long scans stay cancellable; those calls and terminal
+     * occurrences nominate nothing. This test must precede substituting the
+     * whole-input stride. */
     if (stride == 0 || successor == NULL) return 0;
     if (state->input_stride) stride = state->input_stride;
     if (stride == 0 || stride < state->stride) return 0;
@@ -448,17 +444,15 @@ laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
         pfree(ids);
         CHECK_FOR_INTERRUPTS();
     }
-    /* An empty binding is an empty conditional distribution. It cannot fall
-     * back to a common suffix or to a context discovered by an isolated word. */
+    /* With no bound occurrence the advancing scope proposes no successor; it
+     * is not re-matched on a shorter suffix or an isolated operand's context. */
     scope->advancing = true;
     MemoryContextSwitchTo(previous);
     MemoryContextDelete(work);
 }
 
-/* Keep each structural route independently addressable. A successor and a
- * co-occurrence reaching the same target are different responses: their force,
- * multiplicity and gap state must survive into COUPLE instead of being folded
- * into one source/target cell. */
+/* Route is part of the key: a successor and a co-occurrence reaching the same
+ * target keep separate multiplicity and gap state into COUPLE. */
 typedef struct StructuralKey
 {
     hash128_t source;
@@ -756,13 +750,12 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
                                          1, &geometry, false);
         match.row = AllocSetContextCreate(work, "trajectory membership match", ALLOCSET_SMALL_SIZES);
     }
-    /* A successful probe of suffix length k includes EVERY trajectory that
-     * could match any longer suffix. The native matcher evaluates those longer
-     * strides too, so its maximum and occurrence counts are globally complete.
-     * On a miss, halve the operand length (rounding up). This requires at most
-     * ceil(log2(n_context))+1 bulk index probes, preserves exact election, and
-     * avoids reading the corpus-wide SPACE posting when a longer suffix works.
-     * No constituent, separator, repeated occurrence or candidate is dropped. */
+    /* Unscoped proposal. Membership of a length-k suffix nominates every
+     * trajectory a longer suffix could match, and the matcher evaluates those
+     * longer strides too, so the elected stride and counts are complete. With
+     * suffix_backoff a miss halves the probe length (rounding up): at most
+     * ceil(log2(n_context))+1 index probes, and the widely posted short
+     * suffixes are read only when every longer one misses. */
     int probe_length = n_context;
     while (!scope)
     {

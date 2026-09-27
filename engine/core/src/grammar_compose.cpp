@@ -23,36 +23,11 @@
 #include "laplace/core/trajectory.h"
 
 
-/* node_type_entity_id() lived here. It built an entity type id by snprintf'ing
- * "substrate/type/grammar/<modality>/<tree-sitter node type>/v1" and hashing the
- * string, then stamped the result onto entities.type_id.
- *
- * Every part of that was wrong, and it was measured wrong on the live substrate:
- * 16,063 entities typed by a JSON parse tree, across 4 type ids that were never
- * minted as entities, so nothing could render them.
- *
- *   - An id constructed OUTSIDE the system. Ids resolve through canonical_id() /
- *     word_id() / relation_type_id(); this was a private key format known only to
- *     this file, governed by nothing.
- *   - "/v1" in an IDENTITY. Content addressing means the id is a function of the
- *     content; a hand-chosen version token means the whole substrate can be
- *     re-typed without a byte of content changing.
- *   - The CONTAINER in the type of the thing contained. Tree-sitter unpacks
- *     container formats and hands off; JSON is packaging for SemLink, PropBank,
- *     VerbNet and FrameNet, so "mince.01" -- a roleset -- came out typed
- *     json/string_content.
- *   - "string_content" is tree-sitter's private symbol name. A rename in that
- *     third-party grammar would silently re-type the substrate.
- *
- * It also duplicated EntityTypeRegistry, the governed vocabulary. A value's semantic
- * class (roleset, verb class, frame) follows from the source claims that use it.
- *
- * Grammar-composed content now types by TIER, from laplace_content_tier_type_id
- * -- the same call the text lane makes -- so both lanes produce identical rows
- * for identical content and the dedup collapses them instead of storing an
- * entity twice at two tiers with two decompositions. type_id is not an input to
- * the entity hash (ids are blake3-Merkle(tier, child_ids), composed before any
- * type is read), so no id changes. */
+/* Grammar-composed entities are typed by content tier through
+ * laplace_content_tier_type_id, the same map every content path uses. A parser
+ * node name is the grammar's private vocabulary, never an entity type, and type_id
+ * is not an input to identity: equal content from any grammar or ladder is one
+ * entity. */
 
 static int codepoint_resolver(uint32_t atom, void* ,
                               hash128_t* out_id, double out_coord[4],
@@ -457,8 +432,8 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                     &leaf_root_id, &leaf_root_tier);
             if (leaf_rc < 0) { rc = leaf_rc; goto done; }
             if (leaf_rc > 0) continue;
-            /* Preserve the existing plain-string wrapper tier: its lexical
-             * content child was tier 2 before whole-string decoding. */
+            /* A plain JSON string with a lexical child sits at tier 3, one floor above
+             * that child; otherwise tier 2. */
             tier = json_string && kid_n > 0 ? 3 : 2;
         } else {
             size_t g_start = 0, g_end = 0;
@@ -868,9 +843,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
                             const char* modality_id, hash128_t source_id,
                             hash128_t type_meta_id, laplace_compose_result_t** out,
                             int materialize_phys) {
-    /* Kept for ABI (NativeInterop pins this signature) and deliberately unused:
-     * it was the meta-type of the ad-hoc grammar type entities, which no longer
-     * exist. Content types by tier now. */
+    /* Part of the NativeInterop signature; unused because content is typed by tier. */
     (void)type_meta_id;
     if (!utf8 || !ast || !modality_id || !out) return -1;
     *out = NULL;
@@ -940,9 +913,8 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
 
     n = st.n;
 
-    /* Span-lookup index (GH #595): sized upfront relative to n, same idiom as
-     * the PRECEDES dedup table below — span_count can never exceed n (one
-     * span per successfully-composed node), so this never needs to grow. */
+    /* Span-lookup index: span_count never exceeds n (one span per composed node),
+     * so sizing from n up front means it never grows. */
     {
         size_t idx_cap = 64;
         while (idx_cap < (n ? n : 1) * 2) idx_cap <<= 1;
@@ -952,11 +924,9 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         r->span_index_cap = idx_cap;
     }
 
-    /* Node->children adjacency, built ONCE and reused by the emit loop below.
-       The loop used to rescan all n nodes twice per node to re-derive each
-       node's children (O(n^2) on fat JSON records with thousands of nodes);
-       this is the same adjacency compose_ast_nodes builds internally, in the
-       same node order, so the composed ids stay byte-identical. */
+    /* Node->children adjacency, built once and reused by the emit loop below. It is
+       the adjacency compose_ast_nodes builds, in the same node order, so composed
+       ids are unaffected. */
     children_of  = (uint32_t**)calloc(n ? n : 1, sizeof(uint32_t*));
     child_counts = (uint32_t*)calloc(n ? n : 1, sizeof(uint32_t));
     if (!children_of || !child_counts) { rc = -3; goto fail_emit; }
@@ -997,102 +967,20 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
             &emitted_entity, &emitted_entity_n, &emitted_entity_cap, id);
         if (novel_entity < 0) { rc = -3; goto fail_emit; }
 
-        /* RULE #8 STEP 1: "Tree-sitter unpacks the packaging (raw file format) ->
-         * raw content. Nothing more."
-         *
-         * This lane did more. On a JSON container it staged the whole parse tree as
-         * substrate rows AND decomposed the leaf values itself, via
-         * json_leaf_fill_grapheme_children -- a SECOND decomposer running beside
-         * text_decomposer/content_witness_batch, which is THE decomposer.
-         *
-         * Measured on the live substrate before this change:
-         *
-         *   - 9,260 interior nodes (json object/pair/array) staged as tier-4
-         *     entities with trajectories, carrying ZERO consensus edges in either
-         *     direction. Nothing witnessed them because there is nothing there to
-         *     witness: their "content" is their children concatenated with the
-         *     delimiters stripped, e.g. 41.2.1ARG0agentARG1patientARG2instrument.
-         *
-         *   - 5,063 VALUES staged twice. The leaf id is already the content root id
-         *     (JsonLeafContentConvergenceTests pins that), so the witness lane and
-         *     this lane mint the SAME id -- then disagree about what it decomposes
-         *     into. This lane gives a flat grapheme run at AST depth; the content
-         *     ladder gives the real segmentation at its own floor. "mince.01" came
-         *     out as m|i|n|c|e|.|0|1 at tier 2 here and mince|.|01 at tier 3 there.
-         *     One physicality key, two trajectories, so DISTINCT ON over it is
-         *     settled by the query PLAN -- the render non-determinism fixed
-         *     downstream in #720, whose actual cause is right here.
-         *
-         * The values are not lost: the decomposer's witness stages every one of them
-         * through CategoryAnchor/ContentEmitter -> ContentTierSpine, which is the one
-         * content path, at the correct tier, with the correct constituents. That is
-         * the handoff the law describes, and it already works -- all 9,669 consensus
-         * edges on those ids came from it.
-         *
-         * So on a container the compose result is NAVIGATION, not rows: spans[] still
-         * carries every node (TrySpanEntity/JsonGrammarHelper are untouched, and the
-         * witness reads values exactly as before) and the record ROOT still stages as
-         * the per-line dedup marker GrammarIngestAdapter probes with IsProvenPresent.
-         * Nothing else becomes a row.
-         *
-         * Scoped by the modality predicate this file already had. */
-        /* NOT scoped to one modality. Scoping this to JSON was fixing the instance
-         * I had measured instead of the class: SemLink also ships PredicateMatrix
-         * tab files, those took the non-JSON leaf branch
-         * (laplace_grapheme_floor_span_to_graphemes), and kept emitting a grapheme
-         * decomposition -- 4,691 of them survived on the next clean seed, e.g.
-         * dewater.01 carrying BOTH dewater|.|01 (the content ladder, 3 points) and
-         * d|e|w|a|t|e|r|.|0|1 (10 points) under one physicality id.
-         *
-         * The row lane is the container lane by construction (audit doc 38 S12:
-         * GrammarIngestHandler row vs GrammarComposeHandler whole-file is a real
-         * taxonomy with distinct callers -- OMW/SemLink/Tatoeba/Wiktionary vs
-         * Code/Stack/TinyCodes/Repo). So every non-root node of a composed RECORD is
-         * packaging, whatever grammar parsed it.
-         *
-         * The whole-file/code lane is unaffected: GrammarEntityBuilder reads
-         * r->entities directly and never consults this flag, so a C
-         * function_definition still becomes a row. Only the two RECORD drains honour
-         * it. */
-        /* Identity, not tree position. A span-identical single-child wrapper IS its
-         * child (the collapse law), so on "a\tb\tc\n" the document and its row share
-         * one id: testing node.parent lets the INNER node claim that id first, and the
-         * real root then dedups away, leaving the record with no row at all
-         * (GrammarCompose.TsvRowProducesEntitiesAndSpans caught exactly that).
-         * The record root is whatever carries the root id, wherever it sits. */
+        /* Packaging is decided by identity, not tree position. The record root is the
+         * node that carries the root id; a span-identical single-child wrapper is its
+         * child and shares that id. Every other node of a composed record is container
+         * structure, whatever grammar parsed it: it stays in spans[] and the containment
+         * tree for navigation, and record drains never stage it as a row. Leaves are
+         * staged as content by the one content path. Whole-file composition reads
+         * r->entities directly and does not consult this flag. */
         int packaging = !hash128_equals(&id, &st.comp_id[0]);
         const int novel_root = !root_seen;
         if (!packaging && !json_fragment) root_seen = 1;
 
-        /* CONTAINER STRUCTURE IS NOT CONTENT.
-         *
-         * On a data container, an interior node is syntax: a JSON object, pair
-         * or array holds no assertion of its own, only the punctuation around
-         * the values it wraps. Persisting one mints an entity whose "content"
-         * is its children concatenated with the delimiters stripped -- measured
-         * live before this fix, 9,260 of them, e.g. the tier-4 "document"
-         *
-         *     41.2.1ARG0agentARG1patientARG2instrument
-         *
-         * which is a SemLink mapping object flattened into a string. Not one of
-         * the 9,260 carried a single consensus edge in either direction: nothing
-         * witnessed them and nothing pointed at them, because there is nothing
-         * there to witness. They sat at tier >= 3 with trajectories, which is
-         * exactly the set corpus_sentence_constituents_since enumerates, so
-         * container syntax was being served to the sequence layer as attested
-         * language.
-         *
-         * The VALUES are kept -- json/string_content held 9,669 consensus edges
-         * over the same seed, and that is the substrate's actual content. So:
-         * leaves and the record root persist, interior structure does not.
-         *
-         * They stay in spans[] and in the containment tree, so span lookup and
-         * parent/child navigation are untouched -- the decomposer still walks
-         * the record exactly as before. The node simply never becomes a row. */
-        /* Pushed ALWAYS: the compose result is the in-memory navigation structure
-         * (spans, containment, id convergence -- GrammarCompose.ConvergenceBattery
-         * asserts the value id is findable here). Whether a node becomes a ROW is the
-         * drain's decision, and it reads this flag. */
+        /* Always pushed: the compose result is the navigation structure (spans,
+         * containment, id convergence). Whether a node becomes a row is the
+         * drain's decision, made from the packaging flag. */
         hash128_t tier_type = laplace_content_tier_type_id(st.entity_tier[idx]);
         if (novel_entity &&
             push_entity(r, id, st.entity_tier[idx], tier_type, (uint8_t)packaging) != 0) {
@@ -1196,13 +1084,9 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     free(children_of);  children_of = NULL;
     free(child_counts); child_counts = NULL;
 
-    /* Sibling-order PRECEDES. JSON containers emit none: member/array
-       order there is dump-format plumbing, and attesting it duplicated
-       ordering the physicality trajectories already carry losslessly.
-       Text modalities keep word-order evidence. Single pass with a
-       per-parent last-child cursor plus an open-addressing dedup table
-       (the old shape rescanned all n nodes per parent and linearly
-       scanned the precedes array per pair — O(n^2) on fat records). */
+    /* Sibling-order PRECEDES. JSON containers emit none: member/array order is
+       already carried losslessly by the physicality trajectories. Single pass with
+       a per-parent last-child cursor plus an open-addressing dedup table. */
     if (!json_mod && n > 0) {
         uint32_t* last_child = (uint32_t*)malloc(n * sizeof(uint32_t));
         size_t    tab_cap    = 64;
@@ -1331,10 +1215,8 @@ int laplace_compose_span_lookup(const laplace_compose_result_t* r,
                                 uint32_t start_byte, uint32_t end_byte,
                                 hash128_t* out_id) {
     if (!r || !out_id) return -1;
-    /* GH #595: O(1) amortized via the index built during compose. Falls back
-     * to the old linear scan only if the index wasn't built (e.g. a result
-     * from a code path predating this fix, or n==0) — never wrong, just slow
-     * in that case, same as before this fix existed. */
+    /* O(1) amortized through the index built during compose; a result without
+     * that index (including n == 0) scans spans[] linearly. */
     if (r->span_index && r->span_index_cap > 0) {
         uint64_t key = ((uint64_t)start_byte << 32) | (uint64_t)end_byte;
         uint64_t h = key * 0x9E3779B97F4A7C15ULL;
@@ -1588,38 +1470,12 @@ int laplace_compose_drain_into_stage(
         }
     }
 
-    /* Text word-adjacency PRECEDES is NOT drained. Sequence is already carried by
-     * the physicality trajectory above -- the exactly-invertible ordered constituent
-     * sequence -- and read back by geometry_successors / containers_of /
-     * laplace_trajectory_constituents. Materializing it as attestations stores a
-     * second copy of a fact the geometry already holds losslessly.
-     *
-     * This is the drain half of a deletion the rest of the system already made.
-     * TextEntityBuilder.TryDecompose dropped its emission ("Jamming word->word
-     * PRECEDES + CONTAINS onto text was the error that produced millions of
-     * redundant attestations (the re-witness grind) ... Deleted."), and Pillar 5 on
-     * 2026-07-20 completed the read side: continuation_conditional_plane and
-     * pos_transition_plane dropped their PRECEDES-consensus legs, while
-     * foundry_vocab, foundry_vocab_crawl, collocates and usage_overlap moved to
-     * trajectory constituents and geometry_successors -- whose own header states it
-     * plainly: "the same knowledge PRECEDES materialized ... needed by neither: the
-     * trajectory already holds the ordered sequence."
-     *
-     * This drain was missed, and it is the one every grammar-lane source actually
-     * runs through: GrammarIngestAdapter -> GrammarDeferredUnit ->
-     * GrammarRowComposer.DrainInto -> here. On the 2026-07-26 seed it had written
-     * 13,497,079 rows -- 34% of all attestations -- that no read path consumes, and
-     * every one of them arrives at the working-set apply as a present row.
-     *
-     * PRECEDES the RELATION stays: it is a MODEL relation (token couplings, read by
-     * model_factor, scoped there as "PRECEDES attestations whose CONTEXT is the
-     * coordinate") and the conversational feedback lane's own edge
-     * (witness_precedes_chain). Neither is text word-adjacency; neither drains here.
-     *
-     * r->precedes is still COMPUTED by the compose and freed in
-     * laplace_compose_result_free. That is wasted work rather than wrong output, and
-     * removing it means changing what the compose builds -- a separate change.
-     */
+    /* Word-adjacency PRECEDES is not drained. Order is a fact of the physicality
+     * trajectory above -- the exactly invertible ordered constituent sequence --
+     * read back by geometry_successors / containers_of /
+     * laplace_trajectory_constituents. Materializing it as attestations would store
+     * a second copy of that trajectory. r->precedes is still computed by compose
+     * and freed in laplace_compose_result_free. */
 
     free_emit_filter(&filter);
     return 0;

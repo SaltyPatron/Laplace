@@ -8,7 +8,7 @@ export interface LabExperiment {
   expect: string[];
   tips: string[];
   category: LabCategory;
-  /** Games written to substrate during the normal Lab UI run. */
+  /** The run writes the games it plays into the substrate; false means a read-only run. */
   recordsLive: boolean;
   requires?: string[];
 }
@@ -195,8 +195,7 @@ const byKind = new Map(LAB_EXPERIMENTS.map((e) => [e.kind, e]));
 
 /**
  * Job records carry the server enum name ("SubstrateTest", "LearnedPst"); the catalog and
- * every start request use the kebab form. Without this the job list rendered raw enum names
- * because no lookup ever matched.
+ * every start request use the kebab form. Maps either spelling to the kebab form.
  */
 export function normalizeKind(kind: string): string {
   return kind.includes('-') ? kind : kind.replace(/(?!^)([A-Z])/g, '-$1').toLowerCase();

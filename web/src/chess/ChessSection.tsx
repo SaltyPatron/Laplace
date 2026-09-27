@@ -10,7 +10,7 @@ const SECTIONS = [
   { id: 'lab', label: 'Lab', path: '/lab', match: (p: string) => p === '/lab' || p.startsWith('/lab/') },
 ] as const;
 
-/** One chess domain: the admitted archive, the board, and the lab share a place. */
+/** Tabs over the chess presentations of the one web: players and games, Laplace-played games, the board, the lab. */
 export function ChessSection({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();

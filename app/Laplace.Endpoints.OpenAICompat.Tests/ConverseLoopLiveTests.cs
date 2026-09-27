@@ -9,21 +9,17 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// The closed OODA loop, live: deposit a turn (mint + inline fold), confirm a
-/// triple through the feedback lane, see the walk serve it; refute it harder,
-/// see the walk drop it — proving the C# deposit → fold → walk lanes wire to
-/// the substrate end to end. Skipped when the seeded substrate is unavailable.
+/// Live deposit → fold → walk: deposit a turn through the accumulating writer (mint +
+/// inline fold), confirm a RELATED_TO triple through <c>FeedbackContent</c> until
+/// <c>consensus.walk_branches</c> serves it, then refute it until the walk drops it.
+/// Skipped when the substrate floor is absent.
 ///
-/// The tokens are UNIQUE PER RUN (a fresh guid suffix). This is load-bearing,
-/// not cosmetic: consensus cells persist and the CI runner shares one live
-/// database, so fixed token ids would accumulate Glicko history across runs.
-/// The deterministic, fully-isolated proof of the same loop is the rolled-back
-/// chat_loop.sql regress test.
+/// Tokens carry a per-run guid suffix: consensus cells persist in the shared database,
+/// so fixed ids would accumulate Glicko history across runs. The rolled-back
+/// <c>chat_loop.sql</c> regress test proves the same loop in isolation.
 /// </summary>
-// Tier=live: this is a shared-substrate-mutating PRODUCT smoke. It needs a seeded
-// substrate and intentionally deposits/folds durable cells. It must not define DB
-// health or gate a fresh database recreation. The isolated chat_loop.sql fixture
-// remains the integration gate for the write/fold/walk mechanism itself.
+// Tier=live: deposits and folds durable cells in the seeded substrate; it is not a
+// database-health gate.
 [Trait("Tier", "live")]
 public sealed class ConverseLoopLiveTests
 {

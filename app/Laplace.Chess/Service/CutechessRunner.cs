@@ -103,7 +103,7 @@ public sealed record CutechessOptions
     /// <summary>Where cutechess writes the PGN.</summary>
     public string PgnOut { get; init; } = "";
 
-    /// <summary>PGN <c>Event</c> tag — the provenance string the ingest lane sees.</summary>
+    /// <summary>PGN <c>Event</c> tag, which PGN admission composes as the playing's event.</summary>
     public string? Event { get; init; }
 }
 
@@ -137,9 +137,8 @@ public static partial class CutechessRunner
     [GeneratedRegex(@"option name UCI_Elo type spin.*?min (\d+) max (\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex UciEloRangeRegex();
 
-    // CI and developer hosts are not guaranteed to carry the large opening corpus. These
-    // ordinary, legal two-ply positions are a deterministic floor so a paired experiment
-    // never silently degrades back to repeated startpos. Production prefers OpeningSeed first.
+    // Legal two-ply positions used when the admitted opening corpus yields none, so a paired
+    // experiment never repeats startpos. OpeningSeed is consulted first.
     private static readonly string[] BuiltinOpeningFens =
     [
         "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", // 1.e4 e5
@@ -168,12 +167,9 @@ public static partial class CutechessRunner
         o.ValidateStockfishConfiguration();
         if (o.PairOpenings && (o.Rounds < 2 || (o.Rounds & 1) != 0))
             throw new ArgumentOutOfRangeException(nameof(o.Rounds), "Paired games require an even total of at least two.");
-        // Every key=value MUST be its own argv token: the old single-token form
-        // ("name=Stockfish cmd=... arg=\"setoption ...\"") reached cutechess-cli as ONE
-        // engine parameter whose value was the rest of the string, so the engine never
-        // started and jobs died with empty artifact dirs. proto=uci is likewise required —
-        // cutechess defaults to the xboard protocol. Make Laplace's substrate mode explicit
-        // in the receipt instead of relying on an environment/default hidden from the match.
+        // Every key=value is its own argv token; cutechess-cli reads a single joined token as
+        // one engine parameter. proto=uci is required because cutechess defaults to xboard.
+        // Laplace's substrate mode is passed explicitly so the receipt records it.
         var args = new List<string>
         {
             "-engine", "name=Laplace", $"cmd={laplaceUci}", "proto=uci", "option.Substrate=substrate",
@@ -238,13 +234,9 @@ public static partial class CutechessRunner
         args.Add("-pgnout");
         args.Add(o.PgnOut);
 
-        // "-debug all", never a bare "-debug". cutechess's MatchParser turns an option with
-        // no arguments into QVariant(true); upstream a70c5915 then added
-        //     if (value == "all") ...; else if (!value.isNull()) ok = false;
-        // to the -debug branch, so that boolean now fails the check and the process dies
-        // before a single game with: Warning: Empty value for option "-debug" (exit 1).
-        // "all" is the one accepted value, and it additionally sends "debug on" to each
-        // engine — more transcript, which is the point of running with -debug at all.
+        // "-debug all", never a bare "-debug": cutechess's MatchParser rejects a valueless
+        // -debug ("Empty value for option") and exits. "all" also sends "debug on" to each
+        // engine, which adds to the transcript.
         args.Add("-debug");
         args.Add("all");
         return args;
@@ -352,11 +344,9 @@ public static partial class CutechessRunner
 
         using var proc = Process.Start(psi)!;
 
-        // stdout and stderr merged into one ordered stream. Draining both is not optional —
-        // a chatty engine fills the unread pipe and deadlocks the match — and interleaving
-        // them is what makes a warning legible against the traffic that provoked it. The old
-        // shape kept stderr in a 40-line tail replayed only on failure, which is why the
-        // "-debug" rejection above surfaced as an epitaph instead of as the first line.
+        // stdout and stderr merged into one ordered stream. Both must be drained (an unread
+        // pipe deadlocks the match), and interleaving places each warning beside the traffic
+        // that provoked it.
         var merged = Channel.CreateUnbounded<(string Stream, string Text)>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
@@ -380,9 +370,8 @@ public static partial class CutechessRunner
         }
         finally
         {
-            // Cancellation throws straight out of the loop above. Process.Dispose does not
-            // kill anything, so without this a Stop left cutechess and both engines running
-            // and burning cores until the host was rebooted.
+            // Cancellation throws out of the loop above and Process.Dispose kills nothing, so
+            // the process tree (cutechess and both engines) is killed here.
             try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
         }
 
@@ -414,8 +403,8 @@ public static partial class CutechessRunner
             path = ResolveOpeningsPath(o);
             if (!string.IsNullOrWhiteSpace(o.OpeningsFile))
             {
-                // The selected EPD is operator-owned input. Inventory framing only;
-                // Cute Chess owns EPD parsing and validation of the chess positions.
+                // The selected EPD is operator input; only its framing is checked here, and
+                // Cute Chess parses and validates the positions.
                 if (!File.Exists(path))
                     throw new FileNotFoundException("selected EPD input does not exist", path);
                 if (string.Equals(path, Path.GetFullPath(o.PgnOut),
@@ -436,8 +425,8 @@ public static partial class CutechessRunner
             }
             catch
             {
-                // The external opening corpus is an input, not a condition for running the
-                // harness. The built-in floor below keeps CI and clean hosts paired as well.
+                // A missing opening corpus does not stop the run; the built-in positions
+                // below keep the gauntlet paired.
             }
 
             for (int i = 0; fens.Count < openingCount; i++)

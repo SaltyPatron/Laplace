@@ -121,28 +121,10 @@ public sealed record RecipeDescriptor(
         string compile = root.TryGetProperty("compile", out var cp) && cp.ValueKind == JsonValueKind.String
             ? cp.GetString() ?? ""
             : "";
-        // AN OMITTED FIELD MUST NOT DISABLE A DECLARED OPERATOR.
-        //
-        // This used to read:
-        //     compile = lmHead.Key == "trajectory" ? "continuation" : "full";
-        // and lm_head itself defaults to "trajectory" a few lines above. So a recipe that
-        // explicitly declared relation:IS_A, relation:HAS_PROPERTY, relation:CAUSES ...
-        // and simply said nothing about `compile` -- a field with no obvious connection to
-        // those heads -- silently selected continuation mode. FoundryCommands then applies
-        //     OpAttnScale(key)  = 0
-        //     OpResidScale(key) = 0
-        // to every operator outside the continuation whitelist
-        // (context, trajectory, sentence_order, relation:PRECEDES), so the declared
-        // semantic operators were read, had their edge counts REPORTED during plane
-        // loading, and contributed exactly nothing to the emitted tensors.
-        //
-        // That is the worst failure shape in this repository: the diagnostic surface says
-        // the capability is present while the executable artifact has had it removed.
-        // Nothing distinguishes "the author wanted continuation only" from "the author did
-        // not know this field existed", and only one of those readings is safe.
-        //
-        // Continuation-only must now be REQUESTED. An omitted compile means full, so an
-        // operator the recipe names always contributes.
+        // An omitted compile means full. Continuation compile zeroes the attention and
+        // residual scale of every operator outside the continuation set, so it is selected
+        // only when the recipe asks for it, never inferred from lm_head; an operator the
+        // recipe names always contributes to the emitted tensors.
         if (compile.Length == 0)
             compile = "full";
 

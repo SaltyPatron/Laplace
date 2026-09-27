@@ -1,4 +1,3 @@
--- BEGIN ATOMIC: GH #764.
 -- Declared unqualified, so it installed as laplace.top_relations_readable while every caller
 -- asks for ops.top_relations_readable -- 42883 at runtime. See ops.evidence_receipt.
 DROP FUNCTION IF EXISTS laplace.top_relations_readable(integer, bytea);

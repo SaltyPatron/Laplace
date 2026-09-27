@@ -10,11 +10,10 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// CALCULATED stockfish eval pass (GH #573): replay a witnessed line, evaluate every
-/// position with stockfish (side-to-move cp), attest HAS_EVAL deposits and eval-delta
-/// MOVE_QUALITY classes under the ChessStockfish source. Versioned and marker-gated
-/// like ChessAnalyze; GH #736: each complete FEN is evaluated under one exact recipe.
-/// The unit is the LINE — another playing of an analyzed line under that recipe re-deposits nothing.
+/// Versioned calculation witness over recorded lines: replays a witnessed line, evaluates
+/// every position with Stockfish under one exact recipe (side-to-move centipawns), and attests
+/// HAS_EVAL and eval-delta MOVE_QUALITY under the ChessStockfish source. The unit is the line:
+/// its marker is keyed by line and recipe, so another playing of an analyzed line deposits nothing.
 /// </summary>
 public static class ChessStockfishEval
 {
@@ -160,8 +159,8 @@ public static class ChessStockfishEval
 
         b.AddEntity(context, EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType);
-        // The existing source family remains addressable. Each new calculated context names
-        // its exact inputs; legacy anonymous v1 contexts and their evidence are left intact.
+        // The calculation context names its exact inputs: the recipe manifest is content,
+        // attested against the line under the analysis-version meta type.
         if ((recipeMetadataRoot ?? ContentEmitter.Emit(b, prepared.Recipe.CanonicalManifest, SourceId)) is { } vId)
             b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
                     BootstrapIntentBuilder.RelationTypeMetaTypeId)

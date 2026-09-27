@@ -1,5 +1,6 @@
-/* SQL presence contracts share the native set scan. Kept in the versioned
- * execution module so updates do not replace the preloaded host library. */
+/* Batch presence reads for ingest's converge step: which candidate ids already
+ * stand as entity, physicality or attestation rows, so persist writes only the
+ * novel set. Each returns a bitmap over input ordinals. */
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
@@ -10,17 +11,10 @@
 #include "descent_probe.h"
 
 /*
- * Shared validation + SPI-wrapped invocation for the flat batch-presence
- * primitives (entities_exist_bitmap, tier_batch_existence_probe). Both are
- * driven by the exact same underlying batch_presence_core() in
- * descent_probe.c (perfcache fast-path + one SPI batch query) -- a bit in
- * the returned bitmap is set iff that id was POSITIVELY confirmed to have a
- * committed entities row. Nothing here ever assumes presence by default.
- * The two SQL entry points exist separately (rather than one function under
- * two names) so ingest-descent call sites are self-documenting about *why*
- * they're calling it -- tier_batch_existence_probe denotes one round of the
- * C#-driven tier-by-tier trunk-to-leaf probe (TierTreeDescent.cs), while
- * entities_exist_bitmap is the general-purpose "do these ids exist" check.
+ * Shared validation and SPI wrapper for the id-only presence probes. A bit is
+ * set only when the probe positively confirms the id; nothing is presumed
+ * present. The entity probes differ in whether the tier-0 perfcache may answer
+ * (resolvability) or only a stored row counts (stored-row presence).
  */
 static Datum
 presence_bitmap_datum(FunctionCallInfo fcinfo, const char* label,
@@ -108,11 +102,10 @@ pg_laplace_tier_batch_existence_probe(PG_FUNCTION_ARGS)
 PG_FUNCTION_INFO_V1(pg_laplace_attestations_exist_bitmap);
 
 /*
- * attestations_exist_bitmap(ids, type_ids, subject_ids) -- KEYED probe.
- * Attestations are partitioned LIST(type_id) -> HASH(subject_id); id alone
- * cannot prune, so the caller (which computed every id FROM these keys)
- * passes them alongside. Three parallel bytea[] arrays, validated for
- * shape/nulls/length parity here so descent_probe.c can assume alignment.
+ * attestations_exist_bitmap(ids, type_ids, subject_ids): attestation ids alone
+ * cannot select a partition, so each id travels with the subject it is routed
+ * by (and its type). The three arrays are validated for shape, nulls and
+ * length parity here so the probe can assume alignment.
  */
 Datum
 pg_laplace_attestations_exist_bitmap(PG_FUNCTION_ARGS)
@@ -224,14 +217,10 @@ pg_laplace_entities_present_ordinals(PG_FUNCTION_ARGS)
 }
 
 /*
- * Shared validation + SPI-wrapped invocation for the single-key batch-
- * presence primitives (entities_stored_bitmap(ids, tiers),
- * tier_batch_existence_probe(ids, tiers),
- * physicalities_exist_bitmap(ids, hilberts)). Same positive-confirmation
- * semantics as presence_bitmap_datum; the second argument carries the
- * target table's partition key parallel to the ids so the ordinals probe
- * prunes to one index descent per id instead of one per leaf
- * (entities: LIST(tier); physicalities: RANGE(hilbert_index)).
+ * Shared validation and SPI wrapper for presence probes that carry the target
+ * table's partition key parallel to the ids (tiers for entities), so each id
+ * prunes to one index descent instead of one per leaf. Same positive-only
+ * semantics as presence_bitmap_datum.
  */
 static Datum
 presence_bitmap_datum_keyed(FunctionCallInfo fcinfo, const char* label,
@@ -338,16 +327,7 @@ pg_laplace_tier_batch_existence_probe_keyed(PG_FUNCTION_ARGS)
                                         laplace_tier_batch_existence_probe_keyed);
 }
 
-/*
- * pg_laplace_physicalities_exist_bitmap_keyed is GONE (2026-08-04).
- *
- * It took a parallel "hilberts" array and pruned each probe to the
- * RANGE(hilbert_index) band that held the row. physicalities is now
- * HASH(id): a hilbert key selects no partition, so the keyed probe would
- * answer "absent" for stored rows -- and COPY has no ON CONFLICT, so that
- * aborts the ingest rather than slowing it. The id-only entry point below
- * needs no partition hint; HASH(id) routes on the id it already has.
- */
+/* physicalities is HASH(id): the id alone routes the probe. */
 
 PG_FUNCTION_INFO_V1(pg_laplace_physicalities_exist_bitmap);
 
@@ -361,31 +341,10 @@ pg_laplace_physicalities_exist_bitmap(PG_FUNCTION_ARGS)
 PG_FUNCTION_INFO_V1(pg_laplace_content_descent_bitmap);
 
 /*
- * Legacy/back-compat entry point (content_descent_bitmap(ids, parents)).
- *
- * The real trunk-to-leaf, tier-by-tier descent algorithm is now driven
- * entirely by the C# orchestrator (TierTreeDescent.cs), which calls
- * tier_batch_existence_probe() once per tier/round with only the
- * candidates that round actually needs to check -- already filtered to
- * exclude descendants of nodes proven present in an earlier round, per the
- * content-addressing guarantee that a present node's whole subtree is
- * present too. This function is kept only so callers that still pass a
- * flat (ids, parents) pair in one shot keep working; `parents` is
- * validated for shape and otherwise UNUSED -- there is no tree-walk, no
- * default-present assumption, and no shortcircuiting here anymore. This
- * replaces the previous laplace_content_descent_bitmap_core()
- * implementation, which memset the whole bitmap to 0xFF ("assume every id
- * present") and only ever cleared bits it could positively disprove,
- * stopping descent at the first node it (correctly or incorrectly)
- * believed present -- that "assume-present, clear-on-disproof,
- * single-shortcircuit-per-branch" scheme is exactly the shape of bug that
- * independently existed on the C# side (TierTreeDescent.cs's previously
- * unconditional MarkProven() call); neither should ever assume presence
- * without a real, positive confirmation. Every bit returned here is set
- * iff a real batch presence query (or perfcache codepoint match) actually
- * confirmed that id has a committed entities row -- identical semantics to
- * tier_batch_existence_probe / entities_exist_bitmap, since all three
- * ultimately call the same batch_presence_core().
+ * content_descent_bitmap(ids, parents): the same positive-only resolvability
+ * probe as tier_batch_existence_probe over the flat id set. `parents` is
+ * validated for shape and length but does not prune; no id is presumed present
+ * because an ancestor is.
  */
 Datum
 pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)

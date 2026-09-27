@@ -5,25 +5,19 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The one open-connection / create-command / set-timeout / bind / read / translate
-/// block. It was hand-copied roughly a hundred times across the app — every copy
-/// identical but for the SQL, the binds and the row map, and every copy free to drift
-/// on the parts that matter (whether the timeout is set, whether the reader is
-/// disposed, what a <see cref="PostgresException"/> turns into).
+/// Open-connection / create-command / set-timeout / bind / read / translate for every
+/// managed SQL call, so timeout, disposal and error mapping behave the same everywhere.
+/// Catalog-query overloads also check each bind against the native catalog's declared
+/// parameter types.
 ///
-/// Translation is a caller-supplied delegate rather than a fixed exception type:
-/// Laplace.Substrate is referenced *by* the endpoint assemblies, so the HTTP-facing
-/// exceptions (SubstrateQueryException, SubstrateUnavailableException in
-/// Laplace.Endpoints.OpenAICompat) cannot be named here without a reference cycle.
-/// Pass <paramref name="onError"/> to map failures into whatever the caller's layer
-/// raises; omit it and the raw Npgsql exception propagates, which is what call sites
-/// that never translated always did.
+/// Error translation is a caller-supplied <see cref="ErrorTranslator"/> because the
+/// endpoint assemblies that define the surface exceptions reference this one, not the
+/// reverse. Without a translator the Npgsql exception propagates unchanged.
 /// </summary>
 public static class NpgsqlRead
 {
-    /// <summary>Typed command ownership for consumers that must retain sequential streaming.
-    /// The caller owns command execution and disposal; binding uses the same catalog
-    /// contract as the materialized row transports.</summary>
+    /// <summary>A bound, catalog-validated command for callers that stream rows themselves.
+    /// The caller owns execution and disposal.</summary>
     public static NpgsqlCommand CreateCommand(
         NpgsqlDataSource source, NativeSqlQuery query,
         Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0)
@@ -87,14 +81,13 @@ public static class NpgsqlRead
             if (array) expected |= NpgsqlDbType.Array;
             if (parameters[i].NpgsqlDbType != expected)
                 throw new ArgumentException($"{query.Name}: parameter {i + 1} must be {query.ParameterTypes[i]}.");
-            // The native catalog uses PostgreSQL $1..$n positions. Legacy callers
-            // may label their binds; retaining those names makes Npgsql select
-            // named-placeholder rewriting and omit the positional bind values.
+            // Catalog statements use $1..$n positions. A named parameter would make
+            // Npgsql rewrite named placeholders and drop the positional values.
             parameters[i].ParameterName = string.Empty;
         }
     }
 
-    /// <summary>Independent typed reads share one transport batch and keep their own row shapes.</summary>
+    /// <summary>Two independent catalog reads in one batch round trip, each with its own row map.</summary>
     public static async Task<(IReadOnlyList<TFirst> First, IReadOnlyList<TSecond> Second)>
         ReadBatchRowsAsync<TFirst, TSecond>(
         NpgsqlConnection conn,
@@ -161,9 +154,8 @@ public static class NpgsqlRead
     }
 
     /// <summary>
-    /// Same as the <see cref="NpgsqlDataSource"/> overload, but on an already-open
-    /// connection — for multi-command scopes (TEMP TABLE then SELECT) where opening a
-    /// fresh connection would lose session state.
+    /// Same as the <see cref="NpgsqlDataSource"/> overload, on an already-open connection,
+    /// so session state (e.g. a TEMP TABLE created earlier) is visible to the read.
     /// </summary>
     public static async Task<IReadOnlyList<T>> ReadRowsAsync<T>(
         NpgsqlConnection conn,
@@ -196,8 +188,7 @@ public static class NpgsqlRead
 
     /// <summary>
     /// The first row mapped, or <c>null</c> when the command returns none. Rows past the
-    /// first are not read — this is the "SELECT ... WHERE id = @id" shape, and the
-    /// distinction between no row and a mapped row is the caller's answer.
+    /// first are not read.
     /// </summary>
     public static async Task<T?> ReadFirstOrDefaultAsync<T>(
         NpgsqlDataSource dataSource,
@@ -350,10 +341,10 @@ public static class NpgsqlRead
     }
 
     /// <summary>
-    /// Only database failures are translated, and only when a translator was supplied.
-    /// <see cref="PostgresException"/> derives from <see cref="NpgsqlException"/>, so a
-    /// translator that wants to tell "the server rejected the query" from "the server is
-    /// unreachable" tests for it first — exactly as the hand-rolled copies did.
+    /// Only database failures and timeouts are translated, and only when a translator was
+    /// supplied. <see cref="PostgresException"/> derives from <see cref="NpgsqlException"/>,
+    /// so a translator that distinguishes a rejected query from an unreachable server
+    /// tests for it first.
     /// </summary>
     private static bool Translatable(Exception ex, ErrorTranslator? onError) =>
         onError is not null && ex is NpgsqlException or TimeoutException;

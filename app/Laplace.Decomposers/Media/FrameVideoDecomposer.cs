@@ -8,16 +8,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Media;
 
 /// <summary>
-/// Thin video lane: ordered image-frame packaging under a directory. Spatial =
-/// <see cref="ImageTierSpine"/> (codepoint floor). The video is one ordered
-/// trajectory over frame roots; frame membership and adjacency are recovered from
-/// that trajectory rather than deposited as testimony. Video root = blake3 over
-/// ordered frame ladder roots (path-independent), not blake3 of frame RGBA buffers.
-///
-/// Compositional perfcache law (#1711): video is a consumer of the same cached
-/// number/pixel/patch/region/image structures used by standalone images, and of
-/// the same audio caches when soundtrack structure is admitted. It adds only the
-/// new frame/audio order, timing and synchronization structure.
+/// Provider for video as ordered image frames under a directory. Each frame composes
+/// through <see cref="ImageTierSpine"/>, reusing the same image structures and caches as a
+/// standalone image. The video is one ordered trajectory over frame roots; membership and
+/// adjacency are read from that trajectory, not attested. The video root is BLAKE3 over the
+/// ordered frame roots, so it is path-independent and never hashes RGBA buffers.
 /// </summary>
 public sealed class FrameVideoDecomposer
     : Decomposer<VideoIngestRecord, FrameVideoSource, FullScope>, IIngestInventoryProvider
@@ -79,8 +74,8 @@ public sealed class FrameVideoDecomposer
     }
 
     /// <summary>
-    /// blake3( domain || frameRoot0 || frameRoot1 || … ) — same frames same video id
-    /// regardless of directory path.
+    /// blake3( domain || frameRoot0 || frameRoot1 || … ): the same frames give the same
+    /// video id regardless of directory path.
     /// </summary>
     internal static async Task<Hash128> ComputeContentAddressedVideoRootAsync(
         string ecosystemPath, CancellationToken ct)

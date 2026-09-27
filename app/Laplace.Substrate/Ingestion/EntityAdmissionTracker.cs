@@ -5,10 +5,9 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Ingestion;
 
 /// <summary>
-/// Run-level admission accounting for managed rows. Native tier-tree stages compose
-/// entities and physicalities together; managed rows are tracked across changes so an
-/// ETL phase may declare content before a later phase places it without weakening the
-/// terminal invariant.
+/// Run-level admission accounting: every entity a run admits has a physicality by the end
+/// of the run. Rows are tracked across changes, so one phase may declare content that a
+/// later phase places.
 /// </summary>
 internal sealed class EntityAdmissionTracker
 {
@@ -22,10 +21,8 @@ internal sealed class EntityAdmissionTracker
             && change.IntentStages.IsDefaultOrEmpty)
             return;
 
-        // Admission is a property of the COMPLETE source stream, not only the managed
-        // compatibility arrays. Shared content/recipe composition lives primarily in
-        // native IntentStages; ignoring those rows made the run-level E/P invariant blind
-        // to the production path and allowed a green receipt to prove only the sidecar.
+        // Admission covers the whole change: the managed row arrays and the rows staged in
+        // native IntentStages, where shared content and recipe composition land.
         var placedHere = new HashSet<Hash128>();
         foreach (var physicality in change.Physicalities)
             placedHere.Add(physicality.EntityId);
@@ -63,11 +60,9 @@ internal sealed class EntityAdmissionTracker
                 if (placedHere.Contains(entity.Id))
                     return;
 
-                // Entity identity is canonical admitted structure. A bare entity is
-                // not a separate semantic class that may opt out of physical realization:
-                // the recipe/provider must supply the content/composition/typed structure
-                // from which the common pipeline emits its physicality. Keep every
-                // unplaced entity pending until some later source phase realizes it.
+                // Every entity is realized: the provider supplies the content, composition or
+                // typed structure from which the pipeline emits its physicality. An unplaced
+                // entity stays pending until a later phase of the run places it.
                 _contentAwaitingPhysicality.TryAdd(
                     entity.Id,
                     new PendingEntity(

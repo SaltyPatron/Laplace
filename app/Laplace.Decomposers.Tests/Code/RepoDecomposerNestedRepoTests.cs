@@ -4,8 +4,8 @@ using Xunit;
 namespace Laplace.Decomposers.Tests.Code;
 
 /// <summary>
-/// Pins GH #594: a directory holding multiple independent git repos must be
-/// rejected rather than silently flattened into one repo-root identity.
+/// A directory holding several independent git repositories is rejected rather than
+/// flattened into one repository-root application object.
 /// </summary>
 public sealed class RepoDecomposerNestedRepoTests
 {

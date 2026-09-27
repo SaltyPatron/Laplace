@@ -1,9 +1,7 @@
--- Tier-0 invariant as an operation (GH #813 first job).
--- atom_window comes from the format constant; tier0_count from entity_count.
--- over_window > 0 means non-atoms were minted at the atom layer.
--- unresolvable_ids stays 0 here — a full codepoint_for_id sweep is O(window)
--- and is a follow-on when a gate needs the NULL-label count.
--- BEGIN ATOMIC: GH #764 beachhead.
+-- Tier-0 census: codepoint entities against the admitted atom window.
+-- atom_window comes from the perfcache format constant; over_window > 0 means
+-- non-atoms were stored as atoms. unresolvable_ids is always 0: no
+-- codepoint_for_id sweep over the window runs here.
 CREATE OR REPLACE FUNCTION laplace.atom_census()
     RETURNS TABLE(
         tier0_count bigint,

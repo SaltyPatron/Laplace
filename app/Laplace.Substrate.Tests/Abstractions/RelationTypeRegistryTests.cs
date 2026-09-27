@@ -211,8 +211,8 @@ public class RelationTypeRegistryTests
                         RelationTypeRegistry.Resolve("MadeOf").Qualifier);
     }
 
-    // A retired name resolves to nothing: its rows were restated under the successor, so no
-    // surface keeps the old name alive.
+    // A retired relation name fails to resolve; its meaning lives under the successor
+    // relation and qualifier.
     [Theory]
     [InlineData("O_WANT")]
     [InlineData("HAS_DOMAIN_TOPIC")]

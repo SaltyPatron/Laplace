@@ -33,13 +33,12 @@ public interface IIngestObservability
         TimeSpan foldSpan, TimeSpan consensusBackendWork, TimeSpan highwayMaskBackendWork,
         long consensusCalls, long highwayMaskCalls, long highwayMaskPairs) { }
 
-    /// <summary>Compatibility file-start callback retained for existing observers.</summary>
+    /// <summary>File-start callback without filesystem metadata.</summary>
     void OnFileStarted(string sourceName, string fileLabel, long bytes = 0) { }
 
     /// <summary>
-    /// File-start callback with observational filesystem metadata. Size and mtime are not
-    /// file-entity identity; the persistent ingest journal is where those observations live.
-    /// The default forwards to the old callback so existing observers continue to receive it.
+    /// File-start callback with filesystem metadata. Size and mtime are not file identity;
+    /// they are journal observations. The default forwards to the metadata-free overload.
     /// </summary>
     void OnFileStarted(
         string sourceName,

@@ -11,7 +11,6 @@
 -- id IS blake3(subject || type || object), so the lookup is one index probe on the
 -- PK and the partition keys come along in the same expression.
 DROP FUNCTION IF EXISTS laplace.consensus_cell(bytea, bytea, bytea);
--- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.cell(
     p_subject bytea, p_type bytea, p_object bytea)
     RETURNS TABLE(rating bigint, rd bigint, witness_count bigint)

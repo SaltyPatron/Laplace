@@ -4,9 +4,9 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Independent matchup operands must not be serialized through two successive
-/// datasource reads. Chess players additionally require their chess-owned comparator;
-/// generic consensus standing must never be rendered as source Elo.
+/// Matchup resolves its two independent operands concurrently, not as successive reads.
+/// Chess players add the chess comparator (tape, source ratings, record, meetings), and
+/// consensus standing is never displayed as source Elo.
 /// </summary>
 public sealed class MatchupReadConcurrencyGateTests
 {

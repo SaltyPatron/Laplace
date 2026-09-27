@@ -49,9 +49,9 @@ public static class StructuredGrammarIngest
     }
 
     /// <summary>
-    /// Record-level parallel parse for monolithic files, then the same
-    /// IngestBatchPipeline + working-set spine as IngestFileAsync. Parse
-    /// fans out across P-cores; existence/dedup/COPY stay on the shared lane.
+    /// Record-level parallel parse for monolithic files, then the same IngestBatchPipeline
+    /// working-set path as IngestFileAsync: parsing fans out across cores, while existence,
+    /// dedup and bulk COPY stay in the shared pipeline.
     /// </summary>
     public static IAsyncEnumerable<SubstrateChange> IngestFileParallelAsync(
         string filePath,
@@ -300,10 +300,8 @@ public static class StructuredGrammarIngest
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
         if (recipe == IntPtr.Zero) return null;
 
-        // This lane parses ONE document as one grammar AST — it must hold
-        // the whole record. Record-oriented multi-record files stream
-        // through IngestFileAsync's row iterator instead; a giant file here
-        // means a caller routed a corpus at the single-document lane.
+        // This path parses one document as one grammar AST, so it holds the whole record;
+        // multi-record files stream through IngestFileAsync's row iterator instead.
         long maxSingleDocumentBytes = IngestSizing.ResolveContiguousPayloadBytes();
         long fileLen = new FileInfo(filePath).Length;
         if (fileLen > maxSingleDocumentBytes)
@@ -339,11 +337,9 @@ public static class StructuredGrammarIngest
             : null;
         var (ents, phys, atts, root) = composer.Materialize(witnessWeight, bitmap);
 
-        // Deferred content routes witness-emitted anchors (CategoryAnchor/
-        // ContentEmitter -> ContentWitnessBatch.TryAppendToBuilder) through
-        // ContentBatch's presence probing at BuildAsync instead of staging
-        // them unconditionally — without it, category anchors bypass the
-        // containment reader entirely and already-present content re-stages.
+        // Deferred content sends anchors emitted during witnessing (CategoryAnchor /
+        // ContentEmitter -> ContentWitnessBatch.TryAppendToBuilder) through ContentBatch's
+        // presence probe at BuildAsync, so already-present content is not staged again.
         var builder = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
             .DeclareSourcePrior(sourceTrust)
             .SetCommitEpoch(0)

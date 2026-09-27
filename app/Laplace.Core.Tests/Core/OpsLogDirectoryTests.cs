@@ -5,16 +5,10 @@ using Xunit;
 namespace Laplace.Core.Tests;
 
 /// <summary>
-/// The CSV sink creates its directory owned by whoever ran the binary. Inside a checkout
-/// that is a directory the checkout's owner may not be able to unlink, and actions/checkout
-/// deletes the workspace before every job — so a log directory under a working tree fails
-/// every subsequent CI run on that runner, before any job step executes.
-///
-/// Both branches are asserted because the host's own location decides which one runs:
-/// app/Directory.Build.props:17 redirects BaseOutputPath out of the tree whenever
-/// LAPLACE_BUILD_ROOT is set, which is the Windows default (D:\Data\Laplace) and available
-/// on any platform. In-tree hosts must resolve outside the tree; out-of-tree hosts keep
-/// $InstallRoot/logs.
+/// LaplaceInstall.OpsLogDirectory never resolves inside a working tree, since the CSV sink
+/// creates it owned by whichever user ran the binary. In-tree hosts resolve outside the
+/// tree; out-of-tree hosts (build output redirected by LAPLACE_BUILD_ROOT) keep
+/// $InstallRoot/logs. Both branches are asserted because the host location picks one.
 /// </summary>
 public sealed class OpsLogDirectoryTests
 {

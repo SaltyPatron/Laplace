@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.related_in(bytea, bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.related_in(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                       p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
--- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+-- No SET search_path: the clause blocks inlining and the consensus index path.
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH subj(id) AS (

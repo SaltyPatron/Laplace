@@ -9,11 +9,9 @@ interface Props {
 }
 
 /**
- * The lens. A band is a set of relation types sharing a read-time salience
- * rank, addressed by one precomputed highway mask — so selecting bands narrows
- * the scan rather than filtering after it. Counts are live: a band holding no
- * consensus is shown as empty rather than offered as a choice that returns
- * nothing.
+ * Salience-band selector. A band is the set of relation types sharing one
+ * read-time salience rank; the selection constrains the read. Only bands holding
+ * consensus rows are offered, with their live counts.
  */
 export function BandPicker({ bands, selected, onChange }: Props) {
   const toggle = (band: number) =>
@@ -27,8 +25,7 @@ export function BandPicker({ bands, selected, onChange }: Props) {
 
   return (
     <div className={styles.picker}>
-      {/* No heading of its own — the host panel titles it; a second "Lens"
-          label doubled the word in the console. */}
+      {/* No heading: the host panel titles it. */}
       <div className={styles.head}>
         <Muted className={styles.summary}>
           {selected.length === 0

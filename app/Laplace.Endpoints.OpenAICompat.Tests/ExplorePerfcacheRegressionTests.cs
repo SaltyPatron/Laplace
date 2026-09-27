@@ -16,8 +16,8 @@ public sealed class ExplorePerfcacheRegressionTests
         var result = new ExploreDecomposeService().Decompose("dog");
         var after = CodepointPerfcache.Records;
 
-        // Compare addresses only: dereferencing the old span after the broken
-        // explorer reload would itself access an unmapped native allocation.
+        // Compare addresses only: dereferencing a replaced span would touch an unmapped
+        // native allocation.
         Assert.True(Unsafe.AreSame(ref MemoryMarshal.GetReference(before),
             ref MemoryMarshal.GetReference(after)),
             "Explorer initialization replaced a mapping already published to other readers.");

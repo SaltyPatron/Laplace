@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.ConceptNet.Tests;
 
-// Validates docs/specs/16 §4/P4: ConceptNet extract captures /wn/ synset suffix + POS hub links.
+// ConceptNet extraction keeps the /wn/ synset suffix and the POS segment of each concept URI.
 public sealed class ConceptNetDecomposerTests
 {
     static ConceptNetDecomposerTests()
@@ -127,12 +127,9 @@ public sealed class ConceptNetDecomposerTests
         }
     }
 
-    // ConceptNet's four Not* relations used to map to separate POSITIVE types
-    // (NOT_DESIRES, NOT_USED_FOR, NOT_CAPABLE_OF, NOT_HAS_PROPERTY), so 29,547 rows of
-    // negative evidence folded into cells that could never contest what they deny.
-    // They now map onto the relation they deny and are flagged negated, so the caller
-    // flips the sign of the source's weight: laplace_score_fp(v, m) scores v < 0 below
-    // 0.5, which is a Refute against the very cell the positive form asserts.
+    // Each Not* relation resolves to the relation it denies and is flagged negated; the
+    // caller flips the sign of the weight, so laplace_score_fp scores it below 0.5 and it
+    // folds as a refutation into the same consensus cell the positive form confirms.
     [Theory]
     [InlineData("/r/NotDesires", "DESIRES")]
     [InlineData("/r/NotUsedFor", "USED_FOR")]

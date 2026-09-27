@@ -1,7 +1,7 @@
 -- An attestation's mask is its claim qualifiers (engine/manifest/qualifiers.toml),
--- not a highway: an installed table created before the rename still calls the
--- column highway_mask. RENAME recurses to every partition and keeps the stored
--- bits in place; once qualifier_mask exists this step does nothing.
+-- not a highway. An installed table whose column is named highway_mask is
+-- renamed to qualifier_mask; RENAME recurses to every partition and keeps the
+-- stored bits in place. Once qualifier_mask exists this step does nothing.
 DO $$
 DECLARE
     rel constant regclass := (current_schema() || '.attestations')::regclass;

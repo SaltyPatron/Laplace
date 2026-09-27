@@ -6,8 +6,8 @@ using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 /// <summary>
-/// Timer A: PGN → parse → Compose into SubstrateChange in RAM. Zero Postgres.
-/// Hard gate: 20s. At 20s the run cancels and exits FAIL — 21s is already a fail.
+/// Times PGN → parse → compose into SubstrateChange in memory, with no PostgreSQL.
+/// The budget is 20 s: at the budget the run cancels and reports FAIL.
 /// </summary>
 static class Program
 {
@@ -176,7 +176,7 @@ static class Program
         double secs = Math.Max(1e-6, swTotal.Elapsed.TotalSeconds);
         if (ct.IsCancellationRequested) timedOut = true;
         bool finished = limit > 0 ? games >= limit : !timedOut && games > 0;
-        // Whole-file / limit must finish inside 20s. Partial at timeout = FAIL.
+        // The whole file (or the game limit) must finish inside the budget; partial = FAIL.
         bool pass = finished && secs <= ProcessBudgetS && games > 0 && !timedOut;
         Console.WriteLine(
             $"DONE games={games:N0} parse_fail={parseFail} timed_out={timedOut} finished={finished} "

@@ -65,8 +65,9 @@ internal static class IngestDescentFlush
     }
 
     /// <summary>
-    /// Working-set mode: root gate + parallel compose only — no O(tiers) descent until
-    /// <see cref="FinalizeWorkingSetAsync"/> (Rule #8 step 5 once per working set).
+    /// Compose step for one batch of a working set: completion gate and parallel native
+    /// compose only. The existence descent (converge) runs once per working set in
+    /// <see cref="FinalizeWorkingSetAsync"/>.
     /// </summary>
     internal static async Task<WorkingSetDeferredBatch<TRecord>> ComposeBatchAsync<TRecord>(
         List<TRecord> records,
@@ -95,9 +96,8 @@ internal static class IngestDescentFlush
         int consumed = 0;
         try
         {
-            // Measure each concurrent wave before admitting another. Creating the
-            // entire record-count batch first lets native trees exhaust RAM before
-            // the working-set owner can observe their allocation capacities.
+            // Measure each concurrent wave's resident bytes before admitting another, so
+            // native trees cannot outgrow memory before the working set sees their size.
             while (consumed < records.Count)
             {
                 ct.ThrowIfCancellationRequested();
@@ -110,10 +110,8 @@ internal static class IngestDescentFlush
                         0, handler.EstimatedOutputRows(records[consumed + admitted]));
                     if (waveRows + rows > outputRowBudget)
                     {
-                        // A single source record may be indivisible. Admit that
-                        // oversized singleton only into an otherwise empty, full-size
-                        // transaction window. A partial remaining window belongs to the
-                        // records already composed by its caller and must close first.
+                        // An indivisible oversized record is admitted only into an empty,
+                        // full-size window; a partly used window closes first.
                         if (admitted == 0
                             && batch.Pending.Count == 0
                             && outputRowBudget >= config.MaxOutputRows)
@@ -173,9 +171,8 @@ internal static class IngestDescentFlush
     }
 
     /// <summary>
-    /// Account what is actually resident after compose. Tier trees expose their exact
-    /// native allocation capacity; source records remain managed and are billed by their
-    /// measured input width. Handlers with hidden/non-tree state may report it directly.
+    /// Resident bytes after compose: tier trees report their exact native allocation;
+    /// source records are billed by their input width; a unit may report more directly.
     /// </summary>
     internal static long MeasureResidentBytes(
         IIngestDeferredUnit unit, IngestSourceProfile? sourceProfile)
@@ -269,8 +266,8 @@ internal static class IngestDescentFlush
             }
         }
 
-        // Rule #8 step 5: one O(tiers) cross-working-set existence probe — distinct ids
-        // deduped per tier round inside TierTreeDescent (06 L93-94a).
+        // Converge: one existence descent over every tree of the working set, O(tiers)
+        // rounds, with distinct ids deduplicated per tier round in TierTreeDescent.
         byte[]?[]? flatBitmaps = await BulkDescent.ProbeFlushBatchAsync(
             flatTrees, reader, probedAbsent, ct).ConfigureAwait(false);
 
@@ -295,9 +292,8 @@ internal static class IngestDescentFlush
                     root = unit.DrainInto(builder, config.WitnessWeight, bm);
                 }
                 handler.WalkWitness(record, root, builder, unit);
-                // Draining only stages rows in this builder. The working-set
-                // stage owns queued dedup; persisted presence requires an
-                // acknowledged write or an actual reader probe.
+                // Draining only stages rows in the builder; nothing is present until
+                // a write is acknowledged or a reader probe finds it.
             }
             finally
             {
@@ -318,9 +314,8 @@ internal static class IngestDescentFlush
 }
 
 /// <summary>
-/// P5 cross-batch O(tiers) bulk descent: one
-/// <see cref="ContentTierSpine.BatchExistenceEmitBitmapsAsync"/> call per flush
-/// batch regardless of record count — at most five tier rounds total.
+/// Bulk existence descent: one <see cref="ContentTierSpine.BatchExistenceEmitBitmapsAsync"/>
+/// call per flush batch regardless of record count, O(tiers) rounds.
 /// </summary>
 internal static class BulkDescent
 {

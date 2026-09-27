@@ -10,8 +10,8 @@ using Inventory = Laplace.Chess.Service.ChessStartingSideInventory;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Cold artifact export from the existing admitted read owner. It never deposits
-/// testimony, changes a content recipe, or activates a serving cache generation.</summary>
+/// <summary>Exports a derived transition-floor artifact from admitted structure. It deposits
+/// no testimony, changes no content recipe and activates no serving cache generation.</summary>
 internal static class ChessRecordedFloorExport
 {
     internal const string Mode = "export-recorded-floors";

@@ -15,8 +15,8 @@ public sealed class GrammarPerfcacheFixture : IDisposable
     }
 
     // The T0 perfcache is process-global native state shared by every test
-    // collection in this assembly (the suites used to be separate processes);
-    // unloading here would pull it out from under still-running collections.
+    // collection in this assembly; unloading here would pull it out from under
+    // still-running collections.
     public void Dispose() { }
 
     private static string? LocateBlob()

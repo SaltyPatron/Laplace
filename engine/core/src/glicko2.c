@@ -16,13 +16,10 @@
 #define LAPLACE_FP_RD_MAX         350000000000LL
 
 /*
- * The old fold let ordinary signed-int64 arithmetic surround a handful of
- * __int128 intermediates.  Once a rating escaped the normal Glicko range those
- * edges were enough to invoke signed overflow/UB and turn one bad transition
- * into a runaway carrier.  Keep the public fixed-point surface total instead:
- * every carrier operation has a deterministic saturating result, while the
- * stateful Glicko entry points still reject an illegal state rather than
- * publishing saturation as a rating.
+ * The public fixed-point surface is total: every carrier operation has a
+ * deterministic saturating result, so a rating outside the normal Glicko range
+ * cannot reach signed overflow. The stateful Glicko entry points still reject an
+ * illegal state rather than publishing saturation as a rating.
  */
 static int64_t clamp_i128(__int128 value)
 {
@@ -639,8 +636,8 @@ static int glicko2_finish_period(glicko2_state_t* st,
         trace->mu             = mu;
         trace->phi            = phi;
         trace->v              = clamp_i128(v);
-        /* The legacy diagnostic fields remain int64. Only this optional
-         * projection saturates; no projected value feeds the state update. */
+        /* The trace fields are int64. Only this optional projection saturates;
+         * no projected value feeds the state update. */
         trace->delta          = clamp_i128(delta);
         trace->a_value        = clamp_i128(a);
         trace->sigma_new      = next.volatility;

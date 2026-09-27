@@ -13,9 +13,10 @@
 #include "spi_common.h"
 #include "trajectory_wkb.h"
 
-/* One batch enters the canonical partition/PK reader. Stored metadata is
- * returned verbatim; this surface does not normalize a corrupt stored count
- * into the expected one or substitute another physicality for a missing row. */
+/* Unpacks the content trajectories of a batch of entities into their GeometryZM
+ * vertices: child id, ordinal, run length, and flags, each with the parent and
+ * its stored constituent count as stored. Every (entity, physicality) pair must
+ * be the entity's content physicality; a missing row yields no vertices. */
 typedef struct CarrierRead
 {
     ReturnSetInfo *result;
@@ -194,9 +195,9 @@ receive_typed_points(Datum physicality, Datum entity, Datum geometry, void *opaq
     visit_geometry(read->as_binary, geometry, emit_typed_points, read);
 }
 
-/* One indexed set read per requested lane, never one planned SQL call per
- * entity. Identity routing, MVCC and permissions belong to the shared reader;
- * ordinal expansion and tier decoding belong to the shared trajectory kernel. */
+/* Trajectory points of a batch of entities for each requested physicality
+ * type: one batched read per distinct type. Runs expand to one row per ordinal,
+ * each carrying the child id and the tier decoded from its flags. */
 PG_FUNCTION_INFO_V1(pg_laplace_typed_trajectory_points);
 Datum
 pg_laplace_typed_trajectory_points(PG_FUNCTION_ARGS)

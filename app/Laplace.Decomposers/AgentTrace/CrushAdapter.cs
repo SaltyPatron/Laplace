@@ -35,9 +35,8 @@ public sealed class CrushAdapter : IAgentTraceAdapter
             || !SqliteSniff.HasTable(conn, "messages"))
             yield break;
 
-        // One ordered join replaces the old query-per-session loop. This is a foreign
-        // SQLite codec, but it is still on the ingest critical path: thousands of
-        // project sessions must not mean thousands of commands before compose begins.
+        // One ordered join streams every session with its messages, so the container
+        // decodes in one command regardless of session count.
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT s.id, s.title, s.created_at, s.updated_at, s.cost, "

@@ -8,9 +8,8 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// One entry in an <see cref="IngestSourceLayout"/>'s file list: either an exact file
-/// name or a glob. Order is meaningful — callers that take the first hit (SemLink's
-/// PredicateMatrix, Wiktionary) depend on the canonical name preceding the glob that
-/// would also match it.
+/// name or a glob. Order is meaningful: a caller that takes the first hit gets the exact
+/// name when it precedes a glob that would also match it.
 /// </summary>
 /// <param name="Value">File name, or glob pattern when <paramref name="IsGlob"/>.</param>
 /// <param name="SkipFileName">Optional exclusion applied to the file NAME of glob hits.</param>
@@ -26,12 +25,9 @@ public readonly record struct IngestFileMatch(
 }
 
 /// <summary>
-/// Where a source's files live, declared instead of hand-walked. Eleven decomposers each
-/// wrote their own `DataDirs`/`VaultRoots`/`seen`-set triad, three of them byte-identical,
-/// and every one re-hardcoded the platform data root one line after calling
-/// <see cref="LaplaceInstall.ResolveIngestRoot"/>. A layout names the directories and the
-/// file entries; <see cref="IngestInput.Locate"/> walks them in declaration order and
-/// dedups.
+/// Declared location of a source's artifacts for the shared enumeration step. A layout
+/// names the directories and file entries; <see cref="IngestInput.Locate"/> walks them in
+/// declaration order and deduplicates.
 /// </summary>
 public sealed record IngestSourceLayout
 {
@@ -39,8 +35,8 @@ public sealed record IngestSourceLayout
     public IReadOnlyList<IngestFileMatch> Files { get; init; } = [];
 
     /// <summary>Directories relative to the ecosystem path, in probe order. "." is the
-    /// ecosystem path itself — listed explicitly because some sources (SemLink's role
-    /// mapping) probe their subdirectories BEFORE the root.</summary>
+    /// ecosystem path itself, listed explicitly so a layout can probe subdirectories
+    /// before the root.</summary>
     public IReadOnlyList<string> EcosystemDirs { get; init; } = ["."];
 
     /// <summary>Subdirectories probed under each ingest root, after the root itself and
@@ -56,8 +52,7 @@ public sealed record IngestSourceLayout
     public IReadOnlyList<string> NestedDirs { get; init; } = [];
 
     /// <summary>Probe <see cref="LaplaceInstall.ResolveIngestRoot"/> as well as the
-    /// ecosystem path. Off by default: a source whose data is only ever under the path it
-    /// was handed must not go fishing in the shared data root.</summary>
+    /// ecosystem path. Off by default, so only the given path is searched.</summary>
     public bool SearchIngestRoots { get; init; }
 
     /// <summary>Also treat the ecosystem path's parent directory as an ingest root — an
@@ -70,12 +65,10 @@ public sealed record IngestSourceLayout
 }
 
 /// <summary>
-/// Shared input resolution for multi-file decomposers (the "valets"): a source root
-/// passed on the CLI may be a single file, a directory of matching files, or an
-/// ecosystem root containing a known subdirectory. Decomposers stay thin — they name
-/// their glob pattern and optional ecosystem subdir; this resolves the file list so
-/// every multi-file source (UD, Tatoeba, OMW, …) supports `ingest &lt;source&gt; &lt;path&gt;`
-/// down to a single file, without per-decomposer file-walking logic.
+/// Shared artifact enumeration for multi-file ingest: a root may be a single file, a
+/// directory of matching files, or an ecosystem root containing a known subdirectory. A
+/// provider names only its glob and optional subdirectory; the file list is resolved
+/// here, so every multi-file source accepts a path down to a single file.
 /// </summary>
 public static class IngestInput
 {
@@ -94,7 +87,7 @@ public static class IngestInput
     /// the subdirectory the corpus actually lives under (e.g. "ud-treebanks-v2.17").</param>
     public static List<string> ResolveFiles(string root, string pattern, string? ecosystemSubdir = null)
     {
-        // Explicit single file: ingest exactly that (used to re-run/validate one file).
+        // An explicit single file is ingested alone.
         if (File.Exists(root))
             return [root];
 
@@ -107,17 +100,9 @@ public static class IngestInput
         }
         if (!Directory.Exists(dir))
             return [];
-        // SORTED. Directory.EnumerateFiles guarantees NO ordering -- on Linux it returns
-        // filesystem order, which is directory-hash order and shifts as entries are added,
-        // removed, or inodes reused. That makes the order of a multi-file source an input
-        // the code leaves to the filesystem.
-        //
-        // MEASURED: two foundation seeds over identical inputs produced semlink row counts
-        // differing by +12 and then +7. Ids are content hashes, so identical content must
-        // yield identical rows; a varying count means something order-dependent reached the
-        // write path (batch boundaries move, and the working-set stage dedup absorbs a
-        // repeat only WITHIN a batch). Sorting removes the variable at its source and costs
-        // one comparison sort per source resolution.
+        // Sorted: Directory.EnumerateFiles returns filesystem order, which shifts as entries
+        // change. Batch boundaries follow file order and working-set dedup is per batch, so
+        // a deterministic order is required for identical inputs to admit identical rows.
         return Directory.EnumerateFiles(dir, pattern, SearchOption.AllDirectories)
                         .OrderBy(static p => p, StringComparer.Ordinal)
                         .ToList();
@@ -129,8 +114,8 @@ public static class IngestInput
 
     /// <summary>First subdirectory of <paramref name="root"/> that actually holds a
     /// matching file, else <paramref name="root"/>. The degenerate "one subdir, one
-    /// pattern" case of <see cref="Locate"/>, kept because the XML sources want the
-    /// DIRECTORY, not its file list.</summary>
+    /// pattern" case of <see cref="Locate"/>, for callers that need the directory rather
+    /// than its file list.</summary>
     public static string ResolveSubdir(string root, string pattern, params string[] subdirs)
     {
         foreach (var sub in subdirs)
@@ -181,10 +166,8 @@ public static class IngestInput
     /// <summary>Directories the layout will search, in probe order.</summary>
     public static IEnumerable<string> CandidateDirectories(string ecosystemPath, IngestSourceLayout layout)
     {
-        // Ordinal, NOT OrdinalIgnoreCase: layouts list case variants of the same unpack
-        // name ("MapNet" and "mapnet") because on Linux those are two directories. Folding
-        // them here would silently drop one. File-path dedup stays case-insensitive, which
-        // is what the hand-rolled copies did.
+        // Ordinal: layouts list case variants ("MapNet" and "mapnet") that are distinct
+        // directories on Linux. File-path dedup is case-insensitive.
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (string rel in layout.EcosystemDirs)
@@ -202,14 +185,12 @@ public static class IngestInput
                 if (seen.Add(dir)) yield return dir;
             }
 
-            // Directory.EnumerateDirectories throws on a missing root — the hand-rolled
-            // copies called it unguarded, so a box without the shared data root faulted
-            // the whole enumeration instead of finding nothing.
+            // Directory.EnumerateDirectories throws on a missing root; a missing root
+            // yields no candidates.
             foreach (string glob in Directory.Exists(root) ? layout.RootDirectoryGlobs : [])
             {
-                // Sorted for the same reason as EnumerateFiles above: the glob's match order
-                // is filesystem order, so an unpacked-directory layout could change which
-                // candidate is visited first between runs over identical inputs.
+                // Sorted, as above: glob match order is filesystem order, and the first
+                // candidate visited must not vary between runs over identical inputs.
                 foreach (string matched in Directory.EnumerateDirectories(root, glob)
                                                     .OrderBy(static d => d, StringComparer.Ordinal))
                 {
@@ -263,9 +244,8 @@ public static class IngestInput
 
     /// <summary>
     /// The shared data roots, resolved ONCE through <see cref="LaplaceInstall.ResolveIngestRoot"/>.
-    /// It throws when no data root is installed (a CI box, a dev checkout without the
-    /// vault); a source that simply has no files there is not an error, so the throw
-    /// becomes "no candidates" rather than a fault mid-enumeration.
+    /// It throws when no data root is installed; that becomes "no candidates" rather than
+    /// a fault mid-enumeration.
     /// </summary>
     private static IEnumerable<string> IngestRoots(string ecosystemPath, IngestSourceLayout layout)
     {

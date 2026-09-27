@@ -12,8 +12,7 @@ extern "C" {
  * These tags select the image/audio ladder while preserving the shared content law:
  * arbitrary amplitudes/colors are NOT minted as private Tier-0 atoms. Finite numeric
  * values compose from the existing codepoint floor into reusable scalar roots; their
- * image/audio occurrences retain modality roles separately. See modality-ladder-law
- * and GH #1134 for reconstruction/occurrence requirements.
+ * image/audio occurrences retain modality roles separately.
  */
 typedef enum {
     LAPLACE_MODALITY_IMAGE = 1,

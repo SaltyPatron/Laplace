@@ -6,9 +6,9 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Spec 34 pins: tenant → source identity, session → context entity (chess-game
-/// parity), occurrence-level testimony, and source-class priors. Id shapes are asserted against the canonical-key law so a drifted key
-/// string fails loudly instead of minting a different entity forever.
+/// Conversational provenance: tenant → source identity, session → context entity (the
+/// same shape as a game context), occurrence-level testimony, and source-class priors.
+/// Ids are asserted against the canonical-key law, so a changed key string fails here.
 /// </summary>
 public class ConversationContentIdTests
 {
@@ -32,7 +32,7 @@ public class ConversationContentIdTests
 
         var rival = ConversationContent.Resolve("rival");
         Assert.NotEqual(acme.PromptSource, rival.PromptSource);
-        // CLI's bare no-tenant sources remain distinct identities.
+        // The no-tenant sources are distinct identities from any tenant's.
         Assert.NotEqual(UserPromptContent.Source, acme.PromptSource);
         Assert.NotEqual(ResponseContent.Source, acme.ResponseSource);
     }

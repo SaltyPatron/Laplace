@@ -46,8 +46,8 @@ size_t intent_stage_memory_bytes(const intent_stage_t* stage);
 /* Conservative high-water reservation of requested payload. Bounded growth
  * includes old plus requested new buffers even if realloc grows in place;
  * this is an upper bound, not measured simultaneous allocations or process RSS.
- * Unbounded buffer growth retains its historical retained-capacity accounting;
- * witness rehash keeps its existing old-plus-new accounting. */
+ * Unbounded buffer growth counts retained capacity; witness rehash counts
+ * old plus new tables. */
 size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage);
 int intent_stage_allocation_failed(const intent_stage_t* stage);
 
@@ -104,8 +104,8 @@ int intent_stage_add_attestation(
     int64_t          opponent_rating_fp1e9,
     const uint8_t*   qualifier_mask);
 
-/* Same COPY row with an explicit durable replay disposition.  The historical
- * entry point above remains the replayable-evidence default. */
+/* Same COPY row with an explicit durable replay disposition. The entry point
+ * above stages replayable evidence. */
 int intent_stage_add_attestation_mode(
     intent_stage_t*  stage,
     const hash128_t* id,

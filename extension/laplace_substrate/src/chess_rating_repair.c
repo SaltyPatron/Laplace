@@ -7,10 +7,12 @@
 #include "laplace/core/sql_catalog.h"
 #include "spi_nested.h"
 
-/* Exceptional reconstruction of explicitly selected player cells. Evidence
- * selection and bulk persistence are PostgreSQL set operations; native C owns
- * event ordering, cell grouping and the canonical Glicko fold. Source Elo
- * testimony is never queried or rewritten as Laplace standing. */
+/* Refolds the consensus cells of selected subjects and relation types from their
+ * retained attestations. One set read selects the evidence; C orders it per
+ * (subject, type, object) cell by observation time then attestation id, folds
+ * each cell from the neutral prior through the canonical Glicko-2 period fold,
+ * and one bulk upsert writes rating, RD, volatility and witness count, leaving
+ * unchanged cells untouched. Evidence not marked replayable refuses the refold. */
 typedef struct {
     hash128_t subject, type, object, id;
     bool object_null;
@@ -43,8 +45,8 @@ evidence_compare(const void *x, const void *y)
     return memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
 
-/* Replays retained evidence in observed order, one retained record per period.
- * This cannot recover original period grouping that was not recorded. */
+/* Each retained attestation is folded as its own rating period; a period
+ * grouping that was never recorded cannot be reconstructed. */
 static void
 repair_cells(ArrayType *subjects, ArrayType *relations, bool normalize)
 {
@@ -60,8 +62,9 @@ repair_cells(ArrayType *subjects, ArrayType *relations, bool normalize)
     Oid types[] = {BYTEAARRAYOID, BYTEAARRAYOID};
     Datum args[] = {PointerGetDatum(subjects), PointerGetDatum(relations)};
     uint64 corrected = 0;
-    /* Only the explicit chess-player repair corrects source-Elo calibration.
-     * General cell reconstruction retains the recorded opponent state. */
+    /* With normalize, the selected attestations' recorded opponent rating is first
+     * reset to the neutral prior, so a source's own rating scale does not enter the
+     * fold. Otherwise the recorded opponent rating and RD are replayed as stored. */
     if (normalize) {
         if (SPI_execute_with_args(laplace_sql_query_text("chess.repair_normalize"),
             2, types, args, NULL, false, 0) != SPI_OK_UPDATE)

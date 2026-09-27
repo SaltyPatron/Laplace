@@ -13,9 +13,8 @@ public sealed class CodeForwardAuthorityTests
         Assert.Contains("generation.forward_text(", sql, StringComparison.Ordinal);
         Assert.Contains("$6::bytea[]", sql, StringComparison.Ordinal);
 
-        // A product adapter may carry prior witnessed state, but it must not
-        // preselect a conventional-model continuation plane or a private code
-        // evidence subset before the canonical COUPLE/ORIENT/ROUTE program runs.
+        // The code surface may carry prior witnessed state, but it does not preselect a
+        // continuation plane or a code-only evidence subset ahead of COUPLE/ORIENT/ROUTE.
         Assert.DoesNotContain("COMPLETES_TO", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("generation.adjudicated_row", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("DEFINES", sql, StringComparison.Ordinal);

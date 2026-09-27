@@ -4,15 +4,9 @@ using Laplace.Chess.Service;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The chess READ surface — the database half of the chess pillar, as distinct from
-/// the playing half in <see cref="ChessEndpoints"/>. Those endpoints drive a board:
-/// legal moves, engine evals, a live game. These serve what the substrate already
-/// witnessed: the roster, a career, a game.
-///
-/// Every route is a drill: roster -> player -> game -> the two players in it. Ids are
-/// content hashes throughout, so every one of them is also a substrate entity id —
-/// the same id /v1/explore/entities/{id} will explain down to its witnesses. The
-/// chess view and the substrate view are two readings of one row, never two copies.
+/// Reads of witnessed chess structure: roster, player, game, plies. Every id is the
+/// content id of the entity, the same id /v1/explore/entities/{id} reads, so these
+/// routes present the same entities as the rest of the web, not a copy.
 /// </summary>
 internal static class ChessReadEndpoints
 {

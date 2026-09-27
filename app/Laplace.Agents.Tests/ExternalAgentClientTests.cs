@@ -6,9 +6,8 @@ using Xunit;
 namespace Laplace.Agents.Tests;
 
 /// <summary>
-/// Transport behaviour against a scripted handler: no socket, no vendor, no
-/// network flake. What is asserted is the part a caller cannot see from a reply —
-/// what was sent, how many times, and what a failure says.
+/// Transport behaviour against a scripted handler: what was sent, how many times,
+/// and what a failure reports.
 /// </summary>
 public sealed class ExternalAgentClientTests
 {
@@ -104,8 +103,7 @@ public sealed class ExternalAgentClientTests
     }
 
     /// <summary>
-    /// A bad key is not transient. Retrying it burns the caller's deadline and,
-    /// on some providers, counts against a lockout.
+    /// An authentication failure is not retried.
     /// </summary>
     [Fact]
     public async Task Authentication_failure_is_not_retried_and_names_the_variable_to_fix()
@@ -122,10 +120,7 @@ public sealed class ExternalAgentClientTests
     }
 
     /// <summary>
-    /// Observed against the live vendor: OpenAI's 401 body quotes the rejected key
-    /// verbatim. Forwarding that writes the credential into the caller's context and
-    /// every log downstream of it, from a path that only fires when something is
-    /// already wrong.
+    /// A vendor error body that echoes the key is reported with the key redacted.
     /// </summary>
     [Fact]
     public async Task Vendor_error_text_never_carries_the_credential_back_to_the_caller()
@@ -139,7 +134,7 @@ public sealed class ExternalAgentClientTests
 
         Assert.DoesNotContain("sk-test", ex.Message, StringComparison.Ordinal);
         Assert.Contains("redacted", ex.Message, StringComparison.Ordinal);
-        // The rest of the vendor's message still has to survive — it is the fix.
+        // The rest of the vendor's message survives redaction.
         Assert.Contains("Incorrect API key provided", ex.Message);
     }
 
@@ -158,8 +153,7 @@ public sealed class ExternalAgentClientTests
     }
 
     /// <summary>
-    /// An HTML error page from a proxy in front of the vendor is the classic
-    /// "worked in curl, threw a JsonException in production" case.
+    /// A non-JSON 2xx body (e.g. a proxy's HTML page) surfaces as an AgentException.
     /// </summary>
     [Fact]
     public async Task Non_json_success_body_is_reported_as_an_agent_fault()

@@ -39,15 +39,12 @@ typedef struct LaplaceCognitionProgramReceipt
 typedef struct LaplaceCognitionProgram LaplaceCognitionProgram;
 struct LaplacePromptIntent;
 
-/* Compile the exact admitted prompt into a finite completion program. Prompt
- * occurrence ordinals are the obligation coordinates; the exact prompt trunk
- * carries their union as the initial whole-observation operand. Supplemental
- * history/frontier operands remain usable evidence but never become obligations
- * for this turn.
- *
- * An applicable source-witnessed whole-root invocation supplies operation and
- * exact input records. Naming evidence alone never supplies a request role.
- * Competing invocation contracts retain their own provenance and ambiguity. */
+/* Compile one admitted observation into a finite completion program whose id
+ * fingerprints the whole COUPLE response. Occurrence ordinals of the
+ * observation are the obligation coordinates; the observation root carries
+ * their union. Operations declared in the intent add exact input-identity
+ * obligations. Channels passed here seed semantic provenance only; they never
+ * add obligations. */
 LaplaceCognitionProgram *laplace_cognition_program_create(
     const LaplacePromptInput *input,
     int prompt_origin_count,
@@ -55,32 +52,28 @@ LaplaceCognitionProgram *laplace_cognition_program_create(
     int initial_channel_count,
     const struct LaplacePromptIntent *intent);
 
-/* Fold exact positive typed transitions into semantic provenance. This is
- * separate from physical/trajectory ancestry: a structural successor never
- * acquires semantic grounding merely because it shares an identity with a
- * typed candidate. Repeated calls advance provenance through routed semantic
- * state without rescanning or reclassifying the prompt text. */
+/* Extend semantic provenance along positively rated typed channels routed
+ * after COUPLE. Structural and geometric reachability never enter this map. */
 void laplace_cognition_program_note_semantic_channels(
     LaplaceCognitionProgram *program,
     const LaplaceQueryChannel *channels,
     int channel_count);
 
-/* ROUTE changes working knowledge but is not an output act. */
+/* Count one ROUTE round; routing is not an output. */
 void laplace_cognition_program_note_route(LaplaceCognitionProgram *program);
 
-/* Register an emitted semantic constituent after its working-state transition.
- * `origins` is the exact prompt/working occurrence ancestry calculated by the
- * active providers. Completion requires required-origin closure and at least
- * one semantically supported output; structural continuity alone cannot claim
- * completion of a semantic request. */
+/* Record one REALIZE output with the caller's occurrence ancestry. The program
+ * completes, minting a semantic act id over program id and output fingerprint,
+ * once every obligation is satisfied and at least one output carries semantic
+ * support. */
 void laplace_cognition_program_note_emit(
     LaplaceCognitionProgram *program,
     const hash128_t *selected,
     const Bitmapset *origins,
     bool semantic_support);
 
-/* Seal an incomplete program when the search frontier or declared budget ends.
- * A completed semantic act cannot be downgraded by a later finalization call. */
+/* Seal an incomplete program as exhausted, budget-exhausted or ambiguous.
+ * A complete or ambiguous program keeps its disposition. */
 void laplace_cognition_program_finalize(
     LaplaceCognitionProgram *program,
     LaplaceCognitionDisposition disposition);

@@ -5,16 +5,10 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Spec 34 architecture gate — red until the conversational surface is real, and
-/// red again the moment any of its known regressions (the conventional-chatbot
-/// reflexes) creep back:
-///   - hand-rolled session ids (SHA256/DeriveSessionId),
-///   - canned assistant prose,
-///   - substring model routing,
-///   - turns without tenant/session provenance,
-///   - turn deposits that emit no testimony.
-/// Text pins over the source tree, DecomposerArchitectureGateTests style: cheap,
-/// always-on, no DB.
+/// Source-text pins for conversational provenance (spec 34): session ids mint through
+/// the canonical id law, no endpoint emits canned assistant prose, model routing goes
+/// through <c>ModelCatalog</c>, every turn closes with tenant and session, and a turn
+/// deposit emits testimony. Reads the source tree only; no database.
 /// </summary>
 public sealed class ConversationProvenanceGateTests
 {
@@ -52,8 +46,8 @@ public sealed class ConversationProvenanceGateTests
         Assert.Contains("record struct TurnItem", text);
         Assert.Contains("string Tenant", text);
         Assert.Contains("Hash128 SessionId", text);
-        // The close sequence moved to the shared TurnCloser; what this lane must
-        // still prove is that it routes a turn through it WITH tenant and session.
+        // The HTTP interface closes a turn through the shared TurnCloser with tenant
+        // and session.
         Assert.Contains("new TurnCloser(", text);
         Assert.Contains("closer.CloseAsync(", text);
         Assert.Contains("item.Tenant, item.SessionId", text);
@@ -76,7 +70,7 @@ public sealed class ConversationProvenanceGateTests
         Assert.Contains("ConsensusAccumulatingWriter", closer);   // fold inline, not deferred
         Assert.Contains("CodepointPerfcache.LoadDefault", closer); // the Tier-0 ROM floor all lanes share
 
-        // No frontend re-derives it.
+        // No interface re-derives it.
         foreach (var lane in new[]
                  {
                      "app/Laplace.Endpoints.Mcp/SubstrateTools.cs",
@@ -91,20 +85,17 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// converse.chat() is the conversational entry point described by spec 36: the CLI
-    /// used to call generation.walk_text() directly with four hardcoded knobs, making it
-    /// a sibling entry point that skipped language inference, the specificity
-    /// election, shape dispatch and the responder family.
+    /// CLI chat enters the same conversational operation as every other interface
+    /// (<c>NpgsqlSubstrateReads.ChatAsync</c>, spec 36), never
+    /// <c>generation.walk_text</c> directly, and closes the turn under a canonical
+    /// session id.
     /// </summary>
     [Fact]
     public void CliChat_GoesThroughChatAndClosesWithProvenance()
     {
         var text = Read("app/Laplace.Cli/QueryCommands.cs");
-        // CODE only: the method's comment block names walk_text to record what it
-        // replaced, and a gate that cannot tell prose from a call site is a gate
-        // that punishes documenting the fix.
+        // Call sites only; comment prose is stripped before matching.
         var chat = StripComments(ExtractMethod(text, "public static async Task<int> ChatAsync"));
-        // Chat SQL lives in NpgsqlSubstrateReads.ChatAsync; CLI must call that, not walk_text.
         Assert.Contains("ChatAsync(", chat);
         Assert.DoesNotContain("generation.walk_text(", chat);
         Assert.Contains("closer.CloseAsync(", chat);
@@ -128,26 +119,25 @@ public sealed class ConversationProvenanceGateTests
     [Fact]
     public void McpDepositTurn_UsesConversationProvenance()
     {
-        // Scoped to the DepositTurn method itself: the MCP surface also has a
-        // standalone `witness` tool (a note with no session to scope) that
-        // legitimately deposits through the plain UserPrompt/Response sources —
-        // only a conversational turn's deposit must carry tenant/session provenance.
+        // Scoped to DepositTurn: the MCP `witness` tool deposits a sessionless note
+        // through the plain UserPrompt/Response sources; only a conversational turn
+        // carries tenant/session provenance.
         var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
         var depositTurn = ExtractMethod(text, "private bool DepositTurn");
-        // Routes through the shared closer WITH the tenant — the provenance the
-        // plain note lane deliberately lacks.
+        // The turn closes through the shared closer with the MCP tenant.
         Assert.Contains("CloseAsync(McpTenant", depositTurn);
         Assert.DoesNotContain("UserPromptContent.BuildBootstrapChange", depositTurn);
-        // The note lane still exists and still uses the plain sources, on its own
-        // writer and its own latch — a failure there must not disable turns.
+        // Notes use the plain sources on their own writer and latch, so a note
+        // failure cannot disable turn deposits.
         Assert.Contains("UserPromptContent.BuildBootstrapChange", text);
         Assert.Contains("_plainWriterBroken", text);
     }
 
     /// <summary>
-    /// Natural chat consumes the forward program. Explicit shapes use the
-    /// inspection operation; an empty pass cannot be replaced by phrase recall.
-    /// a chat reply's eff_mu/witnesses are ABSENT, never fabricated as zero.
+    /// Natural chat runs the forward program (<c>ForwardTurnAsync</c>); explicit
+    /// shapes run the <c>ChatAsync</c> inspection operation. An empty forward pass is
+    /// not replaced by session recall, and a chat reply's eff_mu/witnesses are null,
+    /// never zero.
     /// </summary>
     [Fact]
     public void HttpConverse_UsesForwardProgramWithoutRecallFallback()

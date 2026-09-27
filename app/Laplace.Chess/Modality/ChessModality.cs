@@ -30,8 +30,8 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
     /// <summary>
     /// The en-passant target square (0x88 index) only when a LEGAL en-passant capture
-    /// exists, else -1 — the canonical ep fact position identity and the syzygy probe
-    /// share (a raw double-push square with no capturer is not part of the position).
+    /// exists, else -1. Position identity and the Syzygy probe share this ep fact; a
+    /// double-push square with no capturer is not part of the position.
     /// </summary>
     public static int CapturableEpSquare(Board b)
     {

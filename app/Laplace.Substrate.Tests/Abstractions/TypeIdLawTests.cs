@@ -58,23 +58,12 @@ public class TypeIdLawTests
     }
 
     /// <summary>
-    /// Reserved physicality types stay out of production decomposers. The allowed set is
-    /// NOT "Content and Projection" -- restricting it that far had the opposite effect of
-    /// the one intended, because it forced every non-sequence shape into Content.
-    ///
-    /// PhysicalityType.Set's own comment states the law: a shape "whose vertex order
-    /// carries no sequence meaning" must be distinct from Content so the partial indexes
-    /// that read text trajectories -- physicalities_constituents_gin,
-    /// physicalityanchor_traj_first_id_btree, physicalities_traj_probe, all WHERE type = 1
-    /// -- are not silently widened. A gate that forbids emitting those types makes the law
-    /// unenforceable: the only reachable type was the one the law says not to use.
-    ///
-    /// Measured 2026-08-23: 2,132,050 of 46,542,360 type=1 physicalities were UD parse
-    /// STRUCTURES -- head refs, deprels, annotation keys, end markers -- so
-    /// generation.trajectory_continuations returned annotation entities as continuations
-    /// of words (hot -> ud/misc-key/... at 544, above hot -> water at 502).
-    ///
-    /// So the shape-carrying types are permitted and the genuinely reserved ones are not.
+    /// Provider and shared ingest code emit only Content, Projection, Set, Range and
+    /// ParseStructure physicalities; the other types are reserved. A shape whose vertex order
+    /// carries no sequence meaning must use Set, Range or ParseStructure rather than Content,
+    /// so the partial indexes over text trajectories (WHERE type = 1:
+    /// physicalities_constituents_gin, physicalityanchor_traj_first_id_btree,
+    /// physicalities_traj_probe) and the continuations read over them see only sequences.
     /// </summary>
     [Fact]
     public void PhysicalityType_ProductionEmitters_DoNotUseReservedTypes()
@@ -92,8 +81,7 @@ public class TypeIdLawTests
 
         foreach (var file in Directory.EnumerateFiles(decomposerDir, "*.cs", SearchOption.AllDirectories))
         {
-            // Decomposer production code plus the shared abstractions layer
-            // (formerly Laplace.Decomposers.Abstractions, now Laplace.Substrate/Abstractions).
+            // Provider code plus the shared ingest abstractions in Laplace.Substrate/Abstractions.
             var isDecomposer = file.Contains("Laplace.Decomposers", StringComparison.OrdinalIgnoreCase);
             var isAbstractions = file.Contains(
                 $"Laplace.Substrate{Path.DirectorySeparatorChar}Abstractions", StringComparison.OrdinalIgnoreCase);
@@ -169,9 +157,8 @@ public class TypeIdLawTests
 
     private static string FindRepoRoot()
     {
-        // Build outputs live outside the repo (Directory.Build.props), so
-        // the ancestor walk from the test binary can't reach it — the props
-        // file stamps the root into every assembly instead.
+        // Build outputs live outside the repo (Directory.Build.props), so the root is
+        // read from the assembly metadata the props file stamps.
         var stamped = typeof(TypeIdLawTests).Assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
             .OfType<System.Reflection.AssemblyMetadataAttribute>()

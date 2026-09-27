@@ -5,22 +5,20 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Centralized working-set pipeline defaults for all decomposer lanes. Every
-/// <see cref="Decomposer{TRecord}"/> subclass routes through these presets so
-/// batch sizes, capacities, and working-set mode stay consistent.
+/// Working-set configuration of the shared ingest pipeline. Every
+/// <see cref="Decomposer{TRecord}"/> takes its batch size, capacities and working-set
+/// mode from these presets, sized from the machine and the source profile.
 /// </summary>
 public static class IngestPipelineDefaults
 {
     /// <summary>
-    /// Per-source working-set knobs from Intel topology + RAM (Rule #12).
+    /// Working-set sizes for a source profile, from CPU topology and memory.
     /// </summary>
     public static (int Batch, int ProbeInterval, int RecordCap, int ProbeChunk) ResolveWorkingSet(
         IngestSourceProfile profile,
         DecomposerOptions? options = null)
     {
-        // Only an explicit operator --batch is an execution-policy override.
-        // Vendor default literals were removed because they bypassed the supposedly
-        // generic machine/profile resolver.
+        // Only an explicit operator --batch overrides the machine/profile sizing.
         int batch = options is { BatchSize: > 1 }
             ? options.BatchSize
             : IngestSizing.ResolveForSource(profile).RecordBatchSize;
@@ -29,27 +27,17 @@ public static class IngestPipelineDefaults
     }
 
     /// <summary>
-    /// THE record-batch resolver. Every decomposer that needs a batch size calls this and
-    /// nothing else.
-    ///
-    /// It exists because the idiom was hand-written eight times, and five of those wrote it
-    /// as `options.BatchSize > 1 ? options.BatchSize : &lt;literal&gt;` — which never consults
-    /// <see cref="IngestSizing"/> at all. A per-source literal cannot track the box, so those
-    /// sources ingested with the same batch on a 4-core laptop and a 128 GB server even
-    /// though IngestSizing/MemoryTopology own sizing. A private `? : 2048` overrides it
-    /// exactly as
-    /// effectively as an env var would.
-    ///
-    /// An explicit operator batch (`--batch`) still wins — that is the ONE legitimate
-    /// override, and it arrives through <see cref="DecomposerOptions.BatchSize"/>.
+    /// The record batch size every provider uses: <see cref="IngestSizing"/> for the
+    /// profile on this machine, unless the operator passed an explicit batch
+    /// (<c>--batch</c>, via <see cref="DecomposerOptions.BatchSize"/>).
     /// </summary>
     public static int ResolveBatch(IngestSourceProfile profile, DecomposerOptions? options) =>
         ResolveWorkingSet(profile, options).Batch;
 
     /// <summary>
-    /// Relation-triple lane: each record composes subject + object tier trees (see
+    /// Relation-triple records: each composes subject and object tier trees (see
     /// <see cref="RelationTripleHandler"/>). Batch and probe interval come from
-    /// <see cref="IngestSourceProfile.RelationTriple"/>, not HighVolume.
+    /// <see cref="IngestSourceProfile.RelationTriple"/>.
     /// </summary>
     public static IngestBatchConfig RelationTriple(
         Hash128 sourceId, string batchLabelPrefix, DecomposerOptions options, ISubstrateReader? reader)
@@ -126,10 +114,10 @@ public static class IngestPipelineDefaults
     }
 
     /// <summary>
-    /// Explicit grammar-content lane. Use this only when the parsed serialization itself is
-    /// admitted content. Parser-only vendor witnesses use <see cref="Compose"/> so delimiters,
-    /// field names, and source-local keys do not manufacture a second content tree.
-    /// Mirrors <see cref="StructuredGrammarIngest.IngestFileAsync"/> config shape.
+    /// Grammar-content configuration, for when the parsed serialization itself is admitted
+    /// content. A provider that only parses packaging uses <see cref="Compose"/>, so
+    /// delimiters, field names and source-local keys create no second content tree. Same
+    /// shape as <see cref="StructuredGrammarIngest.IngestFileAsync"/>.
     /// </summary>
     public static IngestBatchConfig StructuredGrammar(
         Hash128 sourceId,
@@ -188,9 +176,9 @@ public static class IngestPipelineDefaults
 }
 
 /// <summary>
-/// Unified extract-only decomposer base. Subclasses implement record extraction and
-/// handler selection; <see cref="DecomposeAsync"/> is sealed and always routes through
-/// <see cref="IngestBatchPipeline"/> working-set mode.
+/// Provider base: subclasses extract records and pick a handler; the sealed
+/// <see cref="DecomposeAsync"/> always admits them through the shared
+/// <see cref="IngestBatchPipeline"/> working-set recipe.
 /// </summary>
 public abstract class Decomposer<TRecord> : IDecomposer
 {
@@ -214,10 +202,9 @@ public abstract class Decomposer<TRecord> : IDecomposer
     /// <summary>See <see cref="IDecomposer.PerFileCompletion"/>.</summary>
     public virtual bool PerFileCompletion => false;
 
-    // Virtual on the class, not just the interface default: interface mapping is
-    // computed at the class that lists IDecomposer, so a derived class declaring
-    // this property WITHOUT override would shadow it — invisible through
-    // IDecomposer references, silently registering zero readback names.
+    // Virtual on the class, not only the interface default: interface mapping is fixed
+    // at the class that lists IDecomposer, so a derived declaration without override
+    // would be invisible through IDecomposer and register no readback names.
     public virtual IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
     public virtual IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
@@ -227,8 +214,8 @@ public abstract class Decomposer<TRecord> : IDecomposer
     protected abstract IIngestRecordHandler<TRecord> CreateHandler();
 
     /// <summary>
-    /// Option-aware handler factory used by the one production driver. Most handlers are
-    /// option-independent and inherit this adapter.
+    /// Option-aware handler factory used by the shared driver; most handlers ignore the
+    /// options and inherit this default.
     /// </summary>
     protected virtual IIngestRecordHandler<TRecord> CreateHandler(DecomposerOptions options) =>
         CreateHandler();
@@ -242,10 +229,10 @@ public abstract class Decomposer<TRecord> : IDecomposer
             SourceId, BatchLabelPrefix, options, context.Reader, PipelineProfile);
 
     /// <summary>
-    /// Whether a monolithic record stream may be cut into independent working-set
-    /// pipelines. Ordered container lanes override this to false: record-local compose
-    /// still fans across the shared compose workers, but the final ordered structure
-    /// must observe every preceding record before it is emitted.
+    /// Whether a single-file record stream may be cut into independent working-set
+    /// pipelines. Ordered containers return false: record-local compose still fans across
+    /// the shared compose workers, but the ordered structure must see every preceding
+    /// record before it is emitted.
     /// </summary>
     protected virtual bool CanSegmentMonolith => true;
 
@@ -326,12 +313,10 @@ public abstract class Decomposer<TRecord> : IDecomposer
         IngestBatchConfig BuildConfig() => IngestPipelineDefaults.ApplyMaxInputUnits(
             BuildPipelineConfig(context, options), options);
 
-        // A monolithic single-file source has no intra-file parallelism: one working-set
-        // builder, serial DrainInto, idle P-cores. Cut the already-FRAMED record stream on
-        // record boundaries into N independent working-set pipelines — a segmented monolith
-        // rides the same pool as a multi-file source, and content-addressing merges any
-        // cross-segment collisions (same content -> same id) with no coordination. Capped
-        // runs stay serial (ResolveSegments -> 1) so the exact input-unit stop point holds.
+        // Cut a single-file record stream on record boundaries into N independent
+        // working-set pipelines on the same pool multi-file sources use. Content addressing
+        // merges cross-segment duplicates (same content, same id) with no coordination.
+        // Capped runs stay serial (ResolveSegments → 1) so the input-unit stop is exact.
         int segments = CanSegmentMonolith ? MonolithSegmenter.ResolveSegments(BuildConfig()) : 1;
         if (segments <= 1)
         {
@@ -354,11 +339,10 @@ public abstract class Decomposer<TRecord> : IDecomposer
 }
 
 /// <summary>
-/// Multi-file sources that route through <see cref="IngestBatchPipeline.RunMultiFileAsync"/>.
-/// The unit of work is <see cref="ExtractFileAsync"/> — one file → records. Multi-file
-/// orchestration calls that unit once per path; it is not a second parser family.
-/// Override <see cref="CreateMultiFileStream"/> only when the open shape is not a path list
-/// (legacy adapters); new sources implement <see cref="ListFiles"/> + <see cref="ExtractFileAsync"/>.
+/// Multi-file provider admitted through <see cref="IngestBatchPipeline.RunMultiFileAsync"/>.
+/// The unit of work is <see cref="ExtractFileAsync"/> (one file → records), called once per
+/// claimed path. Sources implement <see cref="ListFiles"/> and <see cref="ExtractFileAsync"/>;
+/// <see cref="CreateMultiFileStream"/> is overridden only when the input is not a path list.
 /// </summary>
 public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
 {
@@ -371,8 +355,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
             $"{GetType().Name}: implement ListFiles+ExtractFileAsync, or override CreateMultiFileStream.");
 
     /// <summary>
-    /// Parse ONE file into records. This is the single-file masticator; the multi-file
-    /// pool invokes it per claimed path.
+    /// Parses one file into records; the multi-file pool calls it per claimed path.
     /// </summary>
     protected virtual IAsyncEnumerable<TRecord> ExtractFileAsync(
         string filePath, string fileLabel, DecomposerOptions options, CancellationToken ct) =>
@@ -411,16 +394,11 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options);
 
     /// <summary>
-    /// Per-file resume (GH #898): each finished file's boundary records a unit
-    /// completion on the file's content identity, and a restarted run true-skips
-    /// completed files before opening them. Without this, a killed
-    /// multi-hour run restarts from record zero and RE-FOLDS the applied prefix —
-    /// testimony is not idempotent, so witness counts inflate corpus-wide. With it,
-    /// the blast radius of a kill is the one file that was mid-apply.
-    /// Default ON for every <see cref="DecomposerMultiFile{TRecord}"/> lane — that is
-    /// the shape the resume contract was built for. Monolith / multi-phase sources do
-    /// not inherit this base. The fingerprint is streamed with a bounded pooled buffer,
-    /// so large files retain the same resume contract without whole-file allocation.
+    /// Per-file resume: each finished file's boundary receipts a completion on the file's
+    /// content identity, and a restarted run skips completed files before opening them.
+    /// Testimony is not idempotent, so this keeps a restart from folding an applied file
+    /// twice; an interrupted run re-reads only the file that was mid-apply. The content
+    /// fingerprint is streamed through a bounded pooled buffer.
     /// </summary>
     public override bool PerFileResume => true;
 
@@ -429,10 +407,9 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
             $"{GetType().Name} uses multi-file streaming; use CreateHandlerForFile instead.");
 
     /// <summary>
-    /// Concatenation of <see cref="ExtractFileAsync"/> over <see cref="ListFiles"/> —
-    /// the same masticator the parallel pool uses, serial. Not the production driver
-    /// (the shared driver uses the pool); exists so the unit is callable
-    /// without a second parser.
+    /// Serial concatenation of <see cref="ExtractFileAsync"/> over <see cref="ListFiles"/>.
+    /// The shared driver uses the parallel pool instead; this makes the same unit callable
+    /// as one record stream.
     /// </summary>
     protected sealed override async IAsyncEnumerable<TRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
@@ -467,7 +444,7 @@ public abstract class ComposeDecomposerPhase<TRecord> : ComposeDecomposer<TRecor
 }
 
 /// <summary>
-/// Imperative-compose lane: record → callback into <see cref="SubstrateChangeBuilder"/>.
+/// Imperative-compose provider: each record → callback into <see cref="SubstrateChangeBuilder"/>.
 /// </summary>
 public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
 {
@@ -477,9 +454,9 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
     protected virtual long EstimatedOutputRows(TRecord record) => 1;
 
     /// <summary>
-    /// Default: compose callback runs in <see cref="IIngestDeferredUnit.DrainInto"/> (serial).
-    /// Sources whose <see cref="ContentTierSpine"/> work belongs on the compose fan
-    /// (Wiktionary, …) override with a handler that builds trees in
+    /// The compose callback runs in <see cref="IIngestDeferredUnit.DrainInto"/> (serial).
+    /// A source whose <see cref="ContentTierSpine"/> work should run on the parallel compose
+    /// fan overrides this with a handler that builds trees in
     /// <see cref="IIngestRecordHandler{TRecord}.CreateDeferredUnit"/>.
     /// </summary>
     protected override IIngestRecordHandler<TRecord> CreateHandler() =>
@@ -495,18 +472,10 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
 }
 
 /// <summary>
-/// Imperative-compose source spread across MANY files: the multi-file worker pool AND the
-/// <see cref="DirectComposeHandler{TRecord}"/>, which nothing joined before.
-///
-/// A compose-shaped source with more than one input file previously had to choose between
-/// <see cref="ComposeDecomposer{TRecord}"/> — which gives you Compose() but drives ONE serial
-/// record stream — and <see cref="DecomposerMultiFile{TRecord}"/>, which gives you the parallel
-/// pool but no compose handler. ChessPgnDecomposer chose the first and streamed 11 PGN files
-/// through a single thread, on a box whose other multi-file sources fan out by default.
-/// The missing base is the whole reason; there is nothing chess-specific about it.
-///
-/// Files carry no cross-file ordering (references resolve content-addressed), so parallelism
-/// here is the same claim the multi-file pool already makes for every other source.
+/// Imperative-compose provider over many files: the multi-file worker pool with the
+/// <see cref="DirectComposeHandler{TRecord}"/>. Files carry no cross-file ordering
+/// (references resolve by content address), so they compose in parallel like any other
+/// multi-file source.
 /// </summary>
 public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<TRecord>
 {
@@ -517,8 +486,8 @@ public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<
         string fileLabel, DecomposerOptions options) =>
         new DirectComposeHandler<TRecord>(Compose);
 
-    // Per-FILE label, not BatchLabelPrefix: with workers running concurrently the batch label is
-    // the only thing attributing a batch to its input file in the run journal.
+    // Per-file label, not BatchLabelPrefix: with concurrent workers the batch label is what
+    // attributes a batch to its input file in the run journal.
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
@@ -555,13 +524,13 @@ public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.RelationTriple(SourceId, BatchLabelPrefix, options, context.Reader);
 
-    /// <summary>Paths to masticate. Usually one file for monolith sources.</summary>
+    /// <summary>Input paths; often a single file.</summary>
     protected abstract IReadOnlyList<string> ListInputFiles(
         string ecosystemPath, DecomposerOptions options);
 
     /// <summary>
-    /// Parse ONE file into triples. This is the unit — multi-file relation-triple
-    /// sources call the same shape via <see cref="DecomposerMultiFile{TRecord}.ExtractFileAsync"/>.
+    /// Parses one file into triples; multi-file relation-triple sources use the same shape
+    /// via <see cref="DecomposerMultiFile{TRecord}.ExtractFileAsync"/>.
     /// </summary>
     protected abstract IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
         string filePath, DecomposerOptions options, CancellationToken ct);
@@ -596,7 +565,7 @@ public abstract class GrammarComposeDecomposer : Decomposer<GrammarComposeRecord
 }
 
 /// <summary>
-/// Witnessed structured-grammar lane: row parse → <see cref="GrammarIngestHandler"/>.
+/// Structured-grammar provider: row parse → <see cref="GrammarIngestHandler"/>.
 /// Subclasses supply record streams (file, parallel file, multi-file).
 /// </summary>
 public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
@@ -634,11 +603,10 @@ public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorr
 }
 
 /// <summary>
-/// Multi-phase sources (WordNet data/sense/exc/sent, SemLink sub-ingests,
-/// Model tokenizer/recipe/…). Each phase is a standalone
-/// <see cref="DecomposerPhase{T}"/> or <see cref="ComposeDecomposerPhase{T}"/>
-/// routed through <see cref="RunPhaseAsync"/>. Sealed on
-/// <see cref="DecomposeAsync"/> — subclasses implement <see cref="RunIngestAsync"/> only.
+/// Provider whose input has several parts (e.g. WordNet data/sense/exc/sent, model
+/// tokenizer/recipe). Each phase is a <see cref="DecomposerPhase{T}"/> or
+/// <see cref="ComposeDecomposerPhase{T}"/> run through <see cref="RunPhaseAsync"/>;
+/// <see cref="DecomposeAsync"/> is sealed and subclasses implement <see cref="RunIngestAsync"/>.
 /// </summary>
 public abstract class DecomposerMultiPhase : IDecomposer
 {
@@ -729,8 +697,8 @@ public abstract class DecomposerMultiPhase : IDecomposer
         try
         {
             await foreach (var change in phase.DecomposeAsync(context, phaseOptions, ct))
-                // Each phase owns its source/prior declarations. A multi-source
-                // container cannot replace them with its own identity or trust class.
+                // Each phase's changes keep their own source and prior declarations; the
+                // container does not substitute its identity or trust class.
                 yield return change;
         }
         finally
@@ -740,9 +708,8 @@ public abstract class DecomposerMultiPhase : IDecomposer
     }
 
     /// <summary>
-    /// Run a real file-backed phase through the shared multi-phase executor while
-    /// publishing the same started/composed/committed journal protocol used by the
-    /// generic multi-file pipeline.
+    /// Runs a file-backed phase, publishing the same started/composed/committed journal
+    /// events as the multi-file pipeline.
     /// </summary>
     protected async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(
         IDecomposer phase,
@@ -795,8 +762,7 @@ public abstract class DecomposerMultiPhase : IDecomposer
 }
 
 /// <summary>
-/// Multi-phase orchestrator with sealed Initialize from <typeparamref name="TSource"/>.
-/// Existing non-generic <see cref="DecomposerMultiPhase"/> subclasses migrate in Wave 3.
+/// Multi-phase provider with sealed Initialize from <typeparamref name="TSource"/>.
 /// </summary>
 public abstract class DecomposerMultiPhase<TSource, TScope> : ArtifactDecomposerMultiPhase
     where TSource : ISeedSource
@@ -877,7 +843,7 @@ public abstract class Decomposer<TRecord, TSource, TScope> : Decomposer<TRecord>
         Task.CompletedTask;
 }
 
-/// <summary>Multi-file lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+/// <summary>Multi-file provider with sealed Initialize from <typeparamref name="TSource"/>.</summary>
 public abstract class DecomposerMultiFile<TRecord, TSource, TScope> : DecomposerMultiFile<TRecord>
     where TSource : ISeedSource
     where TScope : ISeedScope
@@ -912,7 +878,7 @@ public abstract class DecomposerMultiFile<TRecord, TSource, TScope> : Decomposer
         Task.CompletedTask;
 }
 
-/// <summary>Compose lane with sealed Initialize from compile-time
+/// <summary>Compose provider with sealed Initialize from compile-time
 /// <typeparamref name="TSource"/> / <typeparamref name="TScope"/>.</summary>
 public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecomposer<TRecord>
     where TSource : ISeedSource
@@ -948,7 +914,7 @@ public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecom
         Task.CompletedTask;
 }
 
-/// <summary>Multi-file compose lane with sealed manifest initialization.</summary>
+/// <summary>Multi-file compose provider with sealed manifest initialization.</summary>
 public abstract class ComposeDecomposerMultiFile<TRecord, TSource, TScope>
     : ComposeDecomposerMultiFile<TRecord>
     where TSource : ISeedSource
@@ -983,7 +949,7 @@ public abstract class ComposeDecomposerMultiFile<TRecord, TSource, TScope>
         Task.CompletedTask;
 }
 
-/// <summary>Multi-file whole-grammar lane with sealed manifest initialization.</summary>
+/// <summary>Multi-file whole-grammar provider with sealed manifest initialization.</summary>
 public abstract class GrammarComposeDecomposerMultiFile<TSource, TScope>
     : GrammarComposeDecomposerMultiFile
     where TSource : ISeedSource
@@ -1018,7 +984,7 @@ public abstract class GrammarComposeDecomposerMultiFile<TSource, TScope>
         Task.CompletedTask;
 }
 
-/// <summary>Grammar-ingest lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+/// <summary>Grammar-ingest provider with sealed Initialize from <typeparamref name="TSource"/>.</summary>
 public abstract class GrammarIngestDecomposer<TSource, TScope> : GrammarIngestDecomposer
     where TSource : ISeedSource
     where TScope : ISeedScope
@@ -1053,7 +1019,7 @@ public abstract class GrammarIngestDecomposer<TSource, TScope> : GrammarIngestDe
         Task.CompletedTask;
 }
 
-/// <summary>Grammar-compose lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+/// <summary>Grammar-compose provider with sealed Initialize from <typeparamref name="TSource"/>.</summary>
 public abstract class GrammarComposeDecomposer<TSource, TScope> : GrammarComposeDecomposer
     where TSource : ISeedSource
     where TScope : ISeedScope

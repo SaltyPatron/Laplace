@@ -10,11 +10,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// half (BuildTree — decompose, grapheme ladder, Merkle hash) and its cheap half
 /// (EmitTree — register with a builder), then memoizes the expensive half across records.
 ///
-/// Content-hash identity is exact and tier is a floor, so the ONLY acceptable outcome is
-/// that the cached path is bit-identical to the direct path — same root id, first
-/// occurrence and every occurrence after, in any builder. A cache that changed an id
-/// would silently fork the substrate's identity law, which is far worse than a slow
-/// ingest. These tests exist to make that impossible to regress.
+/// The cache is a derived map, not a second identity: the cached path is bit-identical to
+/// the direct path — same root id on first and every later occurrence, in any builder.
 /// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class WiktionarySurfaceTreesTests
@@ -59,8 +56,7 @@ public sealed class WiktionarySurfaceTreesTests
         "日本語",                        // non-Latin
         "🜁",                            // astral plane
         "New York",                     // space
-        // Long content follows the same identity path; admission is now explicit source
-        // semantics rather than an arbitrary UTF-8 byte threshold.
+        // Long content follows the same identity path; no byte-length threshold applies.
         "a device for separating solid particles from a liquid or gas passing through it",
     };
 
@@ -83,9 +79,9 @@ public sealed class WiktionarySurfaceTreesTests
     {
         CodepointPerfcache.LoadDefault();
 
-        // First call may build and publish; later calls must hit the cache. Distinct
-        // builders, because the native root-id dedup is per intent stage — a cached tree
-        // must still stage correctly into a builder that has never seen the surface.
+        // The first call may build and publish; later calls hit the cache. Builders are
+        // distinct because native root-id dedup is per intent stage, so a cached tree must
+        // stage correctly into a builder that has never seen the surface.
         Hash128 first = StageCached(surface, "wiktionary/test/a");
         Hash128 second = StageCached(surface, "wiktionary/test/b");
         Hash128 third = StageCached(surface, "wiktionary/test/c");
@@ -96,13 +92,10 @@ public sealed class WiktionarySurfaceTreesTests
     }
 
     /// <summary>
-    /// Content witnesses are staged into the builder's native ContentStage, NOT into the
-    /// managed rows that Build() returns — both paths leave change.Entities empty, which
-    /// is why this asserts parity between the paths rather than an absolute count. (An
-    /// earlier draft asserted Entities.Length > 0 and failed; a probe showed the direct
-    /// spine path returns 0 as well, so the expectation was wrong, not the cache.)
-    /// The invariant that matters: after a cache hit, a builder that has never seen the
-    /// surface must be left in exactly the state the direct spine call would leave it.
+    /// After a cache hit, a builder that has never seen the surface is left in exactly the
+    /// state the direct spine call leaves it. Content is staged into the builder's native
+    /// ContentStage, not into the managed rows Build() returns, so parity between the paths
+    /// is asserted rather than an absolute count.
     /// </summary>
     [Fact]
     public void CacheHit_LeavesAFreshBuilder_InTheSameStateAsTheSpine()
@@ -130,9 +123,7 @@ public sealed class WiktionarySurfaceTreesTests
     }
 
     /// <summary>
-    /// The cache must actually be reached — a memo that never hits is just the old cost
-    /// plus a dictionary lookup. Staging a short surface twice must leave exactly one
-    /// entry behind it.
+    /// The cache is actually reached: staging a short surface twice leaves exactly one entry.
     /// </summary>
     [Fact]
     public void CacheAdmission_IsExplicit_NotAStringLengthThreshold()

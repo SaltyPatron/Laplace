@@ -4,16 +4,16 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Identity domains retained for source-format normalization and call-site compatibility.
-/// The domain is NOT a second identity universe: the canonical serialization is ordinary
-/// content, so the same bytes converge on the same entity and physicality everywhere.
-/// Source/version/domain meaning belongs in type interpretations, relations, and context.
+/// Kinds of source reference key. A kind is validated but enters no identity: the key's
+/// canonical serialization is ordinary content, so the same bytes converge on the same
+/// entity and physicality everywhere. Source, version and domain meaning belong to type
+/// interpretations, relations and context.
 /// </summary>
 public enum ReferenceIdentityKind : ushort
 {
     CiliIli = 1,
-    // Persisted three-field bridge key. It can refer to multiple adjective-satellite
-    // senses; keep the value stable and never promote it to exact native identity.
+    // Three-field bridge key; it can denote several adjective-satellite senses, so it
+    // never stands for an exact sense. The enum value is persisted.
     WordNetSenseKey = 2,
     WordNetSynsetKey = 3,
     CiliMapVersion = 4,
@@ -26,20 +26,18 @@ public enum ReferenceIdentityKind : ushort
     PredicateMatrixPredicate = 10,
     PredicateMatrixVocabulary = 11,
     PredicateMatrixAnnotationValue = 12,
-    // Exact integer coordinates published by WordNet's frames.vrb and sents.vrb.
-    // Keeping them as source references lets data.* and sentidx.vrb resolve their
-    // operands without reopening a different physical artifact.
+    // Integer keys published by WordNet's frames.vrb and sents.vrb; as references,
+    // data.* and sentidx.vrb resolve their operands without reopening those files.
     WordNetVerbFrame = 13,
     WordNetVerbSentence = 14,
 }
 
 /// <summary>
-/// Admission path for source/catalog references.
+/// Admission of source/catalog references.
 ///
-/// A reference serialization is still content. Declaring one stages only that ordinary
-/// content entity and its physicality. What a reference denotes follows from the source
-/// claims that use it, never from a second durable identity facet or type testimony.
-/// This preserves Laplace's global convergence law:
+/// A reference serialization is content. Declaring one stages only that content entity
+/// and its physicality through the content composer. What a reference denotes follows from
+/// the attestations that use it, never from a second identity or a type attestation:
 ///
 /// same canonical content -> same entity -> same physicality/trajectory
 ///

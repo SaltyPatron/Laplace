@@ -8,10 +8,9 @@ using Xunit.Abstractions;
 namespace Laplace.Decomposers.Tests.OMW;
 
 /// <summary>
-/// OMW admits the selected lemma/definition/example as content. The enclosing TSV row is source
-/// packaging: its synset key, field tag, and delimiters must not create a second managed content
-/// tree. Compare the exact native semantic-value rows and source ownership instead of
-/// bounding physicality observations by the number of newly declared canonical entities.
+/// The selected lemma/definition/example value is the content admitted; the enclosing TSV row
+/// (synset key, field tag, delimiters) is packaging and creates no content tree. The staged
+/// COPY rows must equal those of the native content composer fed only the values.
 /// </summary>
 public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
 {
@@ -73,9 +72,9 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
         Assert.Equal(expected.EntityCount, stagedEntities);
         Assert.Equal(expected.PhysicalityCount, stagedPhysicalities);
 
-        // Exact COPY parity preserves identities, coordinates, Hilbert values,
-        // trajectories and every occurrence, while rejecting extra packaging rows.
-        // Native content emission uses PgEpochUnixUs, so no timestamp is masked.
+        // Byte-equal COPY output means equal identities, coordinates, Hilbert values,
+        // trajectories and occurrences, and no extra packaging rows. Native emission
+        // stamps PgEpochUnixUs, so no timestamp needs masking.
         Assert.Equal(expected.EmitCopyBinary(IntentStageTable.Entities),
             actual.EmitCopyBinary(IntentStageTable.Entities));
         Assert.Equal(expected.EmitCopyBinary(IntentStageTable.Physicalities),

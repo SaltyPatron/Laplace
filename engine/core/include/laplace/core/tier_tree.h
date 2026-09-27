@@ -59,8 +59,8 @@ int tier_tree_get_node(const tier_tree_t* tree, uint32_t idx, tier_node_view_t* 
  * text_range_off/len index into. Installed by the decomposer; OWNED and freed
  * by the tree. Consumers must slice THIS buffer, never the caller's original
  * input: offsets are in normalized space, and NFC changes byte positions and
- * lengths (GH #1039: NFD input mis-sliced words mid-UTF-8, and NFC-expanding
- * codepoints like U+0958 read past the caller's allocation). */
+ * lengths (NFD input would slice mid-UTF-8; NFC-expanding codepoints such as
+ * U+0958 would read past the caller's allocation). */
 int            tier_tree_set_text(tier_tree_t* tree, uint8_t* text_owned, size_t len);
 const uint8_t* tier_tree_text(const tier_tree_t* tree, size_t* out_len);
 

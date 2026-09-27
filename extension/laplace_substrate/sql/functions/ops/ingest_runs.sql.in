@@ -1,19 +1,15 @@
--- Canonical ingest-run liveness and recent history.
---
--- A persisted status='running' is an execution journal fact, not proof that an
--- execution is still alive. Liveness has two independent witnesses:
---   1. the per-run advisory lock held by NpgsqlIngestObservability; and
---   2. a heartbeat advanced by run/file journal activity.
--- A run is orphaned only when BOTH witnesses are absent/stale. Every reader and
--- reconciler below uses this one predicate so the Operator UI, deployment quiet
--- check, and next-run cleanup cannot disagree about whether a run is alive.
+-- Ingest-run liveness and recent history. A persisted status = 'running' is a
+-- journal fact, not proof the run is alive. Liveness has two witnesses: the
+-- per-run advisory lock the ingest writer holds, and a heartbeat advanced by
+-- run/file journal writes. A run is orphaned only when both are absent or
+-- stale; every reader and reconciler here uses that one predicate.
 
 ALTER TABLE @extschema@.ingest_run_journal
     ADD COLUMN IF NOT EXISTS heartbeat_at timestamptz NOT NULL DEFAULT now();
 
--- Historical rows with dynamic discovery legitimately started with files_total=0.
--- Once a run is terminal, files_done is an observed lower bound on the final total;
--- never expose impossible terminal states such as 6 / 0 or 10 / 0.
+-- A run that discovers files as it goes can start with files_total = 0. Once
+-- terminal, files_done is a lower bound on the total, so a terminal row never
+-- shows files_done > files_total.
 UPDATE @extschema@.ingest_run_journal
    SET files_total = files_done
  WHERE status <> 'running'
@@ -54,10 +50,8 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    -- Legacy callers used "missing advisory lock" by itself as proof of death.
-    -- Refuse that transition while the canonical liveness predicate still has a
-    -- fresh heartbeat or a beacon. This makes old next-run cleanup obey the same
-    -- law as current Operator/deployment reconciliation without a parallel path.
+    -- A cancel that cites only a missing advisory lock is refused while the
+    -- liveness predicate still sees a fresh heartbeat or the lock.
     IF OLD.status = 'running'
        AND NEW.status = 'cancelled'
        AND COALESCE(NEW.error, '') LIKE 'run did not reach completion: liveness lock absent%'
@@ -86,8 +80,8 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    -- File lifecycle writes are sets. Touch each owning run once per statement,
-    -- including COPY and conflict-update statements, rather than once per file.
+    -- File lifecycle writes are sets: each owning run is touched once per
+    -- statement (COPY and conflict updates included), not once per file.
     UPDATE @extschema@.ingest_run_journal j
        SET heartbeat_at = clock_timestamp()
       FROM (SELECT DISTINCT run_id FROM changed_files) f
@@ -146,10 +140,9 @@ BEGIN ATOMIC
       FROM dead d;
 END;
 
--- Ingest run history, newest first. This is a read surface and must stay valid
--- inside the Operator API's read-only transaction. A stale persisted `running`
--- row is projected as cancelled from the same heartbeat+beacon predicate used by
--- the explicit mutating reconciler; displaying history never writes the journal.
+-- Ingest run history, newest first. Read-only: valid inside a read-only
+-- transaction. A stale 'running' row is projected as cancelled by the same
+-- liveness predicate the reconciler uses; reading never writes the journal.
 DROP FUNCTION IF EXISTS laplace.ingest_runs(int);
 CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
 RETURNS SETOF laplace.ingest_run_journal

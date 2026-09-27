@@ -23,7 +23,7 @@ export function formatPositionEval(whiteCp: number): { lead: string; detail: str
 
 /** Substrate move consensus as a delta from the neutral prior (1500). */
 export function formatSubstrateMoveDelta(effMu: number): string {
-  // ModalityEngine stamps terminal / mate-allowing edges outside the normal band.
+  // Standing outside this band marks a terminal or mate-allowing move.
   if (effMu <= 150) return '−M';
   if (effMu >= 3000) return '+M';
   const d = effMu - 1500;
