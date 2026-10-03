@@ -50,17 +50,55 @@ This directory declares the Tree-sitter grammar object libraries available to
    `{Loss=0,Draw=1,Win=2}` encoding with `attestations.outcome`), hence a real grammar
    rather than ad-hoc parsing.
 
-## The ~264 dormant submodules
+## The rest of the estate is already usable
 
-`external/tree-sitter-grammars/` registers **299** grammar submodules; only ~33 are
-load-bearing today (the 31 built directly + `sql`/`swift` as generated-copy sources of
-truth). The rest are dormant by design, not debris: the intent is a unified vendored
-rebuild of the full stack (see also `postgresql`/`postgis`/`geos`/`proj`/`gdal` submodules,
-kept for an Intel/Eigen/Spectra-linked unified build), and each modality/format that gains
-a decomposer wires up its grammar from the already-pinned pool. Wiring a new one is two
-lines: a `laplace_add_grammar` entry in `CMakeLists.txt` here and a registry row in
-`grammar_registry.c`.
+`external/tree-sitter-grammars/` registers **299** grammar submodules; **35** are wired
+into this directory and `grammar_registry.c`. The other checkouts are not debris, and they
+are not waiting on a hand-written decomposer.
 
-Do not deregister dormant submodules without the author's sign-off. If clone weight is a
+On this machine the sources are `/vault/Data/TreeSitter` (303 checkouts, 325 `grammar.js`).
+`Laplace-Engine/tools/build_grammars.sh` compiles each `src/parser.c` to
+`$LAPLACE_GRAMMARS/libtree-sitter-<name>.so`. **316** of those libraries are built.
+
+Tree-sitter parses. It returns a concrete syntax tree: a grammar-rule name and a byte span
+per node. That tree names the parts of a modality. UAX #29 still decomposes every span
+the tree (or a record rule) has decided is text: an XML text node, a TSV field, a source
+leaf, a PDF text run once a reader has extracted it. Whole-file UAX #29 is only the case
+where nothing else names the parts, such as a book with no recipe. The record is the
+composition the engine already runs for a recipe that names a grammar and no `node`
+lines: each node is the composition of its children, the bytes between children stay
+text, a leaf is UAX #29, and the file recomposes byte for byte. The caller keeps the
+trunk id and fetches the record for its physicality. See `Laplace-Wiki/Corpora/TreeSitter.md`.
+
+XML is the stock example: `grammar xml`, leaves are text, `libtree-sitter-xml.so` is
+built. A recipe is Laplace's grammar of a standardized format, whether or not a
+tree-sitter library exists for it: `grammar NAME` when one does, `tier` lines when the
+standard is records and separators, `grammar text` only when no format recipe exists.
+PDF (ISO 32000) and Word (ECMA-376, a package of XML parts) have neither a library in
+the vault nor a recipe. They need recipes. Admitting them as basic text is the wrong
+parse. The text those recipes recover is still UAX #29.
+
+Use that path for a language or a format whose only structure on this machine is one of
+those libraries:
+
+```
+grammar ada
+```
+
+A curated `node` or `format` file comes later, when a node kind is a key, a skip, or a
+reference. Until then the grammar-only recipe is the admission. Do not send the file
+through `grammar text` while the node lines are unwritten.
+
+A record standard still beats the grammar. IANA `text/tab-separated-values` and RFC 4180
+already say what a row and a field are. `tree-sitter-csv` is the wrong reader for a slot
+table: materializing a concrete tree of the rows copies a structure the line already has.
+The UCD XML reader is the same kind of exception, above.
+
+Wiring one of the 35 into this C++ registry is a separate act, for callers that link
+`grammar_registry.c`. It is two lines when you need it: `laplace_add_grammar` here and a
+row in `grammar_registry.c`. The Engine recipe path does not wait on that wiring. It loads
+the `.so` by name.
+
+Do not deregister a submodule without the author's sign-off. If clone weight is a
 concern, use shallow/on-demand submodule fetch (`git submodule update --depth 1` or
 `submodule.<name>.update=none` locally) rather than removing them.
