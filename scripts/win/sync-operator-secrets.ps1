@@ -9,9 +9,14 @@ param(
   [switch]$SkipWebhookSecret
 )
 $ErrorActionPreference = "Stop"
-if (-not $EnvFile) { $EnvFile = Join-Path $RepoRoot ".env" }
+# The operator's secrets: the repo-root .env, else the operator's own file, the same one hart-server's shell loads
+# (~/.config/shell/secrets.env: LICHESS_API, STRIPE_API_SECRET, LAPLACE_AUTH_*_CLIENT_ID/SECRET, ...).
+if (-not $EnvFile) {
+  $EnvFile = Join-Path $RepoRoot ".env"
+  if (-not (Test-Path -LiteralPath $EnvFile)) { $EnvFile = Join-Path $env:USERPROFILE ".config\shell\secrets.env" }
+}
 if (-not (Test-Path -LiteralPath $EnvFile)) {
-  throw "Missing $EnvFile — create it with LICHESS_API / STRIPE_API_SECRET"
+  throw "Missing $EnvFile — create it with LICHESS_API / STRIPE_API_SECRET (repo-root .env or ~/.config/shell/secrets.env)"
 }
 
 $secretsDir = Join-Path $RepoRoot "deploy\secrets"

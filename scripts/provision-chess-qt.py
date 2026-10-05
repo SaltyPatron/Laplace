@@ -38,7 +38,10 @@ def main():
             python = venv / ('Scripts/python.exe' if windows else 'bin/python')
             if not python.is_file():
                 run([sys.executable, '-m', 'venv', venv])
-            run([python, '-m', 'pip', 'install', '--disable-pip-version-check', f'aqtinstall=={lock["aqtinstall_version"]}'])
+            # aqtinstall_source, when the lock names one: a pinned commit of aqtinstall itself, for a Qt the released
+            # aqtinstall cannot fetch (Qt 6.11 moved its Windows packages into per-architecture folders; 3.3.0 looks in the old one)
+            requirement = f'aqtinstall @ {lock["aqtinstall_source"]}' if lock.get('aqtinstall_source') else f'aqtinstall=={lock["aqtinstall_version"]}'
+            run([python, '-m', 'pip', 'install', '--disable-pip-version-check', requirement])
             run([python, '-m', 'aqt', 'install-qt', 'windows' if windows else 'linux', 'desktop',
                  lock['qt_version'], 'win64_msvc2022_64' if windows else 'linux_gcc_64',
                  '-O', args.root, '-m', *lock['qt_modules']])

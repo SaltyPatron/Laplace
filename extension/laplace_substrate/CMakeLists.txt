@@ -12,7 +12,7 @@ set(EXT_EXECUTION_SOURCES
     src/fold_route.c
     src/consensus_bulk_write.c
     src/hash_leaves.c
-    ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/text_root_placements.c
     src/content_trajectory_read.c
@@ -39,9 +39,9 @@ set(EXT_EXECUTION_SOURCES
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-    "${PROJECT_SOURCE_DIR}/engine/core/include/laplace/core/*.h")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/include/laplace/core/*.h")
 set(_execution_inputs CMakeLists.txt ${EXT_EXECUTION_SOURCES} ${_execution_headers}
-    ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.def)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.def)
 list(SORT _execution_inputs)
 set(_execution_hashes "testing=${BUILD_TESTING};${LAPLACE_PG_MAJOR};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};${LAPLACE_TARGET_ISA}")
 foreach(_input IN LISTS _execution_inputs)
@@ -178,6 +178,12 @@ if(WIN32)
         laplace_dynamics
         "${LAPLACE_PG_LIBDIR}/postgres.lib"
     )
+    # 128-bit integer arithmetic (__modti3, __floattidf) comes from the compiler's own runtime, which link.exe does
+    # not find by itself; the execution module below links it too
+    execute_process(COMMAND "${CMAKE_C_COMPILER}" /clang:-print-resource-dir OUTPUT_VARIABLE _icx_resource OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+        target_link_libraries(${EXT_NAME} PRIVATE "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+    endif()
 else()
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
     set_target_properties(${EXT_NAME} PROPERTIES
@@ -201,7 +207,7 @@ else()
     # server from starting. Fail the build instead (2026-09-25: containers_of
     # called the execution library's consensus scan).
     add_custom_command(TARGET ${EXT_NAME} POST_BUILD
-        COMMAND bash "${PROJECT_SOURCE_DIR}/scripts/check-preloaded-module-symbols.sh"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/check-preloaded-module-symbols.sh"
             "$<TARGET_FILE:${EXT_NAME}>"
             "$<TARGET_FILE:laplace_core>" "$<TARGET_FILE:laplace_dynamics>"
         VERBATIM)
@@ -228,6 +234,11 @@ if(WIN32)
         "${LAPLACE_PG_INCLUDEDIR}")
     target_compile_definitions(laplace_execution PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
     target_link_libraries(laplace_execution PRIVATE ${EXT_NAME} "${LAPLACE_PG_LIBDIR}/postgres.lib")
+    # 128-bit integer conversions (__floattidf) come from the compiler's own runtime, which link.exe does not find by itself
+    execute_process(COMMAND "${CMAKE_C_COMPILER}" /clang:-print-resource-dir OUTPUT_VARIABLE _icx_resource OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+        target_link_libraries(laplace_execution PRIVATE "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+    endif()
 endif()
 
 # These generated files live in the shared build tree. Preserve unchanged mtimes

@@ -37,7 +37,20 @@ rem :ensure_cli publishes this tree when missing.
 if not defined LAPLACE_CLI_EXE set "LAPLACE_CLI_EXE=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r\Laplace.Cli.exe"
 if not defined LAPLACE_CLI_DLL set "LAPLACE_CLI_DLL=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r\Laplace.Cli.dll"
 set "LAPLACE_DEPLOY_PG=%LAPLACE_DEPLOY:\=/%"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
+rem The server's binaries are the prefix's (LAPLACE_PG_PREFIX), not an installer's; override PGBIN for another server.
+if not defined PGBIN set "PGBIN=%LAPLACE_PG_PREFIX%\bin"
+rem The external source tree the engine, the extensions and the app read (blake3, eigen, spectra, fathom, tree-sitter,
+rem postgis, tree-sitter-grammars), under the data root; on HART-DESKTOP each entry is a junction to the checkout the
+rem Laplace-Operations manifest keeps under D:\Libraries\src (and the grammars under D:\Data\Ingest\TreeSitter).
+if not defined LAPLACE_EXTERNAL set "LAPLACE_EXTERNAL=%LAPLACE_DATA_ROOT%\external"
+rem Where CMake finds the dependencies the engine and the extensions look up (ZLIB, LibXml2, ICU, PostgreSQL): the
+rem prefixes under LAPLACE_DEPS_PREFIX, each a junction to its Laplace-Operations install (D:\Libraries\<name>\<version>).
+set "CMAKE_PREFIX_PATH=%LAPLACE_PG_PREFIX:\=/%;%LAPLACE_DEPS_PREFIX:\=/%/zlib;%LAPLACE_DEPS_PREFIX:\=/%/zstd;%LAPLACE_DEPS_PREFIX:\=/%/libxml2;%LAPLACE_DEPS_PREFIX:\=/%/icu;%CMAKE_PREFIX_PATH%"
+if not defined ICU_ROOT set "ICU_ROOT=%LAPLACE_DEPS_PREFIX:\=/%/icu"
+if not defined CMAKE_LIBRARY_PATH set "CMAKE_LIBRARY_PATH=%LAPLACE_DEPS_PREFIX:\=/%/icu/lib64"
+if not defined MKLROOT set "MKLROOT=C:\Program Files (x86)\Intel\oneAPI\mkl\latest"
+rem The DLLs the engine's core loads at run time (the app's OpenAPI emission and the perfcache tools load it too).
+set "PATH=%LAPLACE_DEPS_PREFIX%\icu\bin64;%LAPLACE_DEPS_PREFIX%\zlib\bin;%LAPLACE_DEPS_PREFIX%\zstd\bin;%LAPLACE_DEPS_PREFIX%\libxml2\bin;%PATH%"
 set "PATH=%PGBIN%;%PATH%"
 set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 set "PATH=D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
