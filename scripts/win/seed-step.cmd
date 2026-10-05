@@ -198,6 +198,9 @@ if /i "%STEP%"=="atomic2020"    set "STEP_SOURCE=Atomic2020Decomposer"
 if /i "%STEP%"=="ud"            set "STEP_SOURCE=UDDecomposer"
 if /i "%STEP%"=="wiktionary"    set "STEP_SOURCE=WiktionaryDecomposer"
 if /i "%STEP%"=="tatoeba"       set "STEP_SOURCE=TatoebaDecomposer"
+rem A recipe-driven source journals its runs under the recipe's sourceName (recipes\**\*.source.json), not the
+rem decomposer class above: the verification asks for the name the run was written under.
+for /f "usebackq delims=" %%v in (`python "%LAPLACE_ROOT%/scripts/recipe-source-name.py" %STEP% %STEP_SOURCE%`) do set "STEP_SOURCE=%%v"
 if /i "%STEP%"=="opensubtitles" set "STEP_SOURCE=OpenSubtitlesDecomposer"
 if /i "%STEP%"=="document"      set "STEP_SOURCE=UserPrompt"
 if /i "%STEP%"=="stack"         set "STEP_SOURCE=StackDecomposer"
@@ -216,7 +219,7 @@ rem is satisfied by a run killed after its first committed batch, but only a run
 rem REACHED a clean terminal status (ok, or skipped-complete on an already-done source)
 rem with evidence persisted proves the step finished. evidence_count stays informational.
 set "STEP_STATUS="
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT status || '/' || evidence_persisted FROM laplace.ingest_run_journal WHERE source_name = '%STEP_SOURCE%' ORDER BY started_at DESC LIMIT 1;"`) do set "STEP_STATUS=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT status || '/' || CASE WHEN evidence_persisted THEN 't' ELSE 'f' END FROM laplace.ingest_run_journal WHERE source_name = '%STEP_SOURCE%' ORDER BY started_at DESC LIMIT 1;"`) do set "STEP_STATUS=%%v"
 if not defined STEP_STATUS goto verify_fail
 set "STEP_EVIDENCE="
 for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT ops.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
