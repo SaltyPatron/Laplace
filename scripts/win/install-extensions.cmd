@@ -89,22 +89,9 @@ rem Perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewa
 call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%CHESS_SRC%" "%DEPLOY%\share" || exit /b 1
-rem laplace_core's own runtime dependencies (dumpbin /dependents): zlib, ICU, libxml2, from the dependency prefix. A
-rem backend module's dependencies are searched beside the module (LOAD_WITH_ALTERED_SEARCH_PATH), not on the service's PATH.
-call :swapcopy "%LAPLACE_DEPS_PREFIX%\zlib\bin\z.dll" "%PGRT%" || exit /b 1
-call :swapcopy "%LAPLACE_DEPS_PREFIX%\libxml2\bin\libxml2.dll" "%PGRT%" || exit /b 1
-for %%F in (icuuc78 icuin78 icudt78) do call :swapcopy "%LAPLACE_DEPS_PREFIX%\icu\bin64\%%F.dll" "%PGRT%" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" "%PGRT%" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll" "%PGRT%"
-
-rem MKL's TBB threading layer, whatever its current interface version (2026.1: mkl_tbb_thread.3.dll)
-set "MKL_TBB="
-for %%F in ("C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_tbb_thread.*.dll") do if /i not "%%~nF:~-1"=="d" set "MKL_TBB=%%~fF"
-if not defined MKL_TBB ( echo missing build artifact: mkl_tbb_thread.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
-call :swapcopy "%MKL_TBB%" "%PGRT%" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libmmd.dll" "%PGRT%" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libiomp5md.dll" "%PGRT%"
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\svml_dispmd.dll" "%PGRT%" || exit /b 1
+rem laplace_core's own run-time dependencies, the one list (engine-runtime.cmd): beside postgres.exe, where a backend
+rem module's dependencies are searched (LOAD_WITH_ALTERED_SEARCH_PATH), not on the service's PATH.
+call "%~dp0engine-runtime.cmd" "%PGRT%" || exit /b 1
 
 rem geos/proj/sqlite are STATIC into laplace_geom — no runtime DLLs to deploy for them.
 

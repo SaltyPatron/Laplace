@@ -261,7 +261,11 @@ def existing_source(source):
     resolved = receipt_source_path(source)
     if not source.is_dir():
         raise ValueError(f"Selected Stockfish source is not an existing directory: {source}")
-    if Path(git(source, "rev-parse", "--show-toplevel")).resolve() != source.resolve():
+    toplevel = git(source, "rev-parse", "--show-toplevel")
+    if os.name == "nt" and toplevel.startswith("/"):
+        # MSYS2's git (the Stockfish toolchain on Windows) prints a POSIX path: its own cygpath gives the Windows one
+        toplevel = subprocess.run(["cygpath", "-w", toplevel], capture_output=True, text=True, check=True).stdout.strip()
+    if Path(toplevel).resolve() != source.resolve():
         raise ValueError(f"Stockfish source is not a repository root: {source}")
     origin = git(source, "config", "--get", "remote.origin.url").rstrip("/")
     if origin.removesuffix(".git") not in (

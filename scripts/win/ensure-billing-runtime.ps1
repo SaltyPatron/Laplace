@@ -9,7 +9,7 @@ param(
   [string]$NssmExe = "D:\NSSM\nssm-2.24\win64\nssm.exe",
   [string]$ServiceName = "LaplaceStripeListen",
   [string]$DeviceName = "laplace-win-dev",
-  [string]$ForwardTo = "http://127.0.0.1:5187/v1/billing/webhooks/stripe",
+  [string]$ForwardTo = "http://127.0.0.1:8080/v1/billing/webhooks/stripe",   # the IIS site publish-deploy.cmd deploys (deploy\windows\Install-LaplaceSite.ps1)
   [string]$LogDir = "D:\Data\Output",
   [switch]$RequireService
 )
@@ -102,10 +102,18 @@ if ($null -eq $svc) {
   Write-Host "[ensure-billing-runtime] installed + started $ServiceName"
 } else {
   if ($isAdmin) {
-    if (Set-ListenerApiKey -Name $ServiceName -Key $apiKey -Nssm $NssmExe) {
+    $desiredArgs = "listen --forward-to $ForwardTo --device-name $DeviceName"
+    $currentArgs = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters" -Name AppParameters -ErrorAction SilentlyContinue).AppParameters
+    $changed = Set-ListenerApiKey -Name $ServiceName -Key $apiKey -Nssm $NssmExe
+    if ($currentArgs -ne $desiredArgs) {
+      & $NssmExe set $ServiceName AppParameters $desiredArgs | Out-Null
+      & $NssmExe set $ServiceName Description "Forwards Stripe test webhooks to $ForwardTo" | Out-Null
+      $changed = $true
+    }
+    if ($changed) {
       & $NssmExe restart $ServiceName | Out-Null
       Start-Sleep -Seconds 2
-      Write-Host "[ensure-billing-runtime] $ServiceName API key updated + restarted"
+      Write-Host "[ensure-billing-runtime] $ServiceName API key or forward target updated + restarted"
     } elseif ($svc.Status -ne "Running") {
       & $NssmExe start $ServiceName | Out-Null
       Start-Sleep -Seconds 1

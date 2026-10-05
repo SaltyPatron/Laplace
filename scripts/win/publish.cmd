@@ -125,6 +125,8 @@ for %%D in (core dynamics synthesis) do (
   copy /y "%LAPLACE_ENGINE_BUILD%\%%D\laplace_%%D.dll" "%PUBLISH_OUT%\" >nul
 )
 
+rem the engine DLLs' run-time dependencies beside them: IIS's worker searches beside the module, not the PATH
+call "%HERE%engine-runtime.cmd" "%PUBLISH_OUT%" || exit /b 1
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%HERE%publish-zstd.ps1" -Destination "%PUBLISH_OUT%"
 if errorlevel 1 exit /b 1
 

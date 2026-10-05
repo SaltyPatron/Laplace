@@ -4,6 +4,12 @@ from pathlib import Path
 import stat
 import subprocess
 
+if os.name == "nt":
+    # MSYS2's git (the Windows Stockfish toolchain puts it first on the PATH) re-parses its command line with globbing
+    # on, so an argument such as refs/tags/sf_19^{commit} loses its braces; noglob leaves every argument as given.
+    # Git for Windows does not read the variable.
+    os.environ["MSYS"] = " ".join(filter(None, [os.environ.get("MSYS"), "noglob"]))
+
 
 def git_command(source, *arguments):
     return ["git", "--no-replace-objects", "-c", "safe.directory=" + str(source),
