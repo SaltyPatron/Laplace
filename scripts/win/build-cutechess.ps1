@@ -33,10 +33,16 @@ if (-not $vcvars) {
     }
 }
 if (-not $vcvars -or -not (Test-Path $vcvars)) { throw 'MSVC x64 C++ build tools missing; install Visual Studio C++ Build Tools or set LAPLACE_VCVARS' }
-$vcEnvironment = & $env:ComSpec /d /s /c "`"`"$vcvars`" >nul && set`""
-if ($LASTEXITCODE -ne 0) { throw 'MSVC environment setup failed' }
-foreach ($line in $vcEnvironment) {
-    if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
+# The MSVC environment, unless the caller's shell already is one (vcvars sets VSCMD_VER). A path with spaces survives
+# only when vcvars is called from a script of its own: pwsh re-quotes an argument that holds quotes.
+if (-not $env:VSCMD_VER) {
+    $vcScript = Join-Path $work 'vcvars-env.cmd'
+    Set-Content -LiteralPath $vcScript -Value "@call `"$vcvars`" >nul`r`n@set" -Encoding ascii
+    $vcEnvironment = & $env:ComSpec /d /c $vcScript
+    if ($LASTEXITCODE -ne 0) { throw 'MSVC environment setup failed' }
+    foreach ($line in $vcEnvironment) {
+        if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
+    }
 }
 $zstdSource = if ($env:LAPLACE_ZSTD_SOURCE) { $env:LAPLACE_ZSTD_SOURCE } else { Join-Path $external 'zstd' }
 $zstdBuild = if ($env:LAPLACE_ZSTD_BUILD) { $env:LAPLACE_ZSTD_BUILD } else { Join-Path $env:LAPLACE_BUILD_ROOT 'build-zstd' }

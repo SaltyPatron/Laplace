@@ -7,8 +7,9 @@
   "latest_api": "https://api.github.com/repos/cutechess/cutechess/releases/latest",
   "verified_utc": "2026-09-15",
   "qt_version": "6.11.2",
-  "aqtinstall_version": "3.3.0",
+  "aqtinstall_version": "3.3.1.dev166",
   "qt_modules": [
     "qt5compat"
-  ]
+  ],
+  "aqtinstall_source": "git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
 }
