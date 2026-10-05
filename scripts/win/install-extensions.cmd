@@ -79,19 +79,32 @@ if not exist "%SUB_DIR%\laplace_execution_module.txt" exit /b 1
 set /p EXECUTION_MODULE=<"%SUB_DIR%\laplace_execution_module.txt"
 call :swapcopy "%SUB_DIR%\!EXECUTION_MODULE!.dll" || exit /b 1
 copy /y "%SUB_DIR%\laplace_execution_module.txt" "%DEPLOY%\share\extension\" >nul || exit /b 1
-call :swapcopy "%LAPLACE_ENGINE_BUILD%\core\laplace_core.dll" || exit /b 1
-call :swapcopy "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" || exit /b 1
+rem A backend module's dependencies are not searched beside the module: PostgreSQL loads it with LoadLibrary
+rem (src/port/win32dlopen.c), so Windows looks beside postgres.exe and on the service's PATH. Every DLL a module
+rem needs at run time therefore goes beside postgres.exe, as PostGIS's install puts geos and proj there.
+set "PGRT=%LAPLACE_PG_PREFIX%\bin"
+call :swapcopy "%LAPLACE_ENGINE_BUILD%\core\laplace_core.dll" "%PGRT%" || exit /b 1
+call :swapcopy "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" "%PGRT%" || exit /b 1
 rem Perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm).
 call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%CHESS_SRC%" "%DEPLOY%\share" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
+rem laplace_core's own runtime dependencies (dumpbin /dependents): zlib, ICU, libxml2, from the dependency prefix. A
+rem backend module's dependencies are searched beside the module (LOAD_WITH_ALTERED_SEARCH_PATH), not on the service's PATH.
+call :swapcopy "%LAPLACE_DEPS_PREFIX%\zlib\bin\z.dll" "%PGRT%" || exit /b 1
+call :swapcopy "%LAPLACE_DEPS_PREFIX%\libxml2\bin\libxml2.dll" "%PGRT%" || exit /b 1
+for %%F in (icuuc78 icuin78 icudt78) do call :swapcopy "%LAPLACE_DEPS_PREFIX%\icu\bin64\%%F.dll" "%PGRT%" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" "%PGRT%" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll" "%PGRT%"
 
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_tbb_thread.2.dll" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libmmd.dll" || exit /b 1
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libiomp5md.dll"
-call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\svml_dispmd.dll" || exit /b 1
+rem MKL's TBB threading layer, whatever its current interface version (2026.1: mkl_tbb_thread.3.dll)
+set "MKL_TBB="
+for %%F in ("C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_tbb_thread.*.dll") do if /i not "%%~nF:~-1"=="d" set "MKL_TBB=%%~fF"
+if not defined MKL_TBB ( echo missing build artifact: mkl_tbb_thread.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
+call :swapcopy "%MKL_TBB%" "%PGRT%" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libmmd.dll" "%PGRT%" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libiomp5md.dll" "%PGRT%"
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\svml_dispmd.dll" "%PGRT%" || exit /b 1
 
 rem geos/proj/sqlite are STATIC into laplace_geom — no runtime DLLs to deploy for them.
 
@@ -123,7 +136,8 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
   echo ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_chess_position_perfcache.bin';
   rem laplace_substrate joins whatever the server already preloads (observability modules on a shared server), never replaces it
   echo SELECT CASE WHEN current_setting^('shared_preload_libraries'^) ~ '\mlaplace_substrate\M' THEN current_setting^('shared_preload_libraries'^) WHEN current_setting^('shared_preload_libraries'^) = '' THEN 'laplace_substrate' ELSE current_setting^('shared_preload_libraries'^) ^|^| ',laplace_substrate' END AS spl \gset
-  echo ALTER SYSTEM SET shared_preload_libraries = :'spl';
+  rem unquoted: a list setting takes its elements one by one; one quoted text holding commas would be one library name
+  echo ALTER SYSTEM SET shared_preload_libraries = :spl;
   echo SELECT pg_reload_conf^(^);
 )
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
@@ -140,8 +154,8 @@ set "OK=1"
 for %%P in (
   "%DEPLOY%\lib\laplace_substrate.dll"
   "%DEPLOY%\lib\laplace_geom.dll"
-  "%DEPLOY%\lib\laplace_core.dll"
-  "%DEPLOY%\lib\svml_dispmd.dll"
+  "%PGRT%\laplace_core.dll"
+  "%PGRT%\svml_dispmd.dll"
   "%T0_DST%"
   "%HW_DST%"
   "%CHESS_DST%"

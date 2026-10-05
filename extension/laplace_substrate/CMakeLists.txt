@@ -178,6 +178,12 @@ if(WIN32)
         laplace_dynamics
         "${LAPLACE_PG_LIBDIR}/postgres.lib"
     )
+    # 128-bit integer arithmetic (__modti3, __floattidf) comes from the compiler's own runtime, which link.exe does
+    # not find by itself; the execution module below links it too
+    execute_process(COMMAND "${CMAKE_C_COMPILER}" /clang:-print-resource-dir OUTPUT_VARIABLE _icx_resource OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+        target_link_libraries(${EXT_NAME} PRIVATE "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+    endif()
 else()
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
     set_target_properties(${EXT_NAME} PROPERTIES
