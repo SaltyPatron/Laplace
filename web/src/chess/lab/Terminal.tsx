@@ -10,7 +10,7 @@ import {
   type TerminalDirection,
   type TerminalFilter,
   type TranscriptRow,
-} from './terminal';
+} from './terminal-model';   // not './terminal': on a case-insensitive filesystem it shadows this module for '../Terminal' importers
 import styles from './Terminal.module.css';
 
 /** Rendered rows are capped independently of the buffer — 6000 <div>s is not a scrollback. */

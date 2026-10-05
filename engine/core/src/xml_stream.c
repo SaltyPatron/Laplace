@@ -98,7 +98,7 @@ static xmlEntityPtr get_entity(void* ctx, const xmlChar* name) {
      * an internal DTD declaration can cause a second physical artifact read. */
     return xmlGetPredefinedEntity(name);
 }
-static void xml_error(void* ctx, xmlErrorPtr error) {
+static void xml_error(void* ctx, const xmlError* error) {   /* libxml2 >= 2.12: the structured error callback takes a const xmlError* */
     laplace_xml_stream_t* s = ctx;
     if (error && error->level >= XML_ERR_ERROR) {
         s->failed = -2;

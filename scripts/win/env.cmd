@@ -37,7 +37,8 @@ rem :ensure_cli publishes this tree when missing.
 if not defined LAPLACE_CLI_EXE set "LAPLACE_CLI_EXE=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r\Laplace.Cli.exe"
 if not defined LAPLACE_CLI_DLL set "LAPLACE_CLI_DLL=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r\Laplace.Cli.dll"
 set "LAPLACE_DEPLOY_PG=%LAPLACE_DEPLOY:\=/%"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
+rem The server's binaries are the prefix's (LAPLACE_PG_PREFIX), not an installer's; override PGBIN for another server.
+if not defined PGBIN set "PGBIN=%LAPLACE_PG_PREFIX%\bin"
 set "PATH=%PGBIN%;%PATH%"
 set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 set "PATH=D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
