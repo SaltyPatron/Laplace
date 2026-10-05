@@ -34,7 +34,12 @@ if(WIN32)
     find_library(LAPLACE_LIBPROJ NAMES proj HINTS "${_proj_libdir}" NO_DEFAULT_PATH REQUIRED)
     find_library(LAPLACE_LIBSQLITE3 NAMES sqlite3 HINTS "${LAPLACE_DEPS_PREFIX}/sqlite/lib" NO_DEFAULT_PATH REQUIRED)
 
-    set(POSTGIS_SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/postgis")
+    # the PostGIS source: under the external root the engine reads (LAPLACE_EXTERNAL), else the repository's external/
+    if(DEFINED ENV{LAPLACE_EXTERNAL} AND NOT "$ENV{LAPLACE_EXTERNAL}" STREQUAL "" AND EXISTS "$ENV{LAPLACE_EXTERNAL}/postgis/liblwgeom")
+        set(POSTGIS_SRCDIR "$ENV{LAPLACE_EXTERNAL}/postgis")
+    else()
+        set(POSTGIS_SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/postgis")
+    endif()
     set(LWGEOM_DIR "${POSTGIS_SRCDIR}/liblwgeom")
 
     set(POSTGIS_MAJOR_VERSION 3)

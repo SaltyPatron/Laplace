@@ -121,7 +121,9 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
   echo ALTER SYSTEM SET laplace_substrate.perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin';
   echo ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin';
   echo ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_chess_position_perfcache.bin';
-  echo ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate';
+  rem laplace_substrate joins whatever the server already preloads (observability modules on a shared server), never replaces it
+  echo SELECT CASE WHEN current_setting^('shared_preload_libraries'^) ~ '\mlaplace_substrate\M' THEN current_setting^('shared_preload_libraries'^) WHEN current_setting^('shared_preload_libraries'^) = '' THEN 'laplace_substrate' ELSE current_setting^('shared_preload_libraries'^) ^|^| ',laplace_substrate' END AS spl \gset
+  echo ALTER SYSTEM SET shared_preload_libraries = :'spl';
   echo SELECT pg_reload_conf^(^);
 )
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1

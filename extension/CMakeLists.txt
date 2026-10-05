@@ -70,7 +70,7 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set_target_properties(laplace_core PROPERTIES
         IMPORTED_LOCATION "${LAPLACE_ENGINE_BUILD}/core/laplace_core_static.lib"
         INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../engine/core/include"
-        INTERFACE_LINK_LIBRARIES "${LAPLACE_ENGINE_BUILD}/_deps/blake3/blake3.lib")
+        INTERFACE_LINK_LIBRARIES "${LAPLACE_ENGINE_BUILD}/_deps/blake3/blake3.lib;${LAPLACE_ENGINE_BUILD}/tree_sitter_rt.lib")   # the core's private tree-sitter runtime, which a static library does not carry
 
     add_library(laplace_dynamics STATIC IMPORTED GLOBAL)
     set_target_properties(laplace_dynamics PROPERTIES
