@@ -36,12 +36,14 @@ function Read-EnvFile([string]$path) {
   }
   return $map
 }
-function Publish-Service([string]$project, [string]$out) {
+function Publish-Service([string]$project, [string]$out, [string]$serviceName) {
   if ($SkipPublish -and (Test-Path -LiteralPath $out)) { return }
+  # a running service holds its files: stopped before its tree is written (Ensure-Service starts it again)
+  if ($isAdmin -and (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { & $NssmExe stop $serviceName confirm 2>$null | Out-Null }
   & dotnet publish (Join-Path $RepoRoot "app\$project\$project.csproj") -c Release --no-self-contained -o $out --nologo -v q
   if ($LASTEXITCODE -ne 0) { throw "publish of $project failed" }
-  foreach ($d in "core", "dynamics", "synthesis") {
-    $dll = Join-Path $env:LAPLACE_ENGINE_BUILD "$d\laplace_$d.dll"
+  foreach ($d in "core\laplace_core", "dynamics\laplace_dynamics", "synthesis\laplace_synthesis", "core\laplace_syzygy") {
+    $dll = Join-Path $env:LAPLACE_ENGINE_BUILD "$d.dll"
     if (-not (Test-Path -LiteralPath $dll)) { throw "missing $dll (build-engine.cmd)" }
     Copy-Item -LiteralPath $dll -Destination $out -Force
   }
@@ -99,7 +101,7 @@ foreach ($kv in (Read-EnvFile (Join-Path $secrets "chess-lab.env")).GetEnumerato
 $lichessSecrets = Read-EnvFile (Join-Path $secrets "lichess.env")
 if (-not $lichessSecrets.Count) { throw "deploy\secrets\lichess.env missing - scripts\win\sync-operator-secrets.cmd" }
 $lichessOut = Join-Path $env:LAPLACE_OUT "lichess"
-Publish-Service "Laplace.Endpoints.Lichess" $lichessOut
+Publish-Service "Laplace.Endpoints.Lichess" $lichessOut "LaplaceLichess"
 $work = Join-Path $env:LAPLACE_BUILD_ROOT "work\lichess"
 $envLichess = $common + @("TMPDIR=$work", "TMP=$work", "TEMP=$work")
 foreach ($kv in $lichessSecrets.GetEnumerator()) { $envLichess += "$($kv.Key)=$($kv.Value)" }
@@ -110,7 +112,7 @@ Ensure-Service "LaplaceLichess" "Laplace Lichess bot (managed)" (Join-Path $lich
 $mcpSecrets = Read-EnvFile (Join-Path $secrets "mcp.env")
 if ($mcpSecrets.Count) {
   $mcpOut = Join-Path $env:LAPLACE_OUT "mcp"
-  Publish-Service "Laplace.Endpoints.Mcp" $mcpOut
+  Publish-Service "Laplace.Endpoints.Mcp" $mcpOut "LaplaceMcp"
   $work = Join-Path $env:LAPLACE_BUILD_ROOT "work\mcp"
   $envMcp = $common + @("TMPDIR=$work", "TMP=$work", "TEMP=$work")
   foreach ($kv in $mcpSecrets.GetEnumerator()) { $envMcp += "$($kv.Key)=$($kv.Value)" }

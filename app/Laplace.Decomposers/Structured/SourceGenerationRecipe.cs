@@ -96,7 +96,11 @@ public class SourceGenerationRecipe
         if (sourceRoot is not null)
         {
             if (string.IsNullOrWhiteSpace(sourceRoot)) throw new InvalidDataException("Source root cannot be empty.");
-            sourceRoot = Path.GetFullPath(sourceRoot, Path.GetDirectoryName(manifest)!);
+            // A relative root is under the corpus root (LaplaceInstall.ResolveIngestRoot: /vault/Data on hart-server,
+            // D:\Data\Ingest on HART-DESKTOP), so one recipe names the same generation on every machine; an absolute
+            // root is taken as written.
+            sourceRoot = Path.IsPathRooted(sourceRoot) ? Path.GetFullPath(sourceRoot)
+                : Path.GetFullPath(sourceRoot, LaplaceInstall.ResolveIngestRoot());
         }
         bool selected = root.TryGetProperty("selected", out var selectedValue) && selectedValue.GetBoolean();
         var rules = new List<SourceGenerationArtifactRule>();

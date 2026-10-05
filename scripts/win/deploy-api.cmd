@@ -73,6 +73,7 @@ for %%F in (
   laplace_core.dll
   laplace_dynamics.dll
   laplace_synthesis.dll
+  laplace_syzygy.dll
 ) do (
   call :verify_hash "%%F" || set "VERIFY_FAILED=1"
 )

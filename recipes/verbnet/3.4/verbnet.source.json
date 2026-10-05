@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 3,
   "selected": true,
-  "root": "/vault/Data/VerbNet/verbnet-master",
+  "root": "VerbNet/verbnet-master",
   "aliases": [
     "verbnet-recipe"
   ],

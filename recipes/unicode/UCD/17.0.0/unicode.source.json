@@ -8,7 +8,7 @@
   "aliases": [
     "unicode"
   ],
-  "root": "/vault/Data/UCD/Public/UCD/latest",
+  "root": "UCD/Public/UCD/latest",
   "artifacts": [
     {
       "selector": "ReadMe.txt",

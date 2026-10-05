@@ -403,7 +403,7 @@ public sealed class UnicodeDecomposer
     {
         ct.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(ecosystemPath))
-            ecosystemPath = "/vault/Data/UCD/Public/UCD/latest";
+            ecosystemPath = LaplaceInstall.ResolvePathUnderIngest("UCD", "Public", "UCD", "latest");   // the corpus root of the platform, not a Linux path
         if (!Directory.Exists(ecosystemPath))
             return Task.FromResult<IngestArtifactGraph?>(null);
 
