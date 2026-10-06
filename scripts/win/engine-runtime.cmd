@@ -20,6 +20,21 @@ set "MKL_TBB="
 for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_tbb_thread.*.dll") do if /i not "%%~nF:~-1"=="d" set "MKL_TBB=%%~fF"
 if not defined MKL_TBB ( echo missing build artifact: mkl_tbb_thread.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
 call :put "!MKL_TBB!" || exit /b 1
+rem MKL's core, which the threading layer imports (mkl_tbb_thread.3.dll -> mkl_core.3.dll): without it laplace_dynamics
+rem does not load in the site and every belief projection fails with a TypeInitializationException
+set "MKL_CORE="
+for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_core.*.dll") do set "MKL_CORE=%%~fF"
+if not defined MKL_CORE ( echo missing build artifact: mkl_core.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
+call :put "!MKL_CORE!" || exit /b 1
+rem MKL's CPU dispatch kernels: mkl_core picks one at run time with LoadLibrary, so they are in no import table, and
+rem when the one for this CPU is missing MKL ends the process ("Intel oneMKL FATAL ERROR: Cannot load mkl_avx2.3.dll"),
+rem which in IIS crashes every worker until rapid-fail protection disables the pool. All of them, for any CPU.
+for %%K in (def mc3 avx2 avx512 vml_def vml_mc3 vml_avx2 vml_avx512 vml_cmpt) do (
+  set "MKL_K="
+  for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_%%K.*.dll") do set "MKL_K=%%~fF"
+  if not defined MKL_K ( echo missing build artifact: mkl_%%K.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
+  call :put "!MKL_K!" || exit /b 1
+)
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libmmd.dll" || exit /b 1
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libiomp5md.dll"
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\svml_dispmd.dll" || exit /b 1
