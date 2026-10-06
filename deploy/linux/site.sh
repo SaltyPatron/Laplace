@@ -173,7 +173,11 @@ phase_database() {
   fi
   sql -d postgres \
     -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET dynamic_library_path = '$EXT_LIBDIR:\$libdir'" \
-    -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET extension_control_path = '$EXT_SHARE:\$system'" >/dev/null
+    -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET extension_control_path = '$EXT_SHARE:\$system'" \
+    -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET session_preload_libraries = 'laplace_substrate'" >/dev/null
+  # session_preload_libraries: laplace_execution_<hash>.so resolves laplace_substrate's symbols (dlopen RTLD_GLOBAL),
+  # so the substrate is loaded first in every session of this database. The monorepo's own hosts put it in the
+  # cluster's shared_preload_libraries; here the cluster is Operations' and the setting stays this database's.
   local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f
   for g in perfcache_path:laplace_t0_perfcache highway_perfcache_path:laplace_highway_perfcache \
            vocabulary_perfcache_path:laplace_vocabulary_perfcache chess_position_perfcache_path:laplace_chess_position_perfcache; do
