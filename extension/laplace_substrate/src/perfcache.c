@@ -220,6 +220,16 @@ laplace_substrate_perfcache_prewarm(void)
      * raises the error with its detail. */
     if (!process_shared_preload_libraries_in_progress)
         return;
+#ifdef EXEC_BACKEND
+    /* Without fork (Windows) every backend is a new process that runs the
+     * preload again, so a prewarm here loads every blob in every backend,
+     * whether it ever uses one or not: 482 ms from backend start to the first
+     * query on HART-DESKTOP, 17 ms without it (2026-10-06), and every
+     * connection to every database on the server pays it. Only the postmaster
+     * prewarms; a backend loads on first use. */
+    if (IsUnderPostmaster)
+        return;
+#endif
 
     if (perfcache_path != NULL && perfcache_path[0] != '\0')
     {
