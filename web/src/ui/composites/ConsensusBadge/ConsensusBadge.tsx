@@ -9,11 +9,14 @@ export interface ConsensusBadgeProps {
   tone?: 'chat' | 'explore';
 }
 
+// The standing's witness_count is the number of matchups played into it, not of distinct
+// witnesses: one source stating a link with a count of 547 plays 547 games. It is named
+// what it is.
 function formatLabel(mu: number | undefined, witnesses: number | undefined, tone: 'chat' | 'explore'): string {
   const parts: string[] = [];
   if (mu !== undefined) parts.push(`μ ${mu.toFixed(tone === 'chat' ? 3 : 1)}`);
   if (witnesses !== undefined) {
-    parts.push(tone === 'chat' ? `${witnesses}w` : `${witnesses} wit`);
+    parts.push(tone === 'chat' ? `${witnesses}g` : `${witnesses.toLocaleString()} ${witnesses === 1 ? 'game' : 'games'}`);
   }
   return parts.join(' · ');
 }
@@ -47,7 +50,7 @@ export function ConsensusBadge({ mu, witnesses, ordUsed, tone = 'explore' }: Con
           </Badge>
         </TooltipTrigger>
         <TooltipContent>
-          eff_mu {mu} — Glicko-2 95% confidence lower bound; {witnesses ?? 0} witnesses
+          eff_mu {mu} — Glicko-2 95% confidence lower bound; {witnesses ?? 0} games played
         </TooltipContent>
       </Tooltip>
     );

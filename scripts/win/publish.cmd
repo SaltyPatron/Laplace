@@ -98,9 +98,12 @@ if defined SKIP_MANAGED_BUILD (
   dotnet publish app\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj ^
       -c %CONFIG% --no-self-contained -o "%PUBLISH_OUT%"
 ) else (
-  rem OpenAICompat was built in step 1 — publish without rebuilding.
+  rem OpenAICompat was built in step 1, before the web build replaced wwwroot (the web build
+  rem needs step 1's openapi.json). Its static-asset manifest names the assets wwwroot held
+  rem then, so publishing --no-build fails whenever the web app changed: the hashed files it
+  rem names are gone. The publish builds again, incrementally, and reads wwwroot as it is now.
   dotnet publish app\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj ^
-      -c %CONFIG% --no-build --no-self-contained -o "%PUBLISH_OUT%"
+      -c %CONFIG% --no-self-contained -o "%PUBLISH_OUT%"
 )
 if errorlevel 1 (
   echo [publish] FAILED

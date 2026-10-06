@@ -778,14 +778,16 @@ internal sealed partial class SubstrateClient
         Func<T, string> label,
         Func<T, string> id)
     {
+        // Labels compare exactly: "not" and "Not" are different text and tell their entities
+        // apart already; only the same text naming different entities needs an identity.
         return rows
-            .GroupBy(label, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(label, StringComparer.Ordinal)
             .Where(g => g.Select(id)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Take(2)
                 .Count() > 1)
             .Select(g => g.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     private static string DisambiguateDisplayLabel(
