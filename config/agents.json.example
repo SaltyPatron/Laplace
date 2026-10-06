@@ -15,6 +15,16 @@
       "max_tokens": 8192
     },
 
+    "//vertex": "Vertex AI on this machine's Application Default Credentials.",
+    "//vertex2": "Bills the Cloud project (a trial credit lives here). No key in",
+    "//vertex3": "this file. gemini-3.x is served from location global. A bare",
+    "//vertex4": "gemini-* name still uses the API-key `google` provider above.",
+    "vertex": {
+      "provider": "vertex",
+      "model": "gemini-3.8-flash",
+      "max_tokens": 8192
+    },
+
     "openai": {
       "provider": "openai",
       "model": "gpt-5.4",

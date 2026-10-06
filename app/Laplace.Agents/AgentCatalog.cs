@@ -281,31 +281,30 @@ public sealed class AgentCatalog
         foreach (var (name, def) in _aliases.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {
             var provider = AgentProviders.Get(def.Provider);
-            // Describe never runs a token command: a configured command counts as
-            // credentialed without spawning an auth subprocess per row.
-            var minted = !string.IsNullOrWhiteSpace(def.TokenCommand);
-            var (key, keyEnv) = minted ? (null, "token_command") : ResolveKey(provider, def);
+            // Describe never runs a token command or an ADC refresh: a configured
+            // command, or a readable ADC file, counts as credentialed.
+            var (keyEnv, credentialed, credentialSource) = CredentialVerdict(provider, def);
             rows.Add(new AgentDescriptor(
                 name, provider.Id, def.Model ?? provider.DefaultModel,
                 ResolveBaseUrl(provider, def.BaseUrl), keyEnv,
-                minted || key is not null || !provider.RequiresKey,
+                credentialed,
                 IsAlias: true,
                 IsDefault: string.Equals(name, defaultRef, StringComparison.OrdinalIgnoreCase),
                 Auth: (def.Auth ?? provider.Auth).ToString().ToLowerInvariant(),
-                CredentialSource: minted ? $"token_command: {def.TokenCommand}" : $"env: {keyEnv}"));
+                CredentialSource: credentialSource));
         }
 
         foreach (var provider in AgentProviders.All)
         {
-            var (key, keyEnv) = ResolveKey(provider, definition: null);
+            var (keyEnv, credentialed, credentialSource) = CredentialVerdict(provider, definition: null);
             rows.Add(new AgentDescriptor(
                 provider.Id, provider.Id, provider.DefaultModel,
                 ResolveBaseUrl(provider, null), keyEnv,
-                key is not null || !provider.RequiresKey,
+                credentialed,
                 IsAlias: false,
                 IsDefault: string.Equals(provider.Id, defaultRef, StringComparison.OrdinalIgnoreCase),
                 Auth: provider.Auth.ToString().ToLowerInvariant(),
-                CredentialSource: $"env: {keyEnv}"));
+                CredentialSource: credentialSource));
         }
 
         return rows;
@@ -385,24 +384,39 @@ public sealed class AgentCatalog
                 "define an alias with a \"model\" in agents.json.");
 
         var baseUrl = ResolveBaseUrl(provider, definition?.BaseUrl);
-        if (baseUrl.Length == 0)
-            throw new AgentException(
-                $"provider '{provider.Id}' has no base URL. Set \"base_url\" on the agent (or on " +
-                $"providers.{provider.Id}) in agents.json.");
 
-        // A token_command outranks every key variable: the credential is minted per
-        // resolve, never read from a possibly stale env var.
+        // A token_command outranks every key variable and ADC: the credential is
+        // minted per resolve, never read from a possibly stale env var.
         string? key;
         string keyEnv;
+        var headers = definition?.Headers;
         if (!string.IsNullOrWhiteSpace(definition?.TokenCommand))
         {
             key = TokenCommand.Run(definition!.TokenCommand!);
             keyEnv = "token_command";
+            // A command can mint the bearer, but user ADC still needs the quota
+            // project on the request. Skip it when the file is absent.
+            if (provider.UsesAdc && GoogleAdc.TryQuotaProject(_env, out var project))
+                headers = GoogleAdc.WithQuotaProject(headers, project);
+        }
+        else if (provider.UsesAdc)
+        {
+            var session = GoogleAdc.Mint(_env);
+            key = session.AccessToken;
+            keyEnv = "adc";
+            if (baseUrl.Length == 0)
+                baseUrl = GoogleAdc.PublisherBaseUrl(session.ProjectId, session.Location);
+            headers = GoogleAdc.WithQuotaProject(headers, session.ProjectId);
         }
         else
         {
             (key, keyEnv) = ResolveKey(provider, definition);
         }
+
+        if (baseUrl.Length == 0)
+            throw new AgentException(
+                $"provider '{provider.Id}' has no base URL. Set \"base_url\" on the agent (or on " +
+                $"providers.{provider.Id}) in agents.json.");
 
         if (key is null && provider.RequiresKey)
             throw new AgentException(
@@ -413,7 +427,28 @@ public sealed class AgentCatalog
             name, provider, resolvedModel, baseUrl, key,
             definition?.MaxTokens, definition?.Temperature, definition?.System,
             definition?.Auth ?? provider.Auth,
-            definition?.Headers);
+            headers);
+    }
+
+    /// <summary>
+    /// Credential verdict for <see cref="Describe"/>. Never mints a token and never
+    /// returns a secret. ADC counts as present when the credentials file can be
+    /// read and a project resolves.
+    /// </summary>
+    private (string KeyEnv, bool Credentialed, string Source) CredentialVerdict(
+        AgentProvider provider, AgentDefinition? definition)
+    {
+        if (!string.IsNullOrWhiteSpace(definition?.TokenCommand))
+            return ("token_command", true, $"token_command: {definition!.TokenCommand}");
+
+        if (provider.UsesAdc)
+        {
+            var configured = GoogleAdc.IsConfigured(_env);
+            return ("adc", configured, "adc");
+        }
+
+        var (key, keyEnv) = ResolveKey(provider, definition);
+        return (keyEnv, key is not null || !provider.RequiresKey, $"env: {keyEnv}");
     }
 
     private string ResolveBaseUrl(AgentProvider provider, string? fromDefinition)
@@ -428,6 +463,12 @@ public sealed class AgentCatalog
         if (provider.Id == "laplace")
             return $"{LaplaceInstall.EndpointBaseUrl}/v1";
 
+        // Vertex's publisher URL carries the project, which is machine state, not
+        // a table row. Describe reports an empty URL when that state is absent
+        // rather than throwing; Build mints ADC and fills the URL there.
+        if (provider.UsesAdc)
+            return GoogleAdc.TryPublisherBaseUrl(_env, out var url) ? url : "";
+
         return provider.DefaultBaseUrl.TrimEnd('/');
     }
 
@@ -439,6 +480,7 @@ public sealed class AgentCatalog
         if (_providerOverrides.TryGetValue(provider.Id, out var ov) && !string.IsNullOrWhiteSpace(ov.ApiKeyEnv))
             names.Add(ov.ApiKeyEnv!.Trim());
         names.AddRange(provider.ApiKeyEnvNames);
+        if (names.Count == 0) return (null, "adc");
 
         foreach (var n in names)
         {

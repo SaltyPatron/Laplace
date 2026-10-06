@@ -94,7 +94,7 @@ class ConfigureLaplaceEnvironmentTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("LAPLACE_AGENT_DEFAULT=gemini", runner.read_text())
+        self.assertIn("LAPLACE_AGENT_DEFAULT=vertex", runner.read_text())
         self.assertIn("LAPLACE_ROOT=/srv/Laplace-Legacy", runner.read_text())
 
     def test_runner_env_requires_the_roots_it_exports(self):

@@ -76,8 +76,9 @@ Static API keys are the only option most vendors offer for inference — OpenAI,
 xAI, Groq, DeepSeek and Mistral have no OAuth on the completions API, and
 OpenRouter's PKCE flow *issues a key* rather than replacing one. Where OAuth or
 SSO does exist it is a different endpoint and flow per provider, not a flag:
-Anthropic profiles (`ant auth login`), Google via Vertex AI's ADC, Azure/Foundry
-via Entra ID, Bedrock via SigV4 and IAM Identity Center.
+Anthropic profiles (`ant auth login`), Google Vertex AI via the `vertex`
+provider (Application Default Credentials, below), Azure/Foundry via Entra ID,
+Bedrock via SigV4 and IAM Identity Center.
 
 Three per-agent fields cover every case that is a bearer token:
 
@@ -106,8 +107,36 @@ command exists to prevent. It is also **not a shell**: the string is split on
 whitespace honouring quotes and executed directly, so no pipeline or substitution
 runs. Name a shell explicitly if you need one.
 
-What these three fields do **not** cover: AWS SigV4 (Bedrock) and Google ADC
-(Vertex) are request *signing*, not a header, so they need real signing code.
+What these three fields do **not** cover: AWS SigV4 (Bedrock) is request
+signing, not a header, so it needs real signing code.
+
+Google ADC is not that. It is an OAuth refresh token on disk. The `vertex`
+provider reads it and exchanges it for a bearer:
+
+- Credentials: `GOOGLE_APPLICATION_CREDENTIALS`, else
+  `~/.config/gcloud/application_default_credentials.json`. The file must be
+  `type: authorized_user` from `gcloud auth application-default login`. A
+  service-account JSON is refused.
+- Project, first hit: `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT`, `GOOGLE_PROJECT`,
+  `quota_project_id` in that file, the active gcloud config's `[core] project`.
+- Location, first hit: `GOOGLE_CLOUD_LOCATION`, `CLOUDSDK_COMPUTE_REGION`,
+  `GOOGLE_CLOUD_REGION`, else `global`. `gemini-3.x` publisher models answer on
+  `global`. A regional location 404s for them. The global host is
+  `aiplatform.googleapis.com`, with no location prefix.
+- Request: `Authorization: Bearer` plus `x-goog-user-project` set to that
+  project, unless the agent already set the header. The URL is
+  `{host}/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent`.
+- The access token is cached in the process until a minute before `expires_in`.
+  A new login changes the credentials file's write time and the next call
+  refreshes. `Describe` / `agents` does not refresh; a readable file with a
+  project counts as credentialed, reported as `adc`, and the token value is
+  never returned.
+
+That call bills the Cloud project in the URL (`trafficType: ON_DEMAND`). The
+`google` provider does not: it posts to the Generative Language API with
+`x-goog-api-key`, and a bare `gemini-*` name still resolves there. Name
+`vertex` or `vertex/<model>` to spend a Cloud credit. `token_command` still
+outranks ADC when an alias sets one.
 
 ## Checking a route before blaming the vendor
 
@@ -140,8 +169,11 @@ safe to read into a model's context.
   name is provider data, not a branch.
 - **OpenAI Responses** gets `input`, optional `instructions`, and
   `max_output_tokens`; this is the route used by the `codex` alias.
-- **Google** gets `contents` / `systemInstruction` / `generationConfig`, and its
-  key rides `x-goog-api-key`.
+- **Google** (`google` and `vertex`, the same body) gets `contents` /
+  `systemInstruction` / `generationConfig`. On `google` the key rides
+  `x-goog-api-key`. On `vertex` the credential is the ADC bearer. Gemini 3
+  thinking tokens count against `maxOutputTokens`; an alias cap of a few dozen
+  tokens comes back empty with `finishReason: MAX_TOKENS`.
 - A **refusal** (Anthropic `stop_reason: "refusal"`) or an upstream block
   (Google `promptFeedback.blockReason`) returns an **empty reply with a
   finish_reason and a note**, not an error. Both arrive as HTTP 200 with an empty

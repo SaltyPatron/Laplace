@@ -47,7 +47,8 @@ public sealed record AgentProvider(
     string? DefaultModel = null,
     string MaxTokensField = "max_tokens",
     AgentAuth Auth = AgentAuth.Bearer,
-    string KeyHeader = "Authorization")
+    string KeyHeader = "Authorization",
+    bool UsesAdc = false)
 {
     /// <summary>
     /// Base URLs end at the version segment; the wire supplies the path suffix.
@@ -74,11 +75,19 @@ public static class AgentProviders
             Auth: AgentAuth.KeyHeader, KeyHeader: "x-api-key"),
         new("xai", AgentWire.OpenAiChat, "https://api.x.ai/v1",
             ["XAI_API_KEY"]),
-        // Key header on the Generative Language API. An OAuth-fronted host is an
-        // agent with its own base_url, bearer auth and token_command.
+        // Generative Language API, billed to an API key. A Cloud credit is not
+        // spent here; that is the vertex row below.
         new("google", AgentWire.GoogleGenerative, "https://generativelanguage.googleapis.com/v1beta",
             ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
             Auth: AgentAuth.KeyHeader, KeyHeader: "x-goog-api-key"),
+        // Vertex AI publisher models. The base URL is built per machine from
+        // Application Default Credentials (see GoogleAdc); it is empty here so a
+        // project id never lands in this table. RequiresKey stays true: a missing
+        // ADC file is a credential fault, not an anonymous call.
+        new("vertex", AgentWire.GoogleGenerative, "",
+            [],
+            Auth: AgentAuth.Bearer,
+            UsesAdc: true),
         new("openrouter", AgentWire.OpenAiChat, "https://openrouter.ai/api/v1",
             ["OPENROUTER_API_KEY"]),
         new("groq", AgentWire.OpenAiChat, "https://api.groq.com/openai/v1",

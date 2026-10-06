@@ -174,7 +174,7 @@ def main() -> None:
     parser.add_argument("--refactor-root", type=Path)
     parser.add_argument("--install-prefix", type=Path, default=Path("/opt/laplace"))
     parser.add_argument("--public-base-url", default="https://hart-server:8443")
-    parser.add_argument("--default-agent", default="gemini")
+    parser.add_argument("--default-agent", default="vertex")
     parser.add_argument("--runner-env", type=Path)
     parser.add_argument("--skip-operator", action="store_true")
     args = parser.parse_args()
