@@ -30,7 +30,10 @@ a new private receipt path for each invocation and never substitutes the latest
 source run. It derives the complete expected artifact paths from the project's literal
 `Content` selection, verifies the bundled bytes against the authored files, and
 uses the existing native BLAKE3/Merkle file-resume recipe to read back the exact
-byte fingerprint and source-scoped layer-2 completion attestation for every file.
+byte fingerprint and source-scoped layer-2 completion record for every file.
+Completion is operational state and a receipt, not testimony: the current code
+writes it as an attestation, which the identity law does not allow, and it must
+move out of the attestation table.
 The file journal must account for that exact set as admitted and complete; the
 run must be `ok`, uncapped, and backed by persisted evidence. Output contains
 paths, identities, byte counts and completion status. Original contract text is
@@ -83,8 +86,11 @@ provenance. No separate source worker or database writer is introduced.
 The bundled `define justice` annotation supplies a syntactic exemplar. Its
 separate `seeds/operational/tasks/en_define.json` declaration names the actual
 admitted parse identity and the second token reference, recovered from native
-source admission. That declaration calls the governed `HAS_DEFINITION` relation
-and accepts a witnessed `WordNet_Synset` semantic binding for the second token.
+source admission. That declaration calls the definition relation and accepts a
+witnessed synset binding for the second token. `HAS_DEFINITION` and
+`WordNet_Synset` are developer handles for registry slots; the relation and the
+entity type are content-derived entities whose meaning is attested, and no
+identity is derived from those English labels.
 The first token remains invariant. Both artifacts are authored operational
 evidence with `SubstrateMandate` provenance; neither claims upstream UD authorship.
 
@@ -107,7 +113,8 @@ The additional `The opposite of empty is` annotation retains an intentionally
 unfinished five-token fragment. Its fourth token is the prospective variable;
 the other four forms are invariant source content. Its separate
 `seeds/operational/tasks/en_antonym.json` declaration references the actual
-admitted parse and fourth token, calls `IS_ANTONYM_OF`, and accepts the current
+admitted parse and fourth token, calls the antonym relation (handle
+`IS_ANTONYM_OF`), and accepts the current
 whole `Word` identity as its input. Its version-2 slot explicitly declares the
 `CURRENT_FORM` binding mode. The declaration contains no answer.
 The native executor consumes the same generic token-slot contract as the
@@ -158,27 +165,32 @@ complete match. A surface name alone cannot supply an applicability declaration.
 A new request need not already have an observed corpus parse: its complete
 ordered surface can instantiate the explicitly declared substitutions. The
 resulting structural projection is an inference under the shape contract, with
-its own recipe identity; it is never recorded as a new `HAS_PARSE` observation
+its own receipt; it is never recorded as a new parse observation
 merely because matching succeeded. Existing observed parses constrain that
 projection and cannot be bypassed when they contradict it.
 
 The native JSON grammar is parsed once with full-source admission. The source
 witness reuses that AST, creates a type-8 structural trajectory, and records
-`exemplar_parse IS_EXAMPLE_OF shape`, `shape CALLS predicate`, and the complete
-`shape HAS_INPUT slot` set under one source-file context. Missing, duplicate,
+the claims that the exemplar parse is an example of the shape, that the shape
+calls the predicate, and the complete set of the shape's input slots, each
+witnessed by the source. Missing, duplicate,
 unknown, or malformed fields fail admission. Referenced parses, predicates,
 token references and entity types are not manufactured by this source.
 
 The trajectory is `[schema, exemplar_parse, predicate, (slot, token_ref,
-accepted_type)*, slots_end]`. Its identity is the Document-tier Merkle
-composition of those exact IDs. Each slot is the Document-tier Merkle
-composition of `[token_slot_schema, token_ref, accepted_type]`. The marker names
-are `laplace/task-shape/relation-read/token-slots/v1`,
-`laplace/task-shape/token-slot/v1`, and `laplace/task-shape/slots-end/v1`.
+accepted_type)*, slots_end]`. Its identity is the Merkle composition of those
+exact IDs. Each slot is the Merkle composition of `[token_slot_schema, token_ref,
+accepted_type]`. The current code takes the marker IDs as blob hashes of made-up
+strings (`laplace/task-shape/relation-read/token-slots/v1`,
+`laplace/task-shape/token-slot/v1`, `laplace/task-shape/slots-end/v1`). Those are
+fake identifiers and violate the identity law: an ID is content, no version
+suffix appears in an ID, and a string is never blob-hashed into a second ID.
+The schema marker must be the decomposed content of the declaration's own
+`schema` text, or a referenced trunk.
 Source-file identity belongs to provenance, so changing JSON presentation can
 change its source occurrence without changing the declared shape.
 
-Version 2 uses the schema `laplace/task-shape/relation-read/token-slots/v2`
+Version 2 uses the schema text `laplace/task-shape/relation-read/token-slots/v2`
 and requires a `binding_mode_id` on every slot. `WITNESSED_SEMANTIC` retains
 the same typed, source-witnessed semantic binding alternatives as version 1;
 multiple complete interpretations remain ambiguous. `CURRENT_FORM` binds the
@@ -189,7 +201,8 @@ and lemma evidence remains available to other contracts and operators.
 The version-2 trajectory retains `[schema, exemplar_parse, predicate,
 (slot, token_ref, accepted_type, binding_mode)*, slots_end]`. Its slot identity
 commits all four constituents `[token_slot_schema, token_ref, accepted_type,
-binding_mode]`. Both schema and slot markers carry version 2. An unsupported
+binding_mode]`. Both schema and slot marker strings carry version 2; the
+version is part of the declaration's text, never a suffix minted into an ID. An unsupported
 mode or a slot identity that omits or changes the declared mode fails decoding;
 the runtime cannot silently reinterpret a version-1 contract as current-form
 binding. The version-1 representation and existing definition declaration stay

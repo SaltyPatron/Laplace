@@ -17,8 +17,8 @@ Corpora, conversations, code, games, tools, conventional models and generated ou
 Conversation uses the same representation as every other domain:
 
 - admitted atomic/typed structure composes recursively into exact finite higher structures;
-- canonical executable identity is derived under a declared recipe; source/provenance/worker/batch facts do not silently remint equal content;
-- canonical executable identity is the Merkle hash over the ordered child-id sequence; the current `hash128_merkle` discards its tier argument, so tier is altitude/occurrence metadata and is not part of content identity; single-child composition preserves the child id;
+- executable identity is derived from content alone; the recipe decides the tree, never the hash, and source/provenance/worker/batch facts do not silently remint equal content;
+- canonical executable identity is the Merkle hash over the ordered child-id sequence; the current `hash128_merkle` discards its tier argument, so tier is altitude/occurrence metadata and is not part of content identity; single-child composition preserves the child id; the current `hash128_merkle` also prepends a `0x01` domain byte, which violates the identity law and must be removed;
 - current Tier-0 text generation uses deterministic S³/Super-Fibonacci placement inside the common 4D frame;
 - parent physicality `coord`, packed trajectory carrier and realized child-coordinate curve are different state;
 - a packed GeometryZM trajectory vertex carries the complete 128-bit constituent id plus ordinal/run/typed flags and is not a child spatial position;

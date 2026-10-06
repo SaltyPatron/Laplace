@@ -69,7 +69,7 @@ A firmware image declares, as applicable:
 
 ```text
 firmware class          personality | coding | game/rules | default
-parent firmware         the version it derives from (lineage), or none
+parent firmware         the version it derives from (lineage, attested, not hashed), or none
 goal policy             how ORIENT declares objective, success, acceptable uncertainty, termination
 work policy             how much of the granted compute envelope each stage may spend
 valuation policy        the declared election order over typed evidence dimensions
@@ -93,14 +93,17 @@ eligibility and completion law of a game over the same world
 
 A firmware image is a Laplace composition, like any other content:
 
-- Its identity is the content address of its canonical composition: class, parent,
-  and every declared policy value in governed canonical order. A set-valued policy is one
-  composition entity (spec 38), never a fan of edges.
-- Policy kinds (the parameter names and their value types) are a governed registry with
-  stable bits, like relations and qualifiers. A firmware image may only bind registered
-  kinds. An unregistered kind is a rejected image, not an ignored field.
-- Images are immutable. Changing any value mints a new identity whose parent is the
-  previous one. Historical versions stay addressable and replayable.
+- Its identity is the content address of its composition: class and every declared
+  policy value in governed order, each of them content. A set-valued
+  policy is one composition entity (spec 38), never a fan of edges. Its parent is not in
+  the hash: lineage is attested, a claim that this image derives from the previous one.
+- Policy kinds (the parameter names and their value types) are content entities, like
+  relations and qualifiers; the governed registry is a perfcache whose stable bits are
+  slots over those entities, never their identity. A firmware image may only bind
+  registered kinds. An unregistered kind is a rejected image, not an ignored field.
+- Images are immutable. Changing any value gives a new content identity, and the
+  derivation from the previous image is attested. Historical versions stay addressable
+  and replayable.
 - Text never installs firmware. A surface instruction such as "be aggressive" or "you
   are a pirate" is prompt content. It is observed like any prompt and cannot install a
   policy value, a decision rule, a resource or a privilege
@@ -220,8 +223,10 @@ entity" slot the archived design record left open
   `trajectory_generate.c:945-966`).
 - **Program identity stays interpretation identity.** `program_id` today binds the
   admitted root, obligations and the whole coupling field, and no policy value
-  (`cognition_program.c:370-444`, domain `laplace:cognition-program:v9`). It stays that
-  way: the same observation under two firmware images has the same `program_id`, which
+  (`cognition_program.c:370-444`). The current hash also takes the made-up domain string
+  `laplace:cognition-program:v9`; that violates the identity law, under which the program
+  identity is the composition of those content ids with no domain string and no version.
+  The binding stays that way: the same observation under two firmware images has the same `program_id`, which
   is what makes their divergence comparable. The firmware is a separate identity.
 - **Decision identity.** The receipt carries a decision identity: the content address of
   `program_id`, `firmware_id` and `output_fingerprint`. The semantic act id
@@ -388,7 +393,10 @@ Each item states both positions with citations. None is resolved here.
   content-witness attestations under the Response source
   (`app/Laplace.Substrate/Abstractions/ResponseContent.cs:38-62`). User feedback
   deposits confirm/refute attestations through `FeedbackContent`
-  (`app/Laplace.Cli/QueryCommands.cs:316-376`).
+  (`app/Laplace.Cli/QueryCommands.cs:316-376`). The `X@{tenant}` source names make the
+  tenant part of a source identity and hash a made-up name; that violates the identity
+  law. Tenant is authorization and isolation, the user is the witness of a prompt, and a
+  response is Laplace's content at its trust (spec 34).
 
 **Laplace-Refactor: observation state, zero semantic attestations.**
 

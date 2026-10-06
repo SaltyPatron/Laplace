@@ -41,7 +41,7 @@ firmware / rules / scoring
 
 ## Identity is not the label
 
-Game pieces are canonical executable entities under declared recipes. Current Hash128/BLAKE3-derived ids are the implementation address, not the abstract content itself.
+Game pieces are executable entities whose identity is their content: BLAKE3 over the ordered child ids down to codepoints. A recipe decides how a game decomposes into a tree; it never salts the hash.
 
 Human names, handles, translations, notations and aliases are realization/reference state. Missing pretty text does not make an entity missing and must not remint it.
 

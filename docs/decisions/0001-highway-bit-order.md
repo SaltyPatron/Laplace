@@ -4,6 +4,10 @@ Status: **ACCEPTED 2026-07-20** — explicit `bit = N`, append-only. Written 202
 from the forest audit; decided by the operator 2026-07-20 (see §Decision). Implementation
 is GH #551; the layout freezes at the next operator-ordered full reseed.
 
+Note: a highway bit is a perfcache slot over a content-derived relation entity, never the
+relation's identity. The relation's meaning is attested and realizable in any language, and
+the "canonical names" below are developer handles in the manifest.
+
 ## The problem
 
 Highway bits (the 256-bit relation-type channel bank on every entity and attestation)

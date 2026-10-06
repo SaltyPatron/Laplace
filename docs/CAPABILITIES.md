@@ -212,7 +212,7 @@ A realized AST's validity is not sufficient for correctness; type/link/runtime/b
 
 ## Duplicate code should converge
 
-Content addressing makes exact duplicate code the trivial case: the same canonical code composition under the same recipe has the same identity even when observed in many repositories.
+Content addressing makes exact duplicate code the trivial case: the same code composition has the same identity wherever it is observed, in any repository. The recipe decides how the code decomposes into a tree; it never salts the hash.
 
 Duplicate detection then rises through increasingly stronger equivalence classes:
 

@@ -11,6 +11,28 @@ surface. Callers resolve ids with canonical helpers; they do not manufacture has
 Two observations of identical content converge on one entity id regardless of source,
 modality, ingestion order, or interpretation.
 
+A codepoint's id is BLAKE3 of its UTF-8 bytes, read from the Tier-0 ROM. A
+composition's id is BLAKE3 over its children's 16-byte ids, in order, repeats
+included, truncated to 16 bytes; a one-child composition is that child. The hash input
+holds nothing else: no domain byte, tier, type, recipe name, version, source, position,
+index, or role label. A recipe decides how content decomposes into a tree; it never
+salts a hash.
+
+Identity is one Merkle DAG from leaf to trunk: the recipe's tiers compose to a file's
+content tree; a file is `[metadata, content]`; a source is `[source record, its files'
+trunks in path order]`. A release is its files, so a new release has a new source
+trunk. Any client computes any id from the ROM with no database.
+
+Hashes are never faked. A hash of a made-up string (`substrate/source/X/v1`,
+`language:eng`, `operation/what_is/v1`) is a fake identifier, and a blob hash of a
+string's raw bytes gives the same text a second id. Such a string is decomposed
+content, a referenced trunk, or a recorded attestation.
+
+A source's identifiers are content. `i46360` is `[i,4,6,3,6,0]` wherever that text
+occurs; that it is an ILI is attested by the source that says so. Structured
+identifiers decompose into their parts. A record's position in a file, a line number,
+or a byte offset is occurrence under the trunk, never part of an id.
+
 Coordinate equality, spatial proximity, a shared name, or an ordinal slot is evidence
 about entities. None replaces content identity.
 
@@ -21,7 +43,9 @@ Tier is a property of a representation level and is never an input to the conten
 The same content has the same id at every tier. Tier predicates cannot be used as a
 proxy for semantic role, source, or modality.
 
-Tier 0 is the universal Unicode codepoint floor for textual content. Tokens, words,
+Tier 0 is the universal Unicode codepoint floor for all content: every modality
+decomposes to codepoint leaves. A raw byte, sample, or channel value is a number, a
+composition of digit codepoints under the scalar recipe, never a leaf of its own. Tokens, words,
 phrases, sentences, documents, programs, games, model circuits, and other modalities
 compose above that floor; packaging bytes do not redefine their content identity.
 
@@ -78,8 +102,9 @@ Likewise, if the exact ordered constituent sequence is admitted at two different
 hash128_merkle produces the same id. Tier is deliberately discarded by the executable
 hash law.
 
-Do not salt content identity with tier, source, parent/container, occurrence ordinal,
-semantic role/type label, modality, cache profile, physicality or provenance when those
+Do not salt content identity with a domain byte, tier, recipe, version, source,
+parent/container, occurrence ordinal, semantic role/type label, modality, cache
+profile, physicality or provenance when those
 facts do not change the canonical ordered constituent content itself.
 
 Rule #2 — Physicality is typed
@@ -118,9 +143,19 @@ must agree on version, vertex class, field layout, and bounds.
 Rule #5 — Evidence retains provenance
 -------------------------------------
 
-An attestation records subject, relation type, optional object, source, optional
-context, outcome, score, uncertainty inputs, and observation count. Absence of a row is
-unknown, not refutation. Refutation, draw, and confirmation remain distinct outcomes.
+An attestation records one claim and one witness: the claim is an n-ary composition
+of content ids with referential integrity, of any arity and any tier (a lexicalization
+`[lemma, language, ILI]`, a concept relation `[ILI, hypernym, ILI]`, a role inside a
+roleset, a valence pattern); the witness is a content-derived entity, never a blob hash
+or a made-up key. It carries the outcome,
+games, score, qualifiers, and context. `(subject, relation, object)` is one claim shape
+among many. Absence of a row is unknown, not refutation.
+
+A witness asserting the same claim n times plays n games, run-length. The client folds
+every repeat from one source, per cell, into one Glicko-2 rating period, and the
+database receives one update per cell per witness; different witnesses play first in,
+first out. The run length is also kept as a count beside the claim. A number the source states (a usage count, a sense order) is an
+observation, not games. A derived witness records its lineage, so copies count once. Refutation, draw, and confirmation remain distinct outcomes.
 
 Observed testimony is append-only evidence. Corrections add new testimony; they do not
 erase the earlier witness. Calculated testimony identifies its analyzer and version.
@@ -128,9 +163,10 @@ erase the earlier witness. Calculated testimony identifies its analyzer and vers
 Rule #6 — Consensus is one typed cell
 -------------------------------------
 
-The canonical consensus address is the typed `(subject, relation, object)` triple.
-Every source speaking about that triple folds into the same standing cell while source
-attestations remain inspectable. Rating, deviation, volatility, witness count, and
+The consensus address is the claim composition. Every source speaking about that
+claim folds into the same standing cell while source attestations remain inspectable.
+The cell is never keyed by `BLAKE3(subject || type || object)` with a zero-filled
+missing object. Rating, deviation, volatility, witness count, and
 source/context scope are part of the decision surface.
 
 Consensus is not an answer vote. It is the standing evidence state consumed before and
@@ -139,10 +175,14 @@ during one forward pass.
 Rule #7 — Relation types are governed
 -------------------------------------
 
-Canonical relation definitions and highway bits come from
-`engine/manifest/relation_types.toml`. Bits are explicit, append-only identifiers.
-Aliases resolve to canonical relations; they do not mint parallel meanings.
-Salience band, rank, hotness, and highway membership are separate properties.
+Relations are content-derived entities whose meaning is attested and realizable in any
+language. `engine/manifest/relation_types.toml` governs the relation registry, a
+perfcache over those entities: its highway bits are explicit, append-only slots, never
+relation identity, and its English names are developer handles. Aliases are attested
+equivalences: a source's own code is recorded as it arrives and sets the same bit as
+the relation it means; aliases do not mint parallel meanings. No code path tests for
+an English value. Salience band, rank, hotness, and highway membership are separate
+properties.
 
 Rule #8 — Determinism and receipts are product properties
 ---------------------------------------------------------

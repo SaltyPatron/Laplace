@@ -73,7 +73,7 @@ Distinguish source registration/capability from selected artifact estate, admitt
 
 ## W13 — Convergent recursive identity
 
-Prove that equal canonical structures under the same declared recipe converge across independent corpora/tokenizers/models/modalities while occurrence/source/provenance/testimony remain attributable. True cryptographic collision handling stays separate from ordinary content convergence. Historical owner lineage includes #574.
+Prove that equal content converges on one identity, the recipe deciding the tree and never the hash, across independent corpora/tokenizers/models/modalities while occurrence/source/provenance/testimony remain attributable. True cryptographic collision handling stays separate from ordinary content convergence. Historical owner lineage includes #574.
 
 ## W14 — Machine model / one execution substrate
 

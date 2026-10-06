@@ -68,9 +68,9 @@ A UI may display `Itachi Uchiha` or `Uchiha Itachi` according to a selected cult
 
 Submitting both strings cannot manufacture two different playable entities under a no-repeat rule if they resolve to the same canonical referent.
 
-Likewise provider handles, titles, nicknames, external identifiers and transliterations remain evidence/references used by resolution/realization; they do not mint extra game pieces simply because their surface strings differ.
+Likewise provider handles, titles, nicknames, external identifiers and transliterations are content as written, linked to what they name by attestation and used by resolution/realization; they do not mint extra game pieces simply because their surface strings differ.
 
-Current executable ids are finite Hash128/BLAKE3-derived addresses under declared recipes, not the human label and not the abstract content itself.
+Executable ids are finite Hash128 BLAKE3 content addresses: no recipe, label or version salts them, and a human label is its own content, never the id of what it names.
 
 ## Unicode endpoint law
 

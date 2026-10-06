@@ -30,11 +30,18 @@ The primitive laws compose into binding product consequences documented in `docs
 
 - A finite/countable typed basis forms a countably unbounded family of finite recursive
   compositions. Current widths are machine windows, never invention limits.
-- Same canonical content under the same recipe produces the same BLAKE3-derived
-  Hash128. Normal convergence is deduplication, not a cryptographic collision.
+- Same content produces the same BLAKE3-derived Hash128 wherever it occurs. The recipe
+  decides how content decomposes into a tree; it never salts the hash. A codepoint is
+  BLAKE3 of its UTF-8 bytes; a composition is BLAKE3 over its children's 16-byte ids in
+  order, with no domain byte, tier, type, recipe, version, source, or position in the
+  input. Normal convergence is deduplication, not a cryptographic collision.
+- One Merkle DAG runs from codepoint to source trunk: a file is `[metadata, content]`, a
+  source is `[source record, its files' trunks in path order]`. A release is its files.
+  Never hash a made-up string (`substrate/source/X/v1`, `language:eng`) or a raw text
+  blob into an id; decompose it, reference its trunk, or record an attestation.
 - `[k,i,n,g]` is one entity everywhere. Word/name/title/label/token/tier/source/container/sense/task role are occurrences, relations, evidence or physicality around that entity, not identity salts. The same law applies recursively: an exact ordered 2x2 pixel composition inside any 8x8/image/video is the same global subpatch entity and is referenced by the containing physicality trajectories.
 - Multi-child identity is Merkle-style over ordered child ids. Tier is excluded from
-  current content identity. Declared single-child composition collapses to the child.
+  content identity. A single-child composition is the child.
 - Tier is compositional altitude/floor in a modality grammar, not identity or ontology.
   Reobservation reuses structure while adding attributable occurrence/evidence state.
 - Finite digital scalars reuse canonical trajectories: `0.34567` composes from `0 . 3 4 5 6 7`; `255` from `2 5 5`. Repeated equal amplitudes/channels/tensor values reuse that scalar root while occurrence/time/channel/precision remain typed. A finite pi prefix is the same wide-composition law; never mint arbitrary numeric/media values as new Tier-0 atoms.
@@ -56,8 +63,8 @@ The primitive laws compose into binding product consequences documented in `docs
 - Qualified Tree-sitter grammars, native parsers, standards readers, codecs and decoders are providers when needed. Their CST/AST/record output is evidence or an external projection, not a second ontology.
 - Grammar productions, precedence, associativity, delimiter rules, fields and queries may themselves be ingested as entities/relations/attestations and used to derive higher-tier composition.
 - Prefer streaming/native standards readers for large shallow structured sources when they preserve the same facts more directly. Tree-sitter remains valuable for grammar knowledge, compatibility parsing, validation and realization.
-- Recipes disposition recovered facts into canonical content/physicality, occurrence, typed reference, provenance, testimony, calculation, packaging/reconstruction or unresolved state. AST/CST/IR may be derived/exported when an external consumer requires them.
-- The same recovered value may participate in multiple classes: e.g. a definition sentence is canonical content with physicality while `sense HAS_DEFINITION sentence` is separately attributed testimony.
+- Recipes disposition recovered facts into content/physicality, occurrence, provenance, testimony, calculation, packaging/reconstruction or unresolved state. A source's identifiers (`i46360`, `06975898-n`, `abandon.01`, `run-51.3.2`) are content like any other text; what they identify is attested by the source that says so. English names in manifests and code are developer handles; registries are perfcaches whose bits index content-derived entities. AST/CST/IR may be derived/exported when an external consumer requires them.
+- The same recovered value may participate in multiple classes: e.g. a definition sentence is content with physicality while the claim composition that links the concept to that sentence, witnessed by the source, is separately attributed testimony. A claim is an n-ary composition of content ids (`[lemma, language, ILI]`, `[ILI, hypernym, ILI]`); `(subject, relation, object)` is one shape among many.
 
 ## Physicality, trajectory, and O(tiers)
 

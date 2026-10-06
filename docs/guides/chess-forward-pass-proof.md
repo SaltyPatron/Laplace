@@ -29,7 +29,7 @@ Chess has a tightly bounded primitive/rule vocabulary and a huge finite-composit
 
 The identity law is:
 
-> **Same canonical chess content under the same declared recipe converges on the same executable identity.**
+> **Same chess content converges on the same executable identity; the recipe decides the tree, never the hash.**
 
 Current executable identity is a finite Hash128/BLAKE3-derived implementation choice. It is not the abstract content itself and it is not a proof of global mathematical injectivity.
 
@@ -292,7 +292,7 @@ On the managed 6C/12T host, benchmark/search experiments claiming **serviceable*
 
 The proving domain should demonstrate:
 
-- equal canonical chess states converge across PGN/book/self-play/calculation sources under the same recipe;
+- equal chess states converge on one content identity across PGN/book/self-play/calculation sources;
 - game/event occurrences remain distinct while reusable calculation results do not line-amplify;
 - exact trajectory/order/provenance survives transpositions/repeated structures;
 - Stockfish generation changes invalidate incompatible calculation-cache namespaces;

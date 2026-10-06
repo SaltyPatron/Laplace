@@ -161,12 +161,14 @@ Executable identities are BLAKE3-derived 128-bit ids. That is a finite machine a
 The governing behavior is **content-address convergence**:
 
 ```text
-same canonical content -> same executable identity
+same content -> same executable identity
 ```
 
-under the selected identity generation.
+A codepoint's identity is BLAKE3 of its UTF-8 bytes, read from the Tier-0 ROM with its coordinate, Hilbert value and flags. Composite identity is BLAKE3 over the children's 16-byte identities, in order, repeats included, truncated to 16 bytes. A single-child composition is the child. Nothing else enters the hash input: no domain byte, tier, type, recipe name, version, source, position, index or role label. A node can never collide with a leaf, because a leaf hashes one to four UTF-8 bytes and a node at least thirty-two.
 
-Composite identity is Merkle-style over the ordered child identities under the selected recipe/domain separation. A single-child composition is the child.
+A recipe decides how content decomposes into a tree, so the same bytes under a different decomposition can give a different trunk; a recipe never salts a hash. Identity is one Merkle DAG from leaf to trunk: codepoint → grapheme → word → sentence → … the recipe's tiers … → the file's content tree; the file's metadata tree; the file `[metadata, content]`; the source `[source record, its files' trunks in path order]`. A release is its files, so a new release has a different source trunk; version suffixes never appear in identities. Any client computes any identity from the ROM with no database.
+
+Hashes are never faked. A hash of a made-up string (`substrate/source/WordNetDecomposer/v1`, `language:eng`, `operation/what_is/v1`) is a fake identifier, and a blob hash of a string's raw bytes gives the same text a second identity. Such a string is decomposed content, a referenced trunk, or a recorded attestation.
 
 Native composition lives in `engine/core/src/hash_composer.c`.
 
@@ -192,7 +194,7 @@ They do not create another content identity.
 
 The same law applies recursively to every modality. A 2x2 pixel composition occurring inside an 8x8 region is the same canonical 2x2 entity when it appears in another region, another image, a video frame, or as a standalone selected structure. Higher structures reference it through their physicality/trajectory/occurrence structure.
 
-`hash128_merkle` ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton collapses to its child.
+`hash128_merkle` ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton collapses to its child. The current `hash128_merkle` prepends a `0x01` domain byte to that sequence; that violates the law above and disagrees with Laplace-Native and the Engine for every composition, and the byte must be removed.
 
 This is the fundamental deduplication law:
 
@@ -225,7 +227,7 @@ UAX #29 is a concrete text instance of this law: code points compose into graphe
 
 Sequence is already knowledge. The physicality trajectory preserves exactly which constituents occurred and in what logical order. Grammar productions, precedence, associativity, delimiters, arity, field/role names and similar rules are themselves ordinary entities/relations/attestations. They constrain which higher-tier composition is applicable; they do not require a second semantic universe of parser enums.
 
-For example, `[m,u,l,t,i,p,l,i,c,a,t,i,o,n]` is the canonical entity for the observed word "multiplication". A source may attest `multiplication IS_SYNONYM *` in a mathematical/programming context, while other contexts can attest other meanings for `*`. PEMDAS/precedence/associativity knowledge and the observed trajectory determine lawful composition. A parser-specific `MultiplicationOperator` node is therefore optional derived structure, not the meaning itself.
+For example, `[m,u,l,t,i,p,l,i,c,a,t,i,o,n]` is the canonical entity for the observed word "multiplication". A source may attest the claim composition `[multiplication, synonym, *]` in a mathematical/programming context, while other contexts can attest other meanings for `*`. PEMDAS/precedence/associativity knowledge and the observed trajectory determine lawful composition. A parser-specific `MultiplicationOperator` node is therefore optional derived structure, not the meaning itself.
 
 Qualified parsers, standards readers, codecs and decoders remain useful when a physical format requires recovery that cannot be obtained from raw tier segmentation alone. Their output is **provider evidence**, not canonical ontology. Exact fields/spans/errors/ambiguity/reconstruction facts may be retained as occurrences, references, testimony, calculation or packaging state according to the recipe.
 
@@ -373,11 +375,11 @@ Canonical content says what a structure is. It does not make every claim about t
 
 A witness may be a standards source, lexicon, corpus, document, user, tool, game, deterministic calculation provider, conventional model or Laplace itself. The source and context remain attributable.
 
-An attestation records a typed proposition and that witnessing occurred. Confirmation, draw/indeterminate evidence and refutation remain distinct; absence is not silently converted into falsehood.
+A claim is an n-ary composition of content identities with referential integrity, of any arity and any tier: a lexicalization `[lemma, language, ILI]`, a concept relation `[ILI, hypernym, ILI]`, a role inside a roleset, a valence pattern. `(subject, relation, object)` is one shape among many. An attestation records that claim, its witness (a content-derived entity, never a blob hash or a made-up key) and that witnessing occurred, with its outcome, games, score, qualifiers and context. Confirmation, draw/indeterminate evidence and refutation remain distinct; absence is not silently converted into falsehood.
 
 Consensus folds evidence about one proposition into standing. The intended standing state includes strength, uncertainty, volatility and witness breadth rather than one opaque confidence scalar.
 
-Glicko-2 is used because it provides a strength estimate plus uncertainty and surprise/volatility behavior. A claim is a game series: games plus a score in [0,1], where a draw is 0.5. Source semantics and relation identity are inputs to that fold.
+Glicko-2 is used because it provides a strength estimate plus uncertainty and surprise/volatility behavior. A claim is a game series: games plus a score in [0,1], where a draw is 0.5. Source semantics and the claim composition are inputs to that fold. A witness asserting the same claim n times is n games, run-length like a repeat in a path; the client folds every repeat from one source, per cell, into one Glicko-2 rating period, and the database receives one update per cell per witness. Different witnesses play first in, first out. Repetition buys certainty only up to a ceiling set by the witness's trust, so repetition alone cannot manufacture standing. The run length is also kept as a count beside the claim, never only merged into the standing. A number the source states, such as a usage count or sense order, is an observation, not games. A derived witness records its lineage, so copies count once.
 
 The important separation is:
 

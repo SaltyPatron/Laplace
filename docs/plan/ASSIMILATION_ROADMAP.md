@@ -46,11 +46,11 @@ The session's work was almost all on the input side: the recipe engine, governed
 ## 1. Laws stated or clarified in this session
 
 1. **A source is the witness of its observations.** WordNet did not invent "dog". It observed that dog is a noun. The witness identity is the content composition `[authority, release]` (`SourceWitness.Id`). A curated source has one witness per lexicon, for example `[omw-fr, 2.0]`.
-2. **Curated sources are mined for knowledge, not recorded bit-perfect.** Records, files and packaging are not content. Only user content needs exact reconstruction.
-3. **Normalize to Laplace standards at ingest.** Things that mean the same attest the same, just as the same content has the same hash. Examples: WordNet `n` becomes NOUN, and every language code becomes ISO 639-3. Justify each mapping by a governed authority. Never normalize through synonym attestations, never record raw codes, never fabricate records.
-4. **Governed vocabularies are perfcache ROM registries with stable bits.** This covers relations, POS, deprels, languages, entity types, qualifiers and trust classes. They are never seeded as rows.
+2. **Curated sources are mined for knowledge.** A source's files are content, and the source trunk composes their trunks. A record's fields are content; its position in the file, its line number and its byte offset are occurrence under the trunk, never identity. Only user content needs exact reconstruction.
+3. **Things that mean the same attest the same, just as the same content has the same hash.** Source text is recorded as it arrives and never rewritten: WordNet's `n` stays `[n]`, UD's `NOUN` stays `[N,O,U,N]`, and a source's language code stays the code it wrote. That `n` and `NOUN` mean the same, or that a code is the ISO 639-3 code for a language, is attested by the mapping source or the governed alias, and equivalent codes set the same registry mask bit. Justify each mapping by a governed authority. Never fabricate records.
+4. **Governed vocabularies are perfcache ROM registries.** This covers relations, POS, deprels, languages, entity types, qualifiers and trust classes. A stable bit or slot is an index over content-derived entities, never the identity of a meaning; each member's meaning is attested and realizable in any language, and English names in manifests and code are developer handles. They are never seeded as rows: the registry is not a lookup table of fake ids, and its members are content entities like everything else.
 5. **One relation per meaning.** Variants are multi-select qualifier flags on the attestation mask (`engine/manifest/qualifiers.toml`), which is the sister of the entity highway mask. For example, `eng HAS_EXTERNAL_ID eng {iso639-2b, iso639-2t, iso639-3}` is one claim.
-6. **An external identifier is not a node to render (inventor).** An ILI is not dog's label; it is an identifier bound to content by a witnessed claim. In the ingest law an opaque external identity is a typed reference (`INGEST_BOUNDARY_AND_RECIPE_LAW.md`). *Correction:* earlier versions of this note called identifiers "the K of the forward pass". That was the session's paraphrase, not the invention; K is every indexed typed address and plane able to respond.
+6. **An external identifier is not a node to render (inventor).** An ILI is not dog's label. A source's identifier is content: `i46360` is `[i,4,6,3,6,0]`, the same entity wherever that text occurs, and that it is an ILI is attested by the source that says so (CILI). It is bound to dog by a witnessed lexicalization. *Correction:* earlier versions of this note called identifiers "the K of the forward pass". That was the session's paraphrase, not the invention; K is every indexed typed address and plane able to respond.
 7. **Entities carry OR-masks for filtering.** For example, dog's POS mask is NOUN|VERB. The actual score is a consensus query. A mask miss is never authoritative absence.
 8. **Trust is how trustworthy the witness is.** A standards body ranks above an academic curation, which ranks above a user-curated wiki, which ranks above subtitles. Trust enters the standing of every claim the witness makes. The governed trust class is the only statement of trust.
 9. **Truths cluster, lies scatter.** High-trust, densely connected witnesses outweigh scattered low-trust ones.
@@ -107,7 +107,7 @@ Issue: #1715
 - **`witness_weight = rank × trust` drives both the opponent rating and the RD** (`engine/core/src/attestation_engine.c`, `laplace_attestation_witness_phi` / `_opponent_rating`). Certainty and salience are therefore one number. For example, a Unicode `HAS_SCRIPT` fact (0.95 × 0.08) plays as a weak *and uncertain* witness (rating 1229, RD 326), when it is certain and merely low-salience.
 - **Relation rank is a read-time salience weight** (`relation_types.toml` `[ranks]`, "recalibrated for semantic salience (recall)"). It is baked into write-time standing.
 - **Decided (inventor, 2026-09-25):** a claim is "this source says X is (or is not) Y": the witness, the outcome and the games. Its standing comes from the witness's trust. Relation rank (synonymy vs homonymy vs stop-word glue) is salience and applies at reading, in QK coupling. "Hot is not cold" is a refutation of hot IS cold, and "hot is antonymous with cold" is a confirmation of antonymy; neither gains or loses certainty from its relation's salience. Done: every native builder and the recipe stream use the witness's trust alone.
-- **Done: trust classes are a governed registry.** `engine/manifest/trust_classes.toml` declares every class with its prior; codegen emits `trust_class_law` (id = content id of the class label). `SourceTrust.ForClass` / `ForClassName` and every `SourceTrust` prior read it; undeclared classes fail closed. The `blake3("substrate/trust_class/X/v1")` keys and the if-chain are gone.
+- **Done: trust classes are a governed registry.** `engine/manifest/trust_classes.toml` declares every class with its prior; codegen emits `trust_class_law` (id = content id of the class label). Deriving the id from the English label violates the identity law: a trust class is a content entity whose meaning is attested, and its registry slot indexes that entity. `SourceTrust.ForClass` / `ForClassName` and every `SourceTrust` prior read it; undeclared classes fail closed. The `blake3("substrate/trust_class/X/v1")` keys and the if-chain are gone.
 - Related: #1303, #1321, #1015.
 
 ### B. ~~Consensus keeps the query's context~~ (withdrawn)
@@ -115,11 +115,11 @@ Issue: #1715
 Issue: #1716 (closed)
 
 This was mis-framed. A cell does not need a context dimension, because the key model already keeps context where it belongs:
-- A word binds to a language-neutral key (`dog —HAS_SENSE→ i46360 @eng`, `chien —HAS_SENSE→ i46360 @fra`). The binding carries the language, and the witness is the lexicon itself (`[omw-fr, 2.0]`).
+- A word binds to a language-neutral key through a lexicalization, the claim composition `[dog, eng, i46360]` or `[chien, fra, i46360]`. Language is a part of the lexicalization, not a context column, and the witness is the lexicon itself (`[omw-fr, 2.0]`).
 - Facts about a key (`i46360 IS_A …`) are language-neutral, so one consensus over every witness is correct.
 - A cross-language homograph binds to different keys. English "gift" and German "Gift" (poison) are different cells because the objects differ.
 - A shared claim such as "chat HAS_POS NOUN" is true in both languages, so aggregating it is correct.
-- The forward pass reads Q's language through the bindings, which are attestations indexed by subject and context. It reads V from consensus on the key, and O realizes the key through the bindings in the query's language.
+- The forward pass reads Q's language through the lexicalizations, whose language part is indexed with the rest of the claim. It reads V from consensus on the key, and O realizes the key through the bindings in the query's language.
 - A claim's qualifiers are read from its attestations.
 
 ### C. ETL ownership and order of operations
@@ -191,7 +191,7 @@ The contract is `MODEL_INGESTION_DESIGN.md`, `INVENTION.md` §8, §14 and §15, 
 - **E3. Tokenizer.** Decodable pieces resolve to shared canonical content. Model-local pieces and ids remain source-local references and occurrences. BPE fragments never become words (design §3).
 - **E4. Significance as a declared calculation.** Which circuit evidence carries information is a calculation contract over the model's own statistics (INVENTIONS #106), for example a spectral bulk-versus-signal test. It is not a constant floor or a top-k. No world-all-pairs is persisted (INVENTIONS #102).
 - **E5. Durable records.**
-  - Source-scoped circuit entities and physicality trajectories, with the model in their identity.
+  - Circuit entities and physicality trajectories under the model's trunk. The model is never in their identity: which model holds a circuit is containment under its trunk.
   - Graded evidence between canonical entities, under the model witness, with refutation never inferred from a dot-product sign (design §6).
   - No raw values in any form (#1344).
 - **E6. Reading.** The model's evidence participates in the Laplace forward program like any other witness. Source-scoped A, B and pooled A+B are inspection scopes.
@@ -201,7 +201,7 @@ The contract is `MODEL_INGESTION_DESIGN.md`, `INVENTION.md` §8, §14 and §15, 
 
 Landed in the first E slice:
 - **E2:** `engine/manifest/model_operators.toml` declares the operator templates (vocabulary projection, position and segment embeddings, norms, GQA self-attention, fused QKV in either orientation, latent attention, gated, fused-gated and plain MLP, router, stacked experts, low-rank factor pairs). `ModelOperatorRecognizer` binds d by axis frequency, V by the tokenizer, L by path repetition, the rest from config, and a feed-forward width per instance; names only break symmetries between equal shapes, undecided slots are ambiguous and unclaimed tensors are unrecognized. `ArchitectureProfile` and `TensorRoleClassifier` are gone. TinyLlama, Phi-2, MiniLM, Qwen2.5, Qwen3-MoE and DeepSeek-V2-Lite (MLA + MoE + shared experts) recognize with nothing left over.
-- **E5 identity:** a circuit is the ordered composition [model witness, plane, layer, n, head, m].
+- **E5 identity:** a circuit is the ordered composition [model witness, plane, layer, n, head, m]. That puts the source and positions in the identity and violates the identity law; the model is the containing trunk and layer and head are positions under it.
 - **E5 claims:** each circuit writes its own significant pairs under a declared per-subject null (z against the subject's own score distribution, kept iff z ≥ √(2 ln N)); nothing below significance is written, and nothing is refuted. `consensus.circuit_candidates` is dropped.
 - **E3:** the tokenizer vocabulary is one ordered composition whose trajectory ordinal is the model-local id; control pieces decode to their surface; the config enters as facts on the checkpoint structure. The `Blake3` recipe and tokenizer entities and `OfCanonical` special tokens are gone.
 
@@ -254,7 +254,7 @@ Issue: #1722
 - **Dataset priority by dependency:** Unicode, ISO 639, CILI, then OEWN/OMW, Wiktionary, frames/roles, commonsense, then usage corpora. UD, Wiktionary and ConceptNet also test the two ingest shapes: many unbalanced files versus huge single files.
 - **Trust classes:** Wiktionary is UserCuratedResource, and OpenSubtitles is lower.
 - **Open decisions:**
-  - Wiktionary senses without a Wikidata id have no key; the legacy decomposer mints `OfCanonical` sense entities. *Decision for the inventor.*
+  - Wiktionary senses without a Wikidata id: decided. The sense is composed from its content, never minted with `OfCanonical`; the legacy decomposer's `OfCanonical` sense entities are fake identifiers to remove.
   - CILI `sense-mappings/*.tab` (sense key → offset per PWN release) are marked unsupported until the sense-key consumers migrate.
   - ISO 639-2 French names, CLDR and ISO 639-5 each need their own witness.
 
@@ -336,7 +336,7 @@ A component of that slice that fails is fixed in place. It is not replaced by a 
 ## 5. Decisions for the inventor
 
 1. ~~Relation rank~~: decided, read-time only (see A).
-3. **Wiktionary sense keys** when no Wikidata id exists. See H.
+3. ~~Wiktionary sense keys~~: decided, composed from content (see H).
 4. **Personality firmware** (see K; `docs/specs/39_Personality_Firmware.md` §9):
    - C1: whether responses and prompts self-witness as attestations (archived spec 15) or create only observation state (Laplace-Refactor authority stack).
    - C2: whether SELECT may be a seeded stochastic draw (`spread`, `top_k`) or must be deterministic.

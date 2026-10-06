@@ -14,13 +14,14 @@ set at all, which forces an emitter to drop all but one member.
 
 ## 1. Three shapes, one emitter
 
-An emitter that writes a fact about a subject is choosing between three shapes.
+An emitter that writes a fact about a subject is choosing between these shapes.
 
 | shape | example | correct storage |
 |---|---|---|
 | **ordered sequence** | word order in a sentence | trajectory geometry, read with `laplace_trajectory_constituents` |
-| **single-valued attribute** | `HAS_BLOCK`, `HAS_AGE`, `HAS_SCRIPT`, `HAS_EAST_ASIAN_WIDTH`, `HAS_LINE_BREAK` | one typed edge |
-| **set-valued attribute** | a form's morphological analysis `{nominative, singular, masculine}` | **a composition entity, one edge** |
+| **enumerated property** | a codepoint's block, age, script, East Asian width, line break class | an enum mask bit at tier 0, set where Unicode asserts it |
+| **single-valued attribute** | a record field, such as a UD feature (`Case=Nom`) | one claim per differently named field |
+| **set-valued attribute** | a form's morphological analysis `{nominative, singular, masculine}` | **a composition entity, one claim** |
 
 Writing shape 3's data with shape 2's loop — one attestation per tag — leaves the analysis itself with no id.
 
@@ -32,8 +33,8 @@ Writing shape 3's data with shape 2's loop — one attestation per tag — leave
  edges it is three independent claims and there is nothing to point at. The number of
    DISTINCT analyses in a corpus is orders of magnitude below the number of edges spent
    encoding them, so the same fact is re-derived once per form that carries it.
-2. **Nothing can be attested about the set.** Glicko-2 adjudicates a subject–type–object
- triple. With no bundle entity there is no rating, no `witness_count`, and no refutation of
+2. **Nothing can be attested about the set.** Glicko-2 adjudicates one claim composition.
+ With no bundle entity there is no rating, no `witness_count`, and no refutation of
  *the analysis* — only of its members, which is a different claim. A second source that
  disagrees about the analysis as a whole has nowhere to put the disagreement.
 3. **`context_id` is one slot.** `laplace.attestations.context_id` is a single `bytea`. A set
@@ -126,23 +127,26 @@ passes `type_id`.
 - `UD/UdSentenceEmitter.cs:100` — FEATS emits a **different relation type per feature**
  (`RelationTypeRegistry.ResolveFeature` → `FEAT_Case`, `FEAT_Number`, …) against a
  `Name=Value` entity. That is a record with named fields, and it is the *better* shape than a bundle: each field is
- independently adjudicable and independently queryable.
-- `ConceptNet/ConceptNetSource.cs`, `Atomic2020/Atomic2020Source.cs` — `HAS_PROPERTY` comes
- from source rows that are already triples, one relation per row. There is no bundle in the
- input to preserve.
-- `WordNet/WordNetDecomposer.cs` — multiple `HAS_DEFINITION` / `HAS_EXAMPLE` per
- synset are independent claims, each separately corroborable. Multi-valued is not
- set-valued.
+ independently adjudicable and independently queryable. `FEAT_Case` and its siblings are
+ developer handles for registry slots; the feature relations are content-derived
+ entities, and no identity is derived from those English labels.
+- `ConceptNet/ConceptNetSource.cs`, `Atomic2020/Atomic2020Source.cs` — each source row is
+ one claim, one relation per row. There is no bundle in the input to preserve.
+- `WordNet/WordNetDecomposer.cs` — multiple definitions and examples per synset are
+ independent claims, each separately corroborable. Multi-valued is not set-valued.
 
-**Single-valued and correct as edges:** `HAS_LINE_BREAK`, `HAS_EAST_ASIAN_WIDTH`,
-`HAS_BLOCK`, `HAS_AGE`, `HAS_SCRIPT`, all from `Unicode/UnicodeDecomposer.cs`. A codepoint
-has exactly one block.
+**Enumerated properties at tier 0:** a codepoint's line break class, East Asian width,
+block, age and script, all from `Unicode/UnicodeDecomposer.cs`, are mask bits at tier 0,
+set where Unicode asserts them. A codepoint has exactly one block. The current decomposer
+writes them as per-codepoint `HAS_*` edges; that is the as-built form, not the law. The
+relation names here are developer handles; no identity derives from them.
 
 **The test that separates the three cases**, since the relation name does not:
 
 1. Would a second witness corroborate or refute the members *as a whole*? → set → bundle.
-2. Does each member answer a differently-named question? → record → one typed edge per field
- (UD FEATS).
+2. Does each member answer a differently-named question? → record → one claim per
+ differently named field (UD FEATS); a closed enumeration Unicode asserts of a codepoint is
+ an enum mask bit at tier 0.
 3. Is each member an independent claim about the subject? → multi-valued → one edge each
  (WordNet glosses).
 
