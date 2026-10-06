@@ -23,6 +23,12 @@ if (-not ((& $appcmd list module /name:AspNetCoreModuleV2 2>$null) -match 'AspNe
 
 New-Item -ItemType Directory $PhysicalPath -Force | Out-Null
 
+# The site's web.config maps the aspNetCore handler (every ASP.NET Core publish does); IIS refuses a site-level
+# <handlers> while the section is locked at the server (overrideModeDefault="Deny", IIS's default), and answers every
+# request 500 with no body. Unlocked here, once, as part of the site's declaration.
+Write-Host "==> unlock system.webServer/handlers for site-level web.config" -ForegroundColor Cyan
+Invoke-AppCmd unlock config "-section:system.webServer/handlers" | Out-Null
+
 Write-Host "==> app pool '$PoolName' (No Managed Code, AlwaysRunning)" -ForegroundColor Cyan
 if (-not (& $appcmd list apppool /name:$PoolName 2>$null)) {
   Invoke-AppCmd add apppool /name:$PoolName | Out-Null

@@ -223,7 +223,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     novel += n; applied += a; repaired += r;
                     if (requireCompleteSource && measurement is null)
                     {
-                        await VerifyPersistedCompleteGamesAsync(chunk, ct);
+                        await VerifyPersistedCompleteGamesAsync(chunk, (n, a, r), ct);
                         verified += chunk.Count;
                         verifiedPlies += chunk.Sum(static game => (long)game.MoveIds.Length);
                         log?.Invoke($"verified persisted witness + typed move trajectory for {chunk.Count} provider games");
@@ -238,7 +238,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     novel += n; applied += a; repaired += r;
                     if (requireCompleteSource && measurement is null)
                     {
-                        await VerifyPersistedCompleteGamesAsync(chunk, ct);
+                        await VerifyPersistedCompleteGamesAsync(chunk, (n, a, r), ct);
                         verified += chunk.Count;
                         verifiedPlies += chunk.Sum(static game => (long)game.MoveIds.Length);
                         log?.Invoke($"verified persisted witness + typed move trajectory for {chunk.Count} provider games");
@@ -271,7 +271,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     }
 
     private async Task VerifyPersistedCompleteGamesAsync(
-        IReadOnlyList<ChessGameRecord> games, CancellationToken ct)
+        IReadOnlyList<ChessGameRecord> games, (int Novel, int Applied, int Repaired) apply, CancellationToken ct)
     {
         if (games.Count == 0) return;
 
@@ -281,7 +281,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         foreach (var witnessId in witnessIds)
             if (!present.Contains(witnessId))
                 throw new InvalidDataException(
-                    $"provider game commit acknowledged but recording witness {witnessId} is absent on exact readback");
+                    $"provider game commit acknowledged but recording witness {Convert.ToHexStringLower(witnessId.ToBytes())} is absent on exact readback "
+                    + $"(chunk of {games.Count} games: {apply.Novel} novel, {apply.Applied} applied, {apply.Repaired} repaired; {present.Count} of {witnessIds.Length} witnesses present)");
 
         if (await PersistedTrajectoryMismatchAsync(games, ct).ConfigureAwait(false) is { } mismatch)
             throw new InvalidDataException(mismatch);
@@ -313,14 +314,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 .ToArray();
             int expectedConstituents = expectedMoves.Length + 1;
             if (actual.Length != expectedConstituents)
-                return $"provider game line {lineId} persisted {actual.Length} content constituents; expected start + {expectedMoves.Length} moves";
+                return $"provider game line {Convert.ToHexStringLower(lineId.ToBytes())} persisted {actual.Length} content constituents; expected start + {expectedMoves.Length} moves";
 
             if (Hash128.FromBytes(actual[0].EntityId) != game.PositionIds[0])
-                return $"provider game line {lineId} failed exact start-position readback";
+                return $"provider game line {Convert.ToHexStringLower(lineId.ToBytes())} failed exact start-position readback";
 
             for (int i = 0; i < expectedMoves.Length; i++)
                 if (Hash128.FromBytes(actual[i + 1].EntityId) != expectedMoves[i])
-                    return $"provider game line {lineId} move {i + 1} failed exact typed-trajectory readback";
+                    return $"provider game line {Convert.ToHexStringLower(lineId.ToBytes())} move {i + 1} failed exact typed-trajectory readback";
         }
         return null;
     }

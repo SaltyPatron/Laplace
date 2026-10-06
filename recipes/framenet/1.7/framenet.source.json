@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 3,
   "selected": true,
-  "root": "/vault/Data/FrameNet/framenet_v17",
+  "root": "FrameNet/framenet_v17",
   "artifacts": [
     {
       "selector": "frame/*.xml",
@@ -32,7 +32,7 @@
       "provider": "laplace/native-streaming-xml-recipe/v1",
       "syntax": "FrameNet/fullText-1.7",
       "recipePath": "fulltext.recipe.json",
-      "recordDepth": 0
+      "recordDepth": 1
     },
     {
       "selector": "semTypes.xml",

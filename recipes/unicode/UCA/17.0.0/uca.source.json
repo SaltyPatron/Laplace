@@ -8,7 +8,7 @@
   "aliases": [
     "uca"
   ],
-  "root": "/vault/Data/UCD/Public/UCD/latest/uca",
+  "root": "UCD/Public/UCD/latest/uca",
   "artifacts": [
     {
       "selector": "allkeys.txt",

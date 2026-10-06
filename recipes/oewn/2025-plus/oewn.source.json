@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 1,
   "selected": true,
-  "root": "/vault/Data/.refresh-20260903/OpenEnglishWordNet-2025-plus",
+  "root": ".refresh-20260903/OpenEnglishWordNet-2025-plus",
   "aliases": [
     "oewn"
   ],

@@ -1,6 +1,11 @@
 # Governed entity types. A type is a filter on entity rows: never testimony and never
 # seeded into the substrate. A type's id is the content id of its single-word label,
 # the same entity that text is anywhere else.
+#
+# text = true: an entity of the type is text, and its composition is its bytes in order,
+# so it is shown as those bytes. Every other type is a record a source declares (a
+# FrameNet lexical unit is its frame, its lemma and its part of speech): its parts are
+# entities of their own and it is shown as them, never as their bytes run together.
 
 [[type]]
 canonical = "Agent_Model"
@@ -27,6 +32,7 @@ canonical = "Bidi_Resolution"
 
 [[type]]
 canonical = "Byte"
+text = true
 
 [[type]]
 canonical = "CILI_Concept"
@@ -75,6 +81,7 @@ canonical = "CodeConcept"
 
 [[type]]
 canonical = "Codepoint"
+text = true
 
 [[type]]
 canonical = "Collection"
@@ -90,6 +97,7 @@ canonical = "Conversation_Turn"
 
 [[type]]
 canonical = "Document"
+text = true
 
 [[type]]
 canonical = "ESO_Class"
@@ -150,6 +158,7 @@ canonical = "Property_Value"
 
 [[type]]
 canonical = "Grapheme"
+text = true
 
 [[type]]
 canonical = "ILI"
@@ -216,6 +225,7 @@ canonical = "Model_Tokenizer"
 
 [[type]]
 canonical = "Ngram"
+text = true
 
 [[type]]
 canonical = "Number"
@@ -255,6 +265,7 @@ canonical = "Patch"
 
 [[type]]
 canonical = "Phrase"
+text = true
 
 [[type]]
 canonical = "Pixel"
@@ -316,6 +327,7 @@ canonical = "Segmentation"
 
 [[type]]
 canonical = "Sentence"
+text = true
 
 [[type]]
 canonical = "Source"
@@ -343,9 +355,11 @@ canonical = "TabularValue"
 
 [[type]]
 canonical = "Tatoeba_Sentence"
+text = true
 
 [[type]]
 canonical = "Text"
+text = true
 
 [[type]]
 canonical = "Tool_Invocation"
@@ -449,6 +463,7 @@ canonical = "Window"
 
 [[type]]
 canonical = "Word"
+text = true
 
 [[type]]
 canonical = "WordNetSynset"

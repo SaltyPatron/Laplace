@@ -922,7 +922,15 @@ _RANK_BANDS = [
 
 def emit_entity_type_law(path: Path) -> None:
     """Governed entity types -> entity_type_law.h/.c (label + membership table)."""
-    names = re.findall(r'^canonical\s*=\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.M)
+    blocks = re.split(r'^\[\[type\]\]\s*$', path.read_text(encoding="utf-8"), flags=re.M)[1:]
+    names, text = [], []
+    for block in blocks:
+        name = re.search(r'^canonical\s*=\s*"([^"]+)"', block, re.M)
+        if not name:
+            raise SystemExit("entity_types.toml: a [[type]] without a canonical name")
+        flag = re.search(r'^text\s*=\s*(true|false)\s*$', block, re.M)
+        names.append(name.group(1))
+        text.append(flag is not None and flag.group(1) == "true")
     if len(names) != len(set(names)):
         raise SystemExit("entity_types.toml declares a type twice")
     bad = [n for n in names if not re.fullmatch(r"[A-Za-z0-9_]+", n)]
@@ -946,6 +954,9 @@ def emit_entity_type_law(path: Path) -> None:
         "int laplace_entity_type_lookup(const hash128_t* type_id, const char** out_canonical);\n"
         "/* 0 with *out_type_id set when the name is governed, -1 otherwise. */\n"
         "int laplace_entity_type_id(const char* canonical, hash128_t* out_type_id);\n"
+        "/* 1 when type_id is a governed type declared text (its composition is its bytes in\n"
+        " * order), 0 for a governed record type, -1 when type_id is not governed. */\n"
+        "int laplace_entity_type_is_text(const hash128_t* type_id);\n"
         "\n"
         "#ifdef __cplusplus\n"
         "}\n"
@@ -961,6 +972,13 @@ def emit_entity_type_law(path: Path) -> None:
     lines += [
         "};",
         f"const size_t laplace_entity_type_count = {len(names)};",
+        "",
+        "/* entity_types.toml text = true, by position */",
+        f"static const unsigned char k_entity_type_text[{len(names)}] = {{",
+    ]
+    lines += ["    " + ", ".join("1" if t else "0" for t in text[i:i + 32]) + "," for i in range(0, len(text), 32)]
+    lines += [
+        "};",
         "",
         f"static hash128_t k_entity_type_ids[{len(names)}];",
         "",
@@ -1009,6 +1027,15 @@ def emit_entity_type_law(path: Path) -> None:
         "            *out_type_id = k_entity_type_ids[i];",
         "            return 0;",
         "        }",
+        "    return -1;",
+        "}",
+        "",
+        "int laplace_entity_type_is_text(const hash128_t* type_id) {",
+        "    if (!type_id) return -1;",
+        "    ensure_ids();",
+        "    for (size_t i = 0; i < laplace_entity_type_count; ++i)",
+        "        if (k_entity_type_ids[i].hi == type_id->hi && k_entity_type_ids[i].lo == type_id->lo)",
+        "            return k_entity_type_text[i];",
         "    return -1;",
         "}",
     ]

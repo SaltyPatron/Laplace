@@ -4,6 +4,8 @@
 #include "utils/array.h"
 #include "utils/hsearch.h"
 #include "utils/timestamp.h"
+#include "lib/stringinfo.h"
+#include "laplace/core/entity_type_law.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/sql_catalog.h"
 #include "spi_common.h"
@@ -18,7 +20,7 @@
 typedef struct {
     hash128_t id, type, target, chosen_evidence;
     int16 tier, target_tier;
-    bool exists, has_type, has_target;
+    bool exists, has_type, has_target, record;
     int64 chosen_time;
     char *label;
 } DisplayItem;
@@ -26,10 +28,10 @@ typedef struct {
 static const char *query_keys[] = {
     "display.facets", "display.names", "display.text", "display.metadata_labels",
     "display.file_metadata", "display.definition_types", "display.definitions",
-    "display.definition_owners", "display.heads", "entity.facets", "display.lexical"
+    "display.definition_owners", "display.heads", "entity.facets", "display.lexical", "display.parts"
 };
 static SPIPlanPtr plans[lengthof(query_keys)];
-enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS,LEXICAL };
+enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS,LEXICAL,PARTS };
 
 static int
 run_query(int which, ArrayType *ids, ArrayType *types)
@@ -133,6 +135,96 @@ choose_targets(int which,DisplayItem **items,int n,ArrayType *definition_types,H
         }
     }
     SPI_freetuptable(SPI_tuptable);
+}
+
+/* A record (an entity of a governed type that is not text, entity_types.toml) is shown as
+ * its parts: each part's own label in order, joined by " · "; a part that is itself a
+ * record of several parts is bracketed; a run of one part is "part ×n". The record's bytes
+ * run together are not its name: a FrameNet lexical unit's are "NegationnotADV", its parts
+ * are the frame Negation, the word not and the part of speech ADV. A record whose parts are
+ * all code points or graphemes is one string (a frame named by its own text) and stays
+ * text. Parts are labelled by this same batch, nested at most RECORD_DEPTH deep; past that
+ * a part keeps what the other stages give it. */
+#define RECORD_DEPTH 3
+#define RECORD_PARTS 12
+static int record_depth = 0;
+
+typedef struct {hash128_t id;int at;} RecordSlot;
+typedef struct {hash128_t id;char *label;} PartLabel;
+
+static void
+record_labels(DisplayItem **items,int n)
+{
+    if(n==0 || record_depth>=RECORD_DEPTH) return;
+    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(RecordSlot);
+    HTAB *slots=hash_create("display record items",n,&ctl,HASH_ELEM|HASH_BLOBS);
+    for(int i=0;i<n;++i){bool found;RecordSlot *s=hash_search(slots,&items[i]->id,HASH_ENTER,&found);s->at=i;}
+    hash128_t **kids=palloc0(n*sizeof(hash128_t*));uint16 **runs=palloc0(n*sizeof(uint16*));
+    int *nk=palloc0(n*sizeof(int));bool *more=palloc0(n*sizeof(bool));
+    int total=0;
+    run_query(PARTS,item_ids(items,n,false),NULL);
+    for(uint64 r=0;r<SPI_processed;++r) {
+        bool isnull;HeapTuple t=SPI_tuptable->vals[r];TupleDesc d=SPI_tuptable->tupdesc;
+        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
+        RecordSlot *s=hash_search(slots,&id,HASH_FIND,NULL);if(s==NULL)continue;
+        Datum wkb=SPI_getbinval(t,d,2,&isnull);if(isnull)continue;
+        uint32 points;const unsigned char *p=laplace_trajectory_wkb_points(DatumGetByteaPP(wkb),&points);
+        int keep=points>RECORD_PARTS?RECORD_PARTS:(int)points;bool text=true;
+        kids[s->at]=palloc(Max(keep,1)*sizeof(hash128_t));runs[s->at]=palloc(Max(keep,1)*sizeof(uint16));
+        for(uint32 j=0;j<points;++j) {
+            double vertex[4];mantissa_payload_t pl;memcpy(vertex,p+(Size)j*4*sizeof(double),sizeof(vertex));mantissa_unpack(vertex,&pl);
+            if(laplace_vflag_has_atom(pl.flags)==0 && laplace_vflag_tier(pl.flags)>1) text=false;
+            if((int)j<keep){kids[s->at][j]=pl.entity_id;runs[s->at][j]=pl.run_length?pl.run_length:1;}
+        }
+        if(text){items[s->at]->record=false;continue;}             /* one string: its bytes are its name */
+        nk[s->at]=keep;more[s->at]=points>(uint32)keep;total+=keep;
+    }
+    SPI_freetuptable(SPI_tuptable);
+    hash_destroy(slots);
+    if(total==0) return;
+    /* every part once, labelled by this batch one level down */
+    HASHCTL pctl={0};pctl.keysize=sizeof(hash128_t);pctl.entrysize=sizeof(PartLabel);
+    HTAB *parts=hash_create("display record parts",total,&pctl,HASH_ELEM|HASH_BLOBS);
+    Datum *values=palloc(total*sizeof(Datum));int unique=0;
+    for(int i=0;i<n;++i) for(int k=0;k<nk[i];++k) {
+        bool found;PartLabel *pl=hash_search(parts,&kids[i][k],HASH_ENTER,&found);
+        if(!found){pl->label=NULL;values[unique++]=hash128_to_datum(&kids[i][k]);}
+    }
+    Oid argtypes[1]={BYTEAARRAYOID};
+    Datum args[1]={PointerGetDatum(construct_array(values,unique,BYTEAOID,-1,false,TYPALIGN_INT))};
+    volatile int rc=0;
+    record_depth++;
+    PG_TRY();
+    {
+        rc=SPI_execute_with_args("SELECT id,label FROM realize.display_label_batch($1)",1,argtypes,args,NULL,true,0);
+    }
+    PG_FINALLY();
+    {
+        record_depth--;
+    }
+    PG_END_TRY();
+    if(rc!=SPI_OK_SELECT) elog(ERROR,"display: record parts could not be labelled");
+    for(uint64 r=0;r<SPI_processed;++r) {
+        bool isnull;HeapTuple t=SPI_tuptable->vals[r];TupleDesc d=SPI_tuptable->tupdesc;
+        Datum idd=SPI_getbinval(t,d,1,&isnull);if(isnull)continue;
+        hash128_t id=datum_to_hash128(idd);PartLabel *pl=hash_search(parts,&id,HASH_FIND,NULL);
+        Datum lab=SPI_getbinval(t,d,2,&isnull);if(pl&&!isnull)pl->label=TextDatumGetCString(lab);
+    }
+    SPI_freetuptable(SPI_tuptable);
+    for(int i=0;i<n;++i) {
+        if(nk[i]==0) continue;
+        StringInfoData buf;initStringInfo(&buf);int written=0;
+        for(int k=0;k<nk[i];++k) {
+            PartLabel *pl=hash_search(parts,&kids[i][k],HASH_FIND,NULL);
+            const char *s=pl?pl->label:NULL;if(s==NULL||*s=='\0')continue;
+            if(written++)appendStringInfoString(&buf," · ");
+            if(nk[i]>1 && strstr(s," · ")) appendStringInfo(&buf,"(%s)",s); else appendStringInfoString(&buf,s);
+            if(runs[i][k]>1) appendStringInfo(&buf," ×%u",(unsigned)runs[i][k]);
+        }
+        if(more[i]&&written) appendStringInfoString(&buf," · …");
+        if(written) items[i]->label=buf.data;
+    }
+    hash_destroy(parts);
 }
 
 typedef struct {hash128_t id,physicality,child;int16 tier;bool found;} SpineHead;
@@ -269,6 +361,7 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         if(!item)continue;
         item->exists=true;item->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
         Datum type=SPI_getbinval(t,d,3,&isnull);item->has_type=!isnull;if(!isnull)item->type=datum_to_hash128(type);
+        item->record=item->has_type && item->tier>=2 && laplace_entity_type_is_text(&item->type)==0;
         /* display.facets: id, tier, type_id, canonical name. An entity row names no source. */
         Datum name=SPI_getbinval(t,d,4,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
     }
@@ -278,6 +371,9 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
      * labels only what has no surface of its own. */
     int count=pending(all,unique,work,0);char **labels=batch_text(LEXICAL,work,count,false);
     for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
+    /* A record is shown as its parts, before any stage reads its bytes as text. */
+    count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->record)work[count++]=all[i];
+    record_labels(work,count);
     count=pending(all,unique,work,1);labels=batch_text(TEXT,work,count,false);
     for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
     count=pending(all,unique,work,0);labels=batch_text(NAMES,work,count,false);

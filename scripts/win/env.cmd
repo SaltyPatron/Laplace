@@ -25,6 +25,10 @@ rem Linux ${LAPLACE_DEPS_PREFIX}/pgsql-18 install prefix from external/CMakeList
 if not defined LAPLACE_PG_BUILD set "LAPLACE_PG_BUILD=%LAPLACE_BUILD_ROOT%\build-pg"
 if not defined LAPLACE_PG_PREFIX set "LAPLACE_PG_PREFIX=%LAPLACE_DEPS_PREFIX%\pgsql-18"
 if not defined LAPLACE_TOOLS set "LAPLACE_TOOLS=%LAPLACE_DATA_ROOT%\tools"
+rem MSYS2 (make, sh, curl, mingw-w64-ucrt gcc): the one Laplace-Operations declares (LAPLACE_MSYS2); ensure-stockfish-toolchain.ps1
+rem builds Stockfish with it, and installs a copy under LAPLACE_TOOLS only when none is declared.
+if not defined MSYS2_ROOT if defined LAPLACE_MSYS2 set "MSYS2_ROOT=%LAPLACE_MSYS2%"
+if not defined MSYS2_ROOT set "MSYS2_ROOT=D:\Libraries\msys64"
 if not defined LAPLACE_CUTECHESS_BUILD set "LAPLACE_CUTECHESS_BUILD=%LAPLACE_BUILD_ROOT%\build-cutechess"
 if not defined LAPLACE_OUT set "LAPLACE_OUT=%LAPLACE_BUILD_ROOT%\out"
 if not defined LAPLACE_PUBLISH_ENDPOINT set "LAPLACE_PUBLISH_ENDPOINT=%LAPLACE_OUT%\endpoint"

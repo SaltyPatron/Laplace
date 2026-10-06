@@ -16,7 +16,7 @@ static class Program
     static async Task<int> Main(string[] args)
     {
         string path = args.ElementAtOrDefault(0)
-            ?? "/vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn";
+            ?? LaplaceInstall.ResolvePathUnderIngest("Games", "Chess", "Lumbras", "otb", "LumbrasGigaBase_OTB_2025.pgn");
         int limit = 0;
         if (args.Length > 1 && args[1] is not ("--" or "--no-analyze" or "--analyze" or "all"
                 or "--serial" or "--workers"))

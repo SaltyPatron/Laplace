@@ -52,6 +52,15 @@ public static class ChessTablebaseRuntime
 
     private static int Load()
     {
+        // The decoder (laplace_syzygy, the Fathom kernel) is needed only to read the tablebase files. A process without
+        // it admits games as it does without tables: positions are looked up in the substrate, never probed, and the
+        // Syzygy facts come from the tablebase source's own ingest. Its absence is not a reason to refuse a game.
+        try { return LoadTables(); }
+        catch (DllNotFoundException) { return 0; }
+    }
+
+    private static int LoadTables()
+    {
         if (_testTableSet is { Length: > 0 } testTableSet)
         {
             int loaded = Math.Max(0, SyzygyNative.Init(testTableSet));

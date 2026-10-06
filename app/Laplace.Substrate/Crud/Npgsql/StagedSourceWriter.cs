@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using global::Npgsql;
+using NpgsqlTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Laplace.Decomposers.Abstractions;
@@ -194,6 +195,14 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             if (_staged) return;
             await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
             await ExecuteAsync(conn, null, Sql("stage.create"), ct).ConfigureAwait(false);
+            // Operational edges are stored but never scored or masked: their relation type is a row of the stage,
+            // bound as bytes, so no statement carries an id as text.
+            await using (var excluded = conn.CreateCommand())
+            {
+                excluded.CommandText = $"INSERT INTO {_stage}.excluded_type (type_id) VALUES ($1)";
+                excluded.Parameters.Add(new NpgsqlParameter { Value = FileEntity.MetadataRelationTypeId.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
+                await excluded.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
             Volatile.Write(ref _staged, true);
             _log.LogInformation("STAGED_LOAD extraction stages into {Stage}", _stage);
         }
@@ -583,15 +592,10 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         .Replace("{partadd}", ((long)(HashPartitionCombine & (ulong)(_modulus - 1)))
             .ToString(System.Globalization.CultureInfo.InvariantCulture))
         .Replace("{zero}", "'\\x00000000000000000000000000000000'::bytea")
-        .Replace("{lanes}", _lanes.ToString(System.Globalization.CultureInfo.InvariantCulture))
-        .Replace("{excluded}", Excluded);
+        .Replace("{lanes}", _lanes.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     private static string Lane(string sql, int lane)
         => sql.Replace("{lane}", lane.ToString(System.Globalization.CultureInfo.InvariantCulture));
-
-    // Operational edges are stored but never scored or masked.
-    private static readonly string Excluded =
-        $"ARRAY['\\x{Convert.ToHexStringLower(FileEntity.MetadataRelationTypeId.ToBytes())}'::bytea]";
 
     private async Task<NpgsqlTransaction> BeginAsync(NpgsqlConnection conn, CancellationToken ct)
     {

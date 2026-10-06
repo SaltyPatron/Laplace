@@ -76,6 +76,10 @@ SQL_QUERY("display.definitions", "bytea[],bytea[]",
 SQL_QUERY("display.definition_owners", "bytea[],bytea[]",
     "SELECT object_id,object_id,last_observed_at,id FROM laplace.attestations "
     "WHERE object_id=ANY($1) AND type_id=ANY($2)")
+SQL_QUERY("display.parts", "bytea[]",
+    "SELECT DISTINCT ON (entity_id) entity_id,public.ST_AsBinary(trajectory) "
+    "FROM laplace.physicalities WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL "
+    "ORDER BY entity_id,id")
 SQL_QUERY("display.heads", "bytea[]",
     "SELECT entity_id,id,public.ST_AsBinary(public.ST_PointN(trajectory,1)) "
     "FROM laplace.physicalities WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL")
@@ -341,6 +345,7 @@ SQL_QUERY("language.tags", "text[]",
  * {lane} are integers the caller formats; COPY takes no bind parameters. */
 SQL_QUERY("stage.create", "",
     "CREATE SCHEMA {stage}; "
+    "CREATE UNLOGGED TABLE {stage}.excluded_type (type_id bytea PRIMARY KEY); "
     "CREATE UNLOGGED TABLE {stage}.entity (id bytea,tier smallint,type_id bytea); "
     "CREATE UNLOGGED TABLE {stage}.physicality (id bytea,entity_id bytea,type smallint,coord geometry,"
     "hilbert_index bytea,trajectory geometry,n_constituents integer,alignment_residual double precision,"
@@ -390,7 +395,7 @@ SQL_QUERY("stage.claim_copy", "",
  * cell already stands. */
 SQL_QUERY("stage.score_out", "",
     "COPY (WITH claim AS MATERIALIZED (SELECT * FROM {stage}.claimp c "
-    "WHERE c.type_id<>ALL({excluded}) AND c.part%{lanes}={lane}), "
+    "WHERE NOT EXISTS (SELECT 1 FROM {stage}.excluded_type x WHERE x.type_id=c.type_id) AND c.part%{lanes}={lane}), "
     "touched AS MATERIALIZED (SELECT DISTINCT subject_id,type_id,object_id FROM claim), "
     "evidence AS ("
     "SELECT subject_id,type_id,object_id,source_id,opponent_rating_fp1e9,opponent_rd_fp1e9,"
@@ -442,7 +447,7 @@ SQL_QUERY("stage.new_sets", "",
     "AND object_id IS NOT NULL UNION ALL SELECT object_id FROM {stage}.claim WHERE subject_id=t.type_id "
     "AND type_id=laplace.relation_type_id('IS_A') AND object_id IS NOT NULL) f "
     "WHERE consensus.relation_highway_bit(f.object_id) IS NOT NULL LIMIT 1)) END AS bit "
-    "FROM (SELECT DISTINCT type_id FROM {stage}.claim WHERE type_id<>ALL({excluded})) t; "
+    "FROM (SELECT DISTINCT c.type_id FROM {stage}.claim c WHERE NOT EXISTS (SELECT 1 FROM {stage}.excluded_type x WHERE x.type_id=c.type_id)) t; "
     "CREATE UNLOGGED TABLE {stage}.mask AS SELECT x.id,(((hashbyteaextended(x.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part,"
     "consensus.highway_mask_from_bits(array_agg(DISTINCT b.bit ORDER BY b.bit)) AS mask "
     "FROM (SELECT subject_id AS id,type_id FROM {stage}.claim UNION SELECT object_id,type_id FROM {stage}.claim "

@@ -113,6 +113,16 @@ if ($whsec) { $stripeLines += "STRIPE_WEBHOOK_SECRET=$whsec" }
 else { $stripeLines += "# STRIPE_WEBHOOK_SECRET=whsec_...  # install-stripe-listen.cmd or: stripe listen --print-secret" }
 $stripeLines | Set-Content -LiteralPath $stripePath -Encoding utf8NoBOM
 
+# The operator credential (X-Laplace-Operator-Token for /v1/admin, /v1/billing/operator, catalog sync): operator.env, the
+# file deploy/linux/pipeline.sh writes from the CI secret of the same name.
+$operatorPath = Join-Path $secretsDir "operator.env"
+if ($map.ContainsKey("LAPLACE_OPERATOR_TOKEN") -and -not [string]::IsNullOrWhiteSpace($map["LAPLACE_OPERATOR_TOKEN"])) {
+  if ($map["LAPLACE_OPERATOR_TOKEN"] -notmatch '^[A-Za-z0-9_=/+-]{32,}$') { throw "LAPLACE_OPERATOR_TOKEN is invalid (32+ of A-Za-z0-9_=/+-)" }
+  @("# Synced by scripts/win/sync-operator-secrets.ps1 — do not commit.", "LAPLACE_OPERATOR_TOKEN=$($map['LAPLACE_OPERATOR_TOKEN'])") | Set-Content -LiteralPath $operatorPath -Encoding utf8NoBOM
+  Write-Host "[sync-operator-secrets] wrote $operatorPath"
+} else {
+  Write-Warning "[sync-operator-secrets] no LAPLACE_OPERATOR_TOKEN in $EnvFile — the operator endpoints stay closed"
+}
 $identityPath = Join-Path $secretsDir "identity.env"
 $identityLines = @("# Synced by scripts/win/sync-operator-secrets.ps1 — do not commit.")
 foreach ($provider in @("MICROSOFT", "GOOGLE")) {

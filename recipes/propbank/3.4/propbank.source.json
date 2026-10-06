@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 3,
   "selected": true,
-  "root": "/vault/Data/PropBank/propbank-frames-main",
+  "root": "PropBank/propbank-frames-main",
   "artifacts": [
     {
       "selector": "frames/*.xml",

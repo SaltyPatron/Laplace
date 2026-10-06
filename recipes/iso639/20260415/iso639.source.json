@@ -5,7 +5,7 @@
   "trustClass": "StandardsDerived",
   "layerOrder": 1,
   "selected": true,
-  "root": "/vault/Data/ISO639",
+  "root": "ISO639",
   "aliases": [
     "iso639"
   ],

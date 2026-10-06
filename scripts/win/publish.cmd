@@ -98,9 +98,12 @@ if defined SKIP_MANAGED_BUILD (
   dotnet publish app\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj ^
       -c %CONFIG% --no-self-contained -o "%PUBLISH_OUT%"
 ) else (
-  rem OpenAICompat was built in step 1 — publish without rebuilding.
+  rem OpenAICompat was built in step 1, before the web build replaced wwwroot (the web build
+  rem needs step 1's openapi.json). Its static-asset manifest names the assets wwwroot held
+  rem then, so publishing --no-build fails whenever the web app changed: the hashed files it
+  rem names are gone. The publish builds again, incrementally, and reads wwwroot as it is now.
   dotnet publish app\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj ^
-      -c %CONFIG% --no-build --no-self-contained -o "%PUBLISH_OUT%"
+      -c %CONFIG% --no-self-contained -o "%PUBLISH_OUT%"
 )
 if errorlevel 1 (
   echo [publish] FAILED
@@ -117,14 +120,18 @@ if not exist "%PUBLISH_OUT%\laplace-uci.exe" (
 )
 robocopy "%LAPLACE_ROOT%\web\dist" "%PUBLISH_OUT%\wwwroot" /MIR /NJH /NJS /NDL /NFL
 if errorlevel 8 exit /b 1
-for %%D in (core dynamics synthesis) do (
-  if not exist "%LAPLACE_ENGINE_BUILD%\%%D\laplace_%%D.dll" (
-    echo [publish] ERROR: missing %LAPLACE_ENGINE_BUILD%\%%D\laplace_%%D.dll — run build-engine.cmd or publish-deploy.cmd --full
+rem the engine DLLs the site loads (deploy/linux/deploy.sh carries the same four): core, dynamics, synthesis, and the
+rem Syzygy prober, which builds beside laplace_core (engine/CMakeLists.txt)
+for %%D in (core\laplace_core dynamics\laplace_dynamics synthesis\laplace_synthesis core\laplace_syzygy) do (
+  if not exist "%LAPLACE_ENGINE_BUILD%\%%D.dll" (
+    echo [publish] ERROR: missing %LAPLACE_ENGINE_BUILD%\%%D.dll — run build-engine.cmd or publish-deploy.cmd --full
     exit /b 1
   )
-  copy /y "%LAPLACE_ENGINE_BUILD%\%%D\laplace_%%D.dll" "%PUBLISH_OUT%\" >nul
+  copy /y "%LAPLACE_ENGINE_BUILD%\%%D.dll" "%PUBLISH_OUT%\" >nul
 )
 
+rem the engine DLLs' run-time dependencies beside them: IIS's worker searches beside the module, not the PATH
+call "%HERE%engine-runtime.cmd" "%PUBLISH_OUT%" || exit /b 1
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%HERE%publish-zstd.ps1" -Destination "%PUBLISH_OUT%"
 if errorlevel 1 exit /b 1
 

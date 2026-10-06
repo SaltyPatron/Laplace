@@ -242,8 +242,10 @@ public static class ConversationContent
         byte[] metadata = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
         {
             kind = "conversation-message-v1", tenant = scope.Tenant,
-            session = sessionId.ToString(), occurrence = occurrenceKey, role,
-            source = sourceId.ToString(), participant = participantKey
+            // the ids as hex, the form every export and label uses; a Hash128's default ToString is the record's
+            // "Hash128 { Hi = ..., Lo = ... }", which once leaked into the provenance
+            session = Convert.ToHexStringLower(sessionId.ToBytes()), occurrence = occurrenceKey, role,
+            source = Convert.ToHexStringLower(sourceId.ToBytes()), participant = participantKey
         });
         using var metadataTree = ContentTierSpine.BuildTree(metadata)
             ?? throw new InvalidOperationException("Conversation metadata could not be composed.");
