@@ -21,7 +21,7 @@ PGN artifact / source record
 │          ├─ HAS_RATING ─────► rating observations
 │          ├─ PLAYED_BY ──────► opponent Chess_Player
 │          ├─ CORRESPONDS_TO ─► explicitly associated provider identity
-│          └─ external/profile ─► provider id, FIDE id, title, federation, biography, links
+│          └─ FIDE id ──────────► the player's highway node; provider id, title, federation, biography, links
 │
 ├─ named tournament/site/date
 │    └─► Chess_Event
@@ -76,7 +76,7 @@ string/name similarity      != identity proof
 explicit provider linkage   -> governed CORRESPONDS_TO testimony
 ```
 
-Whether a FIDE id is a highway node or an internal pointer is not decided. If it names a player across sources, it is a highway node: content exactly as FIDE writes it, and that it is a FIDE id is attested by the FIDE source. If it only addresses FIDE's own records, it is a pointer that resolves to the player and is not recorded. Either way it is never encoded as a made-up `fide:` prefix. Title/federation/rating/profile facts attach to the same player/profile world.
+A FIDE id is a highway node. It is a publicly known identifier used across sources and languages, so it is the node for a player exactly as an ILI is the node for a concept: content exactly as FIDE writes it, every source that cites it landing on the same node, and that it is a FIDE id is attested by the FIDE source. It is never encoded as a made-up `fide:` prefix. The player's names in every language and script (`Magnus Carlsen`, `Магнус Карлсен`, `マグヌス・カールセン`, and a PGN's `Carlsen, Magnus`) are lexicalizations of that node, each content as written, and the languages the player speaks are attested relations. Nothing is order-dependent: a PGN that names the player and the FIDE rating list that gives the id link by entity collision whichever is ingested first, and no placeholder player waits for the FIDE source. Laplace cares about the id and its links; a name is a label used to realize the node. Title/federation/rating/profile facts attach to the same player node.
 
 ## Games connect players to each other
 
@@ -235,7 +235,7 @@ This is why the old screenshot is a web rather than a player profile with decora
 
 - `Carlsen, Magnus` and `Magnus Carlsen` remain different content, linked to the same player by attestation; no canonicalizer folds them.
 - Provider handle/profile identity such as `MagnusCarlsen` is not merged solely by fuzzy/name similarity; explicit provider association is receipted through `CORRESPONDS_TO` or the selected identity mechanism.
-- A FIDE/provider id remains external/profile state and does not salt the canonical human/player content merely because a source carries it.
+- A FIDE id is the player's highway node, its names in every language and script its lexicalizations and the languages the player speaks attested relations; a provider id does not salt the canonical human/player content merely because a source carries it.
 - PGN `HAS_WHITE/HAS_BLACK`, `PLAYED_BY`, result/event/rating/time state remain traversable from the player world.
 - A player-conditioned move query reaches the player through move/playing context rather than requiring a duplicated player-specific move identity.
 - Two players who reach the same canonical position share that position node while retaining independent game occurrences/outcomes.

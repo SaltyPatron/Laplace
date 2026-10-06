@@ -212,7 +212,11 @@ covered by an admitted source or explicitly declared historical-only.
 
 Replace v2.17 with v2.18. The official treebank archive is 684,056,893 bytes with MD5
 `e9bfd544a48eac63ea3bb41e80c78813`. Inventory all 2,501 extracted files; each treebank's
-README/license and each `.conllu` file remain distinct artifacts.
+README/license and each `.conllu` file remain distinct artifacts. Release 2.18 has 353 treebanks
+(712 `.conllu` files). Universal Dependencies is one source and one witness: its documentation
+pages (`UniversalDependencies/docs`, branch `pages-source`) and its validator data (the `data`
+folder of `UniversalDependencies/tools` at commit `10ce40cf`) are files under the same trunk as
+the treebanks.
 
 ### Tatoeba
 
