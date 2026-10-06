@@ -54,7 +54,7 @@ Four primary families persist the world (see [`ARCHITECTURE.md`](ARCHITECTURE.md
 ```text
 entities       content identity (BLAKE3 over the ordered child ids, no domain byte; codepoint = BLAKE3 of its UTF-8)
 physicalities  typed realization: coord, Hilbert address, packed trajectory (exact manifest)
-attestations   (claim composition, witness) testimony (confirm/draw/refute; absence != false)
+attestations   claim compositions contained in record paths under the source trunk, the witness (confirm/draw/refute; absence != false)
 consensus      folded standing per claim composition (Glicko-2 rating/RD/volatility/witnesses)
 ```
 

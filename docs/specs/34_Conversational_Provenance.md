@@ -21,6 +21,13 @@ distinct forms:
 
 The same prompt text in two turns is one content entity occurring twice.
 
+Witnessing is not attribution. An entity is witnessed wherever some tree holds it; that
+is calculated by a walk up the DAG, never stored, and a user's ordinary prompt only adds
+observations: new trees containing existing nodes. Attribution is of a claim: a source
+asserted it, with an outcome, and the claim sits in a record path under that source's
+trunk. Attestations come from seeded corpora and from Laplace's own calculations and
+outcomes at their trust.
+
 No identity here is a hash of a made-up key string or carries a version suffix. The
 current code derives the session handle as `Hash128.OfCanonical` of a tenant/session key
 string; that is a fake identifier and violates the identity law.

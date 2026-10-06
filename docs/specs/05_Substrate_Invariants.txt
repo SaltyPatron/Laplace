@@ -28,10 +28,21 @@ Hashes are never faked. A hash of a made-up string (`substrate/source/X/v1`,
 string's raw bytes gives the same text a second id. Such a string is decomposed
 content, a referenced trunk, or a recorded attestation.
 
-A source's identifiers are content. `i46360` is `[i,4,6,3,6,0]` wherever that text
-occurs; that it is an ILI is attested by the source that says so. Structured
-identifiers decompose into their parts. A record's position in a file, a line number,
-or a byte offset is occurrence under the trunk, never part of an id.
+A source's identifiers are of two kinds. A hub (an ILI, a PropBank roleset, a VerbNet
+class, a FrameNet frame, frame element or lexical unit, a VerbAtlas frame, a language
+code) is content: `i46360` is `[i,4,6,3,6,0]` wherever that text occurs, every source
+that cites it lands on the same entity, and that it is an ILI is attested by the source
+that says so. An internal pointer (a WordNet synset offset, a synset or sense id, a
+FrameNet numeric id, a UD token number or `sent_id`, a Tatoeba number, a geonameid, a
+row or line number) is how a source addresses its own records. The recipe decomposes it
+by the source's own notation only for the facts it carries (a WordNet offset's type, a
+sense key's lexicographer file), resolves it through the source's tree or the highway
+perfcache to the id of what it points at, and records nothing of it. Whether a sense
+key is such a pointer or a lexicalization in its own right is open. A WordNet offset
+is a byte position in one release's `data.<pos>` file, unique only with its type, and
+19,619 of WordNet 3.0's 117,659 synsets share their exact word list with another, so a
+synset is its ILI hub, neither its offset nor its words. A record's position in a file,
+a line number, or a byte offset is occurrence under the trunk, never part of an id.
 
 Coordinate equality, spatial proximity, a shared name, or an ordinal slot is evidence
 about entities. None replaces content identity.
@@ -143,13 +154,21 @@ must agree on version, vertex class, field layout, and bounds.
 Rule #5 — Evidence retains provenance
 -------------------------------------
 
-An attestation records one claim and one witness: the claim is an n-ary composition
+An attestation is a witness asserting one claim. The claim is an n-ary composition
 of content ids with referential integrity, of any arity and any tier (a lexicalization
 `[lemma, language, ILI]`, a concept relation `[ILI, hypernym, ILI]`, a role inside a
-roleset, a valence pattern); the witness is a content-derived entity, never a blob hash
-or a made-up key. It carries the outcome,
-games, score, qualifiers, and context. `(subject, relation, object)` is one claim shape
-among many. Absence of a row is unknown, not refutation.
+roleset, a valence pattern); `(subject, relation, object)` is one claim shape among
+many. The witness is the source trunk, `[source record, its files' trunks in path
+order]`. Provenance is containment: a source's record is a path over the claims it
+asserts, inside its file's content tree, with each claim's run length, outcome and
+score in its vertex; many source trunks can contain the same claim, and a walk up from
+the claim finds them all. Trust and lineage are keyed by the trunk id. Forgetting a
+source removes its trunk, sweeps what nothing references, and replays the standings it
+touched. Absence is unknown, not refutation.
+
+The current schema keeps a per-(claim, witness) `attestation` row whose witness is
+`SourceWitness.Id(authority, release)`. That is not the source trunk; containment
+replaces the row, and nothing new is implemented from it.
 
 A witness asserting the same claim n times plays n games, run-length. The client folds
 every repeat from one source, per cell, into one Glicko-2 rating period, and the
@@ -164,7 +183,9 @@ Rule #6 — Consensus is one typed cell
 -------------------------------------
 
 The consensus address is the claim composition. Every source speaking about that
-claim folds into the same standing cell while source attestations remain inspectable.
+claim folds into the same standing cell while the record paths that assert it remain
+inspectable. Standing (rating, deviation, volatility, matches) is one table keyed by
+the claim id, beside the path, never on the GIN-indexed path row.
 The cell is never keyed by `BLAKE3(subject || type || object)` with a zero-filled
 missing object. Rating, deviation, volatility, witness count, and
 source/context scope are part of the decision surface.

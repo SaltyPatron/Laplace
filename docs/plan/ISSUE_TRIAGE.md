@@ -575,7 +575,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Carry |
 |---|---|---|
-| #355 | doc 15 B3 — Behavioral harness as witness (standing SQL-engine test suite deposited as attestations) | 'Evaluation IS ingestion' self-witnessing is the Gödel/OODA loop that #1726 must reconcile with Laplace-Refactor's authority stack. The proposed 'substrate/source/BehavioralHarness/v1' string id is a fake identifier; a witness is a content-derived entity (SourceWitness.Id). |
+| #355 | doc 15 B3 — Behavioral harness as witness (standing SQL-engine test suite deposited as attestations) | 'Evaluation IS ingestion' self-witnessing is the Gödel/OODA loop that #1726 must reconcile with Laplace-Refactor's authority stack. The proposed 'substrate/source/BehavioralHarness/v1' string id is a fake identifier; the witness is the source trunk, and today's `SourceWitness.Id(authority, release)` is not it. |
 | #356 | doc 15 B4 — Walk-policy rating (decode policies as content-addressed, Glicko-rated entities) | Content-addressed decode policies rated by outcome are #1726's personality firmware: content-addressed policy over ROUTE/STEER/SELECT, witnessed and rated like a source. |
 | #357 | doc 15 D — Loop-closure metrics (feedback-to-next-walk delta, depth-k accuracy, latency budget) | Loop-closure metrics measure the Gödel/OODA feedback loop #1726 owns; depends on #355, also absorbed there. |
 | #379 | doc 18 Q6 — Echo-loop guard for the generation corpus (self-improvement vs self-contamination, same loop) | Whether generated output becomes corpus or testimony, and at what trust, is #1726's self-witnessing reconciliation; the n-gram path it names still exists (trajectory_generate.c). |
