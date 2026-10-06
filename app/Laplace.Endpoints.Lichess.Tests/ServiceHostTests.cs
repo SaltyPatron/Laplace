@@ -34,7 +34,7 @@ public sealed class ServiceHostTests
         public LichessConnectivityStatus Status() =>
             new(Configured, null, Connected, "test", 8, 2, true, 0, [], Error, Account: Account);
         public IReadOnlyList<LichessChatLine> ChatForGame(string gameId) => [];
-        public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
+        public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, LichessChallengePolicy? policy = null)
         { Started = (depth, maxConcurrent, substrate); return StartAllowed; }
         public Task WaitForExitAsync(CancellationToken ct) => _exit.Task.WaitAsync(ct);
         public Task StopAsync(CancellationToken ct) { Stopped = true; _exit.TrySetResult(); return Task.CompletedTask; }

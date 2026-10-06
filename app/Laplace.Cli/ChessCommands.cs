@@ -482,10 +482,11 @@ internal static class ChessCommands
         string? token = LichessBot.ResolveToken(ArgStr(args, "--token", ""));
         if (string.IsNullOrEmpty(token))
             return Fail("usage: laplace chess lichess [--token T] [--depth D] [--max-concurrent N]\n"
-                      + "                             [--substrate] [--speed bullet|blitz|rapid|classical]\n"
+                      + "                             [--substrate] [--speed bullet|blitz|rapid|classical] [--rated]\n"
                       + "  Token from --token, LICHESS_API env var, or deploy\\secrets\\lichess.env.\n"
                       + "  --substrate: fuse position transitions, move physicality, and child structure in one substrate pass.\n"
-                      + "  --speed: accept only this time-control class (repeatable); default = all.");
+                      + "  --speed: accept only this time-control class (repeatable); default = all.\n"
+                      + "  --rated: accept rated challenges too; default = casual only.");
 
         int depth = ArgInt(args, "--depth", 4);
         int maxConcurrent = ArgInt(args, "--max-concurrent", 4);
@@ -495,10 +496,10 @@ internal static class ChessCommands
         var speeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < args.Length - 1; i++)
             if (args[i] == "--speed") speeds.Add(args[i + 1].ToLowerInvariant());
-        IReadOnlySet<string>? acceptSpeeds = speeds.Count > 0 ? speeds : null;
+        var policy = new LichessChallengePolicy(speeds.Count > 0 ? speeds : null, Rated: HasFlag(args, "--rated"));
 
         Console.WriteLine($"lichess bot: depth {depth}, max {maxConcurrent} concurrent games, "
-            + $"substrate {substrate}, speeds {(acceptSpeeds is null ? "all" : string.Join('+', acceptSpeeds))}");
+            + $"substrate {substrate}, {policy}");
         Console.WriteLine("  token configured; validating Lichess account and bot permissions.");
         Console.WriteLine("  Ctrl-C to stop (finishes in-flight games first).");
 
@@ -516,7 +517,7 @@ internal static class ChessCommands
             liveHost,
             substrate: substrate,
             maxDepth: depth,
-            acceptSpeeds: acceptSpeeds);
+            policy: policy);
         await bot.RunAsync(maxConcurrent, cts.Token);
         return 0;
     }

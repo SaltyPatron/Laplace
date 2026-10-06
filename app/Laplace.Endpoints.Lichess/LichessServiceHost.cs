@@ -9,7 +9,7 @@ internal sealed record LichessOptions(
     int MaxConcurrent = LichessDefaults.MaxConcurrent,
     bool Substrate = true,
     int Port = 5189,
-    IReadOnlySet<string>? Speeds = null,
+    LichessChallengePolicy? Challenges = null,
     int FailureLingerSeconds = 20)
 {
     public static LichessOptions FromEnvironment()
@@ -24,13 +24,16 @@ internal sealed record LichessOptions(
             Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SUBSTRATE") != "false",
             // the loopback status port the API reads (AppComposition reads the same variable)
             Number("LAPLACE_LICHESS_PORT", 5189),
-            Speeds: speeds is { Length: > 0 } ? speeds.ToHashSet(StringComparer.OrdinalIgnoreCase) : null);
+            Challenges: new LichessChallengePolicy(
+                speeds is { Length: > 0 } ? speeds.ToHashSet(StringComparer.OrdinalIgnoreCase) : null,
+                // rated challenges only when LAPLACE_LICHESS_RATED=true; casual games otherwise
+                Rated: Environment.GetEnvironmentVariable("LAPLACE_LICHESS_RATED") == "true"));
     }
     public void Validate()
     {
         if (Depth is < 1 or > 64 || MaxConcurrent is < 1 or > 16 || Port is < 0 or > 65535 || FailureLingerSeconds is < 0 or > 300)
             throw new InvalidOperationException("Invalid Lichess service limits.");
-        if (Speeds?.Any(s => s is not ("ultraBullet" or "bullet" or "blitz" or "rapid" or "classical" or "correspondence")) == true)
+        if (Challenges?.Speeds?.Any(s => !LichessChallengePolicy.KnownSpeeds.Contains(s)) == true)
             throw new InvalidOperationException("Unsupported Lichess speed filter.");
     }
 }
@@ -83,7 +86,7 @@ internal sealed class LichessWorker(ILichessConnection bot, LichessOptions optio
     {
         try
         {
-            if (!bot.Start(options.Depth, options.MaxConcurrent, options.Substrate, options.Speeds))
+            if (!bot.Start(options.Depth, options.MaxConcurrent, options.Substrate, options.Challenges))
                 throw new InvalidOperationException("Lichess service could not start; verify server-side token configuration.");
             await bot.WaitForExitAsync(stoppingToken);
             if (!stoppingToken.IsCancellationRequested)
