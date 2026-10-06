@@ -120,6 +120,20 @@ public sealed class ServiceHostTests
         Assert.False(bot.Connected);
     }
 
+    [Fact]
+    public async Task FailedServiceKeepsReportingWhyBeforeItExits()
+    {
+        var bot = new Connection { StartAllowed = false, Error = "No password has been provided" };
+        var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var app = LichessServiceHost.Build(new(Port: 0, FailureLingerSeconds: 30), bot, () => failed.TrySetResult());
+        await app.StartAsync();
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(app.Lifetime.ApplicationStopping.IsCancellationRequested);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        Assert.Contains("No password has been provided", await client.GetStringAsync("/status"));
+        await app.StopAsync();
+    }
+
     [Theory]
     [InlineData(0, 2)]
     [InlineData(8, 0)]

@@ -9,7 +9,10 @@ test('lichess lab has no secondary operator-token or HTTPS roadblock', async ({ 
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          configured: true,
+          state: 'stopped',
+          reachable: false,
+          desired: false,
+          configured: null,
           tokenPreview: 'lichess-server-secret',
           connected: false,
           running: false,
