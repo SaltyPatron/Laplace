@@ -258,6 +258,18 @@
       "propertyName": "targetLabelfgColor",
       "valueKind": "Text",
       "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "AnnotationSet/@cxnID",
+      "propertyName": "annotationSetcxnID",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "AnnotationSet/@cxnName",
+      "propertyName": "annotationSetcxnName",
+      "valueKind": "Text",
+      "disposition": "Excluded"
     }
   ],
   "providerRoutes": [

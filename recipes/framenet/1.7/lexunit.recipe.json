@@ -264,6 +264,30 @@
       "propertyName": "targetLabelfgColor",
       "valueKind": "Text",
       "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "Pattern/@total",
+      "propertyName": "patternTotal",
+      "valueKind": "Integer",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "ValenceUnit/@FE",
+      "propertyName": "valenceUnitFE",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "ValenceUnit/@GF",
+      "propertyName": "valenceUnitGF",
+      "valueKind": "Text",
+      "disposition": "Excluded"
+    },
+    {
+      "syntaxPath": "ValenceUnit/@PT",
+      "propertyName": "valenceUnitPT",
+      "valueKind": "Text",
+      "disposition": "Excluded"
     }
   ],
   "providerRoutes": [
@@ -308,7 +332,16 @@
         "subCorpus/sentence/text": "SentenceText",
         "subCorpus/sentence/annotationSet": "AnnotationSet",
         "subCorpus/sentence/annotationSet/layer": "Layer",
-        "subCorpus/sentence/annotationSet/layer/label": ""
+        "subCorpus/sentence/annotationSet/layer/label": "",
+        "header/corpus": "",
+        "header/corpus/document": "",
+        "header/frame": "",
+        "header/frame/FE": "",
+        "semType": "",
+        "valences/FEGroupRealization/pattern/annoSet": "",
+        "valences/FERealization/pattern/annoSet": "",
+        "valences/governor/annoSet": "",
+        "valences/governor": ""
       },
       "elementCompositions": [
         {
