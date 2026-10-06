@@ -79,10 +79,10 @@ Common substrate state includes:
 content                         -> recursive composition / executable identity
 ordered occurrence             -> trajectory / occurrence physicality
 unordered multi-value state    -> declared collection composition
-hub identifier                 -> content (an ILI, roleset, class, frame); what it is is attested
+hub identifier                 -> content (an ILI, roleset, class, frame, language); what it is is attested
 internal pointer               -> resolved to the id of what it points at; not recorded
-source claim                    -> claim composition in the record path under the source trunk (the witness)
-provenance                      -> containment under the source trunk
+source claim                    -> claim composition attested by the source trunk (the witness)
+provenance                      -> attestation row today; containment under the source trunk is the target
 deterministic consequence      -> calculation / rebuildable accelerator state
 packaging/provider syntax      -> reconstruction/provider state unless declared otherwise
 unresolved field meaning       -> explicit unresolved obligation
@@ -158,7 +158,7 @@ The source-estate refresh and the recipe/admission work are therefore one depend
 
 A staged newer release should be used to develop and validate its recipe before activation. Do not extend a bespoke decomposer against a superseded source merely because that directory is still the active path. Conversely, do not switch the active source path to a new release whose provider/recipe cannot yet account for its native fields.
 
-A release is its files, so a new release has different files and a different source trunk; no version suffix enters any identity. The same literal sentence, definition, source-code fragment or other content seen in two releases converges on the same content identity, gains a parent under each release's trunk, and the source claims remain release-attributable by containment under that trunk.
+A release is its files, so a new release has different files and a different source trunk; no version suffix enters any identity. The same literal sentence, definition, source-code fragment or other content seen in two releases converges on the same content identity, gains a parent under each release's trunk, and the source claims remain release-attributable to that trunk.
 
 ## Recipe lowering: one recovered object may contribute several state classes
 
@@ -169,7 +169,7 @@ The recipe does not choose exactly one bucket for a parser record. It declares h
 | sentence, definition text, example text, prose, literal source-code/media content | canonical content entity/composition with its normal physicality/trajectory; separately retain artifact/span occurrence | a high-trust semantic fact merely because the source contains the bytes |
 | source says frame X has definition Y, or sense X has example sentence Y | ensure the X/Y content exists, then emit the claim composition (here `[X, definition, Y]`; claims are n-ary, of any arity and tier) witnessed by the source, with its qualifiers and context | a private decomposer-only edge or duplicated text identity |
 | hub: ILI, PropBank roleset, VerbNet class, FrameNet frame/frame element/lexical unit, VerbAtlas frame, language code | content, exactly as written (`i46360` is `[i,4,6,3,6,0]`, the same entity in every source that cites it); a structured hub decomposes into its parts by its notation; a source's own way of writing a hub resolves to it; that it is an X is attested by the source that says so | a fake identifier, a "typed reference" outside content, or a governed identity minted from it |
-| internal pointer: synset offset, synset or sense id, FrameNet numeric id, UD token number or `sent_id`, Tatoeba number, geonameid, row id, line number | decomposed by the source's own notation only for the facts it carries (`06975898-n`: the part of speech `n`), which are attested; resolved through the source's tree or the highway perfcache to the BLAKE3 id of what it points at; not recorded. Whether a sense key is a pointer or a lexicalization in its own right is open | an entity of its own, a part of any id or claim, or a key minted from it |
+| internal pointer: synset offset, synset or sense id, FrameNet numeric id, UD token number or `sent_id`, Tatoeba number, geonameid, row id, line number | decomposed by the source's own notation only for the facts it carries (`06975898-n`: the part of speech `n`), which are attested; resolved through the source's tree or the highway perfcache to the BLAKE3 id of what it points at; not recorded. A sense key (`dog%1:05:00::`) is WordNet's internal pointer to a lexicalization: decomposed for its lemma, type and lexicographer file, resolved through the highway perfcache, not recorded | an entity of its own, a part of any id or claim, or a key minted from it |
 | row/file/span/annotation occurrence, token ordinal, gap, containment | occurrence/trajectory/provenance state over canonical identities | independent consensus witness count |
 | release, license, file path, archive member, parser version | content in the source record and the file's metadata tree; position under the trunk | truth unless the source asserts it |
 | deterministic parser/normalizer/geometry consequence | versioned calculation/structural state with its recipe/provider identity | empirical source testimony |

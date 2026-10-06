@@ -24,8 +24,10 @@ The same prompt text in two turns is one content entity occurring twice.
 Witnessing is not attribution. An entity is witnessed wherever some tree holds it; that
 is calculated by a walk up the DAG, never stored, and a user's ordinary prompt only adds
 observations: new trees containing existing nodes. Attribution is of a claim: a source
-asserted it, with an outcome, and the claim sits in a record path under that source's
-trunk. Attestations come from seeded corpora and from Laplace's own calculations and
+asserted it, with an outcome, recorded today in the attestation table; the target is
+that the claim sits in a record path under that source's trunk, and the table stays
+until a prototype on real data shows containment answers everything it answers with
+nothing lost. Attestations come from seeded corpora and from Laplace's own calculations and
 outcomes at their trust.
 
 No identity here is a hash of a made-up key string or carries a version suffix. The

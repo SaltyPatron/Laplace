@@ -54,8 +54,8 @@ Four primary families persist the world (see [`ARCHITECTURE.md`](ARCHITECTURE.md
 ```text
 entities       content identity (BLAKE3 over the ordered child ids, no domain byte; codepoint = BLAKE3 of its UTF-8)
 physicalities  typed realization: coord, Hilbert address, packed trajectory (exact manifest)
-attestations   claim compositions contained in record paths under the source trunk, the witness (confirm/draw/refute; absence != false)
-consensus      folded standing per claim composition (Glicko-2 rating/RD/volatility/witnesses)
+attestations   source-attributed testimony per (claim composition, witness = source trunk): games, score, qualifier mask (confirm/draw/refute; absence != false); containment in record paths is the target, proven side by side first
+consensus      folded standing per claim composition, stored for every claim (Glicko-2 rating/RD/volatility/witnesses)
 ```
 
 These are different things and must not collapse:
