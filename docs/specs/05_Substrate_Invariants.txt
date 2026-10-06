@@ -140,6 +140,8 @@ Code must select the representation required by the operation. A point cannot an
 an order question; a packed trajectory cannot be passed to a geometric distance
 operator as if its mantissas were spatial coordinates.
 
+A physicality has no identity of its own: it is the entity's realization, one row per entity keyed by the entity's id, and attestations are of entities only, never of physicalities. As built, `laplace_physicality_id_compute` (`engine/core/src/content_witness_batch.c`) and `PhysicalityId.cs` give a physicality an id, BLAKE3 over the entity id followed by the physicality type; that violates the identity law (Laplace#1731 item 16), and nothing new is implemented from it.
+
 Rule #3 — Order lives in trajectories
 -------------------------------------
 
@@ -190,9 +192,9 @@ replay) with nothing lost, side by side with the row. The row's witness today is
 identity violates the identity law, and nothing new is implemented from it.
 
 A witness that asserts one claim n times gives one attestation of n games with a
-score, and Glicko-2 plays that series as the witness's rating period. The client folds
+score. The client folds
 a source's repeats before the database sees anything, so the database takes one update
-per claim per witness. Run length is content structure only, identical consecutive
+per claim per witness. The client solves that series as one update: it finds the rating where the claim's prior standing and the series' score agree (the log posterior is concave, so bisection on its slope always converges) and takes the deviation from the series' games, at a cost independent of n. It is not Glicko-2's single period step, one linearized move that assumes a period moves a rating only a little, fine for small moves and wrong for a long series: a 450 player against a 3400 player over 1000 games, 100 wins and 100 draws, is one series with score 0.15; played game by game Glicko-2 converges to 3100 with deviation 15, where an expected score of 0.15 against 3400 sits (3097); solved as one update it gives 3092 with deviation 16; the single period step from 450 gives 105,823. As built, the Engine (`db.c`) plays one `lp_attest` for a claim the first time a lineage attests it, ever, and every later occurrence only adds to `games` and averages the score, so an attestation's games are counted and never played. Run length is content structure only, identical consecutive
 children in a path: a prompt pasted n times is a run in its content, an observation
 that attests nothing. Packaging is not the source asserting again: a cross-product
 table layout or an automatic tagger's per-token output repeating one fact is not the
@@ -219,6 +221,8 @@ source/context scope are part of the decision surface.
 Consensus is not an answer vote. It is the standing evidence state consumed before and
 during one forward pass.
 
+Trust bounds a vote. Each game's outcome is pulled toward a draw by the witness's trust, s_eff = 0.5 + t(s - 0.5), so no repetition takes a source past its trust's ceiling, symmetrically for affirmation and refutation and monotone in trust, and one witness alone can give a claim only bounded certainty (a per-witness deviation floor). Count is never independence: witnesses sharing a dependence root or a trust class count as one root, capped, wherever low-trust voices do attest (explicit feedback, model outputs, Laplace's own responses). Prompts are observations and give no semantic attestation merely by being said; Laplace records that people say a thing, a fact about discourse, without its standing moving. A witness's own trust is its own rating, starting at its trust class's default and earned only through agreement or disagreement with independent witnesses and verified outcomes, never by repeating itself. The test: user prompts screaming that the earth is flat must not drown out GPS, photographs, mathematics, reports and NASA. Computed with a series solver, round-earth evidence alone stands at 2000 (p 0.947); a million flat-earth prompts as a million independent witnesses drown it (1393, p 0.351) even with a per-witness cap; as one capped root they dent it (1765, p 0.821); as observations only it stands (2027, p 0.954). As built, Laplace-Native's `lp_attest` plays every witness as a fixed 1500 opponent whose trust sets only its deviation (`lp_trust_deviation`, g = trust), and a claim enters at the witness's deviation, which inverts the rule: an affirming series of 1000 games leaves a claim at 3235, deviation 55, from trust 0.2 and at 1884, deviation 30, from trust 0.9.
+
 Rule #7 — Relation types are governed
 -------------------------------------
 
@@ -230,6 +234,8 @@ equivalences: a source's own code is recorded as it arrives and sets the same bi
 the relation it means; aliases do not mint parallel meanings. No code path tests for
 an English value. Salience band, rank, hotness, and highway membership are separate
 properties.
+
+A claim's relation, like every other part of it, is what the source means, resolved through the road classes, never the name of the field, column, attribute or layer the source's markup happens to use. A tagset value is a value of its tagset with its attested equivalence to the shared vocabulary (FrameNet's BNC layer `NN1` is a CLAWS C5 singular common noun, its PENN layer `nns` a Penn Treebank plural common noun, each reaching UD's `NOUN` through that equivalence); a per-span label (a frame element, grammatical function or phrase type in one sentence's annotation) belongs in the sentence's annotation layer, not on the word; a pointer's attribute name (`feID`, `ID`) never appears in any claim. As built, the Engine's recipes record `[cell, column header, value]` (`[dog, BNC, NN1]`, `[dog, GF, Head]`, `[dog, feID, Animals, Animal]`, `[dog.n, POS, N]`, `[pred, role, 10_VN_ROLE, vn:Theme]`): markup, not meaning.
 
 Rule #8 — Determinism and receipts are product properties
 ---------------------------------------------------------

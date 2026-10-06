@@ -10,7 +10,11 @@ entities in a running substrate.
 
 ## Identity and retained evidence
 
-The existing `laplace_physicality_id_compute(E, type)` and managed twin remain
+As built, `laplace_physicality_id_compute(E, type)`, BLAKE3 over E's id and the
+type, and its managed twin `PhysicalityId.cs` give a physicality an id of its own.
+That violates the identity law (Laplace#1731 item 16): a physicality has no identity
+of its own, it is one row per entity keyed by the entity's id, and attestations are
+of entities only. Nothing new is implemented from it. The two remain
 byte-compatible. They address the current typed placement of E. Several exact
 bodies can occur at that address; the address cannot identify each immutable
 body. For example, `conversation_session.c` updates a session projection's
