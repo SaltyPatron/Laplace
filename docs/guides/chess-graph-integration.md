@@ -76,7 +76,7 @@ string/name similarity      != identity proof
 explicit provider linkage   -> governed CORRESPONDS_TO testimony
 ```
 
-A FIDE profile also deposits its id exactly as FIDE writes it, as content; that it is a FIDE id is attested by the FIDE source, never encoded as a made-up `fide:` prefix. Title/federation/rating/profile facts attach to the same player/profile world.
+Whether a FIDE id is a highway node or an internal pointer is not decided. If it names a player across sources, it is a highway node: content exactly as FIDE writes it, and that it is a FIDE id is attested by the FIDE source. If it only addresses FIDE's own records, it is a pointer that resolves to the player and is not recorded. Either way it is never encoded as a made-up `fide:` prefix. Title/federation/rating/profile facts attach to the same player/profile world.
 
 ## Games connect players to each other
 
