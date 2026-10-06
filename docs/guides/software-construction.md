@@ -49,7 +49,7 @@ This means duplicate elimination is part of generation.
 
 ### Exact duplicates
 
-If two admitted code structures resolve to the same canonical composition under the same recipe, they have the same identity. An AST is one possible projection of that shared identity. Their occurrences, files, repositories and provenance remain distinct, but the implementation structure is already known to be identical.
+If two admitted code structures are the same content, they have the same identity, wherever they occur; the recipe decides how code decomposes into a tree, never what its hash is. An AST is one possible projection of that shared identity. Their occurrences, files, repositories and provenance remain distinct, but the implementation structure is already known to be identical.
 
 ### Deeper duplicates
 

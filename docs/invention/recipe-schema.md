@@ -1,8 +1,9 @@
 # Conventional-model export/construction recipe schema
 
 A recipe is a versioned consumer-artifact construction description (JSON). It names a target architecture structure, an explicitly authorized/export scope, and an operator array describing which substrate calculations populate target slots. Recipes are deposited into the substrate as
-content-addressed `Model_Recipe` entities (the JSON is the entity's canonical name; hparams are
-also emitted as queryable scalar attestations). Export reads the stored recipe via
+content-addressed entities: the JSON is decomposed like any other content, and its trunk is the
+recipe's identity, never a blob hash of the JSON text or a name. `Model_Recipe` is a developer handle
+for the entity type, not an identity. Hparams are also emitted as queryable scalar attestations. Export reads the stored recipe via
 `model_recipes()` / `--recipe-from` — never a disk file. A hand-written recipe is a **dev fixture**
 that simulates an ingest or user-create event; it goes through deposit like any other.
 

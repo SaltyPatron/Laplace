@@ -31,15 +31,15 @@ cross-cutting: execution grain - authority/capability - resource envelopes/recei
 
 ## 1. Admission — ingestion is the learning process
 
-A logical source has many releases, files and sidecars; every selected physical artifact gets an explicit disposition (admitted, equivalent packaging, superseded, excluded-with-reason, unsupported-with-why-not). Silent non-enumeration is invalid.
+A source is admitted one release at a time, and a release is its files: the source trunk is the composition `[source record, its files' trunks in path order]`, so a new release has a different trunk. Every selected physical artifact gets an explicit disposition (admitted, equivalent packaging, superseded, excluded-with-reason, unsupported-with-why-not). Silent non-enumeration is invalid.
 
 ```text
 artifact graph enumeration
 -> streamed read/parse (native kernels; qualified parsers are provider evidence)
 -> typed decomposition (grammar/recipe per modality)
--> recursive composition under one identity law (equal content converges)
+-> recursive composition under one identity law (equal content converges; the recipe decides the tree, never the hash)
 -> working-set dedup / bulk existence / COPY persistence
--> set-sized evidence fold (attestations -> consensus)
+-> set-sized evidence fold (a witness's repeats of one claim are one attestation with that many games, folded on the client; attestations -> consensus)
 -> receipt/journal completion (physical files and semantic units reported separately)
 ```
 
@@ -52,10 +52,10 @@ artifact graph enumeration
 Four primary families persist the world (see [`ARCHITECTURE.md`](ARCHITECTURE.md) §1–4):
 
 ```text
-entities       canonical content identity (Merkle hash over the ordered child ids)
+entities       content identity (BLAKE3 over the ordered child ids, no domain byte; codepoint = BLAKE3 of its UTF-8)
 physicalities  typed realization: coord, Hilbert address, packed trajectory (exact manifest)
-attestations   source-attributed typed testimony (confirm/draw/refute; absence != false)
-consensus      folded standing (Glicko-2 rating/RD/volatility/witnesses)
+attestations   source-attributed testimony per (claim composition, witness = source trunk): games, score, qualifier mask (confirm/draw/refute; absence != false); containment in record paths is the target, proven side by side first
+consensus      folded standing per claim composition, stored for every claim (Glicko-2 rating/RD/volatility/witnesses)
 ```
 
 These are different things and must not collapse:

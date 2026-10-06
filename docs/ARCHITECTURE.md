@@ -19,7 +19,7 @@ The PostgreSQL extension persists four primary substrate families under `extensi
 
 Everything else (journals, working-set and index bookkeeping) is operational state around these four tables, not knowledge. `docs/INVENTORY.md` is the generated catalog.
 
-Every entity has a physicality; entities are both building blocks and content. Physicality admission records source/unit/time provenance through ordinary attestations only — an attestation recording that an entity has a physicality adds nothing and is not admitted.
+Every entity has a physicality; entities are both building blocks and content. A physicality has no identity of its own: it is one row per entity, keyed by the entity's id, and attestations are of entities only, never of physicalities; an attestation recording that an entity has a physicality adds nothing and is not admitted. As built, `laplace_physicality_id_compute` and `PhysicalityId.cs` give a physicality an id, BLAKE3(entity id ‖ type); that violates the identity law (Laplace#1731 item 16).
 
 The high-level separation is deliberate:
 
@@ -52,14 +52,16 @@ n == 1 -> child identity is preserved
 n > 1  -> hash128_merkle(tier, ordered child ids, n)
 ```
 
-The function signature carries `tier`, and `hash128_merkle` discards it. The executable id is a BLAKE3-derived hash over the Merkle domain byte plus the ordered child-id sequence. Tier, source, ordinal and container identity are not mixed into that hash.
+The function signature carries `tier`, and `hash128_merkle` discards it. The law is that a composite id is BLAKE3 over the ordered 16-byte child ids, repeats included, truncated to 16 bytes, with nothing else in the input: no domain byte, tier, type, recipe, version, source, ordinal or container identity. A codepoint id is BLAKE3 of its UTF-8 bytes, from the Tier-0 ROM; a leaf hashes one to four bytes and a node at least thirty-two, so a node can never collide with a leaf. The current `hash128_merkle` prepends a `0x01` domain byte to the child-id sequence. That violates the law, disagrees with Laplace-Native and the Engine for every composition, and must be removed; do not implement from it.
 
 So the identity law is:
 
 ```text
-same ordered canonical child-id sequence
+same ordered child-id sequence
 -> same composite content id
 ```
+
+The recipe decides how content decomposes into a tree; it never salts the hash.
 
 regardless of the tier at which that same content is observed/used. Tier remains altitude/floor/storage/occurrence metadata rather than canonical content identity. A single-child composition is the child id.
 
@@ -131,7 +133,7 @@ A composite's coordinate is the Euclidean centroid of its children's coordinates
 
 `AttestationRow` in `app/Laplace.Substrate/Crud/SubstrateChange.cs` carries the typed proposition/witness state used by the write path. The outcome domain distinguishes refute/draw/confirm rather than treating omission as falsehood.
 
-`engine/core/src/glicko2.c` implements the Glicko-2 fold in fixed-point arithmetic. A claim is a game series (games plus a score in [0,1]; a draw is 0.5). Consensus is partitioned by `HASH(subject_id)`. Scoring runs once over a source's landed evidence: each touched cell is one rating period over all of its durable evidence.
+`engine/core/src/glicko2.c` implements the Glicko-2 fold in fixed-point arithmetic. A claim is a game series (games plus a score in [0,1]; a draw is 0.5). A claim is an n-ary composition of content ids of any arity and tier, and consensus is keyed on that claim composition. The current consensus table is partitioned by `HASH(subject_id)` and keyed by `laplace.consensus_id`, `BLAKE3(subject ‖ type ‖ object)` with a zero-filled missing object. That violates the law, which keys consensus on the claim composition; do not implement from it. As built, scoring runs once over a source's landed evidence, and each touched cell is recomputed from the neutral prior as one rating period over all of its durable evidence, stored and new (`laplace_staged_score_*` in `engine/core/include/laplace/core/staged_load.h`, `fold_route.c`). That is not the law's fold; do not implement from it. Under the law, a witness that asserts one claim n times gives one attestation of n games with a score, that series is solved on the client as one update (the rating where the claim's prior standing and the series' score agree), never by Glicko-2's single linearized period step, on the claim's prior standing as the source is ingested; each game's outcome is pulled toward a draw by the witness's trust, and witnesses sharing a dependence root or trust class count as one capped root, and the client folds a source's repeats so the database takes one update per claim per witness.
 
 Evidence moves through distinct stages:
 
@@ -163,7 +165,7 @@ stage 1:    prove novelty trunk-first against the substrate (a present trunk cov
 stage 2:    Glicko-2 scoring of the landed evidence into consensus, once
 ```
 
-Content shared with another source gains a second parent trajectory; that multi-parent DAG is the provenance. Records, recipe subjects and file layout are packaging, never entities. A recipe maps provider syntax to governed vocabulary (WordNet `%p` → `HAS_PART`, WN-LMF `n` → UPOS `NOUN`) so sources converge; unmapped syntax is explicitly unresolved, never dropped. Structured values (sense keys, frame elements, valence patterns, class ids) are ordered compositions of governed parts, never joined strings.
+Content shared with another source gains a second parent trajectory; that multi-parent DAG is the provenance. A record's fields are content like any other; its position in the file, its line number and its byte offset are occurrence under the file trunk, never identity, and file layout is packaging. Source text is recorded as it arrives: WordNet's `%p` stays `[%,p]` and WN-LMF's `n` stays `[n]`. That `%p` means the part relation, or that `n` means what UPOS `NOUN` means, is attested by the mapping source or the governed alias, and equivalent codes set the same registry mask bit, so sources converge without rewriting what they said. Unmapped syntax is explicitly unresolved, never dropped. A source's highway nodes (ILIs, rolesets, VerbNet classes, FrameNet frames, language codes) are content; structured ones decompose into their parts as ordered compositions, never joined strings, and what they are is attested. Its internal pointers (synset offsets, synset and sense ids, token numbers, row and line numbers) are decomposed by the source's notation only for the facts they carry, resolved to the id of what they point at, and not recorded.
 
 Locators: `app/Laplace.Substrate/Abstractions/IngestPipeline.cs` (streaming/worker contract), `NativeRecipeCompiler.cs` and `SemanticSourceRecipe.cs` (recipes), `recipes/` (per-source recipe data).
 
@@ -224,7 +226,7 @@ Wider SIMD, AVX-512 and GPU providers are additional headroom, not the premise o
 
 ## 7. Relation registry and indexed web
 
-`engine/manifest/relation_types.toml` governs canonical relation identities, aliases, bands/ranks and append-only highway bits; `scripts/codegen-attestation-law.py` generates the native tables. A relation bit is one primitive meaning. Direction is an alias flip, never a second bit. Negation is a refute outcome, never a `NOT_` relation. A closed sub-category (part/member/substance) is a qualifier on the attestation; an open one (a property name) goes in the object as the composition `[property, value]`. Governed vocabularies (relations, UPOS, deprels, features, languages, modalities) are perfcache ROMs keyed by content id with stable, append-only bits; entities carry OR-masks (`highway_mask` and its sister masks) deposited from consensus. A mask is a prefilter; a mask miss is never absence.
+`engine/manifest/relation_types.toml` governs the relation registry: aliases, bands/ranks and append-only highway bits; `scripts/codegen-attestation-law.py` generates the native tables. A relation is a content-derived entity whose meaning is attested and realizable in any language; the English names in the manifest are developer handles, and a highway bit is a perfcache slot over that entity, never its identity. A relation bit is one primitive meaning. Direction is an alias flip, never a second bit. Negation is a refute outcome, never a `NOT_` relation. A closed sub-category (part/member/substance) is a qualifier on the attestation; an open one (a property name) goes in the object as the composition `[property, value]`. Governed vocabularies (relations, UPOS, deprels, features, modalities) are perfcache ROMs keyed by content id with append-only bit slots, never the identity of a meaning; a language is an ISO 639 highway node and a part of the lexicalization strand `[dog, eng, i46360]`, so changing the language is intersecting on the ILI and another language part, and no mask bank holds languages; entities carry OR-masks (`highway_mask` and its sister masks) deposited from consensus. A mask is a prefilter; a mask miss is never absence.
 
 The substrate is not merely a flat relation table. A canonical entity can simultaneously participate in:
 

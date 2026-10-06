@@ -10,7 +10,11 @@ entities in a running substrate.
 
 ## Identity and retained evidence
 
-The existing `laplace_physicality_id_compute(E, type)` and managed twin remain
+As built, `laplace_physicality_id_compute(E, type)`, BLAKE3 over E's id and the
+type, and its managed twin `PhysicalityId.cs` give a physicality an id of its own.
+That violates the identity law (Laplace#1731 item 16): a physicality has no identity
+of its own, it is one row per entity keyed by the entity's id, and attestations are
+of entities only. Nothing new is implemented from it. The two remain
 byte-compatible. They address the current typed placement of E. Several exact
 bodies can occur at that address; the address cannot identify each immutable
 body. For example, `conversation_session.c` updates a session projection's
@@ -139,7 +143,7 @@ missing slices. Every flattened missing entry belongs to an original form;
 duplicate forms may share a slice. No zero hash is published as an entity.
 The provider order is declared by
 `PhysicalityRetainedDescriptorSelectedGeometryRecipeV2`: current database Content,
-mapped codepoint floor or authenticated native raw-byte basis, then the actual placement winner this writer will
+mapped codepoint floor (the current code also admits a native raw-byte basis, which violates the identity law; see below), then the actual placement winner this writer will
 install after a checked database absence. Alternate raw source bodies never
 choose the provider by incidental order or by a different minimum-id rule.
 All typed rows in the original writer stages are authenticated. Only Content
@@ -148,15 +152,16 @@ the writer's actual first-occurrence rule across those stages. Projection,
 parse and alternate Content observations remain in the original capture and
 receive their own exact descriptors and source-unit evidence.
 
-Raw bytes 128–255 use the same native basis as `ByteAtoms`: Blake3 of the
-single byte, the existing 128-point SuperFibonacci placement and its Hilbert
-index. The vocabulary retains a copied indexed basis and authenticates it
-before use. A selected byte atom binds `PhysicalityByteBasisReceiptV1` to a
-fingerprint of every exact basis ID, binary64 coordinate and Hilbert field;
-the Unicode floor receipt itself remains unchanged. Stored Content
-still takes precedence. This makes atoms resolvable without claiming their E
-rows are already persisted: the generated-stage sink retains its SQL presence
-checks. Existing Unicode decomposition owns byte E/P declaration.
+Every floor is codepoints. A raw byte, including 128–255, is a number, and a
+number is a composition of digit codepoints under the scalar recipe: the byte
+255 is `['2','5','5']`, the same entity as the text "255" anywhere. No byte
+atom exists. The current code instead resolves raw bytes 128–255 through the
+`ByteAtoms` basis (Blake3 of the single byte, a 128-point SuperFibonacci
+placement and its Hilbert index, authenticated by
+`PhysicalityByteBasisReceiptV1`). That is a second tier-0 alphabet; it violates
+the identity law and must be replaced by the scalar composition. Stored Content
+still takes precedence, and the generated-stage sink retains its SQL presence
+checks.
 
 Every view contains a canonical sorted receipt of the selected bodies reachable
 from that root. A change to C in A→B→C changes A's view receipt even when A and
@@ -174,14 +179,20 @@ it is not relabeled as a type-9 projection.
 Physical-form provenance is structural state, not testimony. Admission retains one
 exact `(E,D,source,source-unit)` observation in `laplace.physicality_observations`,
 advancing only its observation time on exact replay. The source-unit receipt remains
-opaque provenance; no context entity is manufactured merely to carry it. Descriptor
+opaque provenance; no context entity is manufactured merely to carry it.
+Provenance is containment: which sources hold a form is the walk up to the
+trunks that contain it, and this observation row never enters an identity. Descriptor
 identity remains immutable and source-independent. Physicality provenance does not
 enter Glicko consensus, relation standing, highway masks or salient semantic facts.
 
 
 `physicality_descriptor_generated_source_create` builds the ordinary content
 entity for `substrate/source/PhysicalityDescriptorAdmission/v1` through the
-actual content owner and returns its declaration stage and content id. The
+actual content owner and returns its declaration stage and content id. That
+string is a made-up name with a version suffix; using its content id as a
+source identity violates the identity law. A generated source is content like any
+other source, and the calculation that generates views is recorded with its
+analyzer, version and receipt. The
 database operation uses that returned id for generated provenance and returns
 the source, vocabulary and generated stages together. A caller's literal hash
 is not relabeled as an ordinary source entity.
@@ -302,7 +313,9 @@ atom keeps its exact body and identity. Export copies remain valid after the
 native stage and capture are released.
 
 Session projection observations use the ordinary native-composed source
-`substrate/source/SessionProjection/v1`, its explicit AppDerived prior, and the
+`substrate/source/SessionProjection/v1` (a made-up versioned name used as a
+source identity, which violates the identity law; a session is a handle over its
+turns, spec 34), its explicit AppDerived prior, and the
 actual writer source-unit receipt. The native append takes the shared apply lock
 before locking the session row, then refreshes its Read Committed snapshot after
 any wait. A waiting append therefore captures the form committed by its

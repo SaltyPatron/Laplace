@@ -4,7 +4,7 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 
 ## Identity, bounded physicality and exact composition
 
-1. **Content-addressed identity as the join.** Equal canonical content under one declared recipe converges across sources and modalities without a separate source-specific identity namespace.
+1. **Content-addressed identity as the join.** Equal content converges on one identity across sources, modalities, tiers and positions without a separate source-specific identity namespace. A recipe decides how content decomposes into a tree; it never salts the hash, and no domain byte, tier, type, version, source or position enters it. One Merkle DAG runs from codepoint to source trunk.
 2. **Content convergence is not a hash collision.** Normal convergence means equal canonical content produced the same executable id. A true cryptographic collision is a distinct implementation event and must be detected/handled as such.
 3. **Tier as compositional altitude rather than ontology.** Tier describes a selected decomposition/composition ladder; it does not redefine canonical content identity or impose one semantic hierarchy on every modality.
 4. **Open Tier-0 address law; finite observed generations.** Tier-0 ranks are not bounded by Unicode or a terminal population `N`; the abstract law admits `n ∈ N`. Any concrete perfcache/database/observation is finite. Unicode's 1,114,112 positions are one selected finite standards window, not Tier-0 capacity.
@@ -27,14 +27,14 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 
 ## Evidence, relations and consensus
 
-21. **Universal attestation reduction.** Facts from corpora, users, tools, games, code and checkpoints reduce to typed subject/relation/object/source/context/outcome evidence.
+21. **Universal attestation reduction.** Facts from corpora, users, tools, games, code and checkpoints reduce to one form: an n-ary claim composition of content identities, of any arity and tier (subject/relation/object is one shape among many), witnessed by a source trunk with context, qualifiers, outcome, games and score.
 22. **Content/evidence/consensus separation.** Identity converges, witnesses remain attributable and propositions acquire standing without erasing their evidence roots.
-23. **Glicko-2 epistemology.** Rating, deviation, volatility, source semantics, witness count and conservative score retain support and uncertainty rather than one opaque confidence number. A claim is a game series: games plus a score in [0,1], a draw is 0.5.
+23. **Glicko-2 epistemology.** Rating, deviation, volatility, source semantics, witness count and conservative score retain support and uncertainty rather than one opaque confidence number. A claim is a game series: games plus a score in [0,1], a draw is 0.5. A witness that asserts one claim n times gives one attestation of n games, a series solved on the client as one update (the rating where the claim's prior standing and the series' score agree), never by Glicko-2's single linearized period step, and the database takes one update per claim per witness. Run length is content structure only and attests nothing. Numbers a source states are observations.
 24. **Signed three-valued testimony.** Confirmation, draw/indeterminate evidence and refutation remain distinct; absence is not silently converted into falsehood.
 25. **Provenance/aggregation duality.** Context-scoped occurrences and folded proposition standing coexist without erasing one another.
 26. **Record-versus-calculate boundary.** Literal observation and versioned deterministic/analytic calculation remain distinguishable witnesses.
 27. **Tier-correct attestation.** Evidence attaches to the compositional object the source actually asserts rather than being sprayed across every constituent.
-28. **Governed relation registry.** Relation identity, aliases, append-only highway bits, salience bands, rank and physical hotness remain explicit axes.
+28. **Governed relation registry.** Relations are content-derived entities whose meaning is attested and realizable in any language. The registry is a perfcache over them: append-only highway bits, salience bands, rank and physical hotness are slots and indexes, never relation identity, and aliases are attested equivalences between source vocabularies.
 29. **Trust-class lattice.** Curated sources, tools, conventional models, responses and feedback have declared source semantics rather than one untyped global weight.
 30. **Dependence-aware evidence.** Multiple paths/witnesses are useful only to the degree their evidence roots are actually independent; provenance remains available to prevent duplicate dependence from masquerading as independent confirmation.
 
@@ -131,7 +131,7 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 
 ## Cross-domain preservation laws
 
-98. **Exact reusable subtrajectory identity.** Repeated ordered subpaths are reusable canonical structures under their declared trajectory recipe while each containing occurrence remains attributable.
+98. **Exact reusable subtrajectory identity.** Repeated ordered subpaths are reusable structures with one content identity wherever they occur, while each containing occurrence remains attributable.
 99. **Identity-versus-realization separation.** SAN/PGN/FEN, labels, aliases, languages, codec fields, source paths and model tensor names are contextual realizations/references rather than canonical identity owners.
 100. **Composition/trajectory/occurrence symmetry.** Text, chess, models, code and other modalities instantiate the same atom → composition → higher composition → trajectory/reusable structure → witnessed occurrence pattern under different typed grammars.
 101. **Deterministic execution trajectory.** A conventional model forward pass, chess calculation, tablebase probe, code execution or other deterministic provider run is a declared transformation trajectory under its complete inputs, generation, numeric boundary, implementation and recipe.

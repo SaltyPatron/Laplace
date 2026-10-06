@@ -11,6 +11,47 @@ surface. Callers resolve ids with canonical helpers; they do not manufacture has
 Two observations of identical content converge on one entity id regardless of source,
 modality, ingestion order, or interpretation.
 
+A codepoint's id is BLAKE3 of its UTF-8 bytes, read from the Tier-0 ROM. A
+composition's id is BLAKE3 over its children's 16-byte ids, in order, repeats
+included, truncated to 16 bytes; a one-child composition is that child. The hash input
+holds nothing else: no domain byte, tier, type, recipe name, version, source, position,
+index, or role label. A recipe decides how content decomposes into a tree; it never
+salts a hash.
+
+Identity is one Merkle DAG from leaf to trunk: the recipe's tiers compose to a file's
+content tree; a file is `[metadata, content]`; a source is `[source record, its files'
+trunks in path order]`. A release is its files, so a new release has a new source
+trunk. Any client computes any id from the ROM with no database.
+
+Hashes are never faked. A hash of a made-up string (`substrate/source/X/v1`,
+`language:eng`, `operation/what_is/v1`) is a fake identifier, and a blob hash of a
+string's raw bytes gives the same text a second id. Such a string is decomposed
+content, a referenced trunk, or a recorded attestation.
+
+A source's identifiers are of two kinds. A highway node (an ILI, a PropBank roleset, a
+VerbNet class, a FrameNet frame, frame element or lexical unit, a VerbAtlas frame, a
+language code) is content: `i46360` is `[i,4,6,3,6,0]` wherever that text occurs, every source
+that cites it lands on the same entity, and that it is an ILI is attested by the source
+that says so. An internal pointer (a WordNet synset offset, a synset or sense id, a
+FrameNet numeric id, a UD token number or `sent_id`, a Tatoeba number, a geonameid, a
+row or line number) is how a source addresses its own records. The recipe decomposes it
+by the source's own notation only for the facts it carries (a WordNet offset's type, a
+sense key's lexicographer file), resolves it through the source's tree or the highway
+perfcache to the id of what it points at, and records nothing of it. A sense key
+(`dog%1:05:00::`) is such a pointer: WordNet's internal pointer to a lexicalization,
+decomposed for its lemma, type and lexicographer file, resolved through the highway
+perfcache to the lexicalization, and not recorded. The language is a part of the
+lexicalization, `[dog, eng, i46360]`, an ISO 639 highway node; changing the language is
+intersecting on the ILI and another language part, one GIN read, and no mask bank holds
+languages. Rolesets, VerbNet classes, FrameNet frames, frame elements and lexical
+units, and VerbAtlas frames are highway nodes exactly as an ILI is: concept nodes of the
+linguistic superhighway, each identifier system a road class. A node holding more
+claims than the fan (NOUN, `eng`) is a fan-limited node, reached and not crossed. A WordNet offset
+is a byte position in one release's `data.<pos>` file, unique only with its type, and
+19,619 of WordNet 3.0's 117,659 synsets share their exact word list with another, so a
+synset is its ILI, neither its offset nor its words. A record's position in a file,
+a line number, or a byte offset is occurrence under the trunk, never part of an id.
+
 Coordinate equality, spatial proximity, a shared name, or an ordinal slot is evidence
 about entities. None replaces content identity.
 
@@ -21,7 +62,9 @@ Tier is a property of a representation level and is never an input to the conten
 The same content has the same id at every tier. Tier predicates cannot be used as a
 proxy for semantic role, source, or modality.
 
-Tier 0 is the universal Unicode codepoint floor for textual content. Tokens, words,
+Tier 0 is the universal Unicode codepoint floor for all content: every modality
+decomposes to codepoint leaves. A raw byte, sample, or channel value is a number, a
+composition of digit codepoints under the scalar recipe, never a leaf of its own. Tokens, words,
 phrases, sentences, documents, programs, games, model circuits, and other modalities
 compose above that floor; packaging bytes do not redefine their content identity.
 
@@ -78,8 +121,9 @@ Likewise, if the exact ordered constituent sequence is admitted at two different
 hash128_merkle produces the same id. Tier is deliberately discarded by the executable
 hash law.
 
-Do not salt content identity with tier, source, parent/container, occurrence ordinal,
-semantic role/type label, modality, cache profile, physicality or provenance when those
+Do not salt content identity with a domain byte, tier, recipe, version, source,
+parent/container, occurrence ordinal, semantic role/type label, modality, cache
+profile, physicality or provenance when those
 facts do not change the canonical ordered constituent content itself.
 
 Rule #2 — Physicality is typed
@@ -95,6 +139,8 @@ Rule #2 — Physicality is typed
 Code must select the representation required by the operation. A point cannot answer
 an order question; a packed trajectory cannot be passed to a geometric distance
 operator as if its mantissas were spatial coordinates.
+
+A physicality has no identity of its own: it is the entity's realization, one row per entity keyed by the entity's id, and attestations are of entities only, never of physicalities. As built, `laplace_physicality_id_compute` (`engine/core/src/content_witness_batch.c`) and `PhysicalityId.cs` give a physicality an id, BLAKE3 over the entity id followed by the physicality type; that violates the identity law (Laplace#1731 item 16), and nothing new is implemented from it.
 
 Rule #3 — Order lives in trajectories
 -------------------------------------
@@ -118,9 +164,44 @@ must agree on version, vertex class, field layout, and bounds.
 Rule #5 — Evidence retains provenance
 -------------------------------------
 
-An attestation records subject, relation type, optional object, source, optional
-context, outcome, score, uncertainty inputs, and observation count. Absence of a row is
-unknown, not refutation. Refutation, draw, and confirmation remain distinct outcomes.
+An attestation is a witness asserting one claim. The claim is an n-ary composition
+of content ids with referential integrity, of any arity and any tier (a lexicalization
+`[lemma, language, ILI]`, a concept relation `[ILI, hypernym, ILI]`, a role inside a
+roleset, a valence pattern); `(subject, relation, object)` is one claim shape among
+many. The witness is the source trunk, `[source record, its files' trunks in path
+order]`. A corpus is one source trunk and one witness: a treebank, a lexicon or a
+dataset under it is files, with their paths, under that trunk, never a witness of its
+own. Annotators, workers, speakers and members a corpus names are content, not
+witnesses: what the corpus reports of them (this annotator labelled this case, this
+speaker said this sentence) are relations the corpus attests, added to the web
+explicitly. Absence is unknown, not refutation.
+
+The target is provenance by containment: a source's record is a path over the claims
+it asserts, inside its file's content tree, with each claim's games, outcome and
+score in its vertex; many source trunks can contain the same claim, and a walk up from
+the claim finds them all; trust and lineage are keyed by the trunk id; forgetting a
+source removes its trunk, sweeps what nothing references, and replays the standings it
+touched.
+
+The current schema keeps a per-(claim, witness) `attestation` row, with its games,
+score, position and qualifier mask, and that row stays. Containment replaces it only
+after a working prototype on real data shows containment answering everything the
+row answers today (who said a claim, games, score, position, qualifiers, forget and
+replay) with nothing lost, side by side with the row. The row's witness today is
+`SourceWitness.Id(authority, release)`, which is not the source trunk; that witness
+identity violates the identity law, and nothing new is implemented from it.
+
+A witness that asserts one claim n times gives one attestation of n games with a
+score. The client folds
+a source's repeats before the database sees anything, so the database takes one update
+per claim per witness. The client solves that series as one update: it finds the rating where the claim's prior standing and the series' score agree (the log posterior is concave, so bisection on its slope always converges) and takes the deviation from the series' games, at a cost independent of n. It is not Glicko-2's single period step, one linearized move that assumes a period moves a rating only a little, fine for small moves and wrong for a long series: a 450 player against a 3400 player over 1000 games, 100 wins and 100 draws, is one series with score 0.15; played game by game Glicko-2 converges to 3100 with deviation 15, where an expected score of 0.15 against 3400 sits (3097); solved as one update it gives 3092 with deviation 16; the single period step from 450 gives 105,823. As built, the Engine (`db.c`) plays one `lp_attest` for a claim the first time a lineage attests it, ever, and every later occurrence only adds to `games` and averages the score, so an attestation's games are counted and never played. Run length is content structure only, identical consecutive
+children in a path: a prompt pasted n times is a run in its content, an observation
+that attests nothing. Packaging is not the source asserting again: a cross-product
+table layout or an automatic tagger's per-token output repeating one fact is not the
+source saying it again. The same claim from different witnesses is separate witnesses, independent
+only as far as their dependence roots are. A number the source states (a usage count,
+a sense order) is an observation. A derived witness records its lineage, so copies
+count once. Refutation, draw, and confirmation remain distinct outcomes.
 
 Observed testimony is append-only evidence. Corrections add new testimony; they do not
 erase the earlier witness. Calculated testimony identifies its analyzer and version.
@@ -128,21 +209,33 @@ erase the earlier witness. Calculated testimony identifies its analyzer and vers
 Rule #6 — Consensus is one typed cell
 -------------------------------------
 
-The canonical consensus address is the typed `(subject, relation, object)` triple.
-Every source speaking about that triple folds into the same standing cell while source
-attestations remain inspectable. Rating, deviation, volatility, witness count, and
+The consensus address is the claim composition. Every source speaking about that
+claim folds into the same standing cell while the record paths that assert it remain
+inspectable. Standing (rating, deviation, volatility, matches) is one table keyed by
+the claim id, beside the path, never on the GIN-indexed path row, and it is stored
+for every claim.
+The cell is never keyed by `BLAKE3(subject || type || object)` with a zero-filled
+missing object. Rating, deviation, volatility, witness count, and
 source/context scope are part of the decision surface.
 
 Consensus is not an answer vote. It is the standing evidence state consumed before and
 during one forward pass.
 
+Trust bounds a vote. Each game's outcome is pulled toward a draw by the witness's trust, s_eff = 0.5 + t(s - 0.5), so no repetition takes a source past its trust's ceiling, symmetrically for affirmation and refutation and monotone in trust, and one witness alone can give a claim only bounded certainty (a per-witness deviation floor). Count is never independence: witnesses sharing a dependence root or a trust class count as one root, capped, wherever low-trust voices do attest (explicit feedback, model outputs, Laplace's own responses). Prompts are observations and give no semantic attestation merely by being said; Laplace records that people say a thing, a fact about discourse, without its standing moving. A witness's own trust is its own rating, starting at its trust class's default and earned only through agreement or disagreement with independent witnesses and verified outcomes, never by repeating itself. The test: user prompts screaming that the earth is flat must not drown out GPS, photographs, mathematics, reports and NASA. Computed with a series solver, round-earth evidence alone stands at 2000 (p 0.947); a million flat-earth prompts as a million independent witnesses drown it (1393, p 0.351) even with a per-witness cap; as one capped root they dent it (1765, p 0.821); as observations only it stands (2027, p 0.954). As built, Laplace-Native's `lp_attest` plays every witness as a fixed 1500 opponent whose trust sets only its deviation (`lp_trust_deviation`, g = trust), and a claim enters at the witness's deviation, which inverts the rule: an affirming series of 1000 games leaves a claim at 3235, deviation 55, from trust 0.2 and at 1884, deviation 30, from trust 0.9.
+
 Rule #7 — Relation types are governed
 -------------------------------------
 
-Canonical relation definitions and highway bits come from
-`engine/manifest/relation_types.toml`. Bits are explicit, append-only identifiers.
-Aliases resolve to canonical relations; they do not mint parallel meanings.
-Salience band, rank, hotness, and highway membership are separate properties.
+Relations are content-derived entities whose meaning is attested and realizable in any
+language. `engine/manifest/relation_types.toml` governs the relation registry, a
+perfcache over those entities: its highway bits are explicit, append-only slots, never
+relation identity, and its English names are developer handles. Aliases are attested
+equivalences: a source's own code is recorded as it arrives and sets the same bit as
+the relation it means; aliases do not mint parallel meanings. No code path tests for
+an English value. Salience band, rank, hotness, and highway membership are separate
+properties.
+
+A claim's relation, like every other part of it, is what the source means, resolved through the road classes, never the name of the field, column, attribute or layer the source's markup happens to use. A tagset value is a value of its tagset with its attested equivalence to the shared vocabulary (FrameNet's BNC layer `NN1` is a CLAWS C5 singular common noun, its PENN layer `nns` a Penn Treebank plural common noun, each reaching UD's `NOUN` through that equivalence); a per-span label (a frame element, grammatical function or phrase type in one sentence's annotation) belongs in the sentence's annotation layer, not on the word; a pointer's attribute name (`feID`, `ID`) never appears in any claim. As built, the Engine's recipes record `[cell, column header, value]` (`[dog, BNC, NN1]`, `[dog, GF, Head]`, `[dog, feID, Animals, Animal]`, `[dog.n, POS, N]`, `[pred, role, 10_VN_ROLE, vn:Theme]`): markup, not meaning.
 
 Rule #8 — Determinism and receipts are product properties
 ---------------------------------------------------------

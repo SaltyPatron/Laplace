@@ -56,18 +56,16 @@ The graph is therefore not `PGN -> engine score`. It is a dense set of reusable 
 
 ## Player identity and name realization
 
-Current old-Laplace player identity uses `ChessVocabulary.PlayerId(name)` over `PlayerAlias.Canonical(name)`.
-
-The canonicalizer deliberately makes forms such as:
+A player name is content exactly as the source writes it. Case and form are never folded:
 
 ```text
 "Carlsen, Magnus"
 "Magnus Carlsen"
 ```
 
-resolve to the same chess player identity. Display/name strings are still emitted as `HAS_NAME_ALIAS` content, so identity and realization are not the same state.
+are different content. That they name the same player is attested by a source that says so, and the traversal crosses that attestation. A graph can show a human-facing `Carlsen, Magnus` or `Magnus Carlsen` because each is a lexicalization of the same player, not because one string was rewritten into the other.
 
-This is why a graph can show a human-facing `Carlsen, Magnus` or `Magnus Carlsen` while traversing the same canonical player node.
+The current code instead derives player identity as `ChessVocabulary.PlayerId(name)` over `PlayerAlias.Canonical(name)`, a canonicalizer that folds both forms into `Hash128.OfCanonical("chess/player/{alias}")`. That is a fake identifier and a folded name; it violates the identity law and must not be implemented from.
 
 Online provider handles are a different case. A provider identity such as `MagnusCarlsen` can be retained as the provider's own player/profile identity and carry aliases/display/real-name evidence. The profile ingest code does **not** declare identity merely because two strings look similar. When an online profile and exactly one FIDE profile are explicitly supplied together, the online provider identity can receive a `CORRESPONDS_TO` edge to the FIDE-side player identity.
 
@@ -78,13 +76,7 @@ string/name similarity      != identity proof
 explicit provider linkage   -> governed CORRESPONDS_TO testimony
 ```
 
-A FIDE profile also deposits an external-id value such as:
-
-```text
-fide:<provider-id>
-```
-
-plus title/federation/rating/profile facts on the same player/profile world.
+Whether a FIDE id is a highway node or an internal pointer is not decided. If it names a player across sources, it is a highway node: content exactly as FIDE writes it, and that it is a FIDE id is attested by the FIDE source. If it only addresses FIDE's own records, it is a pointer that resolves to the player and is not recorded. Either way it is never encoded as a made-up `fide:` prefix. Title/federation/rating/profile facts attach to the same player/profile world.
 
 ## Games connect players to each other
 
@@ -241,7 +233,7 @@ This is why the old screenshot is a web rather than a player profile with decora
 
 ## Acceptance
 
-- `Carlsen, Magnus` and `Magnus Carlsen` resolve to the same intended canonical chess-player identity under the governed alias canonicalizer.
+- `Carlsen, Magnus` and `Magnus Carlsen` remain different content, linked to the same player by attestation; no canonicalizer folds them.
 - Provider handle/profile identity such as `MagnusCarlsen` is not merged solely by fuzzy/name similarity; explicit provider association is receipted through `CORRESPONDS_TO` or the selected identity mechanism.
 - A FIDE/provider id remains external/profile state and does not salt the canonical human/player content merely because a source carries it.
 - PGN `HAS_WHITE/HAS_BLACK`, `PLAYED_BY`, result/event/rating/time state remain traversable from the player world.

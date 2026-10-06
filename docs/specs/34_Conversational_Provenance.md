@@ -3,8 +3,36 @@
 ## Identity hierarchy
 
 A tenant, user/participant, session, turn, message, tool call, and content artifact are
-distinct entities. A session is a stable identity whose ordered, versioned trajectory
-contains turns. Each message is itself a tiered content trajectory.
+distinct forms:
+
+- Tenant is authorization and isolation, not trust and not a source identity.
+- A user/participant is a witness.
+- A session is a handle: a projection over a growing ordered trajectory of turns, like a
+  git ref. It is not a hashed identity.
+- A turn is one act. Its session and ordinal are position, never hashed.
+- A message is a content trunk. A prompt with text, a photo and a video is one trunk
+  `[metadata, content]` whose content is `[text, image, video]`, each a tree down to
+  codepoints. A photo of a sentence is pixels, not the sentence; an OCR or ASR link is a
+  calculation with its analyzer and receipt.
+- A tool call and its result are a calculation.
+- An artifact is a file trunk with exact reconstruction.
+- A response is Laplace's content at its trust, attesting its dependence on the prompt.
+- A receipt and a firmware image are their own forms.
+
+The same prompt text in two turns is one content entity occurring twice.
+
+Witnessing is not attribution. An entity is witnessed wherever some tree holds it; that
+is calculated by a walk up the DAG, never stored, and a user's ordinary prompt only adds
+observations: new trees containing existing nodes. Attribution is of a claim: a source
+asserted it, with an outcome, recorded today in the attestation table; the target is
+that the claim sits in a record path under that source's trunk, and the table stays
+until a prototype on real data shows containment answers everything it answers with
+nothing lost. Attestations come from seeded corpora and from Laplace's own calculations and
+outcomes at their trust.
+
+No identity here is a hash of a made-up key string or carries a version suffix. The
+current code derives the session handle as `Hash128.OfCanonical` of a tenant/session key
+string; that is a fake identifier and violates the identity law.
 
 The current session handle stores its growing ordered turn manifest as a Projection
 physicality. Its constituent turn identities resolve to canonical Content
@@ -20,8 +48,8 @@ identities.
 
 A turn records:
 
-- session and ordinal;
-- role/participant/source;
+- session and ordinal, as position (never hashed into the turn's identity);
+- role/participant/witness;
 - exact content entity and physical trajectory;
 - reply/dependency edges to prior turns or tool results;
 - request parameters and declared source/context scope;

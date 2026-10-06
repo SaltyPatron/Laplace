@@ -24,8 +24,8 @@ Priority: **P0** blocks the next slice (one coherent reseed, then live forward-p
 | #504 | ingest: decide the git-lane relation ledger (reuse vs new) BEFORE codegen — one reseed should pay for it | NEEDS INVENTOR DECISION: git-lane relations reserved; respect one relation per meaning and highway budget. |
 | #515 | foundry: tier-scheduled layer operators — replace all-ops-every-layer with the resolution ladder | After the forward program works (inventor: export generates every slot by querying standing; if the reads are wrong the export is muddied). NEEDS INVENTOR DECISION: derived layer/operator schedule (spec 09/12); rebase off archived specs. |
 | #535 | substrate-law: write the doc 08 amendment — derivable-evidence virtualization law | Same factor question as #472: can pair evidence be derived at query time from retained factor physicalities (design §4), or must graded evidence be materialized? |
-| #548 | ingest: XPOS tags are minted unnamespaced (bare NodeHash) while UPOS goes through the governed resolver | XPOS anchors now OfCanonical string ids; NEEDS INVENTOR DECISION on XPOS (governed tagset registry vs UPOS+features). |
-| #799 | EPIC: text content, file artifact, document structure, and work identity are distinct reusable compositions | NEEDS INVENTOR DECISION: file/artifact occurrence entity for USER documents vs 'files are not content' (stated for curated sources). |
+| #548 | ingest: XPOS tags are minted unnamespaced (bare NodeHash) while UPOS goes through the governed resolver | XPOS anchors now OfCanonical string ids, which are fake identifiers under the identity law. Decided by the identity law: an XPOS tag is content exactly as the treebank writes it; its tagset membership and its UPOS equivalence are attested by the mapping source, and equivalent tags set the same registry mask bit. |
+| #799 | EPIC: text content, file artifact, document structure, and work identity are distinct reusable compositions | Decided by the identity law: a file is content for every source, the trunk `[metadata, content]`, and a source is `[source record, its files' trunks in path order]`. 'Files are not content' is superseded. |
 | #840 | chess: Explore ranks Na3 above e4 — the fold is correct, the move cell is unconditioned on who played it | NEEDS INVENTOR DECISION: MOVE cell conditioned on ΔElo resembles withdrawn context dimension. |
 | #1050 | one mean, declared: chess composes with math4d_karcher_mean, text with math4d_centroid — the 'open placement defect' is answered in code but only in one lane | NEEDS INVENTOR DECISION: centroid vs Karcher fork still present (hash_composer vs chess/agent C#). |
 | #1099 | Typed relations are stranded in HAS_DEFINITION gloss text — 'capital of France' is not an election defect | capital(France) fact only in gloss text; NEEDS INVENTOR DECISION on mechanism (calculated gloss analysis vs a stating source). |
@@ -96,7 +96,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Why |
 |---|---|---|
-| #799 | EPIC: text content, file artifact, document structure, and work identity are distinct reusable compositions | NEEDS INVENTOR DECISION: file/artifact occurrence entity for USER documents vs 'files are not content' (stated for curated sources). |
+| #799 | EPIC: text content, file artifact, document structure, and work identity are distinct reusable compositions | Decided by the identity law: a file is content for every source, the trunk `[metadata, content]`, and a source is `[source record, its files' trunks in path order]`. 'Files are not content' is superseded. |
 
 **E**
 
@@ -145,7 +145,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 | #818 | EPIC: chess catalog dual + substrate ISA compose — modality stress of the invention | Chess modality stress epic; remove blake3 ids/markers under #1721. |
 | #820 | chess: compose shape/DTB/missed-finish over existing ISA surfaces — delete sibling Frechet engines | Chess sibling SQL dialects remain. |
 | #821 | chess: live proof — re-seed openings as LINEs, Syzygy closings smoke, QGD entity_curve Frechet | Openings/Syzygy/QGD live proof owed. |
-| #835 | chess: ChessPgn corpus is Live-Chess volume + name-splinter identity (partial cancelled seed) | PlayerId is OfCanonical('chess/player/{alias}'); fix via canonical content bindings, not HAS_NAME_ALIAS. |
+| #835 | chess: ChessPgn corpus is Live-Chess volume + name-splinter identity (partial cancelled seed) | PlayerId is OfCanonical('chess/player/{alias}'), a fake identifier under the identity law. A player name is content exactly as the source writes it; case and form are never folded, so 'Carlsen, Magnus' and 'Magnus Carlsen' are different content linked by attestation. |
 | #838 | EPIC: chess write-volume — 92% of MOVE cells are single-witness; the reseed batch that fixes it | Batch items; item 6 done; PLAYS_MOVE bit budget. |
 | #840 | chess: Explore ranks Na3 above e4 — the fold is correct, the move cell is unconditioned on who played it | NEEDS INVENTOR DECISION: MOVE cell conditioned on ΔElo resembles withdrawn context dimension. |
 | #935 | chess reads: enforce command-count budgets and collapse player detail to one typed operation | ChessPlayerAsync fans out five parallel commands. |
@@ -513,7 +513,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 | #359 | SPEAKING: language-agnostic discourse/sense evidence must participate in whole-prompt COUPLE, not an English topic gate | #1720 owns typed whole-prompt COUPLE and removal of English-specific matching (prompt_coherence.c labels, English templates); this issue restates spec 36's no-topic-before-coupling rule. |
 | #409 | SPEAKING: walk_text / trajectory_continuations times out at scale | Chat path timeout on legacy walk_text lane; F acceptance: one-word chat inside budget with trace, no substrate_unavailable misreport. |
 | #459 | read-side native lift: rank_edges(subject_ids, types, k) — collapse four duplicated ranking cores | salient_facts/top_relations/evidence_receipt separate SQL cores; one native ranking primitive returning typed standing. |
-| #464 | read-side: edge_strength(subject,type,object) + batch form; bless label() or render() as the one renderer | label*/render* families both installed; one REALIZE authority; edge_strength scalar conflicts with typed standing. |
+| #464 | read-side: edge_strength(subject,type,object) + batch form; bless label() or render() as the one renderer | label*/render* families both installed; one REALIZE authority; edge_strength scalar conflicts with typed standing, and its (subject,type,object) signature assumes a triple where a claim is an n-ary composition. |
 | #517 | read-side: native SPI adjacency walk to retire relation_rank_resolved (~27us/call) | relation_rank_resolved per-row calls; native COUPLE reads rank from ROM in-loop. |
 | #617 | read-side: inlining audit — SET search_path on LANGUAGE sql functions in per-row/per-step hot positions | SET search_path on legacy readers replaced by native forward program. |
 | #752 | substrate: tier-collision seam — a surface's sense set unions its tier-0 Codepoint lineage with its word senses | RESOLVE/COUPLE must select the meant physicality by tier (letter A vs article). |
@@ -575,7 +575,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Carry |
 |---|---|---|
-| #355 | doc 15 B3 — Behavioral harness as witness (standing SQL-engine test suite deposited as attestations) | 'Evaluation IS ingestion' self-witnessing is the Gödel/OODA loop that #1726 must reconcile with Laplace-Refactor's authority stack. The proposed 'substrate/source/BehavioralHarness/v1' string id is superseded; a witness is SourceWitness.Id. |
+| #355 | doc 15 B3 — Behavioral harness as witness (standing SQL-engine test suite deposited as attestations) | 'Evaluation IS ingestion' self-witnessing is the Gödel/OODA loop that #1726 must reconcile with Laplace-Refactor's authority stack. The proposed 'substrate/source/BehavioralHarness/v1' string id is a fake identifier; the witness is the source trunk, and today's `SourceWitness.Id(authority, release)` is not it. |
 | #356 | doc 15 B4 — Walk-policy rating (decode policies as content-addressed, Glicko-rated entities) | Content-addressed decode policies rated by outcome are #1726's personality firmware: content-addressed policy over ROUTE/STEER/SELECT, witnessed and rated like a source. |
 | #357 | doc 15 D — Loop-closure metrics (feedback-to-next-walk delta, depth-k accuracy, latency budget) | Loop-closure metrics measure the Gödel/OODA feedback loop #1726 owns; depends on #355, also absorbed there. |
 | #379 | doc 18 Q6 — Echo-loop guard for the generation corpus (self-improvement vs self-contamination, same loop) | Whether generated output becomes corpus or testimony, and at what trust, is #1726's self-witnessing reconciliation; the n-gram path it names still exists (trajectory_generate.c). |
@@ -586,7 +586,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 | Issue | Title | Carry |
 |---|---|---|
 | #399 | highway_mask grain: relation-TYPE bits vs value-grained (reseed-class decision) | Highway stays type-grained; value filtering via entity OR-masks and qualifier masks; record the ADR under I. |
-| #1038 | Vocabulary/registry entities must have declared identity/physicality law, not masquerade as tier-2 composed content | Registry entities never rows; gate: no vocabulary rows or fake trajectories for registry keys. |
+| #1038 | Vocabulary/registry entities must have declared identity/physicality law, not masquerade as tier-2 composed content | A registry is a perfcache whose bits index content-derived entities; its members are content entities like everything else, and no registry is a lookup table of fake ids or fake trajectories for registry keys. |
 | #1133 | substrate: canonical modality registry + derived modality masks (routing only, never identity) | Modality registry + derived OR-masks is I's work. |
 
 **Owner #1562** (2)
@@ -657,22 +657,22 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 | #498 | ingest: GrammarRowReader.FeedChunkFields allocates a string[] per row for all tabular ingest | (kernel to #1718) Tuning legacy GrammarRowReader per-row string arrays; TSV provider under #1718 must stream natively. |
 | #519 | foundry research: make the correction planes head-informative (apply the readout law to correction subspaces) | Research spike from archived spec 14; heads derive from spec 12 slot map. |
 | #522 | foundry: synthesize selectors — EVOKES_FRAME/definition planes as QK, G-subspace bookkeeping | Frame/definition planes as QK selectors from archived spec 18; QK is typed COUPLE. |
-| #523 | substrate-law: XPOS->UPOS is recorded as IS_A, but doc 18 calls that a recording defect (CORRESPONDS_TO) | (kernel to #1722) XPOS->UPOS as IS_A/CORRESPONDS_TO testimony; normalize at ingest via governed mapping in the UD recipe. |
+| #523 | substrate-law: XPOS->UPOS is recorded as IS_A, but doc 18 calls that a recording defect (CORRESPONDS_TO) | (kernel to #1722) XPOS->UPOS as CORRESPONDS_TO testimony from the mapping source; both tags are recorded as they arrive, never rewritten, and equivalent tags set the same registry mask bit. |
 | #542 | model-lane: HasBiases is one boolean per profile — cannot express per-projection bias presence (Qwen2) | (kernel to #1719) Patches ArchitectureProfile HasBiases; E2 recognizes biases per projection. |
 | #543 | model-lane: Bert profile FinalNorm points at embeddings.LayerNorm.weight — embedding norm misfiled as final norm | (kernel to #1719) ArchitectureProfile FinalNorm mismap; E2 distinguishes by structural position. |
 | #544 | model-lane: norm placement/topology (pre-LN / post-LN / sandwich / parallel) is not a witnessed field | (kernel to #1719) Framed as replay fidelity; norm placement recorded as structure under E2/E5. |
 | #545 | model-lane: the phi profile is Phi-1/2 (mlp.fc1/fc2) — Phi-3 tensor names mismap under the same model_type | (kernel to #1719) model_type dispatch mismap; E2 never fails open on model_type. |
-| #548 | ingest: XPOS tags are minted unnamespaced (bare NodeHash) while UPOS goes through the governed resolver | (kernel to #1722) XPOS anchors now OfCanonical string ids; NEEDS INVENTOR DECISION on XPOS (governed tagset registry vs UPOS+features). |
+| #548 | ingest: XPOS tags are minted unnamespaced (bare NodeHash) while UPOS goes through the governed resolver | (kernel to #1722) XPOS anchors now OfCanonical string ids, which are fake identifiers under the identity law. Decided by the identity law: an XPOS tag is content as written; its UPOS equivalence is attested and sets the same registry mask bit. |
 | #552 | engine: move recipe canonicalization to native, gated on proving byte-identical output | (kernel to #1719) Blake3(config.json) recipe id is bookkeeping; config enters as content via JSON provider. |
 | #658 | voice: ORIENT can seed on a one-word translation lemma instead of the real gloss | converse_walk ORIENT over sense mesh; realization via bindings in query language (#1720). |
-| #753 | coherence: sense election needs a salience prior — content-band mass comparator + HAS_SENSE_RANK at WordNet ingest | Early sense elector + HAS_SENSE_RANK at WordNet 3.0 ingest; lexicon sense order may become a qualifier/read-time salience. |
+| #753 | coherence: sense election needs a salience prior — content-band mass comparator + HAS_SENSE_RANK at WordNet ingest | Early sense elector + HAS_SENSE_RANK at WordNet 3.0 ingest; lexicon sense order and tag counts are numbers the source states, recorded as observations (content), never played as games; read-time salience may use them. |
 | #757 | read-side: port infer() to C — both directions, n-hop bias family, multi-step loop | Porting legacy infer() to C builds a second read path. |
 | #802 | document layer: a document is a composition over content, not the file's content root | Requires plain .txt doc id != content root; contradicts single-child identity. |
 | #805 | source kind: corpus / runtime / derived, attested at bootstrap — 'is UserPrompt ingested' is a category error | Sources testifying their own kind; source kind becomes a governed declaration. |
 | #861 | Elector ranks on a language-specific word-order prior because the joint signals are inert | (kernel to #1720) Tunes single-topic elector's scalar key. |
 | #865 | Containment prior alone over-rewards rare tokens; must be weighed against the fold | (kernel to #1720) One combined scalar elector key violates typed state. |
 | #954 | WEIGHT: the sequence epistemology is undocumented and unratified | (kernel to #1720) FOLLOWS/CO_OCCURS_WITH Glicko lane forbidden; sequence statistics are calculations over trajectories. |
-| #1015 | Model lane: the magnitude→Glicko conversion was deleted; witnessWeight is hardcoded to 1.0 | (kernel to #1719) Restore kind_rank x trust -> phi and score only existing pairs; rank out of standing, re-scoring existing pairs is a defect. |
+| #1015 | Model lane: the magnitude→Glicko conversion was deleted; witnessWeight is hardcoded to 1.0 | (kernel to #1719) Restore kind_rank x trust -> phi and score only existing pairs; rank out of standing, re-scoring existing pairs is a defect. A magnitude the model states is an observation, not games; a witness's repeats of one claim are one attestation with that many games, folded on the client. |
 | #1024 | Evaluate fp64 -> fp32 across the dynamics/synthesis GEMM path | (kernel to #1719) GPU FP32 wiring for model lane contradicts no-GPU finish line; carry CPU fp32 determinism study into E1/E4. |
 | #1025 | torch cu126 ships no cp310 wheels; sm_61 absent from arch_list but Pascal runs anyway | torch/GPU wheel note; nothing to build. |
 | #1046 | taxonomy: bubble_down(concept_id, lang_id, k, filters, temperature) — the missing trunk-to-surface projection primitive | (kernel to #1720) bubble_down assumes sense mesh + softmax temperature; REALIZE descent from identifier is F. |

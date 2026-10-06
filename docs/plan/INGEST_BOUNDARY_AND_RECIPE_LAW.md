@@ -44,7 +44,7 @@ It is never canonical content identity. A UTF-8 scalar, quoted record, grammar t
 
 A record, CST/AST node, field, row, game, sentence, frame, tensor descriptor, codec element, etc. recovered according to the source/provider contract.
 
-This is observed/source structure. It is **not automatically canonical content**. The declared recipe decides which recovered values/structures become content, occurrence, reference, provenance, testimony, deterministic calculation, packaging or unresolved obligation.
+This is observed/source structure. Its text is content in the file's content tree like any other text, and its position is occurrence; what it asserts is **not automatic**. The declared recipe decides how it decomposes and which recovered values/structures also become content, occurrence, reference, provenance, testimony, deterministic calculation, packaging or unresolved obligation.
 
 ### Universal tier / trajectory boundary
 
@@ -67,7 +67,7 @@ Provider CST/AST nodes are evidence/projections, not a mandatory universal ontol
 
 Tree-sitter therefore serves as a reusable grammar estate, compatibility parser, validator/realizer and grammar-knowledge source. It is appropriate when its grammar contributes structural information that the tier recipe needs; it is not a blanket container-format router.
 
-Recipes explicitly disposition recovered facts into canonical content/physicality, occurrence, typed reference, provenance, attributed testimony, deterministic calculation, packaging/reconstruction or unresolved state. Unknown provider structure remains unresolved; it must not be silently dropped or coerced into content.
+Recipes explicitly disposition recovered facts into content/physicality, occurrence, provenance, attributed testimony, deterministic calculation, packaging/reconstruction or unresolved state. Unknown provider structure remains unresolved; it must not be silently dropped or coerced into content.
 
 Once canonical compositions are admitted, the shared machine owns identity, physicality/trajectory, occurrences, references, provenance, testimony, calculations, reconstruction and deposition. AST/CST/IR can be derived or exported when an external tool needs that view.
 
@@ -76,18 +76,19 @@ Once canonical compositions are admitted, the shared machine owns identity, phys
 Common substrate state includes:
 
 ```text
-content                         -> canonical recursive composition / executable identity
+content                         -> recursive composition / executable identity
 ordered occurrence             -> trajectory / occurrence physicality
 unordered multi-value state    -> declared collection composition
-opaque external identity       -> typed reference
-source claim                    -> attributed testimony
-provenance                      -> context / occurrence metadata
+highway node identifier        -> content (an ILI, roleset, class, frame, language); what it is is attested
+internal pointer               -> resolved to the id of what it points at; not recorded
+source claim                    -> claim composition attested by the source trunk (the witness)
+provenance                      -> attestation row today; containment under the source trunk is the target
 deterministic consequence      -> calculation / rebuildable accelerator state
 packaging/provider syntax      -> reconstruction/provider state unless declared otherwise
 unresolved field meaning       -> explicit unresolved obligation
 ```
 
-Canonical identity follows declared semantic recipes, not transport/batch/worker execution grain.
+Identity follows content. The recipe decides how content decomposes into a tree; it never salts a hash, and transport/batch/worker execution grain never changes either.
 
 ### Persistence boundary
 
@@ -144,6 +145,8 @@ authority + release/version + exact artifact graph
 + semantic recipe/profile generation
 ```
 
+That binding selects what is admitted; it is not an identity. The admitted release's content is its source trunk, `[source record, its files' trunks in path order]`, and that trunk is the witness of what the release asserts. Provider and recipe generations are recorded with the receipt and never mixed into a hash.
+
 The source-estate refresh and the recipe/admission work are therefore one dependency chain, not sequential projects where decomposers keep targeting an obsolete active tree until dataset cleanup is declared finished.
 
 1. Stage and verify the selected release/artifact graph.
@@ -155,23 +158,29 @@ The source-estate refresh and the recipe/admission work are therefore one depend
 
 A staged newer release should be used to develop and validate its recipe before activation. Do not extend a bespoke decomposer against a superseded source merely because that directory is still the active path. Conversely, do not switch the active source path to a new release whose provider/recipe cannot yet account for its native fields.
 
-Release/version participates in source/provenance/profile identity, not canonical content identity. The same literal sentence, definition, source-code fragment or other canonical content seen in two releases converges on the same content identity while the source occurrences and source claims remain release-attributable.
+A release is its files, so a new release has different files and a different source trunk; no version suffix enters any identity. The same literal sentence, definition, source-code fragment or other content seen in two releases converges on the same content identity, gains a parent under each release's trunk, and the source claims remain release-attributable to that trunk.
 
 ## Recipe lowering: one recovered object may contribute several state classes
+
+Seeding a curated source is extraction, like UAX #29 for semantics: the format's grammar exposes structure, and the recipe says what each node becomes, extracting the raw product (the content and what the source states) from the packaging, which stays provenance with its trunks. It is a bulk client-side, set-based pass, folded per claim before the database sees it; "no ETL" means no delayed folding of standing, not this. Content decomposes to codepoints for identity; a claim attaches once, at the tier the source asserts it, never sprayed over the words below; an XML attribute is said of its element; a mapping row is one interchange claim, never per-column claims; a declared default attests nothing. One corpus is one trunk and one witness: Universal Dependencies' treebanks and Open Multilingual Wordnet's lexicons are files under their corpus's trunk.
 
 The recipe does not choose exactly one bucket for a parser record. It declares how each recovered field/role contributes to the shared substrate. A single source object can produce canonical content **and** source-attributed testimony about that content.
 
 | Recovered source value/role | Generic lowering | What it must not become |
 | --- | --- | --- |
 | sentence, definition text, example text, prose, literal source-code/media content | canonical content entity/composition with its normal physicality/trajectory; separately retain artifact/span occurrence | a high-trust semantic fact merely because the source contains the bytes |
-| source says `frame X HAS_DEFINITION text Y` or `sense X HAS_EXAMPLE sentence Y` | ensure X/Y endpoints exist under their declared identity/realization laws, then emit attributed testimony `(X, relation, Y, source, context)` | a private decomposer-only edge or duplicated text identity |
-| sense key, synset id, frame id, roleset id, external record key | typed reference/governed identity; attach declared realization/physicality only when that state class participates geometrically | ordinary text content just because the identifier is UTF-8 |
+| source says frame X has definition Y, or sense X has example sentence Y | ensure the X/Y content exists, then emit the claim composition (here `[X, definition, Y]`; claims are n-ary, of any arity and tier) witnessed by the source, with its qualifiers and context | a private decomposer-only edge or duplicated text identity |
+| highway node: ILI, PropBank roleset, VerbNet class, FrameNet frame/frame element/lexical unit, VerbAtlas frame, language code | content, exactly as written (`i46360` is `[i,4,6,3,6,0]`, the same entity in every source that cites it); a structured highway identifier decomposes into its parts by its notation; a source's own way of writing one resolves to it; that it is an X is attested by the source that says so | a fake identifier, a "typed reference" outside content, or a governed identity minted from it |
+| internal pointer: synset offset, synset or sense id, FrameNet numeric id, UD token number or `sent_id`, Tatoeba number, geonameid, row id, line number | decomposed by the source's own notation only for the facts it carries (`06975898-n`: the part of speech `n`), which are attested; resolved through the source's tree or the highway perfcache to the BLAKE3 id of what it points at; not recorded. A sense key (`dog%1:05:00::`) is WordNet's internal pointer to a lexicalization: decomposed for its lemma, type and lexicographer file, resolved through the highway perfcache, not recorded | an entity of its own, a part of any id or claim, or a key minted from it |
 | row/file/span/annotation occurrence, token ordinal, gap, containment | occurrence/trajectory/provenance state over canonical identities | independent consensus witness count |
-| release, license, file path, archive member, parser version | source/provenance/packaging coordinates | semantic content or truth unless explicitly declared by the recipe |
+| release, license, file path, archive member, parser version | a release is its files, the source trunk, and its name and number are content in the source record; a license or parser version is content in the source record or the file's metadata tree; a file path or archive member is the file's metadata, its place under the trunk | truth unless the source asserts it |
 | deterministic parser/normalizer/geometry consequence | versioned calculation/structural state with its recipe/provider identity | empirical source testimony |
 | field whose semantics are not mapped | explicit unresolved disposition | silent fallback to content, string label, or dropped field |
+| field, column, attribute or layer name; a tagset value; a per-span label; a pointer's attribute name | the relation is what the field means, resolved through the road classes; a tagset value is a value of its tagset with its attested equivalence to the shared vocabulary; a per-span label goes in the sentence's annotation layer; a pointer's attribute name is in no claim | a relation named by the markup (`[dog, BNC, NN1]`, `[dog, feID, Animals, Animal]`), or a label sprayed onto the word |
 
-An endpoint being an entity with a physicality does not prevent it from being the subject/object of attestations. That is the intended pattern. For example, a FrameNet definition sentence is ordinary canonical text with a content physicality; FrameNet's assertion that a particular frame has that definition is a separate attributed attestation pointing at the same sentence entity.
+A claim's relation, like every other part of it, is what the source means, resolved through the road classes, never the name of the field, column, attribute or layer the source's markup happens to use. A tagset value is a value of its tagset with its attested equivalence to the shared vocabulary (FrameNet's BNC layer `NN1` is a CLAWS C5 singular common noun, its PENN layer `nns` a Penn Treebank plural common noun, each reaching UD's `NOUN` through that equivalence); a per-span label (a frame element, grammatical function or phrase type in one sentence's annotation) belongs in the sentence's annotation layer, not on the word; a pointer's attribute name (`feID`, `ID`) never appears in any claim. As built, the Engine's recipes record `[cell, column header, value]` (`[dog, BNC, NN1]`, `[dog, GF, Head]`, `[dog, feID, Animals, Animal]`, `[dog.n, POS, N]`, `[pred, role, 10_VN_ROLE, vn:Theme]`): markup, not meaning.
+
+An endpoint being an entity with a physicality does not prevent it from being the subject/object of attestations. Attestations are of entities only: a physicality has no identity of its own and is never attested. That is the intended pattern. For example, a FrameNet definition sentence is ordinary canonical text with a content physicality; FrameNet's assertion that a particular frame has that definition is a separate attributed attestation pointing at the same sentence entity.
 
 This distinction is the generic replacement for source-local `ContentEmitter`/`AddAttestation` policy. Parsers recover native values and source roles; recipes declare their disposition; the common machine performs canonical composition, physicality/trajectory creation, reference admission, occurrence/provenance lowering, testimony creation and persistence.
 
@@ -193,7 +202,7 @@ Current `Laplace` has a generic driver/scheduler/apply spine, but its `IngestSou
 - **Tatoeba:** the active estate exposes a smaller subset; the staged 2026-08-29 generation contains 15 selected core/sidecar artifacts (compressed exports plus CSV sidecars). One recipe/profile must disposition those fields/sidecars instead of treating each as a new private ingest lane.
 - **Wiktionary:** the active tree contains older raw/extracted and English-specific material; the selected 2026-08-28 raw Wiktextract gzip is staged. Schema/recipe work should bind that selected raw generation instead of filename-specific legacy selection.
 - **Mapping estate:** FrameBase 2.0, VerbAtlas 1.1 and pinned SemLink/VerbNet/PropBank snapshots are already staged alongside the current active sources. Their coverage/supersession work and their recipes are one dependency graph.
-- **Chess/publication feeds:** TWIC 1651–1660 and pinned Lichess openings are staged source generations. Their feed provenance and parser/recipe identity must remain bound rather than treated as ambient files.
+- **Chess/publication feeds:** TWIC 1651–1660 and pinned Lichess openings are staged source generations. Their feed provenance and parser/recipe generation must remain bound rather than treated as ambient files.
 - **Commonsense:** ATOMIC10x is staged separately from Atomic2020 and therefore remains a separate machine-generated witness/profile, not a transparent replacement.
 
 `staged` means "not yet activated into the selected world generation." It does **not** mean "ignore the staged release while continuing to design semantics against the superseded active source."
@@ -277,10 +286,9 @@ The durable semantic fingerprint must remain identical for logically order-indep
 - Merkle/recursive composition;
 - physicality trajectories, ordinals, gaps and multiplicity;
 - occurrences;
-- typed references;
 - testimony ids and observation cardinality;
 - provenance/source coordinates;
-- deterministic calculation identity/results under the same recipe;
+- deterministic calculation results with their analyzer, version and receipt;
 - reconstruction output or declared loss.
 
 Only physical receipts may differ: time, CPU, RSS, I/O, WAL, cache behavior, batch sizes, temporary staging and worker scheduling.
@@ -360,13 +368,13 @@ The following do not satisfy this architecture:
 - adding source-private caches/batchers/thread pools to mask common-spine defects;
 - accepting a faster ingest when worker/batch settings change durable semantic state;
 - accepting a semantically correct ingest whose physical path still performs avoidable per-element DB/native boundary crossings at scale;
-- declaring an opaque identifier to be content merely because it is UTF-8;
+- treating a highway node as anything other than content, recording an internal pointer as an entity, or minting a governed identity from either;
 - using parser success as truth/admission authority;
 - preserving source-specific compatibility readers forever instead of normalized state;
 - allowing benchmark design or worker topology to redefine product semantics.
 
 ## Acceptance summary
 
-A source is admitted by a selected artifact/profile plus a qualified provider and recipe. The common machine performs canonical recursive composition/reuse, deposition, bulk persistence/fold and receipts. Equal canonical content under the same recipe converges across sources and legal physical plans. Source-specific structure/claims remain reconstructable and attributable. Physical execution can be optimized aggressively because semantic equivalence is continuously proved.
+A source is admitted by a selected artifact/profile plus a qualified provider and recipe. The common machine performs canonical recursive composition/reuse, deposition, bulk persistence/fold and receipts. Equal content converges on one identity across sources and legal physical plans; the recipe decides the tree, never the hash. Source-specific structure/claims remain reconstructable and attributable. Physical execution can be optimized aggressively because semantic equivalence is continuously proved.
 
 Performance acceptance measures both useful semantic work and physical execution grain: native work, DB/SPI/PInvoke boundary counts, batch/set widths, CPU/memory/I/O/WAL and wall time appropriate to the source. Avoidable orchestration overhead is an implementation defect, not a permanent semantic cost.
