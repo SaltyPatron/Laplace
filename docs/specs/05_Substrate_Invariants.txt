@@ -175,7 +175,7 @@ speaker said this sentence) are relations the corpus attests, added to the web
 explicitly. Absence is unknown, not refutation.
 
 The target is provenance by containment: a source's record is a path over the claims
-it asserts, inside its file's content tree, with each claim's run length, outcome and
+it asserts, inside its file's content tree, with each claim's games, outcome and
 score in its vertex; many source trunks can contain the same claim, and a walk up from
 the claim finds them all; trust and lineage are keyed by the trunk id; forgetting a
 source removes its trunk, sweeps what nothing references, and replays the standings it
@@ -189,17 +189,14 @@ replay) with nothing lost, side by side with the row. The row's witness today is
 `SourceWitness.Id(authority, release)`, which is not the source trunk; that witness
 identity violates the identity law, and nothing new is implemented from it.
 
-Repetition is run length read off the tree: a run in a vertex's M, a lengthening
-session trajectory, a claim occurring in k records under the corpus's trunk. A witness
-plays one matchup per claim per ingestion, its outcome or score at its trust, with n,
-the run length, carried as the certainty of its assertion; n is never played as n
-Glicko-2 games, which in one period approach a full Newton step that is larger for a
-low-trust witness (10^6 refutations at opponent deviation 1500 take a claim at 2300,
-deviation 60, to -720, deviation 1.9). The client folds a source's repeats before the
-database sees anything, so the database takes one update per claim per witness. The
-run count is also kept beside the claim. Packaging is not repetition: a cross-product
+A witness that asserts one claim n times gives one attestation of n games with a
+score, and Glicko-2 plays that series as the witness's rating period. The client folds
+a source's repeats before the database sees anything, so the database takes one update
+per claim per witness. Run length is content structure only, identical consecutive
+children in a path: a prompt pasted n times is a run in its content, an observation
+that attests nothing. Packaging is not the source asserting again: a cross-product
 table layout or an automatic tagger's per-token output repeating one fact is not the
-source saying it again. Repetition across witnesses is separate witnesses, independent
+source saying it again. The same claim from different witnesses is separate witnesses, independent
 only as far as their dependence roots are. A number the source states (a usage count,
 a sense order) is an observation. A derived witness records its lineage, so copies
 count once. Refutation, draw, and confirmation remain distinct outcomes.

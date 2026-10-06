@@ -39,7 +39,7 @@ artifact graph enumeration
 -> typed decomposition (grammar/recipe per modality)
 -> recursive composition under one identity law (equal content converges; the recipe decides the tree, never the hash)
 -> working-set dedup / bulk existence / COPY persistence
--> set-sized evidence fold (a witness's repeats of one claim are run length, one matchup per claim per witness per ingestion, folded on the client; attestations -> consensus)
+-> set-sized evidence fold (a witness's repeats of one claim are one attestation with that many games, folded on the client; attestations -> consensus)
 -> receipt/journal completion (physical files and semantic units reported separately)
 ```
 

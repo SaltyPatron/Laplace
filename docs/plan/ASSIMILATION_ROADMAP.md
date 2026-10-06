@@ -135,7 +135,7 @@ Measured and read in code:
 
 **Target order:**
 
-1. **Native, per source:** parse, compose ids, emit claims. Then reduce by attestation id (the run length of a repeated claim, scores, OR masks). Then fold the witness's one matchup per claim in memory, the run length carried as the certainty of its assertion, never as n games. Then route to partitions and emit sorted COPY streams, consensus deltas and entity masks.
+1. **Native, per source:** parse, compose ids, emit claims. Then reduce by attestation id (merge games and scores, OR masks). Then fold the witness's rating period per cell in memory. Then route to partitions and emit sorted COPY streams, consensus deltas and entity masks.
 2. **PostgreSQL:** stores the rows and resolves key conflicts. It reads prior standing once per cell per source.
 3. **C#:** selects artifacts, orders dependencies, and handles commit epochs, progress and retries. It holds no per-row objects.
 4. **SQL:** set-level orchestration only.
