@@ -10,6 +10,16 @@ laplace_storage_init() {
             echo "Laplace checkouts must use permanent storage: $checkout" >&2; return 1 ;;
     esac
     base=/build/laplace/work
+    if [[ -n "${LAPLACE_SCRATCH_ROOT:-}" && ! -d /build/laplace ]]; then
+        # A machine without the /build volume (Laplace-Operations' layout, deploy/linux/site.sh) names its scratch
+        # root explicitly; it must still be permanent, group-shared storage (checked below).
+        scratch="$LAPLACE_SCRATCH_ROOT"
+        resolved=$(realpath -m -- "$scratch") || return
+        case "$resolved" in
+            /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*)
+                echo "Laplace scratch must be permanent storage: $scratch" >&2; return 1 ;;
+        esac
+    else
     mountpoint -q /build || { echo 'Laplace requires the /build volume' >&2; return 1; }
     scratch="${LAPLACE_SCRATCH_ROOT:-$base/scratch}"
     resolved=$(realpath -m -- "$scratch") || return
@@ -17,6 +27,7 @@ laplace_storage_init() {
         /build/laplace/*) ;;
         *) echo "Laplace scratch must resolve under /build/laplace: $scratch" >&2; return 1 ;;
     esac
+    fi
     mkdir -p -- "$resolved" || return
     if [[ -O "$resolved" ]]; then
         chgrp "$group" "$resolved" || return
