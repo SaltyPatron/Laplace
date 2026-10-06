@@ -108,10 +108,15 @@ internal static class AppComposition
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
         services.AddHttpClient<ILichessStatusClient, LichessStatusClient>(client =>
         {
-            client.BaseAddress = new Uri("http://127.0.0.1:5189");
+            // the managed service's loopback status port (LichessServiceHost, LAPLACE_LICHESS_PORT)
+            var port = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_LICHESS_PORT"), out var p) && p is > 0 and < 65536 ? p : 5189;
+            client.BaseAddress = new Uri($"http://127.0.0.1:{port}");
             client.Timeout = TimeSpan.FromSeconds(5);
         });
-        services.AddSingleton<IServiceControl, ServiceControl>();
+        services.AddSingleton<LichessStatusMemory>();
+        services.AddTransient<LichessStatusReader>();
+        if (OperatingSystem.IsWindows()) services.AddSingleton<IServiceControl, WindowsServiceControl>();
+        else services.AddSingleton<IServiceControl, ServiceControl>();
         services.AddSingleton<IRecipeCompileService, RecipeCompileService>();
         services.AddSingleton<IFoundryExportService, CliFoundryExportService>();
         Laplace.Decomposers.Composition.SeedIngestComposition.AddLaplaceSeedIngest(services);

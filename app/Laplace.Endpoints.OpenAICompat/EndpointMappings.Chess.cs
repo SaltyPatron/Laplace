@@ -92,8 +92,8 @@ internal static class ChessEndpoints
         app.MapGet("/chess/lichess/games/{gameId}/chat", async (string gameId, ILichessStatusClient lichess, CancellationToken ct) =>
             Results.Json(await lichess.ChatAsync(gameId, ct))).WithTags("chess");
 
-        app.MapGet("/chess/lichess/status", async (ILichessStatusClient lichess, CancellationToken ct) =>
-            Results.Json(await lichess.StatusAsync(ct))).WithTags("chess");
+        app.MapGet("/chess/lichess/status", async (LichessStatusReader lichess, CancellationToken ct) =>
+            Results.Json(await lichess.ReadAsync(ct))).WithTags("chess").Produces<LichessStatusView>(200);
 
         // Starts and stops the managed Lichess service under the /chess/* tenancy and
         // API-key policy; its configuration is server-side only.

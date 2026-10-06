@@ -27,6 +27,7 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Stripe.net" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" />
     <ProjectReference Include="..\Laplace.Agents\Laplace.Agents.csproj" />
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
     <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />

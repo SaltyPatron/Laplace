@@ -34,7 +34,7 @@ public sealed class ServiceHostTests
         public LichessConnectivityStatus Status() =>
             new(Configured, null, Connected, "test", 8, 2, true, 0, [], Error, Account: Account);
         public IReadOnlyList<LichessChatLine> ChatForGame(string gameId) => [];
-        public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
+        public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, LichessChallengePolicy? policy = null)
         { Started = (depth, maxConcurrent, substrate); return StartAllowed; }
         public Task WaitForExitAsync(CancellationToken ct) => _exit.Task.WaitAsync(ct);
         public Task StopAsync(CancellationToken ct) { Stopped = true; _exit.TrySetResult(); return Task.CompletedTask; }
@@ -118,6 +118,20 @@ public sealed class ServiceHostTests
         await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await app.StopAsync();
         Assert.False(bot.Connected);
+    }
+
+    [Fact]
+    public async Task FailedServiceKeepsReportingWhyBeforeItExits()
+    {
+        var bot = new Connection { StartAllowed = false, Error = "No password has been provided" };
+        var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var app = LichessServiceHost.Build(new(Port: 0, FailureLingerSeconds: 30), bot, () => failed.TrySetResult());
+        await app.StartAsync();
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(app.Lifetime.ApplicationStopping.IsCancellationRequested);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        Assert.Contains("No password has been provided", await client.GetStringAsync("/status"));
+        await app.StopAsync();
     }
 
     [Theory]

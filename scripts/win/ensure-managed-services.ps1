@@ -14,6 +14,7 @@ param(
   [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
   [string]$NssmExe = "D:\NSSM\nssm-2.24\win64\nssm.exe",
   [string]$LogDir = "D:\Data\Output",
+  [string]$PoolIdentity = "IIS APPPOOL\LaplacePool",
   [switch]$SkipPublish
 )
 $ErrorActionPreference = "Stop"
@@ -21,10 +22,6 @@ if (-not $env:LAPLACE_OUT) { throw "Run through scripts\win\ensure-managed-servi
 if (-not (Test-Path -LiteralPath $NssmExe)) { throw "nssm.exe missing: $NssmExe" }
 $isAdmin = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $secrets = Join-Path $RepoRoot "deploy\secrets"
-# The database route of a managed service: the host-authenticated loopback route (ManagedServiceDatabase.cs refuses any other)
-$dbName = if ($env:LAPLACE_DBNAME) { $env:LAPLACE_DBNAME } else { "laplace" }
-$dbRole = if ($env:LAPLACE_PGUSER) { $env:LAPLACE_PGUSER } else { "laplace" }
-$db = "Host=127.0.0.1;Port=5432;Username=$dbRole;Database=$dbName"
 
 function Read-EnvFile([string]$path) {
   $map = [ordered]@{}
@@ -52,6 +49,30 @@ function Publish-Service([string]$project, [string]$out, [string]$serviceName) {
   & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "publish-zstd.ps1") -Destination $out
   if ($LASTEXITCODE -ne 0) { throw "zstd for $project failed" }
 }
+# The site's pool identity may query, start, stop and continue the managed services and nothing else (no
+# reconfiguration): the Windows counterpart of the Linux root helper's fixed allowlist (WindowsServiceControl.cs).
+# Its operator-stop markers live in %ProgramData%\Laplace\managed, which the pool may write and the services read.
+function Grant-ServiceControl([string]$name) {
+  $sid = ([Security.Principal.NTAccount]$PoolIdentity).Translate([Security.Principal.SecurityIdentifier]).Value
+  $sddl = (& sc.exe sdshow $name | Where-Object { $_ -match '^D:' } | Select-Object -First 1).Trim()
+  if (-not $sddl) { throw "cannot read the security descriptor of $name" }
+  $ace = "(A;;CCLCSWRPWPDTLORC;;;$sid)"
+  if (-not $sddl.Contains($ace)) {
+    $sddl = $sddl -replace "\(A;;[A-Z]*;;;$([regex]::Escape($sid))\)", ""
+    $sddl = if ($sddl.Contains("S:")) { $sddl.Replace("S:", "$ace" + "S:") } else { $sddl + $ace }
+    & sc.exe sdset $name $sddl | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "sc sdset $name failed" }
+    Write-Host "[managed-services] $name grants $PoolIdentity query/start/stop/continue"
+  }
+  New-Item -ItemType Directory -Force -Path $state | Out-Null
+  $acl = Get-Acl -LiteralPath $state
+  foreach ($rule in @(
+      [Security.AccessControl.FileSystemAccessRule]::new($PoolIdentity, "Modify", "ContainerInherit,ObjectInherit", "None", "Allow"),
+      [Security.AccessControl.FileSystemAccessRule]::new("NT AUTHORITY\LOCAL SERVICE", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow"))) {
+    $acl.AddAccessRule($rule)
+  }
+  Set-Acl -LiteralPath $state -AclObject $acl
+}
 function Ensure-Service([string]$name, [string]$display, [string]$exe, [string]$arguments, [string[]]$environment, [string]$workDir, [string]$probe) {
   $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
   if (-not $isAdmin) {
@@ -74,9 +95,17 @@ function Ensure-Service([string]$name, [string]$display, [string]$exe, [string]$
   & $NssmExe set $name AppRotateFiles 1 | Out-Null
   & $NssmExe set $name AppRotateBytes 1048576 | Out-Null
   & $NssmExe set $name AppExit Default Restart | Out-Null
+  # exit 0 is the service honoring an operator's stop at start (ManagedServiceState): stay stopped
+  & $NssmExe set $name AppExit 0 Exit | Out-Null
   & $NssmExe set $name AppRestartDelay 10000 | Out-Null
   # the whole environment, as the unit file's Environment= and EnvironmentFile= lines: never PGPASSWORD or PGPASSFILE
   & $NssmExe set $name AppEnvironmentExtra @($environment) | Out-Null
+  Grant-ServiceControl $name
+  $stopMarker = Join-Path $state "$($name -replace '^Laplace','' | ForEach-Object ToLowerInvariant).stopped"
+  if (Test-Path -LiteralPath $stopMarker) {
+    Write-Host "[managed-services] $name declared, not started: an operator stopped it ($stopMarker; start it from the site or delete the file)"
+    return
+  }
   & $NssmExe start $name | Out-Null
   $ok = $false
   foreach ($i in 1..30) {
@@ -88,12 +117,24 @@ function Ensure-Service([string]$name, [string]$display, [string]$exe, [string]$
   else { Write-Warning "[managed-services] $name $($svc.Status); $probe did not answer in 30s - see $LogDir\$name.err.log" }
 }
 
+# The database route of a managed service is the site's own (deploy\windows\laplace-api.env), the host-authenticated
+# loopback route (ManagedServiceDatabase.cs refuses any other). Never env.cmd's LAPLACE_DBNAME/LAPLACE_PGUSER: those are
+# the CLI's defaults (postgres, database laplace), which on a machine that also runs Laplace-Engine name the Engine's
+# database, and the role postgres has no SSPI mapping, so the service failed at its first query and NSSM restarted it
+# forever (2026-10-06).
+$apiEnv = Read-EnvFile (Join-Path $RepoRoot "deploy\windows\laplace-api.env")
+$db = if ($apiEnv.Contains("LAPLACE_CHESS_DB")) { $apiEnv["LAPLACE_CHESS_DB"] } elseif ($apiEnv.Contains("LAPLACE_DB")) { $apiEnv["LAPLACE_DB"] } else { $null }
+if (-not $db) { throw "deploy\windows\laplace-api.env declares no LAPLACE_DB: the managed services use the site's database route" }
+if ($db -match '(?i)(^|;)\s*(password|passfile)\s*=' -or $db -notmatch '(?i)(^|;)\s*host\s*=\s*(127\.0\.0\.1|localhost|::1)\s*(;|$)') {
+  throw "the site's LAPLACE_DB is not the host-authenticated loopback route (Host=127.0.0.1, no password) a managed service requires"
+}
+$state = Join-Path $env:ProgramData "Laplace\managed"
+
 $common = @(
   "LAPLACE_DB=$db",
   "LAPLACE_EXTERNAL=$env:LAPLACE_EXTERNAL",
   "LAPLACE_OPS_LOG_DIR=$LogDir"
 )
-$apiEnv = Read-EnvFile (Join-Path $RepoRoot "deploy\windows\laplace-api.env")
 if ($apiEnv.Contains("LAPLACE_PERFCACHE_BIN")) { $common += "LAPLACE_PERFCACHE_BIN=$($apiEnv['LAPLACE_PERFCACHE_BIN'])" }
 foreach ($kv in (Read-EnvFile (Join-Path $secrets "chess-lab.env")).GetEnumerator()) { $common += "$($kv.Key)=$($kv.Value)" }
 

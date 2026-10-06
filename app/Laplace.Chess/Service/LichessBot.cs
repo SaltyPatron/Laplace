@@ -12,6 +12,15 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
+/// <summary>Which challenges the bot accepts, beyond standard chess: the speeds (null: every speed) and whether a rated
+/// challenge is taken (false, the default: casual games only, what a bot under test should play).</summary>
+public sealed record LichessChallengePolicy(IReadOnlySet<string>? Speeds = null, bool Rated = false)
+{
+    public static readonly string[] KnownSpeeds = ["ultraBullet", "bullet", "blitz", "rapid", "classical", "correspondence"];
+    public bool Accepts(string speed, bool rated) => (Speeds is null || Speeds.Contains(speed)) && (Rated || !rated);
+    public override string ToString() => $"speeds {(Speeds is null ? "all" : string.Join('+', Speeds))}, {(Rated ? "rated and casual" : "casual only")}";
+}
+
 public sealed class LichessBot : IAsyncDisposable
 {
     private readonly HttpClient _http;
@@ -21,7 +30,7 @@ public sealed class LichessBot : IAsyncDisposable
     private readonly bool _record;
     private string? _botUsername;
     private readonly Action<LichessChatLine>? _onChatLine;
-    private readonly IReadOnlySet<string>? _acceptSpeeds;
+    private readonly LichessChallengePolicy _policy;
     private readonly ILogger _log;
     private readonly Action<bool>? _onConnectionChanged;
 
@@ -35,7 +44,7 @@ public sealed class LichessBot : IAsyncDisposable
         int maxDepth = 8,
         string? botUsername = null,
         Action<LichessChatLine>? onChatLine = null,
-        IReadOnlySet<string>? acceptSpeeds = null,
+        LichessChallengePolicy? policy = null,
         ILogger? log = null,
         Action<bool>? onConnectionChanged = null)
     {
@@ -45,7 +54,7 @@ public sealed class LichessBot : IAsyncDisposable
         _record = record;
         _botUsername = botUsername;
         _onChatLine = onChatLine;
-        _acceptSpeeds = acceptSpeeds;
+        _policy = policy ?? new LichessChallengePolicy();
         _log = log ?? NullLogger.Instance;
         _onConnectionChanged = onConnectionChanged;
         _http = new HttpClient { BaseAddress = new Uri(Base), Timeout = System.Threading.Timeout.InfiniteTimeSpan };
@@ -509,9 +518,8 @@ public sealed class LichessBot : IAsyncDisposable
         if (!challenge.TryGetProperty("variant", out var v)
             || !v.TryGetProperty("key", out var vk) || vk.GetString() != "standard")
             return false;
-        if (_acceptSpeeds is not null && !_acceptSpeeds.Contains(SpeedOf(challenge)))
-            return false;
-        return true;
+        bool rated = challenge.TryGetProperty("rated", out var r) && r.ValueKind == JsonValueKind.True;
+        return _policy.Accepts(SpeedOf(challenge), rated);
     }
 
     private static string SpeedOf(JsonElement challenge)

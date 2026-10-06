@@ -23,7 +23,7 @@ public interface ILichessConnection : IAsyncDisposable
     LichessConnectivityStatus Status();
     IReadOnlyList<LichessChatLine> ChatForGame(string gameId);
     bool Start(int depth = LichessDefaults.SearchDepth, int maxConcurrent = LichessDefaults.MaxConcurrent,
-        bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null);
+        bool substrate = true, LichessChallengePolicy? policy = null);
     Task WaitForExitAsync(CancellationToken ct);
     Task StopAsync(CancellationToken ct);
 }
@@ -96,7 +96,7 @@ public sealed class LichessConnectivityService : ILichessConnection
 
     public bool Start(int depth = LichessDefaults.SearchDepth,
         int maxConcurrent = LichessDefaults.MaxConcurrent,
-        bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
+        bool substrate = true, LichessChallengePolicy? policy = null)
     {
         var token = LichessBot.ResolveToken();
         if (string.IsNullOrEmpty(token))
@@ -120,7 +120,7 @@ public sealed class LichessConnectivityService : ILichessConnection
             _account = null;
             _cts = new CancellationTokenSource();
             var lifetime = _cts.Token;
-            _runTask = Task.Run(() => RunAsync(token, acceptSpeeds, lifetime));
+            _runTask = Task.Run(() => RunAsync(token, policy, lifetime));
         }
 
         _log.LogInformation("lichess connectivity starting (depth {Depth}, max {Max}, substrate {Substrate})",
@@ -161,7 +161,7 @@ public sealed class LichessConnectivityService : ILichessConnection
         if (_ownsHost && _host is not null) await _host.DisposeAsync();
     }
 
-    private async Task RunAsync(string token, IReadOnlySet<string>? acceptSpeeds, CancellationToken ct)
+    private async Task RunAsync(string token, LichessChallengePolicy? policy, CancellationToken ct)
     {
         try
         {
@@ -192,7 +192,7 @@ public sealed class LichessConnectivityService : ILichessConnection
                     while (q.Count > MaxChatLines && q.TryDequeue(out _)) { }
                     PushLog($"chat [{line.Room}] @{line.Username}: {line.Text}");
                 },
-                acceptSpeeds: acceptSpeeds,
+                policy: policy,
                 onConnectionChanged: connected =>
                 {
                     lock (_gate)

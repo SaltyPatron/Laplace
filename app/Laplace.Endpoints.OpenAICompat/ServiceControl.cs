@@ -1,7 +1,11 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
+using System.Runtime.Versioning;
+using System.ServiceProcess;
 using System.Text.Json.Nodes;
 using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -34,7 +38,9 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
         };
         if (!Enum.IsDefined(action)) throw new ArgumentOutOfRangeException(nameof(action));
         var verb = action.ToString().ToLowerInvariant();
-        log.LogWarning("managed service action requested: service={Service} action={Action}", name, verb);
+        // a status read is not an action: the Lichess panel reads it while the service is unreachable
+        if (action == ServiceAction.Status) log.LogDebug("managed service status requested: service={Service}", name);
+        else log.LogWarning("managed service action requested: service={Service} action={Action}", name, verb);
         var info = new ProcessStartInfo("/usr/bin/sudo")
         {
             RedirectStandardOutput = true,
@@ -74,6 +80,121 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
             (string?)payload["sub_state"] ?? "unknown", (string?)payload["result"] ?? "unknown",
             (int?)payload["main_pid"] ?? 0, (string?)payload["enabled"] ?? "unknown",
             (bool?)payload["operator_stopped"] ?? false);
+    }
+}
+
+/// <summary>
+/// The Windows counterpart of deploy/linux/laplace-service-control: the managed services are NSSM
+/// services (scripts/win/ensure-managed-services.ps1), whose security descriptor grants the site's pool
+/// identity query, start and stop and nothing else (no reconfiguration). Only the two fixed service names
+/// are reachable. The operator's stop persists as the same marker the Linux helper writes
+/// (<see cref="ManagedServiceState"/>), which the service honors at start.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class WindowsServiceControl(ILogger<WindowsServiceControl> log) : IServiceControl
+{
+    internal static string ServiceName(ManagedService service) => service switch
+    {
+        ManagedService.Mcp => "LaplaceMcp", ManagedService.Lichess => "LaplaceLichess",
+        _ => throw new ArgumentOutOfRangeException(nameof(service)),
+    };
+
+    public async Task<ServiceControlResult> ExecuteAsync(ManagedService service, ServiceAction action, CancellationToken ct)
+    {
+        var name = service switch
+        {
+            ManagedService.Mcp => "mcp", ManagedService.Lichess => "lichess",
+            _ => throw new ArgumentOutOfRangeException(nameof(service)),
+        };
+        if (!Enum.IsDefined(action)) throw new ArgumentOutOfRangeException(nameof(action));
+        var unit = ServiceName(service);
+        var verb = action.ToString().ToLowerInvariant();
+        if (action == ServiceAction.Status) log.LogDebug("managed service status requested: service={Service}", name);
+        else log.LogWarning("managed service action requested: service={Service} action={Action}", name, verb);
+        using var sc = new ServiceController(unit);
+        ServiceControllerStatus status;
+        try { status = sc.Status; }
+        catch (InvalidOperationException) when (action == ServiceAction.Status)
+        {
+            // not installed, or the pool identity may not query it: both are "not found" to the caller
+            return new(name, unit, verb, false, "not-found", "inactive", "dead", "unknown", 0, "unknown",
+                ManagedServiceState.OperatorStopped(name));
+        }
+        catch (InvalidOperationException ex)
+        {
+            log.LogError("managed service {Unit} cannot be queried ({Error}); run scripts/win/ensure-managed-services.cmd elevated", unit, ex.InnerException?.Message ?? ex.Message);
+            throw new ServiceControlUnavailableException();
+        }
+        if (action != ServiceAction.Status)
+        {
+            var marker = ManagedServiceState.StopMarker(name);
+            bool previouslyStopped = File.Exists(marker);
+            try
+            {
+                if (action == ServiceAction.Stop) await File.WriteAllTextAsync(marker, DateTimeOffset.UtcNow.ToString("O"), ct);
+                else File.Delete(marker);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                log.LogError("managed service stop marker {Marker} not writable ({Error}); run scripts/win/ensure-managed-services.cmd elevated", marker, ex.GetType().Name);
+                throw new ServiceControlUnavailableException();
+            }
+            try
+            {
+                switch (action)
+                {
+                    case ServiceAction.Start:
+                        // NSSM pauses a service while it waits to restart a failed program; continue restarts it now
+                        if (status == ServiceControllerStatus.Paused) sc.Continue();
+                        else if (status is ServiceControllerStatus.Stopped) sc.Start();
+                        break;
+                    case ServiceAction.Stop:
+                        if (status is not (ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending)) sc.Stop();
+                        break;
+                    case ServiceAction.Restart:
+                        if (status is not (ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending)) sc.Stop();
+                        // the Lichess drain is bounded at 40 s (LichessServiceHost ShutdownTimeout)
+                        await Task.Run(() => sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(45)), ct);
+                        sc.Start();
+                        break;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or System.ServiceProcess.TimeoutException)
+            {
+                try
+                {
+                    if (previouslyStopped) await File.WriteAllTextAsync(marker, DateTimeOffset.UtcNow.ToString("O"), CancellationToken.None);
+                    else File.Delete(marker);
+                }
+                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException) { }
+                log.LogError("managed service action failed: service={Service} action={Action} ({Error})", name, verb, ex.InnerException?.Message ?? ex.Message);
+                throw new ServiceControlUnavailableException();
+            }
+            sc.Refresh();
+            status = sc.Status;
+        }
+        var (active, sub) = status switch
+        {
+            ServiceControllerStatus.Running => ("active", "running"),
+            ServiceControllerStatus.StartPending => ("activating", "start"),
+            ServiceControllerStatus.StopPending => ("deactivating", "stop"),
+            ServiceControllerStatus.Stopped => ("inactive", "dead"),
+            // NSSM's throttle: the program exited and NSSM waits before restarting it
+            _ => ("activating", "auto-restart"),
+        };
+        string enabled = "unknown";
+        try
+        {
+            enabled = sc.StartType switch
+            {
+                ServiceStartMode.Automatic => "enabled", ServiceStartMode.Manual => "manual",
+                ServiceStartMode.Disabled => "disabled", _ => "unknown",
+            };
+        }
+        catch (InvalidOperationException) { }
+        return new(name, unit, verb, action != ServiceAction.Status, "loaded", active, sub,
+            status == ServiceControllerStatus.Paused ? "exit-code" : "success", 0, enabled,
+            ManagedServiceState.OperatorStopped(name));
     }
 }
 
