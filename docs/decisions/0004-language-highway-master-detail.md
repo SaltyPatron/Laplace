@@ -49,10 +49,10 @@ A rough language-highway mapping is:
 |---|---|
 | league | highway / knowledge family |
 | division/conference | layer (ISO, ILI, synset, frame, POS, sense, deprel, …) |
-| team | hub such as synset/frame/class/roleset |
+| team | highway node such as synset/frame/class/roleset |
 | position | relation/role type |
 | player | surface/sense/lemma/entity |
-| roster | hub members / contained structures |
+| roster | highway node members / contained structures |
 | schedule/results | witnessed occurrences/relations and their outcomes |
 | standings | declared ranked arena using consensus/other typed measures |
 

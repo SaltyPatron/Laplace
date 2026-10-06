@@ -96,6 +96,8 @@ Approximate geometry may nominate candidates but cannot establish exact identity
 
 A*, Dijkstra, strongest-first walk, containment, trajectory continuation and geometric search are operators inside SCAN/ROUTE. None is itself the definition of cognition.
 
+Routing is trip planning over road classes. The road classes are the identifier systems (words per language, a wordnet's synsets, the ILI, ISO 639 languages, FrameNet frames, frame elements and lexical units, VerbNet classes, PropBank rolesets, VerbAtlas frames, UPOS, deprels, lexicographer files); the interchanges are the mapping claims where a route changes class (lexicalizations, CILI's maps, SemLink, the Predicate Matrix, MapNet, WordFrameNet). A* plans a trip that changes class at interchanges: a road's speed is confidence (cost −ln p), each hop pays a turn penalty, the fan is how many lanes are considered at a node, and a node holding more claims than the fan (NOUN, `eng`) is a fan-limited node, reached and not crossed. The geometric heuristic is close to zero for content-derived coordinates, so landmarks, the highway nodes, give the heuristic, and the highway ROM (type lists plus mapping edges) is the precomputed freeway network. `dog` → its synset → `i46360` → `[犬, jpn]` is one such trip.
+
 ### COMPOSE
 
 Build/fold the active typed frontier from the responding routes, trajectories, factors, tiers, relation bands, standing, contradiction and uncertainty.

@@ -57,7 +57,7 @@ closed world/evidence epoch
 provider/relation/calculation rules
 source/domain/time/sense scope
 hop/fanout/resource boundaries
-anti-hub/specificity constraints
+fan-limited-node/specificity constraints
 visibility law
 scoring/tie law
 server timing/event-order law
@@ -129,7 +129,7 @@ transition    = stroke
 best admitted path under the pinned rule = par
 ```
 
-Courses may constrain relation families, minimum evidence, domain crossings, time/source boundaries, hop limits, fanout, anti-hub rules or visibility.
+Courses may constrain relation families, minimum evidence, domain crossings, time/source boundaries, hop limits, fanout, fan-limited-node rules or visibility.
 
 Possible modes include Daily 9, Speed Golf, Evidence Golf, Historic Golf, Blind Golf, Tier Golf, Multimodal Golf and constrained tournament courses.
 
@@ -162,7 +162,7 @@ Relays reuse the event trajectory while changing visibility and route obligation
 
 ### Bridge Builder / Constraint Gauntlet
 
-Connect A/B while satisfying typed obligations such as required relation families, evidence sources, domain crossings or forbidden taxonomy hubs. Constraint Gauntlet changes the rules across a deterministic challenge sequence.
+Connect A/B while satisfying typed obligations such as required relation families, evidence sources, domain crossings or forbidden fan-limited taxonomy nodes. Constraint Gauntlet changes the rules across a deterministic challenge sequence.
 
 ### Witness Hunt / Contradiction Duel
 

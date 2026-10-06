@@ -68,7 +68,7 @@ A UI may display `Itachi Uchiha` or `Uchiha Itachi` according to a selected cult
 
 Submitting both strings cannot manufacture two different playable entities under a no-repeat rule if they resolve to the same canonical referent.
 
-Likewise provider handles, titles, nicknames and transliterations are content as written, linked to what they name by attestation and used by resolution/realization. An external identifier is content where it is a hub that sources share, and otherwise an internal pointer that resolves to what it names and is not recorded. None of them mints extra game pieces simply because their surface strings differ.
+Likewise provider handles, titles, nicknames and transliterations are content as written, linked to what they name by attestation and used by resolution/realization. An external identifier is content where it is a highway node that sources share, and otherwise an internal pointer that resolves to what it names and is not recorded. None of them mints extra game pieces simply because their surface strings differ.
 
 Executable ids are finite Hash128 BLAKE3 content addresses: no recipe, label or version salts them, and a human label is its own content, never the id of what it names.
 
