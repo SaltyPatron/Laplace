@@ -10,7 +10,10 @@ echo ==== terminate laplace backends ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='%LAPLACE_DBNAME%' AND pid<>pg_backend_pid();" || exit /b 1
 
 echo ==== DROP + recreate %LAPLACE_DBNAME% ====
-"%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS "%LAPLACE_DBNAME%";" || exit /b 1
+rem the name quoted (laplace-mono has a hyphen): cmd cannot nest quotes in -c, so the statement goes in from a file
+set "RESET_SQL=%TEMP%\laplace-db-reset.sql"
+> "%RESET_SQL%" echo DROP DATABASE IF EXISTS "%LAPLACE_DBNAME%";
+"%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f "%RESET_SQL%" || exit /b 1
 "%PGBIN%\createdb.exe" -h localhost -U postgres "%LAPLACE_DBNAME%" || exit /b 1
 
 echo ==== deploy extension SQL + DLLs ====
