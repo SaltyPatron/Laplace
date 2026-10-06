@@ -1,135 +1,69 @@
 name: Product — main delivery
-run-name: "Deliver main — ${{ github.sha }}"
+run-name: "Deliver main to hart-server — ${{ github.sha }}"
+
+# Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
+# declares) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace; no sudo), with
+# deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database laplace-mono, the API +
+# SPA at /opt/laplace/app behind nginx :8080. The machine's root part is deploy/linux/site-host.sh, run once by a
+# person. Seeding is not part of a push: dispatch this workflow with `seed`.
+#
+# The earlier delivery chain (product-stage.yml over scripts/pipeline.sh) assumes the decommissioned layout (a /build
+# volume, /opt/laplace/pgsql-18, laplace_admin, sudo -n); it stays callable from full-qualification.yml by dispatch.
 
 on:
-  workflow_dispatch:
-    inputs:
-      base_sha:
-        description: "Installed source revision used to plan only undelivered product work"
-        type: string
-        required: true
   push:
     branches: [main]
     paths-ignore:
-      - "vault-data-inventory.tsv"
-      - "vault-data-directories.list"
       - "docs/**"
       - "**/*.md"
-      - ".github/**"
-      - "scripts/api-diagnostics.py"
-      - "web/scripts/capture-ui-diagnostics.mjs"
-      - "scripts/ci-impact-plan.py"
-      - "scripts/ci-qualification-cache.py"
-      - "scripts/ci-product-freshness.py"
-      - "scripts/ci_product_scope.py"
-      - "scripts/ci_managed_projects.py"
-      - "scripts/product-ci.sh"
-      - "scripts/pipeline.sh"
-      - "scripts/bootstrap-chess-lab.sh"
-      - "scripts/check-deployed-revision.sh"
-      - "scripts/test-parallel.sh"
-      - "scripts/publish-applications.sh"
-      - "scripts/db-migrations.sh"
-      - "scripts/verify-api-payload.py"
-      - "scripts/verify-application-release.py"
-      - "scripts/check-application-runtime.py"
-      - "scripts/check-database-health.sh"
-      - "scripts/configure-laplace-environment.py"
-      - "deploy/linux/deploy.sh"
-      - "deploy/linux/payload-sync.sh"
-      - "deploy/linux/managed-publish.sh"
-      - "deploy/linux/bootstrap-host.sh"
-      - "deploy/linux/laplace-managed-deploy"
-      - "deploy/linux/nginx-laplace.conf"
-      - "scripts/test-suites/**"
-      - "scripts/test-*.py"
-      - "scripts/test-*.sh"
-      - "scripts/tests/**"
-      - "web/scripts/test-*.mjs"
-      - "web/scripts/verify-*.mjs"
-      - "web/e2e/**"
-      - "scripts/test-workflow-architecture.py"
-      - "scripts/test-seed-workflow-ownership.py"
-      - "scripts/test-product-ci-artifact-ownership.py"
-      - "scripts/test-benchmark-suite.py"
-      - "scripts/validate-pipeline.py"
-      - "scripts/setup-host.sh"
-      - "scripts/bootstrap-stripe-dev.sh"
-      - "scripts/bootstrap-laplace-runner.sh"
-      - "scripts/configure-github-repo.sh"
-      - "scripts/laplace"
-      - "deploy/linux/laplace-api.env.example"
-      - "deploy/linux/managed-services/laplace-stripe.service"
-      - "config/agents.json"
+      - "vault-data-inventory.tsv"
+      - "vault-data-directories.list"
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "after the deploy: none; foundation (ensure-foundation.sh into laplace-mono); reset-foundation (laplace-mono dropped, made again, migrated, then the foundation)"
+        type: choice
+        options: [none, foundation, reset-foundation]
+        default: none
+
 permissions:
   contents: read
 
-# A main push is one product story. The affected closure is built, deployed, and
-# read back under one non-preemptible candidate/host reservation. Broad development
-# and integration suites are explicit audits; they do not delay this dev deployment.
+concurrency:
+  group: laplace-site-hart-server
+  cancel-in-progress: false
+
 jobs:
-  plan:
-    name: Plan affected product work
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      dev_suites: ${{ steps.plan.outputs.dev_suites }}
-      db_suites: ${{ steps.plan.outputs.db_suites }}
-      live_suites: ${{ steps.plan.outputs.live_suites }}
-      delivery_actions: ${{ steps.plan.outputs.delivery_actions }}
-      publish_scope: ${{ steps.plan.outputs.publish_scope }}
-      components: ${{ steps.plan.outputs.components }}
-      build_components: ${{ steps.plan.outputs.build_components }}
-      managed_build_projects: ${{ steps.plan.outputs.managed_build_projects }}
-      managed_delivery_build_projects: ${{ steps.plan.outputs.managed_delivery_build_projects }}
-      managed_test_projects: ${{ steps.plan.outputs.managed_test_projects }}
-      browser_test_suites: ${{ steps.plan.outputs.browser_test_suites }}
-      managed_test_filter: ${{ steps.plan.outputs.managed_test_filter }}
-      managed_db_test_filter: ${{ steps.plan.outputs.managed_db_test_filter }}
-      managed_live_test_filter: ${{ steps.plan.outputs.managed_live_test_filter }}
-      native_test_filter: ${{ steps.plan.outputs.native_test_filter }}
-      native_db_test_filter: ${{ steps.plan.outputs.native_db_test_filter }}
-      managed_db_test_projects: ${{ steps.plan.outputs.managed_db_test_projects }}
-      managed_live_test_projects: ${{ steps.plan.outputs.managed_live_test_projects }}
-      full_qualification: ${{ steps.plan.outputs.full_qualification }}
-      changed_count: ${{ steps.plan.outputs.changed_count }}
+  deliver:
+    name: Build, migrate, publish, read back
+    runs-on: [self-hosted, laplace, Laplace]
+    timeout-minutes: 240
+    env:
+      LAPLACE_CONNINFO: ""
     steps:
-      - name: Check out exact revision with comparison history
+      - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Plan invalidated components and qualification suites
-        id: plan
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
+      - name: Externals and build (engine, perf-caches, extensions)
+        run: deploy/linux/site.sh externals build
+
+      - name: Install into /opt/laplace
+        run: deploy/linux/site.sh install
+
+      - name: Database laplace-mono, extensions updated in place, migrations
         run: |
-          set -euo pipefail
-          python3 scripts/ci-impact-plan.py \
-            --base "$BASE_SHA" \
-            --head "$HEAD_SHA" \
-            --github-output "$GITHUB_OUTPUT" \
-            --summary "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.seed }}" = reset-foundation ]; then deploy/linux/site.sh reset; fi
+          deploy/linux/site.sh database extensions migrate
 
-  mainline-delivery:
-    name: Build, deploy, and read back affected product
-    needs: plan
-    concurrency:
-      group: laplace-main-delivery-dispatch
-      cancel-in-progress: false
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: mainline
-      target_sha: ${{ github.sha }}
-      build_components: ${{ needs.plan.outputs.build_components }}
-      managed_build_projects: ${{ needs.plan.outputs.managed_delivery_build_projects }}
-      delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
-      publish_scope: ${{ needs.plan.outputs.publish_scope }}
-      # The stage reconciles installed->target before build/delivery, so an older
-      # queued main revision can be rejected safely: the newest candidate carries
-      # every still-undelivered product change forward from the installed receipt.
-      skip_if_superseded: true
-    secrets: inherit
+      - name: Stage the API + SPA, publish, restart
+        run: deploy/linux/site.sh app publish restart
+
+      - name: Seed (dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.seed != 'none' }}
+        run: deploy/linux/site.sh seed
+
+      - name: Read back
+        run: deploy/linux/site.sh smoke

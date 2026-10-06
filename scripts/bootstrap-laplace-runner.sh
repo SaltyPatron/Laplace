@@ -6,7 +6,7 @@ RUNNER_USER="laplace-runner"
 RUNNER_GROUP="laplace-runner"
 RUNNER_HOME="/var/lib/agents/laplace-runner"
 RUNNER_HOME_LEGACY="/var/lib/laplace-runner"
-RUNNER_DIR="$RUNNER_HOME/actions-runner"
+RUNNER_DIR="$RUNNER_HOME/Laplace/runner"   # Laplace-Operations agents.sh: $LAPLACE_AGENT_HOME/<repo>/runner
 PG_VERSION="18"
 LAPLACE_PG_PREFIX="/opt/laplace/pgsql-18"
 # Cluster data lives on its own NVMe volume (vg-data/postgres mounted at
@@ -114,7 +114,7 @@ LAPLACE_PG_CONF_DIR="$LAPLACE_PG_PREFIX/conf"
 PG_HBA_FILE="$LAPLACE_PG_CONF_DIR/pg_hba.conf"
 PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
 PG_POSTGRESQL_CONF="$LAPLACE_PG_DATA/postgresql.conf"
-RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"
+RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server-Laplace.service"   # agents.sh names it <host>-<repo>
 
 # THE OPERATOR — the human this host belongs to, not whoever is running us.
 #
@@ -422,54 +422,18 @@ bootstrap_legacy_runner_teardown() {
     green "✓ Legacy runner archived at $archive"
 }
 
+# The runner is Laplace-Operations' (agents.sh): one runner per repository, all as laplace-runner, labels
+# laplace,<repo>, registered, serviced and given its runner/.env there. One way to make runners, not two: this script
+# no longer unpacks, registers or services its own actions-runner.
+OPERATIONS_DIR="${LAPLACE_OPERATIONS:-${LAPLACE_SRC:-/repos/src}/Laplace-Operations}"
 bootstrap_runner_install() {
-    say "Install actions-runner at $RUNNER_DIR"
-    mkdir -p "$RUNNER_DIR"
-    chown "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_DIR"
-
-    if [ -f "$RUNNER_DIR/config.sh" ]; then
-        green "✓ Runner already extracted at $RUNNER_DIR"
-        return
-    fi
-
-    local tarball="$TMPDIR/$RUNNER_TARBALL"
-    if [ ! -f "$tarball" ]; then
-        echo "Downloading $RUNNER_DL_URL ..."
-        curl -sSLo "$tarball" "$RUNNER_DL_URL"
-        chown "$RUNNER_USER:$RUNNER_GROUP" "$tarball"
-    fi
-    sudo -u "$RUNNER_USER" -H tar xzf "$tarball" -C "$RUNNER_DIR"
-    rm -f "$tarball"
-    green "✓ Runner extracted"
+    say "Runner: Laplace-Operations agents.sh registers it"
+    [ -x "$OPERATIONS_DIR/agents.sh" ] || { red "No $OPERATIONS_DIR/agents.sh: clone SaltyPatron/Laplace-Operations there (or set LAPLACE_OPERATIONS)"; exit 1; }
 }
 
 bootstrap_runner_register() {
-    say "Register runner with $REPO_URL"
-
-    if [ -f "$RUNNER_DIR/.runner" ] \
-       || [ -f "/etc/systemd/system/$RUNNER_SERVICE" ]; then
-        green "✓ Runner already registered (.runner or service unit present) — skipping config.sh"
-        return
-    fi
-
-    local token
-    token=$(mint_gh_token "registration-token")
-    if [ -z "$token" ]; then
-        red "Could not mint registration token via gh CLI as $GH_SUDO_USER"
-        red "Ensure: sudo -u $GH_SUDO_USER gh auth status   works with admin scope on $REPO"
-        exit 1
-    fi
-
-    install -d -g "$RUNNER_GROUP" -m 2770 /build/laplace/work/runner
-    (cd "$RUNNER_DIR" && sudo -u "$RUNNER_USER" -H ./config.sh \
-        --url "$REPO_URL" \
-        --token "$token" \
-        --name hart-server \
-        --labels laplace,oneapi,postgres-18,dotnet-10,avx2 \
-        --work /build/laplace/work/runner \
-        --unattended \
-        --replace)
-    green "✓ Registered runner as 'hart-server'"
+    say "Register the runner for $REPO: $OPERATIONS_DIR/agents.sh Laplace"
+    SUDO_USER="${GH_SUDO_USER:-${SUDO_USER:-}}" "$OPERATIONS_DIR/agents.sh" Laplace
 }
 
 bootstrap_runner_oom_guard() {
@@ -594,24 +558,8 @@ bootstrap_runner_stripe_env() {
 }
 
 bootstrap_runner_service() {
-    say "Install + start systemd service ($RUNNER_USER)"
-    local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
-    if [ -f "$unit_file" ]; then
-        green "✓ Service unit $unit_file already exists — skipping svc.sh install"
-        systemctl enable "$RUNNER_SERVICE" >/dev/null 2>&1 || true
-        if systemctl is-active "$RUNNER_SERVICE" >/dev/null 2>&1; then
-            green "✓ Service already active"
-        else
-            systemctl start "$RUNNER_SERVICE"
-            sleep 1
-            green "✓ Service started"
-        fi
-    else
-        (cd "$RUNNER_DIR" && ./svc.sh install "$RUNNER_USER" && ./svc.sh start)
-        sleep 1
-        green "✓ Service installed + started"
-    fi
-    (cd "$RUNNER_DIR" && ./svc.sh status | head -3) || true
+    # agents.sh installed and started the runner's service when it registered it.
+    return 0
 }
 
 bootstrap_disable_system_postgresql() {

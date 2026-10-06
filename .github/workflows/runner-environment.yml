@@ -1,11 +1,8 @@
 name: Host — runner environment
 
+# Dispatch only. It configures the decommissioned runners' .env files (actions-runner*/.env); the runner on
+# hart-server is Laplace-Operations' agents.sh's, whose runner/.env agents.sh writes.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/configure-laplace-environment.py"
-      - ".github/workflows/runner-environment.yml"
   workflow_dispatch:
 
 permissions:

@@ -16,8 +16,8 @@ on:
         description: "Force serial native tests"
         type: boolean
         default: false
-  schedule:
-    - cron: "17 7 * * 0"
+  # No schedule: product-stage.yml assumes the decommissioned host layout, and the weekly run would land on
+  # hart-server's runner (labels laplace,Laplace). Dispatch it once the stage is ported to deploy/linux/site.sh.
 
 permissions:
   contents: read

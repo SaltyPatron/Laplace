@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart laplace-api for a publish (the runner has no sudo; this unit is root's and restarts nothing else)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart laplace-api.service

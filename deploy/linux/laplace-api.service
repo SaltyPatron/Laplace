@@ -1,22 +1,26 @@
 [Unit]
-Description=Laplace API (OpenAI-compat endpoints + self-hosted SPA)
+Description=Laplace API (OpenAI-compatible endpoints + self-hosted SPA) over laplace-mono
 Documentation=https://github.com/SaltyPatron/Laplace
-After=network.target laplace-postgresql.service
-Wants=laplace-postgresql.service
-RequiresMountsFor=/build
+# The cluster is Laplace-Operations' (pgdata.service, socket /tmp); site-host.sh installs this unit.
+After=network.target pgdata.service
+Wants=pgdata.service
+# Nothing to run until deploy/linux/site.sh has published the API once.
+ConditionPathExists=/opt/laplace/app/Laplace.Endpoints.OpenAICompat.dll
 
 [Service]
 Type=simple
 User=laplace-runner
 Group=laplace-runner
 UMask=0002
-Environment=TMPDIR=/build/laplace/work/api
-Environment=TMP=/build/laplace/work/api
-Environment=TEMP=/build/laplace/work/api
+Environment=TMPDIR=/opt/laplace/tmp
+Environment=TMP=/opt/laplace/tmp
+Environment=TEMP=/opt/laplace/tmp
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
 WorkingDirectory=/opt/laplace/app
-# Non-secret runtime config (DB, perfcache, URLs). Owned by laplace-runner; CI may refresh.
+# Non-secret runtime config (database, perf-cache, URLs), written by site.sh publish.
 EnvironmentFile=/opt/laplace/app/laplace-api.env
-# Operator-published secrets (setup-host seeds; CI publish may refresh). Optional (-).
+# Operator-published secrets. Optional (-).
+EnvironmentFile=-/opt/laplace/secrets/operator.env
 EnvironmentFile=-/opt/laplace/secrets/lichess.env
 EnvironmentFile=-/opt/laplace/secrets/stripe.env
 EnvironmentFile=-/opt/laplace/secrets/identity.env

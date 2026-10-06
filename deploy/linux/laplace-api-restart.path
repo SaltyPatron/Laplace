@@ -1,0 +1,8 @@
+[Unit]
+Description=deploy/linux/site.sh asks for laplace-api to be restarted (it writes /run/lock/laplace/restart-api)
+
+[Path]
+PathChanged=/run/lock/laplace/restart-api
+
+[Install]
+WantedBy=multi-user.target
