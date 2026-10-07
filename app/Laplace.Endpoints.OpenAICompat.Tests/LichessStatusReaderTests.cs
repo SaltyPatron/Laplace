@@ -35,7 +35,7 @@ public sealed class LichessStatusReaderTests
 
     private static LichessConnectivityStatus Bot(bool configured = true, bool connected = false, bool running = true,
         string? error = null, LichessAccountReadiness? account = null) =>
-        new(configured, null, connected, "SaltyPatron", 6, 2, true, 3, ["line"], error, running, account);
+        new(configured, null, connected, "SaltyPatron", "laplace", 2, 3, ["line"], error, running, account);
 
     private static (LichessStatusReader Reader, Client Client, Control Control) Make()
     {

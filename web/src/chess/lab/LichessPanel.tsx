@@ -29,9 +29,9 @@ export interface LichessStatus {
   connected: boolean;
   running?: boolean;
   username?: string | null;
-  depth: number;
+  engine: string;
+  engineIdentity?: { name: string; exeSha256: string; via?: { name: string; exeSha256: string } | null } | null;
   maxConcurrent: number;
-  substrate: boolean;
   gamesRecorded: number;
   recentLog: string[];
   error?: string | null;
@@ -222,15 +222,12 @@ export function LichessPanel() {
           />
         </Field>
 
-        <Field label="Search depth" help="Max iterative depth; clock budget can stop search earlier. Interactive default 6; substrate/perfcache evidence still biases the root before conventional search expands.">
+        <Field label="Engine" help="The engine every move comes from (LAPLACE_LICHESS_ENGINE): laplace, stockfish or lc0 through laplace-uci, or a UCI executable. The game is recorded the same way whichever plays.">
           <Input
-            type="number"
-            min={1}
-            max={20}
-            value={status?.depth || ''}
+            value={status?.engineIdentity ? `${status.engine} (${status.engineIdentity.via?.name ?? status.engineIdentity.name})` : (status?.engine ?? '')}
             disabled
             readOnly
-            aria-label="Search depth"
+            aria-label="Engine"
           />
         </Field>
 
@@ -243,15 +240,6 @@ export function LichessPanel() {
             disabled
             readOnly
             aria-label="Max concurrent"
-          />
-        </Field>
-
-        <Field label="Substrate bias" help="Fold consensus at root + learned PST refreshed after each ply fold." layout="row">
-          <Toggle
-            checked={status?.substrate ?? false}
-            disabled
-            onCheckedChange={() => undefined}
-            aria-label="Substrate bias"
           />
         </Field>
 

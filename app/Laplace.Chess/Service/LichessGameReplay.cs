@@ -42,6 +42,8 @@ internal sealed class LichessGameReplay
     public string InitialFen { get; }
     public ChessState State { get; private set; }
     public int AcceptedPlies => _acceptedMoves.Count;
+    /// <summary>The confirmed moves in UCI notation, in order: the position an engine is asked about.</summary>
+    public IReadOnlyList<string> AcceptedMoves => _acceptedMoves;
     public bool Faulted { get; private set; }
     public bool HasPendingSubmission => _pending is not null;
     public LichessGameDisposition Disposition { get; private set; } = new("created", false, null);

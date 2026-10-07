@@ -69,16 +69,16 @@ internal sealed record LichessStatusView(
     bool Connected,
     bool Running,
     string? Username,
-    int Depth,
+    string? Engine,
     int MaxConcurrent,
-    bool Substrate,
     long GamesRecorded,
     IReadOnlyList<string> RecentLog,
     string? Error,
     LichessAccountReadiness? Account,
     LichessServiceView? Service,
     DateTimeOffset? LastSeenAt,
-    string? TokenPreview = null);
+    string? TokenPreview = null,
+    Laplace.Chess.Service.Uci.EngineIdentity? EngineIdentity = null);
 
 /// <summary>
 /// Composes the status: the service's own answer when it gives one; otherwise the service manager's state
@@ -99,8 +99,8 @@ internal sealed class LichessStatusReader(ILichessStatusClient client, IServiceC
                 : s.Connected ? "listening"
                 : s.Running ? "connecting"
                 : "failed";
-            return new(state, true, true, s.Configured, s.Connected, s.Running, s.Username, s.Depth, s.MaxConcurrent,
-                s.Substrate, s.GamesRecorded, s.RecentLog, s.Error, s.Account, null, DateTimeOffset.UtcNow, s.TokenPreview);
+            return new(state, true, true, s.Configured, s.Connected, s.Running, s.Username, s.Engine, s.MaxConcurrent,
+                s.GamesRecorded, s.RecentLog, s.Error, s.Account, null, DateTimeOffset.UtcNow, s.TokenPreview, s.EngineIdentity);
         }
 
         LichessServiceView? service = null;
@@ -129,8 +129,8 @@ internal sealed class LichessStatusReader(ILichessStatusClient client, IServiceC
         };
         // the bot's last own error explains a crash loop; an operator's stop needs no old error
         if (desired == true && last?.Error is { Length: > 0 } lastError) message += " Last error: " + lastError;
-        return new(st, false, desired, null, false, false, last?.Username, last?.Depth ?? 0, last?.MaxConcurrent ?? 0,
-            last?.Substrate ?? false, last?.GamesRecorded ?? 0, desired == false ? [] : last?.RecentLog ?? [],
+        return new(st, false, desired, null, false, false, last?.Username, last?.Engine, last?.MaxConcurrent ?? 0,
+            last?.GamesRecorded ?? 0, desired == false ? [] : last?.RecentLog ?? [],
             message, last?.Account, service, lastAt);
     }
 }

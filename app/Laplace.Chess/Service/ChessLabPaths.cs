@@ -48,6 +48,25 @@ public static class ChessLabPaths
 
     public static Probe LaplaceUci => ResolveLaplaceUci();
 
+    /// <summary>
+    /// laplace-uci for a surface that names an engine (the Lichess connector, the engine endpoint, laplace-uci's own
+    /// laplace backend): an explicit LAPLACE_UCI, this process when it is laplace-uci, the published tool
+    /// (LAPLACE_TOOLS\chess\app, a complete runtime closure), the copy beside this assembly, then the build output or
+    /// PATH. Null when none exists. A copy beside a web host lacks packages the ASP.NET framework supplies to the host,
+    /// so the managed services name the published tool (LAPLACE_UCI, scripts/win/ensure-managed-services.ps1).
+    /// </summary>
+    public static string? LaplaceUciExecutable()
+    {
+        if (ChessRuntimeConfiguration.Read("LAPLACE_UCI") is { } configured && File.Exists(configured)) return Path.GetFullPath(configured);
+        string exe = OperatingSystem.IsWindows() ? "laplace-uci.exe" : "laplace-uci";
+        if (Environment.ProcessPath is { } self && Path.GetFileName(self).Equals(exe, StringComparison.OrdinalIgnoreCase)) return self;
+        if (ChessRuntimeConfiguration.Read("LAPLACE_TOOLS") is { } tools && Path.Combine(tools, "chess", "app", exe) is var published
+            && File.Exists(published))
+            return published;
+        if (File.Exists(DeployedLaplaceUciPath)) return DeployedLaplaceUciPath;
+        return LaplaceUci is { Found: true, Path: { } found } ? found : null;
+    }
+
     public static Probe QtBin => ResolveQtBin();
 
     /// <summary>

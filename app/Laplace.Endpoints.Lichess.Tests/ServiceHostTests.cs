@@ -29,13 +29,13 @@ public sealed class ServiceHostTests
         public bool StartAllowed = true;
         public bool Stopped;
         public bool Disposed;
-        public (int Depth, int Maximum, bool Substrate)? Started;
+        public (int Maximum, string? Engine)? Started;
         private readonly TaskCompletionSource _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public LichessConnectivityStatus Status() =>
-            new(Configured, null, Connected, "test", 8, 2, true, 0, [], Error, Account: Account);
+            new(Configured, null, Connected, "test", "laplace", 2, 0, [], Error, Account: Account);
         public IReadOnlyList<LichessChatLine> ChatForGame(string gameId) => [];
-        public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, LichessChallengePolicy? policy = null)
-        { Started = (depth, maxConcurrent, substrate); return StartAllowed; }
+        public bool Start(int maxConcurrent = 2, LichessChallengePolicy? policy = null, ILichessEngine? engine = null)
+        { Started = (maxConcurrent, engine?.Name); return StartAllowed; }
         public Task WaitForExitAsync(CancellationToken ct) => _exit.Task.WaitAsync(ct);
         public Task StopAsync(CancellationToken ct) { Stopped = true; _exit.TrySetResult(); return Task.CompletedTask; }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
@@ -46,7 +46,7 @@ public sealed class ServiceHostTests
     {
         var bot = new Connection();
         bool failed = false;
-        var app = LichessServiceHost.Build(new(Depth: 6, MaxConcurrent: 3, Port: 0), bot, () => failed = true);
+        var app = LichessServiceHost.Build(new(MaxConcurrent: 3, Port: 0), bot, () => failed = true);
         await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
@@ -60,7 +60,7 @@ public sealed class ServiceHostTests
         Assert.Equal(HttpStatusCode.OK, connected.StatusCode);
         Assert.Contains("\"connected\":true", await connected.Content.ReadAsStringAsync());
 
-        Assert.Equal((6, 3, true), bot.Started);
+        Assert.Equal((3, (string?)null), bot.Started);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/stop", null)).StatusCode);
         Assert.DoesNotContain("tokenPreview\":\"", await client.GetStringAsync("/status"));
         await app.StopAsync();
@@ -135,9 +135,8 @@ public sealed class ServiceHostTests
     }
 
     [Theory]
-    [InlineData(0, 2)]
-    [InlineData(8, 0)]
-    [InlineData(100, 2)]
-    public void InvalidLimitsCannotStartABot(int depth, int maximum) =>
-        Assert.Throws<InvalidOperationException>(() => LichessServiceHost.Build(new(Depth: depth, MaxConcurrent: maximum), new Connection()));
+    [InlineData(0)]
+    [InlineData(17)]
+    public void InvalidLimitsCannotStartABot(int maximum) =>
+        Assert.Throws<InvalidOperationException>(() => LichessServiceHost.Build(new(MaxConcurrent: maximum), new Connection()));
 }

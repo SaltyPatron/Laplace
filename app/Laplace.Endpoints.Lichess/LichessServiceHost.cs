@@ -5,9 +5,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Endpoints.Lichess;
 
 internal sealed record LichessOptions(
-    int Depth = LichessDefaults.SearchDepth,
     int MaxConcurrent = LichessDefaults.MaxConcurrent,
-    bool Substrate = true,
     int Port = 5189,
     LichessChallengePolicy? Challenges = null,
     int FailureLingerSeconds = 20)
@@ -19,9 +17,7 @@ internal sealed record LichessOptions(
         var speeds = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SPEEDS")?
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return new(
-            Number("LAPLACE_LICHESS_DEPTH", LichessDefaults.SearchDepth),
             Number("LAPLACE_LICHESS_MAX_CONCURRENT", LichessDefaults.MaxConcurrent),
-            Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SUBSTRATE") != "false",
             // the loopback status port the API reads (AppComposition reads the same variable)
             Number("LAPLACE_LICHESS_PORT", 5189),
             Challenges: new LichessChallengePolicy(
@@ -31,7 +27,7 @@ internal sealed record LichessOptions(
     }
     public void Validate()
     {
-        if (Depth is < 1 or > 64 || MaxConcurrent is < 1 or > 16 || Port is < 0 or > 65535 || FailureLingerSeconds is < 0 or > 300)
+        if (MaxConcurrent is < 1 or > 16 || Port is < 0 or > 65535 || FailureLingerSeconds is < 0 or > 300)
             throw new InvalidOperationException("Invalid Lichess service limits.");
         if (Challenges?.Speeds?.Any(s => !LichessChallengePolicy.KnownSpeeds.Contains(s)) == true)
             throw new InvalidOperationException("Unsupported Lichess speed filter.");
@@ -86,7 +82,7 @@ internal sealed class LichessWorker(ILichessConnection bot, LichessOptions optio
     {
         try
         {
-            if (!bot.Start(options.Depth, options.MaxConcurrent, options.Substrate, options.Challenges))
+            if (!bot.Start(options.MaxConcurrent, options.Challenges))
                 throw new InvalidOperationException("Lichess service could not start; verify server-side token configuration.");
             await bot.WaitForExitAsync(stoppingToken);
             if (!stoppingToken.IsCancellationRequested)
