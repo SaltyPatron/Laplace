@@ -282,9 +282,14 @@ public static class ChessLabRunners
             StockfishElo = int.Parse(Config(cfg, "elo", "2000")),
             StockfishLimitStrength = bool.Parse(Config(cfg, "limitStrength", "true")),
             Concurrency = Math.Max(1, int.Parse(Config(cfg, "concurrency", "1"))),
+            Conductor = Config(cfg, "conductor", "cutechess").Trim().ToLowerInvariant(),
+            Affinity = cfg.TryGetValue("affinity", out var affinity) && !string.IsNullOrWhiteSpace(affinity) ? affinity.Trim() : null,
             PgnOut = pgnOut,
             Event = $"chess-lab/cutechess/{slot.Job.Id}",
-        }.WithStockfishConfiguration(cfg);
+        }.WithStockfishConfiguration(cfg)
+         // Stockfish gets the installed Syzygy tables unless the job names a path or "none"
+         .WithInstalledSyzygy(cfg, ChessLabPaths.InstalledSyzygyEnginePath);
+        options.ValidateStockfishConfiguration();
 
         // PGN Event already carries this stable experiment id. Keep its original description;
         // the same id addresses the exact configuration/artifact receipt after PGN cleanup.

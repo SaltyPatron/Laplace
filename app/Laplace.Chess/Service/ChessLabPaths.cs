@@ -8,6 +8,7 @@ public static class ChessLabPaths
     private static readonly string[] CutechessPathNames = ["cutechess-cli.exe", "cutechess-cli"];
     private static readonly string[] StockfishPathNames = ["stockfish.exe", "stockfish"];
     private static readonly string[] LaplaceUciPathNames = ["laplace-uci.exe", "laplace-uci"];
+    private static readonly string[] FastchessPathNames = ["fastchess.exe", "fastchess"];
 
     public readonly record struct Probe(string? Path, bool Found, string Source);
 
@@ -37,6 +38,14 @@ public static class ChessLabPaths
         sourceCandidate: TryDefaultStockfishSourceCandidate(),
         sourceAuthoritative: !string.IsNullOrWhiteSpace(ChessRuntimeConfiguration.Read("LAPLACE_STOCKFISH_SOURCE")));
 
+    /// <summary>
+    /// fastchess, the match/SPRT/ladder conductor (Laplace-Wiki Sequence/Conflicts.md: fastchess for matches,
+    /// cutechess for the GUI). An explicit <c>LAPLACE_FASTCHESS</c>, the Linux install prefix, or the PATH selects it.
+    /// </summary>
+    public static Probe Fastchess => ResolveExecutable("LAPLACE_FASTCHESS", null, FastchessPathNames,
+        installedCandidate: OperatingSystem.IsWindows() ? null : Path.Combine(
+            ChessRuntimeConfiguration.InstallPrefix!, "bin", "fastchess"));
+
     public static Probe LaplaceUci => ResolveLaplaceUci();
 
     public static Probe QtBin => ResolveQtBin();
@@ -48,6 +57,19 @@ public static class ChessLabPaths
     /// only the largest bracket hides the smaller tables needed after captures/promotions.
     /// </summary>
     public static Probe SyzygyDir => ResolveSyzygyDir();
+
+    /// <summary>
+    /// The installed Syzygy set as an engine's <c>SyzygyPath</c>: the directories that hold its table files,
+    /// joined by the platform's path separator (Stockfish does not descend into subdirectories). Null when no
+    /// complete set is installed.
+    /// </summary>
+    public static string? InstalledSyzygyEnginePath()
+    {
+        var probe = SyzygyDir;
+        if (!probe.Found || probe.Path is null) return null;
+        try { return ChessSyzygyPaths.ProbePath(probe.Path); }
+        catch (Exception error) when (error is ChessInputException or IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+    }
 
     private static Probe ResolveSyzygyDir()
     {
@@ -79,6 +101,7 @@ public static class ChessLabPaths
     public static IReadOnlyDictionary<string, Probe> Catalog => new Dictionary<string, Probe>(StringComparer.OrdinalIgnoreCase)
     {
         ["cutechess"] = Cutechess,
+        ["fastchess"] = Fastchess,
         ["stockfish"] = Stockfish,
         ["qt"] = QtBin,
         ["laplaceUci"] = LaplaceUci,

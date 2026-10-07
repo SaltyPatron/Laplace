@@ -1,0 +1,85 @@
+{
+  "description": "The conventional chess reference beside Stockfish: the match/SPRT/ladder conductor, the rating tool, Lc0 and its networks, and the opening suites. Each is pinned by tag and commit and by the SHA-256 of what is installed. Hashes marked tofu are not published upstream and record the bytes as first downloaded.",
+  "fastchess": {
+    "version": "1.8.2-alpha",
+    "tag": "v1.8.2-alpha",
+    "commit": "f618e34540f94f4719ad3817950618dabe441318",
+    "repository": "https://github.com/Disservin/fastchess",
+    "license": "MIT",
+    "version_line": "fastchess alpha 1.8.2",
+    "assets": {
+      "windows-x86-64": {"url": "https://github.com/Disservin/fastchess/releases/download/v1.8.2-alpha/fastchess-windows-x86-64.zip",
+                          "sha256": "007ce550dc809510b34622a1aeb43fd443d40284045bef5c1bc39c8941114143",
+                          "binary": "fastchess.exe", "binary_sha256": "c6d7e4458a58025983c81bf38c524cb213e6f27559657dcfd72543392a431a71"},
+      "linux-x86-64": {"url": "https://github.com/Disservin/fastchess/releases/download/v1.8.2-alpha/fastchess-linux-x86-64.tar",
+                        "sha256": "1003f920bebe841acdab5e6d7871e93171a4586857b3ec91c21ef5777f26ff96",
+                        "binary": "fastchess", "binary_sha256": "3d0a8f3c8b837a96366ac838f3ddf6fe87b813abb4ad2852284c0ce409132566"}
+    }
+  },
+  "ordo": {
+    "version": "1.2.6",
+    "tag": "v1.2.6",
+    "commit": "17eec774f2e4b9fdd2b1b38739f55ea221fb851a",
+    "repository": "https://github.com/michiguel/Ordo",
+    "license": "GPL-3.0",
+    "version_line": "ordo 1.2.6",
+    "assets": {
+      "windows-x86-64": {"url": "https://github.com/michiguel/Ordo/releases/download/v1.2.6/ordo-1.2.6-win.zip", "sha256_tofu": "44dcb6b103e13a39f701baabab12fc503dd5a7c34873face503a9d18b92b2b29",
+                          "binary": "ordo-win64.exe", "binary_sha256": "219be7081e63653c403ac4a0d8c0eecbab31116f4f67028d9d817b8290c9c6eb"},
+      "source": {"url": "https://github.com/michiguel/Ordo/releases/download/v1.2.6/ordo-1.2.6.tar.gz", "sha256_tofu": "f8ad211d8a77e9769c8c66246eaf0a6eae495532165739e37d46e2ea91d971b1"}
+    }
+  },
+  "lc0": {
+    "version": "0.32.1",
+    "tag": "v0.32.1",
+    "commit": "fd71a2d921b689c5f479d3227c3806c8e272d9c5",
+    "repository": "https://github.com/LeelaChessZero/lc0",
+    "license": "GPL-3.0 with the NVIDIA linking exception",
+    "note": "Lc0 is a provider generation only together with the GPU model, driver, backend and precision: fp16 on Ada and fp32 on Pascal are different generations, and a cross-GPU difference is not a provider failure. It runs only in chess-GPU mode on HART-DESKTOP (Laplace-Operations chess/chess-gpu.ps1).",
+    "assets": {
+      "windows-cuda12": {"url": "https://github.com/LeelaChessZero/lc0/releases/download/v0.32.1/lc0-v0.32.1-windows-gpu-nvidia-cuda12.zip",
+                          "sha256": "8d0ce17676eb15e303bea9e790742d31c94ce5d24107f6187adc58e820f6d2f7",
+                          "binary": "lc0.exe", "binary_sha256": "e32164ceb85ab128e6fe5e02d34cf17608d638335ae7d519f82a58c372e9666b",
+                          "backends": ["cuda-fp16", "cuda", "cuda-auto"]},
+      "windows-onnx-trt": {"url": "https://github.com/LeelaChessZero/lc0/releases/download/v0.32.1/lc0-v0.32.1-windows-onnx-trt.zip",
+                            "sha256": "ac91559d9ca9cfcc5d0e26544cd5aa7ace29013444611a48b195dfb475750fe3",
+                            "binary": "lc0.exe", "binary_sha256": "5fe277a553806accf939cdd2e4c1b4c9c2e5c3533a143b90791f91cf920d86fa",
+                            "backends": ["onnx-trt"],
+                            "runtime": {
+                              "cuda_cudart-windows-x86_64-12.9.79-archive.zip": "179e9c43b0735ffe67207b3da556eb5a0c50f3047961882b7657d3b822d34ef8",
+                              "libcublas-windows-x86_64-12.9.1.4-archive.zip": "d534d98b0b453a98914dbf3adf47d7e84b55037abf02f87466439e1dcef581ed",
+                              "libcufft-windows-x86_64-11.4.1.4-archive.zip": "f26f80bb9abff3269c548e1559e8c2b4ba58ccb8acc6095bbc6404fc962d4b80",
+                              "cudnn-windows-x86_64-9.11.0.98_cuda12-archive.zip": "947988b49209d0d22c81809f20f8e7a703e9347d519317e1468e11fd70bb195a",
+                              "TensorRT-10.12.0.36.Windows.win10.cuda-12.9.zip": "tofu:965d8d70c3954449131754669c3f8aadfc17b35bd94c91bd795effef5628d8c6"
+                            },
+                            "runtime_source": "the package's install.cmd names these NVIDIA archives; the CUDA and cuDNN hashes are NVIDIA's redistrib manifests"},
+      "linux-source": {"build": "meson, -Dcudnn=false -Dplain_cuda=true (Backend=cuda, fp32 on Pascal)"}
+    },
+    "networks": {
+      "BT4-1024x15x32h-swa-6147500-policytune-332.pb.gz": {"url": "https://storage.lczero.org/files/networks-contrib/BT4-1024x15x32h-swa-6147500-policytune-332.pb.gz",
+        "sha256_tofu": "e6ada9d6c4a769bfab3aa0848d82caeb809aa45f83e6c605fc58a31d21bdd618", "use": "main network (TCEC/CCC), ~4 GB VRAM"},
+      "BT3-768x15x24h-swa-2790000.pb.gz": {"url": "https://storage.lczero.org/files/networks-contrib/BT3-768x15x24h-swa-2790000.pb.gz",
+        "sha256_tofu": "e3067757d1fc2dfc66947b21d15ace0cedf4c54254fc1de83d77c378a3e8b8e1", "use": "faster rungs"},
+      "768x15x24h-t82-swa-7464000.pb.gz": {"url": "https://storage.lczero.org/files/768x15x24h-t82-swa-7464000.pb.gz",
+        "sha256_tofu": "98c8e077647092b7645c683bc60ca0c888b4904d9981a63a70ac47b0c4501b88", "use": "faster rungs; hart-server's fp32 net"}
+    }
+  },
+  "books": {
+    "repository": "https://github.com/official-stockfish/books",
+    "commit": "65815ccdbc7727cd4f6aee252ba8f67fb740e92f",
+    "license": "CC0-1.0",
+    "directory": "Games/Chess/books/65815cc",
+    "files": {
+      "UHO_Lichess_4852_v1.epd": "7a7f6470615a69c6cf23d565417701d38732876f480af90d67b42abade35644a",
+      "8moves_v3.pgn": "5835239f88cc2c7511b177c32392a69f3ede21819cf0616f80a7f907cd21d17e",
+      "noob_3moves.epd": "2011193b4854e9a8cfdc05312ca2dbaffa6ceae3abbdee20e2ead2a18a603347",
+      "endgames.epd": "71c7477ca8c8fb097bb565794d8b5ed8754532f8fb499e9d8b1d397692302a6a"
+    },
+    "archives": {
+      "UHO_Lichess_4852_v1.epd.zip": {"git_blob": "e439636101786177ece850d3607356891c1cc2cd", "sha256": "4e298f11e8acfa106babe02968f2e61582145e7874c59284690b20b9650e0e07"},
+      "8moves_v3.pgn.zip": {"git_blob": "572bcf2eff104c51c64e796313f0589ce97e7044", "sha256": "7e1e9dd118b4bb97d8a8b5b8a790c86e21f8509d59a27d2883767d94477be02e"},
+      "noob_3moves.epd.zip": {"git_blob": "02630d748971b1cc1daa0d4e897b896b8f9115fa", "sha256": "68fe2691e0876d0de54fffb68c797e752138d5ed363beab2ac6ca34be68ee9f3"},
+      "endgames.epd.zip": {"git_blob": "e5a3eecdab0ffcfdb1586595cf8dafe1d722c448", "sha256": "4bfbf7c07c0f9822751c2557a4ebedb76e6f49daa781b00abec0401b6d988467"}
+    }
+  }
+}

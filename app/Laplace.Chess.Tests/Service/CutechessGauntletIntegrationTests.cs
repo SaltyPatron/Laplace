@@ -15,14 +15,16 @@ namespace Laplace.Chess.Service.Tests;
 [Trait("Tier", "integration")]
 public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
 {
-    [Fact]
-    public async Task OneOpeningPair_VerifiesIdentities_SwapsColors_AndMatchesPgn()
+    [Theory]
+    [InlineData("cutechess")]
+    [InlineData("fastchess")]
+    public async Task OneOpeningPair_VerifiesIdentities_SwapsColors_AndMatchesPgn(string conductor)
     {
         var catalog = ChessLabPaths.Catalog;
-        if (!catalog["cutechess"].Found || !catalog["stockfish"].Found || !catalog["laplaceUci"].Found)
+        if (!catalog[conductor].Found || !catalog["stockfish"].Found || !catalog["laplaceUci"].Found)
         {
             output.WriteLine(
-                $"skipped — cutechess={catalog["cutechess"].Found} stockfish={catalog["stockfish"].Found} "
+                $"skipped — {conductor}={catalog[conductor].Found} stockfish={catalog["stockfish"].Found} "
                 + $"laplaceUci={catalog["laplaceUci"].Found}");
             return;
         }
@@ -35,6 +37,7 @@ public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
             Depth = 1,
             StockfishElo = 2000,
             PairOpenings = true,
+            Conductor = conductor,
             PgnOut = pgn,
             Event = "chess-lab/test",
         };
@@ -47,7 +50,7 @@ public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
         var command = Assert.Single(events.OfType<ChessLabCommandEvent>());
         output.WriteLine(command.CommandLine);
         Assert.Contains("-openings", command.Arguments);
-        Assert.Contains("-repeat", command.Arguments);
+        Assert.Contains(conductor == "fastchess" ? "-games" : "-repeat", command.Arguments);
         Assert.Contains("option.Substrate=substrate", command.Arguments);
 
         var done = Assert.Single(events.OfType<ChessLabDoneEvent>());
@@ -79,7 +82,7 @@ public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
         Assert.Equal(2, games.Count);
         Assert.Equal((games[0].White, games[0].Black), (games[1].Black, games[1].White));
         Assert.Contains(events, e => e is ChessLabMetricEvent { Name: "wins" });
-        Assert.True(File.Exists(pgn), "cutechess wrote no PGN");
+        Assert.True(File.Exists(pgn), $"{conductor} wrote no PGN");
 
         var pgnGames = ReadPgnTags(pgn);
         Assert.Equal(games.Count, pgnGames.Count);

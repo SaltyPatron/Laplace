@@ -369,9 +369,56 @@ evaluator's own throughput before applying tournament concurrency to ingestion.
 
 The gauntlet UI, preview and start configuration expose `stockfishThreads`,
 `stockfishHashMb`, `stockfishNumaPolicy`, and `stockfishSyzygyPath`. Empty values
-preserve the actual installed engine defaults. Use the host calibration report
-to choose resources for the intended workload. `auto` and `system` NUMA policies
-respect process affinity; `hardware` deliberately ignores it.
+preserve the actual installed engine defaults, except the tablebases: an empty
+`stockfishSyzygyPath` gives Stockfish the installed Syzygy set (`LAPLACE_SYZYGY`,
+as the directories holding its files), and `none` plays without tables. Use the
+host calibration report to choose resources for the intended workload. `auto` and
+`system` NUMA policies respect process affinity; `hardware` deliberately ignores it.
+
+`conductor` selects `cutechess` (the default, cutechess-cli) or `fastchess`
+(`LAPLACE_FASTCHESS`), which conducts matches, SPRT and the ladder (Laplace-Wiki
+Sequence/Conflicts.md K1). Both receive the same engines, budget, paired openings
+and PGN; fastchess also takes `affinity`, a CPU list every engine process is
+pinned to, which time-controlled games on a hybrid CPU need. fastchess's engine
+traffic is read from its log beside the PGN and shown as the same transcript.
+
+## The ladder
+
+`scripts/chess-ladder.py` calibrates and uses the conventional ladder with
+fastchess and Ordo, pinned in `deploy/chess-ladder-release.json` (fastchess, Ordo,
+Lc0 and its networks, the official-stockfish/books suites) and checked by
+`check-chess-dependencies.py --require-ladder`. A rung is an engine at a fixed
+budget: `sf:nodes=N` (Stockfish 19, Threads 1, Hash 16, the installed tables),
+`lc0:nodes=N[:net=...][:backend=...]`, `laplace[:nodes=N]`.
+
+```sh
+python scripts/chess-ladder.py stockfish-receipt               # tag, binary SHA-256, compiler, network, bench 2497913
+python scripts/chess-ladder.py calibrate --rungs sf:nodes=128,sf:nodes=256,sf:nodes=512,sf:nodes=1024 \
+    --games 40 --concurrency 12 --affinity 16-31 --anchor SF19-n1024
+python scripts/chess-ladder.py gauntlet --seed laplace:nodes=2000 --rungs sf:nodes=1,sf:nodes=128 \
+    --games 20 --ladder <calibration run> --anchor SF19-n1024
+```
+
+Every run is a directory with the games, fastchess's output, Ordo's table and a
+`receipt.json` (tools and engines by SHA-256, Stockfish's bench, Lc0's network,
+backend and GPU driver, the argv, the book and seed, WHEA event 19 before and
+after on Windows). A gauntlet is rated together with its calibration run, so the
+rungs stay where the calibration put them. Node-limited rungs do not depend on
+core speed and may run on any core; time-controlled matches pin both engines to
+equal cores (on HART-DESKTOP not the two P-cores capped at x50). Adjudication is
+by rules, tablebase and a 200-move limit, never by an engine's score. Lc0 rungs
+need chess-GPU mode on HART-DESKTOP (Laplace-Operations `chess/chess-gpu.ps1 on`,
+and `off` afterwards); the tool refuses them while the embedders hold the card.
+Stockfish's UCI option sets per purpose are `deploy/stockfish-profiles.json`.
+
+Measured 2026-10-06: Stockfish 19 below about 64 nodes per move is one player
+(nodes 1 to 8 drew every colour-swapped pair), so the ladder's floor below that
+needs another kind of rung, such as Lc0's policy at one node.
+
+`scripts/win/publish-uci.cmd` publishes `laplace-uci` to
+`%LAPLACE_TOOLS%\chess\app` with the engine DLLs and their run-time dependencies
+beside it, so a conductor can start it outside the developer shell;
+`publish-deploy.cmd` runs it.
 
 Each gauntlet retains an `experiment.json` containing the requested options,
 actual command, observed UCI configuration, executable/runtime/opening identities,
