@@ -126,7 +126,7 @@ internal static class ChessEndpoints
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
-                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true", stockfishThreads = "", stockfishHashMb = "", stockfishNumaPolicy = "", stockfishSyzygyPath = "" } },
+                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true", conductor = "cutechess", affinity = "", stockfishThreads = "", stockfishHashMb = "", stockfishNumaPolicy = "", stockfishSyzygyPath = "" } },
                     new { kind = "lichess-fetch", label = "Ingest player games", @default = new { site = "chesscom", all = "true", max = "1000", ingest = "true" } },
                     new { kind = "player-profile", label = "Acquire and associate player profiles", @default = new { site = "chesscom", ingest = "true" } },
                     new { kind = "fide-search", label = "Search FIDE players", @default = new { limit = "25" } },
@@ -141,7 +141,8 @@ internal static class ChessEndpoints
         // CutechessRunner.BuildArguments the job uses.
         app.MapGet("/chess/lab/cutechess/preview", (
             int? rounds, int? depth, double? st, int? elo, int? concurrency, bool? limitStrength,
-            string? stockfishThreads, string? stockfishHashMb, string? stockfishNumaPolicy, string? stockfishSyzygyPath) =>
+            string? stockfishThreads, string? stockfishHashMb, string? stockfishNumaPolicy, string? stockfishSyzygyPath,
+            string? conductor, string? affinity) =>
         {
             var options = new CutechessOptions
             {
@@ -151,29 +152,36 @@ internal static class ChessEndpoints
                 StockfishElo = elo ?? 2000,
                 StockfishLimitStrength = limitStrength ?? true,
                 Concurrency = Math.Max(1, concurrency ?? 1),
+                Conductor = string.IsNullOrWhiteSpace(conductor) ? "cutechess" : conductor.Trim().ToLowerInvariant(),
+                Affinity = string.IsNullOrWhiteSpace(affinity) ? null : affinity.Trim(),
                 PgnOut = Path.Combine(ChessLabPaths.LabDir, "{job}", "games.pgn"),
                 Event = "chess-lab/cutechess/{job}",
             };
             try
             {
-                options = options.WithStockfishConfiguration(new Dictionary<string, string>
+                var stockfishConfig = new Dictionary<string, string>
                 {
                     ["stockfishThreads"] = stockfishThreads ?? "",
                     ["stockfishHashMb"] = stockfishHashMb ?? "",
                     ["stockfishNumaPolicy"] = stockfishNumaPolicy ?? "",
                     ["stockfishSyzygyPath"] = stockfishSyzygyPath ?? "",
-                });
+                };
+                // the same effective tablebase path the job gives Stockfish
+                options = options.WithStockfishConfiguration(stockfishConfig)
+                    .WithInstalledSyzygy(stockfishConfig, ChessLabPaths.InstalledSyzygyEnginePath);
+                options.ValidateStockfishConfiguration();
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
             var catalog = ChessLabPaths.Catalog;
-            var required = new (string Name, string Key, string Hint)[]
+            bool fastchess = options.Conductor == "fastchess";
+            var required = new List<(string Name, string Key, string Hint)>
             {
-                ("cutechess", "cutechess", "LAPLACE_CUTECHESS"),
+                fastchess ? ("fastchess", "fastchess", "LAPLACE_FASTCHESS") : ("cutechess", "cutechess", "LAPLACE_CUTECHESS"),
                 ("stockfish", "stockfish", "LAPLACE_STOCKFISH"),
-                ("qt", "qt", "LAPLACE_QT_BIN"),
                 ("laplaceUci", "laplaceUci", "publish the API host — laplace-uci ships beside it"),
             };
+            if (!fastchess) required.Add(("qt", "qt", "LAPLACE_QT_BIN"));   // fastchess needs no Qt
             var missing = required
                 .Where(r => !catalog[r.Key].Found)
                 .Select(r => new { name = r.Name, hint = r.Hint, looked = catalog[r.Key].Path, source = catalog[r.Key].Source })
@@ -184,7 +192,7 @@ internal static class ChessEndpoints
                 catalog["laplaceUci"].Path ?? "<laplace-uci>",
                 catalog["stockfish"].Path ?? "<stockfish>");
             var command = new ChessLabCommandEvent(
-                catalog["cutechess"].Path ?? "<cutechess-cli>", args, ChessLabPaths.LabDir);
+                catalog[options.Conductor].Path ?? (fastchess ? "<fastchess>" : "<cutechess-cli>"), args, ChessLabPaths.LabDir);
 
             return Results.Json(new
             {

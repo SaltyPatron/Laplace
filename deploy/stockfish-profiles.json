@@ -1,0 +1,41 @@
+{
+  "description": "Stockfish 19's UCI option sets, one per purpose (docs/guides/chess-forward-pass-proof.md, Stockfish experiment profiles). Every option a profile names is sent and receipted; an option it does not name keeps the engine default. SyzygyPath is the installed 3-4-5 set (LAPLACE_SYZYGY), so SyzygyProbeLimit declares the boundary those tables cover. The tables are a calculation provider Stockfish probes, not content Laplace depends on.",
+  "identity": {
+    "tag": "sf_19",
+    "commit": "edb0d9db6731067ec50ce619ff372b463bc4dd5d",
+    "network": "nn-1a298aa575a0.nnue",
+    "bench_command": "stockfish bench",
+    "bench_nodes": 2497913,
+    "note": "bench (16 MB hash, 1 thread, depth 13, the default positions) is the generation's identity: a different node count is a different engine, whatever the ARCH or compiler."
+  },
+  "profiles": {
+    "testimony": {
+      "use": "deterministic calculation provider and census: reproducible on every host",
+      "options": {"Threads": 1, "Hash": 16, "MultiPV": 1, "UCI_ShowWDL": true, "Ponder": false,
+                  "SyzygyPath": "${LAPLACE_SYZYGY}", "SyzygyProbeDepth": 1, "Syzygy50MoveRule": true, "SyzygyProbeLimit": 5},
+      "search": "go nodes N (or go depth D), ucinewgame before each independent position, no clock"
+    },
+    "calibration": {
+      "use": "graded opponent on Stockfish's CCRL 40/4 anchored scale; non-deterministic by design (time-seeded skill PRNG): comparator evidence, never testimony",
+      "options": {"UCI_LimitStrength": true, "UCI_Elo": "1320..3190", "Threads": 1, "Hash": 16, "Ponder": false},
+      "search": "tc=120+1 (the clock UCI_Elo is calibrated at), engines pinned to equal P-cores"
+    },
+    "ladder": {
+      "use": "a rung of the ladder and the frozen fixed reference: full strength, node-limited, hardware-independent",
+      "options": {"Threads": 1, "Hash": 16, "Ponder": false, "SyzygyPath": "${LAPLACE_SYZYGY}"},
+      "search": "nodes=2^k per move, tc=inf"
+    },
+    "analysis": {
+      "use": "deep single-position analysis on the host's spare cores; not bit-reproducible",
+      "options": {"Threads": 6, "Hash": 2048, "MultiPV": 4, "UCI_ShowWDL": true, "Ponder": false,
+                  "SyzygyPath": "${LAPLACE_SYZYGY}", "SyzygyProbeLimit": 5},
+      "search": "go depth D or go nodes N; large pages are used when the operator holds Lock pages in memory"
+    },
+    "play": {
+      "use": "host-max opponent and Lichess play; not bit-reproducible",
+      "options": {"Threads": 6, "Hash": 1024, "Ponder": false, "Move Overhead": 300,
+                  "SyzygyPath": "${LAPLACE_SYZYGY}"},
+      "search": "a clock; Move Overhead covers a loaded host or the network"
+    }
+  }
+}

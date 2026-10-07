@@ -38,10 +38,12 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
             case ChessLabCommandEvent command:
                 Command = command;
                 MatchState = ChessLabJobState.Running;
-                Artifacts["cutechess"] = await IdentifyAsync(command.FileName, ct);
+                Artifacts[options.Conductor] = await IdentifyAsync(command.FileName, ct);
                 string engine = "engine";
+                string flag = "";
                 foreach (var arg in command.Arguments)
                 {
+                    if (arg.StartsWith('-')) { flag = arg; continue; }
                     if (arg.StartsWith("name=", StringComparison.Ordinal)) engine = arg[5..];
                     else if (arg.StartsWith("cmd=", StringComparison.Ordinal))
                     {
@@ -58,7 +60,8 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
                                          .Order(StringComparer.Ordinal))
                                 Artifacts["Laplace/" + Path.GetFileName(payload)] = await IdentifyAsync(payload, ct);
                     }
-                    else if (arg.StartsWith("file=", StringComparison.Ordinal))
+                    // fastchess also names its PGN and log with file=; only the -openings file is an input
+                    else if (arg.StartsWith("file=", StringComparison.Ordinal) && flag == "-openings")
                         Artifacts["openingSuite"] = await IdentifyAsync(arg[5..], ct);
                 }
                 break;

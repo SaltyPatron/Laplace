@@ -45,6 +45,8 @@ python "%LAPLACE_ROOT%\scripts\install-stockfish.py" || exit /b 1
 
 call "%HERE%publish.cmd" %PUBLISH_ARGS%
 if errorlevel 1 exit /b 1
+rem the standalone chess engine the conductors start, with its native DLLs beside it
+call "%HERE%publish-uci.cmd" || exit /b 1
 call "%HERE%deploy-api.cmd" || exit /b 1
 rem the managed services (Linux: deploy/linux/managed-publish.sh), after the API they serve
 call "%HERE%ensure-managed-services.cmd"
