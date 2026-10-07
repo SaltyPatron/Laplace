@@ -398,9 +398,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         };
     }
 
+    // The board ended the game only when the source says so as its ending ("FabianoCaruana won by checkmate",
+    // "Game drawn by stalemate", or the bare word), never when a player's name merely contains the word: chess.com's
+    // "Chasing_Checkmate won on time" is a time loss, and reading it as checkmate aborted a whole archive fetch.
     private static bool SourceDeclaresBoardTerminal(string termination)
-        => termination.Contains("checkmate", StringComparison.OrdinalIgnoreCase)
-           || termination.Contains("stalemate", StringComparison.OrdinalIgnoreCase);
+    {
+        string t = termination.Trim();
+        return t.Equals("checkmate", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("stalemate", StringComparison.OrdinalIgnoreCase)
+            || t.EndsWith(" by checkmate", StringComparison.OrdinalIgnoreCase)
+            || t.EndsWith(" by stalemate", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string DropReason(string gameText, string? startFen)
     {
