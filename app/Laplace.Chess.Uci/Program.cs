@@ -3,6 +3,7 @@ using Laplace.Chess.Service.Uci;
 using Laplace.Chess.Uci;
 using Laplace.Chess.Uci.Commands;
 using Laplace.Chess.Uci.Engines;
+using Laplace.Chess.Uci.Lab;
 using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
@@ -60,11 +61,70 @@ if (cmd.Verb == "uci")
     }
 }
 
-object result;
-int exit = 0;
+
+// The other commands return data; this writes it: JSON for the engine and lab commands, readable text for inspect and
+// review unless --json, the ladder's own progress and table.
+var json = new JsonSerializerOptions(UciJson.Options) { WriteIndented = true };
+bool textOutput = cmd.Verb is "inspect" or "review" or "lichess" or "help" || (cmd.Verb == "ladder" && cmd.Positionals.FirstOrDefault() != "stockfish-receipt");
+textOutput &= !cmd.Flag("json");
 try
 {
-    result = cmd.Verb switch
+    switch (cmd.Verb)
+    {
+        case "lichess":
+        {
+            var settings = LichessCommand.Parse(cmd);
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                Console.Out.WriteLine("\n[lichess] stopping after in-flight games finish...");
+                cts.Cancel();
+            };
+            return await LichessCommand.RunAsync(settings, Console.Out, cts.Token);
+        }
+        case "inspect":
+        {
+            var report = InspectCommand.Run(cmd);
+            Console.Out.WriteLine(textOutput ? InspectCommand.Render(report) : JsonSerializer.Serialize(report, json));
+            return 0;
+        }
+        case "review":
+        {
+            var review = ReviewCommand.Run(cmd);
+            Console.Out.WriteLine(textOutput ? ReviewCommand.Render(review) : JsonSerializer.Serialize(review, json));
+            return 0;
+        }
+        case "check":
+        {
+            var (report, code) = CheckCommand.Run(cmd);
+            Console.Out.WriteLine(report.ToJsonString(json));
+            return code;
+        }
+        case "match":
+        {
+            var receipt = MatchCommand.Run(cmd);
+            Console.Out.WriteLine(receipt.ToJsonString(json));
+            return receipt["match"]?["exit"]?.GetValue<int>() is 0 ? 0 : 1;
+        }
+        case "ladder":
+        {
+            var ladder = LadderCommand.Run(cmd, progress: line => { Console.Out.WriteLine(line); Console.Out.Flush(); });
+            if (!textOutput) Console.Out.WriteLine(ladder.Receipt?.ToJsonString(json) ?? ladder.Table);
+            else
+            {
+                Console.Out.WriteLine(ladder.Table);
+                if (ladder.Receipt is not null && ladder.Run is not null) Console.Out.WriteLine($"run: {ladder.Run}");
+                if (ladder.Warning is not null) Console.Out.WriteLine(ladder.Warning);
+            }
+            return ladder.Failed ? 1 : 0;
+        }
+        case "help":
+            Console.Out.WriteLine(ChessCommands.Usage);
+            return 0;
+    }
+
+    object result = cmd.Verb switch
     {
         "engines" => ChessCommands.Engines(cmd.Value("profile")),
         "analyse" => ChessCommands.Analyse(cmd, cmd.Engine),
@@ -72,12 +132,14 @@ try
         "compare" => ChessCommands.Compare(cmd),
         _ => ChessCommands.Usage,
     };
+    if (result is string text) Console.Out.WriteLine(text);
+    else Console.Out.WriteLine(JsonSerializer.Serialize(result, json));
+    return 0;
 }
-catch (Exception ex) when (ex is UciEngineException or ArgumentException or FormatException)
+catch (Exception ex) when (ex is UciEngineException or ArgumentException or FormatException or IOException or InvalidOperationException
+                               or KeyNotFoundException or TimeoutException or UnauthorizedAccessException)
 {
-    result = new { error = CommandError.From(ex) };
-    exit = 2;
+    if (textOutput) Console.Error.WriteLine($"laplace-uci {cmd.Verb}: {ex.Message}");
+    else Console.Out.WriteLine(JsonSerializer.Serialize(new { error = CommandError.From(ex) }, json));
+    return 2;
 }
-if (result is string text) Console.Out.WriteLine(text);
-else Console.Out.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions(UciJson.Options) { WriteIndented = true }));
-return exit;

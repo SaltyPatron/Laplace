@@ -5,6 +5,7 @@
     <RootNamespace>Laplace.Chess.Uci</RootNamespace>
     <AssemblyName>laplace-uci</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +20,11 @@
     <!-- The pinned engine profiles travel with the binary (ChessEngineCatalog reads them beside it). -->
     <None Include="..\..\deploy\stockfish-profiles.json" Link="stockfish-profiles.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\deploy\lc0-profiles.json" Link="lc0-profiles.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- The pinned releases match, ladder and check read (Lab/LabLocks), so a published laplace-uci needs no checkout. -->
+    <None Include="..\..\deploy\chess-ladder-release.json" Link="chess-ladder-release.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\deploy\cutechess-release.json" Link="cutechess-release.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\deploy\zstd-release.json" Link="zstd-release.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\deploy\linux\stockfish-release.json" Link="stockfish-release.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

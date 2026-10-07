@@ -293,6 +293,80 @@ laplace-uci engines                            # JSON: each engine, its identity
 laplace-uci analyse --engine lc0 --fen "<FEN>" --nodes 2000 --multipv 2
 laplace-uci bestmove --engine stockfish --moves "e2e4 c7c5" --movetime 500
 laplace-uci compare --fen "<FEN>" --nodes 20000      # the same limits on laplace, stockfish and lc0
+laplace-uci match --engine1 laplace:nodes=2000 --engine2 stockfish:nodes=256 --games 20 --concurrency 4
+laplace-uci ladder calibrate|gauntlet|rate|stockfish-receipt ...   # the ladder (below)
+laplace-uci check [--require-ladder] [--require-data] [--check-latest] [--cutechess-gui]
+laplace-uci review games.pgn --depth 4         # centipawn loss, blunders, wins from a lost position
+laplace-uci lichess --engine stockfish         # the Lichess connector (laplace chess lichess runs this)
+laplace-uci inspect games.pgn --where Variant=Chess960   # what the monorepo would store for a game
+```
+
+Each command parses its arguments into data, runs, and returns a result that
+`Program` writes: JSON for `engines`, `analyse`, `bestmove`, `compare`, `match`
+and `check`; text for `inspect`, `review` and the ladder unless `--json`.
+
+**match** is a fastchess match between two engines, each written
+`engine[:key=value]...`: `laplace`, `stockfish` or `lc0` (from the catalog with
+their pinned profile; stockfish defaults to `ladder`, the others to `play`) or
+the path of any UCI executable; `nodes=N` is a node budget per move,
+`profile=` and `name=` choose the profile and the PGN name, and any other key is
+a UCI option (canonical names map). `--tc 10+0.1` or `--nodes N` sets the
+budget, `--book` a suite from `LAPLACE_CHESS_BOOKS` (default `8moves_v3.pgn`;
+`none` starts from the initial position) with `--plies` and `--seed`,
+`--concurrency` and `--affinity` the processes and their cores. Adjudication is
+by rules, the installed tablebases (`--no-tb` to leave them out) and
+`--maxmoves` (200), never by an engine's score. fastchess is
+`LAPLACE_FASTCHESS`, pinned by `deploy/chess-ladder-release.json`. The run
+directory (`--out`, default `LAPLACE_CHESS_MATCH_DIR` or
+`D:\Data\Laplace\work\chess\match`) holds the PGN, fastchess's transcript and
+log, and `receipt.json`: the conductor by SHA-256 and whether those bytes are
+the pinned asset, each engine by SHA-256 and its UCI identity (name, network
+and its SHA-256), the options sent, the exact argv, the book with its pinned
+and measured SHA-256, the seed, fastchess's closing table, and the WHEA-Logger
+event 19 count before and after (Windows).
+
+**check** is the dependency report: Stockfish (the handshake names the
+locked release, the strength options exist, a depth-1 search plays a legal
+move), cutechess-cli (its version and Qt), the published laplace-uci (uciok,
+readyok, a completed depth-1 search, a legal move, exit 0 after quit, substrate
+off), the native Zstandard streaming ABI on a checksummed PGN fixture,
+fastchess, Ordo, Lc0 and its network and the opening suites by SHA-256 against
+`deploy/chess-ladder-release.json`, the official cutechess GUI bound to its
+retained source build (`--cutechess-gui`; Linux), Syzygy pairing and the opening
+TSVs (`--require-data` makes them required), and `--check-latest` against the
+official GitHub releases. Settings are read from the installed files and the
+environment by key, so a token in the same file never enters the report.
+
+### What the monorepo stores: `inspect`
+
+`laplace-uci inspect` prints the tree the monorepo's chess ingest would store
+for a PGN game, a FEN or a list of moves, read-only and without a database. It
+runs the monorepo's own code: `ChessPgnDecomposer.TryParseGame`, then
+`RecordGame` into a change that is never applied, `ChessPositionIdentity` for
+every atom, and `ContentEmitter` for content IDs. For each game it shows:
+
+- the record kind (played game, custom start, Chess960 or another variant,
+  incomplete `*`, study with variations, comments and glyphs, clock comments);
+- per position its identity parts: side to move, the castling atom, any
+  rook-file override atom, en passant, any rules atom and the piece-square
+  atoms, each with its private bytes and atom ID (`--all-positions` for every
+  ply, otherwise the start and the final position);
+- every transition: SAN, UCI, the move ID and its five atoms, the position it
+  reaches, and the transition-floor key;
+- the LINE ID (a Merkle over P0 and the move IDs) beside the PLAYING
+  (occurrence), EVENT and player IDs and the exact strings they are hashed
+  from, each recomputed and checked;
+- every header and its disposition, found by recording the game again without
+  that header: stored as content (with the claim it makes), hashed into an
+  identity, or dropped;
+- findings keyed to SaltyPatron/Laplace-Engine#46, including what each
+  composed ID would be without the native Merkle's domain byte.
+
+```sh
+laplace-uci inspect FabianoCaruana_chesscom.pgn                    # the first game
+laplace-uci inspect FabianoCaruana_chesscom.pgn --where Variant=Chess960 --json
+laplace-uci inspect "e4 e5 Nf3 Nc6"                                 # a bare line: positions, moves, LINE
+laplace-uci inspect "<FEN>" --moves "e2e4"
 ```
 
 As a proxy it replays the engine's handshake and passes the protocol through;
@@ -463,18 +537,18 @@ traffic is read from its log beside the PGN and shown as the same transcript.
 
 ## The ladder
 
-`scripts/chess-ladder.py` calibrates and uses the conventional ladder with
+`laplace-uci ladder` calibrates and uses the conventional ladder with
 fastchess and Ordo, pinned in `deploy/chess-ladder-release.json` (fastchess, Ordo,
 Lc0 and its networks, the official-stockfish/books suites) and checked by
-`check-chess-dependencies.py --require-ladder`. A rung is an engine at a fixed
+`laplace-uci check --require-ladder`. A rung is an engine at a fixed
 budget: `sf:nodes=N` (Stockfish 19, Threads 1, Hash 16, the installed tables),
-`lc0:nodes=N[:net=...][:backend=...]`, `laplace[:nodes=N]`.
+`lc0:nodes=N[:net=...][:backend=...]`, `laplace[:nodes=N][:substrate=off]` (the laplace-uci running the ladder, or `LAPLACE_UCI`).
 
 ```sh
-python scripts/chess-ladder.py stockfish-receipt               # tag, binary SHA-256, compiler, network, bench 2497913
-python scripts/chess-ladder.py calibrate --rungs sf:nodes=128,sf:nodes=256,sf:nodes=512,sf:nodes=1024 \
+laplace-uci ladder stockfish-receipt                            # tag, binary SHA-256, compiler, network, bench 2497913
+laplace-uci ladder calibrate --rungs sf:nodes=128,sf:nodes=256,sf:nodes=512,sf:nodes=1024 \
     --games 40 --concurrency 12 --affinity 16-31 --anchor SF19-n1024
-python scripts/chess-ladder.py gauntlet --seed laplace:nodes=2000 --rungs sf:nodes=1,sf:nodes=128 \
+laplace-uci ladder gauntlet --seed laplace:nodes=2000 --rungs sf:nodes=1,sf:nodes=128 \
     --games 20 --ladder <calibration run> --anchor SF19-n1024
 ```
 

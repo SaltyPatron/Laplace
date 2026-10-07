@@ -142,7 +142,7 @@ class CorpusAcceptanceTests(unittest.TestCase):
             CORPUS.verify_repeat(first, repeated)
 
     def test_source_override_uses_existing_doctor_precedence(self):
-        doctor = CORPUS.module('check-chess-dependencies')
+        doctor = CORPUS.module('chess-runtime-env')
         with tempfile.TemporaryDirectory(prefix='stockfish-corpus-config-') as temporary:
             prefix = Path(temporary)
             (prefix / 'app').mkdir()

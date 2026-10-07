@@ -115,7 +115,7 @@ def main():
     try:
         config = {key: os.environ[key] for key in ("LAPLACE_ZSTD_LIBRARY", "LAPLACE_ZSTD_WINDOW_LOG_MAX") if os.environ.get(key)}
         if args.prefix:
-            spec = importlib.util.spec_from_file_location("chess_readiness", Path(__file__).with_name("check-chess-dependencies.py"))
+            spec = importlib.util.spec_from_file_location("chess_readiness", Path(__file__).with_name("chess-runtime-env.py"))
             readiness = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(readiness)
             config = readiness.configuration(args.prefix)

@@ -1004,7 +1004,7 @@ run_chess_lab() {
   bash scripts/pipeline.sh chess-lab
   sudo -n systemctl restart laplace-api
   check_application_live
-  python3 scripts/check-chess-dependencies.py --cutechess-gui
+  "${LAPLACE_APP_DIR:-/opt/laplace/app}/laplace-uci" check --cutechess-gui
 }
 
 reconcile_installed_product() {

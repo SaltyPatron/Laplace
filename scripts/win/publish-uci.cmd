@@ -1,6 +1,6 @@
 @echo off
 rem laplace-uci as a standalone chess engine, the way a conductor (fastchess, cutechess) starts it: published to
-rem %LAPLACE_TOOLS%\chess\app (the Windows prefix check-chess-dependencies.py reads) with the engine DLLs it loads and
+rem %LAPLACE_TOOLS%\chess\app (the Windows prefix laplace-uci check reads) with the engine DLLs it loads and
 rem their run-time dependencies beside it. laplace-uci computes content IDs through laplace_core (BLAKE3), and Windows
 rem searches a process's DLLs beside the executable, not on a dev shell's PATH: without them the engine fails its
 rem type initializer ("Unable to load DLL 'laplace_core'") outside scripts\win\env.cmd or load-env.ps1.

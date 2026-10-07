@@ -308,6 +308,16 @@ public sealed class UciProcess : IDisposable
 
     public bool WaitForExit(TimeSpan timeout) => _proc?.WaitForExit(timeout) ?? true;
 
+    /// <summary>Send quit and wait for the engine to exit; its exit code (0 for an attached client), or null when it did
+    /// not exit in time (Dispose then kills it).</summary>
+    public int? Quit(TimeSpan timeout)
+    {
+        TrySend("quit");
+        _ended = true;
+        if (_proc is null) return 0;
+        return _proc.WaitForExit(timeout) ? _proc.ExitCode : null;
+    }
+
     private bool ObserveFront(string line)
     {
         const string head = "info string ";
