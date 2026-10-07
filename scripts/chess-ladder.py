@@ -218,7 +218,10 @@ def fastchess_run(cfg, out, label, rungs, args, games, concurrency, affinity, tc
     text = (out / f"{label}.out").read_text(encoding="utf-8", errors="replace")
     return {"label": label, "argv": argv, "exit": code, "pgn": str(pgn),
             "started": started.isoformat(), "finished": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "summary": [line for line in text.splitlines() if re.match(r"\s*(Results of|Elo:|LOS:|Games:|Ptnml|Score of|Elo difference)", line)][-8:]}
+            # a match's closing block, or a tournament's final table (header and one row per engine)
+            "summary": [line for line in text.splitlines()
+                        if re.match(r"\s*(Results of|Elo:|LOS:|Games:|Ptnml|Score of|Elo difference|Rank\s+Name)", line)
+                        or re.match(r"\s+\d+\s+\S+\s+(-?[\d.]+|-?inf)\s", line)][-(len(rungs) + 9):]}
 
 
 def ordo(cfg, out, anchor, anchor_elo, simulations=1000, ladder=None):
