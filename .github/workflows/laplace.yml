@@ -1,11 +1,15 @@
 name: Product — main delivery
-run-name: "Deliver main to hart-server — ${{ github.sha }}"
+run-name: "Deliver main — staging on hart-server, then production on hart-cloud — ${{ github.sha }}"
 
 # Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
-# declares) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace; no sudo), with
-# deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database laplace-mono, the API +
-# SPA at /opt/laplace/app behind nginx :8080. The machine's root part is deploy/linux/site-host.sh, run once by a
-# person. Seeding is not part of a push: dispatch this workflow with `seed`.
+# declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
+# staging; no sudo), with deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database
+# laplace-mono, the API + SPA at /opt/laplace/app behind nginx :8080. The machine's root part is
+# deploy/linux/site-host.sh, run once by a person. Seeding is not part of a push: dispatch this workflow with `seed`.
+#
+# When that delivery has read back on hart-server, the same revision goes to production: hart-cloud (a Google Compute
+# c3 host, Sapphire Rapids, the AVX-512 machine), whose runner carries the label production and whose job waits for
+# the `production` environment's required reviewer. Each host is its own concurrency group, one delivery at a time.
 #
 # The earlier delivery chain (product-stage.yml over scripts/pipeline.sh) assumes the decommissioned layout (a /build
 # volume, /opt/laplace/pgsql-18, laplace_admin, sudo -n); it stays callable from full-qualification.yml by dispatch.
@@ -35,9 +39,48 @@ concurrency:
 
 jobs:
   deliver:
-    name: Build, migrate, publish, read back
-    runs-on: [self-hosted, laplace, Laplace]
+    name: Staging — build, migrate, publish, read back on hart-server
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 240
+    env:
+      LAPLACE_CONNINFO: ""
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Externals and build (engine, perf-caches, extensions)
+        run: deploy/linux/site.sh externals build
+
+      - name: Install into /opt/laplace
+        run: deploy/linux/site.sh install
+
+      - name: Database laplace-mono, extensions updated in place, migrations
+        run: |
+          if [ "${{ inputs.seed }}" = reset-foundation ]; then deploy/linux/site.sh reset; fi
+          deploy/linux/site.sh database extensions migrate
+
+      - name: Stage the API + SPA, publish, restart
+        run: deploy/linux/site.sh app publish restart
+
+      - name: Seed (dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.seed != 'none' }}
+        run: deploy/linux/site.sh seed
+
+      - name: Read back
+        run: deploy/linux/site.sh smoke
+
+  production:
+    name: Production — the same revision on hart-cloud, after approval
+    needs: deliver
+    runs-on: [self-hosted, laplace, Laplace, production]
+    environment: production
+    timeout-minutes: 240
+    concurrency:
+      group: laplace-site-hart-cloud
+      cancel-in-progress: false
     env:
       LAPLACE_CONNINFO: ""
     steps:
