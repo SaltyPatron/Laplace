@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Laplace.Chess.Service.Uci;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Microsoft.Extensions.Logging;
@@ -8,10 +9,6 @@ namespace Laplace.Chess.Service;
 
 public static class LichessDefaults
 {
-    // Live play is a latency-sensitive product surface. Search.Limits itself defaults to 6;
-    // forcing depth 8 here made ordinary Lichess moves take exponentially longer even when
-    // the substrate/perfcache had already supplied strong root evidence.
-    public const int SearchDepth = 6;
     public const int MaxConcurrent = 2;
 }
 
@@ -22,8 +19,8 @@ public interface ILichessConnection : IAsyncDisposable
 {
     LichessConnectivityStatus Status();
     IReadOnlyList<LichessChatLine> ChatForGame(string gameId);
-    bool Start(int depth = LichessDefaults.SearchDepth, int maxConcurrent = LichessDefaults.MaxConcurrent,
-        bool substrate = true, LichessChallengePolicy? policy = null);
+    bool Start(int maxConcurrent = LichessDefaults.MaxConcurrent, LichessChallengePolicy? policy = null,
+        ILichessEngine? engine = null);
     Task WaitForExitAsync(CancellationToken ct);
     Task StopAsync(CancellationToken ct);
 }
@@ -46,9 +43,9 @@ public sealed class LichessConnectivityService : ILichessConnection
     private string? _lastError;
     private bool _connected;
     private LichessAccountReadiness? _account;
-    private int _depth = LichessDefaults.SearchDepth;
     private int _maxConcurrent = LichessDefaults.MaxConcurrent;
-    private bool _substrate = true;
+    private ILichessEngine? _engine;
+    private EngineIdentity? _engineIdentity;
     private long _gamesRecorded;
 
     public LichessConnectivityService(ChessLiveGameHost host, ILogger? log = null)
@@ -77,14 +74,14 @@ public sealed class LichessConnectivityService : ILichessConnection
                 TokenPreview: null,
                 Connected: connected,
                 Username: _username,
-                Depth: _depth,
+                Engine: _engine?.Name ?? "laplace",
                 MaxConcurrent: _maxConcurrent,
-                Substrate: _substrate,
                 GamesRecorded: _gamesRecorded,
                 RecentLog: _recentLog.ToArray(),
                 Error: _lastError,
                 Running: _runTask is not null && !_runTask.IsCompleted,
-                Account: _account);
+                Account: _account,
+                EngineIdentity: _engineIdentity);
         }
     }
 
@@ -94,9 +91,8 @@ public sealed class LichessConnectivityService : ILichessConnection
         return q.ToArray();
     }
 
-    public bool Start(int depth = LichessDefaults.SearchDepth,
-        int maxConcurrent = LichessDefaults.MaxConcurrent,
-        bool substrate = true, LichessChallengePolicy? policy = null)
+    public bool Start(int maxConcurrent = LichessDefaults.MaxConcurrent,
+        LichessChallengePolicy? policy = null, ILichessEngine? engine = null)
     {
         var token = LichessBot.ResolveToken();
         if (string.IsNullOrEmpty(token))
@@ -111,9 +107,15 @@ public sealed class LichessConnectivityService : ILichessConnection
             if (_runTask is not null && !_runTask.IsCompleted)
                 return false;
 
-            _depth = Math.Max(1, depth);
             _maxConcurrent = Math.Max(1, maxConcurrent);
-            _substrate = substrate;
+            try { _engine = engine ?? UciLichessEngine.FromEnvironment(); }
+            catch (Exception ex) when (ex is UciEngineException or FormatException)
+            {
+                _lastError = "Lichess engine not configured: " + ex.Message;
+                PushLog(_lastError);
+                return false;
+            }
+            _engineIdentity = null;
             _lastError = null;
             _connected = false;
             _username = null;
@@ -123,8 +125,7 @@ public sealed class LichessConnectivityService : ILichessConnection
             _runTask = Task.Run(() => RunAsync(token, policy, lifetime));
         }
 
-        _log.LogInformation("lichess connectivity starting (depth {Depth}, max {Max}, substrate {Substrate})",
-            depth, maxConcurrent, substrate);
+        _log.LogInformation("lichess connectivity starting (engine {Engine}, max {Max})", _engine?.Name, maxConcurrent);
         PushLog("connecting…");
         return true;
     }
@@ -173,17 +174,13 @@ public sealed class LichessConnectivityService : ILichessConnection
             var host = _host ??= await _getHost(ct);
             PushLog($"BOT @{user} and bot:play permission verified; opening event stream…");
 
-            if (_substrate)
-                PushLog("substrate fold bias + learned PST refresh after each ply fold");
-            else
-                PushLog("substrate bias off — classical search, still recording if enabled");
+            PushLog($"engine {_engine!.Name} through the generic UCI client; recording is the same whichever engine plays");
 
             await using var bot = new LichessBot(
                 token,
                 host,
-                substrate: _substrate,
+                engine: _engine,
                 record: true,
-                maxDepth: _depth,
                 botUsername: user,
                 onChatLine: line =>
                 {
@@ -202,7 +199,8 @@ public sealed class LichessConnectivityService : ILichessConnection
                     }
                     PushLog(connected ? $"online as @{user}; event stream connected" : "event stream disconnected");
                 },
-                log: new QueueLogger(this));
+                log: new QueueLogger(this),
+                onEngineIdentity: identity => { lock (_gate) _engineIdentity = identity; });
 
             await bot.RunVerifiedAsync(account, _maxConcurrent, ct);
             PushLog("disconnected");
@@ -255,11 +253,11 @@ public sealed record LichessConnectivityStatus(
     string? TokenPreview,
     bool Connected,
     string? Username,
-    int Depth,
+    string Engine,
     int MaxConcurrent,
-    bool Substrate,
     long GamesRecorded,
     IReadOnlyList<string> RecentLog,
     string? Error,
     bool Running = false,
-    LichessAccountReadiness? Account = null);
+    LichessAccountReadiness? Account = null,
+    EngineIdentity? EngineIdentity = null);

@@ -1,0 +1,28 @@
+{
+  "description": "Lc0 0.32.1's UCI option sets, one per purpose, the counterpart of stockfish-profiles.json (laplace-uci --engine lc0 and the engine endpoint read both). Every option a profile names is sent and receipted; an option it does not name keeps the engine default. The network and backend come from chess-lab.env (LAPLACE_LC0_NET, LAPLACE_LC0_BACKEND): an Lc0 generation is the binary, the network, the backend and the GPU together (chess-ladder-release.json).",
+  "identity": {
+    "tag": "v0.32.1",
+    "commit": "fd71a2d921b689c5f479d3227c3806c8e272d9c5",
+    "note": "cuda-fp16 on the RTX 4060 Ti (Ada); one Lc0 process at a time holds the card."
+  },
+  "profiles": {
+    "testimony": {
+      "use": "reproducible single-position evaluation: one search thread, a fixed node count, fresh state per position",
+      "options": {"WeightsFile": "${LAPLACE_LC0_NET}", "Backend": "${LAPLACE_LC0_BACKEND}", "Threads": 1, "MultiPV": 1,
+                  "UCI_ShowWDL": true, "Ponder": false, "SyzygyPath": "${LAPLACE_SYZYGY}"},
+      "search": "go nodes N, ucinewgame before each independent position"
+    },
+    "analysis": {
+      "use": "single-position analysis on the GPU; not bit-reproducible",
+      "options": {"WeightsFile": "${LAPLACE_LC0_NET}", "Backend": "${LAPLACE_LC0_BACKEND}", "UCI_ShowWDL": true,
+                  "Ponder": false, "SyzygyPath": "${LAPLACE_SYZYGY}"},
+      "search": "go nodes N or go movetime T"
+    },
+    "play": {
+      "use": "Lichess and match play on a clock; not bit-reproducible",
+      "options": {"WeightsFile": "${LAPLACE_LC0_NET}", "Backend": "${LAPLACE_LC0_BACKEND}", "Ponder": false,
+                  "MoveOverheadMs": 300, "SyzygyPath": "${LAPLACE_SYZYGY}"},
+      "search": "a clock; MoveOverheadMs covers a loaded host or the network"
+    }
+  }
+}

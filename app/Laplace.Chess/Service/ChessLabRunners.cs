@@ -447,8 +447,6 @@ public static class ChessLabRunners
             Finish(lab, slot, ChessLabJobState.Failed, "no token");
             return;
         }
-        int depth = int.Parse(Config(slot.Job.Config, "depth",
-            LichessDefaults.SearchDepth.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         int maxConcurrent = int.Parse(Config(slot.Job.Config, "maxConcurrent",
             LichessDefaults.MaxConcurrent.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         var host = await lab.GetLiveHostAsync(ct);
@@ -456,11 +454,11 @@ public static class ChessLabRunners
         await using var bot = new LichessBot(
             token,
             host,
-            substrate: true,
+            engine: Config(slot.Job.Config, "engine", "") is { Length: > 0 } engineName
+                ? UciLichessEngine.Create(engineName, new Dictionary<string, string>()) : null,
             record: true,
-            maxDepth: depth,
             log: new LabLogger(lab, slot));
-        lab.Publish(slot, new ChessLabLogEvent("info", "lichess bot starting (transition reads + recording)"));
+        lab.Publish(slot, new ChessLabLogEvent("info", "lichess bot starting (engine through laplace-uci, recording)"));
         await bot.RunAsync(maxConcurrent, ct);
         Finish(lab, slot, ChessLabJobState.Cancelled, "stopped");
     }

@@ -15,6 +15,8 @@
   <Project Path="Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj" />
   <Project Path="Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" />
   <Project Path="Laplace.Endpoints.Lichess.Tests/Laplace.Endpoints.Lichess.Tests.csproj" />
+  <Project Path="Laplace.Endpoints.Engines/Laplace.Endpoints.Engines.csproj" />
+  <Project Path="Laplace.Endpoints.Engines.Tests/Laplace.Endpoints.Engines.Tests.csproj" />
   <Project Path="Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" />
   <Project Path="Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj" />
   <Project Path="Laplace.Migrations/Laplace.Migrations.csproj" />

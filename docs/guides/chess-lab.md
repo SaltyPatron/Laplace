@@ -263,6 +263,85 @@ The named manual benchmark suite is `chess`; it follows the evidence rules in
 [MANUAL_BENCHMARK_EVIDENCE.md](../benchmarks/MANUAL_BENCHMARK_EVIDENCE.md) and does
 not require an unrelated Laplace core/T0 build merely to calibrate external tools.
 
+## One UCI client, laplace-uci as the front, and the engine endpoint
+
+Every surface talks to engines through one generic UCI client,
+`Laplace.Chess.Service.Uci.UciProcess` (handshake with `id` and the option
+list, validated `setoption`, `isready`, `ucinewgame` with the hash cleared,
+`position`, `go` with nodes/depth/movetime/clock, `stop`, `quit`, a deadline on
+every read, kill on dispose). Its codec decodes every engine's output into one
+typed model: `EngineInfo` (depth, seldepth, multipv, score cp or mate from the
+side to move with its White-view value, WDL, nodes, nps, tbhits, time, the PV as
+`UciMove`s), `EngineBestMove` (`(none)` and `0000` are "no move"), and an
+`EngineReceipt` (host, the executable by path and SHA-256, its `id name`, the
+network file and its SHA-256, every option sent, the position, the `go`
+command, `fresh` or `warm` state, engine milliseconds kept apart from queue and
+network time). Positions stay notation (`ChessPosition`: FEN plus UCI moves);
+`IChessIdentityResolver` is the seam where the native core will resolve them to
+content IDs, and nothing here hashes a FEN. `StockfishProcessEvaluator` and its
+pool sit on the same client with their API unchanged.
+
+`laplace-uci` is the one front and the place engine configuration lives
+(`ChessEngineCatalog`: `chess-lab.env` and the pinned profiles
+`deploy/stockfish-profiles.json`, `deploy/lc0-profiles.json`):
+
+```sh
+laplace-uci                                    # UCI engine: Laplace's own (a GUI or conductor starts it bare)
+laplace-uci uci --engine stockfish --profile ladder   # UCI proxy over Stockfish with that profile
+laplace-uci uci --engine lc0 --option threads=2       # canonical option names map per engine
+laplace-uci engines                            # JSON: each engine, its identity, its profile options
+laplace-uci analyse --engine lc0 --fen "<FEN>" --nodes 2000 --multipv 2
+laplace-uci bestmove --engine stockfish --moves "e2e4 c7c5" --movetime 500
+laplace-uci compare --fen "<FEN>" --nodes 20000      # the same limits on laplace, stockfish and lc0
+```
+
+As a proxy it replays the engine's handshake and passes the protocol through;
+its receipt rides as `info string laplace engine {...}` before the first
+`readyok` and `info string laplace receipt {...}` before each `bestmove`, so a
+plain UCI consumer keeps it and the client decodes it (`EngineIdentity.Via`).
+Laplace's own chess is behind `IChessBackend` (position in; move, info lines and
+receipt out); today's backend is the managed provider stack and `Search`
+unchanged, and the native core replaces it without touching the protocol, the
+commands or the endpoint. Options: canonical names (threads, hash, multipv,
+wdl, syzygy, network, backend, overhead, ponder, substrate) or the engine's own.
+
+**Lichess.** The connector plays every move through the client:
+`LAPLACE_LICHESS_ENGINE` is `laplace` (default), `stockfish` or `lc0` (laplace-uci
+started with `--engine` and the `play` profile) or any UCI executable's path;
+`LAPLACE_LICHESS_ENGINE_OPTIONS` is `Name=Value;Name=Value`;
+`LAPLACE_LICHESS_MOVE_OVERHEAD_MS` (300) is taken off the Lichess clock before it
+becomes `wtime/btime/winc/binc`. Recording into the substrate is the same
+whichever engine plays; each game's engine receipt (identity and per-move
+receipts) is written to `LAPLACE_LICHESS_RECEIPTS` (default under the temp
+directory), and `/chess/lichess/status` names the engine. A proxy that does not
+report the engine behind it (an older laplace-uci) is refused rather than played.
+
+**The engine endpoint** (`Laplace.Endpoints.Engines`, NSSM service
+`LaplaceEngines`, declared by `scripts/win/ensure-managed-services.ps1` once
+`deploy/secrets/engines.env` exists; example `deploy/windows/engines.env.example`)
+listens on `LAPLACE_ENGINES_BIND:LAPLACE_ENGINES_PORT` (`0.0.0.0:5190`). Every
+route except `/health` needs `Authorization: Bearer $LAPLACE_ENGINES_TOKEN`.
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /health` | | `{service, live, host}` |
+| `GET /engines` | | each engine with its identity and profile options |
+| `POST /analyse` | `{engine, fen?, moves?, limits:{nodes?,depth?,movetimeMs?}, multipv?, options?, profile?, state?, timeoutMs?, waitMs?}` | `EngineAnalysis`: lines, final, bestMove, strings, receipt |
+| `POST /bestmove` | the same, or `clock:{wtimeMs,btimeMs,wincMs,bincMs,overheadMs}` | `{engine, bestMove, ponder, score, wdl, receipt}` |
+
+Each engine has a small process pool (laplace 2, stockfish 2, lc0 1: one Lc0
+process holds the GPU); a job with other options or another profile reopens the
+process in its slot. Errors are typed and never answered by another engine:
+400 rejected, 401 unauthorized, 429 busy, 503 unavailable, 504 timeout, 502 a
+protocol fault. Callers on other hosts need an inbound firewall rule for the
+port, for example
+`New-NetFirewallRule -DisplayName "Laplace engine endpoint 5190 from hart-server" -Direction Inbound -Protocol TCP -LocalPort 5190 -RemoteAddress 192.168.1.2 -Action Allow -Profile Private`.
+
+```sh
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{"engine":"lc0","fen":"<FEN>","limits":{"nodes":20000},"multipv":2}' http://hart-desktop:5190/analyse
+```
+
 ## Watching games live
 
 Web → **Lab**, which is three surfaces, not one page:

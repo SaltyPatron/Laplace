@@ -75,7 +75,7 @@ internal static class ChessCommands
         + "      position set; reports nodes, nodes/sec, and bytes allocated — the profile-before-\n"
         + "      optimizing baseline, deterministic node counts at a given depth)\n"
         + "  tactics [epd-file] [--depth D]   (solve-rate over an EPD suite; built-in mate suite if no file)\n"
-        + "  lichess [--token T] [--depth D] [--max-concurrent N] [--substrate] [--speed bullet|blitz|rapid|classical]\n"
+        + "  lichess [--token T] [--engine laplace|stockfish|lc0|<uci exe>] [--max-concurrent N] [--speed bullet|blitz|rapid|classical]\n"
         + "      stream account events + play rated standard games (token from LICHESS_API env or deploy\\secrets\\lichess.env)";
 
     // Reproducible Search benchmark: fixed-depth search over a fixed position set, so node
@@ -481,16 +481,16 @@ internal static class ChessCommands
     {
         string? token = LichessBot.ResolveToken(ArgStr(args, "--token", ""));
         if (string.IsNullOrEmpty(token))
-            return Fail("usage: laplace chess lichess [--token T] [--depth D] [--max-concurrent N]\n"
-                      + "                             [--substrate] [--speed bullet|blitz|rapid|classical] [--rated]\n"
+            return Fail("usage: laplace chess lichess [--token T] [--engine laplace|stockfish|lc0|<uci exe>] [--max-concurrent N]\n"
+                      + "                             [--speed bullet|blitz|rapid|classical] [--rated]\n"
                       + "  Token from --token, LICHESS_API env var, or deploy\\secrets\\lichess.env.\n"
-                      + "  --substrate: fuse position transitions, move physicality, and child structure in one substrate pass.\n"
+                      + "  --engine: the UCI engine every move comes from (default LAPLACE_LICHESS_ENGINE, else laplace through laplace-uci).\n"
                       + "  --speed: accept only this time-control class (repeatable); default = all.\n"
                       + "  --rated: accept rated challenges too; default = casual only.");
 
-        int depth = ArgInt(args, "--depth", 4);
         int maxConcurrent = ArgInt(args, "--max-concurrent", 4);
-        bool substrate = HasFlag(args, "--substrate");
+        string engineArg = ArgStr(args, "--engine", "");
+        var engine = engineArg.Length > 0 ? UciLichessEngine.Create(engineArg, new Dictionary<string, string>()) : UciLichessEngine.FromEnvironment();
 
 
         var speeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -498,8 +498,7 @@ internal static class ChessCommands
             if (args[i] == "--speed") speeds.Add(args[i + 1].ToLowerInvariant());
         var policy = new LichessChallengePolicy(speeds.Count > 0 ? speeds : null, Rated: HasFlag(args, "--rated"));
 
-        Console.WriteLine($"lichess bot: depth {depth}, max {maxConcurrent} concurrent games, "
-            + $"substrate {substrate}, {policy}");
+        Console.WriteLine($"lichess bot: engine {engine.Name}, max {maxConcurrent} concurrent games, {policy}");
         Console.WriteLine("  token configured; validating Lichess account and bot permissions.");
         Console.WriteLine("  Ctrl-C to stop (finishes in-flight games first).");
 
@@ -515,8 +514,7 @@ internal static class ChessCommands
         await using var bot = new LichessBot(
             token,
             liveHost,
-            substrate: substrate,
-            maxDepth: depth,
+            engine: engine,
             policy: policy);
         await bot.RunAsync(maxConcurrent, cts.Token);
         return 0;

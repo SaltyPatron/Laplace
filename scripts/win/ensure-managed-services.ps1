@@ -133,7 +133,9 @@ $state = Join-Path $env:ProgramData "Laplace\managed"
 $common = @(
   "LAPLACE_DB=$db",
   "LAPLACE_EXTERNAL=$env:LAPLACE_EXTERNAL",
-  "LAPLACE_OPS_LOG_DIR=$LogDir"
+  "LAPLACE_OPS_LOG_DIR=$LogDir",
+  # the published laplace-uci (publish-uci.cmd): the Lichess connector and the engine endpoint start it and name an engine
+  "LAPLACE_UCI=$(Join-Path $env:LAPLACE_TOOLS 'chess\app\laplace-uci.exe')"
 )
 if ($apiEnv.Contains("LAPLACE_PERFCACHE_BIN")) { $common += "LAPLACE_PERFCACHE_BIN=$($apiEnv['LAPLACE_PERFCACHE_BIN'])" }
 foreach ($kv in (Read-EnvFile (Join-Path $secrets "chess-lab.env")).GetEnumerator()) { $common += "$($kv.Key)=$($kv.Value)" }
@@ -148,6 +150,22 @@ $envLichess = $common + @("TMPDIR=$work", "TMP=$work", "TEMP=$work")
 foreach ($kv in $lichessSecrets.GetEnumerator()) { $envLichess += "$($kv.Key)=$($kv.Value)" }
 foreach ($kv in (Read-EnvFile (Join-Path $secrets "lichess-service.env")).GetEnumerator()) { $envLichess += "$($kv.Key)=$($kv.Value)" }
 Ensure-Service "LaplaceLichess" "Laplace Lichess bot (managed)" (Join-Path $lichessOut "Laplace.Endpoints.Lichess.exe") "" $envLichess $work "http://127.0.0.1:5189/health/live"
+
+# The engine endpoint (laplace, stockfish, lc0 over HTTP for the LAN), only once its token exists
+# (LAPLACE_ENGINES_TOKEN in deploy\secrets\engines.env). It binds LAPLACE_ENGINES_BIND:LAPLACE_ENGINES_PORT (0.0.0.0:5190);
+# the Windows firewall needs an inbound rule for the callers (docs/guides/chess-lab.md, The engine endpoint).
+$enginesSecrets = Read-EnvFile (Join-Path $secrets "engines.env")
+if ($enginesSecrets.Count) {
+  $enginesOut = Join-Path $env:LAPLACE_OUT "engines"
+  Publish-Service "Laplace.Endpoints.Engines" $enginesOut "LaplaceEngines"
+  $work = Join-Path $env:LAPLACE_BUILD_ROOT "work\engines"
+  $envEngines = $common + @("TMPDIR=$work", "TMP=$work", "TEMP=$work")
+  foreach ($kv in $enginesSecrets.GetEnumerator()) { $envEngines += "$($kv.Key)=$($kv.Value)" }
+  $port = if ($enginesSecrets.Contains("LAPLACE_ENGINES_PORT")) { $enginesSecrets["LAPLACE_ENGINES_PORT"] } else { "5190" }
+  Ensure-Service "LaplaceEngines" "Laplace engine endpoint (managed)" (Join-Path $enginesOut "Laplace.Endpoints.Engines.exe") "" $envEngines $work "http://127.0.0.1:$port/health"
+} else {
+  Write-Host "[managed-services] LaplaceEngines not declared: no deploy\secrets\engines.env (LAPLACE_ENGINES_TOKEN)"
+}
 
 # MCP over HTTP: laplace-mcp.service, only once its secrets exist (LAPLACE_MCP_TOKEN in deploy\secrets\mcp.env).
 $mcpSecrets = Read-EnvFile (Join-Path $secrets "mcp.env")

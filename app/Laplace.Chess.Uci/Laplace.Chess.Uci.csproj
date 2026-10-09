@@ -12,6 +12,13 @@
          the MEL abstractions transitively; Laplace.Core is a direct dependency of Ops. GH #602. -->
     <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
     <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
+    <InternalsVisibleTo Include="Laplace.Chess.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The pinned engine profiles travel with the binary (ChessEngineCatalog reads them beside it). -->
+    <None Include="..\..\deploy\stockfish-profiles.json" Link="stockfish-profiles.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\deploy\lc0-profiles.json" Link="lc0-profiles.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

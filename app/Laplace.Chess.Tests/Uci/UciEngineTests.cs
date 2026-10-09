@@ -123,7 +123,7 @@ public sealed class UciEngineTests
     public void CompletedDepthInfo_ReportsWorkInOrderBeforeBestMove()
     {
         var output = Run("position startpos", "go depth 3");
-        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines = output.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
         var progress = lines.Where(line => line.StartsWith("info depth ") && line.Contains(" nps "))
             .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToArray();
 
@@ -271,9 +271,8 @@ public sealed class UciEngineTests
     }
 
     private static Search.Limits ParsedLimits(UciEngine engine, string command)
-        => (Search.Limits)typeof(UciEngine).GetMethod("ParseGo",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .Invoke(engine, [command.Split(' ', StringSplitOptions.RemoveEmptyEntries)])!;
+        => ((Laplace.Chess.Uci.Backends.ManagedSearchBackend)engine.Backend).ToSearchLimits(
+            Laplace.Chess.Service.Uci.UciLimits.Decode(command.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
 
     [Fact]
     public void CombinedDepthAndNodeLimits_FinishAtTheNodeBoundOnTheWire()

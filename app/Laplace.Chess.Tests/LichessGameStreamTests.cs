@@ -380,7 +380,7 @@ public sealed class LichessGameStreamTests
         var late = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var handler = new ScriptedHandler(_ => late.Task);
         using var http = Client(handler);
-        await using var bot = new LichessBot("fixture-not-a-credential", null!, substrate: false, record: false);
+        await using var bot = new LichessBot("fixture-not-a-credential", null!, record: false);
         var account = new LichessAccountReadiness(true, true, true, "fixture-bot");
         var delays = new List<TimeSpan>();
         var response = Response("");
@@ -412,7 +412,7 @@ public sealed class LichessGameStreamTests
             () => Response("{bad-json}\n"),
             () => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ProbeContent(blocked) });
         using var http = Client(handler);
-        await using var bot = new LichessBot("fixture-not-a-credential", null!, substrate: false, record: false);
+        await using var bot = new LichessBot("fixture-not-a-credential", null!, record: false);
         var account = new LichessAccountReadiness(true, true, true, "fixture-bot");
         var delays = new List<TimeSpan>();
         IAsyncEnumerable<JsonElement> Read(CancellationToken token)

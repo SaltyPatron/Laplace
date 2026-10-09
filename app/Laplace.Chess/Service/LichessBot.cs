@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Laplace.Chess.Service.Uci;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -24,33 +25,35 @@ public sealed record LichessChallengePolicy(IReadOnlySet<string>? Speeds = null,
 public sealed class LichessBot : IAsyncDisposable
 {
     private readonly HttpClient _http;
-    private readonly int _maxDepth;
     private readonly ChessLiveGameHost _host;
-    private readonly bool _substrate;
+    private ILichessEngine? _engine;
     private readonly bool _record;
     private string? _botUsername;
     private readonly Action<LichessChatLine>? _onChatLine;
     private readonly LichessChallengePolicy _policy;
     private readonly ILogger _log;
     private readonly Action<bool>? _onConnectionChanged;
+    private readonly Action<EngineIdentity>? _onEngineIdentity;
 
     private const string Base = "https://lichess.org";
 
+    /// <param name="engine">The engine every move comes from (null: LAPLACE_LICHESS_ENGINE, laplace-uci by default),
+    /// opened once per game through the generic UCI client. Game recording does not depend on which engine it is.</param>
     public LichessBot(
         string token,
         ChessLiveGameHost host,
-        bool substrate = true,
+        ILichessEngine? engine = null,
         bool record = true,
-        int maxDepth = 8,
         string? botUsername = null,
         Action<LichessChatLine>? onChatLine = null,
         LichessChallengePolicy? policy = null,
         ILogger? log = null,
-        Action<bool>? onConnectionChanged = null)
+        Action<bool>? onConnectionChanged = null,
+        Action<EngineIdentity>? onEngineIdentity = null)
     {
-        _maxDepth = Math.Max(1, maxDepth);
         _host = host;
-        _substrate = substrate;
+        _engine = engine;
+        _onEngineIdentity = onEngineIdentity;
         _record = record;
         _botUsername = botUsername;
         _onChatLine = onChatLine;
@@ -213,7 +216,8 @@ public sealed class LichessBot : IAsyncDisposable
         var substrateGameId = ChessLiveGameHost.LichessGameId(lichessGameId);
         LichessGameReplay? replay = null;
         GameOutcome? outcome = null;
-        Search? search = null;
+        ILichessMoveProvider? provider = null;
+        var receipts = new List<EngineReceipt>();
 
         if (_record)
             await _host.OpenGameAsync(
@@ -366,32 +370,34 @@ public sealed class LichessBot : IAsyncDisposable
                 if (!replay.Disposition.CanPlay || replay.HasPendingSubmission ||
                     boardNow.WhiteToMove != weAreWhite) continue;
 
-                int myTime = weAreWhite ? wtime : btime;
-                int myInc = weAreWhite ? winc : binc;
-                int budgetMs = TimeBudget(myTime, myInc);
+                if (provider is null)
+                {
+                    _engine ??= UciLichessEngine.FromEnvironment();
+                    provider = await Task.Run(_engine.Open, ct).ConfigureAwait(false);
+                    _onEngineIdentity?.Invoke(provider.Identity);
+                    _log.LogInformation("game {Id}: engine {Engine} ({Name}, sha256 {Sha})", lichessGameId, _engine.Name,
+                        provider.Identity.Via?.Name ?? provider.Identity.Name,
+                        (provider.Identity.Via ?? provider.Identity).ExeSha256[..12]);
+                }
+                var position = ChessPosition.From(replay.InitialFen, replay.AcceptedMoves);
+                // The Lichess clock in milliseconds; the provider takes the network overhead off before the engine sees it.
+                var clock = new UciClock(wtime, btime, winc, binc);
+                var decision = await Task.Run(() => provider.Choose(position, clock, ct), ct).ConfigureAwait(false);
+                ChessMove mv = MoveGen.Legal(boardNow).FirstOrDefault(m => m.ToUci() == decision.Move.Text) is var legal
+                    && legal.ToUci() == decision.Move.Text
+                    ? legal
+                    : throw new InvalidDataException($"engine move {decision.Move.Text} is not legal here");
+                receipts.Add(decision.Analysis.Receipt);
+                var final = decision.Analysis.Final;
+                var plyAnalysis = new ChessLivePlyAnalysis(final?.Score?.SideToMoveCentipawns, final?.Depth ?? 0,
+                    decision.Analysis.Receipt.Nodes ?? 0,
+                    final?.Pv is { Count: > 0 } line ? line.Select(static m => m.Text).ToList() : [decision.Move.Text]);
 
-                ChessMove mv;
-                int scoreCp;
-                int searchedDepth;
-                long searchedNodes;
-                IReadOnlyList<string> pv;
-                search ??= _host.BuildSearch(_substrate, maxDepth: _maxDepth);
-                _host.RefreshSearch(search, _substrate);
-                var result = search.Think(
-                    trackState, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
-                mv = result.BestMove!.Value;
-                scoreCp = result.Score;
-                searchedDepth = result.Depth;
-                searchedNodes = result.Nodes;
-                pv = search.ExtractPv(trackState);
+                _log.LogDebug("game {Id}: play {Move} ({Engine}, depth {D}, score {S}cp, engine {Ms}ms)",
+                    lichessGameId, mv.ToUci(), _engine.Name, plyAnalysis.Depth, plyAnalysis.ScoreCpSideToMove,
+                    decision.Analysis.Receipt.EngineMs);
 
-                _log.LogDebug(
-                    "game {Id}: play {Move} ({Mode}, depth {D}, score {S}cp, budget {B}ms)",
-                    lichessGameId, mv.ToUci(), _substrate ? "substrate-guided search" : "classical control",
-                    searchedDepth, scoreCp, budgetMs);
-
-                var pending = replay.BeginSubmission(
-                    mv, new ChessLivePlyAnalysis(scoreCp, searchedDepth, searchedNodes, pv));
+                var pending = replay.BeginSubmission(mv, plyAnalysis);
                 var submission = await PostAsync($"/api/bot/game/{lichessGameId}/move/{mv.ToUci()}", ct);
                 replay.ResolveSubmission(pending, submission);
                 // Even HTTP success is only submission evidence. A later gameState
@@ -401,6 +407,11 @@ public sealed class LichessBot : IAsyncDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _log.LogWarning(ex, "game {Id} stream ended early", lichessGameId); }
+        finally
+        {
+            provider?.Dispose();
+            if (provider is not null) WriteEngineReceipt(lichessGameId, provider.Identity, receipts);
+        }
 
         if (_record && outcome is { } gameOutcome)
         {
@@ -528,8 +539,29 @@ public sealed class LichessBot : IAsyncDisposable
     private static string Describe(GameOutcome o)
         => o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
 
-    private static int TimeBudget(int myTimeMs, int myIncMs)
-        => Math.Max(50, Math.Min(myTimeMs - 100, myTimeMs / 20 + (int)(myIncMs * 0.85)));
+    /// <summary>The game's engine receipt: which engine played (path, SHA-256, UCI id, and the engine behind
+    /// laplace-uci) and each move's receipt, beside the recorded game (LAPLACE_LICHESS_RECEIPTS, default under the temp
+    /// directory). Recording into the substrate stays engine-agnostic.</summary>
+    private void WriteEngineReceipt(string lichessGameId, EngineIdentity engine, IReadOnlyList<EngineReceipt> moves)
+    {
+        try
+        {
+            string dir = LaplaceInstall.TryReadConfig("LAPLACE_LICHESS_RECEIPTS")
+                ?? Path.Combine(Path.GetTempPath(), "laplace-lichess", "receipts");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, lichessGameId + ".json"), JsonSerializer.Serialize(new
+            {
+                game = $"lichess:{lichessGameId}",
+                engineName = _engine?.Name,
+                engine,
+                moves,
+            }, new JsonSerializerOptions(UciJson.Options) { WriteIndented = true }));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.LogWarning(ex, "game {Id}: engine receipt not written", lichessGameId);
+        }
+    }
 
     private Task<LichessSubmissionDisposition> PostAsync(string url, CancellationToken ct)
         => SendPostAsync(_http, url, ct, _log);
