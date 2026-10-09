@@ -76,7 +76,7 @@ internal static class ChessCommands
         + "      optimizing baseline, deterministic node counts at a given depth)\n"
         + "  tactics [epd-file] [--depth D]   (solve-rate over an EPD suite; built-in mate suite if no file)\n"
         + "  lichess [--token T] [--engine laplace|stockfish|lc0|<uci exe>] [--max-concurrent N] [--speed bullet|blitz|rapid|classical]\n"
-        + "      stream account events + play rated standard games (token from LICHESS_API env or deploy\\secrets\\lichess.env)";
+        + "      runs laplace-uci lichess: stream account events and play accepted challenges (token from LICHESS_API or deploy\\secrets\\lichess.env)";
 
     // Reproducible Search benchmark: fixed-depth search over a fixed position set, so node
     // counts are deterministic at a given depth and nodes/sec and bytes allocated are the
@@ -477,46 +477,23 @@ internal static class ChessCommands
         return i >= 0 && i + 1 < a.Length && double.TryParse(a[i + 1], out var v) ? v : def;
     }
 
+    /// <summary>
+    /// The Lichess connector lives in laplace-uci (<c>laplace-uci lichess</c>); this runs it with the same arguments in
+    /// this console, so there is one implementation. Ctrl-C reaches both processes: this one waits while laplace-uci
+    /// finishes its in-flight games.
+    /// </summary>
     private static async Task<int> LichessAsync(string[] args)
     {
-        string? token = LichessBot.ResolveToken(ArgStr(args, "--token", ""));
-        if (string.IsNullOrEmpty(token))
-            return Fail("usage: laplace chess lichess [--token T] [--engine laplace|stockfish|lc0|<uci exe>] [--max-concurrent N]\n"
-                      + "                             [--speed bullet|blitz|rapid|classical] [--rated]\n"
-                      + "  Token from --token, LICHESS_API env var, or deploy\\secrets\\lichess.env.\n"
-                      + "  --engine: the UCI engine every move comes from (default LAPLACE_LICHESS_ENGINE, else laplace through laplace-uci).\n"
-                      + "  --speed: accept only this time-control class (repeatable); default = all.\n"
-                      + "  --rated: accept rated challenges too; default = casual only.");
-
-        int maxConcurrent = ArgInt(args, "--max-concurrent", 4);
-        string engineArg = ArgStr(args, "--engine", "");
-        var engine = engineArg.Length > 0 ? UciLichessEngine.Create(engineArg, new Dictionary<string, string>()) : UciLichessEngine.FromEnvironment();
-
-
-        var speeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < args.Length - 1; i++)
-            if (args[i] == "--speed") speeds.Add(args[i + 1].ToLowerInvariant());
-        var policy = new LichessChallengePolicy(speeds.Count > 0 ? speeds : null, Rated: HasFlag(args, "--rated"));
-
-        Console.WriteLine($"lichess bot: engine {engine.Name}, max {maxConcurrent} concurrent games, {policy}");
-        Console.WriteLine("  token configured; validating Lichess account and bot permissions.");
-        Console.WriteLine("  Ctrl-C to stop (finishes in-flight games first).");
-
-        var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
-        {
-            e.Cancel = true;
-            Console.WriteLine("\n[lichess] stopping after in-flight games finish…");
-            cts.Cancel();
-        };
-
-        await using var liveHost = await ChessLiveGameHost.CreateAsync();
-        await using var bot = new LichessBot(
-            token,
-            liveHost,
-            engine: engine,
-            policy: policy);
-        await bot.RunAsync(maxConcurrent, cts.Token);
-        return 0;
+        string? uci = ChessLabPaths.LaplaceUciExecutable();
+        if (uci is null)
+            return Fail("laplace chess lichess runs laplace-uci lichess, and laplace-uci is not built or published (scripts/win/publish-uci.cmd)");
+        var psi = new System.Diagnostics.ProcessStartInfo(uci) { UseShellExecute = false };
+        psi.ArgumentList.Add("lichess");
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        Console.CancelKeyPress += (_, e) => e.Cancel = true;
+        using var process = System.Diagnostics.Process.Start(psi);
+        if (process is null) return Fail($"could not start {uci}");
+        await process.WaitForExitAsync();
+        return process.ExitCode;
     }
 }

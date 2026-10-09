@@ -45,17 +45,18 @@ executables, but no Git checkout was found there. Its name does not select the
 runtime. The installer updates the configured official checkout, builds it with
 upstream's Makefile and matching NNUE, and uses that checkout's `src/stockfish`.
 
-Run the installed dependency report from the repository:
+Run the installed dependency report, `laplace-uci check` (JSON; exit 1 when a
+required check fails):
 
 ```sh
-python3 scripts/check-chess-dependencies.py --prefix /opt/laplace --check-latest --cutechess-gui
+/opt/laplace/app/laplace-uci check --prefix /opt/laplace --check-latest --cutechess-gui
 ```
 
 On Windows, provide the published UCI executable and use the same environment as
 the application's build/publish configuration:
 
 ```bat
-python scripts\check-chess-dependencies.py --uci "<published-app>\laplace-uci.exe" --check-latest
+"%LAPLACE_TOOLS%\chess\app\laplace-uci.exe" check --uci "%LAPLACE_TOOLS%\chess\app\laplace-uci.exe" --check-latest
 ```
 
 The report exercises the configured Stockfish binary and Laplace UCI binary,
@@ -463,7 +464,7 @@ Chess setup updates and builds Zstandard 1.5.7 from the official
 [`facebook/zstd` repository](https://github.com/facebook/zstd/releases/tag/v1.5.7)
 under the configured external source root. It records the exact shared library in
 `LAPLACE_ZSTD_LIBRARY`, preserving PostgreSQL's system library. Bootstrap and
-`check-chess-dependencies.py` verify the actual streaming ABI and selected release
+`laplace-uci check` verify the actual streaming ABI and selected release
 by decoding a checksummed PGN fixture. Use `LAPLACE_ZSTD_LIBRARY` for an explicit
 absolute shared-library path. That selection must load successfully; it is never
 replaced by another library. On Windows, publication carries the selected Zstandard

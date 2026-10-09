@@ -625,11 +625,11 @@ def main():
               "--evidence-output", args.output_dir / "x11-runtime-evidence"], 330)
     owner.run("provision-chess", ["bash", "scripts/bootstrap-chess-lab.sh", "--cutechess-gui"], 3600)
     runtime = [python, "scripts/chess-runtime-env.py", "--prefix", str(args.prefix), "--"]
-    owner.run("dependencies", [*runtime, python, "scripts/check-chess-dependencies.py",
+    owner.run("dependencies", [*runtime, args.prefix / "app/laplace-uci", "check",
               "--prefix", args.prefix, "--uci", args.prefix / "app/laplace-uci",
               "--check-latest", "--cutechess-gui"], 300)
     def gui():
-        doctor = module("acceptance_chess_configuration", "check-chess-dependencies.py")
+        doctor = module("acceptance_chess_configuration", "chess-runtime-env.py")
         config = doctor.configuration(args.prefix, keys={"LAPLACE_CUTECHESS_GUI", "LAPLACE_CUTECHESS_GUI_RECEIPT"})
         command([python, "scripts/check-cutechess-gui-session.py",
                  "--binary", config.get("LAPLACE_CUTECHESS_GUI", str(args.prefix / "bin/cutechess")),
@@ -658,7 +658,7 @@ def main():
               "--geometry-transaction-rows", "10000", "--geometry-concurrency", "1,2,4",
               "--geometry-timeout", "900"], 930, allowed=native)
     def calibration():
-        doctor = module("acceptance_chess_calibration", "check-chess-dependencies.py")
+        doctor = module("acceptance_chess_calibration", "chess-runtime-env.py")
         configured = doctor.configuration(args.prefix, keys={"LAPLACE_UCI"})
         uci = Path(configured.get("LAPLACE_UCI", str(args.prefix / "app/laplace-uci")))
         if not uci.is_file() or not os.access(uci, os.X_OK):

@@ -32,7 +32,7 @@ def load_lock():
 
 
 def configuration():
-    spec = importlib.util.spec_from_file_location("laplace_chess_configuration", ROOT / "scripts/check-chess-dependencies.py")
+    spec = importlib.util.spec_from_file_location("laplace_chess_configuration", ROOT / "scripts/chess-runtime-env.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))

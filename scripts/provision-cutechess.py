@@ -416,7 +416,7 @@ def desktop_perfcache(prefix):
     # This provisioning-time whitelist reuses the installed configuration owner.
     # Desktop users never read the app environment or its adjacent secret files.
     spec = importlib.util.spec_from_file_location(
-        "cutechess_runtime_configuration", Path(__file__).with_name("check-chess-dependencies.py"))
+        "cutechess_runtime_configuration", Path(__file__).with_name("chess-runtime-env.py"))
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     configured = owner.configuration(prefix, keys={"LAPLACE_PERFCACHE_BIN"})
@@ -732,7 +732,7 @@ def configure_evaluation(prefix, stockfish):
             receipt.update(status="stale", reportSha256=calibration.get("reportSha256"))
         else:
             spec = importlib.util.spec_from_file_location(
-                "evaluation_runtime_configuration", Path(__file__).with_name("check-chess-dependencies.py"))
+                "evaluation_runtime_configuration", Path(__file__).with_name("chess-runtime-env.py"))
             doctor = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(doctor)
             keys = {"LAPLACE_STOCKFISH_EVAL_" + name for name in ("THREADS", "HASH_MB", "PROCESSES")}

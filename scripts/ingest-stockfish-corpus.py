@@ -26,7 +26,7 @@ def module(name):
 
 
 def selection(prefix):
-    doctor, installer = module('check-chess-dependencies'), module('install-stockfish')
+    doctor, installer = module('chess-runtime-env'), module('install-stockfish')
     config = doctor.configuration(prefix)
     source = Path(config.get('LAPLACE_STOCKFISH_SOURCE') or
                   str(Path(config.get('LAPLACE_EXTERNAL') or installer.external_root()) / 'stockfish')).resolve(strict=True)

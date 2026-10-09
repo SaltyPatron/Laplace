@@ -4,61 +4,6 @@ using Laplace.Chess.Uci.Engines;
 
 namespace Laplace.Chess.Uci.Commands;
 
-/// <summary>A parsed command line: the verb and its options. Parsing is separate from running and from output, so a
-/// richer console can sit on top of the same commands.</summary>
-public sealed record ChessCommandLine(string Verb, IReadOnlyDictionary<string, string> Values,
-    IReadOnlyDictionary<string, string> Options, IReadOnlySet<string> Flags)
-{
-    public static readonly string[] Verbs = ["uci", "engines", "analyse", "bestmove", "compare", "help"];
-
-    public static ChessCommandLine Parse(IReadOnlyList<string> args)
-    {
-        string verb = args.Count == 0 || args[0].StartsWith("--", StringComparison.Ordinal) ? "uci" : args[0];
-        if (verb == "analyze") verb = "analyse";
-        if (!Verbs.Contains(verb)) throw new ArgumentException($"unknown command '{verb}' (commands: {string.Join(", ", Verbs)})");
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int i = verb == "uci" && (args.Count == 0 || args[0] != "uci") ? 0 : 1; i < args.Count; i++)
-        {
-            string a = args[i];
-            if (!a.StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException($"unexpected argument '{a}'");
-            string key = a[2..];
-            if (key is "warm" or "startpos") { flags.Add(key); continue; }
-            if (i + 1 >= args.Count) throw new ArgumentException($"--{key} needs a value");
-            string value = args[++i];
-            if (key == "option")
-            {
-                int eq = value.IndexOf('=');
-                if (eq <= 0) throw new ArgumentException("--option takes Name=Value");
-                options[value[..eq].Trim()] = value[(eq + 1)..].Trim();
-            }
-            else values[key] = value;
-        }
-        return new ChessCommandLine(verb, values, options, flags);
-    }
-
-    public string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
-
-    public string Engine => Value("engine") ?? "laplace";
-
-    public ChessPosition Position => ChessPosition.From(Value("fen"),
-        Value("moves")?.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries));
-
-    public UciLimits Limits
-    {
-        get
-        {
-            long? L(string k) => Value(k) is { } s ? long.Parse(s, NumberStyles.Integer, CultureInfo.InvariantCulture) : null;
-            var limits = new UciLimits(Nodes: L("nodes"), Depth: L("depth") is { } d ? (int)d : null, MoveTimeMs: L("movetime"));
-            if (!limits.Bounded) throw new ArgumentException("give a bound: --nodes, --depth or --movetime");
-            return limits;
-        }
-    }
-
-    public int MultiPv => Value("multipv") is { } s ? int.Parse(s, CultureInfo.InvariantCulture) : 1;
-}
-
 /// <summary>The commands' results, as data. <see cref="ChessCommands"/> produces them; a writer renders them.</summary>
 public sealed record EngineListing(string Name, bool Available, string Profile, int MaxProcesses,
     IReadOnlyList<KeyValuePair<string, string>> ProfileOptions, EngineIdentity? Identity = null, string? Error = null);
@@ -140,5 +85,24 @@ public static class ChessCommands
           laplace-uci bestmove (same arguments; profile play)
           laplace-uci compare [--engines laplace,stockfish,lc0] (same arguments): the same limits on each engine
           Option names may be the engine's own or canonical: threads hash multipv wdl syzygy network backend overhead ponder substrate.
+
+          laplace-uci match --engine1 E[:k=v...] --engine2 E[:k=v...] [--games 2] [--tc 10+0.1 | --nodes N] [--book 8moves_v3.pgn|PATH|none]
+                            [--plies 16] [--seed N] [--concurrency 1] [--affinity CPUS] [--no-tb] [--maxmoves 200] [--out DIR] [--pgn FILE]
+              a fastchess match; E is laplace, stockfish, lc0 or a UCI executable; keys nodes, profile, name, or a UCI option.
+              Writes the games and receipt.json (conductor and engines by SHA-256, argv, book, seed) and prints the receipt.
+          laplace-uci ladder calibrate --rungs sf:nodes=256,sf:nodes=512 [--games 40] [--concurrency 4] [--affinity CPUS] [--tc TC]
+                                       [--book 8moves_v3.pgn] [--plies 16] [--srand 20261006] [--anchor NAME] [--anchor-elo 0] [--out DIR]
+          laplace-uci ladder gauntlet --seed laplace:nodes=2000 --rungs sf:nodes=16,sf:nodes=32 [--ladder CALIBRATION_RUN] (same options)
+          laplace-uci ladder rate RUN_DIR --anchor NAME [--anchor-elo 0] [--ladder CALIBRATION_RUN]
+          laplace-uci ladder stockfish-receipt [--out FILE]
+              rungs: sf:nodes=N[:syzygy=off]  lc0:nodes=N[:net=FILE][:backend=B]  laplace[:nodes=N][:substrate=off]
+          laplace-uci check [--prefix DIR] [--uci EXE] [--check-latest] [--cutechess-gui] [--require-data] [--require-ladder]
+              the installed chess tools and data, exercising the configured binaries (JSON; exit 1 when a required check fails)
+          laplace-uci review PGN|DIR [--depth 4] [--max-games 20] [--json]
+          laplace-uci lichess [--token T] [--engine laplace|stockfish|lc0|EXE] [--max-concurrent 4] [--speed S]... [--rated]
+              the Lichess connector (one event stream per account: never beside the LaplaceLichess service)
+          laplace-uci inspect PGN [--game N | --where Tag=Value] [--max-games N] [--all-positions] [--json]
+          laplace-uci inspect "FEN" [--moves "e4 e5"]  |  inspect "e4 e5 Nf3" [--fen F]
+              the tree the monorepo would store for the input, read-only, without a database
         """;
 }
