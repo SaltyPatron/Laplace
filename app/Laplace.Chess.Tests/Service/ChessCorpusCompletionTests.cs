@@ -64,6 +64,22 @@ public sealed class ChessCorpusCompletionTests
             ChessPgnDecomposer.TryParseGame(pgn, requireNormalCompletion: true));
     }
 
+    // chess.com writes the winner's name first: a name containing "Checkmate" is not a checkmate.
+    [Theory]
+    [InlineData("1-0", "Chasing_Checkmate won on time")]
+    [InlineData("0-1", "StalemateKing won by resignation")]
+    public void APlayerNameContainingATerminalWordIsNotABoardTerminal(string result, string termination)
+    {
+        var game = Complete(Pgn($"1. e4 e5 {result}", result, $"[Termination \"{termination}\"]\n"));
+        Assert.True(game.CompleteSourceVerified);
+        Assert.Equal(2, game.MoveIds.Length);
+    }
+
+    [Fact]
+    public void AClaimedCheckmateThatTheBoardDoesNotShowIsStillRejected()
+        => Assert.Throws<InvalidDataException>(() =>
+            Complete(Pgn("1. e4 e5 1-0", "1-0", "[Termination \"Test White won by checkmate\"]\n")));
+
     [Theory]
     [InlineData("1. e4 e5 0-1", "1-0", "")]
     [InlineData("1. e4 e5 *", "*", "")]
