@@ -69,6 +69,16 @@ def load_native(core: str, t0: str):
     return lib
 
 
+def _digest_native(digest, ptr: int, size: int, chunk: int = 1 << 30) -> None:
+    """Feed a native array to the digest without copying it through ctypes.string_at,
+    whose size is a C int: a tree of 130 M nodes has 4 GiB coordinate arrays."""
+    offset = 0
+    while offset < size:
+        n = min(chunk, size - offset)
+        digest.update((ctypes.c_char * n).from_address(ptr + offset))
+        offset += n
+
+
 def exact_tree_receipt(lib, tree: ctypes.c_void_p) -> dict[str, Any]:
     count = int(lib.tier_tree_node_count(tree))
     root = Hash128()
@@ -97,7 +107,7 @@ def exact_tree_receipt(lib, tree: ctypes.c_void_p) -> dict[str, Any]:
         if size and not ptr:
             raise RuntimeError(f"{symbol} returned null for {count} nodes")
         if size:
-            digest.update(ctypes.string_at(ptr, size))
+            _digest_native(digest, ptr, size)
 
     return {
         "node_count": count,
