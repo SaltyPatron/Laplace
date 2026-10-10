@@ -383,6 +383,8 @@ class DeploymentReadinessTests(unittest.TestCase):
             (503, "application/json", json.dumps(self.readiness()).encode()),
             (200, "text/html; charset=utf-8", b'<!doctype html><div id="root"></div>'),
             (200, "application/json", b'{"object":"op.result","name":"ops.substrate_counts"}'),
+            (200, "application/json", json.dumps(self.storage_proof()).encode()),
+            (200, "application/json", b'{"root_id_hex":"canonical-root"}'),
         ]
 
         def fake_request(method, url, body=None, headers=None):
@@ -395,12 +397,55 @@ class DeploymentReadinessTests(unittest.TestCase):
             self.assertEqual((False, False), self.verify.verify("http://unit"))
         stockfish.assert_called_once_with()
         self.assertEqual(
-            ["/health/ready", "/", "/v1/op"],
+            ["/health/ready", "/", "/v1/op", "/v1/explore/storage-proof", "/v1/explore/decompose"],
             [call[1].removeprefix("http://unit") for call in calls],
         )
         self.assertEqual("POST", calls[-1][0])
-        self.assertIn(b"ops.substrate_counts", calls[-1][2])
+        self.assertIn(b"ops.substrate_counts", calls[2][2])
         self.assertEqual("Bearer unit-key", calls[-1][3]["Authorization"])
+
+    @staticmethod
+    def storage_proof():
+        return {"root_id_hex": "canonical-root", "perfcache_aligned": True,
+                "perfcache_receipt_hex": "receipt", "database_perfcache_receipt_hex": "receipt",
+                "invariants": [{"key": name, "passed": True} for name in
+                               ("tier0_rom", "merkle_recomposition", "trajectory_roundtrip")]}
+
+    def test_storage_proof_rejects_failed_invariants_and_mixed_loaded_artifacts(self):
+        for update in ({"perfcache_aligned": False}, {"database_perfcache_receipt_hex": "old"},
+                       {"database_perfcache_error": "unavailable"}, {"invariants": []},
+                       {"invariants": [{"key": "tier0_rom", "passed": False}]}):
+            value = self.storage_proof() | update
+            with self.subTest(update=update), patch.object(self.verify, "request",
+                    return_value=(200, "application/json", json.dumps(value).encode())), \
+                    patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}), self.assertRaises(ValueError):
+                self.verify.verify_storage_proof("http://unit")
+
+    def test_temporary_workload_key_is_revoked_when_operation_fails(self):
+        calls = []
+        def request(method, url, body=None, headers=None):
+            calls.append((url, json.loads(body), headers))
+            if url.endswith("operator/keys"):
+                return 200, "application/json", b'{"api_key":"sk-laplace-test","key_prefix":"sk-laplace-test"}'
+            return 200, "application/json", b'{"revoked":true}'
+        with patch.dict(os.environ, {"LAPLACE_OPERATOR_TOKEN": "unit-operator"}, clear=True), \
+                patch.object(self.verify, "request", side_effect=request):
+            with self.assertRaisesRegex(ValueError, "operation failed"):
+                with self.verify.verification_credential("http://unit"):
+                    self.assertEqual("sk-laplace-test", os.environ["LAPLACE_API_KEY"])
+                    raise ValueError("operation failed")
+            self.assertNotIn("LAPLACE_API_KEY", os.environ)
+        self.assertEqual("deployment-verification", calls[0][1]["tenant"])
+        self.assertTrue(calls[-1][0].endswith("/keys/revoke"))
+        self.assertEqual("Bearer sk-laplace-test", calls[-1][2]["Authorization"])
+
+    def test_supplied_workload_identity_is_not_revoked_by_verification(self):
+        with patch.dict(os.environ, {"LAPLACE_API_KEY": "owned-key"}, clear=True), \
+                patch.object(self.verify, "request") as request:
+            with self.verify.verification_credential("http://unit"):
+                pass
+            self.assertEqual("owned-key", os.environ["LAPLACE_API_KEY"])
+        request.assert_not_called()
 
     def test_typed_operation_without_api_key_fails_before_request(self):
         environment = {k: v for k, v in os.environ.items() if k != "LAPLACE_API_KEY"}

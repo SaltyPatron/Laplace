@@ -20,6 +20,7 @@ run-name: "Deliver main — staging on hart-server, then production: built on ha
 # volume, /opt/laplace/pgsql-18, laplace_admin, sudo -n); it stays callable from full-qualification.yml by dispatch.
 
 on:
+  workflow_call:
   push:
     branches: [main]
     paths-ignore:

@@ -23,3 +23,18 @@ echo 'PASS nested commands reuse the inherited operation lock'
 exec 8>&-
 flock -xn "$work/host-resource.lock" true
 echo 'PASS the next deployment acquires the released lock'
+
+# A compiler daemon remains alive after its caller exits. It must not keep the
+# caller's deployment lock; otherwise the next workflow step fails against itself.
+sed -n '/^dotnet_app() /p' "$root/deploy/linux/site.sh" >> "$work/functions"
+bash -c '
+  fail(){ exit 1; }; source "$FUNCTIONS"; host_lock
+  dotnet(){ sleep 30 </dev/null >/dev/null 2>&1 & echo $! > "$LAPLACE_LOCKS/daemon.pid"; }
+  dotnet_app build
+  if flock -xn "$LAPLACE_LOCKS/host-resource.lock" true; then exit 1; fi
+'
+daemon=$(cat "$work/daemon.pid")
+trap 'kill "$daemon" 2>/dev/null || true; rm -rf "$work"' EXIT
+kill -0 "$daemon"
+flock -xn "$work/host-resource.lock" true
+echo 'PASS compiler daemon outlives build without retaining deployment lock'
