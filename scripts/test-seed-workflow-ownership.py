@@ -65,7 +65,8 @@ class WorkflowOwnership(unittest.TestCase):
             "options: [quick, throughput, core, scale, dag, moby, query, chess, geometry, recorded, all]",
             text,
         )
-        self.assertEqual(text.count("runs-on: [self-hosted, laplace]"), 1)
+        # the measured host is chosen by its tier label (knowledge is hart-cloud, the AVX-512 machine; staging is hart-server)
+        self.assertEqual(text.count('runs-on: [self-hosted, laplace, "${{ inputs.host }}"]'), 1)
         self.assertEqual(text.count("host-resource.lock"), 1)
         self.assertNotIn("\nconcurrency:\n", text)
         self.assertIn('git show "$workflow_sha:scripts/benchmark-evidence-ci.sh"', text)
