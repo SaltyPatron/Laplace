@@ -98,20 +98,20 @@ jobs:
           workload_identity_provider: projects/398413378767/locations/global/workloadIdentityPools/github/providers/github-actions
           service_account: laplace-pipeline@project-f5812b96-f924-41a4-94c.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-      - name: Start the instance if it is stopped, then wait for its runner
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Start the instance if it is stopped
         run: |
           set -euo pipefail
           state=$(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(status)')
           echo "hart-cloud: $state"
-          if [ "$state" != RUNNING ]; then gcloud compute instances start hart-cloud --zone us-east1-b --quiet; fi
-          for i in $(seq 1 60); do
-            online=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners" --jq '[.runners[] | select(.name == "hart-cloud-Laplace" and .status == "online")] | length')
-            [ "$online" = 1 ] && { echo "runner hart-cloud-Laplace online after $((i * 10)) s"; exit 0; }
-            sleep 10
-          done
-          echo "::error::hart-cloud's runner did not come online within 10 minutes"; exit 1
+          case "$state" in
+            RUNNING) ;;
+            TERMINATED|STOPPED|SUSPENDED) gcloud compute instances start hart-cloud --zone us-east1-b --quiet ;;
+            *) for i in $(seq 1 30); do sleep 10; state=$(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(status)'); [ "$state" = RUNNING ] && break; done
+               [ "$state" = RUNNING ] || gcloud compute instances start hart-cloud --zone us-east1-b --quiet ;;
+          esac
+          echo "hart-cloud: $(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(status)')"
+          # The build job queues until the host's runner registers (GitHub holds a queued job for a day); no poll of the
+          # runner API here, which the workflow token may not read.
 
   production-build:
     name: Production — built, migrated and staged on the knowledge host (hart-cloud)
