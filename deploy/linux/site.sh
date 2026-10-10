@@ -13,6 +13,7 @@
 #   deploy/linux/site.sh reset seed       the database dropped and made again, then the foundation
 #
 # Phases: externals build install database extensions migrate app publish restart smoke   (and: reset seed serve)
+#         bundle: what the hosting host receives, after app; receive: on the hosting host, before publish
 #
 # The machine is set up once by root with deploy/linux/site-host.sh (directories, the unit, nginx, the restart
 # trigger); the runner that runs this is Laplace-Operations' agents.sh's (labels laplace,Laplace). Every value below is
@@ -302,6 +303,32 @@ phase_restart() {
   fail "laplace-api did not answer $LAPLACE_API_URL/health within 180 s"
 }
 
+# ------------------------------------------------------------------------------------------------ bundle, receive
+# The knowledge host builds, the hosting host runs. What travels between them is one directory the pipeline carries
+# as an artifact: the staged app with its native closure, and the perf-caches the API reads. Nothing else of the
+# build host's goes along, and the hosting host builds nothing: it needs dotnet, nginx and the directories
+# site-host.sh makes.
+phase_bundle() {
+  say "bundle for the hosting host"
+  local b="$SITE_WORK/bundle"
+  [[ -d "$SITE_WORK/stage/app" ]] || fail "nothing staged: run the app phase first"
+  rm -rf "$b"; mkdir -p "$b/share"
+  cp -a "$SITE_WORK/stage/app" "$b/app"
+  cp -a "$LAPLACE_INSTALL_PREFIX/share/laplace" "$b/share/laplace"
+  echo "  $(du -sh "$b" | cut -f1) at $b: $(cat "$b/app/.laplace-source-revision")"
+}
+
+phase_receive() {
+  say "receive the bundle"
+  local b="$SITE_WORK/bundle"
+  [[ -f "$b/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "no bundle at $b/app: the knowledge host's bundle phase makes it"
+  rm -rf "$SITE_WORK/stage"; mkdir -p "$SITE_WORK/stage"; cp -a "$b/app" "$SITE_WORK/stage/app"
+  [[ -d "$LAPLACE_INSTALL_PREFIX/share" && -w "$LAPLACE_INSTALL_PREFIX/share" ]] || fail "$LAPLACE_INSTALL_PREFIX/share is missing or not writable: sudo deploy/linux/site-host.sh"
+  mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace"
+  rsync -a --delete "$b/share/laplace/" "$LAPLACE_INSTALL_PREFIX/share/laplace/"
+  echo "  $(cat "$SITE_WORK/stage/app/.laplace-source-revision")"
+}
+
 # ------------------------------------------------------------------------------------------------ smoke
 phase_smoke() {
   say smoke
@@ -361,7 +388,7 @@ phase_serve() {
 phases=("$@"); [[ ${#phases[@]} -gt 0 ]] || phases=(externals build install database extensions migrate app publish restart smoke)
 for p in "${phases[@]}"; do
   case "$p" in
-    externals|build|install|database|reset|migrate|extensions|app|publish|restart|smoke|seed|serve) "phase_$p" ;;
+    externals|build|install|database|reset|migrate|extensions|app|bundle|receive|publish|restart|smoke|seed|serve) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
