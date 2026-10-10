@@ -6,6 +6,7 @@ using Laplace.Engine.Core;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -18,6 +19,19 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     private readonly GoldenFactory _factory;
 
     public BrowserIdentityTests(GoldenFactory factory) => _factory = factory;
+
+    [Fact]
+    public void IdentityStoreResolvesWithoutOpeningTheKnowledgeDatabase()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.AddKeyedSingleton<NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey, (_, _) =>
+                new NpgsqlDataSourceBuilder("Host=application.invalid;Database=app;Username=app").Build());
+            services.AddSingleton<SubstrateClient>(_ =>
+                throw new InvalidOperationException("Identity attempted to use the knowledge database"));
+        }));
+        Assert.IsType<PostgresIdentityStore>(factory.Services.GetRequiredService<IIdentityStore>());
+    }
 
     [Theory]
     [InlineData("https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0", "9188040d-6c67-4c5b-b112-36a304b66dad", true)]
@@ -99,7 +113,7 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     public async Task PostgresIdentityStorePersistsAccountSessionAndConversation()
     {
         await using var dataSource = new NpgsqlDataSourceBuilder(
-            LaplaceInstall.PostgresConnectionString()).Build();
+            LaplaceInstall.AppConnectionString()).Build();
         var store = new PostgresIdentityStore(dataSource);
         var suffix = Guid.NewGuid().ToString("N");
         var provider = $"test-{suffix}";
