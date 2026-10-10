@@ -19,7 +19,7 @@ if not defined LAPLACE_BUILD_ROOT if defined LAPLACE_BUILD set "LAPLACE_BUILD_RO
 
 if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_DATA_ROOT%\deploy"
 rem geos/proj/gdal (and sqlite for PROJ) from external/ — scripts\win\build-deps.cmd
-if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DATA_ROOT%\deps"
+if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DEPS%"
 if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\build-deps"
 if not defined LAPLACE_ENGINE_BUILD set "LAPLACE_ENGINE_BUILD=%LAPLACE_BUILD_ROOT%\build-win"
 if not defined LAPLACE_EXT_BUILD set "LAPLACE_EXT_BUILD=%LAPLACE_BUILD_ROOT%\build-win-ext"
@@ -52,18 +52,12 @@ rem The external source tree the engine, the extensions and the app read (blake3
 rem postgis, tree-sitter-grammars), under the data root; on HART-DESKTOP each entry is a junction to the checkout the
 rem Laplace-Operations manifest keeps under D:\Libraries\src (and the grammars under D:\Data\Ingest\TreeSitter).
 if not defined LAPLACE_EXTERNAL set "LAPLACE_EXTERNAL=%LAPLACE_DATA_ROOT%\external"
-rem Where CMake finds the dependencies the engine and the extensions look up (ZLIB, LibXml2, ICU, PostgreSQL): the
-rem prefixes under LAPLACE_DEPS_PREFIX, each a junction to its Laplace-Operations install (D:\Libraries\<name>\<version>).
-set "CMAKE_PREFIX_PATH=%LAPLACE_PG_PREFIX:\=/%;%LAPLACE_DEPS_PREFIX:\=/%/zlib;%LAPLACE_DEPS_PREFIX:\=/%/zstd;%LAPLACE_DEPS_PREFIX:\=/%/libxml2;%LAPLACE_DEPS_PREFIX:\=/%/icu;%CMAKE_PREFIX_PATH%"
-if not defined ICU_ROOT set "ICU_ROOT=%LAPLACE_DEPS_PREFIX:\=/%/icu"
-if not defined CMAKE_LIBRARY_PATH set "CMAKE_LIBRARY_PATH=%LAPLACE_DEPS_PREFIX:\=/%/icu/lib64"
+rem Versioned dependency prefixes and runtime DLL paths come from the installed manifest.
 if not defined MKLROOT if defined LAPLACE_ONEAPI set "MKLROOT=%LAPLACE_ONEAPI%\mkl\latest"
 rem The DLLs the engine's core loads at run time (the app's OpenAPI emission and the perfcache tools load it too).
-set "PATH=%LAPLACE_DEPS_PREFIX%\icu\bin64;%LAPLACE_DEPS_PREFIX%\zlib\bin;%LAPLACE_DEPS_PREFIX%\zstd\bin;%LAPLACE_DEPS_PREFIX%\libxml2\bin;%PATH%"
 set "PATH=%PGBIN%;%PATH%"
 set "PATH=%LAPLACE_ENGINE_BUILD%\core;%LAPLACE_ENGINE_BUILD%\dynamics;%LAPLACE_ENGINE_BUILD%\synthesis;%PATH%"
 rem Runtime DLLs for laplace_geom (geos_c / proj / sqlite) — must precede system PATH.
-set "PATH=%LAPLACE_DEPS_PREFIX%\geos\bin;%LAPLACE_DEPS_PREFIX%\proj\bin;%LAPLACE_DEPS_PREFIX%\sqlite\bin;%LAPLACE_DEPS_PREFIX%\gdal\bin;%PATH%"
 
 if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
 if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=%LAPLACE_DBNAME%"

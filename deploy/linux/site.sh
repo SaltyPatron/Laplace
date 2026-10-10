@@ -337,6 +337,7 @@ ASPNETCORE_URLS=$LAPLACE_API_URL
 LAPLACE_OPS_LOG_DIR=$LAPLACE_APP_DIR/logs
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
 LAPLACE_DATA_PROTECTION_KEYS=$LAPLACE_INSTALL_PREFIX/secrets/data-protection
+${LAPLACE_PUBLIC_BASE_URL:+LAPLACE_PUBLIC_BASE_URL=$LAPLACE_PUBLIC_BASE_URL}
 EOF
 }
 
@@ -483,7 +484,7 @@ phase_smoke() {
   fi
   # Empty knowledge is valid; unavailable SQL, authentication, native execution or
   # incompatible loaded artifacts are deployment failures and block promotion.
-  if python3 "$ROOT/scripts/verify-application-release.py" --base "$LAPLACE_API_URL" \
+  if python3 "$ROOT/scripts/verify-application-release.py" --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" \
       --state-file "${LAPLACE_VERIFICATION_STATE:-$LAPLACE_APP_DIR/logs/application-verification.json}"; then
     echo '| Authenticated SQL, native storage proof and installed dependencies | passed |' >> "$SUMMARY"
   else
