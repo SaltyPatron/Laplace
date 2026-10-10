@@ -162,6 +162,9 @@ def main() -> int:
 
     print(f"corpus      : {len(scale._DOCS):,} documents, {corpus_bytes/1e6:.1f} MB, {corpus_codepoints:,} codepoints / worker")
     print(f"largest doc : {largest_document_bytes/1e6:.1f} MB ({largest_document_bytes/corpus_bytes:.1%} of one corpus stream)")
+    if scale.SKIPPED_DOCUMENTS:
+        print(f"left out    : {len(scale.SKIPPED_DOCUMENTS)} document(s) above {scale.MAX_DOCUMENT_BYTES/1e6:.1f} MB: "
+              + ", ".join(f"{row['path']} ({int(row['bytes'])/1e6:.1f} MB)" for row in scale.SKIPPED_DOCUMENTS))
     print(f"core        : {core}")
     print(f"t0          : {t0}")
     print(f"topology    : {physical} physical core(s), {logical} allowed logical CPU(s)")
@@ -246,6 +249,8 @@ def main() -> int:
         "largest_document_fraction_of_corpus": largest_document_bytes / corpus_bytes,
         "top_document_bytes": top_document_bytes,
         "bpe_equivalence_chars_per_token": 4,
+        "max_document_bytes": scale.MAX_DOCUMENT_BYTES,
+        "documents_left_out": scale.SKIPPED_DOCUMENTS,
         "worker_footprint_bytes": footprint,
         "memory_reserve_bytes": memory_reserve,
         "points_not_run_for_memory": not_run,
