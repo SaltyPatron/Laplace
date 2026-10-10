@@ -1,5 +1,5 @@
 name: Product — main delivery
-run-name: "Deliver main — staging on hart-server${{ github.event_name == 'workflow_dispatch' && inputs.production && ', then production: built on hart-cloud, hosted on hart-prod' || '' }} — ${{ github.sha }}"
+run-name: "Deliver main — staging on hart-server, then production: built on hart-cloud, hosted on hart-prod — ${{ github.sha }}"
 
 # Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
 # declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
@@ -12,7 +12,7 @@ run-name: "Deliver main — staging on hart-server${{ github.event_name == 'work
 # and the compiler; runner label knowledge), builds, installs, migrates and stages, and hands the staged app with its
 # native closure and perf-caches on as an artifact. The hosting host, hart-prod (a small always-on machine with the
 # API, MCP and the Cloudflare tunnel, and the application's own database; runner label production), receives it,
-# publishes and restarts. The dispatch's `production` input is the gate; nothing waits for a click. Each host is its
+# publishes and restarts. Promotion is by evidence: staging passed in the same run. Nothing waits for a click. Each host is its
 # own concurrency group, one delivery at a time.
 #
 # The earlier delivery chain (product-stage.yml over scripts/pipeline.sh) assumes the decommissioned layout (a /build
@@ -29,9 +29,9 @@ on:
   workflow_dispatch:
     inputs:
       production:
-        description: "after staging has passed in this run: build on the knowledge host and publish on the hosting host. The dispatch is the gate; nothing waits for a click."
+        description: "deliver production in this run even though it is a dispatch (a push promotes by itself once staging has passed)"
         type: boolean
-        default: false
+        default: true
       seed:
         description: "after the deploy: none; foundation (ensure-foundation.sh into laplace-mono); reset-foundation (laplace-mono dropped, made again, migrated, then the foundation)"
         type: choice
@@ -40,10 +40,13 @@ on:
 
 permissions:
   contents: read
+  id-token: write   # the knowledge host is started through GCP workload identity federation: a short-lived token, no stored key
 
-# Each job queues in its own group, and none is held for the whole run. Production is gated by the dispatch itself, as
-# Laplace-Operations gates its own (the `production` input): no environment approval, so no run ever waits for a click
-# and holds a group while later deliveries queue and cancel one another behind it (2026-10-10).
+# Each job queues in its own group, and none is held for the whole run. Production is promoted by evidence: when staging
+# has deployed, passed its checks and read back in this run, the same revision goes to production with no approval and
+# no dispatch, nothing waits for a click (the inventor, 2026-10-10). The knowledge host is started by the run itself
+# through GCP workload identity federation (a service account that may start that one instance and nothing else) and
+# stops itself when idle (Laplace-Operations setup.sh idlestop); the pipeline pays for the minutes it uses.
 jobs:
   deliver:
     name: Staging — build, migrate, publish, read back on hart-server
@@ -82,10 +85,38 @@ jobs:
       - name: Read back
         run: deploy/linux/site.sh smoke
 
-  production-build:
-    name: Production — built, migrated and staged on the knowledge host (hart-cloud), on dispatch
+  knowledge-host:
+    name: Production — the knowledge host (hart-cloud) started for the job
     needs: deliver
-    if: github.event_name == 'workflow_dispatch' && inputs.production == true
+    if: needs.deliver.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.production == true)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Authenticate to GCP by workload identity (no stored key)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/398413378767/locations/global/workloadIdentityPools/github/providers/github-actions
+          service_account: laplace-pipeline@project-f5812b96-f924-41a4-94c.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Start the instance if it is stopped, then wait for its runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          state=$(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(status)')
+          echo "hart-cloud: $state"
+          if [ "$state" != RUNNING ]; then gcloud compute instances start hart-cloud --zone us-east1-b --quiet; fi
+          for i in $(seq 1 60); do
+            online=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners" --jq '[.runners[] | select(.name == "hart-cloud-Laplace" and .status == "online")] | length')
+            [ "$online" = 1 ] && { echo "runner hart-cloud-Laplace online after $((i * 10)) s"; exit 0; }
+            sleep 10
+          done
+          echo "::error::hart-cloud's runner did not come online within 10 minutes"; exit 1
+
+  production-build:
+    name: Production — built, migrated and staged on the knowledge host (hart-cloud)
+    needs: [deliver, knowledge-host]
+    if: needs.knowledge-host.result == 'success'
     runs-on: [self-hosted, laplace, Laplace, knowledge]
     timeout-minutes: 240
     concurrency:
