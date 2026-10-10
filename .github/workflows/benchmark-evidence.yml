@@ -67,6 +67,9 @@ env:
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
   LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX }}
   LAPLACE_WORK_ROOT: ${{ vars.LAPLACE_WORK_ROOT }}
+  # the pinned CMake the build pipeline wants (scripts/provision-cmake.py) is provisioned under the install prefix when
+  # the measured host lacks it, from Kitware's release, once; a host that has it is left alone
+  LAPLACE_PROVISION_TOOLS: ${{ vars.LAPLACE_PROVISION_TOOLS || '1' }}
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
 
