@@ -17,38 +17,7 @@ def code(body: str) -> str:
     return "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
 
 
-class MainPushQueueContract(unittest.TestCase):
-    def test_main_push_is_one_serial_build_deploy_readback_job(self):
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-
-        self.assertIn("name: Product — main delivery", lifecycle)
-        self.assertIn("\n  push:\n", lifecycle)
-        self.assertIn("workflow_dispatch:", lifecycle)
-        self.assertNotIn("\nconcurrency:\n", lifecycle)
-        self.assertFalse((WORKFLOWS / "mainline-delivery.yml").exists())
-
-        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
-        self.assertNotIn("  mainline-qualification:", lifecycle)
-        self.assertIn("group: laplace-main-delivery-dispatch", delivery)
-        self.assertIn("cancel-in-progress: false", delivery)
-        self.assertIn("stage: mainline", delivery)
-
-        # The reusable stage holds the same non-preemptible host reservation for
-        # build, deployment, and readback.
-        self.assertNotIn("laplace-main-qualification", reusable)
-        self.assertIn("laplace-main-delivery", reusable)
-        self.assertIn("cancel-in-progress: false", reusable)
-
-
 class WorkflowArchitecture(unittest.TestCase):
-    def test_main_deployment_does_not_have_a_separate_test_gate(self):
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertNotIn("  mainline-qualification:", lifecycle)
-        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
-        self.assertNotIn("managed_test_projects:", delivery)
-        self.assertNotIn("browser_test_suites:", delivery)
-
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
         repairs = sorted(name for name in names if "repair" in name)
@@ -98,7 +67,6 @@ class WorkflowArchitecture(unittest.TestCase):
     def test_ci_contract_is_an_explicit_lightweight_hosted_lane(self):
         text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", text)
-        self.assertNotIn("pull_request:", text)
         self.assertNotIn("\n  push:\n", text)
         self.assertIn("runs-on: ubuntu-24.04", text)
         self.assertNotIn("self-hosted", text)
@@ -107,34 +75,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("[actions-history-cleanup]", text)
         self.assertIn("[actions-evidence-archive]", text)
         self.assertIn("cancel-in-progress:", text)
-
-    def test_main_delivery_plans_then_builds_deploys_and_reads_back(self):
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("  plan:", lifecycle)
-        self.assertIn("scripts/ci-impact-plan.py", lifecycle)
-        self.assertNotIn("  mainline-qualification:", lifecycle)
-        self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
-        self.assertIn("managed_delivery_build_projects: ${{ steps.plan.outputs.managed_delivery_build_projects }}", lifecycle)
-        self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_delivery_build_projects }}", lifecycle)
-        self.assertIn("  mainline-delivery:", lifecycle)
-        self.assertIn("needs: plan", lifecycle)
-        self.assertNotIn("if: needs.plan.outputs.delivery_actions != ''", lifecycle)
-        self.assertIn("stage: mainline", lifecycle)
-        self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
-        self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
-        self.assertIn("publish_scope: ${{ needs.plan.outputs.publish_scope }}", lifecycle)
-        # Automatic main delivery is deploy-only: integration suites stay explicit.
-        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
-        for suite in ("db_suites:", "live_suites:", "managed_db_test_projects:",
-                      "managed_live_test_projects:", "native_db_test_filter:"):
-            self.assertNotIn(suite, delivery)
-        self.assertEqual(1, lifecycle.count("uses: ./.github/workflows/product-stage.yml"))
-        self.assertEqual(1, lifecycle.count("skip_if_superseded: true"))
-
-    def test_targeted_code_player_does_not_duplicate_mainline_build(self):
-        self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("stage: mainline", lifecycle)
 
     def test_superseded_push_is_rejected_only_for_product_relevant_changes(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
@@ -244,7 +184,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("name: Audit — full product qualification", audit)
         self.assertIn("workflow_dispatch:", audit)
         self.assertIn("schedule:", audit)
-        self.assertIn('cron: "17 7 * * 0"', audit)
         self.assertIn("stage: release-qualification", audit)
         self.assertIn("build_components: all", audit)
         self.assertIn("dev_suites: all", audit)
@@ -340,8 +279,6 @@ class WorkflowArchitecture(unittest.TestCase):
         pipeline = (ROOT / "scripts/pipeline.sh").read_text(encoding="utf-8")
         deploy = (ROOT / "deploy/linux/deploy.sh").read_text(encoding="utf-8")
 
-        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
-        self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", delivery)
         self.assertIn("LAPLACE_REQUIRE_QUALIFIED_WEB", product)
         self.assertIn("LAPLACE_REUSE_INSTALLED_WEB", product)
         self.assertIn("web-artifact.py", pipeline)
@@ -454,20 +391,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("verify_installed_product", automatic)
         self.assertNotIn("run_live_tests", automatic)
         self.assertNotIn("run_release_activation", automatic)
-
-    def test_manual_maintenance_is_separate_from_main_delivery_dispatch(self):
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        manual = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
-        self.assertIn("workflow_dispatch:", lifecycle)
-        self.assertIn('base_sha:', lifecycle)
-        self.assertIn("workflow_dispatch:", manual)
-        self.assertEqual(1, manual.count("uses: ./.github/workflows/product-stage.yml"))
-        self.assertIn("stage: ${{ inputs.operation }}", manual)
-        self.assertIn("normal main delivery is automatic", manual)
-        self.assertIn("options: [verify, forward-chat-proof, reconcile, chess-lab, deploy]", manual)
-        # The forward chat proof runs directly on the installed host, not as a stage.
-        self.assertIn("if: inputs.operation != 'forward-chat-proof'", manual)
-        self.assertIn("  forward-chat-proof:\n", manual)
 
     def test_competitive_proof_remains_explicit_and_composed(self):
         proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")

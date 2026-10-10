@@ -36,4 +36,35 @@ class SiteWorkflow < Minitest::Test
     assert_equal true, upload.fetch('with').fetch('include-hidden-files')
     assert_equal 'error', upload.fetch('with').fetch('if-no-files-found')
   end
+
+  def test_delivery_is_automatic_and_maintenance_is_separate
+    triggers = @workflow.fetch('on') { @workflow.fetch(true) }
+    assert_equal ['main'], triggers.fetch('push').fetch('branches')
+    refute triggers.key?('workflow_dispatch')
+    refute triggers.key?('pull_request')
+    refute @jobs.key?('mainline-qualification')
+    groups = %w[deliver production-build production].map do |name|
+      concurrency = @jobs.fetch(name).fetch('concurrency')
+      assert_equal false, concurrency.fetch('cancel-in-progress')
+      concurrency.fetch('group')
+    end
+    assert_equal groups.uniq, groups
+    operator = YAML.load_file(File.expand_path('../.github/workflows/product-operator.yml', __dir__))
+    assert (operator['on'] || operator[true]).key?('workflow_dispatch')
+  end
+
+  def test_policy_pull_requests_run_on_hosted_runner
+    policy = YAML.load_file(File.expand_path('../.github/workflows/ci-contract.yml', __dir__))
+    assert (policy['on'] || policy[true]).key?('pull_request')
+    assert_equal 'ubuntu-24.04', policy.fetch('jobs').fetch('contract').fetch('runs-on')
+    assert_equal 'read', policy.fetch('permissions').fetch('contents')
+  end
+
+  def test_active_runtime_changes_are_not_ignored
+    triggers = @workflow['on'] || @workflow[true]
+    ignored = triggers.fetch('push').fetch('paths-ignore')
+    %w[deploy/linux/site.sh app/Laplace.Migrations/Program.cs db/migrations/example.sql engine/core/src/example.c].each do |path|
+      refute ignored.any? { |pattern| File.fnmatch?(pattern, path, File::FNM_PATHNAME | File::FNM_DOTMATCH) }, path
+    end
+  end
 end

@@ -32,6 +32,7 @@ on:
       - "scripts/ci-product-freshness.py"
       - "scripts/ci_product_scope.py"
       - "scripts/test-parallel.sh"
+      - "scripts/product-ci.sh"
       - "deploy/linux/deploy.sh"
       - "scripts/publish-applications.sh"
       - "scripts/test-suites/**"
