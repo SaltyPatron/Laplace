@@ -79,13 +79,13 @@ jobs:
     runs-on: [self-hosted, laplace, "${{ inputs.host }}"]
     timeout-minutes: 180
     steps:
-      - name: The measured host's own layout
+      - name: The measured host, its own layout
         shell: bash
         run: |
           set -euo pipefail
-          : "${LAPLACE_WORK:?the runner's environment names no LAPLACE_WORK (Laplace-Operations agents.sh)}"
-          : "${LAPLACE_PG_DIR:?the runner's environment names no LAPLACE_PG_DIR (Laplace-Operations agents.sh)}"
-          : "${LAPLACE_BUILD:?the runner's environment names no LAPLACE_BUILD (Laplace-Operations agents.sh)}"
+          : "${LAPLACE_WORK:?the runner environment names no LAPLACE_WORK (Laplace-Operations agents.sh)}"
+          : "${LAPLACE_PG_DIR:?the runner environment names no LAPLACE_PG_DIR (Laplace-Operations agents.sh)}"
+          : "${LAPLACE_BUILD:?the runner environment names no LAPLACE_BUILD (Laplace-Operations agents.sh)}"
           {
             printf 'LAPLACE_EXTERNAL=%s\n'   "${LAPLACE_EXTERNAL:-$LAPLACE_WORK/mono-site/external}"
             printf 'LAPLACE_PG_PREFIX=%s\n'  "${LAPLACE_PG_PREFIX:-$LAPLACE_PG_DIR}"
