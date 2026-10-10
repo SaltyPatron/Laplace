@@ -35,6 +35,32 @@ LOCKS="${LAPLACE_LOCKS:-/run/lock/laplace}"
 MCP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # the same default as site.sh; a machine that declares another says so in /etc/laplace/machine.env
 
 [[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
+
+# Never an old script. This runs from a person's checkout, which nothing else keeps current: before anything is
+# changed, the checkout is brought to its upstream by the account that owns it (never as root), and what arrived is
+# what runs. A checkout that cannot be brought there (changed files, commits of its own, no upstream, no network) is
+# refused and said, with what to do; --as-is runs what is here, for a host that is deliberately held back.
+current() {
+  local repo owner branch before after
+  repo="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" || { echo "  $HERE is not in a git checkout: nothing says what revision this is. --as-is runs it anyway."; return 1; }
+  owner="$(stat -c %U "$repo")"
+  g() { sudo -u "$owner" git -C "$repo" "$@"; }
+  branch="$(g symbolic-ref -q --short HEAD)" || { echo "  $repo is on no branch (a detached revision): check out main there, or --as-is."; return 1; }
+  g rev-parse -q --verify "@{upstream}" >/dev/null 2>&1 || { echo "  $repo: $branch follows no upstream: check out main there, or --as-is."; return 1; }
+  [[ -z "$(g status --porcelain --untracked-files=no)" ]] || { echo "  $repo has changed files:"; g status --short --untracked-files=no | head -10; echo "  commit or drop them, or --as-is."; return 1; }
+  before="$(g rev-parse HEAD)"
+  g fetch -q || { echo "  $repo: its upstream could not be fetched: whether this script is current is not known. --as-is runs it anyway."; return 1; }
+  g merge -q --ff-only "@{upstream}" || { echo "  $repo: $branch has commits its upstream does not: it cannot be brought forward. --as-is runs it anyway."; return 1; }
+  after="$(g rev-parse HEAD)"
+  if [[ "$before" != "$after" ]]; then
+    echo "=== $repo brought from ${before:0:12} to ${after:0:12} ($branch): running what arrived"
+    exec env LAPLACE_SITE_HOST_CURRENT="$after" bash "$HERE/$(basename "${BASH_SOURCE[0]}")"
+  fi
+  echo "=== $repo is at its upstream: ${after:0:12} ($branch)"
+}
+if [[ "${1:-}" == --as-is ]]; then echo "=== run as it is here, not checked against its upstream (--as-is): $(git -C "$HERE" rev-parse --short=12 HEAD 2>/dev/null || echo 'no revision')"
+elif [[ -n "${LAPLACE_SITE_HOST_CURRENT:-}" ]]; then echo "=== at ${LAPLACE_SITE_HOST_CURRENT:0:12}"
+else current || exit 1; fi
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
 say() { printf '  %-44s %s\n' "$1" "$2"; }
 
