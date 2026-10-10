@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: verify
-        options: [verify, forward-chat-proof, reconcile, chess-lab, deploy]
+        options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy]
       target:
         description: "Verification host; deploy always follows staging → cloud build → production"
         type: choice
@@ -30,7 +30,7 @@ jobs:
 
   verify:
     name: Verify the installed application on ${{ inputs.target }}
-    if: inputs.operation == 'verify'
+    if: inputs.operation == 'verify' || inputs.operation == 'status'
     runs-on: [self-hosted, laplace, '${{ inputs.target }}']
     timeout-minutes: 10
     concurrency:
@@ -42,15 +42,21 @@ jobs:
         with:
           persist-credentials: false
       - name: Execute the same installed-runtime checks used by promotion
+        if: inputs.operation == 'verify'
         env:
           LAPLACE_VERIFICATION_STATE: ${{ github.workspace }}/artifacts/application-verification.json
         run: env -u GITHUB_SHA bash deploy/linux/site.sh smoke
+      - name: Read installed configuration and target connectivity
+        if: always()
+        run: |
+          mkdir -p artifacts
+          bash deploy/linux/site.sh status | tee artifacts/site-status.json
       - name: Retain verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: application-verification-${{ inputs.target }}-${{ github.run_id }}
-          path: artifacts/application-verification.json
+          path: artifacts/*.json
           if-no-files-found: warn
 
   operator:

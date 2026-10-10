@@ -60,15 +60,16 @@ LAPLACE_MCP_HTTP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # 5188 is Laplace-MCP's
 LAPLACE_MCP_ORIGIN="${LAPLACE_MCP_ORIGIN:-https://mcp.hartonomous.com}"
 LAPLACE_MCP_URL="http://127.0.0.1:$LAPLACE_MCP_HTTP_PORT"
 
-export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER="${LAPLACE_ROLE:-laplace}"
+export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER="${LAPLACE_KNOWLEDGE_ROLE:-${LAPLACE_ROLE:-laplace}}"
 export LAPLACE_DBNAME="${LAPLACE_DBNAME:-laplace-mono}"
 export PGDATABASE="$LAPLACE_DBNAME"
-export LAPLACE_DB="Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$LAPLACE_DBNAME"
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
+export LAPLACE_DB="Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$LAPLACE_DBNAME${LAPLACE_DB_SSLMODE:+;SSL Mode=$LAPLACE_DB_SSLMODE}"
 # The application's own database (the app schema: accounts, sessions, keys, billing) when the host declares one:
 # LAPLACE_APP_DBNAME names it, LAPLACE_APP_PGHOST/PGPORT/ROLE say where (default: the same server). The migrator
 # makes it and routes the app schema's scripts to it; the API reads it as LAPLACE_APP_DB. Unset: one database.
 if [[ -n "${LAPLACE_APP_DBNAME:-}" ]]; then
-  export LAPLACE_APP_DB="Host=${LAPLACE_APP_PGHOST:-$PGHOST};Port=${LAPLACE_APP_PGPORT:-$PGPORT};Username=${LAPLACE_APP_ROLE:-$PGUSER};Database=$LAPLACE_APP_DBNAME"
+  export LAPLACE_APP_DB="Host=${LAPLACE_APP_PGHOST:-$PGHOST};Port=${LAPLACE_APP_PGPORT:-$PGPORT};Username=${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-laplace}};Database=$LAPLACE_APP_DBNAME"
 fi
 export LAPLACE_EXTERNAL="$SITE_WORK/external"
 export LAPLACE_INSTALL_PREFIX LAPLACE_ENGINE_BUILD="$SITE_BUILD/engine"
@@ -490,6 +491,11 @@ phase_smoke() {
   return "$rc"
 }
 
+phase_status() {
+  python3 "$ROOT/scripts/site-status.py" --app-dir "$LAPLACE_APP_DIR" \
+    --machine-file "${LAPLACE_MACHINE_ENV:-/etc/laplace/machine.env}"
+}
+
 # ------------------------------------------------------------------------------------------------ seed, serve
 # The foundation through the monorepo's own seed path (ensure-foundation.sh: the CLI's layer-checked ingest).
 phase_seed() {
@@ -531,12 +537,12 @@ lock_needed=; lock_mode=shared
 for p in "${phases[@]}"; do
   [[ "$p" == serve ]] && continue
   lock_needed=1
-  [[ "$p" == smoke ]] || lock_mode=exclusive
+  [[ "$p" == smoke || "$p" == status ]] || lock_mode=exclusive
 done
 [[ -z "$lock_needed" ]] || host_lock "$lock_mode"
 for p in "${phases[@]}"; do
   case "$p" in
-    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|seed|serve) "phase_$p" ;;
+    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|seed|serve) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done

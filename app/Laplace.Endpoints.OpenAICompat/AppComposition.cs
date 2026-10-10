@@ -13,6 +13,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class AppComposition
 {
+    internal const string ApplicationDatabaseKey = "laplace-application";
     // OpenAPI generation runs this host during compilation; under it no hosted
     // service starts and the billing stores are in-memory.
     private static bool IsOpenApiDocumentGeneration => string.Equals(
@@ -54,7 +55,7 @@ internal static class AppComposition
                 .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
         }
         services.AddSingleton<IIdentityStore>(sp =>
-            new PostgresIdentityStore(sp.GetRequiredService<SubstrateClient>().DataSource));
+            new PostgresIdentityStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey)));
         services.AddSingleton<BrowserTicketStore>();
 
         var authentication = services.AddAuthentication(options =>
@@ -283,6 +284,11 @@ internal static class AppComposition
             }
         }
         services.AddSingleton(new BillingStoreMode(mode, detail));
+        // Identity, sessions, API keys and billing share the application database
+        // pool. Knowledge selection must never move these records with it.
+        services.AddKeyedSingleton<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey, (_, _) =>
+            dataSource ?? LaplaceDataSource.Create(SubstrateAccess.Serving,
+                baseConnectionString: LaplaceInstall.AppConnectionString()));
         if (dataSource is not null)
         {
             var ds = dataSource;
