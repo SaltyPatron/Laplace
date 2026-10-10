@@ -36,8 +36,9 @@ permissions:
 # Each job queues in its own group, and none is held for the whole run. Production is promoted by evidence: when staging
 # has deployed, passed its checks and read back in this run, the same revision goes to production with no approval and
 # no dispatch, nothing waits for a click (the inventor, 2026-10-10). The knowledge host is started by the run itself
-# through GCP workload identity federation (a service account that may start that one instance and nothing else) and
-# stops itself when idle (Laplace-Operations setup.sh idlestop); the pipeline pays for the minutes it uses.
+# through GCP workload identity federation (a service account that may start that one instance and nothing else), held
+# by this run's lease in its metadata until the build job has run, and stops itself when idle (Laplace-Operations
+# setup.sh idlestop); the pipeline pays for the minutes it uses.
 jobs:
   deliver:
     name: Staging — build, migrate, publish, read back on hart-server
@@ -99,6 +100,16 @@ jobs:
           echo "hart-cloud: $(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(status)')"
           # The build job queues until the host's runner registers (GitHub holds a queued job for a day); no poll of the
           # runner API here, which the workflow token may not read.
+      - name: Hold the host for this run
+        # The host stops itself when idle (Laplace-Operations setup.sh idlestop), and a job queued behind its
+        # concurrency group or waiting for the runner is not running on it yet: on 2026-10-10 the host stopped under
+        # run 38023100147 after thirty idle minutes. The lease in the instance's metadata, this run's id and an expiry
+        # the build job's timeout away, is what the idle stop reads; the release job below removes it when the build
+        # job has run, whatever its result, and the expiry ends it if nothing does.
+        run: |
+          set -euo pipefail
+          gcloud compute instances add-metadata hart-cloud --zone us-east1-b --quiet \
+            --metadata "laplace-lease=${{ github.run_id }} $(( $(date +%s) + 240 * 60 ))"
 
   production-build:
     name: Production — built, migrated and staged on the knowledge host (hart-cloud)
@@ -146,6 +157,29 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 1
+
+  knowledge-host-release:
+    name: Production — the knowledge host released to stop itself when idle
+    needs: [knowledge-host, production-build]
+    if: always() && needs.knowledge-host.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate to GCP by workload identity (no stored key)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/398413378767/locations/global/workloadIdentityPools/github/providers/github-actions
+          service_account: laplace-pipeline@project-f5812b96-f924-41a4-94c.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Release this run's lease (a newer run's lease is left to that run)
+        run: |
+          set -euo pipefail
+          lease=$(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(metadata.items.laplace-lease)' || true)
+          echo "lease: ${lease:-none}"
+          case "$lease" in
+            "${{ github.run_id }} "*) gcloud compute instances remove-metadata hart-cloud --zone us-east1-b --quiet --keys laplace-lease; echo "released" ;;
+            *) echo "not this run's: left" ;;
+          esac
 
   production:
     name: Production — received, published and restarted on the hosting host (hart-prod)
