@@ -27,6 +27,12 @@ if [[ -z "${LAPLACE_PG_DIR:-}" && -r "${LAPLACE_OPERATIONS:-/repos/src/Laplace-O
   # shellcheck disable=SC1090,SC1091
   set +u; . "${LAPLACE_OPERATIONS:-/repos/src/Laplace-Operations}/laplace.env"; set -u
 fi
+# the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), whichever way the rest arrived: where
+# its databases are (LAPLACE_PGHOST, LAPLACE_APP_DBNAME, LAPLACE_APP_PGHOST), what the runner's environment does not carry
+if [[ -r /etc/laplace/machine.env ]]; then
+  # shellcheck disable=SC1091
+  set -a; set +u; . /etc/laplace/machine.env; set -u; set +a
+fi
 
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-${LAPLACE_PG_DIR:-/usr/local/pgsql}}"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
