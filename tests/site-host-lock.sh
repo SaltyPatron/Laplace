@@ -29,10 +29,14 @@ echo 'PASS the next deployment acquires the released lock'
 sed -n '/^dotnet_app() /p' "$root/deploy/linux/site.sh" >> "$work/functions"
 bash -c '
   fail(){ exit 1; }; source "$FUNCTIONS"; host_lock
-  dotnet(){ sleep 30 </dev/null >/dev/null 2>&1 & echo $! > "$LAPLACE_LOCKS/daemon.pid"; }
+  dotnet(){
+    bash -c '\''echo "$$" > "$LAPLACE_LOCKS/daemon.pid"; : > "$LAPLACE_LOCKS/daemon.ready"; exec sleep 30'\'' </dev/null >/dev/null 2>&1 &
+  }
   dotnet_app build
   if flock -xn "$LAPLACE_LOCKS/host-resource.lock" true; then exit 1; fi
 '
+for attempt in {1..100}; do [[ -f "$work/daemon.ready" ]] && break; sleep .01; done
+[[ -f "$work/daemon.ready" ]] || { echo 'compiler fixture did not start'; exit 1; }
 daemon=$(cat "$work/daemon.pid")
 trap 'kill "$daemon" 2>/dev/null || true; rm -rf "$work"' EXIT
 kill -0 "$daemon"
