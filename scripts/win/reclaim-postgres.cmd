@@ -23,7 +23,7 @@ rem
 rem  Does NOT drop databases. Does NOT seed. Does NOT pop UAC — you already elevated.
 rem  Agents must NEVER launch this via Start-Process -Verb RunAs.
 rem ============================================================================
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "PGDATA=%LAPLACE_PGDATA%"
 if not defined PGDATA set "PGDATA=D:\Data\Postgres"
 set "SVC=postgresql-x64-18"

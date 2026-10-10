@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 set "DB=%LAPLACE_DBNAME%"
 if not defined DB set "DB=laplace"

@@ -1,7 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 set "SKIP_BUILD="
 if /i "%~1"=="--skip-build" (
     set "SKIP_BUILD=1"

@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if not defined LAPLACE_CHESS_TEST_DB set "LAPLACE_CHESS_TEST_DB=laplace_chess_test"
 
 set "SCRIPTS=%~dp0"

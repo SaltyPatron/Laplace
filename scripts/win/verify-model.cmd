@@ -14,8 +14,7 @@ rem      forward pass cross-check via scripts/model-forward-oracle.py.
 rem
 rem Exit 0 only if the behavioral gate passes.
 
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if "%~1"=="" (
   echo usage: verify-model.cmd ^<model.gguf^> [min-pass]
   exit /b 2

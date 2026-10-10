@@ -1,7 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 set "VERDICT_DB=%~1"
 if not defined VERDICT_DB set "VERDICT_DB=laplace_export"
 set "OUTDIR=%LAPLACE_ENGINE_BUILD%\verdicts"

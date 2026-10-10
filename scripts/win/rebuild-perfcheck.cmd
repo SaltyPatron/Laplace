@@ -1,8 +1,7 @@
 @echo off
 rem rebuild-perfcheck.cmd — assert T0 + highway perfcache blobs exist after engine build.
 setlocal
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if not exist "%LAPLACE_PERFCACHE_BIN%" (
   echo ERROR: T0 perfcache blob missing at %LAPLACE_PERFCACHE_BIN%
   echo        engine ALL build should have emitted it — check laplace_t0_perfcache target

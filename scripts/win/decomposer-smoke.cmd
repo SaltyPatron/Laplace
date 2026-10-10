@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=laplace"
 
 echo ==== smoke: test unicode, promote to fresh !LAPLACE_CANONICAL_DB! ====

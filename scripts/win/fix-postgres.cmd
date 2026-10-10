@@ -32,7 +32,7 @@ rem  If services.msc says "started and then stopped" while psql still works:
 rem    that is an orphan postmaster holding 5432 — do NOT keep hitting Start.
 rem    Elevated:  scripts\win\reclaim-postgres.cmd
 rem ============================================================================
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "PGDATA=%LAPLACE_PGDATA%"
 set "AUTOC=%PGDATA%\postgresql.auto.conf"
 set "SVC=postgresql-x64-18"

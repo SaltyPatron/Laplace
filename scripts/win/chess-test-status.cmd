@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace_chess_test"
 set "PGDATABASE=%LAPLACE_DBNAME%"
 

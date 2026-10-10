@@ -20,7 +20,7 @@ exit /b 2
 :args_done
 if "%SKIP_MODELS%"=="1" set "LAPLACE_SKIP_MODELS=1"
 
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"

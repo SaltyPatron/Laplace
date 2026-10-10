@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 rem Build geos + sqlite + proj + gdal from external/ into LAPLACE_DEPS_PREFIX.

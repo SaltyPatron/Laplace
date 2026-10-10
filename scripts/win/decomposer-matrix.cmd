@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 set "ROOT=%LAPLACE_ROOT%"
 set "LAPLACE_WIN=%~dp0"
 

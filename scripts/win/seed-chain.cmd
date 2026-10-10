@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 rem One-process foundation seed: the whole ladder runs through `ingest chain`
 rem in a single Laplace.Cli — one startup, one perfcache map, one native
 rem runtime init, instead of one per source (seed-step.cmd pays those 12x).

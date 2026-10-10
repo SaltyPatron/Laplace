@@ -14,8 +14,7 @@ set "LAPLACE_PGHOST=localhost"
 set "LAPLACE_DBNAME=laplace_qa_%RANDOM%%RANDOM%"
 set "LAPLACE_DB="
 set "LAPLACE_ENV_LOADED="
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 echo ==== qa-isolated: %LAPLACE_DBNAME% @ localhost ====
 
 "%PGBIN%\pg_isready.exe" -h localhost -q || (

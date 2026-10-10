@@ -1,6 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 echo ==== Starting Laplace endpoint (defaults from laplace.env / built-in) ====

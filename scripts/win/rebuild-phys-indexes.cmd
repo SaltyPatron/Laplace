@@ -1,6 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%\app"
 echo ensuring missing physicalities indexes (CREATE IF NOT EXISTS only) ...
 if not exist "%LAPLACE_CLI_EXE%" (

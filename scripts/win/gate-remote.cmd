@@ -5,8 +5,7 @@ rem 3) PENDING-gate: wait while a live CI run holds the hart-server runner
 rem    (CI deploy bounces the remote postmaster mid-seed otherwise)
 rem 4) warn if cluster has settings pending a postmaster restart (perfcache prewarm inactive)
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 echo ==== gate-remote: host=%LAPLACE_PGHOST% user=%LAPLACE_PGUSER% db=%LAPLACE_DBNAME% ====
 
 "%PGBIN%\psql.exe" -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d postgres -tAc "SELECT 'remote-ok: '||current_setting('server_version')" || (

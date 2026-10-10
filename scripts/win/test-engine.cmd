@@ -7,8 +7,7 @@ setlocal EnableDelayedExpansion
 
 
 
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 if "%~1"=="" (
     echo usage: converse.cmd "your question"
     exit /b 2

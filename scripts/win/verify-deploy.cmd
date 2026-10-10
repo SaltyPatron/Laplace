@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "DEPLOY=%LAPLACE_DEPLOY%"
 set "PSQL=%PGBIN%\psql.exe"
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"

@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if "%~1"=="" (
   echo usage: db-isolate.cmd ^<dbname^> [--recycle]
   echo   DROP + CREATE database with laplace extensions - parameterized db-reset.

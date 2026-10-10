@@ -1,6 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 set "SUB_RESULTS=%LAPLACE_EXT_BUILD%\regress_substrate\results"
