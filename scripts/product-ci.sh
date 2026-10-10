@@ -73,6 +73,7 @@ run_ci_contract_checks() {
   python3 scripts/test-managed-db-scheduling.py
   python3 scripts/test-codegen-configure.py
   python3 scripts/test-cmake-release.py
+  python3 scripts/test-perfcache-source-fingerprint.py
   python3 scripts/test-web-artifact.py
   python3 scripts/test-atomic-directory-exchange.py
   python3 scripts/test-web-publication.py

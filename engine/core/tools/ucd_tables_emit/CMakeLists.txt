@@ -40,15 +40,8 @@ set(_LAPLACE_GEN_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/unicode_seed.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/super_fibonacci.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/hilbert4d.c")
-set(_LAPLACE_GEN_MIX "")
-foreach(_src IN LISTS _LAPLACE_GEN_SRCS)
-    if(EXISTS "${_src}")
-        file(SHA256 "${_src}" _h)
-        string(APPEND _LAPLACE_GEN_MIX "${_h}")
-    endif()
-endforeach()
-string(SHA256 _LAPLACE_GEN_FINGERPRINT "${_LAPLACE_GEN_MIX}")
-string(SUBSTRING "${_LAPLACE_GEN_FINGERPRINT}" 0 16 _LAPLACE_GEN_FINGERPRINT)
+include("${CMAKE_CURRENT_SOURCE_DIR}/source-fingerprint.cmake")
+laplace_generator_fingerprint(_LAPLACE_GEN_FINGERPRINT ${_LAPLACE_GEN_SRCS})
 message(STATUS "Laplace perfcache generator fingerprint: ${_LAPLACE_GEN_FINGERPRINT}")
 
 target_compile_definitions(laplace_ucd_tables_emit PRIVATE
