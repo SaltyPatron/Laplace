@@ -63,9 +63,17 @@ export LAPLACE_INSTALL_PREFIX LAPLACE_ENGINE_BUILD="$SITE_BUILD/engine"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
 
-PG_MAJOR="$("$LAPLACE_PG_PREFIX/bin/pg_config" --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')"
-EXT_LIBDIR="$LAPLACE_INSTALL_PREFIX/lib/postgresql/$PG_MAJOR"
-EXT_SHARE="$LAPLACE_INSTALL_PREFIX/share/postgresql/$PG_MAJOR"
+# The knowledge cluster's own build, where there is one (the knowledge host): the extensions are built against it and
+# installed under this prefix for its major. A hosting host has no such build and runs only receive, publish, restart
+# and smoke, which need none of this; a phase that does need it says so when it runs.
+if [[ -x "$LAPLACE_PG_PREFIX/bin/pg_config" ]]; then
+  PG_MAJOR="$("$LAPLACE_PG_PREFIX/bin/pg_config" --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')"
+else
+  PG_MAJOR=""
+fi
+EXT_LIBDIR="$LAPLACE_INSTALL_PREFIX/lib/postgresql/${PG_MAJOR:-none}"
+EXT_SHARE="$LAPLACE_INSTALL_PREFIX/share/postgresql/${PG_MAJOR:-none}"
+need_pg() { [[ -n "$PG_MAJOR" ]] || fail "no PostgreSQL build at $LAPLACE_PG_PREFIX: this phase runs on the knowledge host"; }
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 say()  { echo; echo "=== $*   $(date -u +%H:%M:%S)"; }
@@ -116,6 +124,7 @@ EOF
 # ------------------------------------------------------------------------------------------------ build
 # configure_native_build_tree's configuration (scripts/pipeline.sh), against the Operations cluster, staged install.
 phase_build() {
+  need_pg
   say "build: engine, perf-caches, extensions"
   oneapi
   local ucd="${LAPLACE_UCD_PATH:-$LAPLACE_DATA_ROOT/UCD/Public/UCD/latest}"
@@ -145,6 +154,7 @@ phase_build() {
 # compiler runtime) is copied beside them: PostgreSQL loads the modules with plain dlopen and no oneAPI environment,
 # and MKL dlopens its kernels by name (the HART-DESKTOP lesson: the runtime beside what loads it).
 phase_install() {
+  need_pg
   say "install into $LAPLACE_INSTALL_PREFIX"
   oneapi
   [[ -d "$LAPLACE_INSTALL_PREFIX" && -w "$LAPLACE_INSTALL_PREFIX" ]] || fail "$LAPLACE_INSTALL_PREFIX is missing or not writable: sudo deploy/linux/site-host.sh"
@@ -179,6 +189,7 @@ phase_install() {
 # own dynamic_library_path and extension_control_path, so nothing of the monorepo goes into the cluster's directories
 # or reaches another database. The perf-cache paths are server settings (PGC_SIGHUP) the extension alone reads.
 phase_database() {
+  need_pg
   say "database $LAPLACE_DBNAME"
   local q
   if [[ "$(sql -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '$LAPLACE_DBNAME'")" != 1 ]]; then
@@ -213,6 +224,7 @@ phase_reset() {
 # ------------------------------------------------------------------------------------------------ migrate + extensions
 dotnet_app() { LAPLACE_REUSE_INSTALLED_NATIVE=0 dotnet "$@"; }
 phase_migrate() {
+  need_pg
   say "migrate $LAPLACE_DBNAME"
   local out="$SITE_WORK/migrations"
   dotnet_app publish "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release --no-self-contained -o "$out" -v minimal --nologo
@@ -223,6 +235,7 @@ phase_migrate() {
 # A newer extension than the database has is updated in place through the bridge its upgrade script makes
 # (scripts/pipeline.sh sync_one_extension), never by dropping it.
 phase_extensions() {
+  need_pg
   say "extensions in $LAPLACE_DBNAME"
   local ext avail installed
   for ext in laplace_geom laplace_substrate; do
