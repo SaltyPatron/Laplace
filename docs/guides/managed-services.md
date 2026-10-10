@@ -204,7 +204,49 @@ them or printing their arguments. Do not kill them to make deployment pass.
 
 ## CI/CD, readiness, and recovery
 
-The existing `laplace.yml` owns delivery: policy and native/.NET tests precede any
+### Current site delivery
+
+The current `.github/workflows/laplace.yml` invokes `deploy/linux/site.sh` on
+hart-server, then builds on hart-cloud and delivers the bundle to hart-prod.
+The earlier deployment guarantees described below are not all implemented by
+this site path. In particular, its workflow does not contain the described
+pre-install unit-test job, `site.sh` does not take the Operations ingest lock,
+and its publication uses rsync into the application directory rather than
+switching immutable runtime directories. Do not report those guarantees as
+verified for current site delivery.
+
+Hosting delivery follows `receive migrate_app publish restart`, then `smoke`.
+Receive stages the application and caches without modifying their serving
+copies. The bundle contains the migration executable and its matching SQL.
+`migrate_app` runs only app/browser migrations against the explicitly declared
+application database; failure prevents publication. Operations log migrations
+belong to the knowledge-side migration set. Application and web revision receipts
+must agree with the workflow revision; a checkout revision cannot substitute for
+a missing installed receipt. The artifact upload includes those hidden receipts.
+
+The knowledge-host lease is released after hosting delivery/readback, including
+failure, with a five-hour expiry covering the configured build and hosting
+timeouts. Queue delays and overlapping runs still require lifecycle verification;
+this is not proof that the lease cannot expire while a job waits.
+
+Publication is not an atomic transaction spanning application files, caches,
+native libraries and schema. A database migration is not automatically undone by
+reverting application files. Cross-repository coordination, complete release
+identity, rollback/recovery and a full staging-to-production exercise remain
+separate deployment acceptance requirements.
+
+Local verification: migrator publication succeeds with the machine's grammar
+resources explicitly supplied; application-only migration refuses an absent
+database declaration; application/browser/operations script classification was
+checked. `tests/site-revision-receipts.sh` checks six receipt cases;
+`tests/site-application-migrations.sh` checks missing configuration, failed and
+successful migration ordering, and receive without changing serving caches.
+These are deployment checks, not validation of Laplace's invention.
+
+### Earlier managed-service delivery path
+
+The earlier delivery implementation described here requires re-verification
+before reuse through the current site workflow. In that implementation, policy and native/.NET tests precede any
 installation. Managed policy/auth/transport tests run in the pre-install unit job.
 Deploy reconciles and checks installed host policy, failing early if it is missing
 or differs from the reviewed source. Both install and publish
