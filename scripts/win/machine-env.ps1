@@ -33,7 +33,9 @@ Set-LaplaceDefault LAPLACE_SRC ([IO.Path]::Combine($env:USERPROFILE, 'source\rep
 Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'work'))
 Set-LaplaceDefault LAPLACE_DATA ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'data'))
 Set-LaplaceDefault LAPLACE_BUILD ([IO.Path]::Combine($env:LAPLACE_WORK, 'build'))
-Set-LaplaceDefault LAPLACE_BUILD_ROOT ([IO.Path]::Combine($env:LAPLACE_BUILD, 'Laplace'))
+$checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..')).TrimEnd('\').ToLowerInvariant()
+$workspaceId = [IO.Path]::GetFileName($checkout) + '-' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($checkout))).Substring(0,12).ToLowerInvariant()
+Set-LaplaceDefault LAPLACE_BUILD_ROOT ([IO.Path]::Combine($env:LAPLACE_BUILD, 'worktrees', $workspaceId))
 Set-LaplaceDefault LAPLACE_DEPS ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'dependencies'))
 Set-LaplaceDefault LAPLACE_DEPSRC ([IO.Path]::Combine($env:LAPLACE_DEPS, 'src'))
 Set-LaplaceDefault LAPLACE_EXTERNAL $env:LAPLACE_DEPSRC
@@ -43,6 +45,30 @@ Set-LaplaceDefault LAPLACE_PGWAL ([IO.Path]::Combine($env:LAPLACE_PGDATA, 'pg_wa
 Set-LaplaceDefault LAPLACE_ROLE 'laplace'
 Set-LaplaceDefault LAPLACE_PGUSER $env:LAPLACE_ROLE
 Set-LaplaceDefault LAPLACE_PG_SERVICE_ACCOUNT 'NT AUTHORITY\NetworkService'
+Set-LaplaceDefault LAPLACE_DEPENDENCY_MANIFEST ([IO.Path]::Combine($env:ProgramData, 'Laplace\dependencies.tsv'))
+if (Test-Path -LiteralPath $env:LAPLACE_DEPENDENCY_MANIFEST -PathType Leaf) {
+    $prefixes = @()
+    foreach ($line in Get-Content -LiteralPath $env:LAPLACE_DEPENDENCY_MANIFEST) {
+        if (-not $line.Trim() -or $line.StartsWith('#')) { continue }
+        $fields = $line -split "`t"
+        if ($fields.Count -lt 9 -or ($fields[8] -split ',') -notcontains 'windows' -or $fields[2] -eq 'tool') { continue }
+        if ($fields[0] -notmatch '^[A-Za-z0-9_-]+$' -or $fields[1] -notmatch '^[A-Za-z0-9._-]+$' -or $fields[1] -eq '..') { throw 'Invalid installed dependency manifest' }
+        $prefix = [IO.Path]::Combine($env:LAPLACE_DEPS, $fields[0], $fields[1])
+        if (Test-Path -LiteralPath $prefix -PathType Container) { $prefixes += $prefix }
+        if ($fields[0] -eq 'icu') {
+            Set-LaplaceDefault ICU_ROOT $prefix
+            Set-LaplaceDefault CMAKE_LIBRARY_PATH ([IO.Path]::Combine($prefix, 'lib64'))
+        }
+    }
+    $env:CMAKE_PREFIX_PATH = (@(($env:CMAKE_PREFIX_PATH -split ';') + $prefixes) | Where-Object { $_ } | Select-Object -Unique) -join ';'
+    $values['CMAKE_PREFIX_PATH'] = $env:CMAKE_PREFIX_PATH
+    $runtimeDirs = foreach ($prefix in $prefixes) { foreach ($leaf in 'bin','bin64') {
+        $directory = [IO.Path]::Combine($prefix, $leaf)
+        if (Test-Path -LiteralPath $directory -PathType Container) { $directory }
+    } }
+    $env:PATH = (@($runtimeDirs) + @($env:PATH -split ';') | Select-Object -Unique) -join ';'
+    $values['PATH'] = $env:PATH
+}
 if ($ForCmd) {
     foreach ($name in $values.Keys) { '{0}={1}' -f $name, [Environment]::GetEnvironmentVariable($name) }
     'LAPLACE_CONFIG_SOURCE=' + $env:LAPLACE_CONFIG_SOURCE

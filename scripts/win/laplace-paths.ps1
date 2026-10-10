@@ -9,6 +9,9 @@ function Import-LaplaceEnv {
     }
     $lines = cmd /d /c "`"$envCmd`" && set LAPLACE && set INGEST && set REPOS && set PGBIN"
     if ($LASTEXITCODE -ne 0) { throw 'Laplace environment resolution failed' }
+    # VS's developer shell sets Platform=x64, which is not a solution platform
+    # in Laplace.slnx. This path import follows env.cmd's managed-build choice.
+    Remove-Item Env:Platform -ErrorAction SilentlyContinue
     foreach ($line in $lines) {
         $eq = $line.IndexOf('=')
         if ($eq -le 0) { continue }

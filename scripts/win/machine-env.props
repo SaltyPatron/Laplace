@@ -32,8 +32,9 @@
     <LAPLACE_PGDATA Condition="'$(LAPLACE_PGDATA)' == ''">$(LAPLACE_DATA_ROOT)\pgdata</LAPLACE_PGDATA>
     <LAPLACE_PGWAL Condition="'$(LAPLACE_PGWAL)' == ''">$(LAPLACE_PGDATA)\pg_wal</LAPLACE_PGWAL>
     <LAPLACE_ROLE Condition="'$(LAPLACE_ROLE)' == ''">laplace</LAPLACE_ROLE>
-    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(LAPLACE_BUILD)' != ''">$(LAPLACE_BUILD)\Laplace</LAPLACE_BUILD_ROOT>
-    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == ''">$(LAPLACE_BUILD)\Laplace</LAPLACE_BUILD_ROOT>
+    <_LaplaceCheckout>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..').TrimEnd('\').ToLowerInvariant())</_LaplaceCheckout>
+    <_LaplaceWorkspaceId>$([System.IO.Path]::GetFileName('$(_LaplaceCheckout)'))-$([MSBuild]::StableStringHash('$(_LaplaceCheckout)', 'Sha256').Substring(0,12))</_LaplaceWorkspaceId>
+    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == ''">$(LAPLACE_BUILD)\worktrees\$(_LaplaceWorkspaceId)</LAPLACE_BUILD_ROOT>
     <LAPLACE_PGUSER Condition="'$(LAPLACE_PGUSER)' == '' AND '$(LAPLACE_ROLE)' != ''">$(LAPLACE_ROLE)</LAPLACE_PGUSER>
     <LAPLACE_PGUSER Condition="'$(LAPLACE_PGUSER)' == ''">laplace</LAPLACE_PGUSER>
     <LAPLACE_PG_SERVICE_ACCOUNT Condition="'$(LAPLACE_PG_SERVICE_ACCOUNT)' == ''">NT AUTHORITY\NetworkService</LAPLACE_PG_SERVICE_ACCOUNT>
