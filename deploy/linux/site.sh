@@ -45,6 +45,12 @@ export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER=
 export LAPLACE_DBNAME="${LAPLACE_DBNAME:-laplace-mono}"
 export PGDATABASE="$LAPLACE_DBNAME"
 export LAPLACE_DB="Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$LAPLACE_DBNAME"
+# The application's own database (the app schema: accounts, sessions, keys, billing) when the host declares one:
+# LAPLACE_APP_DBNAME names it, LAPLACE_APP_PGHOST/PGPORT/ROLE say where (default: the same server). The migrator
+# makes it and routes the app schema's scripts to it; the API reads it as LAPLACE_APP_DB. Unset: one database.
+if [[ -n "${LAPLACE_APP_DBNAME:-}" ]]; then
+  export LAPLACE_APP_DB="Host=${LAPLACE_APP_PGHOST:-$PGHOST};Port=${LAPLACE_APP_PGPORT:-$PGPORT};Username=${LAPLACE_APP_ROLE:-$PGUSER};Database=$LAPLACE_APP_DBNAME"
+fi
 export LAPLACE_EXTERNAL="$SITE_WORK/external"
 export LAPLACE_INSTALL_PREFIX LAPLACE_ENGINE_BUILD="$SITE_BUILD/engine"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -259,6 +265,7 @@ api_env() {
     if grep -q "^$key=" "$env_file"; then sed -i "s|^$key=.*|$key=$val|" "$env_file"; else printf '%s=%s\n' "$key" "$val" >> "$env_file"; fi
   done <<EOF
 LAPLACE_DB=$LAPLACE_DB
+${LAPLACE_APP_DB:+LAPLACE_APP_DB=$LAPLACE_APP_DB}
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
 ASPNETCORE_URLS=$LAPLACE_API_URL

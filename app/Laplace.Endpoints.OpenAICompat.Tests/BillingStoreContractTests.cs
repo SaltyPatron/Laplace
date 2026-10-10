@@ -302,7 +302,7 @@ public sealed class PostgresBillingStoreContractTests : BillingStoreContractTest
 
     private static NpgsqlDataSource? TryBuild()
     {
-        var connString = LaplaceInstall.PostgresConnectionString();
+        var connString = LaplaceInstall.AppConnectionString();
         try
         {
             var dataSource = new NpgsqlDataSourceBuilder(connString).Build();
