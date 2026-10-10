@@ -697,3 +697,7 @@ an installed configuration file. The receipt reports both the current effective
 configuration and the resulting installed configuration; the file value applies
 again when that environment override is absent. Environment values are retained
 as defaults only for keys absent from all caller-owned installed files.
+
+On the Operations Linux layout, `site.sh` coordinates with Operations deployment, direct installation and ingestion through `$LAPLACE_LOCKS/host-resource.lock` (or the shared `LAPLACE_HOST_LOCK` override). Changes hold an exclusive lock for the complete invocation; a smoke-only invocation holds a shared lock. Operations ingestion holds a shared lock for its full duration, so a deployment cannot race its startup. Descriptor 8 is inherited by nested commands. A foreground `serve` releases it before becoming a long-running runtime process. The lock file is retained after use and must live in the machine's shared lock directory, not a runner-specific work tree.
+
+This covers these current Linux entry points. Older manual deployment paths and Windows coordination still need reconciliation; this is not a claim that every historical writer follows the protocol.

@@ -90,6 +90,16 @@ SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 say()  { echo; echo "=== $*   $(date -u +%H:%M:%S)"; }
 fail() { echo "::error::$*" >&2; exit 1; }
+host_lock() {
+  local path="${LAPLACE_HOST_LOCK:-$LAPLACE_LOCKS/host-resource.lock}" mode="${1:-exclusive}"
+  [[ -d "$(dirname "$path")" ]] || fail "missing shared host lock directory: $path"
+  if ! [[ /proc/self/fd/8 -ef "$path" ]]; then exec 8>>"$path"; fi
+  if [[ "$mode" == shared ]]; then
+    flock -sn 8 || fail "another deployment holds $path"
+  else
+    flock -xn 8 || fail "another deployment or ingest holds $path"
+  fi
+}
 revision() {
   local app="$1" rev web
   [[ -r "$app/.laplace-source-revision" && -r "$app/wwwroot/.laplace-web-source-revision" ]] || fail "missing application or web revision receipt in $app"
@@ -491,6 +501,7 @@ phase_serve() {
   local app="$SITE_WORK/stage/app" t0
   t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
   cd "$app"
+  exec 8>&- # The foreground runtime is not a deployment transaction.
   LD_LIBRARY_PATH="$app:$LAPLACE_INSTALL_PREFIX/lib" ASPNETCORE_URLS="$LAPLACE_API_URL" ASPNETCORE_ENVIRONMENT=Production \
     LAPLACE_PERFCACHE_BIN="$t0" LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" LAPLACE_AUTH_MODE=header LAPLACE_BILLING_BYPASS=true \
     exec dotnet "$app/Laplace.Endpoints.OpenAICompat.dll"
@@ -505,6 +516,13 @@ phase_migrate_app() {
 }
 
 phases=("$@"); [[ ${#phases[@]} -gt 0 ]] || phases=(externals build install database extensions migrate app publish restart smoke)
+lock_needed=; lock_mode=shared
+for p in "${phases[@]}"; do
+  [[ "$p" == serve ]] && continue
+  lock_needed=1
+  [[ "$p" == smoke ]] || lock_mode=exclusive
+done
+[[ -z "$lock_needed" ]] || host_lock "$lock_mode"
 for p in "${phases[@]}"; do
   case "$p" in
     externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|seed|serve) "phase_$p" ;;
