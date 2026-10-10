@@ -92,6 +92,7 @@ jobs:
             printf 'LAPLACE_WORK_ROOT=%s\n'  "${LAPLACE_WORK_ROOT:-$LAPLACE_WORK/bench}"
             printf 'LAPLACE_BUILD_VOLUME=%s\n' "${LAPLACE_BUILD_VOLUME:-$LAPLACE_BUILD}"
             printf 'LAPLACE_SCRATCH_ROOT=%s\n' "${LAPLACE_SCRATCH_ROOT:-$LAPLACE_WORK/scratch}"
+            printf 'LAPLACE_DEPS_PREFIX=%s\n' "${LAPLACE_DEPS_PREFIX:-$LAPLACE_WORK/mono-site/deps}"
           } >> "$GITHUB_ENV"
           echo "host $(hostname): external ${LAPLACE_EXTERNAL:-$LAPLACE_WORK/mono-site/external}, pg ${LAPLACE_PG_PREFIX:-$LAPLACE_PG_DIR}, work ${LAPLACE_WORK_ROOT:-$LAPLACE_WORK/bench}"
 
