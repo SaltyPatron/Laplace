@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 set "LOG=%INGEST%\logs\seed-everything-%DATE:~-4,4%%DATE:~-10,2%%DATE:~-7,2%-%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%.log"

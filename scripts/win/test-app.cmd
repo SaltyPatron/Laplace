@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 rem Golden/billing gate tests must not inherit dev bypass from env.cmd
 set "LAPLACE_BILLING_BYPASS="
 cd /d "%LAPLACE_ROOT%\app"

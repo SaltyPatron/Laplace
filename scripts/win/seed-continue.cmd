@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%\app"
 
 set "KNOWLEDGE=wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary"

@@ -1,7 +1,7 @@
 @echo off
 rem rebuild-clean.cmd — wipe engine/ext/app build trees (explicit; not the rebuild default).
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win || exit /b 1

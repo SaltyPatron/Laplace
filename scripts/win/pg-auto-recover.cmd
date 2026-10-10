@@ -20,7 +20,7 @@ rem       "cmd /c D:\Repositories\Laplace\scripts\win\pg-auto-recover.cmd" ^
 rem       actions= run/5000/run/60000/run/300000
 rem  Log: D:\Data\Output\pg-auto-recover.log
 rem ============================================================================
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "SVC=postgresql-x64-18"
 set "PGDATA=%LAPLACE_PGDATA%"
 set "PGBIN=C:\Program Files\PostgreSQL\18\bin"

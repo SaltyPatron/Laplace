@@ -7,7 +7,8 @@ function Import-LaplaceEnv {
     if (-not (Test-Path $envCmd)) {
         throw "laplace-paths: missing $envCmd"
     }
-    $lines = cmd /c "`"$envCmd`" >nul 2>&1 && set LAPLACE && set INGEST && set REPOS && set PGPASSWORD"
+    $lines = cmd /d /c "`"$envCmd`" && set LAPLACE && set INGEST && set REPOS && set PGBIN"
+    if ($LASTEXITCODE -ne 0) { throw 'Laplace environment resolution failed' }
     foreach ($line in $lines) {
         $eq = $line.IndexOf('=')
         if ($eq -le 0) { continue }
@@ -28,7 +29,7 @@ function Get-LaplaceRepoRoot {
 function Get-LaplaceDataRoot {
     Import-LaplaceEnv
     if ($env:LAPLACE_DATA_ROOT) { return $env:LAPLACE_DATA_ROOT }
-    return 'D:\Data\Laplace'
+    throw 'LAPLACE_DATA_ROOT is missing from the installation configuration'
 }
 
 function Get-LaplaceBuildRoot {

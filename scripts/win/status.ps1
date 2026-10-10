@@ -11,8 +11,7 @@ $asanBuild = Resolve-LaplaceTreePath 'build-win-asan'
 $deployLib = Join-Path $deployRoot 'lib'
 $deployShare = Join-Path $deployRoot 'share'
 $deployPg = ($deployRoot -replace '\\', '/')
-$psql = if (Get-Command psql) { 'psql' } else { 'C:\Program Files\PostgreSQL\18\bin\psql.exe' }
-$env:PGPASSWORD = if ($env:PGPASSWORD) { $env:PGPASSWORD } else { 'postgres' }
+$psql = if ($env:PGBIN -and (Test-Path (Join-Path $env:PGBIN 'psql.exe'))) { Join-Path $env:PGBIN 'psql.exe' } elseif (Get-Command psql -ErrorAction SilentlyContinue) { 'psql' } else { throw 'psql is unavailable; configure the PostgreSQL client path.' }
 $env:PGCONNECT_TIMEOUT = '3'
 
 function Section($t) { Write-Host "`n=== $t ===" }

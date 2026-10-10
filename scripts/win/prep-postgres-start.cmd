@@ -1,6 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "DEPLOY=%LAPLACE_DEPLOY%"
 
 echo ==== prep-postgres-start ====

@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 set "SRC=%LAPLACE_PUBLISH_ENDPOINT%"
 set "LIVE=%LAPLACE_IIS_API%"
 set "APPCMD=%SystemRoot%\System32\inetsrv\appcmd.exe"

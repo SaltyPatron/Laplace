@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if "%~1"=="" goto usage
 if /i "%~1"=="help" goto usage
 if /i "%~1"=="--list" goto list

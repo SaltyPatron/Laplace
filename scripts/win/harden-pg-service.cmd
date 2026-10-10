@@ -18,7 +18,7 @@ rem       points at reclaim-postgres.cmd (does not kill from here).
 rem
 rem  Does NOT drop databases. Does NOT run pg_ctl start (that creates orphans).
 rem ============================================================================
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "SVC=postgresql-x64-18"
 set "SVC_KEY=HKLM\SYSTEM\CurrentControlSet\Services\%SVC%"
 set "CTRL_KEY=HKLM\SYSTEM\CurrentControlSet\Control"

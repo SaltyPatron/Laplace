@@ -1,7 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 if "%1"=="" (
     echo Usage: download-code-data.cmd ^<tiny-codes ^| stack-v2 ^| authority^> [options]
     exit /b 1

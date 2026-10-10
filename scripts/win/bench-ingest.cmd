@@ -5,8 +5,7 @@
 
 
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 set "CONFIRMED=0"
 set "SOURCE="
 set "DO_COLD=1"

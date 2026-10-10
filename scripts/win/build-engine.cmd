@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
+set "LAPLACE_RESOURCE_FLAGS="
+if defined LAPLACE_RC set LAPLACE_RESOURCE_FLAGS="-DCMAKE_RC_COMPILER=%LAPLACE_RC%"
+if defined LAPLACE_MT set LAPLACE_RESOURCE_FLAGS=%LAPLACE_RESOURCE_FLAGS% "-DCMAKE_MT=%LAPLACE_MT%"
 cd /d "%LAPLACE_ROOT%"
 
 set "RECONF=0"
@@ -30,9 +33,8 @@ if exist "%LAPLACE_ENGINE_BUILD%\CMakeCache.txt" if not exist "%LAPLACE_ENGINE_B
 set "LAPLACE_UCD=%LAPLACE_UCD_ROOT%"
 cmake -B "%LAPLACE_ENGINE_BUILD%" -S engine -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release ^
-  "-DCMAKE_MAKE_PROGRAM=D:/Microsoft Visual Studio/2026/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" ^
   -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
-  "-DCMAKE_RC_COMPILER=%LAPLACE_RC%" "-DCMAKE_MT=%LAPLACE_MT%" ^
+  %LAPLACE_RESOURCE_FLAGS% ^
   -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON ^
   -DBLAKE3_SIMD_TYPE=x86-intrinsics ^
   -DBUILD_TESTING=ON ^

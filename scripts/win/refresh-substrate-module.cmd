@@ -8,6 +8,6 @@ if "%~2"=="" (
     echo and run: build-extensions.cmd --reconfigure ^&^& install-extensions.cmd --recycle
     exit /b 2
 )
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 echo refresh-substrate-module: per-object hot refresh removed — use install-extensions.cmd after rebuild.
 exit /b 1

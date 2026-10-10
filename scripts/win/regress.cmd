@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 rem Derive from PGBIN (env.cmd owns the toolchain path) so custom/self-hosted PG
 rem installs work by changing ONE place, not this hardcoded literal.

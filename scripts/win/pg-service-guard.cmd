@@ -13,7 +13,7 @@ rem  No elevation. No start/stop. No database mutations.
 rem  Usage:  call scripts\win\pg-service-guard.cmd
 rem          call scripts\win\pg-service-guard.cmd --require-up
 rem ============================================================================
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "SVC=postgresql-x64-18"
 set "REQUIRE_UP=0"
 if /i "%~1"=="--require-up" set "REQUIRE_UP=1"

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 set "PSQL="%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -v ON_ERROR_STOP=1"
 
 REM tune-laplace: db/table-scoped tuning for the laplace substrate (distinct from tune-pg,

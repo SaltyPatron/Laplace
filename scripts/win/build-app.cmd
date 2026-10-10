@@ -1,7 +1,7 @@
 @echo off
 rem build-app.cmd — Release build of app/Laplace.slnx (no publish / IIS).
 setlocal
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%\app" || exit /b 1
 
 set "SKIP_CLEAN=0"

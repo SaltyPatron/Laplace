@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
+call "%~dp0env.cmd" || exit /b 1
+set "LAPLACE_RESOURCE_FLAGS="
+if defined LAPLACE_RC set LAPLACE_RESOURCE_FLAGS="-DCMAKE_RC_COMPILER=%LAPLACE_RC%"
+if defined LAPLACE_MT set LAPLACE_RESOURCE_FLAGS=%LAPLACE_RESOURCE_FLAGS% "-DCMAKE_MT=%LAPLACE_MT%"
 cd /d "%LAPLACE_ROOT%"
 set "PATH=%LAPLACE_ENGINE_BUILD_ASAN%\core;%LAPLACE_ENGINE_BUILD_ASAN%\dynamics;%LAPLACE_ENGINE_BUILD_ASAN%\synthesis;%PATH%"
 for /d %%v in ("C:\Program Files (x86)\Intel\oneAPI\compiler\latest\lib\clang\*") do set "LAPLACE_ASAN_RT=%%v\lib\windows"
@@ -33,9 +36,8 @@ if exist "%LAPLACE_ENGINE_BUILD_ASAN%\CMakeCache.txt" if not exist "%LAPLACE_ENG
 set "LAPLACE_UCD=%LAPLACE_UCD_ROOT%"
 cmake -B "%LAPLACE_ENGINE_BUILD_ASAN%" -S engine -G Ninja ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-  "-DCMAKE_MAKE_PROGRAM=D:/Microsoft Visual Studio/2026/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" ^
   -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
-  "-DCMAKE_RC_COMPILER=%LAPLACE_RC%" "-DCMAKE_MT=%LAPLACE_MT%" ^
+  %LAPLACE_RESOURCE_FLAGS% ^
   "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS -fsanitize=address" ^
   "-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /EHsc -fsanitize=address" ^
   "-DCMAKE_EXE_LINKER_FLAGS=/Qoption,link,/machine:x64 -fsanitize=address /MD" ^

@@ -6,8 +6,7 @@ rem is two-axis partitioned — laplace.entities must be relkind 'p'. A plain 'r
 rem host's installed extension predates the greenfield schema and seeding would target the
 rem wrong generation: stop and deploy first.
 setlocal EnableDelayedExpansion
-call "%~dp0env.cmd"
-
+call "%~dp0env.cmd" || exit /b 1
 set "MIG=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Migrations\Release\net10.0\Laplace.Migrations.dll"
 if not exist "%MIG%" (
   echo migrate-db: building Laplace.Migrations ^(dll missing^)
