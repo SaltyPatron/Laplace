@@ -34,7 +34,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CORE = ROOT / "build/engine/core/liblaplace_core.so"
 DEFAULT_T0 = ROOT / "build/engine/core/perfcache/laplace_t0_perfcache.bin"
 CORPUS_CAP_BYTES = 48 << 20
-SKIP_DIRS = ("/build/", "/.git/", "/external/", "/node_modules/", "/bin/", "/obj/")
+SKIP_DIRS = ("/build/", "/.git/", "/external/", "/node_modules/", "/bin/", "/obj/", "/generated/", "/third_party/")
+# A corpus is the repository's own writing and code, document by document: a generated tree-sitter parser
+# (engine/core/grammars/generated/sql/parser.c is 39.7 MB and was 78 percent of the corpus) is neither, and one such
+# file makes every worker hold a ten-gigabyte tree. Documents above the cap are left out and counted in the receipt.
+MAX_DOCUMENT_BYTES = int(os.environ.get("LAPLACE_BENCH_MAX_DOCUMENT_BYTES", str(4 << 20)))
+SKIPPED_DOCUMENTS: list[dict[str, int | str]] = []
 
 _DOCS: list[bytes] = []
 _CORE = ""
@@ -76,6 +81,9 @@ def load_corpus(root: str, cap: int = CORPUS_CAP_BYTES) -> list[bytes]:
         except OSError:
             continue
         if not payload:
+            continue
+        if len(payload) > MAX_DOCUMENT_BYTES:
+            SKIPPED_DOCUMENTS.append({"path": os.path.relpath(path, root), "bytes": len(payload)})
             continue
         docs.append(payload)
         total += len(payload)
