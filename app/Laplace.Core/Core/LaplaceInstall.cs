@@ -109,6 +109,21 @@ public static class LaplaceInstall
         File.Exists(Path.Combine(directory, "app", "Laplace.slnx"))
         && File.Exists(Path.Combine(directory, "engine", "CMakeLists.txt"));
 
+    /// <summary>
+    /// The application's own database: accounts, sessions, API keys, billing, the <c>app</c> schema.
+    /// LAPLACE_APP_DB when it is set; otherwise the database LAPLACE_DB names, so a host with one
+    /// database is unchanged. The knowledge substrate never lives here.
+    /// </summary>
+    public static string AppConnectionString()
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_APP_DB");
+        return string.IsNullOrWhiteSpace(fromEnv) ? PostgresConnectionString() : fromEnv.Trim();
+    }
+
+    /// <summary>True when LAPLACE_APP_DB names a database of its own for the <c>app</c> schema.</summary>
+    public static bool HasSeparateAppDatabase =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_APP_DB"));
+
     public static string PostgresConnectionString(string database = "laplace")
     {
         var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_DB");

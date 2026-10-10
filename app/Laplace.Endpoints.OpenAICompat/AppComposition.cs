@@ -268,7 +268,8 @@ internal static class AppComposition
         {
             try
             {
-                dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+                // accounts, keys and billing live in the application database (LAPLACE_APP_DB), not with the knowledge
+                dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving, baseConnectionString: LaplaceInstall.AppConnectionString());
                 BillingPostgres.BillingSchemaProbe.EnsureQuotesTableReachable(dataSource);
                 mode = "postgres";
             }

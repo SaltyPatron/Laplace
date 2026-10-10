@@ -110,18 +110,24 @@ internal static class Program
         var log = loggerFactory.CreateLogger("up");
 
         EnsureDatabase.For.PostgresqlDatabase(connectionString);
+        var applied = new List<DbUp.Engine.SqlScript>();
 
-        var engine = BuildEngine(connectionString);
-        var result = engine.PerformUpgrade();
-
-        if (!result.Successful)
+        // The app schema (accounts, sessions, keys, billing) has a database of its own when LAPLACE_APP_DB is set:
+        // its scripts go there and nowhere else; the knowledge database takes the rest. One database takes all.
+        foreach (var (target, filter, label) in Targets(connectionString))
         {
-            Console.Error.WriteLine($"[migrate up FAILED] {result.Error?.Message}");
-            log.LogError(result.Error, "migration upgrade failed");
-            return 1;
+            if (target != connectionString) EnsureDatabase.For.PostgresqlDatabase(target);
+            var engine = BuildEngine(target, filter);
+            var result = engine.PerformUpgrade();
+            if (!result.Successful)
+            {
+                Console.Error.WriteLine($"[migrate up FAILED] {label}: {result.Error?.Message}");
+                log.LogError(result.Error, "migration upgrade failed ({Target})", label);
+                return 1;
+            }
+            applied.AddRange(result.Scripts);
         }
 
-        var applied = result.Scripts.ToList();
         if (applied.Count == 0)
         {
             Console.WriteLine("[migrate up] No pending migrations. Database is current.");
@@ -140,9 +146,14 @@ internal static class Program
 
     private static int RunStatus(string connectionString)
     {
-        var engine = BuildEngine(connectionString);
-        var pending = engine.GetScriptsToExecute().ToList();
-        var applied = engine.GetExecutedScripts().ToList();
+        var pending = new List<DbUp.Engine.SqlScript>();
+        var applied = new List<string>();
+        foreach (var (target, filter, _) in Targets(connectionString))
+        {
+            var engine = BuildEngine(target, filter);
+            pending.AddRange(engine.GetScriptsToExecute());
+            applied.AddRange(engine.GetExecutedScripts());
+        }
 
         Console.WriteLine($"[migrate status] applied: {applied.Count}, pending: {pending.Count}");
         Console.WriteLine();
@@ -232,7 +243,30 @@ internal static class Program
         return 0;
     }
 
-    private static UpgradeEngine BuildEngine(string connectionString)
+    // A script of the app schema: accounts, sessions, keys, billing, and the browser-ticket binding on them.
+    private static bool IsAppScript(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.Contains("_app_", StringComparison.Ordinal) || name.Contains("_browser_", StringComparison.Ordinal);
+    }
+
+    // Where the scripts go: the knowledge database and, when LAPLACE_APP_DB names one, the application database.
+    private static IEnumerable<(string connectionString, Func<string, bool> filter, string label)> Targets(string connectionString)
+    {
+        if (!LaplaceInstall.HasSeparateAppDatabase)
+        {
+            yield return (connectionString, _ => true, "database");
+            yield break;
+        }
+        var app = LaplaceInstall.AppConnectionString();
+        Console.WriteLine($"Application database connection: {LaplaceInstall.RedactConnectionString(app)}");
+        yield return (connectionString, path => !IsAppScript(path), "knowledge database");
+        yield return (app, IsAppScript, "application database");
+    }
+
+    private static UpgradeEngine BuildEngine(string connectionString) => BuildEngine(connectionString, _ => true);
+
+    private static UpgradeEngine BuildEngine(string connectionString, Func<string, bool> filter)
     {
         var migrationsDir = LocateMigrationsDir();
         Console.WriteLine($"Migrations directory: {migrationsDir}");
@@ -243,7 +277,7 @@ internal static class Program
         // Journal lives in public; pass it explicitly and keep Search Path for scripts.
         return DeployChanges.To
             .PostgresqlDatabase(connectionString, "public")
-            .WithScriptsFromFileSystem(migrationsDir)
+            .WithScriptsFromFileSystem(migrationsDir, filter)
             .JournalToPostgresqlTable("public", "schemaversions")
             .WithVariablesDisabled()
             .WithExecutionTimeout(TimeSpan.FromHours(4))
