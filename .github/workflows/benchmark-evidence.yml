@@ -50,6 +50,12 @@ on:
         description: "force a clean exact-revision rebuild before measurement"
         type: boolean
         default: false
+      host:
+        description: "the measured host, by its runner's tier label: knowledge is hart-cloud (Sapphire Rapids, AVX-512), staging is hart-server"
+        type: choice
+        required: true
+        default: knowledge
+        options: [knowledge, staging]
 
 permissions:
   contents: read
@@ -64,7 +70,7 @@ env:
 jobs:
   benchmark:
     name: Measured host — versioned benchmark suite
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, "${{ inputs.host }}"]
     timeout-minutes: 180
     steps:
       - name: Create immutable evidence directory first
