@@ -31,10 +31,20 @@ public sealed class ManagedServiceDatabaseTests
         Assert.Throws<InvalidOperationException>(() => ManagedServiceDatabase.Resolve(OtherPlatform));
     }
 
+    // The cluster Laplace-Operations declares keeps its socket in /tmp: a Unix-domain socket all the same.
+    [Fact]
+    public void AnotherSocketDirectoryIsStillTheLocalRoute()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var parsed = new NpgsqlConnectionStringBuilder(ManagedServiceDatabase.Resolve("Host=/tmp;Username=laplace;Database=laplace-mono"));
+        Assert.Equal("/tmp", parsed.Host);
+    }
+
     public static IEnumerable<object[]> Unsafe() => new[]
     {
         "Host=hart-server;Username=laplace_admin;Database=laplace",
-        "Host=/tmp;Username=laplace_admin;Database=laplace",
+        "Host=tmp;Username=laplace_admin;Database=laplace",
+        "Host=/tmp/../srv;Username=laplace_admin;Database=laplace",
         "Host=192.168.1.2;Username=laplace;Database=laplace-mono",
         "Host=/var/run/postgresql,192.168.1.2;Username=laplace_admin;Database=laplace",
         "Host=127.0.0.1,192.168.1.2;Username=laplace;Database=laplace-mono",

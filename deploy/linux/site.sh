@@ -47,6 +47,11 @@ LAPLACE_GEOS_PROJ_PREFIX="${LAPLACE_GEOS_PROJ_PREFIX:-${LAPLACE_PREFIX:-/usr/loc
 LAPLACE_LOCKS="${LAPLACE_LOCKS:-/run/lock/laplace}"
 LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
 LAPLACE_SITE_URL="${LAPLACE_SITE_URL:-http://127.0.0.1:8080}"
+# the MCP endpoint (laplace-mcp.service): its loopback port, and the one browser origin it answers (a caller that
+# sends no Origin, as MCP clients do, is judged by its bearer token alone)
+LAPLACE_MCP_HTTP_PORT="${LAPLACE_MCP_HTTP_PORT:-5188}"
+LAPLACE_MCP_ORIGIN="${LAPLACE_MCP_ORIGIN:-https://mcp.hartonomous.com}"
+LAPLACE_MCP_URL="http://127.0.0.1:$LAPLACE_MCP_HTTP_PORT"
 
 export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER="${LAPLACE_ROLE:-laplace}"
 export LAPLACE_DBNAME="${LAPLACE_DBNAME:-laplace-mono}"
@@ -273,6 +278,10 @@ phase_app() {
   cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$LAPLACE_INSTALL_PREFIX"/lib/libmkl_*.so* "$stage/app/" 2>/dev/null || true
   local f; for f in "$LAPLACE_INSTALL_PREFIX"/lib/lib{iomp5,tbb,tbbmalloc,svml,imf,intlc,irng,sycl}*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/"; done
   [[ -f "$stage/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "API not staged"
+  # the MCP server (laplace-mcp.service) in its own directory of the app, with the same native closure beside it
+  dotnet_app publish "$ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" -c Release --no-self-contained -o "$stage/app/mcp-runtime" -v minimal --nologo
+  for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/mcp-runtime/"; done
+  [[ -f "$stage/app/mcp-runtime/Laplace.Endpoints.Mcp.dll" ]] || fail "MCP server not staged"
   echo "  staged $(du -sh "$stage/app" | cut -f1) at $stage/app"
 }
 
@@ -295,15 +304,34 @@ LAPLACE_DATA_PROTECTION_KEYS=$LAPLACE_INSTALL_PREFIX/secrets/data-protection
 EOF
 }
 
+# The MCP server's non-secret environment, beside the API's: the same database and perf-cache, its own port and
+# origin. Its token is the host's ($LAPLACE_INSTALL_PREFIX/secrets/mcp.env, made by site-host.sh), never written here.
+mcp_env() {
+  local env_file="$LAPLACE_APP_DIR/laplace-mcp.env" t0
+  t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
+  cat > "$env_file.new" <<EOF
+LAPLACE_DB=$LAPLACE_DB
+LAPLACE_PGPORT=$PGPORT
+LD_LIBRARY_PATH=$LAPLACE_APP_DIR/mcp-runtime:$LAPLACE_INSTALL_PREFIX/lib
+LAPLACE_PERFCACHE_BIN=$t0
+LAPLACE_MCP_HTTP_PORT=$LAPLACE_MCP_HTTP_PORT
+LAPLACE_MCP_ORIGIN=$LAPLACE_MCP_ORIGIN
+LAPLACE_OPS_LOG_DIR=$LAPLACE_APP_DIR/logs
+LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
+EOF
+  chmod 0664 "$env_file.new"; mv -f "$env_file.new" "$env_file"
+}
+
 phase_publish() {
   say "publish into $LAPLACE_APP_DIR"
   [[ -d "$SITE_WORK/stage/app" ]] || fail "nothing staged: run the app phase first"
   [[ -d "$LAPLACE_APP_DIR" && -w "$LAPLACE_APP_DIR" ]] || fail "$LAPLACE_APP_DIR is missing or not writable: sudo deploy/linux/site-host.sh"
   rsync -a --delete --delay-updates \
-    --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'mcp-runtime/' --exclude 'releases/' \
+    --exclude 'laplace-api.env' --exclude 'laplace-mcp.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'releases/' \
     "$SITE_WORK/stage/app/" "$LAPLACE_APP_DIR/"
   mkdir -p "$LAPLACE_APP_DIR/logs"
   api_env
+  mcp_env
   echo "  $(cat "$LAPLACE_APP_DIR/.laplace-source-revision")"
 }
 
@@ -316,10 +344,26 @@ phase_restart() {
   for i in $(seq 90); do
     sleep 2
     [[ "$(systemctl show -p ActiveState --value laplace-api 2>/dev/null)" == active ]] &&
-      curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; return 0; }
+      curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; restart_mcp; return 0; }
   done
   systemctl status laplace-api --no-pager 2>&1 | tail -20 || true
   fail "laplace-api did not answer $LAPLACE_API_URL/health within 180 s"
+}
+
+# The MCP endpoint restarts the same way. A host where root has not declared it yet (no unit: site-host.sh) is said
+# and passed over: the API's delivery does not wait on a host's root.
+mcp_declared() { systemctl cat laplace-mcp.service >/dev/null 2>&1; }
+restart_mcp() {
+  local trigger="$LAPLACE_LOCKS/restart-mcp" i
+  mcp_declared || { echo "  laplace-mcp.service is not declared on this host: sudo bash deploy/linux/site-host.sh"; return 0; }
+  date -u +%FT%TZ > "$trigger"
+  for i in $(seq 60); do
+    sleep 2
+    [[ "$(systemctl show -p ActiveState --value laplace-mcp 2>/dev/null)" == active ]] &&
+      curl -fsS -m 5 "$LAPLACE_MCP_URL/health/live" >/dev/null 2>&1 && { echo "  laplace-mcp up after $((i * 2)) s"; return 0; }
+  done
+  systemctl status laplace-mcp --no-pager 2>&1 | tail -20 || true
+  fail "laplace-mcp did not answer $LAPLACE_MCP_URL/health/live within 120 s"
 }
 
 # ------------------------------------------------------------------------------------------------ bundle, receive
@@ -364,6 +408,20 @@ phase_smoke() {
     printf '  %-44s %s\n' "$url" "$code"; echo "| \`$url\` | $code |" >> "$SUMMARY"
     [[ "$code" == 200 ]] || rc=1
   done
+  # The MCP endpoint, where the host declares it: alive on its port; through the site it refuses a caller without the
+  # token (401) and answers one that has it (initialize: 200).
+  if mcp_declared; then
+    local token init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"site.sh smoke","version":"1"}}}'
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$LAPLACE_MCP_URL/health/live" || true)"
+    printf '  %-44s %s\n' "$LAPLACE_MCP_URL/health/live" "$code"; echo "| \`$LAPLACE_MCP_URL/health/live\` | $code |" >> "$SUMMARY"; [[ "$code" == 200 ]] || rc=1
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
+    printf '  %-44s %s\n' "$LAPLACE_SITE_URL/mcp, no token" "$code"; echo "| \`$LAPLACE_SITE_URL/mcp\` without a token (401) | $code |" >> "$SUMMARY"; [[ "$code" == 401 ]] || rc=1
+    token="$(sed -n 's/^LAPLACE_MCP_TOKEN=//p' "$LAPLACE_INSTALL_PREFIX/secrets/mcp.env" 2>/dev/null | head -1)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' -H "Authorization: Bearer $token" -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
+    printf '  %-44s %s\n' "$LAPLACE_SITE_URL/mcp, initialize" "$code"; echo "| \`$LAPLACE_SITE_URL/mcp\` initialize, with the token | $code |" >> "$SUMMARY"; [[ "$code" == 200 ]] || rc=1
+  else
+    echo "  laplace-mcp.service is not declared on this host: sudo bash deploy/linux/site-host.sh"; echo "| MCP endpoint | not declared on this host |" >> "$SUMMARY"
+  fi
   # readiness says whether the substrate is seeded: reported, not required (a push does not seed)
   code="$(curl -s -o "$SITE_WORK/ready.json" -w '%{http_code}' -m 20 "$LAPLACE_API_URL/health/ready" || true)"
   printf '  %-44s %s %s\n' "$LAPLACE_API_URL/health/ready" "$code" "$(head -c 160 "$SITE_WORK/ready.json" 2>/dev/null)"
