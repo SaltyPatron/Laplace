@@ -12,7 +12,7 @@ run-name: "Deliver main — staging on hart-server${{ github.event_name == 'work
 # and the compiler; runner label knowledge), builds, installs, migrates and stages, and hands the staged app with its
 # native closure and perf-caches on as an artifact. The hosting host, hart-prod (a small always-on machine with the
 # API, MCP and the Cloudflare tunnel, and the application's own database; runner label production), receives it,
-# publishes and restarts. The build job waits for the `production` environment's required reviewer. Each host is its
+# publishes and restarts. The dispatch's `production` input is the gate; nothing waits for a click. Each host is its
 # own concurrency group, one delivery at a time.
 #
 # The earlier delivery chain (product-stage.yml over scripts/pipeline.sh) assumes the decommissioned layout (a /build
