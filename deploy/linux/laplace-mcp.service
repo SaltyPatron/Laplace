@@ -1,0 +1,33 @@
+[Unit]
+Description=Laplace MCP (Streamable HTTP, MCP 2025-06-18) over the site's database
+Documentation=https://github.com/SaltyPatron/Laplace
+# The cluster is Laplace-Operations' (pgdata.service); site-host.sh installs this unit.
+After=network.target pgdata.service
+Wants=pgdata.service
+# Nothing to run until deploy/linux/site.sh has published the server once, and the host has its token.
+ConditionPathExists=/opt/laplace/app/mcp-runtime/Laplace.Endpoints.Mcp.dll
+ConditionPathExists=/opt/laplace/secrets/mcp.env
+
+[Service]
+Type=simple
+User=laplace-runner
+Group=laplace-runner
+UMask=0002
+Environment=TMPDIR=/opt/laplace/tmp
+Environment=TMP=/opt/laplace/tmp
+Environment=TEMP=/opt/laplace/tmp
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+WorkingDirectory=/opt/laplace/app/mcp-runtime
+# Non-secret runtime config (database, perf-cache, the loopback port, the origin), written by site.sh publish.
+EnvironmentFile=/opt/laplace/app/laplace-mcp.env
+# The bearer token every caller presents (LAPLACE_MCP_TOKEN), made once by site-host.sh.
+EnvironmentFile=/opt/laplace/secrets/mcp.env
+ExecStart=/usr/bin/dotnet /opt/laplace/app/mcp-runtime/Laplace.Endpoints.Mcp.dll --http
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+SyslogIdentifier=laplace-mcp
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=deploy/linux/site.sh asks for laplace-mcp to be restarted (it writes /run/lock/laplace/restart-mcp)
+
+[Path]
+PathChanged=/run/lock/laplace/restart-mcp
+
+[Install]
+WantedBy=multi-user.target

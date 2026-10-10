@@ -13,7 +13,9 @@ internal sealed record McpHttpOptions(string Token, string Origin, int Port = 51
 {
     public static McpHttpOptions FromEnvironment() => new(
         LaplaceInstall.TryReadConfig("LAPLACE_MCP_TOKEN", "mcp.env") ?? "",
-        Environment.GetEnvironmentVariable("LAPLACE_MCP_ORIGIN") ?? "https://hart-server:8443");
+        Environment.GetEnvironmentVariable("LAPLACE_MCP_ORIGIN") ?? "https://hart-server:8443",
+        // the loopback port the machine declares for this listener; 5188 when it declares none
+        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_MCP_HTTP_PORT"), out var port) ? port : 5188);
 
     public void Validate()
     {
