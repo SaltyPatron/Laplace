@@ -218,7 +218,7 @@ add_custom_command(
 )
 add_custom_target(laplace_attestation_codegen DEPENDS "${LAPLACE_CODEGEN_STAMP}")
 
-# zlib inflates the UCD .zip in process. Inflate output is deterministic, so any
+# zlib for in-process ZIP inflate. Inflate output is deterministic, so any
 # system or PostgreSQL zlib yields the same T0 input. On Windows it is located
 # through PGBIN.
 if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
