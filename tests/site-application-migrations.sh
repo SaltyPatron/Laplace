@@ -44,3 +44,16 @@ LAPLACE_INSTALL_PREFIX="$work/installed" bash -c 'set -euo pipefail; fail() { ec
 [[ "$(cat "$work/installed/share/laplace/cache")" == old ]]
 [[ "$(cat "$work/stage/share/laplace/cache")" == new ]]
 echo 'PASS receive stages caches without replacing the serving copy'
+
+# Selecting a restricted knowledge identity does not change the application login.
+sed -n '/^export PGHOST=/,/^export LAPLACE_EXTERNAL=/p' "$root/deploy/linux/site.sh" > "$work/connections.sh"
+(
+  unset LAPLACE_APP_ROLE LAPLACE_APP_DB LAPLACE_APP_PGPORT
+  export LAPLACE_ROLE=application_owner LAPLACE_KNOWLEDGE_ROLE=knowledge_runtime
+  export LAPLACE_PGHOST=knowledge.invalid LAPLACE_PGPORT=5432 LAPLACE_DBNAME=knowledge
+  export LAPLACE_APP_DBNAME=application LAPLACE_APP_PGHOST=127.0.0.1 LAPLACE_DB_SSLMODE=Require
+  source "$work/connections.sh"
+  [[ "$LAPLACE_DB" == 'Host=knowledge.invalid;Port=5432;Username=knowledge_runtime;Database=knowledge;SSL Mode=Require' ]]
+  [[ "$LAPLACE_APP_DB" == 'Host=127.0.0.1;Port=5432;Username=application_owner;Database=application' ]]
+)
+echo 'PASS knowledge selection preserves the distinct application identity'
