@@ -7,12 +7,13 @@ function Import-LaplaceEnv {
     if (-not (Test-Path $envCmd)) {
         throw "laplace-paths: missing $envCmd"
     }
-    $lines = cmd /d /c "`"$envCmd`" && set LAPLACE && set INGEST && set REPOS && set PGBIN"
+    $lines = cmd /d /c "`"$envCmd`" && set"
     if ($LASTEXITCODE -ne 0) { throw 'Laplace environment resolution failed' }
     # VS's developer shell sets Platform=x64, which is not a solution platform
     # in Laplace.slnx. This path import follows env.cmd's managed-build choice.
     Remove-Item Env:Platform -ErrorAction SilentlyContinue
     foreach ($line in $lines) {
+        if ($line -notmatch '^(LAPLACE_|CMAKE_|CTEST_|MKL_|TBB_|DOTNET_|PGBIN=|INGEST=|REPOS=|PATH=|ICU_ROOT=|MKLROOT=)') { continue }
         $eq = $line.IndexOf('=')
         if ($eq -le 0) { continue }
         $name = $line.Substring(0, $eq)
