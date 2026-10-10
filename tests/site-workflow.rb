@@ -79,4 +79,11 @@ class SiteWorkflow < Minitest::Test
     assert_equal 'all', settings.fetch('dev_suites')
     assert_equal false, settings.fetch('skip_if_superseded')
   end
+
+  def test_benchmark_targets_the_selected_host
+    workflow = YAML.load_file(File.expand_path('../.github/workflows/benchmark-evidence.yml', __dir__))
+    runners = workflow.fetch('jobs').values.map { |job| job.fetch('runs-on') }
+    assert_equal [['self-hosted', 'laplace', '${{ inputs.host }}']], runners
+    refute workflow.key?('concurrency')
+  end
 end
