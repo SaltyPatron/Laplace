@@ -67,4 +67,16 @@ class SiteWorkflow < Minitest::Test
       refute ignored.any? { |pattern| File.fnmatch?(pattern, path, File::FNM_PATHNAME | File::FNM_DOTMATCH) }, path
     end
   end
+
+  def test_legacy_full_qualification_stays_explicit_until_ported
+    audit = YAML.load_file(File.expand_path('../.github/workflows/full-qualification.yml', __dir__))
+    triggers = audit['on'] || audit[true]
+    assert triggers.key?('workflow_dispatch')
+    refute triggers.key?('schedule')
+    settings = audit.fetch('jobs').fetch('qualify').fetch('with')
+    assert_equal 'release-qualification', settings.fetch('stage')
+    assert_equal 'all', settings.fetch('build_components')
+    assert_equal 'all', settings.fetch('dev_suites')
+    assert_equal false, settings.fetch('skip_if_superseded')
+  end
 end

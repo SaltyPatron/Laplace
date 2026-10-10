@@ -179,16 +179,6 @@ class WorkflowArchitecture(unittest.TestCase):
                 self.assertIn('default: ""', block)
                 self.assertNotIn("default: all", block)
 
-    def test_full_qualification_audit_is_manual_and_weekly(self):
-        audit = (WORKFLOWS / "full-qualification.yml").read_text(encoding="utf-8")
-        self.assertIn("name: Audit — full product qualification", audit)
-        self.assertIn("workflow_dispatch:", audit)
-        self.assertIn("schedule:", audit)
-        self.assertIn("stage: release-qualification", audit)
-        self.assertIn("build_components: all", audit)
-        self.assertIn("dev_suites: all", audit)
-        self.assertIn("skip_if_superseded: false", audit)
-
     def test_candidate_reclamation_preserves_one_native_qualified_artifact_owner(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         self.assertIn("latest-source --suite native-dev", reusable)
