@@ -49,7 +49,7 @@ LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
 LAPLACE_SITE_URL="${LAPLACE_SITE_URL:-http://127.0.0.1:8080}"
 # the MCP endpoint (laplace-mcp.service): its loopback port, and the one browser origin it answers (a caller that
 # sends no Origin, as MCP clients do, is judged by its bearer token alone)
-LAPLACE_MCP_HTTP_PORT="${LAPLACE_MCP_HTTP_PORT:-5188}"
+LAPLACE_MCP_HTTP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # 5188 is Laplace-MCP's lpm serve where a host runs it, 5189 the Lichess service
 LAPLACE_MCP_ORIGIN="${LAPLACE_MCP_ORIGIN:-https://mcp.hartonomous.com}"
 LAPLACE_MCP_URL="http://127.0.0.1:$LAPLACE_MCP_HTTP_PORT"
 

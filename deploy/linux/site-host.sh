@@ -20,13 +20,19 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), as site.sh reads it: what this host
+# names differently from the defaults below is said there once, never on a command line
+if [[ -r /etc/laplace/machine.env ]]; then
+  # shellcheck disable=SC1091
+  set -a; set +u; . /etc/laplace/machine.env; set -u; set +a
+fi
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 RUN_USER="${LAPLACE_AGENT_USER:-laplace-runner}"
 RUN_GROUP="${LAPLACE_GROUP:-laplace-runner}"
 SITE_PORT="${LAPLACE_SITE_PORT:-8080}"
 LAN="${LAPLACE_LAN:-192.168.1.0/24}"
 LOCKS="${LAPLACE_LOCKS:-/run/lock/laplace}"
-MCP_PORT="${LAPLACE_MCP_HTTP_PORT:-5188}"
+MCP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # the same default as site.sh; a machine that declares another says so in /etc/laplace/machine.env
 
 [[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
@@ -57,7 +63,7 @@ echo "=== the MCP endpoint"
 # The MCP server takes only a database route the host itself authenticates: the cluster's Unix-domain socket
 # (ManagedServiceDatabase). A host whose database is another machine's (a hosting host: LAPLACE_PGHOST in
 # /etc/laplace/machine.env names it) cannot run it, and is told so here in place of a unit that would never start.
-DB_HOST="${LAPLACE_PGHOST:-$(sed -n 's/^LAPLACE_PGHOST=//p' /etc/laplace/machine.env 2>/dev/null | tail -1)}"; DB_HOST="${DB_HOST:-/tmp}"
+DB_HOST="${LAPLACE_PGHOST:-/tmp}"
 if [[ "$DB_HOST" != /* ]]; then
   say "laplace-mcp.service" "not declared: this host's database is $DB_HOST, not a local socket (the MCP endpoint runs where the database is)"
 else
@@ -82,7 +88,7 @@ fi
 
 echo "=== nginx"
 command -v nginx >/dev/null || { echo "nginx is not installed: apt-get install nginx"; exit 1; }
-sed "s|127.0.0.1:5188;|127.0.0.1:$MCP_PORT;|" "$HERE/nginx-laplace.conf" > /etc/nginx/sites-available/laplace; chmod 0644 /etc/nginx/sites-available/laplace
+sed "s|127.0.0.1:5190;|127.0.0.1:$MCP_PORT;|" "$HERE/nginx-laplace.conf" > /etc/nginx/sites-available/laplace; chmod 0644 /etc/nginx/sites-available/laplace
 ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
 rm -f /etc/nginx/sites-enabled/laplace-managed
 nginx -t -q
