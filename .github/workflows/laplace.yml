@@ -37,13 +37,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: laplace-site-hart-server
-  cancel-in-progress: false
-
+# Each job queues in its own group, and none is held for the whole run: a run whose production job waits for approval
+# (environment: production) would otherwise hold staging's group until someone answers, and every later delivery to
+# staging would wait behind it, each new one replacing the one waiting before it.
 jobs:
   deliver:
     name: Staging — build, migrate, publish, read back on hart-server
+    concurrency:
+      group: laplace-site-hart-server
+      cancel-in-progress: false
     runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 240
     env:
