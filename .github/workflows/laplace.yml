@@ -1,5 +1,5 @@
 name: Product — main delivery
-run-name: "Deliver main — staging on hart-server, then production: built on hart-cloud, hosted on hart-prod — ${{ github.sha }}"
+run-name: "Deliver main — staging on hart-server${{ github.event_name == 'workflow_dispatch' && inputs.production && ', then production: built on hart-cloud, hosted on hart-prod' || '' }} — ${{ github.sha }}"
 
 # Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
 # declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
@@ -28,6 +28,10 @@ on:
       - "vault-data-directories.list"
   workflow_dispatch:
     inputs:
+      production:
+        description: "after staging has passed in this run: build on the knowledge host and publish on the hosting host. The dispatch is the gate; nothing waits for a click."
+        type: boolean
+        default: false
       seed:
         description: "after the deploy: none; foundation (ensure-foundation.sh into laplace-mono); reset-foundation (laplace-mono dropped, made again, migrated, then the foundation)"
         type: choice
@@ -37,9 +41,9 @@ on:
 permissions:
   contents: read
 
-# Each job queues in its own group, and none is held for the whole run: a run whose production job waits for approval
-# (environment: production) would otherwise hold staging's group until someone answers, and every later delivery to
-# staging would wait behind it, each new one replacing the one waiting before it.
+# Each job queues in its own group, and none is held for the whole run. Production is gated by the dispatch itself, as
+# Laplace-Operations gates its own (the `production` input): no environment approval, so no run ever waits for a click
+# and holds a group while later deliveries queue and cancel one another behind it (2026-10-10).
 jobs:
   deliver:
     name: Staging — build, migrate, publish, read back on hart-server
@@ -79,10 +83,10 @@ jobs:
         run: deploy/linux/site.sh smoke
 
   production-build:
-    name: Production — built, migrated and staged on the knowledge host (hart-cloud), after approval
+    name: Production — built, migrated and staged on the knowledge host (hart-cloud), on dispatch
     needs: deliver
+    if: github.event_name == 'workflow_dispatch' && inputs.production == true
     runs-on: [self-hosted, laplace, Laplace, knowledge]
-    environment: production
     timeout-minutes: 240
     concurrency:
       group: laplace-site-knowledge
