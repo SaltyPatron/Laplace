@@ -417,7 +417,7 @@ phase_smoke() {
     code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
     printf '  %-44s %s\n' "$LAPLACE_SITE_URL/mcp, no token" "$code"; echo "| \`$LAPLACE_SITE_URL/mcp\` without a token (401) | $code |" >> "$SUMMARY"; [[ "$code" == 401 ]] || rc=1
     token="$(sed -n 's/^LAPLACE_MCP_TOKEN=//p' "$LAPLACE_INSTALL_PREFIX/secrets/mcp.env" 2>/dev/null | head -1)"
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' -H "Authorization: Bearer $token" -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "Authorization: Bearer $token" -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
     printf '  %-44s %s\n' "$LAPLACE_SITE_URL/mcp, initialize" "$code"; echo "| \`$LAPLACE_SITE_URL/mcp\` initialize, with the token | $code |" >> "$SUMMARY"; [[ "$code" == 200 ]] || rc=1
   else
     echo "  laplace-mcp.service is not declared on this host: sudo bash deploy/linux/site-host.sh"; echo "| MCP endpoint | not declared on this host |" >> "$SUMMARY"
