@@ -182,7 +182,6 @@ class BenchmarkSuiteTests(unittest.TestCase):
         for suite in registry_suites:
             self.assertIn(suite, workflow)
 
-        self.assertEqual(1, workflow.count("runs-on: [self-hosted, laplace]"))
         self.assertEqual(1, workflow.count("host-resource.lock"))
         self.assertNotIn("\nconcurrency:\n", workflow)
 

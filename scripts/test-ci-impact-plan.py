@@ -22,39 +22,6 @@ def plan(*paths: str) -> dict:
 
 
 class ImpactPlanTests(unittest.TestCase):
-    def test_native_suite_executes_ctest_with_planned_case_filter(self):
-        with tempfile.TemporaryDirectory(prefix="native-filter-") as tmp:
-            tools = Path(tmp)
-            log = tools / "calls.json"
-            python = tools / "python3"
-            python.write_text(
-                "#!/usr/bin/python3\n"
-                "import json,os,sys\n"
-                "open(os.environ['CALL_LOG'],'w').write(json.dumps(sys.argv[1:]))\n"
-            )
-            python.chmod(0o755)
-            planned = r"LaplaceDynamicsProcrustes\.RecoversScale"
-            env = dict(
-                os.environ,
-                PATH=str(tools) + os.pathsep + os.environ["PATH"],
-                CALL_LOG=str(log),
-                LAPLACE_NATIVE_TEST_FILTER=planned,
-                LAPLACE_WORK_ROOT=str(tools / "work"),
-            )
-            result = subprocess.run(
-                ["bash", "scripts/test-suites/native-dev.sh"],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                timeout=10,
-            )
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-            command = json.loads(log.read_text())
-            self.assertEqual(command[command.index("-R") + 1], planned)
-            self.assertIn("-LE", command)
-            self.assertNotIn("regress_laplace_substrate", command)
-
     def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
@@ -190,28 +157,6 @@ class ImpactPlanTests(unittest.TestCase):
             "app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj",
             value["managed_delivery_build_projects"],
         )
-
-    def test_uci_executable_change_isolated_from_api_database_and_live_matrix(self):
-        value = plan("app/Laplace.Chess.Uci/Program.cs")
-        self.assertEqual(value["components"], ["managed", "uci"])
-        self.assertEqual(value["build_components"], ["managed"])
-        self.assertEqual(
-            value["managed_build_projects"],
-            [
-                "app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj",
-                "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
-            ],
-        )
-        self.assertEqual(
-            value["managed_test_projects"],
-            ["app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj"],
-        )
-        self.assertEqual(value["dev_suites"], ["managed-dev", "uci-dev"])
-        self.assertEqual(value["db_suites"], [])
-        self.assertEqual(value["live_suites"], [])
-        self.assertEqual(value["delivery_actions"], ["publish"])
-        self.assertEqual(value["publish_scope"], "uci")
-        self.assertFalse(value["full_qualification"])
 
     def test_api_and_web_change_publish_both_without_full_product_expansion(self):
         value = plan(

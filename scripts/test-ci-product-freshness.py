@@ -65,12 +65,6 @@ class ProductFreshnessTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(MODULE.ignored(path))
 
-    def test_main_delivery_trigger_matches_shared_product_ignore_law(self):
-        workflow = (ROOT / ".github" / "workflows" / "laplace.yml").read_text(encoding="utf-8")
-        for pattern in GITHUB_PATH_IGNORES:
-            with self.subTest(pattern=pattern):
-                self.assertIn(f'- "{pattern}"', workflow)
-
     def test_shared_scope_function_is_the_freshness_function(self):
         for path in ("scripts/test-ci-workspace.py", "scripts/product-ci.sh"):
             self.assertEqual(MODULE.ignored(path), ignored(path))

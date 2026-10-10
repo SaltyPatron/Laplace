@@ -12,7 +12,7 @@
 #   deploy/linux/site.sh seed             the foundation (scripts/ensure-foundation.sh) into the database
 #   deploy/linux/site.sh reset seed       the database dropped and made again, then the foundation
 #
-# Phases: externals build install database extensions migrate app publish restart smoke   (and: reset seed serve)
+# Phases: externals build install database extensions migrate app publish restart smoke   (and: configure migrate_app reset seed serve)
 #         bundle: what the hosting host receives, after app; receive: on the hosting host, before publish
 #
 # The machine is set up once by root with deploy/linux/site-host.sh (directories, the unit, nginx, the restart
@@ -29,9 +29,16 @@ if [[ -z "${LAPLACE_PG_DIR:-}" && -r "${LAPLACE_OPERATIONS:-/repos/src/Laplace-O
 fi
 # the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), whichever way the rest arrived: where
 # its databases are (LAPLACE_PGHOST, LAPLACE_APP_DBNAME, LAPLACE_APP_PGHOST), what the runner's environment does not carry
+if [[ -d /etc/laplace && ! -x /etc/laplace ]]; then
+  echo '::error::cannot traverse /etc/laplace; refusing to use another machine configuration' >&2
+  exit 1
+fi
 if [[ -r /etc/laplace/machine.env ]]; then
   # shellcheck disable=SC1091
   set -a; set +u; . /etc/laplace/machine.env; set -u; set +a
+elif [[ -e /etc/laplace/machine.env ]]; then
+  echo '::error::cannot read /etc/laplace/machine.env' >&2
+  exit 1
 fi
 
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-${LAPLACE_PG_DIR:-/usr/local/pgsql}}"
@@ -83,6 +90,14 @@ SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 say()  { echo; echo "=== $*   $(date -u +%H:%M:%S)"; }
 fail() { echo "::error::$*" >&2; exit 1; }
+revision() {
+  local app="$1" rev web
+  [[ -r "$app/.laplace-source-revision" && -r "$app/wwwroot/.laplace-web-source-revision" ]] || fail "missing application or web revision receipt in $app"
+  rev=$(cat "$app/.laplace-source-revision"); web=$(cat "$app/wwwroot/.laplace-web-source-revision")
+  [[ "$rev" =~ ^[0-9a-f]{40}$ && "$rev" == "$web" ]] || fail "invalid or mismatched application/web revisions in $app"
+  [[ -z "${GITHUB_SHA:-}" || "$rev" == "$GITHUB_SHA" ]] || fail "bundle revision $rev differs from workflow revision $GITHUB_SHA"
+  printf '%s\n' "$rev"
+}
 sql()  { psql -X -v ON_ERROR_STOP=1 -At "$@"; }
 oneapi() {
   [[ -n "${SETVARS_COMPLETED:-}" ]] && return 0
@@ -266,6 +281,8 @@ phase_app() {
   rm -rf "$stage"; mkdir -p "$stage"
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" -c Release --no-self-contained -o "$stage/app" -v minimal --nologo
   dotnet_app publish "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release --no-self-contained -o "$stage/app/migrations" -v minimal --nologo
+  mkdir -p "$stage/app/migrations/db/migrations"
+  cp -a "$ROOT/db/migrations/." "$stage/app/migrations/db/migrations/"
   [[ -f "$ROOT/web/openapi/openapi.json" ]] || fail "the endpoint build did not write web/openapi/openapi.json"
   ( cd "$ROOT/web"
     lock="$(sha256sum package-lock.json | cut -d' ' -f1)"
@@ -325,7 +342,13 @@ EOF
 phase_publish() {
   say "publish into $LAPLACE_APP_DIR"
   [[ -d "$SITE_WORK/stage/app" ]] || fail "nothing staged: run the app phase first"
+  revision "$SITE_WORK/stage/app" >/dev/null
   [[ -d "$LAPLACE_APP_DIR" && -w "$LAPLACE_APP_DIR" ]] || fail "$LAPLACE_APP_DIR is missing or not writable: sudo deploy/linux/site-host.sh"
+  if [[ -d "$SITE_WORK/stage/share/laplace" ]]; then
+    [[ -d "$LAPLACE_INSTALL_PREFIX/share" && -w "$LAPLACE_INSTALL_PREFIX/share" ]] || fail "$LAPLACE_INSTALL_PREFIX/share is missing or not writable"
+    mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace"
+    rsync -a --delete "$SITE_WORK/stage/share/laplace/" "$LAPLACE_INSTALL_PREFIX/share/laplace/"
+  fi
   rsync -a --delete --delay-updates \
     --exclude 'laplace-api.env' --exclude 'laplace-mcp.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'releases/' \
     "$SITE_WORK/stage/app/" "$LAPLACE_APP_DIR/"
@@ -333,6 +356,14 @@ phase_publish() {
   api_env
   mcp_env
   echo "  $(cat "$LAPLACE_APP_DIR/.laplace-source-revision")"
+}
+
+# Regenerate runtime configuration without rebuilding or replacing application files.
+phase_configure() {
+  say "configure runtime environment"
+  [[ -d "$LAPLACE_APP_DIR" && -w "$LAPLACE_APP_DIR" ]] || fail "$LAPLACE_APP_DIR is not writable"
+  api_env
+  mcp_env
 }
 
 # The runner has no sudo: a root-owned path unit (site-host.sh) restarts laplace-api when this file changes.
@@ -375,6 +406,7 @@ phase_bundle() {
   say "bundle for the hosting host"
   local b="$SITE_WORK/bundle"
   [[ -d "$SITE_WORK/stage/app" ]] || fail "nothing staged: run the app phase first"
+  revision "$SITE_WORK/stage/app" >/dev/null
   rm -rf "$b"; mkdir -p "$b/share"
   cp -a "$SITE_WORK/stage/app" "$b/app"
   cp -a "$LAPLACE_INSTALL_PREFIX/share/laplace" "$b/share/laplace"
@@ -385,17 +417,19 @@ phase_receive() {
   say "receive the bundle"
   local b="$SITE_WORK/bundle"
   [[ -f "$b/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "no bundle at $b/app: the knowledge host's bundle phase makes it"
-  rm -rf "$SITE_WORK/stage"; mkdir -p "$SITE_WORK/stage"; cp -a "$b/app" "$SITE_WORK/stage/app"
-  [[ -d "$LAPLACE_INSTALL_PREFIX/share" && -w "$LAPLACE_INSTALL_PREFIX/share" ]] || fail "$LAPLACE_INSTALL_PREFIX/share is missing or not writable: sudo deploy/linux/site-host.sh"
-  mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace"
-  rsync -a --delete "$b/share/laplace/" "$LAPLACE_INSTALL_PREFIX/share/laplace/"
+  revision "$b/app" >/dev/null
+  [[ -d "$b/share/laplace" ]] || fail "bundle perf-caches are missing"
+  rm -rf "$SITE_WORK/stage"; mkdir -p "$SITE_WORK/stage/share"
+  cp -a "$b/app" "$SITE_WORK/stage/app"
+  cp -a "$b/share/laplace" "$SITE_WORK/stage/share/laplace"
   echo "  $(cat "$SITE_WORK/stage/app/.laplace-source-revision")"
 }
 
 # ------------------------------------------------------------------------------------------------ smoke
 phase_smoke() {
   say smoke
-  local rc=0 url code
+  local rc=0 url code installed_revision
+  if ! installed_revision=$(revision "$LAPLACE_APP_DIR"); then installed_revision=unknown; rc=1; fi
   {
     echo "### Laplace monorepo site on $(hostname)"
     echo
@@ -428,7 +462,7 @@ phase_smoke() {
   echo "| \`$LAPLACE_API_URL/health/ready\` (not required) | $code $(head -c 120 "$SITE_WORK/ready.json" 2>/dev/null | tr '|' '/') |" >> "$SUMMARY"
   {
     echo
-    echo "- revision: \`$(cat "$LAPLACE_APP_DIR/.laplace-source-revision" 2>/dev/null || git -C "$ROOT" rev-parse HEAD)\`"
+    echo "- revision: \`$installed_revision\`"
     echo "- database: \`$LAPLACE_DBNAME\` on \`$PGHOST:$PGPORT\`; $(sql -c "SELECT string_agg(extname || ' ' || extversion, ', ' ORDER BY extname) FROM pg_extension WHERE extname LIKE 'laplace%'" 2>/dev/null)"
     echo "- size: $(sql -c "SELECT pg_size_pretty(pg_database_size(current_database()))" 2>/dev/null)"
   } >> "$SUMMARY"
@@ -462,10 +496,18 @@ phase_serve() {
     exec dotnet "$app/Laplace.Endpoints.OpenAICompat.dll"
 }
 
+phase_migrate_app() {
+  [[ -n "${LAPLACE_APP_DB:-}" ]] || fail "migrate_app requires the declared application database"
+  local app="$SITE_WORK/stage/app"
+  revision "$app" >/dev/null
+  [[ -d "$app/migrations/db/migrations" ]] || fail "staged migration scripts are missing"
+  LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" dotnet "$app/migrations/Laplace.Migrations.dll" app-up
+}
+
 phases=("$@"); [[ ${#phases[@]} -gt 0 ]] || phases=(externals build install database extensions migrate app publish restart smoke)
 for p in "${phases[@]}"; do
   case "$p" in
-    externals|build|install|database|reset|migrate|extensions|app|bundle|receive|publish|restart|smoke|seed|serve) "phase_$p" ;;
+    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|seed|serve) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done

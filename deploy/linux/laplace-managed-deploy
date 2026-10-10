@@ -834,8 +834,10 @@ def configure_tls(address, network, hostname):
             "--property=ActiveState", "--value") == "active"
         if changed or renew or not was_enabled or not nginx_active:
             run("/usr/sbin/nginx", "-t")
-            # nginx is managed host infrastructure. `reload` cannot recover an
-            # inactive unit, so an inactive nginx is started.
+            # nginx is managed host infrastructure, not an application payload.
+            # Reconciliation must restore it when the machine or service has
+            # restarted; `reload` alone cannot recover an inactive unit and left
+            # every downstream install/DB/product job skipped.
             run("/usr/bin/systemctl", "reload" if nginx_active else "start", "nginx")
     except Exception:
         if previous is not None:

@@ -26,6 +26,27 @@ on:
       - ".github/**"
       - "docs/**"
       - "**/*.md"
+      - "tests/**"
+      - "scripts/ci-impact-plan.py"
+      - "scripts/ci-qualification-cache.py"
+      - "scripts/ci-product-freshness.py"
+      - "scripts/ci_product_scope.py"
+      - "scripts/test-parallel.sh"
+      - "scripts/product-ci.sh"
+      - "deploy/linux/deploy.sh"
+      - "scripts/publish-applications.sh"
+      - "scripts/test-suites/**"
+      - "scripts/ci_managed_projects.py"
+      - "scripts/test-*.py"
+      - "scripts/test-*.sh"
+      - "scripts/tests/**"
+      - "web/scripts/test-*.mjs"
+      - "web/e2e/**"
+      - "scripts/test-workflow-architecture.py"
+      - "scripts/test-seed-workflow-ownership.py"
+      - "scripts/test-product-ci-artifact-ownership.py"
+      - "scripts/test-benchmark-suite.py"
+      - "scripts/validate-pipeline.py"
       - "vault-data-inventory.tsv"
       - "vault-data-directories.list"
 
@@ -104,12 +125,12 @@ jobs:
         # The host stops itself when idle (Laplace-Operations setup.sh idlestop), and a job queued behind its
         # concurrency group or waiting for the runner is not running on it yet: on 2026-10-10 the host stopped under
         # run 38023100147 after thirty idle minutes. The lease in the instance's metadata, this run's id and an expiry
-        # the build job's timeout away, is what the idle stop reads; the release job below removes it when the build
-        # job has run, whatever its result, and the expiry ends it if nothing does.
+        # the build and hosting jobs' combined timeouts away, is what the idle stop reads; release waits for hosting
+        # verification, whatever its result, and the expiry ends it if nothing does.
         run: |
           set -euo pipefail
           gcloud compute instances add-metadata hart-cloud --zone us-east1-b --quiet \
-            --metadata "laplace-lease=${{ github.run_id }} $(( $(date +%s) + 240 * 60 ))"
+            --metadata "laplace-lease=${{ github.run_id }} $(( $(date +%s) + 300 * 60 ))"
 
   production-build:
     name: Production — built, migrated and staged on the knowledge host (hart-cloud)
@@ -154,13 +175,14 @@ jobs:
         with:
           name: laplace-site-${{ github.sha }}
           path: ${{ steps.bundle.outputs.path }}
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           compression-level: 1
 
   knowledge-host-release:
     name: Production — the knowledge host released to stop itself when idle
-    needs: [knowledge-host, production-build]
+    needs: [knowledge-host, production-build, production]
     if: always() && needs.knowledge-host.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -210,8 +232,8 @@ jobs:
           name: laplace-site-${{ github.sha }}
           path: ${{ steps.bundle.outputs.path }}
 
-      - name: Receive, publish, restart
-        run: deploy/linux/site.sh receive publish restart
+      - name: Receive, migrate application database, publish, restart
+        run: deploy/linux/site.sh receive migrate_app publish restart
 
       - name: Read back
         run: deploy/linux/site.sh smoke

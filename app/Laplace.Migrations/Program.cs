@@ -10,8 +10,7 @@ namespace Laplace.Migrations;
 
 internal static class Program
 {
-    // Spectre.Console.Cli entrypoint with four verbs routed to the DbUp helpers (RunUp,
-    // RunStatus, RunReset, RunNuke). The connection string and --yes are resolved from the raw
+    // Spectre.Console.Cli entrypoint routes verbs to the DbUp helpers. The connection string and --yes are resolved from the raw
     // process args, independent of Spectre parsing. The CommandApp has no registrar because no
     // command takes constructor dependencies.
     public static int Main(string[] args)
@@ -21,6 +20,7 @@ internal static class Program
         {
             config.SetApplicationName("laplace-migrate");
             config.AddCommand<UpCommand>("up");
+            config.AddCommand<AppUpCommand>("app-up");
             config.AddCommand<StatusCommand>("status");
             config.AddCommand<ResetCommand>("reset");
             config.AddCommand<NukeCommand>("nuke");
@@ -41,7 +41,7 @@ internal static class Program
     // Route on the verb and hand the raw arguments to the resolver untouched. A leading flag
     // (no verb) means the default 'up', which Spectre needs as an explicit token. `--` keeps
     // Spectre from binding --database/--connection-string, which it does not model.
-    private static readonly string[] Verbs = { "up", "status", "reset", "nuke" };
+    private static readonly string[] Verbs = { "up", "app-up", "status", "reset", "nuke" };
     private static string[] Rewrite(string[] args)
     {
         if (args.Length == 0) return new[] { "up" };
@@ -57,7 +57,7 @@ internal static class Program
     private static int Dispatch(string command, Func<string, int> run)
     {
         var raw = Environment.GetCommandLineArgs().Skip(1).ToArray();
-        var connectionString = ResolveConnectionString(raw);
+        var connectionString = command == "app-up" ? LaplaceInstall.AppConnectionString() : ResolveConnectionString(raw);
         Console.WriteLine($"Laplace.Migrations: command={command}");
         Console.WriteLine($"Target database connection: {LaplaceInstall.RedactConnectionString(connectionString)}");
         return run(connectionString);
@@ -84,6 +84,13 @@ internal static class Program
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("up", RunUp);
     }
 
+    [System.ComponentModel.Description("Apply application migrations to LAPLACE_APP_DB only.")]
+    internal sealed class AppUpCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("app-up", _ => RunAppUp());
+    }
+
     [System.ComponentModel.Description("Show applied vs pending migrations.")]
     internal sealed class StatusCommand : Command<MigrateSettings>
     {
@@ -103,20 +110,29 @@ internal static class Program
     }
 
     private static int RunUp(string connectionString)
+        => RunUpTargets(Targets(connectionString));
+
+    private static int RunAppUp()
+    {
+        if (!LaplaceInstall.HasSeparateAppDatabase)
+            throw new InvalidOperationException("app-up requires LAPLACE_APP_DB; no database was changed.");
+        return RunUpTargets(new[] { (LaplaceInstall.AppConnectionString(), (Func<string, bool>)IsAppScript, "application database") });
+    }
+
+    private static int RunUpTargets(IEnumerable<(string target, Func<string, bool> filter, string label)> targets)
     {
         // File sink only: the human-facing report goes to stdout below; this is the
         // queryable record of which migration applied when, read through ops.app_log.
         using var loggerFactory = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
         var log = loggerFactory.CreateLogger("up");
 
-        EnsureDatabase.For.PostgresqlDatabase(connectionString);
         var applied = new List<DbUp.Engine.SqlScript>();
 
         // The app schema (accounts, sessions, keys, billing) has a database of its own when LAPLACE_APP_DB is set:
         // its scripts go there and nowhere else; the knowledge database takes the rest. One database takes all.
-        foreach (var (target, filter, label) in Targets(connectionString))
+        foreach (var (target, filter, label) in targets)
         {
-            if (target != connectionString) EnsureDatabase.For.PostgresqlDatabase(target);
+            EnsureDatabase.For.PostgresqlDatabase(target);
             var engine = BuildEngine(target, filter);
             var result = engine.PerformUpgrade();
             if (!result.Successful)
@@ -247,7 +263,10 @@ internal static class Program
     private static bool IsAppScript(string path)
     {
         var name = Path.GetFileName(path);
-        return name.Contains("_app_", StringComparison.Ordinal) || name.Contains("_browser_", StringComparison.Ordinal);
+        var separator = name.IndexOf('_');
+        if (separator < 0) return false;
+        var scope = name[(separator + 1)..];
+        return scope.StartsWith("app_", StringComparison.Ordinal) || scope.StartsWith("browser_", StringComparison.Ordinal);
     }
 
     // Where the scripts go: the knowledge database and, when LAPLACE_APP_DB names one, the application database.
