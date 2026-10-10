@@ -49,7 +49,7 @@ function Set-BenchEnv([string]$h) {
     $env:LAPLACE_PGHOST = $h
     $env:LAPLACE_PGUSER = $u
     $env:LAPLACE_DBNAME = $BenchDb
-    $env:LAPLACE_DB     = "Host=$h;Username=$u;Password=postgres;Database=$BenchDb;Command Timeout=0"
+    $env:LAPLACE_DB     = "Host=$h;Username=$u;Database=$BenchDb;Command Timeout=0"
     $env:LAPLACE_ENV_LOADED = $null
 }
 

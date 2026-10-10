@@ -1106,15 +1106,10 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_readonly') THEN
         CREATE ROLE laplace_readonly WITH LOGIN;
     END IF;
-    -- 'postgres' convenience superuser (password 'postgres') for LAN clients
-    -- that default to postgres:postgres. The custom cluster initdb's as
-    -- laplace_admin, so this role does not exist otherwise — its absence is the
-    -- "role postgres does not exist" LAN-connect failure. Kept in the managed
-    -- block so a redeploy re-ensures it.
+    -- The custom cluster initializes as laplace_admin. An additional administrator
+    -- role starts without password authentication until its credential is provisioned.
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
-        CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE PASSWORD 'postgres';
-    ELSE
-        ALTER ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';
+        CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE;
     END IF;
 END $$;
 PG_EOF
