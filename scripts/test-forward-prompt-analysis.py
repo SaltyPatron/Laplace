@@ -279,14 +279,15 @@ def main() -> int:
     assert drop_trace in walk
     assert walk.index(drop_frontier) < walk.index(drop_trace)
 
-    # Natural chat answers an open turn with the joint meeting of its content
-    # terms first, then carries exact session state into this same program under
-    # the governed firmware image's policy rather than literal envelopes.
+    # Natural chat enters the forward program for every open turn (spec 36; read-path.md: no single
+    # operation "is the read architecture by itself"). The joint meeting of the turn's content terms is
+    # COUPLE, the program's second phase, never a separate first answer. The envelope comes from the
+    # governed firmware image, not from literals.
     natural = re.search(r"IF shape IS NULL THEN(.*?)\n    ELSE\n", chat, re.S)
     assert natural is not None
     natural_body = natural.group(1)
-    assert "out := converse.answer(p_prompt, p_lang);" in natural_body
-    assert natural_body.index("converse.answer(") < natural_body.index("converse.forward_turn(")
+    assert "converse.answer(" not in natural_body, "an open turn must not be answered by one phase before the program"
+    assert "converse.forward_turn(" in natural_body
     call = re.search(r"FROM converse\.firmware\(\) f,\s*converse\.forward_turn\(\s*"
                      r"p_prompt,\s*p_session,\s*f\.steps,\s*f\.max_stride,\s*f\.spread,"
                      r"\s*f\.top_k,\s*NULL::bigint,\s*f\.semantic_hops,\s*f\.fanout\)",

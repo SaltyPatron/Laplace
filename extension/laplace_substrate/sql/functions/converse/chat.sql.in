@@ -55,17 +55,17 @@ BEGIN
     -- Natural turns enter forward_text with the canonical prompt root. Explicit
     -- query shapes remain typed inspection requests; they do not interpret chat.
     IF shape IS NULL THEN
-        -- An open turn is answered by the joint meeting of its content terms;
-        -- the forward walk continues a turn that has no such meeting.
-        out := converse.answer(p_prompt, p_lang);
-        IF COALESCE(btrim(out), '') = '' THEN
-            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
-            FROM converse.firmware() f,
-                 converse.forward_turn(
-                     p_prompt, p_session, f.steps, f.max_stride, f.spread, f.top_k,
-                     NULL::bigint,
-                     f.semantic_hops, f.fanout) g;
-        END IF;
+        -- An open turn enters the forward program, every time: COUPLE's joint meeting of the turn's content
+        -- terms is that program's second phase (spec 36), not an answer of its own, and no phase's result is
+        -- handed back in place of the program's (read-path.md: one operation inside the machine "is not the
+        -- read architecture by itself"; OPERATING_SEQUENCE.md: the surfaces "do not implement rival cognition
+        -- paths"). The envelope is the firmware image's, never a literal.
+        SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+        FROM converse.firmware() f,
+             converse.forward_turn(
+                 p_prompt, p_session, f.steps, f.max_stride, f.spread, f.top_k,
+                 NULL::bigint,
+                 f.semantic_hops, f.fanout) g;
     ELSE
 
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
