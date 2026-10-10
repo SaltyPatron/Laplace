@@ -85,10 +85,12 @@ jobs:
           set -euo pipefail
           : "${LAPLACE_WORK:?the runner's environment names no LAPLACE_WORK (Laplace-Operations agents.sh)}"
           : "${LAPLACE_PG_DIR:?the runner's environment names no LAPLACE_PG_DIR (Laplace-Operations agents.sh)}"
+          : "${LAPLACE_BUILD:?the runner's environment names no LAPLACE_BUILD (Laplace-Operations agents.sh)}"
           {
             printf 'LAPLACE_EXTERNAL=%s\n'   "${LAPLACE_EXTERNAL:-$LAPLACE_WORK/mono-site/external}"
             printf 'LAPLACE_PG_PREFIX=%s\n'  "${LAPLACE_PG_PREFIX:-$LAPLACE_PG_DIR}"
             printf 'LAPLACE_WORK_ROOT=%s\n'  "${LAPLACE_WORK_ROOT:-$LAPLACE_WORK/bench}"
+            printf 'LAPLACE_BUILD_VOLUME=%s\n' "${LAPLACE_BUILD_VOLUME:-$LAPLACE_BUILD}"
           } >> "$GITHUB_ENV"
           echo "host $(hostname): external ${LAPLACE_EXTERNAL:-$LAPLACE_WORK/mono-site/external}, pg ${LAPLACE_PG_PREFIX:-$LAPLACE_PG_DIR}, work ${LAPLACE_WORK_ROOT:-$LAPLACE_WORK/bench}"
 

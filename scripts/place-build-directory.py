@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Place a checkout's build directory on /build without discarding existing output."""
+"""Place a checkout's build directory on the build volume (/build, or LAPLACE_BUILD_VOLUME) without discarding existing output."""
 import fcntl
 import hashlib
 import json
@@ -53,14 +53,23 @@ def canonicalize_cmake_cache(target, lock_root, identity):
 
 
 def place(checkout):
-    if subprocess.run(['mountpoint', '-q', '/build']).returncode:
-        raise RuntimeError('/build must be mounted')
+    # The volume the build lives on: the host's declaration names it (LAPLACE_BUILD_VOLUME, the runner's build root on
+    # a Laplace-Operations host); without one, the monorepo's own hosts mount /build, and it must be mounted.
+    volume = os.environ.get('LAPLACE_BUILD_VOLUME')
+    if volume:
+        if not Path(volume).is_dir():
+            raise RuntimeError(f'LAPLACE_BUILD_VOLUME is not a directory: {volume}')
+    else:
+        volume = '/build'
+        if subprocess.run(['mountpoint', '-q', volume]).returncode:
+            raise RuntimeError('/build must be mounted (or LAPLACE_BUILD_VOLUME must name the build volume)')
+    volume = Path(volume)
     checkout = checkout.resolve(strict=True)
     identity = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
-    target = Path('/build/laplace/build') / ('laplace-' + identity)
-    old_target = Path('/build/laplace/build') / ('legacy-' + identity)
+    target = volume / 'laplace/build' / ('laplace-' + identity)
+    old_target = volume / 'laplace/build' / ('legacy-' + identity)
     source = checkout / 'build'
-    lock_root = Path('/build/laplace/work/build-placement')
+    lock_root = volume / 'laplace/work/build-placement'
     lock_root.mkdir(parents=True, exist_ok=True)
     with (lock_root / (identity + '.lock')).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
