@@ -40,9 +40,14 @@ PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 RUN_USER="${LAPLACE_AGENT_USER:-laplace-runner}"
 RUN_GROUP="${LAPLACE_GROUP:-laplace-runner}"
 SITE_PORT="${LAPLACE_SITE_PORT:-8080}"
+API_UPSTREAM="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
+[[ "$SITE_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$SITE_PORT > 0 && 10#$SITE_PORT <= 65535 )) || { echo 'Invalid LAPLACE_SITE_PORT' >&2; exit 1; }
+[[ "$API_UPSTREAM" =~ ^https?://[A-Za-z0-9.:-]+$ ]] || { echo 'Invalid LAPLACE_API_URL origin' >&2; exit 1; }
 LAN="${LAPLACE_LAN:-192.168.1.0/24}"
 LOCKS="${LAPLACE_LOCKS:-/run/lock/laplace}"
 MCP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # the same default as site.sh; a machine that declares another says so in /etc/laplace/machine.env
+MCP_UPSTREAM="${LAPLACE_MCP_UPSTREAM:-http://127.0.0.1:$MCP_PORT}"
+[[ "$MCP_UPSTREAM" =~ ^https?://[A-Za-z0-9.:-]+$ ]] || { echo 'Invalid LAPLACE_MCP_UPSTREAM origin' >&2; exit 1; }
 
 # Never an old script. This runs from a person's checkout, which nothing else keeps current: before anything is
 # changed, the checkout is brought to its upstream by the account that owns it (never as root), and what arrived is
@@ -81,6 +86,8 @@ for d in "$PREFIX" "$PREFIX/app" "$PREFIX/app/logs" "$PREFIX/app/mcp-runtime" "$
 say "$PREFIX" "$RUN_USER:$RUN_GROUP 2775; secrets 2770"
 # the restart trigger's directory is Operations' (setup.sh shared: tmpfiles at boot); made here too if it is not yet
 [[ -d "$LOCKS" ]] || { install -d -g "$RUN_GROUP" -m 2775 "$LOCKS"; say "$LOCKS" "made (Operations setup.sh declares it at boot)"; }
+if ! [[ /proc/self/fd/8 -ef "$LOCKS/host-resource.lock" ]]; then exec 8>>"$LOCKS/host-resource.lock"; fi
+flock -xn 8 || { echo 'Another deployment or ingest owns the host lock' >&2; exit 1; }
 
 echo "=== units"
 install -m 0644 "$HERE/laplace-api.service" /etc/systemd/system/laplace-api.service
@@ -122,12 +129,16 @@ fi
 
 echo "=== nginx"
 command -v nginx >/dev/null || { echo "nginx is not installed: apt-get install nginx"; exit 1; }
-sed "s|127.0.0.1:5190;|127.0.0.1:$MCP_PORT;|" "$HERE/nginx-laplace.conf" > /etc/nginx/sites-available/laplace; chmod 0644 /etc/nginx/sites-available/laplace
+sed -e "s|http://127.0.0.1:5190;|$MCP_UPSTREAM;|" \
+    -e "s|http://127.0.0.1:5187;|$API_UPSTREAM;|" \
+    -e "s|listen 8080;|listen $SITE_PORT;|" \
+    -e "s|listen \[::\]:8080;|listen [::]:$SITE_PORT;|" \
+    "$HERE/nginx-laplace.conf" > /etc/nginx/sites-available/laplace; chmod 0644 /etc/nginx/sites-available/laplace
 ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
 rm -f /etc/nginx/sites-enabled/laplace-managed
 nginx -t -q
 if systemctl is-active -q nginx; then systemctl reload nginx; else systemctl start nginx; fi
-say "nginx site laplace" ":$SITE_PORT -> 127.0.0.1:5187; /mcp -> 127.0.0.1:$MCP_PORT"
+say "nginx site laplace" ":$SITE_PORT -> $API_UPSTREAM; /mcp -> $MCP_UPSTREAM"
 
 echo "=== firewall"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
