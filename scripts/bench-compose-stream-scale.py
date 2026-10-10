@@ -22,6 +22,7 @@ import json
 import multiprocessing as mp
 import os
 from pathlib import Path
+import resource
 import sys
 import time
 from typing import Any
@@ -109,6 +110,19 @@ def run_stream_point(worker_count: int, cpus: list[int], repeats: int) -> dict[s
     }
 
 
+def memory_available_bytes() -> int:
+    with open("/proc/meminfo", encoding="ascii") as handle:
+        for line in handle:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    raise RuntimeError("/proc/meminfo has no MemAvailable")
+
+
+def children_peak_rss_bytes() -> int:
+    """Peak resident size of any finished child so far (Linux reports KiB)."""
+    return resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("corpus_dir", nargs="?", default=str(ROOT))
@@ -154,7 +168,27 @@ def main() -> int:
     print(f"mode        : replicated-independent-streams")
     print(f"worker pts  : {','.join(map(str, counts))}")
 
-    points = [run_stream_point(count, ordered_cpus, args.repeats) for count in counts]
+    # Every worker holds a whole tree of the corpus: the host's memory bounds the worker count as much as its cores do.
+    # The one-worker point runs first and measures the footprint; a higher point runs only when that many fit in what is
+    # available, less a reserve for PostgreSQL, the runner and the kernel. A point that does not fit is reported, not run:
+    # hart-cloud (31 GB, no swap) lost its runner to the OOM killer at six workers of a 130 M-node corpus (2026-10-10).
+    memory_reserve = int(os.environ.get("LAPLACE_BENCH_MEMORY_RESERVE_BYTES", str(2 << 30)))
+    points: list[dict[str, Any]] = []
+    not_run: list[dict[str, Any]] = []
+    footprint = 0
+    for count in sorted(counts):
+        available = memory_available_bytes()
+        if footprint and count * footprint > available - memory_reserve:
+            fit = max(1, (available - memory_reserve) // footprint)
+            not_run.append({"workers": count, "worker_footprint_bytes": footprint, "memory_available_bytes": available,
+                            "memory_reserve_bytes": memory_reserve, "workers_that_fit": int(fit)})
+            print(f"workers {count}: not run; {count} x {footprint/1e9:.2f} GB exceeds {available/1e9:.2f} GB available"
+                  f" less {memory_reserve/1e9:.2f} GB reserve ({fit} fit)")
+            continue
+        points.append(run_stream_point(count, ordered_cpus, args.repeats))
+        if count == 1:
+            footprint = children_peak_rss_bytes()
+            print(f"footprint   : {footprint/1e9:.2f} GB per worker (peak resident, 1-worker point)")
     baseline = next((point for point in points if int(point["workers"]) == 1), None)
     if baseline is None:
         raise RuntimeError("stream scaling requires a measured 1-worker baseline")
@@ -212,6 +246,9 @@ def main() -> int:
         "largest_document_fraction_of_corpus": largest_document_bytes / corpus_bytes,
         "top_document_bytes": top_document_bytes,
         "bpe_equivalence_chars_per_token": 4,
+        "worker_footprint_bytes": footprint,
+        "memory_reserve_bytes": memory_reserve,
+        "points_not_run_for_memory": not_run,
         "core_library": str(core),
         "t0_perfcache": str(t0),
         "repeats": args.repeats,
