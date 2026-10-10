@@ -203,8 +203,27 @@ def verify_storage_proof(base: str) -> None:
         raise ValueError("decomposition and storage proof disagree on canonical identity")
 
 
-def verify_stockfish() -> None:
+def stockfish_declared(prefix: Path) -> bool:
+    names = {"LAPLACE_STOCKFISH", "LAPLACE_STOCKFISH_SOURCE"}
+    if any(os.environ.get(name, "").strip() for name in names):
+        return True
+    config = prefix / "app/laplace-api.env"
+    if config.is_file():
+        for line in config.read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key in names and value.strip().strip("\"'"):
+                return True
+    return False
+
+
+def verify_stockfish() -> bool:
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
+    # Stockfish is an external chess-lab calculator, not Laplace's native chess
+    # engine. Every declared installation is checked; an API-only host need not
+    # acquire a calculation worker merely to serve the same substrate.
+    if not stockfish_declared(prefix):
+        print("Stockfish calculation worker: not configured on this host")
+        return False
     spec = importlib.util.spec_from_file_location(
         "stockfish_release", ROOT / "scripts/install-stockfish.py"
     )
@@ -213,6 +232,7 @@ def verify_stockfish() -> None:
     spec.loader.exec_module(installer)
     lock = json.loads((ROOT / "deploy/linux/stockfish-release.json").read_text())
     installer.probe(installer.configured_binary(prefix), lock["version"])
+    return True
 
 
 def wait_for_readiness(base: str, timeout_seconds: float = 60.0,
@@ -232,14 +252,17 @@ def wait_for_readiness(base: str, timeout_seconds: float = 60.0,
 
 
 def verify(base: str, readiness_only: bool = False, timeout_seconds: float = 60.0,
-           retry_seconds: float = 1.0) -> tuple[bool, bool]:
+           retry_seconds: float = 1.0, checks: dict | None = None) -> tuple[bool, bool]:
+    checks = checks if checks is not None else {}
     has_data, product_ready = wait_for_readiness(base, timeout_seconds, retry_seconds)
+    checks["readiness"] = "verified"
     if not readiness_only:
         verify_spa(base)
         with verification_credential(base):
             verify_typed_operation(base)
             verify_storage_proof(base)
-        verify_stockfish()
+        checks.update(spa="verified", authenticated_sql="verified", native_storage="verified")
+        checks["stockfish"] = "verified" if verify_stockfish() else "not_configured"
     print(
         "PASS: application deployment health "
         f"has_data={'true' if has_data else 'false'} "
@@ -249,7 +272,7 @@ def verify(base: str, readiness_only: bool = False, timeout_seconds: float = 60.
     return has_data, product_ready
 
 
-def write_state(path: Path, has_data: bool, product_ready: bool) -> None:
+def write_state(path: Path, has_data: bool, product_ready: bool, checks: dict | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "has_data": has_data,
@@ -257,6 +280,8 @@ def write_state(path: Path, has_data: bool, product_ready: bool) -> None:
         "substrate_reachable": True,
         "perfcache_ready": True,
     }
+    if checks is not None:
+        payload["checks"] = checks
     temporary = path.with_name(path.name + f".tmp-{os.getpid()}")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temporary, path)
@@ -277,11 +302,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=float, default=60.0)
     parser.add_argument("--retry-seconds", type=float, default=1.0)
     args = parser.parse_args(argv)
+    checks: dict[str, str] = {}
     has_data, product_ready = verify(
         args.base.rstrip("/"), args.readiness_only,
-        args.timeout_seconds, args.retry_seconds,
+        args.timeout_seconds, args.retry_seconds, checks,
     )
-    write_state(args.state_file, has_data, product_ready)
+    write_state(args.state_file, has_data, product_ready, checks)
     if args.github_output is not None:
         write_github_output(args.github_output, has_data, product_ready)
     return 0
