@@ -455,6 +455,17 @@ class DeploymentReadinessTests(unittest.TestCase):
                 self.verify.verify_typed_operation("http://unit")
         request.assert_not_called()
 
+    def test_optional_calculation_worker_is_checked_when_declared(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            prefix = Path(directory)
+            self.assertFalse(self.verify.stockfish_declared(prefix))
+            (prefix / "app").mkdir()
+            (prefix / "app/laplace-api.env").write_text("LAPLACE_STOCKFISH=/missing/declared/engine\n")
+            self.assertTrue(self.verify.stockfish_declared(prefix))
+            with patch.dict(os.environ, {"LAPLACE_INSTALL_PREFIX": str(prefix)}):
+                with self.assertRaises(FileNotFoundError):
+                    self.verify.verify_stockfish()
+
     def test_readiness_only_does_not_pretend_to_verify_spa_or_typed_operation(self):
         with patch.object(
             self.verify,

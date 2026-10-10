@@ -461,13 +461,15 @@ phase_smoke() {
   done
   # The MCP endpoint, where the host declares it: alive on its port; through the site it refuses a caller without the
   # token (401) and answers one that has it (initialize: 200).
-  if mcp_declared; then
+  if mcp_declared || [[ -n "${LAPLACE_MCP_UPSTREAM:-}" ]]; then
     local token init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"site.sh smoke","version":"1"}}}'
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$LAPLACE_MCP_URL/health/live" || true)"
-    printf '  %-44s %s\n' "$LAPLACE_MCP_URL/health/live" "$code"; echo "| \`$LAPLACE_MCP_URL/health/live\` | $code |" >> "$SUMMARY"; [[ "$code" == 200 ]] || rc=1
+    if mcp_declared; then
+      code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$LAPLACE_MCP_URL/health/live" || true)"
+      printf '  %-44s %s\n' "$LAPLACE_MCP_URL/health/live" "$code"; echo "| \`$LAPLACE_MCP_URL/health/live\` | $code |" >> "$SUMMARY"; [[ "$code" == 200 ]] || rc=1
+    fi
     code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
     printf '  %-44s %s\n' "$LAPLACE_SITE_URL/mcp, no token" "$code"; echo "| \`$LAPLACE_SITE_URL/mcp\` without a token (401) | $code |" >> "$SUMMARY"; [[ "$code" == 401 ]] || rc=1
-    token="$(sed -n 's/^LAPLACE_MCP_TOKEN=//p' "$LAPLACE_INSTALL_PREFIX/secrets/mcp.env" 2>/dev/null | head -1)"
+    token="$(python3 -c 'import pathlib,shlex,sys; lines=pathlib.Path(sys.argv[1]).read_text().splitlines(); print(next(shlex.split(line.partition("=")[2])[0] for line in lines if line.startswith("LAPLACE_MCP_TOKEN=")))' "$LAPLACE_INSTALL_PREFIX/secrets/mcp.env")"
     code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "Authorization: Bearer $token" -d "$init" "$LAPLACE_SITE_URL/mcp" || true)"
     printf '  %-44s %s\n' "$LAPLACE_SITE_URL/mcp, initialize" "$code"; echo "| \`$LAPLACE_SITE_URL/mcp\` initialize, with the token | $code |" >> "$SUMMARY"; [[ "$code" == 200 ]] || rc=1
   else
@@ -476,7 +478,7 @@ phase_smoke() {
   # Empty knowledge is valid; unavailable SQL, authentication, native execution or
   # incompatible loaded artifacts are deployment failures and block promotion.
   if python3 "$ROOT/scripts/verify-application-release.py" --base "$LAPLACE_API_URL" \
-      --state-file "${LAPLACE_VERIFICATION_STATE:-$SITE_WORK/application-verification.json}"; then
+      --state-file "${LAPLACE_VERIFICATION_STATE:-$LAPLACE_APP_DIR/logs/application-verification.json}"; then
     echo '| Authenticated SQL, native storage proof and installed dependencies | passed |' >> "$SUMMARY"
   else
     echo '| Authenticated installed runtime | FAILED |' >> "$SUMMARY"
