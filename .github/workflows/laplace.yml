@@ -13,8 +13,9 @@ run-name: "Deliver main — staging on hart-server, then production: built on ha
 # and the compiler; runner label knowledge), builds, installs, migrates and stages, and hands the staged app with its
 # native closure and perf-caches on as an artifact. The hosting host, hart-prod (a small always-on machine with the
 # API, MCP and the Cloudflare tunnel, and the application's own database; runner label production), receives it,
-# publishes and restarts. Promotion is by evidence: staging passed in the same run. Nothing waits for a click. Each host is its
-# own concurrency group, one delivery at a time.
+# publishes and restarts. Promotion requires staging to pass in the same run.
+# Serialize complete promotions so two revisions cannot interleave shared staging
+# artifacts or overwrite each other's cloud lease while waiting on later hosts.
 #
 # The earlier delivery chain (product-stage.yml over scripts/pipeline.sh) assumes the decommissioned layout (a /build
 # volume, /opt/laplace/pgsql-18, laplace_admin, sudo -n); it stays callable from full-qualification.yml by dispatch.
@@ -55,18 +56,20 @@ permissions:
   contents: read
   id-token: write   # the knowledge host is started through GCP workload identity federation: a short-lived token, no stored key
 
-# Each job queues in its own group, and none is held for the whole run. Production is promoted by evidence: when staging
-# has deployed, passed its checks and read back in this run, the same revision goes to production with no approval and
-# no dispatch, nothing waits for a click (the inventor, 2026-10-10). The knowledge host is started by the run itself
-# through GCP workload identity federation (a service account that may start that one instance and nothing else), held
-# by this run's lease in its metadata until the build job has run, and stops itself when idle (Laplace-Operations
-# setup.sh idlestop); the pipeline pays for the minutes it uses.
+concurrency:
+  group: laplace-promotion
+  cancel-in-progress: false
+  queue: max
+
+# Host groups also coordinate jobs with other workflows. Status and verification
+# remain independently callable; the promotion queue is not a machine lock.
 jobs:
   deliver:
     name: Staging — build, migrate, publish, read back on hart-server
     concurrency:
       group: laplace-site-hart-server
       cancel-in-progress: false
+      queue: max
     runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 240
     env:
@@ -142,6 +145,7 @@ jobs:
     concurrency:
       group: laplace-site-knowledge
       cancel-in-progress: false
+      queue: max
     env:
       LAPLACE_CONNINFO: ""
     outputs:
@@ -212,6 +216,7 @@ jobs:
     concurrency:
       group: laplace-site-hart-prod
       cancel-in-progress: false
+      queue: max
     env:
       LAPLACE_CONNINFO: ""
     steps:

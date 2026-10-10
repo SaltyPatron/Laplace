@@ -36,6 +36,7 @@ jobs:
     concurrency:
       group: laplace-maintenance-${{ inputs.target }}
       cancel-in-progress: false
+      queue: max
     steps:
       - name: Check out the verification implementation
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
