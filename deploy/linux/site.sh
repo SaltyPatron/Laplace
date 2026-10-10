@@ -172,9 +172,9 @@ phase_build() {
     -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
-    -DLAPLACE_CHESS_OPENINGS="$openings"
+    -DLAPLACE_CHESS_OPENINGS="$openings" 8>&-
   LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-    cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache
+    cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache 8>&-
   find -H "$SITE_BUILD" -name 'laplace_t0_perfcache*.bin' -print -quit | grep -q . || fail "tier-0 perf-cache not produced"
 }
 
@@ -190,7 +190,7 @@ phase_install() {
   [[ -d "$LAPLACE_INSTALL_PREFIX" && -w "$LAPLACE_INSTALL_PREFIX" ]] || fail "$LAPLACE_INSTALL_PREFIX is missing or not writable: sudo deploy/linux/site-host.sh"
   local stage f rel n=0
   stage="$(mktemp -d "$SITE_WORK/.install.XXXXXX")"
-  DESTDIR="$stage" cmake --install "$SITE_BUILD" >/dev/null
+  DESTDIR="$stage" cmake --install "$SITE_BUILD" >/dev/null 8>&-
   while IFS= read -r -d '' f; do
     rel="${f#"$stage$LAPLACE_INSTALL_PREFIX"/}"
     mkdir -p "$LAPLACE_INSTALL_PREFIX/$(dirname "$rel")"
@@ -252,7 +252,9 @@ phase_reset() {
 }
 
 # ------------------------------------------------------------------------------------------------ migrate + extensions
-dotnet_app() { LAPLACE_REUSE_INSTALLED_NATIVE=0 dotnet "$@"; }
+# Compiler servers may outlive a build. The supervising shell owns the host lock;
+# those servers must not retain its file descriptor after the phase completes.
+dotnet_app() { LAPLACE_REUSE_INSTALLED_NATIVE=0 dotnet "$@" 8>&-; }
 phase_migrate() {
   need_pg
   say "migrate $LAPLACE_DBNAME"
@@ -296,8 +298,8 @@ phase_app() {
   [[ -f "$ROOT/web/openapi/openapi.json" ]] || fail "the endpoint build did not write web/openapi/openapi.json"
   ( cd "$ROOT/web"
     lock="$(sha256sum package-lock.json | cut -d' ' -f1)"
-    [[ -d node_modules && "$(cat node_modules/.laplace-npm-ci.stamp 2>/dev/null)" == "$lock" ]] || { npm ci --no-audit --no-fund --prefer-offline; echo "$lock" > node_modules/.laplace-npm-ci.stamp; }
-    npm run gen:api; npm run build )
+    [[ -d node_modules && "$(cat node_modules/.laplace-npm-ci.stamp 2>/dev/null)" == "$lock" ]] || { npm ci --no-audit --no-fund --prefer-offline 8>&-; echo "$lock" > node_modules/.laplace-npm-ci.stamp; }
+    npm run gen:api 8>&-; npm run build 8>&- )
   [[ -f "$ROOT/web/dist/index.html" ]] || fail "the web build wrote no dist/index.html"
   mkdir -p "$stage/app/wwwroot"; cp -a "$ROOT/web/dist/." "$stage/app/wwwroot/"
   git -C "$ROOT" rev-parse HEAD | tee "$stage/app/.laplace-source-revision" > "$stage/app/wwwroot/.laplace-web-source-revision"
@@ -379,12 +381,14 @@ phase_configure() {
 # The runner has no sudo: a root-owned path unit (site-host.sh) restarts laplace-api when this file changes.
 phase_restart() {
   say "restart laplace-api"
-  local trigger="$LAPLACE_LOCKS/restart-api" i
+  local trigger="$LAPLACE_LOCKS/restart-api" i previous current
+  previous=$(systemctl show -p InvocationID --value laplace-api)
   [[ -w "$LAPLACE_LOCKS" ]] || fail "$LAPLACE_LOCKS is not writable (Operations setup.sh)"
   date -u +%FT%TZ > "$trigger"
   for i in $(seq 90); do
     sleep 2
-    [[ "$(systemctl show -p ActiveState --value laplace-api 2>/dev/null)" == active ]] &&
+    current=$(systemctl show -p InvocationID --value laplace-api)
+    [[ -n "$current" && "$current" != "$previous" && "$(systemctl show -p ActiveState --value laplace-api 2>/dev/null)" == active ]] &&
       curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; restart_mcp; return 0; }
   done
   systemctl status laplace-api --no-pager 2>&1 | tail -20 || true
@@ -395,12 +399,14 @@ phase_restart() {
 # and passed over: the API's delivery does not wait on a host's root.
 mcp_declared() { systemctl cat laplace-mcp.service >/dev/null 2>&1; }
 restart_mcp() {
-  local trigger="$LAPLACE_LOCKS/restart-mcp" i
+  local trigger="$LAPLACE_LOCKS/restart-mcp" i previous current
   mcp_declared || { echo "  laplace-mcp.service is not declared on this host: sudo bash deploy/linux/site-host.sh"; return 0; }
+  previous=$(systemctl show -p InvocationID --value laplace-mcp)
   date -u +%FT%TZ > "$trigger"
   for i in $(seq 60); do
     sleep 2
-    [[ "$(systemctl show -p ActiveState --value laplace-mcp 2>/dev/null)" == active ]] &&
+    current=$(systemctl show -p InvocationID --value laplace-mcp)
+    [[ -n "$current" && "$current" != "$previous" && "$(systemctl show -p ActiveState --value laplace-mcp 2>/dev/null)" == active ]] &&
       curl -fsS -m 5 "$LAPLACE_MCP_URL/health/live" >/dev/null 2>&1 && { echo "  laplace-mcp up after $((i * 2)) s"; return 0; }
   done
   systemctl status laplace-mcp --no-pager 2>&1 | tail -20 || true
@@ -466,10 +472,15 @@ phase_smoke() {
   else
     echo "  laplace-mcp.service is not declared on this host: sudo bash deploy/linux/site-host.sh"; echo "| MCP endpoint | not declared on this host |" >> "$SUMMARY"
   fi
-  # readiness says whether the substrate is seeded: reported, not required (a push does not seed)
-  code="$(curl -s -o "$SITE_WORK/ready.json" -w '%{http_code}' -m 20 "$LAPLACE_API_URL/health/ready" || true)"
-  printf '  %-44s %s %s\n' "$LAPLACE_API_URL/health/ready" "$code" "$(head -c 160 "$SITE_WORK/ready.json" 2>/dev/null)"
-  echo "| \`$LAPLACE_API_URL/health/ready\` (not required) | $code $(head -c 120 "$SITE_WORK/ready.json" 2>/dev/null | tr '|' '/') |" >> "$SUMMARY"
+  # Empty knowledge is valid; unavailable SQL, authentication, native execution or
+  # incompatible loaded artifacts are deployment failures and block promotion.
+  if python3 "$ROOT/scripts/verify-application-release.py" --base "$LAPLACE_API_URL" \
+      --state-file "${LAPLACE_VERIFICATION_STATE:-$SITE_WORK/application-verification.json}"; then
+    echo '| Authenticated SQL, native storage proof and installed dependencies | passed |' >> "$SUMMARY"
+  else
+    echo '| Authenticated installed runtime | FAILED |' >> "$SUMMARY"
+    rc=1
+  fi
   {
     echo
     echo "- revision: \`$installed_revision\`"

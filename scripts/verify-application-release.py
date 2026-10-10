@@ -9,9 +9,11 @@ reported separately and is owned by Tier=live/smoke/eval.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 import time
@@ -133,6 +135,74 @@ def verify_typed_operation(base: str) -> None:
         raise ValueError("typed substrate operation returned the wrong contract")
 
 
+@contextmanager
+def verification_credential(base: str):
+    """Use a supplied workload key or issue and revoke a key for this verification."""
+    if os.environ.get("LAPLACE_API_KEY", "").strip():
+        yield
+        return
+    operator = os.environ.get("LAPLACE_OPERATOR_TOKEN", "").strip()
+    if not operator:
+        prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
+        credential_file = prefix / "secrets" / "operator.env"
+        if credential_file.is_file():
+            for line in credential_file.read_text().splitlines():
+                name, separator, value = line.partition("=")
+                if separator and name.strip() == "LAPLACE_OPERATOR_TOKEN":
+                    parsed = shlex.split(value)
+                    operator = parsed[0] if parsed else ""
+    if not operator:
+        raise ValueError("deployment identity is not installed: configure the site's OpenBao credentials")
+    status, _, response = request("POST", base + "/v1/billing/operator/keys",
+        json.dumps({"tenant": os.environ.get("LAPLACE_VERIFICATION_TENANT", "deployment-verification"),
+                    "label": "installed-runtime-check"}).encode(),
+        {"Content-Type": "application/json", "X-Laplace-Operator-Token": operator})
+    if status != 200:
+        raise ValueError(f"deployment credential issuance returned HTTP {status}")
+    issued = json_object(response, "credential issuance")
+    key, key_prefix = issued.get("api_key"), issued.get("key_prefix")
+    if not isinstance(key, str) or not key.startswith("sk-laplace-") or not key_prefix:
+        raise ValueError("deployment credential issuance returned an invalid key contract")
+    os.environ["LAPLACE_API_KEY"] = key
+    try:
+        yield
+    finally:
+        os.environ.pop("LAPLACE_API_KEY", None)
+        status, _, _ = request("POST", base + "/v1/billing/keys/revoke",
+            json.dumps({"key_prefix": key_prefix}).encode(),
+            {"Content-Type": "application/json", "Authorization": "Bearer " + key})
+        if status != 200:
+            raise ValueError(f"verification credential revocation returned HTTP {status}")
+
+
+def verify_storage_proof(base: str) -> None:
+    headers = {"Content-Type": "application/json",
+               "Authorization": "Bearer " + os.environ["LAPLACE_API_KEY"]}
+    body = json.dumps({"text": "Laplace deployment validation."}).encode()
+    status, _, response = request("POST", base + "/v1/explore/storage-proof", body, headers)
+    if status != 200:
+        raise ValueError(f"native storage proof returned HTTP {status}")
+    proof = json_object(response, "native storage proof")
+    receipt = proof.get("perfcache_receipt_hex")
+    if (proof.get("perfcache_aligned") is not True or not receipt
+            or receipt != proof.get("database_perfcache_receipt_hex")
+            or proof.get("database_perfcache_error")):
+        raise ValueError("API and PostgreSQL are not using compatible T0 artifacts")
+    invariants = proof.get("invariants", [])
+    required = {"tier0_rom", "merkle_recomposition", "trajectory_roundtrip"}
+    if not required.issubset({i.get("key") for i in invariants}):
+        raise ValueError("native storage proof omitted required invariants")
+    if any(i.get("passed") is not True for i in invariants):
+        raise ValueError("native storage proof failed: " + ", ".join(
+            str(i.get("key")) for i in invariants if i.get("passed") is not True))
+    status, _, response = request("POST", base + "/v1/explore/decompose", body, headers)
+    if status != 200:
+        raise ValueError(f"native decomposition returned HTTP {status}")
+    decomposition = json_object(response, "native decomposition")
+    if not proof.get("root_id_hex") or proof["root_id_hex"] != decomposition.get("root_id_hex"):
+        raise ValueError("decomposition and storage proof disagree on canonical identity")
+
+
 def verify_stockfish() -> None:
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
     spec = importlib.util.spec_from_file_location(
@@ -166,7 +236,9 @@ def verify(base: str, readiness_only: bool = False, timeout_seconds: float = 60.
     has_data, product_ready = wait_for_readiness(base, timeout_seconds, retry_seconds)
     if not readiness_only:
         verify_spa(base)
-        verify_typed_operation(base)
+        with verification_credential(base):
+            verify_typed_operation(base)
+            verify_storage_proof(base)
         verify_stockfish()
     print(
         "PASS: application deployment health "

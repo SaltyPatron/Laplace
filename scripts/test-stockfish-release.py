@@ -78,6 +78,30 @@ class StockfishSourceTests(unittest.TestCase):
         with patch.dict(os.environ, {"LAPLACE_STOCKFISH_SOURCE": str(self.base / "own-checkout")}):
             self.assertEqual(self.base / "own-checkout", installer.source_root())
 
+    def test_configure_persists_verified_selection_and_preserves_other_settings(self):
+        self.executable()
+        prefix = self.base / "install"
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        config.write_text("PRESERVE=value\nLAPLACE_STOCKFISH=/obsolete\n")
+        installer.configure(prefix, self.source)
+        first = config.read_bytes()
+        installer.configure(prefix, self.source)
+        self.assertEqual(first, config.read_bytes())
+        self.assertIn("PRESERVE=value\n", config.read_text())
+        self.assertEqual(self.source, installer.installed_source(prefix))
+        self.assertEqual(self.source / "src/stockfish", installer.configured_binary(prefix))
+
+    def test_configure_rejects_unusable_engine_before_changing_service(self):
+        self.executable(b"#!/bin/sh\nexit 1\n")
+        prefix = self.base / "install"
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        config.write_text("PRESERVE=value\n")
+        with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+            installer.configure(prefix, self.source)
+        self.assertEqual("PRESERVE=value\n", config.read_text())
+
     def test_source_selection_retains_installed_path_across_later_invocations(self):
         config = self.base / "install/app/laplace-api.env"
         config.parent.mkdir(parents=True)

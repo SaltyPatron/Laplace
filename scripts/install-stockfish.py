@@ -87,6 +87,37 @@ def configured_binary(prefix=None):
     return binary_path()
 
 
+def configure(prefix, source=None):
+    """Install a validated source selection without rebuilding or moving it."""
+    selected = Path(existing_source(source_selection(source)[0])["source"])
+    verify_source(selected, load_lock()["commit"])
+    executable = binary_path(selected)
+    probe(executable, load_lock()["version"])
+    config = Path(prefix) / "app/laplace-api.env"
+    if not config.is_file() or config.is_symlink():
+        raise ValueError("Stockfish configuration requires an installed application environment file")
+    values = {"LAPLACE_STOCKFISH_SOURCE": str(selected), "LAPLACE_STOCKFISH": str(executable)}
+    lines = [line for line in config.read_text().splitlines()
+             if line.partition("=")[0] not in values]
+    # Single quoting is understood by systemd EnvironmentFile and the data parser.
+    for key, value in values.items():
+        if "'" in value or any(c in value for c in "\r\n\x00"):
+            raise ValueError("Stockfish path cannot be represented in the service environment")
+        lines.append(key + "='" + value + "'")
+    fd, temporary = tempfile.mkstemp(prefix=".stockfish-config-", dir=config.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write("\n".join(lines) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        shutil.copymode(config, temporary)
+        os.replace(temporary, config)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    print("Installed Stockfish source selection: " + str(selected))
+
+
 def github_json(url):
     request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Laplace-dependency-check"})
     with urlopen(request, timeout=30) as response:
@@ -509,8 +540,9 @@ if __name__ == "__main__":
     parser.add_argument("--make", help="GNU make executable")
     parser.add_argument("--compiler", choices=("gcc", "clang", "mingw", "icx"))
     parser.add_argument("--rebuild", action="store_true", help="Rebuild even when source, compiler, CPU and executable match")
-    parser.add_argument("--prefix", type=Path, default=Path("/opt/laplace"), help="Application prefix for snapshot/restore only")
+    parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace")), help="Installed application prefix")
     action = parser.add_mutually_exclusive_group()
+    action.add_argument("--configure", action="store_true", help="Validate and persist an existing source build in the installed service configuration")
     action.add_argument("--snapshot", type=Path, help="Save the previous application launch configuration for CI rollback")
     action.add_argument("--restore", type=Path, help="Restore the previous CI launch configuration")
     action.add_argument("--check-latest", action="store_true", help="Check the official latest stable tag and source commit")
@@ -522,7 +554,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.prefer_source is not None and not args.source_receipt:
         parser.error("--prefer-source is only valid with --source-receipt")
-    if args.verify_source_receipt:
+    if args.configure:
+        configure(args.prefix, args.source_dir)
+    elif args.verify_source_receipt:
         print(json.dumps(verify_source_receipt(args.verify_source_receipt), sort_keys=True))
     elif args.source_receipt:
         print(json.dumps(host_source_receipt(args.prefer_source, args.source_dir), sort_keys=True))

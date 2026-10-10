@@ -1,5 +1,5 @@
 name: Product — maintenance
-run-name: "Product maintenance — ${{ inputs.operation }} @ ${{ github.sha }}"
+run-name: "Product maintenance — ${{ inputs.operation }} / ${{ inputs.target }} @ ${{ github.sha }}"
 
 on:
   workflow_dispatch:
@@ -10,33 +10,56 @@ on:
         required: true
         default: verify
         options: [verify, forward-chat-proof, reconcile, chess-lab, deploy]
-      full_clean:
-        description: "Deploy only: discard candidate build outputs before rebuilding"
-        type: boolean
-        default: false
-      force_codegen:
-        description: "Deploy only: regenerate attestation-law source before building"
-        type: boolean
-        default: false
-      serial_tests:
-        description: "Deploy only: force serial native tests"
-        type: boolean
-        default: false
+      target:
+        description: "Verification host; deploy always follows staging → cloud build → production"
+        type: choice
+        required: true
+        default: staging
+        options: [staging, production, knowledge]
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
+  deploy:
+    name: Deploy through the normal promotion chain
+    if: inputs.operation == 'deploy'
+    uses: ./.github/workflows/laplace.yml
+    secrets: inherit
+
+  verify:
+    name: Verify the installed application on ${{ inputs.target }}
+    if: inputs.operation == 'verify'
+    runs-on: [self-hosted, laplace, '${{ inputs.target }}']
+    timeout-minutes: 10
+    concurrency:
+      group: laplace-maintenance-${{ inputs.target }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out the verification implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Execute the same installed-runtime checks used by promotion
+        env:
+          LAPLACE_VERIFICATION_STATE: ${{ github.workspace }}/artifacts/application-verification.json
+        run: env -u GITHUB_SHA bash deploy/linux/site.sh smoke
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: application-verification-${{ inputs.target }}-${{ github.run_id }}
+          path: artifacts/application-verification.json
+          if-no-files-found: warn
+
   operator:
     name: Run explicit product maintenance operation
-    if: inputs.operation != 'forward-chat-proof'
+    if: inputs.operation == 'reconcile' || inputs.operation == 'chess-lab'
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: ${{ inputs.operation }}
       target_sha: ${{ github.sha }}
-      full_clean: ${{ inputs.full_clean }}
-      force_codegen: ${{ inputs.force_codegen }}
-      serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
 
   forward-chat-proof:
