@@ -20,6 +20,16 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
+# The declaration is public; credentials alongside it retain their own modes.
+machine_config_permissions() {
+  local directory=${1:-/etc/laplace}
+  install -d -m 755 "$directory"
+  if [[ -f "$directory/machine.env" ]]; then
+    chmod 644 "$directory/machine.env"
+  fi
+}
+machine_config_permissions
 # the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), as site.sh reads it: what this host
 # names differently from the defaults below is said there once, never on a command line
 if [[ -r /etc/laplace/machine.env ]]; then
@@ -33,8 +43,6 @@ SITE_PORT="${LAPLACE_SITE_PORT:-8080}"
 LAN="${LAPLACE_LAN:-192.168.1.0/24}"
 LOCKS="${LAPLACE_LOCKS:-/run/lock/laplace}"
 MCP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # the same default as site.sh; a machine that declares another says so in /etc/laplace/machine.env
-
-[[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
 
 # Never an old script. This runs from a person's checkout, which nothing else keeps current: before anything is
 # changed, the checkout is brought to its upstream by the account that owns it (never as root), and what arrived is

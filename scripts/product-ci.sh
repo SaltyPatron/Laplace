@@ -54,6 +54,7 @@ run_ci_contract_checks() {
   bash tests/site-revision-receipts.sh
   bash tests/site-application-migrations.sh
   bash tests/site-host-lock.sh
+  bash tests/machine-config.sh
   python3 scripts/test-workflow-architecture.py
   python3 scripts/test-benchmark-suite.py
   python3 scripts/test-ci-impact-plan.py
