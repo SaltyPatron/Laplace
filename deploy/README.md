@@ -5,6 +5,9 @@ Refactor and the modular repositories have separate installation owners.
 The existing `dev`, `staging` and `api` DNS names are retained here until their
 provider callback registrations and consumers are migrated together.
 
+[Browser credentials and OpenBao enrollment](identity.md) describes persistent
+per-environment credentials, unattended refresh, verification and repair.
+
 ## hart-server
 
 `private-origins.json` declares the staging hostname, listen addresses, allowed
