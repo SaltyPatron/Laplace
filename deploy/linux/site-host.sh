@@ -4,6 +4,7 @@
 # migrate, publish, restart) is deploy/linux/site.sh, run by the repository's runner as laplace-runner with no sudo.
 #
 #   sudo bash deploy/linux/site-host.sh
+#   sudo bash deploy/linux/site-host.sh --routing-only
 #
 # What it makes:
 #   /opt/laplace/{app,app/logs,app/mcp-runtime,lib,share,tmp}   laplace-runner:laplace-runner 2775 (the shared group)
@@ -21,6 +22,15 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
+host_args=("$@")
+as_is=false; routing_only=false
+for arg in "$@"; do
+  case "$arg" in
+    --as-is) as_is=true ;;
+    --routing-only) routing_only=true ;;
+    *) echo "Unknown setup argument: $arg" >&2; exit 2 ;;
+  esac
+done
 # The declaration is public; credentials alongside it retain their own modes.
 machine_config_permissions() {
   local directory=${1:-/etc/laplace}
@@ -66,13 +76,17 @@ current() {
   after="$(g rev-parse HEAD)"
   if [[ "$before" != "$after" ]]; then
     echo "=== $repo brought from ${before:0:12} to ${after:0:12} ($branch): running what arrived"
-    exec env LAPLACE_SITE_HOST_CURRENT="$after" bash "$HERE/$(basename "${BASH_SOURCE[0]}")"
+    exec env LAPLACE_SITE_HOST_CURRENT="$after" bash "$HERE/$(basename "${BASH_SOURCE[0]}")" "${host_args[@]}"
   fi
   echo "=== $repo is at its upstream: ${after:0:12} ($branch)"
 }
-if [[ "${1:-}" == --as-is ]]; then echo "=== run as it is here, not checked against its upstream (--as-is): $(git -C "$HERE" rev-parse --short=12 HEAD 2>/dev/null || echo 'no revision')"
+if "$as_is"; then echo "=== run as it is here, not checked against its upstream (--as-is): $(git -C "$HERE" rev-parse --short=12 HEAD 2>/dev/null || echo 'no revision')"
 elif [[ -n "${LAPLACE_SITE_HOST_CURRENT:-}" ]]; then echo "=== at ${LAPLACE_SITE_HOST_CURRENT:0:12}"
 else current || exit 1; fi
+private_browser_route() {
+  python3 "$HERE/configure-nginx.py" --configuration "${LAPLACE_PRIVATE_ORIGINS:-$HERE/../private-origins.json}" --apply
+}
+if "$routing_only"; then private_browser_route; exit; fi
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
 say() { printf '  %-44s %s\n' "$1" "$2"; }
 
@@ -138,6 +152,7 @@ rm -f /etc/nginx/sites-enabled/laplace-managed
 nginx -t -q
 if systemctl is-active -q nginx; then systemctl reload nginx; else systemctl start nginx; fi
 say "nginx site laplace" ":$SITE_PORT -> $API_UPSTREAM; /mcp -> $MCP_UPSTREAM"
+private_browser_route
 
 echo "=== firewall"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
