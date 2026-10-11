@@ -23,7 +23,10 @@ def deduplicate(root):
         hashes = {}
         for path in paths:
             with path.open('rb') as stream:
-                digest = hashlib.file_digest(stream, 'sha256').digest()
+                hasher = hashlib.sha256()
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    hasher.update(block)
+                digest = hasher.digest()
             previous = hashes.setdefault(digest, path)
             if previous == path or os.path.samefile(previous, path):
                 continue
