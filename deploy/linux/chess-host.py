@@ -65,11 +65,19 @@ def render(c, directory):
         if not isinstance(value, str) or not value or '\x00' in value:
             raise ValueError('Credential field missing or invalid: ' + field)
         target = Path(destination['path'])
-        account = pwd.getpwnam(destination['user'])
+        user = destination.get('user')
+        if destination.get('service'):
+            if not re.fullmatch(r'[a-zA-Z0-9_-]+\.service', destination['service']):
+                raise ValueError('Invalid credential consumer service.')
+            user = identity.run(['systemctl', 'show', destination['service'], '--property=User', '--value']).strip()
+            if not user or user == 'root':
+                raise ValueError('Credential consumer must declare an unprivileged service user.')
+        account = pwd.getpwnam(user)
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chown(target.parent, account.pw_uid, account.pw_gid)
         identity.write(target, value, 0o600)
         os.chown(target, account.pw_uid, account.pw_gid)
+        identity.run(['runuser', '-u', user, '--', 'test', '-r', str(target)])
     identity.write(directory / 'render-receipt.json', json.dumps({'source': 'openbao-agent', 'rendered_at': time.time(), 'fields': sorted(c['secret_files'])}))
 
 
