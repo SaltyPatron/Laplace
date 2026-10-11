@@ -18,6 +18,12 @@ if ($Operation -eq 'Render') {
     $record=Get-Content -LiteralPath (Join-Path $root 'candidate.json') -Raw | ConvertFrom-Json
     if ($record.control_token -notmatch '^[a-f0-9]{64}$') { throw 'The workload record has no valid controller credential.' }
     Write-Atomic (Join-Path $root 'control.token') $record.control_token
+    foreach($entry in $c.secret_files.PSObject.Properties) {
+        if ([IO.Path]::GetFileName($entry.Value) -ne $entry.Value) { throw 'Secret destinations must remain in the private installation directory.' }
+        $value=$record.($entry.Name)
+        if ($value -isnot [string] -or -not $value -or $value.Contains([char]0)) { throw "Missing workload field: $($entry.Name)" }
+        Write-Atomic (Join-Path $root $entry.Value) $value
+    }
     Write-Atomic (Join-Path $root 'render-receipt.json') (@{source='openbao-agent';rendered_utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json)
     return
 }
@@ -42,6 +48,21 @@ if ($Operation -eq 'Install') {
     if ($PSCommandPath -ne $script) { Copy-Item -LiteralPath $PSCommandPath -Destination $script -Force }
     $client=Join-Path $root 'api-client.json'
     Write-Atomic $client (@{url=$c.url;tokenFile=(Join-Path $root 'control.token');operators=$c.operators} | ConvertTo-Json -Depth 5)
+    foreach($entry in $c.public_files.PSObject.Properties) {
+        if ([IO.Path]::GetFileName($entry.Name) -ne $entry.Name) { throw 'Public configuration must remain in the installation directory.' }
+        Write-Atomic (Join-Path $root $entry.Name) $(if($entry.Value -is [string]){$entry.Value}else{$entry.Value | ConvertTo-Json -Depth 12})
+    }
+    if ($c.connector) {
+        $bin=[IO.Path]::GetFullPath($c.connector.bin)
+        $release=Join-Path $bin $c.connector.revision
+        if ($c.connector.revision -notmatch '^[a-f0-9]{7,64}$' -or -not (Test-Path (Join-Path $c.connector.publish 'laplace-uci-connect.exe'))) { throw 'Declare a published UCI connector revision.' }
+        [void](New-Item -ItemType Directory -Path $release -Force)
+        Copy-Item -Path (Join-Path $c.connector.publish '*') -Destination $release -Recurse -Force
+        $profilePath=Join-Path $root 'uci-client.json'
+        Write-Atomic (Join-Path $bin 'laplace-uci-connect.cmd') ('@"'+(Join-Path $release 'laplace-uci-connect.exe')+'" %* --configuration "'+$profilePath+'"'+"`r`n")
+        $userPath=[Environment]::GetEnvironmentVariable('Path','User')
+        if ($bin -notin ($userPath -split ';')) { [Environment]::SetEnvironmentVariable('Path',($userPath.TrimEnd(';')+';'+$bin),'User') }
+    }
     [Environment]::SetEnvironmentVariable('LAPLACE_LICHESS_CONTROL_CLIENT',$client,'User')
     $shell=New-Object -ComObject WScript.Shell
     $shortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'Laplace mono chess credentials.lnk'))
@@ -100,6 +121,14 @@ template {
     if (-not $rendered) { throw "The desktop workload has not rendered its credential; inspect $root/agent.stderr.log" }
 }
 $token=(Get-Content -LiteralPath (Join-Path $root 'control.token') -Raw).Trim()
+foreach($entry in $c.secret_files.PSObject.Properties) {
+    $ready=$false
+    for($i=0;$i -lt 65;$i++) {
+        if(Test-Path (Join-Path $root $entry.Value)){$ready=$true;break}
+        Start-Sleep -Seconds 1
+    }
+    if(-not $ready){throw "The workload agent has not rendered $($entry.Name)."}
+}
 $status=Invoke-RestMethod ($c.url.TrimEnd('/')+'/status') -Headers @{Authorization='Bearer '+$token} -TimeoutSec 10
 if ($Enrollment) { Remove-Item -LiteralPath $Enrollment -Force }
 Write-Host "Desktop chess control installed: $($status.controller), selection $($status.selection.profile ?? 'Off'). OpenBao uses the DPAPI-enrolled workload; startup is registered for this Windows user."
