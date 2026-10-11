@@ -203,7 +203,16 @@ def install(c, source, enrollment_path):
     unit += f'\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=40\nNoNewPrivileges=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths={state}\n[Install]\nWantedBy=multi-user.target\n'
     if c.get('command'):
         identity.write(units / (c['service'] + '.service'), unit, 0o644)
+        trigger = c.get('restart_trigger')
+        if not trigger or not re.fullmatch(r'/[a-zA-Z0-9_./-]+', trigger) or not Path(trigger).parent.is_dir():
+            raise ValueError('Declare a restart_trigger inside the installed runner lock directory.')
+        restart = c['service'] + '-restart'
+        identity.write(units / (restart + '.service'), '[Unit]\nDescription=Restart the declared monorepo chess controller after delivery\n[Service]\nType=oneshot\nExecStart=/usr/bin/systemctl restart ' + c['service'] + '.service\n', 0o644)
+        identity.write(units / (restart + '.path'), '[Unit]\nDescription=Monorepo chess delivery restart request\n[Path]\nPathChanged=' + trigger + '\n[Install]\nWantedBy=multi-user.target\n', 0o644)
+        identity.write(directory / 'deployment.json', json.dumps({'service': c['service'] + '.service', 'trigger': trigger}), 0o644)
     identity.run(['systemctl', 'daemon-reload'])
+    if c.get('command'):
+        identity.run(['systemctl', 'enable', '--now', restart + '.path'])
     identity.run(['systemctl', 'stop', credentials])
     (private / 'candidate.json').unlink(missing_ok=True)
     before = time.time()

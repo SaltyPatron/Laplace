@@ -435,7 +435,7 @@ phase_restart() {
     sleep 2
     current=$(systemctl show -p InvocationID --value laplace-api)
     [[ -n "$current" && "$current" != "$previous" && "$(systemctl show -p ActiveState --value laplace-api 2>/dev/null)" == active ]] &&
-      curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; restart_mcp; return 0; }
+      curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; restart_mcp; restart_chess_controller; return 0; }
   done
   systemctl status laplace-api --no-pager 2>&1 | tail -20 || true
   fail "laplace-api did not answer $LAPLACE_API_URL/health within 180 s"
@@ -457,6 +457,38 @@ restart_mcp() {
   done
   systemctl status laplace-mcp --no-pager 2>&1 | tail -20 || true
   fail "laplace-mcp did not answer $LAPLACE_MCP_URL/health/live within 120 s"
+}
+
+restart_chess_controller() {
+  local declaration="${LAPLACE_CHESS_DEPLOYMENT_CONFIG:-/etc/laplace-mono/chess/deployment.json}"
+  if [[ ! -f "$declaration" ]]; then
+    if systemctl cat laplace-mono-lichess.service >/dev/null 2>&1; then
+      fail "The installed chess controller has no delivery declaration: run monorepo chess host setup"
+    fi
+    return 0
+  fi
+  local values service trigger previous current i
+  values=$(python3 - "$declaration" <<'PY'
+import json, re, sys
+c = json.load(open(sys.argv[1]))
+if not re.fullmatch(r'[a-zA-Z0-9_-]+\.service', c['service']) or not re.fullmatch(r'/[a-zA-Z0-9_./-]+', c['trigger']):
+    raise ValueError('Invalid installed chess delivery declaration')
+print(c['service'])
+print(c['trigger'])
+PY
+  ) || fail "Cannot read the installed chess delivery declaration"
+  service=${values%%$'\n'*}; trigger=${values#*$'\n'}
+  systemctl is-active --quiet "${service%.service}-restart.path" || fail "Chess restart path is not installed or active"
+  previous=$(systemctl show -p InvocationID --value "$service")
+  date -u +%FT%TZ > "$trigger"
+  for i in $(seq 90); do
+    sleep 2
+    current=$(systemctl show -p InvocationID --value "$service")
+    if [[ -n "$current" && "$current" != "$previous" && "$(systemctl show -p ActiveState --value "$service")" == active ]]; then
+      echo "  $service restarted for the delivered revision"; return 0
+    fi
+  done
+  fail "The installed chess controller did not restart within 180 s"
 }
 
 # ------------------------------------------------------------------------------------------------ bundle, receive
