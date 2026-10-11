@@ -26,7 +26,7 @@ public static class MemoryTopology
 
     internal static long? TestTotalPhysicalOverride;
 
-    /// <summary>Real installed physical RAM in bytes (not the GC heap ceiling).</summary>
+    /// <summary>Physical RAM available to this process, bounded by Linux cgroup memory limits (not the GC heap ceiling).</summary>
     public static long TotalPhysicalBytes => TestTotalPhysicalOverride ?? LazyTotalPhysical.Value;
 
     public static string DetectionSource { get; private set; } = "uninitialized";
@@ -161,8 +161,10 @@ public static class MemoryTopology
             }
             if (OperatingSystem.IsLinux() && TryLinuxMemTotal(out long lin))
             {
-                DetectionSource = "linux-meminfo";
-                return lin;
+                long available = BoundLinuxMemory(lin, File.ReadLines("/proc/self/cgroup"), File.ReadLines("/proc/self/mountinfo"),
+                    path => File.Exists(path) ? File.ReadAllText(path).Trim() : null);
+                DetectionSource = available < lin ? "linux-cgroup-memory" : "linux-meminfo";
+                return available;
             }
         }
         catch
@@ -184,6 +186,55 @@ public static class MemoryTopology
             return false;
         bytes = (long)status.ullTotalPhys;
         return true;
+    }
+
+    /// <summary>Every ancestor limit applies; reading only the mount root misses systemd/container limits.</summary>
+    internal static long BoundLinuxMemory(long physical, IEnumerable<string> memberships,
+        IEnumerable<string> mounts, Func<string, string?> read)
+    {
+        string? unified = null, memory = null;
+        foreach (var line in memberships)
+        {
+            var fields = line.Split(':', 3);
+            if (fields.Length != 3 || !fields[2].StartsWith('/')) continue;
+            if (fields[1].Length == 0) unified = fields[2];
+            if (fields[1].Split(',').Contains("memory")) memory = fields[2];
+        }
+        long available = physical;
+        foreach (var line in mounts)
+        {
+            var halves = line.Split(" - ", 2, StringSplitOptions.None);
+            if (halves.Length != 2) continue;
+            var left = halves[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var right = halves[1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (left.Length < 5 || right.Length < 3) continue;
+            string? group = right[0] == "cgroup2" ? unified
+                : right[0] == "cgroup" && right[2].Split(',').Contains("memory") ? memory : null;
+            if (group is null) continue;
+            static string Decode(string value) => System.Text.RegularExpressions.Regex.Replace(value,
+                @"\\([0-7]{3})", match => ((char)Convert.ToInt32(match.Groups[1].Value, 8)).ToString());
+            var hierarchyRoot = Decode(left[3]).TrimEnd('/');
+            var mount = Decode(left[4]).TrimEnd('/');
+            string relative;
+            if (group == hierarchyRoot || group == "/") relative = "";
+            else if (group.StartsWith(hierarchyRoot + "/", StringComparison.Ordinal)) relative = group[(hierarchyRoot.Length + 1)..];
+            else continue;
+            // procfs supplies absolute paths. Refuse a namespace escape rather than probing outside this hierarchy.
+            if (!mount.StartsWith('/') || relative.Split('/').Any(part => part is "." or "..")) continue;
+            var current = relative.Length == 0 ? mount : mount + "/" + relative;
+            var setting = right[0] == "cgroup2" ? "/memory.max" : "/memory.limit_in_bytes";
+            bool hierarchical = right[0] == "cgroup2" || read(current + "/memory.use_hierarchy")?.Trim() == "1";
+            while (true)
+            {
+                if (long.TryParse(read(current + setting), out long limit) && limit > 0)
+                    available = Math.Min(available, limit);
+                if (current == mount || !hierarchical) break;
+                var separator = current.LastIndexOf('/');
+                if (separator < mount.Length) break;
+                current = current[..separator];
+            }
+        }
+        return available;
     }
 
     private static bool TryLinuxMemTotal(out long bytes)
