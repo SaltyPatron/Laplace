@@ -9,6 +9,8 @@ if (OperatingSystem.IsWindows() && ManagedServiceState.OperatorStopped("lichess"
     Console.WriteLine($"laplace-lichess: stopped by an operator ({ManagedServiceState.StopMarker("lichess")}); not starting.");
     return 0;
 }
-await using var app = LichessServiceHost.Build(LichessOptions.FromEnvironment());
+await using var app = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTROL_CONFIG") is { Length: > 0 } control
+    ? ControlledLichessHost.Build(control)
+    : LichessServiceHost.Build(LichessOptions.FromEnvironment());
 await app.RunAsync();
 return Environment.ExitCode;

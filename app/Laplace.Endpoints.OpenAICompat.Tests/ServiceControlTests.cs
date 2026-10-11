@@ -119,7 +119,7 @@ public sealed class ServiceControlTests
         client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "operator-test-only");
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/v1/admin/services/mcp")).StatusCode);
         Assert.Equal((ManagedService.Mcp, ServiceAction.Status), Assert.Single(factory.Control.Calls));
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/chess/lichess/start", new { depth = 20 })).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync("/chess/lichess/start", new { depth = 20 })).StatusCode);
         Assert.Single(factory.Control.Calls);
     }
 
@@ -157,13 +157,13 @@ public sealed class ServiceControlTests
     }
 
     [Fact]
-    public async Task LichessChessControlsHaveNoOperatorTokenOrHttpsRoadblockInHeaderMode()
+    public async Task LegacyLichessStartCannotBypassTheSharedController()
     {
         await using var factory = new Factory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://localhost") });
         using var reply = await client.PostAsJsonAsync("/chess/lichess/start", new { });
-        Assert.Equal(HttpStatusCode.Accepted, reply.StatusCode);
-        Assert.Equal((ManagedService.Lichess, ServiceAction.Start), Assert.Single(factory.Control.Calls));
+        Assert.Equal(HttpStatusCode.Gone, reply.StatusCode);
+        Assert.Empty(factory.Control.Calls);
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class ServiceControlTests
         using var client = factory.Client();
         client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "operator-test-only");
         Assert.Equal(expected, (await client.PostAsJsonAsync("/v1/admin/services/mcp/start", new { })).StatusCode);
-        Assert.Equal(expected, (await client.PostAsJsonAsync("/chess/lichess/stop", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync("/chess/lichess/stop", new { })).StatusCode);
     }
 
     [Fact]

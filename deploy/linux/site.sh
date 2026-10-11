@@ -321,6 +321,15 @@ phase_app() {
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" -c Release --no-self-contained -o "$stage/app/mcp-runtime" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/mcp-runtime/"; done
   [[ -f "$stage/app/mcp-runtime/Laplace.Endpoints.Mcp.dll" ]] || fail "MCP server not staged"
+  # Chess entry points belong to the same monorepo release and native closure.
+  dotnet_app publish "$ROOT/app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" -c Release --no-self-contained -o "$stage/app/uci" -v minimal --nologo
+  dotnet_app publish "$ROOT/app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" -c Release --no-self-contained -o "$stage/app/lichess-runtime" -v minimal --nologo
+  for f in "$stage/app"/lib*.so*; do
+    [[ -e "$f" ]] || continue
+    cp -fL "$f" "$stage/app/uci/"
+    cp -fL "$f" "$stage/app/lichess-runtime/"
+  done
+  [[ -x "$stage/app/uci/laplace-uci" && -f "$stage/app/lichess-runtime/Laplace.Endpoints.Lichess.dll" ]] || fail "chess runtimes not staged"
   # Both API and MCP launch the same installed CLI. A serving host must not
   # depend on a runner checkout or an old in-repository build directory.
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
@@ -357,6 +366,7 @@ LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
 LAPLACE_DATA=${LAPLACE_DATA:-$LAPLACE_DATA_ROOT}
 LAPLACE_INSTALL_PREFIX=$LAPLACE_INSTALL_PREFIX
 LAPLACE_CLI_EXE=$LAPLACE_APP_DIR/cli/Laplace.Cli
+LAPLACE_UCI=$LAPLACE_APP_DIR/uci/laplace-uci
 LAPLACE_DATA_PROTECTION_KEYS=${LAPLACE_DATA_PROTECTION_KEYS:-$LAPLACE_INSTALL_PREFIX/secrets/data-protection}
 ${LAPLACE_API_STATE_DIR:+LAPLACE_AGENTS_CONFIG=$LAPLACE_API_STATE_DIR/agents.json}
 ${LAPLACE_API_STATE_DIR:+LAPLACE_OUT=$LAPLACE_API_STATE_DIR/out}

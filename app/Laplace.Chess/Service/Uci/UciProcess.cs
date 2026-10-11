@@ -92,6 +92,7 @@ public sealed class UciProcess : IDisposable
     public IReadOnlyDictionary<string, UciOptionInfo> Options => _options;
     /// <summary>The engine's own handshake lines (id and option), as a front replays them.</summary>
     public IReadOnlyList<string> HandshakeLines => _handshake;
+    public ChessKnowledgeIdentity? KnowledgeIdentity { get; private set; }
     public IReadOnlyList<KeyValuePair<string, string>> OptionsSent => _sent;
     public bool Broken => _broken || _ended || (_proc?.HasExited ?? false);
 
@@ -325,6 +326,12 @@ public sealed class UciProcess : IDisposable
         string body = line[head.Length..];
         try
         {
+            if (body.StartsWith(ChessKnowledgeIdentity.ProtocolPrefix, StringComparison.Ordinal))
+            {
+                KnowledgeIdentity = JsonSerializer.Deserialize<ChessKnowledgeIdentity>(
+                    body[ChessKnowledgeIdentity.ProtocolPrefix.Length..], UciJson.Options);
+                return true;
+            }
             if (body.StartsWith(EngineReceipt.IdentityPrefix, StringComparison.Ordinal))
             {
                 var via = JsonSerializer.Deserialize<EngineIdentity>(body[EngineReceipt.IdentityPrefix.Length..], UciJson.Options);
