@@ -43,7 +43,11 @@
   }
 
   .ghost {
-    background: var(--material-raised);
+    /* Resolve the fill here: inherited gradients already contain the root's
+       colours, which can disagree with a nested surface's foreground. */
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--color-bg-panel) 94%, var(--color-steel) 6%),
+      var(--color-bg-panel));
     border: 1px solid var(--color-border-default);
     color: var(--color-text-primary);
   }

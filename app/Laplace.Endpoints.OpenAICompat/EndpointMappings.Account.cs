@@ -13,14 +13,14 @@ internal static class AccountEndpoints
 {
     public static void MapAccountEndpoints(this WebApplication app)
     {
-        app.MapGet("/v1/account", async (HttpContext http, SubstrateClient substrate,
+        app.MapGet("/v1/account", async (HttpContext http, [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application,
             BrowserAuthSettings identity, IOptions<LaplaceAuthOptions> auth,
             IOptions<StripeBillingOptions> stripe, BillingStoreMode store,
             IBillingEntitlementStore entitlements, CancellationToken ct) =>
         {
             if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to manage your account.");
             var workspaces = new List<WorkspaceView>();
-            await using (var command = NpgsqlCatalog.Command(substrate.DataSource, "account.workspaces", account.User))
+            await using (var command = NpgsqlCatalog.Command(application, "account.workspaces", account.User))
             {
                 await using var reader = await command.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
@@ -53,24 +53,24 @@ internal static class AccountEndpoints
         }).WithTags("account");
 
         app.MapPost("/v1/account/workspaces", async (HttpContext http, WorkspaceNameRequest request,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to create a company workspace.");
             if (!ValidName(request.Name)) return Error(400, "invalid_name", "Use a workspace name between 1 and 160 characters without control characters.");
             var tenant = $"t-{Guid.NewGuid():N}";
             var name = request.Name!.Trim();
             // Workspace and owner are admitted atomically by one catalog operation.
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+            await using var command = NpgsqlCatalog.Command(application,
                 "account.create_workspace", tenant, name, account.User);
             await command.ExecuteNonQueryAsync(ct);
             return Results.Ok(new WorkspaceView(tenant, name, "organization", "owner"));
         }).WithTags("account");
 
         app.MapPost("/v1/account/workspaces/{tenantId}/select", async (string tenantId, HttpContext http,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to choose a workspace.");
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+            await using var command = NpgsqlCatalog.Command(application,
                 "account.membership_role", tenantId, account.User);
             if (await command.ExecuteScalarAsync(ct) is not string role)
                 return Error(403, "workspace_membership_required", "This account does not belong to that workspace.");
@@ -81,20 +81,20 @@ internal static class AccountEndpoints
         }).WithTags("account");
 
         app.MapPut("/v1/account/workspace", async (HttpContext http, WorkspaceNameRequest request,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "A workspace owner or administrator must change its settings.");
             if (!ValidName(request.Name)) return Error(400, "invalid_name", "Use a workspace name between 1 and 160 characters without control characters.");
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+            await using var command = NpgsqlCatalog.Command(application,
                 "account.rename_workspace", account.Tenant, account.User, request.Name!.Trim());
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent()
                 : Error(403, "workspace_admin_required", "Your workspace permissions have changed.");
         }).WithTags("account");
 
-        app.MapGet("/v1/account/members", async (HttpContext http, SubstrateClient substrate, CancellationToken ct) =>
+        app.MapGet("/v1/account/members", async (HttpContext http, [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can view the membership roster.");
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource, "account.members", account.Tenant);
+            await using var command = NpgsqlCatalog.Command(application, "account.members", account.Tenant);
             await using var reader = await command.ExecuteReaderAsync(ct);
             var members = new List<object>();
             while (await reader.ReadAsync(ct)) members.Add(new
@@ -106,7 +106,7 @@ internal static class AccountEndpoints
         }).WithTags("account");
 
         app.MapPost("/v1/account/invitations", async (HttpContext http, InvitationRequest request,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can invite members.");
             var role = request.Role ?? "member";
@@ -115,16 +115,16 @@ internal static class AccountEndpoints
             var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
             var id = Guid.NewGuid();
             var expires = DateTimeOffset.UtcNow.AddDays(7);
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource, "account.create_invitation",
+            await using var command = NpgsqlCatalog.Command(application, "account.create_invitation",
                 id, account.Tenant, SHA256.HashData(Encoding.UTF8.GetBytes(token)), role, account.User, expires);
             if (await command.ExecuteNonQueryAsync(ct) != 1) return Error(403, "workspace_admin_required", "Your workspace permissions have changed.");
             return Results.Ok(new { invitationId = id, role, expiresAt = expires, invitationPath = $"/settings#join={token}" });
         }).WithTags("account");
 
-        app.MapGet("/v1/account/invitations", async (HttpContext http, SubstrateClient substrate, CancellationToken ct) =>
+        app.MapGet("/v1/account/invitations", async (HttpContext http, [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can view invitations.");
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource, "account.invitations", account.Tenant);
+            await using var command = NpgsqlCatalog.Command(application, "account.invitations", account.Tenant);
             await using var reader = await command.ExecuteReaderAsync(ct);
             var invitations = new List<object>();
             while (await reader.ReadAsync(ct)) invitations.Add(new
@@ -136,21 +136,21 @@ internal static class AccountEndpoints
         }).WithTags("account");
 
         app.MapDelete("/v1/account/invitations/{invitationId:guid}", async (Guid invitationId, HttpContext http,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can revoke invitations.");
-            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+            await using var command = NpgsqlCatalog.Command(application,
                 "account.revoke_invitation", invitationId, account.Tenant, account.User);
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent() : Results.NotFound();
         }).WithTags("account");
 
         app.MapPost("/v1/account/invitations/accept", async (HttpContext http, AcceptInvitationRequest request,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in before accepting an invitation.");
             if (request.Token is not { Length: 64 } || !request.Token.All(Uri.IsHexDigit))
                 return Error(400, "invalid_invitation", "This invitation is invalid or expired.");
-            await using var connection = await substrate.DataSource.OpenConnectionAsync(ct);
+            await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
             string tenant;
             string role;
@@ -170,10 +170,10 @@ internal static class AccountEndpoints
         }).WithTags("account");
 
         app.MapDelete("/v1/account/members/{userId:guid}", async (Guid userId, HttpContext http,
-            SubstrateClient substrate, CancellationToken ct) =>
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can remove members.");
-            await using var connection = await substrate.DataSource.OpenConnectionAsync(ct);
+            await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
             await using (var command = NpgsqlCatalog.Command(connection, transaction, "account.lock_workspace", account.Tenant))
                 await command.ExecuteScalarAsync(ct);

@@ -110,6 +110,61 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
 
     [Fact]
     [Trait("Tier", "db")]
+    public async Task BrowserWorkspaceChecksAndAccountRoutesUseApplicationDatabase()
+    {
+        await using var application = new NpgsqlDataSourceBuilder(LaplaceInstall.AppConnectionString()).Build();
+        var store = new PostgresIdentityStore(application);
+        var suffix = Guid.NewGuid().ToString("N");
+        var account = await store.UpsertExternalIdentityAsync(new ExternalIdentityProfile(
+            $"route-test-{suffix}", "https://identity.test", suffix, null, "Database routing test", null), CancellationToken.None);
+        try
+        {
+            using var factory = _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            {
+                services.AddKeyedSingleton<NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey, application);
+                services.AddSingleton<SubstrateClient>(_ => throw new InvalidOperationException("Account route opened the knowledge database"));
+                services.AddSingleton(account);
+                services.AddAuthentication(options => options.DefaultAuthenticateScheme = "database-route-test")
+                    .AddScheme<AuthenticationSchemeOptions, DatabaseRouteIdentityHandler>("database-route-test", _ => { });
+            }));
+            using var client = factory.CreateClient();
+            foreach (var path in new[] { "/v1/account", "/v1/account/members", "/v1/account/invitations" })
+            {
+                using var response = await client.GetAsync(path);
+                Assert.True(response.IsSuccessStatusCode, $"{path}: {await response.Content.ReadAsStringAsync()}");
+            }
+            // A selected workspace takes the resolver's other membership path.
+            client.DefaultRequestHeaders.Add("Cookie", $"{ApiKeyTenantResolver.WorkspaceCookie}={account.TenantId}");
+            using var selected = await client.GetAsync("/v1/account");
+            Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+            using var payload = JsonDocument.Parse(await selected.Content.ReadAsStringAsync());
+            Assert.Equal(account.TenantId, payload.RootElement.GetProperty("tenantId").GetString());
+        }
+        finally
+        {
+            await using var cleanup = application.CreateCommand("DELETE FROM app.users WHERE user_id = @user; DELETE FROM app.tenants WHERE tenant_id = @tenant;");
+            cleanup.Parameters.AddWithValue("user", account.UserId);
+            cleanup.Parameters.AddWithValue("tenant", account.TenantId);
+            await cleanup.ExecuteNonQueryAsync();
+        }
+    }
+
+    private sealed class DatabaseRouteIdentityHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        Microsoft.Extensions.Logging.ILoggerFactory logger,
+        System.Text.Encodings.Web.UrlEncoder encoder,
+        IdentityAccount account) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(AuthenticateResult.Success(
+            new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity([
+                new Claim(LaplaceClaimTypes.User, account.UserId.ToString("D")),
+                new Claim(LaplaceClaimTypes.Tenant, account.TenantId),
+                new Claim(LaplaceClaimTypes.Provider, account.Provider)
+            ], Scheme.Name)), Scheme.Name)));
+    }
+
+    [Fact]
+    [Trait("Tier", "db")]
     public async Task PostgresIdentityStorePersistsAccountSessionAndConversation()
     {
         await using var dataSource = new NpgsqlDataSourceBuilder(
