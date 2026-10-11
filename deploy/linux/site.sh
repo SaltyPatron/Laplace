@@ -472,6 +472,9 @@ phase_bundle() {
   rm -rf "$b"; mkdir -p "$b/share"
   cp -a "$SITE_WORK/stage/app" "$b/app"
   cp -a "$LAPLACE_INSTALL_PREFIX/share/laplace" "$b/share/laplace"
+  # The entry points share identical managed/native dependencies. Tar preserves
+  # hardlinks, so the network carries each byte-identical file once.
+  python3 "$ROOT/deploy/linux/deduplicate-release.py" "$b"
   # Artifact upload normalizes file modes; tar preserves executable CLI permissions.
   tar -cf "$b/laplace-site.tar" -C "$b" app share
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then printf 'path=%s\n' "$b/laplace-site.tar" >> "$GITHUB_OUTPUT"; fi
