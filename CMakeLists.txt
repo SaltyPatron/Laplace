@@ -73,6 +73,11 @@ if(UNIX AND NOT APPLE)
 endif()
 
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+if(UNIX AND NOT APPLE)
+    # Installation rewrites BUILD_RPATH. Keep the bundled native closure usable
+    # on hosting machines without the build host's compiler installation.
+    list(PREPEND CMAKE_INSTALL_RPATH "$ORIGIN")
+endif()
 list(APPEND CMAKE_INSTALL_RPATH "/opt/laplace/geos/lib")
 list(APPEND CMAKE_INSTALL_RPATH "/opt/laplace/proj/lib")
 foreach(_oneapi_var_pair IN ITEMS
