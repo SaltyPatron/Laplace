@@ -318,6 +318,7 @@ api_env() {
   # Migrations keep their schema-owning identity; only the serving environment
   # receives the explicitly declared application runtime connection.
   local runtime_app_db="${LAPLACE_APP_RUNTIME_DB:-${LAPLACE_APP_DB:-}}"
+  local runtime_knowledge_db="${LAPLACE_KNOWLEDGE_RUNTIME_DB:-$LAPLACE_DB}"
   [[ -z "${LAPLACE_APP_RUNTIME_DB:-}" || -n "${LAPLACE_APP_DB:-}" ]] || fail "application runtime selection requires the migration database declaration"
   [[ -f "$env_file" ]] || install -m 0664 "$ROOT/deploy/linux/laplace-api.env.example" "$env_file"
   t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
@@ -325,7 +326,7 @@ api_env() {
     [[ -n "$key" ]] || continue
     if grep -q "^$key=" "$env_file"; then sed -i "s|^$key=.*|$key=$val|" "$env_file"; else printf '%s=%s\n' "$key" "$val" >> "$env_file"; fi
   done <<EOF
-LAPLACE_DB=$LAPLACE_DB
+LAPLACE_DB=$runtime_knowledge_db
 ${runtime_app_db:+LAPLACE_APP_DB=$runtime_app_db}
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
@@ -347,13 +348,13 @@ mcp_env() {
   local env_file="$LAPLACE_APP_DIR/laplace-mcp.env" t0
   t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
   cat > "$env_file.new" <<EOF
-LAPLACE_DB=$LAPLACE_DB
+LAPLACE_DB=${LAPLACE_MCP_RUNTIME_DB:-$LAPLACE_DB}
 LAPLACE_PGPORT=$PGPORT
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR/mcp-runtime:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
 LAPLACE_MCP_HTTP_PORT=$LAPLACE_MCP_HTTP_PORT
 LAPLACE_MCP_ORIGIN=$LAPLACE_MCP_ORIGIN
-LAPLACE_OPS_LOG_DIR=$LAPLACE_APP_DIR/logs
+LAPLACE_OPS_LOG_DIR=${LAPLACE_MCP_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
 LAPLACE_DATA=${LAPLACE_DATA:-$LAPLACE_DATA_ROOT}
 LAPLACE_INSTALL_PREFIX=$LAPLACE_INSTALL_PREFIX
