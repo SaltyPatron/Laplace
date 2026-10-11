@@ -1076,9 +1076,9 @@ internal sealed class SubstrateTools : IMcpTools
         if (!File.Exists(path) && !Directory.Exists(path))
             return ($"path not found: {path}", true);
 
-        var cliPath = ResolveCliBinary();
+        var cliPath = Laplace.Ops.IngestProcessRunner.ResolveCliBinary();
         if (cliPath is null)
-            return ("Laplace.Cli binary not found (expected app/Laplace.Cli/bin/{Release,Debug}/net10.0/Laplace.Cli next to the repo root; override with LAPLACE_CLI_BIN)", true);
+            return ("Laplace.Cli binary not found. Publish the CLI at LAPLACE_CLI_EXE or install the release's cli directory.", true);
 
         var psi = new ProcessStartInfo(cliPath)
         {
@@ -1124,21 +1124,6 @@ internal sealed class SubstrateTools : IMcpTools
 
     private static string Tail(string s, int maxChars) =>
         s.Length <= maxChars ? s : "...[truncated]...\n" + s[^maxChars..];
-
-    private static string? ResolveCliBinary()
-    {
-        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_CLI_BIN");
-        if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv)) return fromEnv;
-
-        if (!LaplaceInstall.TryRepoRoot(out var root)) return null;
-        var exeName = OperatingSystem.IsWindows() ? "Laplace.Cli.exe" : "Laplace.Cli";
-        foreach (var config in new[] { "Release", "Debug" })
-        {
-            var candidate = Path.Combine(root, "app", "Laplace.Cli", "bin", config, "net10.0", exeName);
-            if (File.Exists(candidate)) return candidate;
-        }
-        return null;
-    }
 
     private static (string, bool) Help(JsonObject? args)
     {

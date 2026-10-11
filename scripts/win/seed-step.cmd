@@ -122,8 +122,6 @@ exit /b %ERRORLEVEL%
 rem Ingest CLI is a ReadyToRun publish tree (net10.0-r2r), not the plain build
 rem output. Publishing into BaseOutputPath silently kept non-R2R assemblies and
 rem left clrjit on the hot path (WER 0xc0000409 on ConceptNet/WordNet 2026-07-11).
-set "CLI_R2R_OUT=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r"
-set "LAPLACE_CLI_EXE=%CLI_R2R_OUT%\Laplace.Cli.exe"
 if "%REBUILD%"=="1" goto ensure_cli_build
 if defined LAPLACE_FORCE_CLI_BUILD goto ensure_cli_build
 if not exist "%LAPLACE_CLI_EXE%" goto ensure_cli_build
@@ -148,20 +146,8 @@ if errorlevel 1 (
 )
 exit /b 0
 :ensure_cli_build
-echo ==== seed-step: publish CLI Release ^(ReadyToRun → net10.0-r2r^) ====
-rem Fix for clrjit.dll 0xc0000409 fail-fast (.NET 10.0.9 WER on ConceptNet/WordNet):
-rem publish the managed closure as ReadyToRun into a dedicated output dir so ingest
-rem does not depend on runtime tiered recompile. DOTNET_TieredCompilation=0 is NOT
-rem the fix — do not re-add it.
-if exist "%CLI_R2R_OUT%" rmdir /s /q "%CLI_R2R_OUT%"
-dotnet publish "%LAPLACE_ROOT%\app\Laplace.Cli\Laplace.Cli.csproj" -c Release -v q --nologo ^
-  -p:PublishReadyToRun=true -o "%CLI_R2R_OUT%" || exit /b 1
-if not exist "%LAPLACE_CLI_EXE%" (
-  echo ERROR: CLI ReadyToRun publish succeeded but exe missing: %LAPLACE_CLI_EXE%
-  exit /b 1
-)
-echo r2r %DATE% %TIME%> "%LAPLACE_CLI_EXE%.r2r-stamp"
-exit /b 0
+pwsh -NoProfile -File "%~dp0publish-cli.ps1"
+exit /b %ERRORLEVEL%
 
 rem exit /b 0 = an ingest CLI process is running, 1 = none (same convention as
 rem the old tasklist^|find check, so callers keep `if not errorlevel 1` = running).

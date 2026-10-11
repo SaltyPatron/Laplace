@@ -18,6 +18,24 @@ def code(body: str) -> str:
 
 
 class WorkflowArchitecture(unittest.TestCase):
+    def test_manual_deployment_passes_the_selected_promotion_boundary(self):
+        maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
+        delivery = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        deploy = maintenance.split("\n  deploy:\n", 1)[1].split("\n  verify:\n", 1)[0]
+        self.assertIn("inputs.target != 'knowledge'", deploy)
+        self.assertIn("promote: ${{ inputs.target == 'production' }}", deploy)
+        start_cloud = delivery.split("\n  knowledge-host:\n", 1)[1].split("\n  production-build:\n", 1)[0]
+        self.assertIn("needs.deliver.result == 'success' && inputs.qualify_cloud == true", start_cloud)
+        self.assertNotIn("github.event_name == 'push' || inputs.promote", start_cloud)
+        production = delivery.split("\n  production:\n", 1)[1]
+        self.assertIn("needs: deliver", production)
+        self.assertNotIn("needs: production-build", production)
+        staging = delivery.split("\n  knowledge-host:\n", 1)[0]
+        self.assertIn("run: deploy/linux/site.sh bundle", staging)
+        self.assertIn("qualify_cloud: true", maintenance)
+        self.assertIn("promote:\n", delivery)
+        self.assertIn("type: boolean\n        default: true", delivery)
+
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
         repairs = sorted(name for name in names if "repair" in name)
