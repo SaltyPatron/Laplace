@@ -81,10 +81,13 @@ export LAPLACE_DB='Host=/tmp;Username=migration_owner;Database=knowledge'
 export LAPLACE_KNOWLEDGE_RUNTIME_DB='Host=127.0.0.1;Username=api_knowledge;Database=knowledge;SSL Mode=Require;Maximum Pool Size=2'
 export LAPLACE_MCP_RUNTIME_DB='Host=/tmp;Username=mcp_knowledge;Database=knowledge;Maximum Pool Size=2'
 export LAPLACE_MCP_LOG_DIR="$work/mcp-state/logs" LAPLACE_MCP_HTTP_PORT=5190 LAPLACE_MCP_ORIGIN=https://mcp.example
+export LAPLACE_MCP_STATE_DIR="$work/mcp-state"
 export PGPORT=5432
 sed -n '/^mcp_env() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
 bash -c 'set -euo pipefail; fail(){ exit 1; }; source "$SITE_WORK/functions.sh"; api_env; mcp_env; [[ "$LAPLACE_DB" == *Username=migration_owner* ]]'
 grep -Fxq "LAPLACE_DB=$LAPLACE_KNOWLEDGE_RUNTIME_DB" "$work/runtime/laplace-api.env"
 grep -Fxq "LAPLACE_DB=$LAPLACE_MCP_RUNTIME_DB" "$work/runtime/laplace-mcp.env"
 grep -Fxq "LAPLACE_OPS_LOG_DIR=$LAPLACE_MCP_LOG_DIR" "$work/runtime/laplace-mcp.env"
+grep -Fxq "LAPLACE_AGENTS_CONFIG=$LAPLACE_MCP_STATE_DIR/agents.json" "$work/runtime/laplace-mcp.env"
+grep -Fxq "LAPLACE_OUT=$LAPLACE_MCP_STATE_DIR/out" "$work/runtime/laplace-mcp.env"
 echo 'PASS API/MCP knowledge identities and MCP writable state remain separate from deployment'
