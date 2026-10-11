@@ -1,11 +1,14 @@
 @echo off
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
+set "LAPLACE_IIS_SETTINGS_RESOLVED="
+for /f "usebackq delims=" %%L in (`pwsh -NoProfile -File "%~dp0..\..\deploy\windows\site-settings.ps1" -ForCmd`) do set "%%L"
+if not defined LAPLACE_IIS_SETTINGS_RESOLVED exit /b 1
 set "SRC=%LAPLACE_PUBLISH_ENDPOINT%"
 set "LIVE=%LAPLACE_IIS_API%"
 set "APPCMD=%SystemRoot%\System32\inetsrv\appcmd.exe"
-set "POOL=LaplacePool"
-set "SITE=Laplace"
+set "POOL=%LAPLACE_IIS_POOL%"
+set "SITE=%LAPLACE_IIS_SITE%"
 
 if not exist "%SRC%\Laplace.Endpoints.OpenAICompat.dll" (
   echo [deploy-api] ERROR: no staged build at %SRC% — run scripts\win\publish.cmd first
@@ -109,7 +112,7 @@ echo ==== wait for /health ^(liveness — ready requires DB+seed which come late
 set /a "READY_WAIT=0"
 :wait_ready
 powershell -NoProfile -Command ^
-  "try { $r = Invoke-RestMethod 'http://localhost:8080/health' -TimeoutSec 5; if ($r.status -eq 'ok') { exit 0 }; Write-Host ('not ok: ' + ($r | ConvertTo-Json -Compress)); exit 2 } catch { Write-Host $_.Exception.Message; exit 1 }"
+  "try { $r = Invoke-RestMethod ($env:LAPLACE_SITE_URL + '/health') -TimeoutSec 5; if ($r.status -eq 'ok') { exit 0 }; Write-Host ('not ok: ' + ($r | ConvertTo-Json -Compress)); exit 2 } catch { Write-Host $_.Exception.Message; exit 1 }"
 set "READY_RC=!ERRORLEVEL!"
 if "!READY_RC!"=="0" goto ready_ok
 set /a "READY_WAIT+=1"
