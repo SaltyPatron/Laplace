@@ -27,6 +27,11 @@ certificate coverage/expiry, validates nginx, reloads it and requests the named
 HTTPS health endpoint with certificate validation. If activation fails, it
 restores the previous configuration. The existing certificate renewal mechanism
 still owns renewal; this script does not issue a replacement certificate.
+Nginx reload starts new workers asynchronously. Setup waits up to the declared
+`activation_timeout_seconds` on each listen address for HTTP 200 with application
+health JSON. A persistent failure reports its HTTP status or TLS/connection
+error before rollback. `configure-nginx.py --check-certificate` verifies the
+declared certificate without changing the installation.
 
 The declared route accepts the LAN and selected VM addresses. Router forwarding,
 host firewall rules and Tailscale policy are separate access boundaries; nginx

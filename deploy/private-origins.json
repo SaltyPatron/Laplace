@@ -13,6 +13,7 @@
       "client_max_body_size": "256m",
       "mcp_max_body_size": "1m",
       "proxy_timeout_seconds": 3600,
+      "activation_timeout_seconds": 30,
       "allowed_networks": [
         "192.168.1.0/24",
         "100.124.95.17/32",
