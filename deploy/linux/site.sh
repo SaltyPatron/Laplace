@@ -310,6 +310,11 @@ phase_app() {
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" -c Release --no-self-contained -o "$stage/app/mcp-runtime" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/mcp-runtime/"; done
   [[ -f "$stage/app/mcp-runtime/Laplace.Endpoints.Mcp.dll" ]] || fail "MCP server not staged"
+  # Both API and MCP launch the same installed CLI. A serving host must not
+  # depend on a runner checkout or an old in-repository build directory.
+  dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
+  for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/cli/"; done
+  [[ -x "$stage/app/cli/Laplace.Cli" ]] || fail "CLI not staged"
   echo "  staged $(du -sh "$stage/app" | cut -f1) at $stage/app"
 }
 
@@ -335,6 +340,7 @@ LAPLACE_OPS_LOG_DIR=${LAPLACE_API_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
 LAPLACE_DATA=${LAPLACE_DATA:-$LAPLACE_DATA_ROOT}
 LAPLACE_INSTALL_PREFIX=$LAPLACE_INSTALL_PREFIX
+LAPLACE_CLI_EXE=$LAPLACE_APP_DIR/cli/Laplace.Cli
 LAPLACE_DATA_PROTECTION_KEYS=${LAPLACE_DATA_PROTECTION_KEYS:-$LAPLACE_INSTALL_PREFIX/secrets/data-protection}
 ${LAPLACE_API_STATE_DIR:+LAPLACE_AGENTS_CONFIG=$LAPLACE_API_STATE_DIR/agents.json}
 ${LAPLACE_API_STATE_DIR:+LAPLACE_OUT=$LAPLACE_API_STATE_DIR/out}
@@ -350,6 +356,7 @@ mcp_env() {
   cat > "$env_file.new" <<EOF
 LAPLACE_DB=${LAPLACE_MCP_RUNTIME_DB:-$LAPLACE_DB}
 LAPLACE_PGPORT=$PGPORT
+LAPLACE_CLI_EXE=$LAPLACE_APP_DIR/cli/Laplace.Cli
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR/mcp-runtime:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
 LAPLACE_MCP_HTTP_PORT=$LAPLACE_MCP_HTTP_PORT

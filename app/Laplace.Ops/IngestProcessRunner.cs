@@ -47,7 +47,7 @@ public static class IngestProcessRunner
 
         var cliPath = ResolveCliBinary()
             ?? throw new FileNotFoundException(
-                "Laplace.Cli binary not found. Set LAPLACE_CLI_BIN or install/build the canonical CLI.");
+                "Laplace.Cli binary not found. Publish the CLI at LAPLACE_CLI_EXE or install the release's cli directory.");
 
         var args = new List<string> { "ingest", source };
         if (path is not null) args.Add(path);
@@ -158,14 +158,32 @@ public static class IngestProcessRunner
 
     public static string? ResolveCliBinary()
     {
-        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_CLI_BIN");
-        if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv))
-            return Path.GetFullPath(fromEnv);
+        // BIN is the existing explicit API override; EXE is the path selected by
+        // the build/ingest scripts. A missing explicit selection must not silently
+        // launch an older executable from a different checkout.
+        var selected = Environment.GetEnvironmentVariable("LAPLACE_CLI_BIN");
+        if (string.IsNullOrWhiteSpace(selected))
+            selected = Environment.GetEnvironmentVariable("LAPLACE_CLI_EXE");
+        return ResolveCliBinary(selected, LaplaceInstall.InstallRoot,
+            LaplaceInstall.TryDefaultBuildRoot(out var build) ? build : null,
+            LaplaceInstall.TryRepoRoot(out var repo) ? repo : null);
+    }
 
-        if (!LaplaceInstall.TryRepoRoot(out var root)) return null;
+    internal static string? ResolveCliBinary(string? selected, string installRoot, string? buildRoot, string? repoRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(selected))
+            return File.Exists(selected) ? Path.GetFullPath(selected) : null;
         var exeName = OperatingSystem.IsWindows() ? "Laplace.Cli.exe" : "Laplace.Cli";
-        foreach (var candidate in Candidates(root, exeName))
-            if (File.Exists(candidate)) return candidate;
+        var installed = Path.Combine(installRoot, "cli", exeName);
+        if (File.Exists(installed)) return Path.GetFullPath(installed);
+        if (buildRoot is not null)
+        {
+            var published = Path.Combine(buildRoot, "app", "bin", "Laplace.Cli", "Release", "net10.0-r2r", exeName);
+            if (File.Exists(published)) return Path.GetFullPath(published);
+        }
+        if (repoRoot is not null)
+            foreach (var candidate in Candidates(repoRoot, exeName))
+                if (File.Exists(candidate)) return candidate;
         return null;
     }
 
