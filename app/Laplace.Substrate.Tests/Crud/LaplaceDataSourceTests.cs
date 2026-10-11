@@ -82,12 +82,14 @@ public sealed class LaplaceDataSourceTests
     }
 
     [Theory]
-    [InlineData("Maximum Pool Size")]
-    [InlineData("MaxPoolSize")]
-    public void Serving_PreservesTheDeclaredPoolInsteadOfUsingClientCpuCount(string keyword)
+    [InlineData(SubstrateAccess.Serving, "Maximum Pool Size")]
+    [InlineData(SubstrateAccess.Serving, "MaxPoolSize")]
+    [InlineData(SubstrateAccess.Ingest, "Maximum Pool Size")]
+    [InlineData(SubstrateAccess.Ingest, "MaxPoolSize")]
+    public void PreservesTheDeclaredPoolInsteadOfUsingClientCpuCount(SubstrateAccess access, string keyword)
     {
         var b = new NpgsqlConnectionStringBuilder(LaplaceDataSource.ConnectionStringFor(
-            SubstrateAccess.Serving, $"Host=knowledge.example;Database=knowledge;{keyword}=3;Minimum Pool Size=1;Connection Idle Lifetime=75;Connection Pruning Interval=15"));
+            access, $"Host=knowledge.example;Database=knowledge;{keyword}=3;Minimum Pool Size=1;Connection Idle Lifetime=75;Connection Pruning Interval=15"));
 
         Assert.Equal(3, b.MaxPoolSize);
         Assert.Equal(1, b.MinPoolSize);
