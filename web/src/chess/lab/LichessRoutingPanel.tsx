@@ -17,23 +17,24 @@ interface View { available: boolean; canControl: boolean; error?: string; contro
 
 export function LichessRoutingPanel() {
   const [view, setView] = useState<View | null>(null);
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<{ id: string; revision: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
-    try { setView(await apiGet<View>('/chess/lichess/control')); setError(null); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    try { setView(await apiGet<View>('/chess/lichess/control')); setConnectionError(null); }
+    catch (e) { setConnectionError(e instanceof Error ? e.message : String(e)); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   useVisiblePolling(refresh, { intervalMs: 3000, immediate: false });
   const control = view?.control;
-  const selected = chosen ?? control?.selection.profile ?? '';
+  const selected = chosen?.id ?? control?.selection.profile ?? '';
   const profile = control?.profiles.find(p => p.id === selected);
   const apply = async () => {
     if (!control) return;
     setBusy(true); setError(null);
     try {
-      await apiPost('/chess/lichess/selection', { profile: selected || null, expectedRevision: control.selection.revision });
+      await apiPost('/chess/lichess/selection', { profile: selected || null, expectedRevision: chosen?.revision ?? control.selection.revision });
       setChosen(null); await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -41,10 +42,11 @@ export function LichessRoutingPanel() {
   return <Panel className={styles.panel} title="Lichess destination">
     <p className={styles.intro}>Choose where Laplace plays. Confirmed moves and outcomes are admitted live to the selected engine’s knowledge database. Existing games finish before a destination change takes effect.</p>
     {error && <Alert>{error}</Alert>}
+    {connectionError && <Alert>{connectionError}</Alert>}
     {view?.error && <Alert>{view.error}</Alert>}
     {control && <>
       <Field label="Where are we getting our Lichess UCI from?">
-        <Select value={selected} onChange={e => setChosen(e.target.value)} disabled={!view?.canControl || busy} aria-label="Lichess destination">
+        <Select value={selected} onChange={e => { setChosen({id: e.target.value, revision: control.selection.revision}); setError(null); }} disabled={!view?.canControl || busy} aria-label="Lichess destination">
           <option value="">Off — finish existing games</option>
           {control.profiles.map(p => <option key={p.id} value={p.id}>{p.label} · {p.environment} · {p.implementation}</option>)}
         </Select>
