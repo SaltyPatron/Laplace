@@ -67,11 +67,26 @@ server {{
 '''
 
 
+def verify_certificate(config):
+    hostname = urllib.parse.urlsplit(config['browser_origin']).hostname
+    # Use verification's exit status, not x509's human-readable match message.
+    # The supplied intermediates build the chain; trust still comes from the OS.
+    result = subprocess.run(['openssl', 'verify', '-purpose', 'sslserver',
+                             '-verify_hostname', hostname, '-untrusted', config['certificate'],
+                             config['certificate']], capture_output=True, text=True)
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise SystemExit(f'Certificate verification failed for {hostname}:\n{detail}')
+    subprocess.run(['openssl', 'x509', '-in', config['certificate'], '-noout', '-checkend', '86400'], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configuration', type=Path, default=Path(__file__).parent.parent / 'private-origins.json')
     parser.add_argument('--environment')
-    parser.add_argument('--apply', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--apply', action='store_true')
+    mode.add_argument('--check-certificate', action='store_true', help='Verify the declared certificate without changing the installation')
     args = parser.parse_args()
     environments = json.loads(args.configuration.read_text(encoding='utf-8'))['environments']
     matches = [e for e in environments if (e['name'] == args.environment if args.environment else
@@ -85,17 +100,17 @@ def main():
     if config['hosting'] != 'nginx':
         raise SystemExit('This installation operation is for a declared nginx environment.')
     content = render(config)
+    if args.check_certificate:
+        verify_certificate(config)
+        print('Certificate verified for ' + config['browser_origin'])
+        return
     if not args.apply:
         print(content, end='')
         return
     if os.geteuid() != 0 or socket.gethostname().split('.')[0].lower() != config['host'].lower():
         raise SystemExit('Apply requires root on the declared installation host.')
     hostname = urllib.parse.urlsplit(config['browser_origin']).hostname
-    coverage = subprocess.run(['openssl', 'x509', '-in', config['certificate'], '-noout', '-checkhost', hostname],
-                              check=True, capture_output=True, text=True)
-    if 'Certificate matches host ' not in coverage.stdout:
-        raise SystemExit('The existing certificate does not cover the declared browser hostname.')
-    subprocess.run(['openssl', 'x509', '-in', config['certificate'], '-noout', '-checkend', '86400'], check=True)
+    verify_certificate(config)
     target = Path('/etc/nginx/sites-available/laplace-mono-browser')
     enabled = Path('/etc/nginx/sites-enabled/laplace-mono-browser')
     if enabled.is_symlink() and enabled.resolve() != target:
