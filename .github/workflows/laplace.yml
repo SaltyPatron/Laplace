@@ -1,5 +1,5 @@
 name: Product — main delivery
-run-name: "Deliver main — staging on hart-server, then production: built on hart-cloud, hosted on hart-prod — ${{ github.sha }}"
+run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs.promote && 'production' || 'staging' }} — ${{ github.sha }}"
 
 # Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
 # declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
@@ -22,6 +22,11 @@ run-name: "Deliver main — staging on hart-server, then production: built on ha
 
 on:
   workflow_call:
+    inputs:
+      promote:
+        description: "Continue from verified staging to the cloud build and production installation"
+        type: boolean
+        default: true
   push:
     branches: [main]
     paths-ignore:
@@ -102,7 +107,7 @@ jobs:
   knowledge-host:
     name: Production — the knowledge host (hart-cloud) started for the job
     needs: deliver
-    if: needs.deliver.result == 'success'
+    if: needs.deliver.result == 'success' && (github.event_name == 'push' || inputs.promote)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

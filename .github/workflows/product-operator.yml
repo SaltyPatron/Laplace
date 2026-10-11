@@ -11,7 +11,7 @@ on:
         default: verify
         options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy]
       target:
-        description: "Verification host; deploy always follows staging → cloud build → production"
+        description: "Target: staging deploy stops at hart-server; production deploy promotes through the cloud build"
         type: choice
         required: true
         default: staging
@@ -22,10 +22,21 @@ permissions:
   id-token: write
 
 jobs:
+  unsupported-deployment:
+    name: Reject a knowledge host as an application deployment target
+    if: inputs.operation == 'deploy' && inputs.target == 'knowledge'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo 'Application deployment supports staging or production. Use the Operations component workflow for knowledge-host qualification.' >&2
+          exit 2
+
   deploy:
-    name: Deploy through the normal promotion chain
-    if: inputs.operation == 'deploy'
+    name: Deploy to ${{ inputs.target }}
+    if: inputs.operation == 'deploy' && inputs.target != 'knowledge'
     uses: ./.github/workflows/laplace.yml
+    with:
+      promote: ${{ inputs.target == 'production' }}
     secrets: inherit
 
   verify:
