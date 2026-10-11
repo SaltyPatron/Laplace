@@ -1,5 +1,8 @@
 require 'yaml'
 require 'minitest/autorun'
+require 'tmpdir'
+require 'fileutils'
+require 'open3'
 
 class SiteWorkflow < Minitest::Test
   def setup
@@ -85,5 +88,24 @@ class SiteWorkflow < Minitest::Test
     runners = workflow.fetch('jobs').values.map { |job| job.fetch('runs-on') }
     assert_equal [['self-hosted', 'laplace', '${{ inputs.host }}']], runners
     refute workflow.key?('concurrency')
+  end
+
+  def test_status_step_propagates_failure_and_requires_a_report
+    workflow = YAML.load_file(File.expand_path('../.github/workflows/product-operator.yml', __dir__))
+    step = workflow.fetch('jobs').fetch('verify').fetch('steps').find do |item|
+      item['name'] == 'Read installed configuration and target connectivity'
+    end
+    Dir.mktmpdir('status-step-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'deploy/linux'))
+      script = File.join(root, 'deploy/linux/site.sh')
+      ["exit 23\n", "exit 0\n"].each do |body|
+        File.write(script, body)
+        out, error, status = Open3.capture3('bash', '-e', '-c', step.fetch('run'), chdir: root)
+        refute status.success?, "Accepted failed or empty status: #{out} #{error}"
+      end
+      File.write(script, "printf '%s\\n' '{\"host\":\"fixture\",\"app_dir\":\"/fixture/app\"}'\n")
+      out, error, status = Open3.capture3('bash', '-e', '-c', step.fetch('run'), chdir: root)
+      assert status.success?, "Rejected valid status: #{out} #{error}"
+    end
   end
 end

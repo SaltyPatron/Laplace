@@ -33,6 +33,7 @@ on:
       - "scripts/ci-qualification-cache.py"
       - "scripts/ci-product-freshness.py"
       - "scripts/ci_product_scope.py"
+      - "scripts/site-status.py"
       - "scripts/test-parallel.sh"
       - "scripts/product-ci.sh"
       - "deploy/linux/deploy.sh"
