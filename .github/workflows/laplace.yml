@@ -153,8 +153,8 @@ jobs:
         # The host stops itself when idle (Laplace-Operations setup.sh idlestop), and a job queued behind its
         # concurrency group or waiting for the runner is not running on it yet: on 2026-10-10 the host stopped under
         # run 38023100147 after thirty idle minutes. The lease in the instance's metadata, this run's id and an expiry
-        # the build and hosting jobs' combined timeouts away, is what the idle stop reads; release waits for hosting
-        # verification, whatever its result, and the expiry ends it if nothing does.
+        # beyond the qualification timeout, is what the idle stop reads. Release follows qualification,
+        # whatever its result, and the expiry ends the lease if the run is interrupted.
         run: |
           set -euo pipefail
           gcloud compute instances add-metadata hart-cloud --zone us-east1-b --quiet \
