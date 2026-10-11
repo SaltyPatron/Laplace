@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { LoadingText, Muted, NavTabs } from '@ui';
 import styles from './LabView.module.css';
 
@@ -17,7 +17,8 @@ const LAB_PREFETCH: Record<string, () => Promise<unknown>> = {
   experiments: loadExperiments,
   gauntlet: loadGauntlet,
   calibration: loadCalibration,
-  import: async () => { await Promise.all([loadExperiments(), loadLichess()]); },
+  import: loadExperiments,
+  lichess: loadLichess,
 };
 
 /** Chess experiments, measured machine calibration, external matches and imports. */
@@ -39,6 +40,12 @@ const TABS: { id: string; label: string; path: string; blurb: string }[] = [
     label: 'Calibration',
     path: '/lab/calibration',
     blurb: 'Measured Stockfish and CuteChess performance, engine identity, and machine settings.',
+  },
+  {
+    id: 'lichess',
+    label: 'Lichess',
+    path: '/lab/lichess',
+    blurb: 'Choose the active environment for the shared bot and follow its live game admission.',
   },
   {
     id: 'import',
@@ -86,11 +93,10 @@ export function LabView() {
             element={(
               <div className={styles.stack}>
                 <ExperimentRunner categories={['import']} initialKind="player-profile" />
-                <LichessPanel />
               </div>
             )}
           />
-          <Route path="lichess" element={<Navigate to="/lab/import" replace />} />
+          <Route path="lichess" element={<LichessPanel />} />
         </Routes>
         </Suspense>
       </div>
