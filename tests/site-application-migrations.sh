@@ -57,3 +57,18 @@ sed -n '/^export PGHOST=/,/^export LAPLACE_EXTERNAL=/p' "$root/deploy/linux/site
   [[ "$LAPLACE_APP_DB" == 'Host=127.0.0.1;Port=5432;Username=application_owner;Database=application' ]]
 )
 echo 'PASS knowledge selection preserves the distinct application identity'
+
+sed -n '/^api_env() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
+mkdir -p "$work/runtime" "$work/prefix/share/laplace"
+touch "$work/runtime/laplace-api.env" "$work/prefix/share/laplace/laplace_t0_perfcache_17.bin"
+export LAPLACE_APP_DIR="$work/runtime" LAPLACE_INSTALL_PREFIX="$work/prefix" LAPLACE_API_URL=http://127.0.0.1:5187 LAPLACE_EXTERNAL="$work/external"
+export LAPLACE_DB='Host=knowledge;Username=knowledge_runtime;Database=knowledge'
+export LAPLACE_APP_DB='Host=application;Username=schema_owner;Database=app'
+export LAPLACE_APP_RUNTIME_DB='Host=application;Username=runtime;Database=app;Maximum Pool Size=2'
+bash -c 'set -euo pipefail; fail(){ exit 1; }; source "$SITE_WORK/functions.sh"; api_env; [[ "$LAPLACE_APP_DB" == *Username=schema_owner* ]]'
+grep -Fxq "LAPLACE_APP_DB=$LAPLACE_APP_RUNTIME_DB" "$work/runtime/laplace-api.env"
+echo 'PASS runtime configuration uses the restricted login without changing the migration identity'
+if env -u LAPLACE_APP_DB bash -c 'set -euo pipefail; fail(){ exit 1; }; source "$SITE_WORK/functions.sh"; api_env'; then
+  echo 'FAIL accepted runtime identity without a declared migration target'; exit 1
+fi
+echo 'PASS incomplete application identity declaration is rejected'
