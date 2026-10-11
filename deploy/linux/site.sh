@@ -462,19 +462,24 @@ phase_bundle() {
   rm -rf "$b"; mkdir -p "$b/share"
   cp -a "$SITE_WORK/stage/app" "$b/app"
   cp -a "$LAPLACE_INSTALL_PREFIX/share/laplace" "$b/share/laplace"
-  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then printf 'path=%s\n' "$b" >> "$GITHUB_OUTPUT"; fi
+  # Artifact upload normalizes file modes; tar preserves executable CLI permissions.
+  tar -cf "$b/laplace-site.tar" -C "$b" app share
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then printf 'path=%s\n' "$b/laplace-site.tar" >> "$GITHUB_OUTPUT"; fi
   echo "  $(du -sh "$b" | cut -f1) at $b: $(cat "$b/app/.laplace-source-revision")"
 }
 
 phase_receive() {
   say "receive the bundle"
   local b="$SITE_WORK/bundle"
-  [[ -f "$b/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "no bundle at $b/app: the verified build's bundle phase makes it"
-  revision "$b/app" >/dev/null
-  [[ -d "$b/share/laplace" ]] || fail "bundle perf-caches are missing"
+  [[ -f "$b/laplace-site.tar" ]] || fail "no archive at $b/laplace-site.tar: the verified build's bundle phase makes it"
   rm -rf "$SITE_WORK/stage"; mkdir -p "$SITE_WORK/stage/share"
-  cp -a "$b/app" "$SITE_WORK/stage/app"
-  cp -a "$b/share/laplace" "$SITE_WORK/stage/share/laplace"
+  tar -xf "$b/laplace-site.tar" -C "$SITE_WORK/stage" --no-same-owner
+  [[ -f "$SITE_WORK/stage/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "bundle API is missing"
+  revision "$SITE_WORK/stage/app" >/dev/null
+  [[ -d "$SITE_WORK/stage/share/laplace" ]] || fail "bundle perf-caches are missing"
+  [[ -x "$SITE_WORK/stage/app/cli/Laplace.Cli" ]] || fail "bundle CLI is missing or not executable"
+  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+    "$SITE_WORK/stage/app/cli/Laplace.Cli" decompose Laplace) || fail "received CLI native decomposition failed"
   echo "  $(cat "$SITE_WORK/stage/app/.laplace-source-revision")"
 }
 
