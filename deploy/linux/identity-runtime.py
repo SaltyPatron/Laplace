@@ -276,6 +276,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 UMask=0077
+ExecStartPre=/usr/bin/rm -f {directory}/candidate.json
 ExecStart={bao} agent -config={directory}/agent.hcl
 Restart=on-failure
 RestartSec=15

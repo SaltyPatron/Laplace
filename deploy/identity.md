@@ -65,6 +65,9 @@ readiness plus the actual provider client IDs emitted by its login endpoints.
 Failed activation restores the preceding environment and restarts it. The agent
 never runs with an operator token. Its root execution permits systemd restart
 and protected-file updates; its OpenBao policy still has only the record read.
+Agent exits if its render command fails. Before each systemd restart, the private
+candidate is removed so the next authenticated fetch executes activation again;
+the last verified serving environment remains in place throughout recovery.
 
 The directory is root-only 0700, credential files 0600. A systemd API drop-in
 loads the managed identity file after legacy environment files; applications and
