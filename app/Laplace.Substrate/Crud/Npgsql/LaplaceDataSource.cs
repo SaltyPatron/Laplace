@@ -50,29 +50,14 @@ public static class LaplaceDataSource
     public static string ConnectionStringFor(SubstrateAccess access, string? baseConnectionString = null)
     {
         var basis = baseConnectionString ?? LaplaceInstall.PostgresConnectionString();
-        if (access == SubstrateAccess.Ingest)
-        {
-            // The hot ingest probes and folds prepare their fixed statements explicitly;
-            // no auto-prepare LRU sits between them and PostgreSQL to evict a statement.
-            // Planning a probe over the partitioned physicality relation opens every
-            // leaf's metadata before runtime pruning, so re-planning is the dominant cost.
-            var ing = new NpgsqlConnectionStringBuilder(basis)
-            {
-                MaxPoolSize = PostgresResourcePlan.Current.IngestConnectionOwners,
-                MinPoolSize = 0,
-                ConnectionIdleLifetime = PoolIdleLifetimeSeconds,
-                ConnectionPruningInterval = PoolPruningIntervalSeconds,
-                MaxAutoPrepare = 0,
-            };
-            return ing.ConnectionString;
-        }
-
         var b = new NpgsqlConnectionStringBuilder(basis);
         // The installation budgets each datasource against its database host and
         // other consumers. Local CPU topology describes default client demand;
         // it cannot override an explicitly declared remote-server allocation.
         if (!b.ShouldSerialize("Maximum Pool Size"))
-            b.MaxPoolSize = PostgresResourcePlan.Current.ServingConnectionOwners;
+            b.MaxPoolSize = access == SubstrateAccess.Ingest
+                ? PostgresResourcePlan.Current.IngestConnectionOwners
+                : PostgresResourcePlan.Current.ServingConnectionOwners;
         if (!b.ShouldSerialize("Minimum Pool Size")) b.MinPoolSize = 0;
         if (!b.ShouldSerialize("Connection Idle Lifetime")) b.ConnectionIdleLifetime = PoolIdleLifetimeSeconds;
         if (!b.ShouldSerialize("Connection Pruning Interval")) b.ConnectionPruningInterval = PoolPruningIntervalSeconds;
@@ -80,10 +65,11 @@ public static class LaplaceDataSource
         // The installed connection string may carry `Command Timeout=0` (unbounded) for
         // ingest. A serving path never inherits it: a slow query surfaces as a bounded
         // error instead of holding the caller. Commands may still set a tighter budget.
-        if (b.CommandTimeout <= 0 || b.CommandTimeout > ServingCommandTimeoutSeconds)
+        if (access == SubstrateAccess.Serving &&
+            (b.CommandTimeout <= 0 || b.CommandTimeout > ServingCommandTimeoutSeconds))
             b.CommandTimeout = ServingCommandTimeoutSeconds;
 
-        // Typed serving reads prepare their fixed statements explicitly. Any inherited
+        // Typed reads, ingest probes and folds prepare their fixed statements explicitly. Any inherited
         // auto-prepare setting is disabled so an environment connection string cannot
         // reintroduce an LRU of prepared statements.
         b.MaxAutoPrepare = 0;
