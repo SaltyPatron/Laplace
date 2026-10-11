@@ -303,8 +303,19 @@ phase_app() {
   mkdir -p "$stage/app/wwwroot"; cp -a "$ROOT/web/dist/." "$stage/app/wwwroot/"
   git -C "$ROOT" rev-parse HEAD | tee "$stage/app/.laplace-source-revision" > "$stage/app/wwwroot/.laplace-web-source-revision"
   # the native closure beside what loads it: the engine libraries and the oneAPI runtime from the prefix
-  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$LAPLACE_INSTALL_PREFIX"/lib/libmkl_*.so* "$stage/app/" 2>/dev/null || true
-  local f; for f in "$LAPLACE_INSTALL_PREFIX"/lib/lib{iomp5,tbb,tbbmalloc,svml,imf,intlc,irng,sycl}*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/"; done
+  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$LAPLACE_INSTALL_PREFIX"/lib/libmkl_*.so* "$stage/app/"
+  local f
+  for f in core dynamics synthesis syzygy; do
+    [[ -f "$stage/app/liblaplace_$f.so" ]] || fail "native runtime not staged: liblaplace_$f.so"
+  done
+  for f in "$LAPLACE_INSTALL_PREFIX"/lib/lib{iomp5,tbb,tbbmalloc,svml,imf,intlc,irng,sycl}*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/"; done
+  local zstd_library
+  zstd_library=$(python3 "$ROOT/scripts/install-zstd.py" --build-dir "$SITE_BUILD/zstd")
+  cp -fL "$zstd_library" "$stage/app/libzstd.so.1"
+  mkdir -p "$stage/app/third-party-licenses/zstd"
+  cp "$(dirname "$zstd_library")/LICENSE" "$(dirname "$zstd_library")/COPYING" "$stage/app/third-party-licenses/zstd/"
+  python3 "$ROOT/scripts/check-zstd-runtime.py" --library "$stage/app/libzstd.so.1" \
+    --require-version "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/deploy/zstd-release.json")"
   [[ -f "$stage/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "API not staged"
   # the MCP server (laplace-mcp.service) in its own directory of the app, with the same native closure beside it
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" -c Release --no-self-contained -o "$stage/app/mcp-runtime" -v minimal --nologo
@@ -314,7 +325,12 @@ phase_app() {
   # depend on a runner checkout or an old in-repository build directory.
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/cli/"; done
+  mkdir -p "$stage/app/cli/share/laplace" "$stage/app/cli/third-party-licenses"
+  cp "$SITE_BUILD/engine/core/perfcache/laplace_t0_perfcache.bin" "$stage/app/cli/share/laplace/"
+  cp -a "$stage/app/third-party-licenses/zstd" "$stage/app/cli/third-party-licenses/"
   [[ -x "$stage/app/cli/Laplace.Cli" ]] || fail "CLI not staged"
+  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+    "$stage/app/cli/Laplace.Cli" decompose Laplace) || fail "staged CLI native decomposition failed"
   echo "  staged $(du -sh "$stage/app" | cut -f1) at $stage/app"
 }
 
@@ -434,7 +450,7 @@ restart_mcp() {
 }
 
 # ------------------------------------------------------------------------------------------------ bundle, receive
-# The knowledge host builds, the hosting host runs. What travels between them is one directory the pipeline carries
+# The verified build host supplies the serving host. One directory travels through the pipeline
 # as an artifact: the staged app with its native closure, and the perf-caches the API reads. Nothing else of the
 # build host's goes along, and the hosting host builds nothing: it needs dotnet, nginx and the directories
 # site-host.sh makes.
@@ -446,13 +462,14 @@ phase_bundle() {
   rm -rf "$b"; mkdir -p "$b/share"
   cp -a "$SITE_WORK/stage/app" "$b/app"
   cp -a "$LAPLACE_INSTALL_PREFIX/share/laplace" "$b/share/laplace"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then printf 'path=%s\n' "$b" >> "$GITHUB_OUTPUT"; fi
   echo "  $(du -sh "$b" | cut -f1) at $b: $(cat "$b/app/.laplace-source-revision")"
 }
 
 phase_receive() {
   say "receive the bundle"
   local b="$SITE_WORK/bundle"
-  [[ -f "$b/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "no bundle at $b/app: the knowledge host's bundle phase makes it"
+  [[ -f "$b/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "no bundle at $b/app: the verified build's bundle phase makes it"
   revision "$b/app" >/dev/null
   [[ -d "$b/share/laplace" ]] || fail "bundle perf-caches are missing"
   rm -rf "$SITE_WORK/stage"; mkdir -p "$SITE_WORK/stage/share"
@@ -466,6 +483,13 @@ phase_smoke() {
   say smoke
   local rc=0 url code installed_revision
   if ! installed_revision=$(revision "$LAPLACE_APP_DIR"); then installed_revision=unknown; rc=1; fi
+  if (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+      "$LAPLACE_APP_DIR/cli/Laplace.Cli" decompose Laplace); then
+    echo '| Installed monorepo CLI native decomposition | passed |' >> "$SUMMARY"
+  else
+    echo '| Installed monorepo CLI native decomposition | FAILED |' >> "$SUMMARY"
+    rc=1
+  fi
   {
     echo "### Laplace monorepo site on $(hostname)"
     echo

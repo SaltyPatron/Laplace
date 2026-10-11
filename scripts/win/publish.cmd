@@ -111,6 +111,7 @@ if errorlevel 1 (
 )
 
 echo ==== [4/5] overlay UCI + web/dist + native DLLs ====
+pwsh -NoProfile -File "%HERE%publish-cli.ps1" -Destination "%PUBLISH_OUT%\cli" || exit /b 1
 robocopy "%UCI_STAGE%" "%PUBLISH_OUT%" /E /NFL /NDL /NJH /NJS /NP
 if errorlevel 8 exit /b 1
 if exist "%UCI_STAGE%" rmdir /s /q "%UCI_STAGE%"
@@ -153,6 +154,7 @@ call :require_file "%PUBLISH_OUT%\Laplace.Endpoints.OpenAICompat.dll" || exit /b
 call :require_file "%PUBLISH_OUT%\Laplace.Core.dll" || exit /b 1
 call :require_file "%PUBLISH_OUT%\Laplace.Chess.dll" || exit /b 1
 call :require_file "%PUBLISH_OUT%\Laplace.Substrate.dll" || exit /b 1
+call :require_file "%PUBLISH_OUT%\cli\Laplace.Cli.exe" || exit /b 1
 call :require_file "%LAPLACE_PUBLISH_MIGRATIONS%\Laplace.Migrations.dll" || exit /b 1
 call :require_file "%PUBLISH_OUT%\web.config" || exit /b 1
 

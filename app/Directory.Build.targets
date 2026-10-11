@@ -50,4 +50,24 @@
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="false"
           Condition="Exists('$(LaplaceBuildWin)\core\laplace_syzygy.pdb')" />
   </Target>
+  <!-- Publish output is a separate directory from OutDir. Native libraries copied
+       by the Build target do not automatically become published SDK items. -->
+  <Target Name="LaplacePublishWindowsRuntime" AfterTargets="Publish"
+          Condition="'$(OS)' == 'Windows_NT' AND '$(OutputType)' == 'Exe' AND '$(IsTestProject)' != 'true'">
+    <ItemGroup>
+      <LaplacePublishedNative Include="$(LaplaceBuildWin)\core\laplace_core.dll" />
+      <LaplacePublishedNative Include="$(LaplaceBuildWin)\core\laplace_syzygy.dll" />
+      <LaplacePublishedNative Include="$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll" />
+      <LaplacePublishedNative Include="$(LaplaceBuildWin)\synthesis\laplace_synthesis.dll" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(LaplacePublishedNative.Identity)')"
+           Text="Missing native publish input: %(LaplacePublishedNative.Identity). Build the selected native runtime before publishing." />
+    <Copy SourceFiles="@(LaplacePublishedNative)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="false" />
+    <Exec Command="&quot;$(LaplaceRepoRoot)\scripts\win\engine-runtime.cmd&quot; &quot;$(PublishDir)&quot;" />
+    <Exec Command="pwsh -NoProfile -File &quot;$(LaplaceRepoRoot)\scripts\win\publish-zstd.ps1&quot; -Destination &quot;$(PublishDir).&quot;" />
+    <Error Condition="!Exists('$(LaplaceBuildWin)\core\perfcache\laplace_t0_perfcache.bin')"
+           Text="Missing Tier-0 publish input. Build laplace_t0_perfcache before publishing." />
+    <Copy SourceFiles="$(LaplaceBuildWin)\core\perfcache\laplace_t0_perfcache.bin"
+          DestinationFolder="$(PublishDir)\share\laplace" SkipUnchangedFiles="false" />
+  </Target>
 </Project>

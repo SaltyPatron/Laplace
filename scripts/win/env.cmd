@@ -41,8 +41,8 @@ if not defined LAPLACE_PUBLISH_MIGRATIONS set "LAPLACE_PUBLISH_MIGRATIONS=%LAPLA
 if not defined LAPLACE_IIS_API set "LAPLACE_IIS_API=%LAPLACE_DATA_ROOT%\iis\laplace-api"
 rem Ingest / CLI binary is the ReadyToRun publish tree. Plain `dotnet build` output
 rem under net10.0 is for IDE/build only — runtime clrjit 0xc0000409 killed ingest on
-rem .NET 10.0.9; do not point LAPLACE_CLI_EXE at the non-R2R build. seed-step
-rem :ensure_cli publishes this tree when missing.
+rem .NET 10.0.9; build-app publishes and verifies this tree. seed-step uses the
+rem same publisher if its selected CLI is missing or older than the build.
 if not defined LAPLACE_CLI_EXE set "LAPLACE_CLI_EXE=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r\Laplace.Cli.exe"
 if not defined LAPLACE_CLI_DLL set "LAPLACE_CLI_DLL=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r\Laplace.Cli.dll"
 set "LAPLACE_DEPLOY_PG=%LAPLACE_DEPLOY:\=/%"

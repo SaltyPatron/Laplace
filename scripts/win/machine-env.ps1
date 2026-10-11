@@ -54,6 +54,7 @@ if (Test-Path -LiteralPath $env:LAPLACE_DEPENDENCY_MANIFEST -PathType Leaf) {
         if ($fields.Count -lt 9 -or ($fields[8] -split ',') -notcontains 'windows' -or $fields[2] -eq 'tool') { continue }
         if ($fields[0] -notmatch '^[A-Za-z0-9_-]+$' -or $fields[1] -notmatch '^[A-Za-z0-9._-]+$' -or $fields[1] -eq '..') { throw 'Invalid installed dependency manifest' }
         $prefix = [IO.Path]::Combine($env:LAPLACE_DEPS, $fields[0], $fields[1])
+        Set-LaplaceDefault ('LAPLACE_DEPENDENCY_' + ($fields[0] -replace '-', '_').ToUpperInvariant() + '_PREFIX') $prefix
         if (Test-Path -LiteralPath $prefix -PathType Container) { $prefixes += $prefix }
         if ($fields[0] -eq 'icu') {
             Set-LaplaceDefault ICU_ROOT $prefix

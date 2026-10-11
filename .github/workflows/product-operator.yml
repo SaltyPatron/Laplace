@@ -9,9 +9,9 @@ on:
         type: choice
         required: true
         default: verify
-        options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy]
+        options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
       target:
-        description: "Target: staging deploy stops at hart-server; production deploy promotes through the cloud build"
+        description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the knowledge host"
         type: choice
         required: true
         default: staging
@@ -37,6 +37,15 @@ jobs:
     uses: ./.github/workflows/laplace.yml
     with:
       promote: ${{ inputs.target == 'production' }}
+    secrets: inherit
+
+  qualify-cloud:
+    name: Explicit isolated cloud qualification
+    if: inputs.operation == 'qualify-cloud'
+    uses: ./.github/workflows/laplace.yml
+    with:
+      promote: false
+      qualify_cloud: true
     secrets: inherit
 
   verify:
