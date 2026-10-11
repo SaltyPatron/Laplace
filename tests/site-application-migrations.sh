@@ -38,11 +38,16 @@ mkdir -p "$work/bundle/app/wwwroot" "$work/bundle/share/laplace" "$work/installe
 cp "$work/stage/app/.laplace-source-revision" "$work/bundle/app/"
 cp "$work/stage/app/wwwroot/.laplace-web-source-revision" "$work/bundle/app/wwwroot/"
 touch "$work/bundle/app/Laplace.Endpoints.OpenAICompat.dll"
+mkdir -p "$work/bundle/app/cli"
+printf '#!/bin/sh\nexit 0\n' > "$work/bundle/app/cli/Laplace.Cli"
+chmod 755 "$work/bundle/app/cli/Laplace.Cli"
 printf new > "$work/bundle/share/laplace/cache"
 printf old > "$work/installed/share/laplace/cache"
+tar -cf "$work/bundle/laplace-site.tar" -C "$work/bundle" app share
 LAPLACE_INSTALL_PREFIX="$work/installed" bash -c 'set -euo pipefail; fail() { echo "$*" >&2; exit 1; }; say() { :; }; source "$SITE_WORK/functions.sh"; phase_receive' > "$work/receive-result"
 [[ "$(cat "$work/installed/share/laplace/cache")" == old ]]
 [[ "$(cat "$work/stage/share/laplace/cache")" == new ]]
+[[ -x "$work/stage/app/cli/Laplace.Cli" ]]
 echo 'PASS receive stages caches without replacing the serving copy'
 
 # Selecting a restricted knowledge identity does not change the application login.
