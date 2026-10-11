@@ -1,6 +1,6 @@
 # Selecting where the Lichess bot runs
 
-The monorepo's Chess Lab has a **Lichess routing** selector. Every configured UI
+Open **Chess Lab → Lichess** (`/lab/lichess`) for the **Lichess routing** selector. Every configured UI
 addresses the same account controller. Select an installed engine profile, or Off,
 and Apply. The page shows the requested profile, active profile, connection state,
 game count and initialization failures. Changing a selection stops new challenges
@@ -79,3 +79,18 @@ Linux credential destinations may name a `service` instead of a fixed `user`.
 The renderer resolves that unit's actual unprivileged identity and verifies it can
 read the rendered file. This accommodates hosts where the API runs as `laplace-api`
 rather than assuming the build runner is also the application identity.
+
+The desktop's remote UCI endpoint uses the separate IIS installation in
+`Laplace-UCI/setup-iis.ps1`. Its declaration supplies the HTTPS hostname, engine,
+connector release, database certificate and two exact OpenBao records: runtime
+credentials and the machine TLS certificate. IIS runs the connector in its own
+application pool; the credential service installs the certificate and renders
+credentials for that pool. Ordinary UCI connections require no administrator rights.
+
+A Linux chess declaration may include `certificate_export` with `certificate`,
+`key`, `hostname`, `record` and a scoped publisher `enrollment` path. Root setup
+checks hostname coverage and expiry before publishing a password-protected PFX to
+that one record. An hourly timer publishes a changed certificate. This distributes
+certificates already issued by the configured ACME mechanism; it does not issue or
+renew certificates itself. Source enrollments are consumed, and repeat setup uses
+the retained root-only enrollment.
