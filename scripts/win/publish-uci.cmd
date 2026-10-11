@@ -22,6 +22,12 @@ for %%D in (core\laplace_core dynamics\laplace_dynamics synthesis\laplace_synthe
   copy /y "%LAPLACE_ENGINE_BUILD%\%%D.dll" "%DEST%\" >nul || exit /b 1
 )
 call "%HERE%engine-runtime.cmd" "%DEST%" || exit /b 1
+rem the runtime owns its Tier-0 cache; installed engines must not depend on a build directory
+if not exist "%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_t0_perfcache.bin" (
+  echo [publish-uci] ERROR: missing Tier-0 perfcache - run build-engine.cmd
+  exit /b 1
+)
+copy /y "%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_t0_perfcache.bin" "%DEST%\laplace_t0_perfcache.bin" >nul || exit /b 1
 rem the proof: a UCI handshake from a clean environment (no dev shell PATH), which is how a conductor runs it
 pwsh -NoProfile -Command "$env:PATH = [Environment]::GetEnvironmentVariable('PATH','Machine'); $psi = [Diagnostics.ProcessStartInfo]::new('%DEST%\laplace-uci.exe'); $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $p = [Diagnostics.Process]::Start($psi); $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync(); $p.StandardInput.Write(\"uci`nquit`n\"); $p.StandardInput.Close(); if (-not $p.WaitForExit(30000)) { $p.Kill(); throw 'laplace-uci did not exit' }; if ($p.ExitCode -or $o.Result -notmatch 'uciok') { Write-Host $e.Result; throw \"laplace-uci handshake failed (exit $($p.ExitCode))\" }; 'laplace-uci: uciok from a clean environment'" || exit /b 1
 echo OK laplace-uci at %DEST%

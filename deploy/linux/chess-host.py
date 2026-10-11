@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Enroll or install the monorepo chess controller and its OpenBao-rendered credentials."""
 import argparse
+import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -8,11 +10,14 @@ from pathlib import Path
 import pwd
 import re
 import shutil
+import secrets
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 
+sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('identity_runtime', Path(__file__).with_name('identity-runtime.py'))
 identity = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(identity)
@@ -81,6 +86,40 @@ def render(c, directory):
     identity.write(directory / 'render-receipt.json', json.dumps({'source': 'openbao-agent', 'rendered_at': time.time(), 'fields': sorted(c['secret_files'])}))
 
 
+def export_certificate(c, private):
+    export = c['certificate_export']
+    enrollment = json.loads((private / 'certificate-enrollment.json').read_text())
+    if enrollment['record'] != export['record'] or enrollment['address'] != c['address']:
+        raise ValueError('Certificate publishing identity does not match the declared record.')
+    certificate = Path(export['certificate'])
+    match = identity.run(['openssl', 'x509', '-in', str(certificate), '-noout', '-checkhost', export['hostname']])
+    if 'does match certificate' not in match:
+        raise ValueError('The declared certificate does not cover the desktop UCI hostname.')
+    identity.run(['openssl', 'x509', '-in', str(certificate), '-noout', '-checkend', '86400'])
+    fingerprint = hashlib.sha256(certificate.read_bytes()).hexdigest()
+    token = identity.login(enrollment)
+    try:
+        try:
+            previous = identity.request(enrollment, export['record'], token)['data']['data']
+        except RuntimeError as error:
+            if 'returned HTTP 404' not in str(error):
+                raise
+            previous = {}
+        if previous.get('certificate_sha256') == fingerprint:
+            return
+        password = secrets.token_hex(32)
+        result = subprocess.run(['openssl', 'pkcs12', '-export', '-in', str(certificate), '-inkey', export['key'], '-passout', 'stdin'],
+            input=(password + '\n').encode(), capture_output=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError('The declared TLS certificate and private key could not be exported.')
+        identity.request(enrollment, export['record'], token, {'data': {
+            'pfx_base64': base64.b64encode(result.stdout).decode(), 'password': password,
+            'certificate_sha256': fingerprint, 'hostname': export['hostname']}})
+        print('Published the declared TLS certificate to its scoped desktop record.')
+    finally:
+        identity.request(enrollment, 'auth/token/revoke-self', token, {})
+
+
 def install(c, source, enrollment_path):
     if os.geteuid() != 0:
         raise ValueError('Run the host installation with sudo.')
@@ -96,6 +135,9 @@ def install(c, source, enrollment_path):
     for path in [directory, state]:
         if not path.is_absolute() or path.is_symlink() or '..' in path.parts or len(path.parts) < 3:
             raise ValueError('Invalid installation directory: ' + str(path))
+    supplied_enrollment = Path(enrollment_path)
+    if not supplied_enrollment.exists():
+        enrollment_path = str(directory / 'agent/enrollment.json')
     enrollment = json.loads(Path(enrollment_path).read_text())
     if any(enrollment[k] != c[k] for k in ['host', 'record', 'address']):
         raise ValueError('Workload enrollment does not match this installation.')
@@ -117,6 +159,21 @@ def install(c, source, enrollment_path):
     identity.write(private / 'secret-id', enrollment['secret_id'])
     for name in ['chess-host.py', 'identity-runtime.py']:
         identity.write(private / name, Path(__file__).with_name(name).read_text(), 0o700)
+    if c.get('certificate_export'):
+        external = Path(c['certificate_export']['enrollment'])
+        retained = private / 'certificate-enrollment.json'
+        if external.exists():
+            identity.write(retained, external.read_bytes())
+        export_certificate(c, private)
+        units = Path('/etc/systemd/system')
+        certificate_service = c['service'] + '-certificate'
+        command = f'/usr/bin/python3 {private}/chess-host.py export-certificate --configuration {private}/installation.json'
+        identity.write(units / (certificate_service + '.service'), '[Unit]\nDescription=Publish the configured renewed desktop certificate to OpenBao\n[Service]\nType=oneshot\nUMask=0077\nExecStart=' + command + '\n', 0o644)
+        identity.write(units / (certificate_service + '.timer'), '[Unit]\nDescription=Check for a renewed desktop certificate\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n[Install]\nWantedBy=timers.target\n', 0o644)
+        identity.run(['systemctl', 'daemon-reload'])
+        identity.run(['systemctl', 'enable', '--now', certificate_service + '.timer'])
+        if external.exists() and external.resolve() != retained.resolve():
+            external.unlink()
     for filename, content in c['public_files'].items():
         if Path(filename).name != filename:
             raise ValueError('Public configuration must remain inside the installation directory.')
@@ -216,7 +273,7 @@ def install(c, source, enrollment_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['enroll', 'install', 'render'])
+    parser.add_argument('operation', choices=['enroll', 'install', 'render', 'export-certificate'])
     parser.add_argument('--configuration', required=True)
     parser.add_argument('--enrollment')
     args = parser.parse_args()
@@ -227,6 +284,8 @@ def main():
         enroll(c, args.enrollment)
     elif args.operation == 'install':
         install(c, args.configuration, args.enrollment or str(Path(c['directory']) / 'agent/enrollment.json'))
+    elif args.operation == 'export-certificate':
+        export_certificate(c, Path(c['directory']) / 'agent')
     else:
         render(c, Path(c['directory']) / 'agent')
 
