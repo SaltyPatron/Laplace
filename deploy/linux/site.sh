@@ -29,17 +29,9 @@ if [[ -z "${LAPLACE_PG_DIR:-}" && -r "${LAPLACE_OPERATIONS:-/repos/src/Laplace-O
 fi
 # the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), whichever way the rest arrived: where
 # its databases are (LAPLACE_PGHOST, LAPLACE_APP_DBNAME, LAPLACE_APP_PGHOST), what the runner's environment does not carry
-if [[ -d /etc/laplace && ! -x /etc/laplace ]]; then
-  echo '::error::cannot traverse /etc/laplace; refusing to use another machine configuration' >&2
-  exit 1
-fi
-if [[ -r /etc/laplace/machine.env ]]; then
-  # shellcheck disable=SC1091
-  set -a; set +u; . /etc/laplace/machine.env; set -u; set +a
-elif [[ -e /etc/laplace/machine.env ]]; then
-  echo '::error::cannot read /etc/laplace/machine.env' >&2
-  exit 1
-fi
+machine_values=$(python3 "$ROOT/scripts/machine-env.py")
+eval "$machine_values"
+unset machine_values
 
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-${LAPLACE_PG_DIR:-/usr/local/pgsql}}"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
