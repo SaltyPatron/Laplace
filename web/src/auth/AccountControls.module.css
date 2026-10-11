@@ -24,4 +24,8 @@
   .identity > :last-child {
     font-size: var(--text-xs);
   }
+
+  .identity > a {
+    color: var(--color-text-primary);
+  }
 }

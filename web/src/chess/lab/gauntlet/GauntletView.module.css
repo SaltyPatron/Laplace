@@ -83,6 +83,8 @@
     margin-bottom: 0.85rem;
     color: #eef6f9;
     --color-text-primary: #eef6f9;
+    --color-bg-panel: var(--color-bg-abyss);
+    --color-bg-panel-2: var(--color-navy-raised);
     --color-text-muted: #b9cad4;
     --color-border-default: #36576b;
   }

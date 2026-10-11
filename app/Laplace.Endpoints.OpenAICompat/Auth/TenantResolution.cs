@@ -80,8 +80,8 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
                 if (context.Request.Cookies.TryGetValue(WorkspaceCookie, out var selected)
                     && !string.IsNullOrWhiteSpace(selected) && selected.Length <= 160)
                 {
-                    var substrate = context.RequestServices.GetRequiredService<SubstrateClient>();
-                    await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                    var application = context.RequestServices.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey);
+                    await using var command = NpgsqlCatalog.Command(application,
                         "account.membership_role", selected, userId);
                     if (await command.ExecuteScalarAsync(ct) is string role)
                     {
@@ -197,8 +197,8 @@ internal sealed class ApiKeyEnforcementMiddleware
                 var role = selectedRole as string;
                 if (role is null)
                 {
-                    var substrate = context.RequestServices.GetRequiredService<SubstrateClient>();
-                    await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                    var application = context.RequestServices.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey);
+                    await using var command = NpgsqlCatalog.Command(application,
                         "account.membership_role", tenant.TenantId, Guid.Parse(tenant.Claims["user_id"]));
                     role = await command.ExecuteScalarAsync(context.RequestAborted) as string;
                 }
