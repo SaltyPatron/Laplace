@@ -205,10 +205,8 @@ public static class ChessLabPaths
     {
         name ??= OperatingSystem.IsWindows() ? "cutechess-cli.exe" : "cutechess-cli";
         var fromEnv = ChessRuntimeConfiguration.Read("LAPLACE_CUTECHESS_BUILD");
-        if (string.IsNullOrWhiteSpace(fromEnv) && OperatingSystem.IsWindows())
-            fromEnv = Path.Combine(LaplaceInstall.DefaultBuildRoot, "build-cutechess");
-        if (string.IsNullOrWhiteSpace(fromEnv) && !OperatingSystem.IsWindows())
-            fromEnv = "/build/cutechess";
+        if (string.IsNullOrWhiteSpace(fromEnv) && LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
+            fromEnv = Path.Combine(buildRoot, "build-cutechess");
         if (string.IsNullOrWhiteSpace(fromEnv))
             return null;
         return Path.Combine(fromEnv.Trim(), name);
@@ -222,8 +220,7 @@ public static class ChessLabPaths
             string? external = ChessRuntimeConfiguration.Read("LAPLACE_EXTERNAL");
             if (string.IsNullOrWhiteSpace(external))
             {
-                if (!OperatingSystem.IsWindows()) external = "/build/external";
-                else if (LaplaceInstall.TryRepoRoot(out var repo)) external = Path.Combine(repo, "external");
+                if (LaplaceInstall.TryRepoRoot(out var repo)) external = Path.Combine(repo, "external");
             }
             if (string.IsNullOrWhiteSpace(external)) return null;
             source = Path.Combine(external.Trim(), "stockfish");
@@ -282,8 +279,8 @@ public static class ChessLabPaths
         if (!string.IsNullOrEmpty(installedCandidate) && File.Exists(installedCandidate))
             return new Probe(installedCandidate, true, "install");
 
-        LaplaceInstall.TryDefaultBuildRoot(out var buildRoot);
-        if (repoCandidate is not null)
+        var hasBuildRoot = LaplaceInstall.TryDefaultBuildRoot(out var buildRoot);
+        if (repoCandidate is not null && hasBuildRoot)
         {
             var repoPath = repoCandidate(buildRoot);
             if (!string.IsNullOrEmpty(repoPath) && File.Exists(repoPath))
@@ -298,7 +295,7 @@ public static class ChessLabPaths
 
         var missing = !string.IsNullOrWhiteSpace(configPath) ? configPath.Trim()
             : !string.IsNullOrEmpty(sourceCandidate) ? sourceCandidate
-            : repoCandidate is not null ? repoCandidate(buildRoot)
+            : repoCandidate is not null && hasBuildRoot ? repoCandidate(buildRoot)
             : assemblyNeighbor;
         return new Probe(missing, false, "missing");
     }

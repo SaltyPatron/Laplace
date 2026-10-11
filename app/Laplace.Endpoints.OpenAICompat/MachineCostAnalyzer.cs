@@ -548,6 +548,7 @@ internal static partial class MachineCostAnalyzer
     private static string ResolveWorkRoot()
     {
         string? configured = Environment.GetEnvironmentVariable("LAPLACE_WORK_ROOT");
+        if (string.IsNullOrWhiteSpace(configured)) configured = Environment.GetEnvironmentVariable("LAPLACE_WORK");
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(Path.Combine(configured.Trim(), "machine-cost"));
 
@@ -557,9 +558,7 @@ internal static partial class MachineCostAnalyzer
             && Path.IsPathRooted(processScratch))
             return Path.GetFullPath(Path.Combine(processScratch.Trim(), "machine-cost"));
 
-        return OperatingSystem.IsWindows()
-            ? Path.Combine(LaplaceInstall.DefaultBuildRoot, "work", "machine-cost")
-            : "/build/laplace/work/api/machine-cost";
+        return Path.Combine(Path.GetTempPath(), "laplace", "machine-cost");
     }
 
     private static MachineCostAnalysisException ToolUnavailable(string tool) =>

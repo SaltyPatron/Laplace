@@ -12,9 +12,9 @@ public static class LaplaceInstall
 
     public static string InstallRoot => AppContext.BaseDirectory;
 
-    /// <summary>Windows default matches scripts/win/env.cmd when LAPLACE_BUILD_ROOT is unset.</summary>
+    /// <summary>The active checkout's declared build root; installed runtimes do not require one.</summary>
     public static string DefaultBuildRoot =>
-        OperatingSystem.IsWindows() ? @"D:\Data\Laplace" : "/vault/Data";
+        TryDefaultBuildRoot(out var root) ? root : throw new InvalidOperationException("No build root declared. Use the development entry point or set LAPLACE_BUILD_ROOT.");
 
     public static bool TryDefaultBuildRoot(out string buildRoot)
     {
@@ -25,8 +25,8 @@ public static class LaplaceInstall
             return true;
         }
 
-        buildRoot = DefaultBuildRoot;
-        return true;
+        buildRoot = "";
+        return false;
     }
 
     public static string WebRoot => Path.Combine(InstallRoot, "wwwroot");
@@ -212,8 +212,12 @@ public static class LaplaceInstall
     public static string ResolveT0Perfcache()
     {
         var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv.Trim()))
-            return Path.GetFullPath(fromEnv.Trim());
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            var selected = Path.GetFullPath(fromEnv.Trim());
+            if (!File.Exists(selected)) throw new FileNotFoundException("The selected LAPLACE_PERFCACHE_BIN does not exist.", selected);
+            return selected;
+        }
 
         if (TryResolveEngineBuildRoot(out var engineBuild))
         {
@@ -226,7 +230,9 @@ public static class LaplaceInstall
                 return hit;
         }
 
-        const string share = "/opt/laplace/share/laplace";
+        var installPrefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
+        var share = string.IsNullOrWhiteSpace(installPrefix) ? Path.Combine(InstallRoot, "share", "laplace")
+            : Path.Combine(installPrefix.Trim(), "share", "laplace");
         if (Directory.Exists(share))
         {
             var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin")
@@ -246,29 +252,17 @@ public static class LaplaceInstall
 
     public static string ResolveIngestRoot()
     {
-        if (TryRepoRoot(out var root))
-        {
-            var drive = Path.GetPathRoot(root);
-            if (!string.IsNullOrEmpty(drive))
-            {
-                var sibling = Path.Combine(drive, "Data", "Ingest");
-                if (Directory.Exists(sibling)) return Path.GetFullPath(sibling);
-            }
+        var configured = Environment.GetEnvironmentVariable("LAPLACE_DATA");
+        if (string.IsNullOrWhiteSpace(configured))
+            throw new InvalidOperationException("Declare LAPLACE_DATA as the ingest corpus directory in the installation configuration.");
+        return ExistingDirectory(configured, "LAPLACE_DATA");
+    }
 
-            var upTwo = Path.GetFullPath(Path.Combine(root, "..", "..", "Data", "Ingest"));
-            if (Directory.Exists(upTwo)) return upTwo;
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            const string win = @"D:\Data\Ingest";
-            if (Directory.Exists(win)) return win;
-        }
-
-        if (Directory.Exists("/vault/Data")) return "/vault/Data";
-
-        throw new InvalidOperationException(
-            "Ingest data root not found — expected sibling Data/Ingest to the repo or /vault/Data.");
+    private static string ExistingDirectory(string value, string setting)
+    {
+        var path = Path.GetFullPath(value.Trim());
+        if (!Directory.Exists(path)) throw new DirectoryNotFoundException($"The selected {setting} directory does not exist: {path}");
+        return path;
     }
 
     public static string ResolvePathUnderIngest(params string[] relative)
@@ -307,26 +301,14 @@ public static class LaplaceInstall
 
     public static string ResolveModelHub()
     {
-        if (TryRepoRoot(out var root))
-        {
-            var drive = Path.GetPathRoot(root);
-            if (!string.IsNullOrEmpty(drive))
-            {
-                var hub = Path.Combine(drive, "Models", "hub");
-                if (Directory.Exists(hub)) return Path.GetFullPath(hub);
-            }
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            const string win = @"D:\Models\hub";
-            if (Directory.Exists(win)) return win;
-        }
-
-        if (Directory.Exists("/vault/models/hub")) return "/vault/models/hub";
-
-        throw new InvalidOperationException(
-            "Model hub not found — expected D:\\Models\\hub or /vault/models/hub.");
+        var cache = Environment.GetEnvironmentVariable("HF_HUB_CACHE");
+        if (!string.IsNullOrWhiteSpace(cache)) return ExistingDirectory(cache, "HF_HUB_CACHE");
+        var home = Environment.GetEnvironmentVariable("HF_HOME");
+        if (!string.IsNullOrWhiteSpace(home)) return ExistingDirectory(Path.Combine(home.Trim(), "hub"), "HF_HOME/hub");
+        var xdg = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        var cacheRoot = !string.IsNullOrWhiteSpace(xdg) ? xdg.Trim()
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache");
+        return ExistingDirectory(Path.Combine(cacheRoot, "huggingface", "hub"), "Hugging Face cache (or set HF_HUB_CACHE)");
     }
 
     public static string ResolveGgufOutputDir()
@@ -342,9 +324,7 @@ public static class LaplaceInstall
         if (TryDefaultBuildRoot(out buildRoot))
             return Path.GetFullPath(Path.Combine(buildRoot, "out", "models"));
 
-        var fallback = Path.Combine(AppContext.BaseDirectory, "models");
-        Directory.CreateDirectory(fallback);
-        return fallback;
+        throw new InvalidOperationException("Declare LAPLACE_OUT for model output; installed runtimes do not write into build or binary directories.");
     }
 
     /// <summary>Process environment first, then <c>deploy/secrets/{secretFile}</c>.</summary>
