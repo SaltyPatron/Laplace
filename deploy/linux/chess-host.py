@@ -112,7 +112,7 @@ def install(c, source, enrollment_path):
     for filename, content in c['public_files'].items():
         if Path(filename).name != filename:
             raise ValueError('Public configuration must remain inside the installation directory.')
-        identity.write(directory / filename, json.dumps(content, indent=2), 0o644)
+        identity.write(directory / filename, content if isinstance(content, str) else json.dumps(content, indent=2), 0o644)
     j = json.dumps
     template = '{{ with secret "' + c['record'] + '" }}{{ .Data.data | toJSON }}{{ end }}'
     agent = 'vault { address = ' + j(c['address']) + ' }\nauto_auth { method "approle" { config = {\n'
