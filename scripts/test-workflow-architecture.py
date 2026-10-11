@@ -18,6 +18,17 @@ def code(body: str) -> str:
 
 
 class WorkflowArchitecture(unittest.TestCase):
+    def test_manual_deployment_passes_the_selected_promotion_boundary(self):
+        maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
+        delivery = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        deploy = maintenance.split("\n  deploy:\n", 1)[1].split("\n  verify:\n", 1)[0]
+        self.assertIn("inputs.target != 'knowledge'", deploy)
+        self.assertIn("promote: ${{ inputs.target == 'production' }}", deploy)
+        start_cloud = delivery.split("\n  knowledge-host:\n", 1)[1].split("\n  production-build:\n", 1)[0]
+        self.assertIn("needs.deliver.result == 'success' && (github.event_name == 'push' || inputs.promote)", start_cloud)
+        self.assertIn("promote:\n", delivery)
+        self.assertIn("type: boolean\n        default: true", delivery)
+
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
         repairs = sorted(name for name in names if "repair" in name)
