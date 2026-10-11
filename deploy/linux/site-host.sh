@@ -32,10 +32,9 @@ machine_config_permissions() {
 machine_config_permissions
 # the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), as site.sh reads it: what this host
 # names differently from the defaults below is said there once, never on a command line
-if [[ -r /etc/laplace/machine.env ]]; then
-  # shellcheck disable=SC1091
-  set -a; set +u; . /etc/laplace/machine.env; set -u; set +a
-fi
+machine_values=$(python3 "$HERE/../../scripts/machine-env.py")
+eval "$machine_values"
+unset machine_values
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 RUN_USER="${LAPLACE_AGENT_USER:-laplace-runner}"
 RUN_GROUP="${LAPLACE_GROUP:-laplace-runner}"
