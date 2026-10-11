@@ -41,13 +41,18 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
         // a status read is not an action: the Lichess panel reads it while the service is unreachable
         if (action == ServiceAction.Status) log.LogDebug("managed service status requested: service={Service}", name);
         else log.LogWarning("managed service action requested: service={Service} action={Action}", name, verb);
-        var info = new ProcessStartInfo("/usr/bin/sudo")
+        var statusOnly = action == ServiceAction.Status;
+        var info = new ProcessStartInfo(statusOnly ? "/usr/bin/systemctl" : "/usr/bin/sudo")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
-        foreach (var value in new[] { "-n", "--", Helper, name, verb }) info.ArgumentList.Add(value);
+        var expectedUnit = $"laplace-{name}.service";
+        var arguments = statusOnly
+            ? new[] { "show", expectedUnit, "--no-pager", "--property=LoadState,ActiveState,SubState,Result,MainPID,UnitFileState" }
+            : new[] { "-n", "--", Helper, name, verb };
+        foreach (var value in arguments) info.ArgumentList.Add(value);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(25));
         using var process = Process.Start(info) ?? throw new ServiceControlUnavailableException();
@@ -70,10 +75,20 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
             log.LogError("managed service action failed: service={Service} action={Action} exit={ExitCode}", name, verb, process.ExitCode);
             throw new ServiceControlUnavailableException(busy: process.ExitCode == 3);
         }
+        if (statusOnly)
+        {
+            var values = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2)
+                .ToDictionary(pair => pair[0], pair => pair[1].TrimEnd('\r'), StringComparer.Ordinal);
+            return new(name, expectedUnit, verb, false,
+                values.GetValueOrDefault("LoadState", "unknown"), values.GetValueOrDefault("ActiveState", "unknown"),
+                values.GetValueOrDefault("SubState", "unknown"), values.GetValueOrDefault("Result", "unknown"),
+                int.TryParse(values.GetValueOrDefault("MainPID"), out var pid) ? pid : 0,
+                values.GetValueOrDefault("UnitFileState", "unknown"), ManagedServiceState.OperatorStopped(name));
+        }
         var payload = JsonNode.Parse(stdout) as JsonObject
             ?? throw new InvalidOperationException("service control returned an invalid response");
         var unit = (string?)payload["unit"] ?? "";
-        var expectedUnit = $"laplace-{name}.service";
         if (unit != expectedUnit) throw new InvalidOperationException("service control returned the wrong unit");
         return new(name, unit, verb, action != ServiceAction.Status,
             (string?)payload["load_state"] ?? "unknown", (string?)payload["active_state"] ?? "unknown",
