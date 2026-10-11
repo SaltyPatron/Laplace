@@ -336,6 +336,14 @@ def main():
         if args.operation == 'refresh':
             refresh(config, directory, 'openbao-agent' if args.agent else 'manual')
         else:
+            if directory.stat().st_uid != 0 or directory.stat().st_mode & 0o777 != 0o700:
+                raise ValueError('Identity directory permissions differ from root-only 0700')
+            for name in ('enrollment.json', 'role-id', 'secret-id', 'identity.env', 'candidate.json', 'agent.hcl'):
+                info = (directory / name).lstat()
+                if (directory / name).is_symlink() or info.st_uid != 0 or info.st_mode & 0o777 != 0o600:
+                    raise ValueError('Identity file permissions differ from root-only 0600: ' + name)
+            run(['systemctl', 'is-enabled', '--quiet', SERVICE])
+            run(['systemctl', 'is-active', '--quiet', SERVICE])
             record = verify_access(config)
             verify_application(config, record)
             print(json.dumps({'host': config['host'], 'scoped_access_and_application': 'passed',
