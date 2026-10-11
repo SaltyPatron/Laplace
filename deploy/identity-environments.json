@@ -1,0 +1,9 @@
+{
+  "bao_address": "https://openbao.hartonomous.com",
+  "google_project": "project-f5812b96-f924-41a4-94c",
+  "environments": [
+    {"name":"development","host":"hart-desktop","record":"hosts/hart-desktop/laplace-mono-identity","role":"laplace-hart-desktop-development","callbacks":["http://localhost:5187/signin-google","https://dev.hartonomous.com/signin-google"]},
+    {"name":"staging","host":"hart-server","record":"hosts/hart-server/laplace-mono-identity","role":"laplace-mono-hart-server-identity","callbacks":["https://staging.hartonomous.com/signin-google"]},
+    {"name":"production","host":"hart-prod","record":"hosts/hart-prod/laplace-mono-identity","role":"laplace-mono-hart-prod-identity","callbacks":["https://api.hartonomous.com/signin-google"]}
+  ]
+}

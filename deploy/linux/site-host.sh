@@ -23,13 +23,18 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
 host_args=("$@")
-as_is=false; routing_only=false
-for arg in "$@"; do
-  case "$arg" in
+as_is=false; routing_only=false; browser_setup=false; identity_enrollment=''
+while (( $# )); do
+  case "$1" in
     --as-is) as_is=true ;;
     --routing-only) routing_only=true ;;
-    *) echo "Unknown setup argument: $arg" >&2; exit 2 ;;
+    --browser-setup) browser_setup=true ;;
+    --identity-enrollment)
+      (( $# >= 2 )) || { echo '--identity-enrollment requires a path' >&2; exit 2; }
+      identity_enrollment=$2; shift ;;
+    *) echo "Unknown setup argument: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 # The declaration is public; credentials alongside it retain their own modes.
 machine_config_permissions() {
@@ -86,6 +91,17 @@ else current || exit 1; fi
 private_browser_route() {
   python3 "$HERE/configure-nginx.py" --configuration "${LAPLACE_PRIVATE_ORIGINS:-$HERE/../private-origins.json}" --apply
 }
+browser_identity() {
+  local directory=${LAPLACE_IDENTITY_DIRECTORY:-/etc/laplace-mono/identity}
+  local args=(install --directory "$directory")
+  if [[ -n "$identity_enrollment" ]]; then args+=(--enrollment "$identity_enrollment")
+  elif [[ ! -f "$directory/enrollment.json" ]]; then
+    if "$browser_setup"; then echo 'Browser setup requires --identity-enrollment on first installation' >&2; return 1; fi
+    return 0
+  fi
+  python3 "$HERE/identity-runtime.py" "${args[@]}"
+}
+if "$browser_setup"; then private_browser_route; browser_identity; exit; fi
 if "$routing_only"; then private_browser_route; exit; fi
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
 say() { printf '  %-44s %s\n' "$1" "$2"; }
@@ -159,6 +175,11 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active
   ufw allow from "$LAN" to any port "$SITE_PORT" proto tcp comment "laplace site" >/dev/null
   say "ufw" "$SITE_PORT/tcp from $LAN"
 else say "ufw" "not active: nothing to do"; fi
+
+# Identity refresh owns the same deployment lock. Release the setup lock before
+# running its activation; the root-owned enrollment survives source updates.
+flock -u 8
+browser_identity
 
 echo
 echo "done. The runner deploys with deploy/linux/site.sh on every merge to main (.github/workflows/laplace.yml)."
