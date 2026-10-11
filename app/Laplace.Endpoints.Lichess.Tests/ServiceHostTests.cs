@@ -7,13 +7,13 @@ namespace Laplace.Endpoints.Lichess.Tests;
 public sealed class ServiceHostTests
 {
     [Fact]
-    public void ProductionHostRejectsTcpOverrideBeforeBuildingListenerOrBot()
+    public void ProductionHostRejectsUnverifiedRemoteRouteBeforeBuildingListenerOrBot()
     {
         var prior = Environment.GetEnvironmentVariable("LAPLACE_DB");
         try
         {
             Environment.SetEnvironmentVariable("LAPLACE_DB",
-                "Host=127.0.0.1;Username=laplace_admin;Database=laplace;Password=test-only-sentinel");
+                "Host=knowledge.example;Username=bot;Database=laplace;Password=test-only-sentinel;SSL Mode=Require");
             var error = Assert.Throws<InvalidOperationException>(() => LichessServiceHost.Build(new(Port: 0)));
             Assert.DoesNotContain("test-only-sentinel", error.ToString());
         }

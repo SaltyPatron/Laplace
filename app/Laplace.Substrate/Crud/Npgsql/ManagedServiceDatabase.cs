@@ -4,21 +4,16 @@ using global::Npgsql;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Database route for managed services: only a local route the host authenticates is
-/// accepted, never a TCP/password route from an environment file. On Linux that is the
-/// cluster's Unix-domain socket (one absolute directory: <c>/var/run/postgresql</c>, or <c>/tmp</c> on the
-/// cluster Laplace-Operations declares; the port the machine declares in <c>LAPLACE_PGPORT</c>, 5432 when it
-/// declares none; the host's local HBA/map); on
-/// Windows, where PostgreSQL has no peer authentication, it is the loopback host under
-/// SSPI (the host's HBA/map; Npgsql negotiates it when no password is given). No password
-/// or passfile is allowed on either. This guards the route, not the role's privileges, and the role and database
-/// are the installation's own (<c>LAPLACE_DB</c>), as the HBA map decides.
+/// Uses the installation's knowledge route independently of the worker's execution host.
+/// Local sockets and loopback connections retain host authentication; remote database
+/// connections require certificate and hostname verification. Credentials come from the
+/// installed workload configuration, not from a caller's HTTP request.
 /// </summary>
 public static class ManagedServiceDatabase
 {
     public static string Resolve(string? connectionString = null)
     {
-        const string failure = "Managed services require the installed local host-authenticated database route (peer socket on Linux, SSPI over loopback on Windows); TCP and database credentials are not allowed.";
+        const string failure = "Managed services require a configured host, role and database; remote PostgreSQL routes require SSL Mode=VerifyFull.";
         NpgsqlConnectionStringBuilder parsed;
         try
         {
@@ -30,14 +25,20 @@ public static class ManagedServiceDatabase
             // as an inner exception in a startup log.
             throw new InvalidOperationException(failure);
         }
-        if (parsed.Port != DeclaredPort() || string.IsNullOrWhiteSpace(parsed.Username) || string.IsNullOrWhiteSpace(parsed.Database)
-            || parsed.ShouldSerialize("Password") || parsed.ShouldSerialize("Passfile"))
+        if (string.IsNullOrWhiteSpace(parsed.Host) || string.IsNullOrWhiteSpace(parsed.Username)
+            || string.IsNullOrWhiteSpace(parsed.Database))
             throw new InvalidOperationException(failure);
-        var hostAuthenticated = OperatingSystem.IsWindows()
-            ? parsed.Host is "127.0.0.1" or "localhost" or "::1"
-            : IsSocketDirectory(parsed.Host);
-        if (!hostAuthenticated)
-            throw new InvalidOperationException(failure);
+        foreach (var host in parsed.Host.Split(',', StringSplitOptions.TrimEntries))
+        {
+            if (string.IsNullOrWhiteSpace(host)) throw new InvalidOperationException(failure);
+            if (host.StartsWith('/'))
+            {
+                if (OperatingSystem.IsWindows() || !IsSocketDirectory(host))
+                    throw new InvalidOperationException(failure);
+            }
+            else if (host is not ("127.0.0.1" or "localhost" or "::1") && parsed.SslMode != SslMode.VerifyFull)
+                throw new InvalidOperationException(failure);
+        }
         return parsed.ConnectionString;
     }
 
@@ -46,7 +47,4 @@ public static class ManagedServiceDatabase
     private static bool IsSocketDirectory(string? host) =>
         host is { Length: > 1 } && host[0] == '/' && !host.Contains(',') && !host.Contains("/../") && !host.EndsWith("/..");
 
-    // The port the machine declares for its cluster (LAPLACE_PGPORT); 5432 when it declares none.
-    private static int DeclaredPort() =>
-        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_PGPORT"), out var port) && port is > 0 and <= 65535 ? port : 5432;
 }

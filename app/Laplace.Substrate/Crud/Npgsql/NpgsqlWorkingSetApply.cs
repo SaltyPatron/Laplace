@@ -918,10 +918,8 @@ public sealed partial class NpgsqlSubstrateWriter
 
     internal static string TransactionGucs(PostgresWriteDurability durability) => durability switch
     {
-        PostgresWriteDurability.Asynchronous => "SET LOCAL session_replication_role = replica; "
-            + "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; ",
-        PostgresWriteDurability.Synchronous => "SET LOCAL session_replication_role = replica; "
-            + "SET LOCAL synchronous_commit = on; SET LOCAL jit = off; ",
+        PostgresWriteDurability.Asynchronous => "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; ",
+        PostgresWriteDurability.Synchronous => "SET LOCAL synchronous_commit = on; SET LOCAL jit = off; ",
         _ => throw new ArgumentOutOfRangeException(nameof(durability)),
     };
 

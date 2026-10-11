@@ -11,9 +11,6 @@ public sealed class ManagedServiceDatabaseTests
     private static readonly string Local = OperatingSystem.IsWindows()
         ? "Host=127.0.0.1;Username=laplace;Database=laplace-mono"
         : "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace";
-    private static readonly string OtherPlatform = OperatingSystem.IsWindows()
-        ? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
-        : "Host=127.0.0.1;Username=laplace_admin;Database=laplace";
 
     [Fact]
     public void LocalRoutePreservesServingConfiguration()
@@ -26,9 +23,28 @@ public sealed class ManagedServiceDatabaseTests
     }
 
     [Fact]
-    public void TheOtherPlatformsRouteIsNotThisOnes()
+    public void VerifiedRemoteRoutePreservesConfiguredDestinationCredentialsAndPort()
     {
-        Assert.Throws<InvalidOperationException>(() => ManagedServiceDatabase.Resolve(OtherPlatform));
+        var parsed = new NpgsqlConnectionStringBuilder(ManagedServiceDatabase.Resolve(
+            "Host=knowledge.example;Port=6432;Username=bot;Database=curated;SSL Mode=VerifyFull;"
+            + "Root Certificate=authority.pem;Password=test-sentinel-not-a-secret;Timeout=5"));
+        Assert.Equal("knowledge.example", parsed.Host);
+        Assert.Equal(6432, parsed.Port);
+        Assert.Equal("bot", parsed.Username);
+        Assert.Equal("curated", parsed.Database);
+        Assert.Equal(SslMode.VerifyFull, parsed.SslMode);
+        Assert.Equal("authority.pem", parsed.RootCertificate);
+        Assert.Equal("test-sentinel-not-a-secret", parsed.Password);
+        Assert.Equal(5, parsed.Timeout);
+    }
+
+    [Fact]
+    public void OrderedFallbackIsPreservedWithoutLoadBalancing()
+    {
+        var parsed = new NpgsqlConnectionStringBuilder(ManagedServiceDatabase.Resolve(
+            "Host=cloud.example,server.example;Username=bot;Database=curated;SSL Mode=VerifyFull"));
+        Assert.Equal("cloud.example,server.example", parsed.Host);
+        Assert.False(parsed.LoadBalanceHosts);
     }
 
     // The cluster Laplace-Operations declares keeps its socket in /tmp: a Unix-domain socket all the same.
@@ -48,10 +64,10 @@ public sealed class ManagedServiceDatabaseTests
         "Host=192.168.1.2;Username=laplace;Database=laplace-mono",
         "Host=/var/run/postgresql,192.168.1.2;Username=laplace_admin;Database=laplace",
         "Host=127.0.0.1,192.168.1.2;Username=laplace;Database=laplace-mono",
-        Local + ";Port=5433",
-        Local + ";Password=test-sentinel-not-a-secret",
-        Local + ";Pwd=test-sentinel-not-a-secret",
-        Local + ";Passfile=/tmp/test-sentinel-not-a-secret",
+        "Host=knowledge.example;Username=bot;Database=curated;SSL Mode=Require",
+        "Host=knowledge.example;Username=bot;Database=curated;SSL Mode=VerifyCA",
+        "Host=knowledge.example;Database=curated;SSL Mode=VerifyFull",
+        "Host=knowledge.example;Username=bot;SSL Mode=VerifyFull",
         Local + ";Port=test-sentinel-not-a-secret",
         Local + ";Password='test-sentinel-not-a-secret",
         Local + ";unknown-key=test-sentinel-not-a-secret",
