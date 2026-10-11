@@ -63,3 +63,19 @@ Inspect the declared controller and credential service journals with `journalctl
 A live HTTP listener proves installation only. Connector `verify` performs a real
 readiness/new-game/search exchange, and live admission remains a separate behavior
 to verify with actual confirmed games.
+
+On Windows development, `deploy/windows/Install-ChessClient.ps1` installs the UI's
+controller credential without elevation. Its declaration gives the OpenBao address,
+single credential record, controller URL, private directory and permitted browser
+user IDs. Pass `-Configuration <file> -Enrollment <private-file>` once. The installer
+protects the enrollment with Windows DPAPI, starts OpenBao Agent, checks authenticated
+controller status and consumes the source enrollment. A per-user startup shortcut
+restarts the agent at sign-in. The agent consumes its temporary SecretID file; the
+encrypted enrollment remains for subsequent starts. Repeating installation reuses a
+verified running agent. Restart the development API after first installation so it
+inherits `LAPLACE_LICHESS_CONTROL_CLIENT` from the user's environment.
+
+Linux credential destinations may name a `service` instead of a fixed `user`.
+The renderer resolves that unit's actual unprivileged identity and verifies it can
+read the rendered file. This accommodates hosts where the API runs as `laplace-api`
+rather than assuming the build runner is also the application identity.
