@@ -8,13 +8,18 @@ rem A locked DLL (a running backend or worker holds it) is renamed aside and the
 setlocal EnableDelayedExpansion
 set "DEST=%~1"
 if "%DEST%"=="" ( echo engine-runtime: destination directory required & exit /b 2 )
-if not defined LAPLACE_DEPS_PREFIX call "%~dp0env.cmd"
+if not defined LAPLACE_DEPS_PREFIX call "%~dp0env.cmd" || exit /b 1
+rem Versioned prefixes are selected by the installed dependency manifest. The
+rem unversioned layout remains available for installations without that manifest.
+if not defined LAPLACE_DEPENDENCY_ZLIB_PREFIX set "LAPLACE_DEPENDENCY_ZLIB_PREFIX=%LAPLACE_DEPS_PREFIX%\zlib"
+if not defined LAPLACE_DEPENDENCY_LIBXML2_PREFIX set "LAPLACE_DEPENDENCY_LIBXML2_PREFIX=%LAPLACE_DEPS_PREFIX%\libxml2"
+if not defined ICU_ROOT set "ICU_ROOT=%LAPLACE_DEPS_PREFIX%\icu"
 if not defined LAPLACE_ONEAPI set "LAPLACE_ONEAPI=C:\Program Files (x86)\Intel\oneAPI"
-call :put "%LAPLACE_DEPS_PREFIX%\zlib\bin\z.dll" || exit /b 1
-call :put "%LAPLACE_DEPS_PREFIX%\libxml2\bin\libxml2.dll" || exit /b 1
-for %%F in (icuuc78 icuin78 icudt78) do call :put "%LAPLACE_DEPS_PREFIX%\icu\bin64\%%F.dll" || exit /b 1
+call :put "%LAPLACE_DEPENDENCY_ZLIB_PREFIX%\bin\z.dll" || exit /b 1
+call :put "%LAPLACE_DEPENDENCY_LIBXML2_PREFIX%\bin\libxml2.dll" || exit /b 1
+for %%F in (icuuc78 icuin78 icudt78) do call :put "%ICU_ROOT%\bin64\%%F.dll" || exit /b 1
 call :put "%LAPLACE_ONEAPI%\tbb\latest\bin\tbb12.dll" || exit /b 1
-call :put "%LAPLACE_ONEAPI%\tbb\latest\bin\libhwloc-15.dll"
+if exist "%LAPLACE_ONEAPI%\tbb\latest\bin\libhwloc-15.dll" call :put "%LAPLACE_ONEAPI%\tbb\latest\bin\libhwloc-15.dll" || exit /b 1
 rem MKL's TBB threading layer, whatever its current interface version (2026.1: mkl_tbb_thread.3.dll); not the debug one
 set "MKL_TBB="
 for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_tbb_thread.*.dll") do if /i not "%%~nF:~-1"=="d" set "MKL_TBB=%%~fF"
@@ -36,7 +41,7 @@ for %%K in (def mc3 avx2 avx512 vml_def vml_mc3 vml_avx2 vml_avx512 vml_cmpt) do
   call :put "!MKL_K!" || exit /b 1
 )
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libmmd.dll" || exit /b 1
-call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libiomp5md.dll"
+call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libiomp5md.dll" || exit /b 1
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\svml_dispmd.dll" || exit /b 1
 exit /b 0
 
@@ -51,6 +56,6 @@ set "STALE_NAME=%BASE%.stale~%RANDOM%"
 set "STALE_DIR=%TEMP%\laplace-deploy-stale"
 if not exist "%STALE_DIR%" mkdir "%STALE_DIR%" >nul 2>nul
 ren "%DEST%\%BASE%" "%STALE_NAME%" >nul 2>nul || ( echo cannot replace locked "%DEST%\%BASE%" & exit /b 1 )
-move /y "%DEST%\%STALE_NAME%" "%STALE_DIR%\" >nul 2>nul
+move /y "%DEST%\%STALE_NAME%" "%STALE_DIR%\" >nul 2>nul || ( echo cannot move stale "%DEST%\%STALE_NAME%" to "%STALE_DIR%" & exit /b 1 )
 copy /y "%SRC%" "%DEST%\%BASE%" >nul 2>nul || ( echo cannot copy "%SRC%" to "%DEST%" & exit /b 1 )
 exit /b 0

@@ -2,10 +2,11 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$Destination)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/machine-env.ps1"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $probe = Join-Path $repo 'scripts\check-zstd-runtime.py'
 $version = (Get-Content -Raw (Join-Path $repo 'deploy\zstd-release.json') | ConvertFrom-Json).version
-$builtLibrary = & python (Join-Path $repo 'scripts\install-zstd.py') --print-path
+$builtLibrary = & py -3 (Join-Path $repo 'scripts\install-zstd.py') --print-path
 if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the Zstandard library and license closure built from the locked source' }
 $builtLibrary = "$builtLibrary".Trim()
 $library = $env:LAPLACE_ZSTD_LIBRARY
@@ -29,7 +30,7 @@ if (-not $library) {
 if (-not [IO.Path]::IsPathFullyQualified($library) -or -not (Test-Path -LiteralPath $library -PathType Leaf)) {
     throw 'LAPLACE_ZSTD_LIBRARY must name an existing absolute shared-library path'
 }
-& python $probe --library $library --require-version $version
+& py -3 $probe --library $library --require-version $version
 if ($LASTEXITCODE -ne 0) { throw 'Configured native Zstandard library failed its PGN decode check' }
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 $target = Join-Path $Destination 'libzstd.dll'
@@ -37,7 +38,7 @@ Copy-Item -LiteralPath $library -Destination $target -Force
 if ((Get-FileHash -LiteralPath $library -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
     throw 'Published Zstandard DLL does not match the selected source build'
 }
-& python $probe --library $target --require-version $version
+& py -3 $probe --library $target --require-version $version
 if ($LASTEXITCODE -ne 0) { throw 'Published native Zstandard library failed its PGN decode check' }
 $licenses = Join-Path $Destination 'third-party-licenses\zstd'
 New-Item -ItemType Directory -Force -Path $licenses | Out-Null
