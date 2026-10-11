@@ -59,6 +59,14 @@ is read from its private file for each request. The Lichess token is read from
 `LICHESS_TOKEN_FILE` whenever the bot starts. Changing environment selection needs
 no sudo and no service restart.
 
+Controller host declarations also specify `restart_trigger`, a file in the installed
+runner lock directory. Setup installs a root-owned path unit that can restart only
+that declared controller. Delivery reads the public `deployment.json`, requests the
+restart without sudo and requires a new active systemd invocation. An installed
+controller with missing delivery setup fails deployment explicitly. Before releasing
+during live play, select Off and wait for the UI to report Off: destination changes
+drain games, while a host service restart has a bounded shutdown grace period.
+
 Inspect the declared controller and credential service journals with `journalctl`.
 A live HTTP listener proves installation only. Connector `verify` performs a real
 readiness/new-game/search exchange, and live admission remains a separate behavior
