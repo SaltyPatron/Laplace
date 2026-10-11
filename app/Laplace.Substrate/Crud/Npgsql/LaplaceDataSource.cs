@@ -68,10 +68,14 @@ public static class LaplaceDataSource
         }
 
         var b = new NpgsqlConnectionStringBuilder(basis);
-        b.MaxPoolSize = PostgresResourcePlan.Current.ServingConnectionOwners;
-        b.MinPoolSize = 0;
-        b.ConnectionIdleLifetime = PoolIdleLifetimeSeconds;
-        b.ConnectionPruningInterval = PoolPruningIntervalSeconds;
+        // The installation budgets each datasource against its database host and
+        // other consumers. Local CPU topology describes default client demand;
+        // it cannot override an explicitly declared remote-server allocation.
+        if (!b.ShouldSerialize("Maximum Pool Size"))
+            b.MaxPoolSize = PostgresResourcePlan.Current.ServingConnectionOwners;
+        if (!b.ShouldSerialize("Minimum Pool Size")) b.MinPoolSize = 0;
+        if (!b.ShouldSerialize("Connection Idle Lifetime")) b.ConnectionIdleLifetime = PoolIdleLifetimeSeconds;
+        if (!b.ShouldSerialize("Connection Pruning Interval")) b.ConnectionPruningInterval = PoolPruningIntervalSeconds;
 
         // The installed connection string may carry `Command Timeout=0` (unbounded) for
         // ingest. A serving path never inherits it: a slow query surfaces as a bounded

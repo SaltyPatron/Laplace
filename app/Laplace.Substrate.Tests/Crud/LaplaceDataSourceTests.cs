@@ -80,4 +80,37 @@ public sealed class LaplaceDataSourceTests
         Assert.Equal(LaplaceDataSource.PoolIdleLifetimeSeconds, b.ConnectionIdleLifetime);
         Assert.Equal(LaplaceDataSource.PoolPruningIntervalSeconds, b.ConnectionPruningInterval);
     }
+
+    [Theory]
+    [InlineData("Maximum Pool Size")]
+    [InlineData("MaxPoolSize")]
+    public void Serving_PreservesTheDeclaredPoolInsteadOfUsingClientCpuCount(string keyword)
+    {
+        var b = new NpgsqlConnectionStringBuilder(LaplaceDataSource.ConnectionStringFor(
+            SubstrateAccess.Serving, $"Host=knowledge.example;Database=knowledge;{keyword}=3;Minimum Pool Size=1;Connection Idle Lifetime=75;Connection Pruning Interval=15"));
+
+        Assert.Equal(3, b.MaxPoolSize);
+        Assert.Equal(1, b.MinPoolSize);
+        Assert.Equal(75, b.ConnectionIdleLifetime);
+        Assert.Equal(15, b.ConnectionPruningInterval);
+    }
+
+    [Fact]
+    public void SeparateApplicationAndKnowledgeDataSourcesKeepSeparateConnectionBudgets()
+    {
+        using var application = LaplaceDataSource.Create(SubstrateAccess.Serving,
+            "Host=localhost;Database=app;Maximum Pool Size=2");
+        using var knowledge = LaplaceDataSource.Create(SubstrateAccess.Serving,
+            "Host=knowledge.example;Database=knowledge;Maximum Pool Size=7");
+
+        Assert.Equal(2, new NpgsqlConnectionStringBuilder(application.ConnectionString).MaxPoolSize);
+        Assert.Equal(7, new NpgsqlConnectionStringBuilder(knowledge.ConnectionString).MaxPoolSize);
+    }
+
+    [Fact]
+    public void Serving_RejectsAnInconsistentDeclaredPool()
+    {
+        Assert.Throws<ArgumentException>(() => LaplaceDataSource.Create(SubstrateAccess.Serving,
+            "Host=localhost;Database=app;Maximum Pool Size=2;Minimum Pool Size=3"));
+    }
 }
