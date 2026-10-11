@@ -50,8 +50,10 @@ jobs:
       - name: Read installed configuration and target connectivity
         if: always()
         run: |
+          set -euo pipefail
           mkdir -p artifacts
           bash deploy/linux/site.sh status | tee artifacts/site-status.json
+          python3 -c 'import json; report=json.load(open("artifacts/site-status.json")); assert report.get("host") and report.get("app_dir"), "Missing installed status identity"'
       - name: Retain verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

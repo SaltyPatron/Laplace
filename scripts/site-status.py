@@ -37,6 +37,20 @@ def connection(value):
     return result
 
 
+def path_status(value):
+    result = {"path": value}
+    try:
+        Path(value).stat()
+        result["exists"] = True
+    except FileNotFoundError:
+        result["exists"] = False
+    except OSError as error:
+        # The deployment observer cannot inspect the service's private state.
+        # Inaccessibility does not establish absence or justify broader access.
+        result.update(exists=None, inspection_error=type(error).__name__)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-dir", type=Path, required=True)
@@ -59,7 +73,7 @@ def main():
         "machine_keys": sorted(environment(args.machine_file)), "service_keys": sorted(values),
         "installed_revisions": receipts, "services": units,
         "connections": {name: connection(values[name]) for name in ("LAPLACE_DB", "LAPLACE_APP_DB") if name in values},
-        "paths": {key: {"path": value, "exists": Path(value).exists()} for key, value in values.items()
+        "paths": {key: path_status(value) for key, value in values.items()
                   if key in ("LAPLACE_PERFCACHE_BIN", "LAPLACE_STOCKFISH", "LAPLACE_DATA_PROTECTION_KEYS")}}
     print(json.dumps(result, indent=2))
 
