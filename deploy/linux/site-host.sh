@@ -24,11 +24,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
 host_args=("$@")
 as_is=false; routing_only=false; browser_setup=false; identity_enrollment=''
+chess_setup=false; chess_configuration=''; chess_enrollment=''
 while (( $# )); do
   case "$1" in
     --as-is) as_is=true ;;
     --routing-only) routing_only=true ;;
     --browser-setup) browser_setup=true ;;
+    --chess-setup) chess_setup=true ;;
+    --chess-configuration|--chess-enrollment)
+      (( $# >= 2 )) || { echo "$1 requires a path" >&2; exit 2; }
+      if [[ "$1" == --chess-configuration ]]; then chess_configuration=$2; else chess_enrollment=$2; fi
+      shift ;;
     --identity-enrollment)
       (( $# >= 2 )) || { echo '--identity-enrollment requires a path' >&2; exit 2; }
       identity_enrollment=$2; shift ;;
@@ -101,7 +107,18 @@ browser_identity() {
   fi
   python3 "$HERE/identity-runtime.py" "${args[@]}"
 }
-if "$browser_setup"; then private_browser_route; browser_identity; exit; fi
+chess_runtime() {
+  local declaration=${chess_configuration:-${LAPLACE_CHESS_CONFIGURATION:-/etc/laplace-mono/chess/agent/installation.json}}
+  if [[ ! -f "$declaration" ]]; then
+    if "$chess_setup"; then echo "Missing chess installation declaration: $declaration" >&2; return 1; fi
+    return 0
+  fi
+  local args=(install --configuration "$declaration")
+  if [[ -n "$chess_enrollment" ]]; then args+=(--enrollment "$chess_enrollment"); fi
+  python3 "$HERE/chess-host.py" "${args[@]}"
+}
+if "$chess_setup"; then chess_runtime; exit; fi
+if "$browser_setup"; then private_browser_route; browser_identity; chess_runtime; exit; fi
 if "$routing_only"; then private_browser_route; exit; fi
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
 say() { printf '  %-44s %s\n' "$1" "$2"; }
@@ -180,6 +197,7 @@ else say "ufw" "not active: nothing to do"; fi
 # running its activation; the root-owned enrollment survives source updates.
 flock -u 8
 browser_identity
+chess_runtime
 
 echo
 echo "done. The runner deploys with deploy/linux/site.sh on every merge to main (.github/workflows/laplace.yml)."

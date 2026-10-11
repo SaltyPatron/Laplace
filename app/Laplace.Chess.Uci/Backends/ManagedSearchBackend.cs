@@ -34,10 +34,20 @@ public sealed class ManagedSearchBackend : IChessBackend
     public string Name => "Laplace";
     public string Author => "Laplace";
     public IReadOnlyList<string> OptionLines =>
-        [$"option name Substrate type combo default {_substrateMode} var substrate var off"];
+        [$"option name Substrate type combo default {_substrateMode} var substrate var off",
+         "option name Refresh Knowledge type button"];
 
     public void SetOption(string name, string value)
     {
+        if (name.Equals("Refresh Knowledge", StringComparison.OrdinalIgnoreCase))
+        {
+            // The live writer may be another process or host. Its local invalidation
+            // epoch cannot invalidate this process's snapshots or root-evidence cache.
+            _providers = null;
+            _substrateTried = false;
+            _searchStale = true;
+            return;
+        }
         if (name.Equals("Substrate", StringComparison.OrdinalIgnoreCase)
             && NormalizeMode(value) is { } mode && mode != _substrateMode)
         {
@@ -46,25 +56,20 @@ public sealed class ManagedSearchBackend : IChessBackend
         }
     }
 
-    public void Prepare(Action<string> info) => _ = EnsureSearch(info, allowInit: true);
+    public void Prepare(Action<string> info)
+    {
+        if (EnsureSearch(info, allowInit: true) && _ds is not null && _substrateMode != "off")
+        {
+            var knowledge = ChessKnowledgeIdentity.Read(_ds);
+            info(ChessKnowledgeIdentity.ProtocolPrefix + System.Text.Json.JsonSerializer.Serialize(knowledge));
+        }
+    }
 
     public void NewGame(Action<string> info)
     {
         _state = _modality.Initial();
-        // A prior game may have folded new move outcomes. Refresh the learned residual
-        // now, outside the next move clock. Failure invalidates readiness instead of
-        // silently running a different classical player under a substrate label.
-        if (_substrateMode != "off" && _providers is not null)
-        {
-            try { _providers.RefreshLearnedPst(); }
-            catch (Exception ex)
-            {
-                info($"learned PST refresh failed ({FirstLine(ex.Message)})");
-                _providers = null;
-                _substrateTried = false;
-            }
-        }
-        _searchStale = true;
+        // A preceding game can have been recorded by another process or machine.
+        SetOption("Refresh Knowledge", "");
     }
 
     public void SetPosition(string? fen, IReadOnlyList<string> moves)

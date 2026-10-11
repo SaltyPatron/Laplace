@@ -33,6 +33,7 @@ public sealed class LichessConnectivityService : ILichessConnection
     private ChessLiveGameHost? _host;
     private readonly ILogger _log;
     private readonly bool _ownsHost;
+    private readonly bool _drainGames;
     private readonly object _gate = new();
     private readonly ConcurrentQueue<string> _recentLog = new();
     private readonly ConcurrentDictionary<string, ConcurrentQueue<LichessChatLine>> _chatByGame = new();
@@ -48,18 +49,19 @@ public sealed class LichessConnectivityService : ILichessConnection
     private EngineIdentity? _engineIdentity;
     private long _gamesRecorded;
 
-    public LichessConnectivityService(ChessLiveGameHost host, ILogger? log = null)
-        : this(_ => Task.FromResult(host), log)
+    public LichessConnectivityService(ChessLiveGameHost host, ILogger? log = null, bool ownsHost = false, bool drainGames = false)
+        : this(_ => Task.FromResult(host), log, ownsHost, drainGames)
     {
         _host = host;
     }
 
     public LichessConnectivityService(
-        Func<CancellationToken, Task<ChessLiveGameHost>> getHost, ILogger? log = null, bool ownsHost = false)
+        Func<CancellationToken, Task<ChessLiveGameHost>> getHost, ILogger? log = null, bool ownsHost = false, bool drainGames = false)
     {
         _getHost = getHost;
         _log = log ?? NullLogger.Instance;
         _ownsHost = ownsHost;
+        _drainGames = drainGames;
     }
 
     public LichessConnectivityStatus Status()
@@ -181,6 +183,7 @@ public sealed class LichessConnectivityService : ILichessConnection
                 host,
                 engine: _engine,
                 record: true,
+                drainGrace: _drainGames ? Timeout.InfiniteTimeSpan : null,
                 botUsername: user,
                 onChatLine: line =>
                 {

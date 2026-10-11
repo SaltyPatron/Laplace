@@ -34,6 +34,7 @@ public sealed class LichessBot : IAsyncDisposable
     private readonly ILogger _log;
     private readonly Action<bool>? _onConnectionChanged;
     private readonly Action<EngineIdentity>? _onEngineIdentity;
+    private readonly TimeSpan _drainGrace;
 
     private const string Base = "https://lichess.org";
 
@@ -49,9 +50,11 @@ public sealed class LichessBot : IAsyncDisposable
         LichessChallengePolicy? policy = null,
         ILogger? log = null,
         Action<bool>? onConnectionChanged = null,
-        Action<EngineIdentity>? onEngineIdentity = null)
+        Action<EngineIdentity>? onEngineIdentity = null,
+        TimeSpan? drainGrace = null)
     {
         _host = host;
+        _drainGrace = drainGrace ?? TimeSpan.FromSeconds(20);
         _engine = engine;
         _onEngineIdentity = onEngineIdentity;
         _record = record;
@@ -67,6 +70,8 @@ public sealed class LichessBot : IAsyncDisposable
     public static string? ResolveToken(string? explicitToken = null)
     {
         if (!string.IsNullOrWhiteSpace(explicitToken)) return explicitToken.Trim();
+        var file = Environment.GetEnvironmentVariable("LICHESS_TOKEN_FILE");
+        if (!string.IsNullOrWhiteSpace(file)) return File.ReadAllText(file).Trim();
         return LaplaceInstall.TryReadConfig("LICHESS_API", "lichess.env")
             ?? LaplaceInstall.TryReadConfig("LICHESS_TOKEN", "lichess.env");
     }
@@ -178,7 +183,7 @@ public sealed class LichessBot : IAsyncDisposable
         if (games.Count > 0)
         {
             _log.LogInformation("draining {N} in-flight games…", games.Count);
-            await DrainGamesAsync(games.Values, gameLifetime, TimeSpan.FromSeconds(20), _log)
+            await DrainGamesAsync(games.Values, gameLifetime, _drainGrace, _log)
                 .ConfigureAwait(false);
         }
         if (terminalFailure is not null)

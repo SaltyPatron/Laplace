@@ -41,7 +41,13 @@ public sealed class UciEngine
             case "setoption":
                 int nameIdx = Array.IndexOf(tok, "name");
                 int valueIdx = Array.IndexOf(tok, "value");
-                if (nameIdx < 0 || valueIdx < 0 || valueIdx <= nameIdx + 1 || valueIdx + 1 >= tok.Length) return true;
+                if (nameIdx < 0 || nameIdx + 1 >= tok.Length) return true;
+                if (valueIdx < 0)
+                {
+                    _backend.SetOption(string.Join(' ', tok[(nameIdx + 1)..]), "");
+                    return true;
+                }
+                if (valueIdx <= nameIdx + 1 || valueIdx + 1 >= tok.Length) return true;
                 _backend.SetOption(string.Join(' ', tok[(nameIdx + 1)..valueIdx]), string.Join(' ', tok[(valueIdx + 1)..]));
                 return true;
 

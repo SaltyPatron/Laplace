@@ -9,6 +9,10 @@ internal static class ChessEndpoints
 
     public static void MapChessEndpoints(this WebApplication app)
     {
+        app.MapGet("/chess/lichess/control", async (HttpContext context, LichessControlClient control, CancellationToken ct) =>
+            await control.StatusAsync(context, ct)).WithTags("chess");
+        app.MapPost("/chess/lichess/selection", async (HttpContext context, LichessProfileSelectionRequest request,
+            LichessControlClient control, CancellationToken ct) => await control.SelectAsync(context, request, ct)).WithTags("chess");
         app.MapGet("/chess/new", (ChessEngineService svc) =>
             Results.Json(new { fen = svc.NewGameFen() })).WithTags("chess");
 
@@ -95,19 +99,11 @@ internal static class ChessEndpoints
         app.MapGet("/chess/lichess/status", async (LichessStatusReader lichess, CancellationToken ct) =>
             Results.Json(await lichess.ReadAsync(ct))).WithTags("chess").Produces<LichessStatusView>(200);
 
-        // Starts and stops the managed Lichess service under the /chess/* tenancy and
-        // API-key policy; its configuration is server-side only.
-        app.MapPost("/chess/lichess/start", async (LichessStartRequest req,
-            IServiceControl services, CancellationToken ct) =>
-        {
-            if (req.Depth is not null || req.MaxConcurrent is not null || req.Substrate is not null || req.Speeds is not null)
-                return Results.BadRequest(new { error = "managed_configuration", message = "Set LAPLACE_LICHESS_* server-side and restart the service." });
-            return await ServiceControlEndpoints.ExecuteAsync(services, ManagedService.Lichess, ServiceAction.Start, ct);
-        }).WithTags("chess");
-
-        app.MapPost("/chess/lichess/stop", async (IServiceControl services, CancellationToken ct) =>
-            await ServiceControlEndpoints.ExecuteAsync(services, ManagedService.Lichess, ServiceAction.Stop, ct))
-            .WithTags("chess");
+        // The account has one controller. A local service-manager start would bypass
+        // its selection and could create a second consumer of the same bot account.
+        foreach (var action in new[] { "start", "stop" })
+            app.MapPost($"/chess/lichess/{action}", () => Results.Json(new
+            { error = "Use /chess/lichess/selection to select a profile or turn the shared bot off." }, statusCode: 410)).WithTags("chess");
 
         app.MapGet("/chess/lab/calibration", async (CancellationToken ct) =>
             Results.Json(await ChessCalibration.ReadAsync(ct))).WithTags("chess");

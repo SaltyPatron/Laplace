@@ -5,12 +5,12 @@ import styles from './LabView.module.css';
 
 const loadExperiments = () => import('./ExperimentRunner');
 const loadGauntlet = () => import('./gauntlet/GauntletView');
-const loadLichess = () => import('./LichessPanel');
+const loadLichess = () => import('./LichessRoutingPanel');
 const loadCalibration = () => import('./gauntlet/CalibrationPanel');
 
 const ExperimentRunner = lazy(() => loadExperiments().then((m) => ({ default: m.ExperimentRunner })));
 const GauntletView = lazy(() => loadGauntlet().then((m) => ({ default: m.GauntletView })));
-const LichessPanel = lazy(() => loadLichess().then((m) => ({ default: m.LichessPanel })));
+const LichessPanel = lazy(() => loadLichess().then((m) => ({ default: m.LichessRoutingPanel })));
 const CalibrationPanel = lazy(() => loadCalibration().then((m) => ({ default: m.CalibrationPanel })));
 
 const LAB_PREFETCH: Record<string, () => Promise<unknown>> = {

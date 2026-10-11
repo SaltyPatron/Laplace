@@ -66,6 +66,7 @@ server {{
     ssl_protocols TLSv1.2 TLSv1.3;
     {allows}
     deny all;
+    include /etc/nginx/laplace-mono/*.location.conf;
 {chr(10).join(locations)}
 }}
 '''
