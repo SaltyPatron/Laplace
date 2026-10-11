@@ -6,6 +6,7 @@ import os
 import re
 import socket
 import subprocess
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -25,6 +26,9 @@ def render(config):
     timeout = config['proxy_timeout_seconds']
     if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 86400:
         raise ValueError('Invalid proxy timeout')
+    activation_timeout = config.get('activation_timeout_seconds', 30)
+    if not isinstance(activation_timeout, int) or isinstance(activation_timeout, bool) or not 1 <= activation_timeout <= 300:
+        raise ValueError('Invalid route activation timeout')
     for name in ('certificate', 'certificate_key'):
         if not re.fullmatch(r'/[A-Za-z0-9_./-]+', config[name]) or '..' in Path(config[name]).parts:
             raise ValueError('Invalid certificate path')
@@ -80,6 +84,42 @@ def verify_certificate(config):
     subprocess.run(['openssl', 'x509', '-in', config['certificate'], '-noout', '-checkend', '86400'], check=True)
 
 
+def verify_route(config):
+    origin = urllib.parse.urlsplit(config['browser_origin'])
+    timeout = config.get('activation_timeout_seconds', 30)
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 300:
+        raise ValueError('Invalid route activation timeout')
+    for address in config['listen_addresses']:
+        probe_address = '[' + address + ']' if ':' in address else address
+        deadline = time.monotonic() + timeout
+        last_error = 'no response'
+        # Reload signals nginx; old workers can still answer until it starts
+        # the replacement workers. Open a new TLS connection for each probe.
+        while time.monotonic() < deadline:
+            remaining = max(0.1, deadline - time.monotonic())
+            response = subprocess.run(['curl', '--silent', '--show-error',
+                         '--max-time', str(min(5, remaining)), '--noproxy', '*',
+                         '--resolve', f'{origin.hostname}:{origin.port or 443}:{probe_address}',
+                         '--write-out', '\\n%{http_code}', config['browser_origin'] + '/health'],
+                         capture_output=True, text=True)
+            body, _, status = response.stdout.rpartition('\n')
+            if response.returncode:
+                last_error = f'curl exit {response.returncode}: {response.stderr.strip()}'
+            elif status != '200':
+                last_error = 'HTTP ' + status
+            else:
+                try:
+                    if json.loads(body).get('status') == 'ok':
+                        break
+                    last_error = 'application health status is not ok'
+                except (ValueError, AttributeError):
+                    last_error = 'HTTP 200 did not contain application health JSON'
+            time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+        else:
+            raise RuntimeError(f'{config["browser_origin"]}/health via {address} did not become ready '
+                               f'within {timeout}s: {last_error}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configuration', type=Path, default=Path(__file__).parent.parent / 'private-origins.json')
@@ -109,7 +149,6 @@ def main():
         return
     if os.geteuid() != 0 or socket.gethostname().split('.')[0].lower() != config['host'].lower():
         raise SystemExit('Apply requires root on the declared installation host.')
-    hostname = urllib.parse.urlsplit(config['browser_origin']).hostname
     verify_certificate(config)
     target = Path('/etc/nginx/sites-available/laplace-mono-browser')
     enabled = Path('/etc/nginx/sites-enabled/laplace-mono-browser')
@@ -128,17 +167,7 @@ def main():
             enabled.symlink_to(target)
         subprocess.run(['nginx', '-t'], check=True)
         subprocess.run(['systemctl', 'reload', 'nginx'], check=True)
-        # Exercise TLS hostname validation and the named virtual host without
-        # depending on DNS propagation on this installation machine.
-        origin = urllib.parse.urlsplit(config['browser_origin'])
-        probe_address = config['listen_addresses'][0]
-        if ':' in probe_address:
-            probe_address = '[' + probe_address + ']'
-        response = subprocess.run(['curl', '--fail', '--silent', '--show-error', '--max-time', '15',
-                        '--noproxy', '*', '--resolve', f'{hostname}:{origin.port or 443}:{probe_address}',
-                        config['browser_origin'] + '/health'], check=True, capture_output=True, text=True)
-        if json.loads(response.stdout).get('status') != 'ok':
-            raise RuntimeError('The HTTPS application health response is not ok')
+        verify_route(config)
     except Exception:
         if before is None:
             target.unlink(missing_ok=True)
