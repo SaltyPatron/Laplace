@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: |
-          echo 'Application deployment supports staging or production. Use the Operations component workflow for knowledge-host qualification.' >&2
+          echo 'Application deployment supports staging or production. Select qualify-cloud for isolated knowledge-host qualification.' >&2
           exit 2
 
   deploy:
