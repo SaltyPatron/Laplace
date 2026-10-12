@@ -150,6 +150,7 @@ internal sealed class ApiKeyEnforcementMiddleware
             || path.Equals("/v1/billing/plans", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/v1/auth/config", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/v1/auth/me", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/access", StringComparison.OrdinalIgnoreCase)
             || IsUnder(path, "/v1/auth/login"));
 
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
@@ -167,11 +168,20 @@ internal sealed class ApiKeyEnforcementMiddleware
         if (IsUnder(path, "/v1/admin") || IsUnder(path, "/v1/billing/operator")
             || path.Equals("/v1/billing/catalog/sync", StringComparison.OrdinalIgnoreCase))
         {
-            if (!OperatorAuth.IsAuthorized(request, _options))
+            context.Response.Headers.CacheControl = "private, no-store";
+            if (PlatformPolicy.UserId(context) is not null && !HttpMethods.IsGet(request.Method)
+                && !HttpMethods.IsHead(request.Method) && !HttpMethods.IsOptions(request.Method) && !SameOrigin(request))
             {
-                await Reject(context, "operator_token_required", "This endpoint requires the operator credential.", 403);
+                await Reject(context, "same_origin_required", "Browser administration changes must originate from this Laplace host.", 403);
                 return;
             }
+            var authorization = context.RequestServices.GetRequiredService<PlatformAuthorization>();
+            if (!await authorization.AllowsAsync(context, PlatformPolicy.ForRoute(request), context.RequestAborted))
+            {
+                await Reject(context, "platform_permission_required", "Your account does not have permission for this platform action. Ask a platform administrator to review your access.", 403);
+                return;
+            }
+            context.Items["laplace.platform_authorized"] = true;
             await _next(context); return;
         }
 
@@ -180,7 +190,8 @@ internal sealed class ApiKeyEnforcementMiddleware
         {
             await Reject(context, "invalid_api_key", "The provided API key is unknown, malformed, or revoked."); return;
         }
-        if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser" or "dev") && !PublicRead(request, path))
+        if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser" or "dev") && !PublicRead(request, path)
+            && !(path.Equals("/v1/op", StringComparison.OrdinalIgnoreCase) && OperatorAuth.HasCredential(request, _options)))
         {
             await Reject(context, "authentication_required", "Sign in or provide a Laplace API key for this workspace."); return;
         }
@@ -202,7 +213,12 @@ internal sealed class ApiKeyEnforcementMiddleware
                         "account.membership_role", tenant.TenantId, Guid.Parse(tenant.Claims["user_id"]));
                     role = await command.ExecuteScalarAsync(context.RequestAborted) as string;
                 }
-                if (role is null)
+                // Discover and select memberships even after access to the currently
+                // selected workspace is removed. These endpoints authorize the target.
+                var accountDiscovery = (HttpMethods.IsGet(request.Method) && path.Equals("/v1/account", StringComparison.OrdinalIgnoreCase))
+                    || (HttpMethods.IsPost(request.Method) && context.GetEndpoint() is RouteEndpoint accountEndpoint
+                        && accountEndpoint.RoutePattern.RawText is "/v1/account/workspaces" or "/v1/account/workspaces/{tenantId}/select");
+                if (role is null && !path.Equals("/v1/access", StringComparison.OrdinalIgnoreCase) && !accountDiscovery)
                 {
                     await Reject(context, "workspace_membership_required", "This account no longer belongs to the selected workspace.", 403); return;
                 }
@@ -244,6 +260,10 @@ internal static class OperatorAuth
 {
     public const string TokenHeader = "X-Laplace-Operator-Token";
     public static bool IsAuthorized(HttpRequest request, LaplaceAuthOptions options)
+        => request.HttpContext.Items.TryGetValue("laplace.platform_authorized", out var authorized) && authorized is true
+            || HasCredential(request, options);
+
+    public static bool HasCredential(HttpRequest request, LaplaceAuthOptions options)
     {
         if (options.DevPrincipalActive) return true;
         if (string.IsNullOrWhiteSpace(options.OperatorToken)) return false;

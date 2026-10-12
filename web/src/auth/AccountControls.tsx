@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, ErrorText, Muted } from '@ui';
-import { apiPost } from '../api/client';
+import { Button, ErrorText, Muted, Select, useReadResource } from '@ui';
+import { apiGet, apiPost } from '../api/client';
+import { roleName } from './access';
 import type { AuthProvider, AuthUser } from '../store';
 import styles from './AccountControls.module.css';
 
@@ -16,6 +17,8 @@ const invitationStorageKey = 'laplace.pending-workspace-invitation';
 export function AccountControls({ user, providers, returnUrl }: AccountControlsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const workspaces = useReadResource({ key: JSON.stringify(['header-workspaces', user?.id, user?.tenantId]), enabled: !!user,
+    read: (signal) => apiGet<{ tenantId: string; workspaces: { tenantId: string; displayName: string; role: string }[] }>('/v1/account', { signal }) });
 
   useEffect(() => {
     if (!user) return;
@@ -39,8 +42,16 @@ export function AccountControls({ user, providers, returnUrl }: AccountControlsP
       <div className={styles.account}>
         <div className={styles.identity}>
           <Link to="/settings">{label}</Link>
-          <Muted>{user.provider} · {user.tenantId}</Muted>
+          <Muted>{user.email || user.provider}</Muted>
         </div>
+        {workspaces.data && <label className={styles.workspace}>Workspace<Select aria-label="Current workspace" value={workspaces.data.tenantId} disabled={busy} onChange={async (event) => {
+          setBusy(true); setError('');
+          try {
+            await apiPost(`/v1/account/workspaces/${encodeURIComponent(event.target.value)}/select`, {});
+            window.location.assign(returnUrl.split('#', 1)[0]);
+          } catch (failure) { setError(failure instanceof Error ? failure.message : 'Workspace switch failed.'); setBusy(false); }
+        }}>{!workspaces.data.workspaces.some((workspace) => workspace.tenantId === workspaces.data?.tenantId) && <option value={workspaces.data.tenantId} disabled>Choose a workspace…</option>}
+          {workspaces.data.workspaces.map((workspace) => <option key={workspace.tenantId} value={workspace.tenantId}>{workspace.displayName} · {roleName(workspace.role)}</option>)}</Select></label>}
         <Button variant="ghost" size="sm" disabled={busy} onClick={async () => {
           setBusy(true); setError('');
           try {

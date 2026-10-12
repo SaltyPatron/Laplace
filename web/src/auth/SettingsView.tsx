@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Button, ErrorText, Input, Muted, Panel } from '@ui';
+import { Button, ErrorText, Input, Modal, Muted, Panel, Select } from '@ui';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import { useAppStore } from '../store';
 import { AccountControls } from './AccountControls';
+import { useSectionParam } from '../layout/useSectionParam';
+import { roleName } from './access';
 import styles from './SettingsView.module.css';
 
 interface Workspace { tenantId: string; displayName: string; kind: string; role: string }
@@ -11,6 +13,7 @@ interface Subscription { planId: string; status: string; periodStart: string; pe
 interface Account {
   userId: string; tenantId: string; displayName: string | null; email: string | null; provider: string;
   workspaces: Workspace[]; subscriptions: Subscription[];
+  workspaceRoles?: { id: string; name: string; permissions: string[] }[];
   configuration: {
     authMode: string; billingEnforced: boolean; billingStore: string; stripeConfigured: boolean; stripeMode: string;
     commercialCatalogApproved: boolean;
@@ -41,8 +44,11 @@ function useRemote<T>(path: string | null, revision: number) {
 }
 
 const date = (value: string) => new Date(value).toLocaleString();
+const SECTIONS = ['workspace', 'members', 'clients', 'billing', 'security', 'permissions'] as const;
+const SECTION_NAMES = ['Workspace', 'Members & invitations', 'API clients', 'Plans & billing', 'Sign-in sessions', 'Roles & permissions'];
 
 export function SettingsView() {
+  const [section, setSection] = useSectionParam('section', [...SECTIONS], 'workspace');
   const { authReady, authUser, authProviders, tenant } = useAppStore();
   const location = useLocation();
   const [revision, refresh] = useState(0);
@@ -56,14 +62,17 @@ export function SettingsView() {
   const [secret, setSecret] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
+  const [roleMember, setRoleMember] = useState<Member | null>(null);
+  const [memberRole, setMemberRole] = useState('member');
   const [joinToken, setJoinToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('join') ?? '');
   const account = useRemote<Account>(authReady && authUser ? '/v1/account' : null, revision);
   const active = account.value?.workspaces.find((w) => w.tenantId === account.value?.tenantId);
   const manages = active?.role === 'owner' || active?.role === 'admin';
-  const members = useRemote<{ members: Member[] }>(manages ? '/v1/account/members' : null, revision);
-  const invitations = useRemote<{ invitations: Invitation[] }>(manages ? '/v1/account/invitations' : null, revision);
-  const keys = useRemote<{ keys: ApiKey[] }>(manages ? '/v1/billing/keys' : null, revision);
-  const sessions = useRemote<{ sessions: WebSession[] }>(authReady && authUser ? '/v1/auth/sessions' : null, revision);
+  const members = useRemote<{ members: Member[] }>(manages && section === 'members' ? '/v1/account/members' : null, revision);
+  const invitations = useRemote<{ invitations: Invitation[] }>(manages && section === 'members' ? '/v1/account/invitations' : null, revision);
+  const roleEvents = useRemote<{ events: { eventId: number; person: string; actor: string; previousRole: string; role: string; occurredAt: string }[] }>(manages && section === 'members' ? '/v1/account/role-events' : null, revision);
+  const keys = useRemote<{ keys: ApiKey[] }>(manages && section === 'clients' ? '/v1/billing/keys' : null, revision);
+  const sessions = useRemote<{ sessions: WebSession[] }>(authReady && authUser && section === 'security' ? '/v1/auth/sessions' : null, revision);
 
   useEffect(() => { setSecret(''); setInviteLink(''); }, [tenant, authUser?.id]);
   useEffect(() => { setRename(active?.displayName ?? ''); }, [active?.displayName]);
@@ -86,7 +95,7 @@ export function SettingsView() {
   if (!authReady) return <div className={styles.root}><Muted>Loading account…</Muted></div>;
   if (!authUser) return (
     <div className={styles.root}>
-      <h1>Account and company settings</h1>
+      <h1>Workspace settings</h1>
       <p>Sign in to select a workspace, subscribe, manage members, and control access.</p>
       <AccountControls user={null} providers={authProviders} returnUrl={returnUrl} />
       {authProviders.length === 0 && <ErrorText>This host has no configured sign-in provider.</ErrorText>}
@@ -96,13 +105,16 @@ export function SettingsView() {
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <div><h1>Account and company settings</h1><Muted>{authUser.displayName || authUser.email}</Muted></div>
+        <div><h1>{active?.displayName || 'Workspace settings'}</h1><Muted>{authUser.email || authUser.displayName} · {active ? roleName(active.role) : account.value ? 'Choose a workspace' : 'Loading access…'}</Muted></div>
         <Button variant="ghost" disabled={!!busy} onClick={() => refresh((n) => n + 1)}>Refresh</Button>
       </header>
+      <nav className={styles.sections} aria-label="Workspace settings sections">{SECTIONS.map((item, index) =>
+        <button key={item} aria-current={section === item ? 'page' : undefined} onClick={() => setSection(item)}>{SECTION_NAMES[index]}</button>)}</nav>
       {error && <ErrorText>{error}</ErrorText>}
       {message && <p role="status">{message}</p>}
       {account.loading && <Muted>Loading workspace and subscription…</Muted>}
       {account.error && <ErrorText>{account.error}</ErrorText>}
+      {account.value && !active && <p role="status">You no longer belong to the selected workspace. Choose another workspace from the account menu, or create one in Workspace settings.</p>}
 
       {joinToken && <Panel title="Workspace invitation">
         <p>This one-use invitation grants access to the inviting workspace. Accept only an invitation from someone you trust.</p>
@@ -114,18 +126,19 @@ export function SettingsView() {
       </Panel>}
 
       {account.value && <>
-        <Panel title="Workspaces">
+        {section === 'workspace' && <Panel title="Workspace settings">
           <label className={styles.field}>Current workspace
             <select value={account.value.tenantId} disabled={!!busy} onChange={(event) => {
               const value = event.target.value;
               void run('workspace', () => selectWorkspace(value));
             }}>
+              {!active && <option value={account.value.tenantId} disabled>Choose a workspace…</option>}
               {account.value.workspaces.map((workspace) => <option key={workspace.tenantId} value={workspace.tenantId}>
                 {workspace.displayName} · {workspace.role}
               </option>)}
             </select>
           </label>
-          <Muted>Workspace ID: {account.value.tenantId}. Your account ID: {account.value.userId}.</Muted>
+          <details><summary>Technical identifiers</summary><Muted>Workspace ID: {account.value.tenantId}. Account ID: {account.value.userId}.</Muted></details>
           {manages && <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void run('rename', async () => {
             await apiPut('/v1/account/workspace', { name: rename }); refresh((n) => n + 1); setMessage('Workspace name saved.');
           }); }}>
@@ -139,9 +152,9 @@ export function SettingsView() {
             <label className={styles.field}>New company workspace<Input value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} required maxLength={160} placeholder="Company name" /></label>
             <Button type="submit" disabled={!!busy}>Create workspace</Button>
           </form>
-        </Panel>
+        </Panel>}
 
-        <Panel title="Subscription">
+        {section === 'billing' && <Panel title="Subscription">
           {account.value.subscriptions.length === 0 ? <p>No subscription is recorded for this workspace.</p> :
             account.value.subscriptions.map((subscription) => <div className={styles.row} key={subscription.planId}>
               <div><strong>{subscription.planId}</strong> · {subscription.status}<br /><Muted>Current period ends {date(subscription.periodEnd)}</Muted></div>
@@ -153,13 +166,14 @@ export function SettingsView() {
             })}>Manage subscription and invoices</Button>}
           </div>
           {!account.value.configuration.stripeConfigured && <ErrorText>Stripe is not configured on this host. Payment cannot be completed here yet.</ErrorText>}
-        </Panel>
+        </Panel>}
 
-        {manages && <Panel title="Company members">
+        {section === 'members' && manages && <Panel title="Members & invitations">
           {members.loading && <Muted>Loading members…</Muted>}
           {members.error && <ErrorText>{members.error}</ErrorText>}
           {members.value?.members.map((member) => <div className={styles.row} key={member.userId}>
-            <div><strong>{member.displayName || member.email || member.userId}</strong><br /><Muted>{member.email} · {member.role}</Muted></div>
+            <div><strong>{member.email || member.displayName || member.userId}</strong><br /><Muted>{member.displayName} · {roleName(member.role)}</Muted></div>
+            {active?.role === 'owner' && <Button variant="ghost" disabled={!!busy} onClick={() => { setRoleMember(member); setMemberRole(member.role); }}>Change role</Button>}
             {member.userId !== account.value?.userId && (active?.role === 'owner' || member.role === 'member') &&
               <Button variant="ghost" disabled={!!busy} onClick={() => {
                 if (!window.confirm(`Remove ${member.displayName || member.email || member.userId} from this workspace?`)) return;
@@ -186,15 +200,19 @@ export function SettingsView() {
             })}>Revoke</Button>
           </div>)}
           <Muted>Workspace API keys are separate service credentials. Rotate any key shared with a departing member.</Muted>
+          <h3>Recent role changes</h3>
+          {roleEvents.loading && <Muted>Loading role history…</Muted>}{roleEvents.error && <ErrorText>{roleEvents.error}</ErrorText>}
+          {roleEvents.value?.events.length === 0 && <Muted>No workspace role changes have been recorded.</Muted>}
+          {roleEvents.value?.events.map((event) => <div className={styles.row} key={event.eventId}><div><strong>{event.person}</strong><Muted>{roleName(event.previousRole)} → {roleName(event.role)} · By {event.actor}</Muted></div><time dateTime={event.occurredAt}>{date(event.occurredAt)}</time></div>)}
         </Panel>}
 
-        {manages && <Panel title="API keys">
-          <p>Use a workspace key with integrations that accept Laplace API-key authentication. Keys are shown only at creation.</p>
+        {section === 'clients' && manages && <Panel title="API clients">
+          <p>Give each application its own labeled API key. Keys act for this workspace and are shown only once. They do not grant platform administration.</p>
           <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void run('key', async () => {
             const result = await apiPost<{ key: string }>('/v1/billing/keys', { label: keyLabel });
             setSecret(result.key); setKeyLabel(''); refresh((n) => n + 1);
           }); }}>
-            <label className={styles.field}>Key label<Input value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} maxLength={160} placeholder="Integration or application" /></label>
+            <label className={styles.field}>Application name<Input value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} maxLength={160} placeholder="Analytics pipeline, desktop client…" /></label>
             <Button type="submit" disabled={!!busy}>Create API key</Button>
           </form>
           {secret && <div className={styles.secret}>
@@ -211,9 +229,12 @@ export function SettingsView() {
               void run('revoke-key', async () => { await apiPost('/v1/billing/keys/revoke', { key_prefix: key.key_prefix }); setSecret(''); refresh((n) => n + 1); });
             }}>Revoke</Button>}
           </div>)}
+          <details><summary>Connect your application</summary><p>Base URL: <code>{window.location.origin}/v1</code></p><p>Authentication: <code>Authorization: Bearer YOUR_API_KEY</code></p><p>Use a separate key for each application so it can be revoked independently. Keep secrets in your application's secret store.</p></details>
         </Panel>}
 
-        <Panel title="Signed-in sessions">
+        {(section === 'clients' || section === 'members') && !manages && <Panel title="Workspace administrator access needed"><p>Your role is {roleName(active?.role)}. An owner or administrator manages workspace members and application credentials.</p><Link to="/settings?section=permissions">View role permissions</Link></Panel>}
+
+        {section === 'security' && <Panel title="Signed-in sessions">
           {sessions.loading && <Muted>Loading sessions…</Muted>}
           {sessions.error && <ErrorText>{sessions.error}</ErrorText>}
           {sessions.value?.sessions.map((session) => <div className={styles.row} key={session.sessionId}>
@@ -224,13 +245,17 @@ export function SettingsView() {
               if (session.current) window.location.assign('/settings'); else refresh((n) => n + 1);
             })}>{session.current ? 'Sign out' : 'Revoke'}</Button>
           </div>)}
-        </Panel>
+        </Panel>}
 
-        <Panel title="Privacy and deployment configuration">
+        {section === 'permissions' && <><Panel title="Workspace roles">
+          <p>Your role: <strong>{roleName(active?.role)}</strong>. These permissions apply to <strong>{active?.displayName}</strong>.</p>
+          <div className={styles.roleCards}>{account.value.workspaceRoles?.map((role) => <section key={role.id}><h3>{role.name}</h3><ul>{role.permissions.map((permission) => <li key={permission}>{permission}</li>)}</ul></section>)}</div>
+          <p>Platform access is assigned separately for shared ingestion and system administration. <Link to="/operator">Open administration</Link>.</p>
+        </Panel><Panel title="Data scope and configuration">
           {!account.value.configuration.privateDataIsolation && <p className={styles.notice}>
-            This development host still uses shared substrate readers. Workspace membership protects account access, but does not yet establish private isolation across Explore, geometry, and all other data paths. Do not upload confidential company data to this shared host.
+            Content belongs to one shared knowledge base. Workspace membership controls account access and billing; it does not provide private content isolation. Only upload content intended for this shared environment.
           </p>}
-          <dl className={styles.configuration}>
+          <details><summary>Deployment details</summary><dl className={styles.configuration}>
             <dt>Authentication</dt><dd>{account.value.configuration.authMode}</dd>
             <dt>Billing persistence</dt><dd>{account.value.configuration.billingStore}</dd>
             <dt>Billing enforcement</dt><dd>{account.value.configuration.billingEnforced ? 'Enabled' : 'Development bypass'}</dd>
@@ -242,9 +267,20 @@ export function SettingsView() {
           {account.value.configuration.providers.map((provider) => <p key={provider.id}>
             {provider.name} sign-in callback: <code>{provider.callbackPath}</code>
           </p>)}
-          <Muted>OAuth client secrets and Stripe credentials are configured on the server, never in this browser form.</Muted>
-        </Panel>
+          <Muted>OAuth client secrets and Stripe credentials are configured on the server, never in this browser form.</Muted></details>
+        </Panel></>}
       </>}
+      <Modal open={roleMember !== null} onClose={() => { if (!busy) setRoleMember(null); }} title="Change workspace role" actions={<>
+        <Button variant="ghost" disabled={!!busy} onClick={() => setRoleMember(null)}>Cancel</Button>
+        <Button disabled={!!busy || memberRole === roleMember?.role} onClick={() => void run('member-role', async () => {
+          if (!roleMember) return;
+          await apiPut(`/v1/account/members/${roleMember.userId}/role`, { role: memberRole });
+          setRoleMember(null); refresh((n) => n + 1); setMessage('Workspace role updated.');
+        })}>Save role</Button></>}>
+        <p>{roleMember?.email || roleMember?.displayName}</p><label className={styles.field}>Workspace role<Select value={memberRole} onChange={(event) => setMemberRole(event.target.value)}>
+          <option value="member">Member</option><option value="admin">Administrator</option><option value="owner">Owner</option>
+        </Select></label><p>Owners can assign roles. At least one owner must remain in the workspace.</p>{error && <ErrorText role="alert">{error}</ErrorText>}
+      </Modal>
     </div>
   );
 }

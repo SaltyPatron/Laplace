@@ -15,8 +15,8 @@ namespace Laplace.Endpoints.OpenAICompat;
 ///     procedure body is in one, so a client issues it on a connection outside a
 ///     transaction.
 ///
-/// These endpoints carry no privilege boundary of their own; they inherit the
-/// deployment's auth mode, as /v1/op does.
+/// Platform authorization is enforced by the request middleware. Agent
+/// configuration and maintenance require platform.maintain.
 /// </summary>
 internal static class AdminEndpoints
 {

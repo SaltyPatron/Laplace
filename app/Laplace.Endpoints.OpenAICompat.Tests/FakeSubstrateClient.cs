@@ -556,6 +556,8 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
         int timeoutSeconds, CancellationToken ct)
     {
+        if (name is "ops.ingest_runs" or "ops.ingest_run_close" or "ops.source_status")
+            return Task.FromResult(new InstalledOpInvoker.OpResult([], null, null));
         if (name is "source_status" or "ops.analyze_substrate")
         {
             var row = new Dictionary<string, object?>

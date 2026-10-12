@@ -27,6 +27,7 @@ namespace Laplace.Decomposers.Composition;
 /// </summary>
 public static class SeedIngestComposition
 {
+    public static IReadOnlyList<string> RegisteredSourceKeys => Registry.Select(entry => entry.Key).ToArray();
     /// <summary>
     /// Built-in providers by ingest key, used when no source generation is selected for
     /// that key; a selected generation routes through the shared recipe decomposer.

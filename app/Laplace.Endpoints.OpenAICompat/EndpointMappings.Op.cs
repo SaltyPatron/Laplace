@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
 using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Endpoints.OpenAICompat.Auth;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -39,12 +40,15 @@ internal static class OpEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/op", async (OpRequest payload, ISubstrateClient substrate, CancellationToken ct) =>
+        app.MapPost("/v1/op", async (OpRequest payload, HttpContext http, PlatformAuthorization authorization, ISubstrateClient substrate, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(payload.Name))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'name' is required.");
 
             var name = payload.Name.Trim();
+            if (PlatformPolicy.ForOperation(name) is { } permission && !await authorization.AllowsAsync(http, permission, ct))
+                return Results.Json(new ErrorResponse(new ErrorBody("authorization_error", "platform_permission_required",
+                    "Your account does not have permission for this platform operation. Ask a platform administrator to review your access.")), statusCode: 403);
             var timeout = payload.TimeoutSeconds
                 ?? (InstalledOpInvoker.IsWritable(name)
                     ? 0

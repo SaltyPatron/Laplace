@@ -57,6 +57,9 @@ internal static class AppComposition
         services.AddSingleton<IIdentityStore>(sp =>
             new PostgresIdentityStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey)));
         services.AddSingleton<BrowserTicketStore>();
+        services.AddSingleton<IPlatformAccessStore>(sp =>
+            new PostgresPlatformAccessStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey)));
+        services.AddSingleton<PlatformAuthorization>();
 
         var authentication = services.AddAuthentication(options =>
         {
