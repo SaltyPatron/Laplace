@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Service;
 
@@ -42,4 +43,5 @@ public sealed record ChessLabJob(
     ChessLabJobSummary Summary,
     IReadOnlyDictionary<string, string> Artifacts,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? FinishedAt = null);
+    DateTimeOffset? FinishedAt = null,
+    OperationPrincipal? Requester = null);

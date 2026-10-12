@@ -293,7 +293,7 @@ public static class ChessLabRunners
 
         // PGN Event already carries this stable experiment id. Keep its original description;
         // the same id addresses the exact configuration/artifact receipt after PGN cleanup.
-        var receipt = new CutechessExperimentReceipt(slot.Job.Id, options, cfg);
+        var receipt = new CutechessExperimentReceipt(slot.Job.Id, options, cfg) { Requester = slot.Job.Requester };
         string receiptPath = Path.Combine(spoolDir, "experiment.json");
         string? persistedReceiptPath = null;
 

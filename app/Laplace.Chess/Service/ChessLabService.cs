@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using System.Threading.Channels;
+using Laplace.Engine.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -12,9 +14,7 @@ public sealed partial class ChessLabService
     private readonly ConcurrentDictionary<string, JobSlot> _jobs = new();
     private readonly string _labDir;
 
-    // The /chess/lab/* HTTP surface has no request-level auth (see EndpointMappings.Chess.cs) —
-    // this cap is the actual mitigation against an unbounded number of concurrent cutechess/
-    // Stockfish process spawns or self-play jobs, independent of caller identity.
+    // Host capacity applies in addition to the API's authenticated workspace boundary.
     private const int MaxConcurrentJobs = 4;
 
     // Job metadata, event channels, transcripts, and per-job files are one lifecycle.
@@ -43,7 +43,8 @@ public sealed partial class ChessLabService
 
     internal Task<ChessLiveGameHost> GetLiveHostAsync(CancellationToken ct) => _getLiveHost(ct);
 
-    public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null)
+    public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null,
+        OperationPrincipal? requester = null)
     {
         // Every new run first bounds process-local history and stale work left by a prior
         // service process. This turns job creation into the maintenance cadence instead of
@@ -65,7 +66,7 @@ public sealed partial class ChessLabService
             config ?? EmptyConfig.Instance,
             new ChessLabJobSummary(),
             EmptyConfig.Instance,
-            now);
+            now, Requester: requester);
 
         var channel = Channel.CreateBounded<ChessLabEvent>(new BoundedChannelOptions(4096)
         {
@@ -129,6 +130,18 @@ public sealed partial class ChessLabService
     {
         try
         {
+            if (slot.Job.Requester is { } requester)
+            {
+                string directory = Path.Combine(_labDir, slot.Job.Id);
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "operation.json");
+                await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+                {
+                    operationId = slot.Job.Id, kind = slot.Job.Kind.ToString(), requester,
+                    startedAt = slot.Job.CreatedAt, host = Environment.MachineName,
+                }, new JsonSerializerOptions(JsonSerializerDefaults.Web)), ct);
+                AddArtifact(slot, "operation.json", path);
+            }
             Publish(slot, new ChessLabLogEvent("info", $"job {slot.Job.Id} ({slot.Job.Kind}) starting"));
             switch (slot.Job.Kind)
             {

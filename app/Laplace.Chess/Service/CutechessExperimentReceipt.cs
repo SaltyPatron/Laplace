@@ -13,6 +13,7 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
     public string? PgnEvent { get; } = options.Event;
     public CutechessOptions RequestedOptions { get; } = options;
     public IReadOnlyDictionary<string, string> JobConfig { get; } = config;
+    public Laplace.Engine.Core.OperationPrincipal? Requester { get; init; }
     public string UnspecifiedStockfishOptions => "Use the installed engine defaults recorded in UciConfiguration.";
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; private set; }
