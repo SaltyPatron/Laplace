@@ -63,8 +63,10 @@ ingestion above did run against the installed substrate.
 ## Staged loading follow-up
 
 The partition scheduler previously admitted `(MaximumPoolSize - 1) / 2` simultaneous
-leaf rebuilds regardless of the configured topology lanes. With the default pool of 100,
-that permits 49 rebuilds even when six lanes were configured. The scheduler now respects
+leaf rebuilds regardless of the configured topology lanes. A pool of 100 permits 49
+rebuilds even when six lanes were configured; this is a regression-test configuration,
+not a measurement of the production pool. The application derives its default pool from
+its resource plan (18 connections for six performance cores). The scheduler now respects
 both limits, and rejects a pool too small for one worker plus its control connection.
 Per-leaf debug measurements separate copy, index/commit, and analyze time. This is a
 concurrency correction; a production throughput improvement has not yet been measured.
@@ -78,16 +80,12 @@ writer's timing and call counters. Fold spans share an end point and use the lon
 so concurrent work is not added twice. These are completion measurements; the staged
 native scoring pass is not misreported as a backend consensus upsert.
 
-Desktop validation of this follow-up:
+Validation of this follow-up:
 
 - The managed test project builds with zero errors (16 existing warnings across projects).
-- Seven new lifecycle/scheduler cases and eight existing ingestion accounting cases pass
-  when their actual test methods and xUnit assertions are invoked by a local console
-  harness. VSTest stalled before reporting discovery/results and was stopped; this is not
-  recorded as a successful VSTest run.
-- The PostgreSQL replay test now additionally checks receipt barriers and positive timing,
-  but those new assertions have not been executed against PostgreSQL in this follow-up.
-- Server SSH in this execution session returned `Permission denied`, including the host's
-  configured IP; DNS queries returned `Access is denied`. These are session access results,
-  not evidence that the server is unavailable. The GitHub connector successfully read the
-  existing PR after the shell's GitHub CLI failed to connect.
+- Normal VSTest execution passed all 15 desktop cases: seven new lifecycle/scheduler cases
+  and eight existing ingestion accounting cases.
+- All five `StagedSourceWriterTests` passed through VSTest on hart-server against PostgreSQL.
+  These cover receipt barriers and positive completion timing, replayed claims, qualifiers,
+  consensus equivalence, another witness's standing, and entity/physicality accounting.
+  The dedicated `laplace_substratecrud_test` database was absent before and after the run.
