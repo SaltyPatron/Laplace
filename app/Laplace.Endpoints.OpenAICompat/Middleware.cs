@@ -41,6 +41,12 @@ internal sealed class ExceptionEnvelopeMiddleware
         {
             await _next(context);
         }
+        catch (Auth.ApiKeyTenantNotFoundException ex)
+        {
+            await Results.Json(
+                new ErrorResponse(new ErrorBody("invalid_request_error", "tenant_not_found", ex.Message)),
+                statusCode: StatusCodes.Status404NotFound).ExecuteAsync(context);
+        }
         catch (SubstrateQueryException ex)
         {
             if (IsTimeoutFailure(ex))

@@ -7,19 +7,20 @@ import { useExploreStore } from '../store';
 import type { BillingReceipt } from '../types';
 import styles from './GatePrompt.module.css';
 
-export function GatePrompt({
-  serviceId,
-  label,
-  units = 1,
-  onReady,
-  receipt,
-}: {
+interface GatePromptProps {
   serviceId: string;
   label: string;
   units?: number;
   onReady: () => void | Promise<void>;
   receipt?: BillingReceipt | null;
-}) {
+}
+
+export function GatePrompt(props: GatePromptProps) {
+  const scope = useAppStore((state) => JSON.stringify([state.tenant, state.authUser?.id]));
+  return <GatePromptBody key={JSON.stringify([scope, props.serviceId, props.units ?? 1])} {...props} />;
+}
+
+function GatePromptBody({ serviceId, label, units = 1, onReady, receipt }: GatePromptProps) {
   const { tenant } = useAppStore();
   const { setQuoteId } = useExploreStore();
   const [busy, setBusy] = useState(false);
@@ -29,6 +30,13 @@ export function GatePrompt({
   const [bypassed, setBypassed] = useState(false);
   const readyRef = useRef(onReady);
   const autoBypassKey = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const unlocking = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     readyRef.current = onReady;
@@ -76,18 +84,21 @@ export function GatePrompt({
   }, [serviceId, tenant]);
 
   async function unlock() {
+    if (unlocking.current) return;
+    unlocking.current = true;
     setBusy(true);
     setErr(null);
     try {
       const q = await preflight(serviceId, tenant, units);
+      if (!mounted.current) return;
       setQuote(q);
       if (q.quote_id) setQuoteId(q.quote_id);
       await onReady();
-      if (!receipt) setBypassed(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (mounted.current) setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      unlocking.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 

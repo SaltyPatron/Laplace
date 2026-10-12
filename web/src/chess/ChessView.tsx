@@ -106,6 +106,12 @@ export function ChessView() {
   const [autoReply, setAutoReply] = useState(() => savedBoot?.autoReply ?? true);
 
   const [train, setTrain] = useState<TrainStatus | null>(null);
+  const [trainStatusError, setTrainStatusError] = useState<string | null>(null);
+  const [trainActionError, setTrainActionError] = useState<string | null>(null);
+  const [trainBusy, setTrainBusy] = useState(false);
+  const trainActionPending = useRef(false);
+  const trainReadSequence = useRef(0);
+  const trainReadController = useRef<AbortController | null>(null);
 
   const [err, setErr] = useState<string | null>(null);
 
@@ -307,16 +313,33 @@ export function ChessView() {
 
 
   const fetchTrain = useCallback(async () => {
-
-    try { setTrain(await apiGet<TrainStatus>('/chess/train/status')); } catch { }
+    const sequence = ++trainReadSequence.current;
+    trainReadController.current?.abort();
+    const controller = new AbortController();
+    trainReadController.current = controller;
+    try {
+      const current = await apiGet<TrainStatus>('/chess/train/status', { signal: controller.signal });
+      if (sequence !== trainReadSequence.current) return;
+      setTrain(current);
+      setTrainStatusError(null);
+    } catch (failure) {
+      if (sequence !== trainReadSequence.current) return;
+      setTrainStatusError(`Cannot read training status: ${msg(failure)}`);
+    }
 
   }, []);
 
-  useEffect(() => { void fetchTrain(); }, [fetchTrain]);
+  useEffect(() => {
+    void fetchTrain();
+    return () => {
+      ++trainReadSequence.current;
+      trainReadController.current?.abort();
+    };
+  }, [fetchTrain]);
 
   useVisiblePolling(fetchTrain, {
     intervalMs: 1500,
-    enabled: !!train?.running,
+    enabled: !!train?.running && !trainBusy,
     immediate: false,
   });
 
@@ -635,7 +658,13 @@ export function ChessView() {
 
 
 
-  const startTrain = () => {
+  const changeTraining = async (action: 'start' | 'stop') => {
+    if (trainActionPending.current) return;
+    trainActionPending.current = true;
+    ++trainReadSequence.current;
+    trainReadController.current?.abort();
+    setTrainBusy(true);
+    setTrainActionError(null);
 
     const q = new URLSearchParams({
 
@@ -645,11 +674,17 @@ export function ChessView() {
 
     }).toString();
 
-    apiPost(`/chess/train/start?${q}`, {}).then(fetchTrain).catch(() => {});
-
+    try {
+      await apiPost(`/chess/train/${action}${action === 'start' ? `?${q}` : ''}`, {});
+      await fetchTrain();
+    } catch (failure) {
+      setTrainActionError(`${action === 'start' ? 'Start' : 'Stop'} request failed: ${msg(failure)}. Refresh status before trying again.`);
+      setTrain(null);
+    } finally {
+      trainActionPending.current = false;
+      setTrainBusy(false);
+    }
   };
-
-  const stopTrain = () => apiPost('/chess/train/stop', {}).then(fetchTrain).catch(() => {});
 
 
 
@@ -866,14 +901,18 @@ export function ChessView() {
         <EnginePanel
 
           train={train}
+          busy={trainBusy}
+          statusError={trainStatusError}
+          actionError={trainActionError}
+          onRefresh={() => void fetchTrain()}
 
           knobs={knobs}
 
           onKnobsChange={setKnobs}
 
-          onStart={startTrain}
+          onStart={() => void changeTraining('start')}
 
-          onStop={stopTrain}
+          onStop={() => void changeTraining('stop')}
 
         />
 

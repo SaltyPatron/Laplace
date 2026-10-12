@@ -137,3 +137,34 @@ test('successful skip and absent throughput are not styled as failures or zero c
   assert.equal(ingestStatusTone('UNMEASURED'), 'cancelled'); assert.equal(ingestStatusTone('unbaselined'), 'cancelled');
   assert.equal(ingestStatusTone('failed'), 'failed'); assert.equal(countText(null), 'Not recorded'); assert.equal(countText(0), '0');
 });
+
+test('raw admission sends the original Blob and metadata without materializing a JSON body', async () => {
+  const bytes = new TextEncoder().encode('\ufeff King != king\r\ne\u0301\n');
+  const body = new Blob([bytes]);
+  const queue = new UploadQueue();
+  queue.add({ ...file('exact.txt', async () => { throw new Error('raw admission must not read the file into JSON'); }),
+    bytes: bytes.length, body: () => body, modifiedAt: '2026-01-01T00:00:00Z' });
+  await queue.startRaw(async (mode, meta, submitted) => {
+    assert.equal(mode, 'text'); assert.equal(submitted, body);
+    assert.deepEqual(new Uint8Array(await submitted.arrayBuffer()), bytes);
+    assert.deepEqual(meta, { name: 'exact.txt', path: 'exact.txt', modified_at: '2026-01-01T00:00:00Z' });
+    return receipt;
+  });
+  assert.equal(queue.getSnapshot().items[0].status, 'admitted');
+});
+
+test('raw admission retains the committed receipt and stops the remaining selection', async () => {
+  const queue = new UploadQueue(); const held = deferred(); let calls = 0;
+  queue.add(file('one')); queue.add(file('two'));
+  const pending = queue.startRaw(async () => { calls++; return held.promise; });
+  await Promise.resolve(); queue.stop(); held.resolve(receipt); await pending;
+  assert.equal(calls, 1); assert.equal(queue.getSnapshot().items[0].receipt, receipt);
+  assert.deepEqual(queue.getSnapshot().items.map((item) => item.status), ['admitted', 'queued']);
+});
+
+test('raw transport failure is unconfirmed and never retried automatically', async () => {
+  const queue = new UploadQueue(); let calls = 0; queue.add(file('one')); queue.add(file('two'));
+  await queue.startRaw(async () => { calls++; throw new Error('lost response'); });
+  assert.equal(calls, 1);
+  assert.deepEqual(queue.getSnapshot().items.map((item) => item.status), ['unconfirmed', 'queued']);
+});

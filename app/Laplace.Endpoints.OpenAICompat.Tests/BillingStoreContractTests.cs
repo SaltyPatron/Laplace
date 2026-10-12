@@ -300,6 +300,19 @@ public sealed class PostgresBillingStoreContractTests : BillingStoreContractTest
 
     private NpgsqlDataSource DataSource => Shared!;
 
+    [SkippableFact]
+    public async Task ApiKeyForUnknownTenant_IsRejectedWithoutIssuingAKey()
+    {
+        Skip.IfNot(Available, "PostgreSQL app schema is required.");
+        string tenant = $"missing-key-tenant-{Guid.NewGuid():N}";
+        var service = new Auth.ApiKeyService(ApiKeys);
+        var failure = await Assert.ThrowsAsync<Auth.ApiKeyTenantNotFoundException>(() =>
+            service.IssueAsync(tenant, "unknown-tenant-contract", CancellationToken.None));
+        Assert.Contains(tenant, failure.Message);
+        Assert.IsType<PostgresException>(failure.InnerException);
+        Assert.Empty(await ApiKeys.GetByTenantAsync(tenant, CancellationToken.None));
+    }
+
     private static NpgsqlDataSource? TryBuild()
     {
         var connString = LaplaceInstall.AppConnectionString();

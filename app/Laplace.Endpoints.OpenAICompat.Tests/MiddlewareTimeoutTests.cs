@@ -9,6 +9,23 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class MiddlewareTimeoutTests
 {
     [Fact]
+    public async Task UnknownApiKeyTenant_IsNotAServiceOutage()
+    {
+        var context = NewContext();
+        var middleware = new ExceptionEnvelopeMiddleware(
+            _ => Task.FromException(new Auth.ApiKeyTenantNotFoundException("missing-workspace",
+                new InvalidOperationException("database constraint detail"))),
+            NullLogger<ExceptionEnvelopeMiddleware>.Instance);
+        await middleware.InvokeAsync(context);
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        using var json = await ReadResponseAsync(context);
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal("tenant_not_found", error.GetProperty("code").GetString());
+        Assert.Contains("existing workspace", error.GetProperty("message").GetString());
+        Assert.DoesNotContain("database constraint detail", json.RootElement.ToString());
+    }
+
+    [Fact]
     public async Task WrappedUnavailableTimeout_IsReportedAsTimeout_NotConnectivityFailure()
     {
         var context = NewContext();
