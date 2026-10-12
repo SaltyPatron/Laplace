@@ -80,14 +80,18 @@ def classify_readiness(value: dict[str, Any]) -> tuple[bool, bool]:
 
     entities = _count(value.get("entities"), "entities")
     consensus = _count(value.get("consensus_relations"), "consensus_relations")
-    has_data = entities > 0 or consensus > 0
+    has_entities = value.get("has_entities", entities > 0)
+    has_consensus = value.get("has_consensus", consensus > 0)
+    if type(has_entities) is not bool or type(has_consensus) is not bool:
+        raise ValueError("readiness presence fields must be boolean")
+    has_data = has_entities or has_consensus
     product_ready = value["ready"]
-    if product_ready and not (entities > 0 and consensus > 0):
+    if product_ready and not (has_entities and has_consensus):
         raise ValueError(
             "API reported product ready without both entities and consensus relations"
         )
-    if not product_ready and entities > 0 and consensus > 0:
-        # The deployed API computes ready = entities && consensus && perfcache.
+    if not product_ready and has_entities and has_consensus:
+        # The deployed API requires actual row presence and the loaded perfcache.
         # Substrate/perfcache health was already proved above, so a populated but
         # not-ready receipt is internally inconsistent and cannot be classified as
         # an ordinary thin/unseeded state.

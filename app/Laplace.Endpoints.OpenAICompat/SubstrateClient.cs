@@ -469,22 +469,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
-            long entities = 0, consensus = 0;
-            foreach (var row in await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, ct))
-            {
-                // Metric keys are ops.substrate_counts labels.
-                if (row.Metric.Equals("entities(ESTIMATE)", StringComparison.Ordinal))
-                    entities = Math.Max(entities, row.Value);
-                else if (row.Metric.Equals("consensus(ESTIMATE)", StringComparison.Ordinal))
-                    consensus = Math.Max(consensus, row.Value);
-            }
-
-            if (entities == 0 || consensus == 0)
-            {
-                var (entitiesExist, consensusExist) = await NpgsqlSubstrateReads.EntitiesAndConsensusExistAsync(conn, ct);
-                if (entities == 0 && entitiesExist) entities = 1;
-                if (consensus == 0 && consensusExist) consensus = 1;
-            }
+            var inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(conn, ct);
+            long entities = inventory.EstimatedEntities, consensus = inventory.EstimatedConsensus;
 
             bool postgresPerfcacheReady;
             string? detail = null;
@@ -519,15 +505,17 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             }
 
             bool perfcacheReady = postgresPerfcacheReady && processPerfcacheReady;
-            var ready = entities > 0 && consensus > 0 && perfcacheReady;
+            var ready = inventory.HasEntities && inventory.HasConsensus && perfcacheReady;
             if (ready)
-                return new ReadinessResponse(true, true, entities, consensus, true, ChessPerfcache: chessPerfcache);
+                return new ReadinessResponse(true, true, entities, consensus, true, ChessPerfcache: chessPerfcache,
+                    HasEntities: inventory.HasEntities, HasConsensus: inventory.HasConsensus);
 
-            detail ??= entities == 0 ? "substrate has no entities (unseeded)"
-                : consensus == 0 ? "substrate has no consensus relations (unseeded)"
+            detail ??= !inventory.HasEntities ? "substrate has no entities (unseeded)"
+                : !inventory.HasConsensus ? "substrate has no consensus relations (unseeded)"
                 : !postgresPerfcacheReady ? "T0 perfcache not loaded in PostgreSQL"
                 : "T0 perfcache not loaded in this process";
-            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail, chessPerfcache);
+            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail, chessPerfcache,
+                HasEntities: inventory.HasEntities, HasConsensus: inventory.HasConsensus);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {

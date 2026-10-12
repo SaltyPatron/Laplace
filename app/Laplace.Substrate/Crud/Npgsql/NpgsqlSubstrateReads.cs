@@ -1590,23 +1590,34 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "evidence_for_target", onError: onError);
 
     /// <summary>
-    /// Readiness probe from the entity and consensus estimates in
-    /// <c>ops.substrate_counts()</c>. Estimates can lag behind recent writes.
+    /// Probe committed row presence independently of planner statistics.
     /// </summary>
     public static async Task<(bool EntitiesExist, bool ConsensusExist)> EntitiesAndConsensusExistAsync(
         NpgsqlConnection conn, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
     {
-        var rows = await SubstrateCountsAsync(conn, ct, timeoutSeconds: 30, onError: onError)
-            .ConfigureAwait(false);
-        bool entities = false, consensus = false;
-        foreach (var r in rows)
-        {
-            if (r.Metric.Equals("entities(ESTIMATE)", StringComparison.Ordinal))
-                entities = r.Value > 0;
-            else if (r.Metric.Equals("consensus(ESTIMATE)", StringComparison.Ordinal))
-                consensus = r.Value > 0;
-        }
-        return (entities, consensus);
+        var rows = await NpgsqlRead.ReadRowsAsync(conn,
+            "SELECT EXISTS (SELECT FROM laplace.entities), EXISTS (SELECT FROM laplace.consensus)",
+            static r => (r.GetBoolean(0), r.GetBoolean(1)),
+            timeoutSeconds: 30, ct: ct, label: "substrate_presence", onError: onError).ConfigureAwait(false);
+        return rows[0];
+    }
+
+    public readonly record struct ReadinessInventory(
+        long EstimatedEntities, long EstimatedConsensus, bool HasEntities, bool HasConsensus);
+
+    /// <summary>One inventory query: estimates describe size; EXISTS determines presence.</summary>
+    public static async Task<ReadinessInventory> ReadinessInventoryAsync(
+        NpgsqlConnection conn, CancellationToken ct)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(conn, """
+            SELECT COALESCE(max(value) FILTER (WHERE metric='entities(ESTIMATE)'),0),
+                   COALESCE(max(value) FILTER (WHERE metric='consensus(ESTIMATE)'),0),
+                   EXISTS (SELECT FROM laplace.entities),
+                   EXISTS (SELECT FROM laplace.consensus)
+            FROM ops.substrate_counts()
+            """, static r => new ReadinessInventory(r.GetInt64(0), r.GetInt64(1), r.GetBoolean(2), r.GetBoolean(3)),
+            timeoutSeconds: 30, ct: ct, label: "readiness_inventory").ConfigureAwait(false);
+        return rows[0];
     }
 
     /// <summary>
