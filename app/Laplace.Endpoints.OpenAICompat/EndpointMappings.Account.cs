@@ -33,7 +33,14 @@ internal static class AccountEndpoints
                 email = http.User.FindFirstValue(ClaimTypes.Email),
                 provider = http.User.FindFirstValue(LaplaceClaimTypes.Provider),
                 workspaces,
-                subscriptions = await entitlements.GetByTenantAsync(account.Tenant, ct),
+                workspaceRoles = new[]
+                {
+                    new { id = "member", name = "Member", permissions = new[] { "Use workspace data and tools", "View usage", "Manage own sign-in sessions" } },
+                    new { id = "admin", name = "Administrator", permissions = new[] { "Member permissions", "Rename workspace", "Invite and remove members", "Manage billing and API clients" } },
+                    new { id = "owner", name = "Owner", permissions = new[] { "Administrator permissions", "Assign workspace roles", "Invite administrators", "Manage workspace ownership" } }
+                },
+                subscriptions = workspaces.Any(w => w.TenantId == account.Tenant)
+                    ? await entitlements.GetByTenantAsync(account.Tenant, ct) : Array.Empty<BillingEntitlement>(),
                 configuration = new
                 {
                     authMode = auth.Value.Mode,
@@ -119,6 +126,60 @@ internal static class AccountEndpoints
                 id, account.Tenant, SHA256.HashData(Encoding.UTF8.GetBytes(token)), role, account.User, expires);
             if (await command.ExecuteNonQueryAsync(ct) != 1) return Error(403, "workspace_admin_required", "Your workspace permissions have changed.");
             return Results.Ok(new { invitationId = id, role, expiresAt = expires, invitationPath = $"/settings#join={token}" });
+        }).WithTags("account");
+
+        app.MapPut("/v1/account/members/{userId:guid}/role", async (Guid userId, MemberRoleRequest request, HttpContext http,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            if (BrowserAccount(http) is not { } account || Role(http) != "owner")
+                return Error(403, "workspace_owner_required", "Only a workspace owner can assign workspace roles.");
+            if (request.Role is not ("owner" or "admin" or "member")) return Error(400, "invalid_role", "Choose Owner, Administrator, or Member.");
+            await using var connection = await application.OpenConnectionAsync(ct);
+            await using var transaction = await connection.BeginTransactionAsync(ct);
+            await using (var locked = NpgsqlCatalog.Command(connection, transaction, "account.lock_workspace", account.Tenant))
+                await locked.ExecuteScalarAsync(ct);
+            await using var update = new Npgsql.NpgsqlCommand("""
+                WITH previous AS MATERIALIZED (
+                    SELECT role FROM app.tenant_memberships WHERE tenant_id = $2 AND user_id = $3
+                ), changed AS (
+                UPDATE app.tenant_memberships target SET role = $1
+                WHERE target.tenant_id = $2 AND target.user_id = $3
+                AND EXISTS (SELECT 1 FROM app.tenant_memberships actor WHERE actor.tenant_id = $2 AND actor.user_id = $4 AND actor.role = 'owner')
+                AND (target.role <> 'owner' OR $1 = 'owner' OR
+                    (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id = $2 AND role = 'owner') > 1)
+                RETURNING target.user_id
+                ), audit AS (
+                    INSERT INTO app.workspace_role_events(tenant_id, user_id, actor_id, previous_role, role)
+                    SELECT $2, changed.user_id, $4, previous.role, $1 FROM changed CROSS JOIN previous
+                    WHERE previous.role <> $1
+                ) SELECT count(*) FROM changed
+                """, connection, transaction);
+            update.Parameters.AddWithValue(request.Role); update.Parameters.AddWithValue(account.Tenant);
+            update.Parameters.AddWithValue(userId); update.Parameters.AddWithValue(account.User);
+            if ((long)(await update.ExecuteScalarAsync(ct))! != 1)
+                return Error(409, "role_change_refused", "The member or your permissions changed, or this is the last workspace owner. Keep at least one owner.");
+            await transaction.CommitAsync(ct);
+            return Results.NoContent();
+        }).WithTags("account");
+
+        app.MapGet("/v1/account/role-events", async (HttpContext http,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can view role history.");
+            await using var command = application.CreateCommand("""
+                SELECT e.event_id, coalesce(person.email, person.display_name, e.user_id::text),
+                    coalesce(actor.email, actor.display_name, e.actor_id::text), e.previous_role, e.role, e.occurred_at
+                FROM app.workspace_role_events e
+                LEFT JOIN app.users person ON person.user_id = e.user_id
+                LEFT JOIN app.users actor ON actor.user_id = e.actor_id
+                WHERE e.tenant_id = $1 ORDER BY e.event_id DESC LIMIT 50
+                """);
+            command.Parameters.AddWithValue(account.Tenant);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            var events = new List<object>();
+            while (await reader.ReadAsync(ct)) events.Add(new { eventId = reader.GetInt64(0), person = reader.GetString(1), actor = reader.GetString(2),
+                previousRole = reader.GetString(3), role = reader.GetString(4), occurredAt = reader.GetFieldValue<DateTimeOffset>(5) });
+            return Results.Ok(new { events, limit = 50 });
         }).WithTags("account");
 
         app.MapGet("/v1/account/invitations", async (HttpContext http, [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
@@ -278,6 +339,7 @@ internal static class AccountEndpoints
     internal sealed record WorkspaceView(string TenantId, string DisplayName, string Kind, string Role);
     internal sealed record WorkspaceNameRequest(string? Name);
     internal sealed record InvitationRequest(string? Role);
+    internal sealed record MemberRoleRequest(string Role);
     internal sealed record AcceptInvitationRequest(string? Token);
     internal sealed record NewKeyRequest(string? Label);
     internal sealed record CheckoutStatusRequest(string? SessionId);

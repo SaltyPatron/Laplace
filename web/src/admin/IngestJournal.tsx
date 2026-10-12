@@ -33,12 +33,12 @@ function RunProgress({ run }: { run: IngestRun }) {
   );
 }
 
-export function IngestJournal({ refreshSignal = 0 }: { refreshSignal?: number }) {
+export function IngestJournal({ refreshSignal = 0, canManage = false }: { refreshSignal?: number; canManage?: boolean }) {
   const { tenant, authUser } = useAppStore();
-  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} refreshSignal={refreshSignal} />;
+  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} refreshSignal={refreshSignal} canManage={canManage} />;
 }
 
-function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal: number }) {
+function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; refreshSignal: number; canManage: boolean }) {
   const [params, setParams] = useSearchParams();
   const [live, setLive] = useState(true);
   const [limit, setLimit] = useState(25);
@@ -161,7 +161,7 @@ function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal
           >
             {expandedRun === run.run_id ? 'Hide files' : 'File receipts'}
           </Button>
-          {OPEN_INGEST_STATES.has(run.status.toLowerCase())
+          {OPEN_INGEST_STATES.has(run.status.toLowerCase()) && canManage
             ? (
               <Button
                 variant="ghost"
@@ -171,7 +171,7 @@ function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal
                 Close journal…
               </Button>
             )
-            : <span className={styles.progressPct}>{run.ended_at ? `Ended ${new Date(run.ended_at).toLocaleString()}` : 'Closed'}</span>}
+            : <span className={styles.progressPct}>{run.ended_at ? `Ended ${new Date(run.ended_at).toLocaleString()}` : OPEN_INGEST_STATES.has(run.status.toLowerCase()) ? 'In progress' : 'Closed'}</span>}
         </div>
       ),
     },

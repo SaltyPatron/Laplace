@@ -47,7 +47,7 @@ const TABS: { id: string; label: string; path: string; owns: string[] }[] = [
   { id: 'explore', label: 'Explore', path: '/explore', owns: ['/explore', '/topic', '/proof', '/unicode', '/query'] },
   { id: 'data', label: 'Data', path: '/data', owns: ['/data'] },
   { id: 'chess', label: 'Chess', path: '/chess', owns: ['/chess', '/play', '/lab'] },
-  { id: 'operator', label: 'Operator', path: '/operator', owns: ['/operator'] },
+  { id: 'operator', label: 'Admin', path: '/operator', owns: ['/operator'] },
 ];
 function isActive(pathname: string, tab: (typeof TABS)[number]): boolean {
   if (tab.path === '/') return pathname === '/';

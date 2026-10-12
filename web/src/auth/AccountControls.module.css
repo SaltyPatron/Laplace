@@ -28,4 +28,6 @@
   .identity > a {
     color: var(--color-text-primary);
   }
+  .workspace { display: grid; gap: .2rem; font-size: var(--text-xs); color: var(--color-text-muted); max-width: min(100%, 17rem); min-width: 0; }
+  .workspace select { max-width: 100%; }
 }

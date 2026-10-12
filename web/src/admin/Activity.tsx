@@ -24,7 +24,7 @@ function stateClass(row: ActivityRow): string {
   return styles.cancelled;
 }
 
-export function Activity() {
+export function Activity({ canManage = false }: { canManage?: boolean }) {
   const { tenant } = useAppStore();
   const [live, setLive] = useState(true);
   const [includeIdle, setIncludeIdle] = useState(true);
@@ -95,8 +95,8 @@ export function Activity() {
             <pre className={styles.sig}>{row.query}</pre>
           </details> : '—'}</td>
           <td>{row.is_self ? <Muted>—</Muted> : <div className={styles.rowActions}>
-            <Button variant="ghost" size="sm" disabled={busyPid != null} loading={busyPid === row.pid} onClick={() => void signal(row, 'cancel')}>Cancel</Button>
-            <Button variant="ghost" size="sm" disabled={busyPid != null} onClick={() => setConfirmKill(row)}>Terminate</Button>
+            {canManage && <><Button variant="ghost" size="sm" disabled={busyPid != null} loading={busyPid === row.pid} onClick={() => void signal(row, 'cancel')}>Cancel</Button>
+            <Button variant="ghost" size="sm" disabled={busyPid != null} onClick={() => setConfirmKill(row)}>Terminate</Button></>}
           </div>}</td>
         </tr>)}</tbody>
       </table>

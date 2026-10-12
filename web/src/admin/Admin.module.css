@@ -11,6 +11,41 @@
     overflow-x: hidden;
   }
 
+  .eyebrow, .navGroup { font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
+  .eyebrow { display: block; margin-bottom: .5rem; }
+  .accessSummary { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+  .adminLayout { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 2rem; align-items: start; }
+  .adminNav { display: flex; flex-direction: column; gap: .25rem; position: sticky; top: 1rem; }
+  .mobileNav { display: none; }
+  .adminNav > a, .adminNav > button { padding: .65rem .8rem; text-align: left; background: none; border: 0; color: var(--color-text-primary); font: inherit; text-decoration: none; border-radius: var(--radius-sm); cursor: pointer; }
+  .adminNav > [aria-current="page"] { background: color-mix(in srgb, var(--color-accent) 13%, transparent); color: var(--color-accent); font-weight: 600; }
+  .adminNav > a:hover, .adminNav > button:hover { background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
+  .navGroup { padding: 1rem .8rem .3rem; }
+  .adminContent { min-width: 0; display: grid; gap: 1.2rem; }
+  .sectionTitle { margin: 0 0 .35rem; font-size: 1.3rem; }
+  .advanced { margin: .3rem 0 1.2rem; }
+  .advanced > summary { cursor: pointer; padding-block: .5rem; color: var(--color-text-muted); }
+  .reviewDetails { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .6rem 1rem; }
+  .reviewDetails dd { margin: 0; overflow-wrap: anywhere; }
+  .taskCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .9rem; }
+  .taskCards > * { display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; padding: 1.2rem; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--color-bg-panel); text-decoration: none; text-align: left; font: inherit; min-width: 0; }
+  .taskCards > button, .taskCards > a { cursor: pointer; }
+  .taskCards > button:hover, .taskCards > a:hover { border-color: var(--color-accent); }
+  .taskCards span, .taskCards p { color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1.5; margin: 0; }
+  .taskCards ul { margin: 0; padding-left: 1.1rem; font-size: var(--text-sm); line-height: 1.7; }
+  .directory { display: grid; margin-block: 1rem; }
+  .directoryRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .7rem 1rem; padding: 1rem 0; border-bottom: 1px solid var(--color-border-default); overflow-wrap: anywhere; }
+  .directoryRow > div { display: grid; gap: .35rem; min-width: 0; flex: 1 1 15rem; }
+  .clientCard { padding: 1.2rem; margin-top: 1rem; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
+  .clientCard h3 { display: inline; margin-right: 1rem; }
+  .clientCard dl { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .5rem; }
+  .clientCard dd { margin: 0; overflow-wrap: anywhere; }
+  @media (max-width: 850px) {
+    .adminLayout { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+    .adminNav { display: none; }
+    .mobileNav { display: grid; gap: .5rem; font-size: var(--text-sm); }
+  }
+
   .header {
     display: flex;
     align-items: center;

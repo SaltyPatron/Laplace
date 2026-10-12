@@ -36,6 +36,7 @@ public sealed class OpContractTests : IClassFixture<GoldenFactory>
     [Fact]
     public async Task WritableOp_DefaultsToUnboundedCancellableExecution()
     {
+        _client.DefaultRequestHeaders.Add(Auth.OperatorAuth.TokenHeader, GoldenFactory.OperatorToken);
         using var response = await _client.PostAsJsonAsync("/v1/op", new
         {
             name = "ops.analyze_substrate",
