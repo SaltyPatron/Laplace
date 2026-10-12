@@ -49,50 +49,50 @@ internal static class ChessEndpoints
         app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
-        // The session's tenant comes from the resolved request authority, not the body,
-        // so a recorded game is witnessed only under the caller's own tenant. User is
-        // optional caller metadata.
         app.MapPost("/chess/play/start", async (HttpContext ctx, PlayStartRequest req,
             ChessEngineService svc, Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
             var tenant = await resolver.ResolveAsync(ctx, ct);
+            if (RequestPrincipal(tenant) is not { } requester) return Results.Unauthorized();
             return Results.Json(await svc.StartPlaySessionAsync(
-                req.Record ?? true, req.Moves, tenant.TenantId, req.User, ct));
+                req.Record ?? true, req.Moves, requester.TenantId, requester.Subject, ct, requester));
+        }).WithTags("chess");
+
+        app.MapGet("/chess/play/{sessionId:guid}", async (HttpContext ctx, Guid sessionId,
+            Auth.ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var requester = RequestPrincipal(await resolver.ResolveAsync(ctx, ct));
+            if (requester is null) return Results.Unauthorized();
+            var operation = ChessPlayOperation.Read(sessionId);
+            return operation?.Requester == requester ? Results.Json(operation) : Results.NotFound();
         }).WithTags("chess");
 
         app.MapPost("/chess/play/move", async (HttpContext ctx, PlayMoveRequest req,
             ChessEngineService svc, ChessRuntimeService runtime,
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
-            var tenant = await resolver.ResolveAsync(ctx, ct);
-            var live = await runtime.GetAsync(ct);
-            if (!OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId))
-                return Results.NotFound();
-            return Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct));
+            return await WithPlaySession(ctx, req.SessionId, runtime, resolver,
+                async () => Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct)), ct);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/bestmove", async (HttpContext ctx, PlayBestMoveRequest req,
             ChessEngineService svc, ChessRuntimeService runtime,
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
-            var tenant = await resolver.ResolveAsync(ctx, ct);
-            var live = await runtime.GetAsync(ct);
-            if (!OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId))
-                return Results.NotFound();
-            return Results.Json(await svc.PlayBestMoveAsync(
-                req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct));
+            return await WithPlaySession(ctx, req.SessionId, runtime, resolver,
+                async () => Results.Json(await svc.PlayBestMoveAsync(
+                    req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)), ct);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/finish", async (HttpContext ctx, PlayFinishRequest req,
             ChessEngineService svc, ChessRuntimeService runtime,
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
-            var tenant = await resolver.ResolveAsync(ctx, ct);
-            var live = await runtime.GetAsync(ct);
-            if (!OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId))
-                return Results.NotFound();
-            await svc.FinishPlaySessionAsync(req.SessionId, req.Status ?? "draw", req.Adjudicated ?? false, ct);
-            return Results.Json(new { finished = true });
+            return await WithPlaySession(ctx, req.SessionId, runtime, resolver, async () =>
+            {
+                await svc.FinishPlaySessionAsync(req.SessionId, req.Status ?? "draw", req.Adjudicated ?? false, ct);
+                return Results.Json(new { finished = true });
+            }, ct);
         }).WithTags("chess");
 
         app.MapGet("/chess/lichess/games/{gameId}/chat", async (string gameId, ILichessStatusClient lichess, CancellationToken ct) =>
@@ -343,8 +343,25 @@ internal static class ChessEndpoints
         }).WithTags("chess-lab");
     }
 
-    internal static bool OwnsPlaySession(PlaySession? session, string tenantId) =>
-        session is not null && string.Equals(session.TenantId, tenantId, StringComparison.Ordinal);
+    internal static bool OwnsPlaySession(PlaySession? session, OperationPrincipal? requester) =>
+        requester is not null && session?.Requester == requester;
+
+    private static async Task<IResult> WithPlaySession(HttpContext context, Guid sessionId,
+        ChessRuntimeService runtime, ITenantResolver resolver, Func<Task<IResult>> action, CancellationToken ct)
+    {
+        var requester = RequestPrincipal(await resolver.ResolveAsync(context, ct));
+        if (requester is null) return Results.Unauthorized();
+        var live = await runtime.GetAsync(ct);
+        var session = live.GetPlaySession(sessionId);
+        if (!OwnsPlaySession(session, requester)) return Results.NotFound();
+        await session!.Gate.WaitAsync(ct);
+        try
+        {
+            if (!ReferenceEquals(live.GetPlaySession(sessionId), session)) return Results.NotFound();
+            return await action();
+        }
+        finally { session.Gate.Release(); }
+    }
 
     internal static bool OwnsLabJob(ChessLabJob? job, string tenantId) =>
         !string.IsNullOrWhiteSpace(tenantId) && job?.Requester is { } requester
@@ -383,7 +400,7 @@ internal static class ChessEndpoints
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth = null, int? MaxConcurrent = null, bool? Substrate = null, string[]? Speeds = null);
-    private sealed record PlayStartRequest(bool? Record, string[]? Moves, string? User);
+    private sealed record PlayStartRequest(bool? Record, string[]? Moves);
     private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
     private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
     private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);

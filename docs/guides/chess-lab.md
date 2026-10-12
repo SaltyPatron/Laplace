@@ -8,6 +8,15 @@ commands against `api('chess')` and `/chess/lab/catalog` if this drifts.
 
 ## Request identity and job access
 
+Browser play also uses the verified Google/Microsoft user or API key. A body `user`
+field cannot select its owner. Move, engine-search and finish requests require the
+same requester, including within one workspace. `/chess/play/{sessionId}` returns
+that requester's retained operation: moves, current FEN, recording outcome and
+authenticated requester. These files live under `play/` in the configured
+`LAPLACE_CHESS_LAB_DIR`; they survive service publication. They are operation records,
+not canonical player identities, and do not claim to restore a running game after
+a process restart. An account ID is never converted into a player name hash.
+
 The HTTP lab uses the authenticated workspace and requester resolved by the existing
 Google/Microsoft browser session or validated Laplace API key. A job configuration
 cannot choose its owner. Job state, cancellation, event streams, transcripts, artifacts

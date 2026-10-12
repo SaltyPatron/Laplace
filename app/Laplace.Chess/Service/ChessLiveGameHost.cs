@@ -352,7 +352,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public Guid StartPlaySession(bool recordToSubstrate = true, string learnContext = "chess/play/session",
         string tenantId = "public", string? userId = null,
         Hash128? whitePlayerId = null, string? whitePlayerName = null,
-        Hash128? blackPlayerId = null, string? blackPlayerName = null)
+        Hash128? blackPlayerId = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
     {
         if (!Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(tenantId))
             throw new ArgumentException($"tenant '{tenantId}' is not a valid identifier", nameof(tenantId));
@@ -360,15 +360,20 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             throw new ArgumentException($"user '{userId}' is not a valid identifier", nameof(userId));
 
         var id = Guid.NewGuid();
+        if (requester is not null && (requester.TenantId != tenantId || requester.Subject != userId))
+            throw new ArgumentException("Play ownership must match the authenticated requester.");
         var eventId = ChessVocabulary.PlaySessionHandle(id);
         var metadata = new ChessLiveGameMetadata(
             Event: "Laplace Play",
             Site: "Laplace",
             Date: DateTimeOffset.UtcNow.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture),
             StartFen: ChessModality.StartFen);
-        _playSessions[id] = new PlaySession(
+        var session = new PlaySession(
             eventId, learnContext, recordToSubstrate, tenantId, userId,
-            whitePlayerId, whitePlayerName, blackPlayerId, blackPlayerName);
+            whitePlayerId, whitePlayerName, blackPlayerId, blackPlayerName, requester)
+        { Operation = requester is null ? null : ChessPlayOperation.Start(id, requester, recordToSubstrate) };
+        session.SaveOperation();
+        _playSessions[id] = session;
         if (recordToSubstrate)
             _ = OpenGameAsync(
                 eventId, learnContext, whitePlayerId, blackPlayerId,
@@ -382,11 +387,22 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public async Task FinishPlaySessionAsync(Guid sessionId, GameOutcome outcome, bool adjudicated, CancellationToken ct)
     {
         if (!_playSessions.TryGetValue(sessionId, out var session)) return;
-        if (session.RecordToSubstrate)
+        try
         {
-            SetGameMetadata(session.EventId, new ChessLiveGameMetadata(
-                Termination: adjudicated ? "adjudicated" : "normal"));
-            await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
+            if (session.RecordToSubstrate)
+            {
+                session.SaveOperation("recording", "in_progress", outcome.ResultToken);
+                SetGameMetadata(session.EventId, new ChessLiveGameMetadata(
+                    Termination: adjudicated ? "adjudicated" : "normal"));
+                await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
+            }
+            session.SaveOperation("completed", !session.RecordToSubstrate ? "disabled"
+                : session.Moves.Count == 0 ? "empty" : "recorded", outcome.ResultToken);
+        }
+        catch (Exception error)
+        {
+            session.SaveOperation("failed", session.RecordToSubstrate ? "failed" : "disabled", outcome.ResultToken, error.GetType().Name);
+            throw;
         }
         _playSessions.TryRemove(sessionId, out _);
     }
@@ -700,13 +716,16 @@ public sealed class PlaySession(
     Hash128 eventId, string learnContext, bool recordToSubstrate,
     string tenantId = "public", string? userId = null,
     Hash128? whitePlayerId = null, string? whitePlayerName = null,
-    Hash128? blackPlayerId = null, string? blackPlayerName = null)
+    Hash128? blackPlayerId = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
 {
     public Hash128 EventId { get; } = eventId;
     public string LearnContext { get; } = learnContext;
     public bool RecordToSubstrate { get; } = recordToSubstrate;
     public string TenantId { get; } = tenantId;
     public string? UserId { get; } = userId;
+    public OperationPrincipal? Requester { get; } = requester;
+    public SemaphoreSlim Gate { get; } = new(1, 1);
+    internal ChessPlayOperation? Operation { get; init; }
     public Hash128? WhitePlayerId { get; } = whitePlayerId;
     public string? WhitePlayerName { get; } = whitePlayerName;
     public Hash128? BlackPlayerId { get; } = blackPlayerId;
@@ -714,4 +733,11 @@ public sealed class PlaySession(
     public int PlyCount { get; set; }
     public ChessState? State { get; set; }
     public List<string> Moves { get; } = new();
+
+    internal void SaveOperation(string state = "ongoing", string? recording = null, string? result = null, string? error = null)
+    {
+        if (Operation is not { } operation) return;
+        (operation with { UpdatedUtc = DateTimeOffset.UtcNow, State = state, Recording = recording ?? operation.Recording,
+            Result = result, Fen = State?.Board.ToFen(), Moves = Moves.ToArray(), Error = error }).Save();
+    }
 }
