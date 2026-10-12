@@ -31,7 +31,7 @@ def module(name, path):
     return value
 
 
-SYNC = module('runtime_sync', HERE / 'knowledge-sync.py')
+SYNC = module('runtime_sync', HERE / 'database-sync.py')
 TLS = module('runtime_tls', HERE / 'runtime_tls.py')
 
 
@@ -59,14 +59,14 @@ def validate(config):
             raise ValueError('Invalid installation identity: ' + key)
     if not re.fullmatch(r'[a-z][a-z0-9_-]*', config['mcp']['user']):
         raise ValueError('Invalid MCP OS identity')
-    identities = [config['role'], config['knowledge']['role'], config['mcp']['role'], config['database_owner']]
+    identities = [config['role'], config['substrate']['role'], config['mcp']['role'], config['database_owner']]
     if len(set(identities)) != len(identities):
-        raise ValueError('Application, knowledge, MCP and migration roles must be distinct')
+        raise ValueError('Application, substrate, MCP and migration roles must be distinct')
     if config['runtime_user'] in ('root', config['pg_os_user'], config['operator'], config['mcp']['user']):
         raise ValueError('API identity must be independent of administration and MCP')
     if config['mcp']['user'] in ('root', config['pg_os_user'], config['operator']):
         raise ValueError('MCP identity must be independent of administration')
-    for item in (config, config['knowledge'], config['mcp']):
+    for item in (config, config['substrate'], config['mcp']):
         if not re.fullmatch(r'[a-z][a-z0-9_-]*', item['role']):
             raise ValueError('Invalid runtime database role')
         if not 1 <= int(item['pool_max']) <= int(item['connection_limit']):
@@ -92,9 +92,9 @@ def validate(config):
     if not 1 <= int(config['port']) <= 65535:
         raise ValueError('Invalid database port')
     # This installation pins existing application data. It is not a database migration.
-    if config['knowledge']['database'] != config['database']:
-        raise ValueError('This setup requires the current co-located application and knowledge database')
-    for item in (config, config['knowledge']):
+    if config['substrate']['database'] != config['database']:
+        raise ValueError('This setup requires the current co-located application and substrate database')
+    for item in (config, config['substrate']):
         if item['database_host'] != '127.0.0.1' or int(item['port']) != int(config['port']):
             raise ValueError('Runtime installation requires the declared local cluster')
 
@@ -233,7 +233,7 @@ class Bao:
 
     def enroll(self, config):
         name = config['bao_role']
-        paths = [f'kv/data/hosts/{config["host"]}/{record}' for record in ('knowledge', config['record'])]
+        paths = [f'kv/data/hosts/{config["host"]}/{record}' for record in ('substrate', config['record'])]
         policy = ''.join(f'path "{path}" {{ capabilities = ["read"] }}\n' for path in paths)
         policy += ('path "sys/capabilities-self" { capabilities = ["update"] }\n'
                    'path "auth/token/lookup-self" { capabilities = ["read"] }\n'
@@ -276,7 +276,7 @@ def enrollment(path):
 def runtime_records(config):
     """Bootstrap once; subsequent repairs read through the installed workload identity."""
     selections = [(name, {key: item[key] for key in ('database_host', 'database', 'role', 'port')})
-                  for name, item in ((config['record'], config), ('knowledge', config['knowledge']))]
+                  for name, item in ((config['record'], config), ('substrate', config['substrate']))]
     if not os.path.lexists(config['credentials']):
         operator = Bao(config)
         operator.call(['token', 'lookup', '-field=ttl'])
@@ -371,7 +371,7 @@ def mcp_verify(config):
 def install(config, lock):
     print('Authenticating the installed runtime AppRole (operator login is used only for initial enrollment)...', flush=True)
     records = runtime_records(config)
-    for name, item in ((config['record'], config), ('knowledge', config['knowledge'])):
+    for name, item in ((config['record'], config), ('substrate', config['substrate'])):
         item['password'] = records[name]['password']
 
     def sql(statement):
@@ -386,7 +386,7 @@ def install(config, lock):
     # A verified certificate repair is preparation, just like roles and enrollment.
     # Keep it if a later identity activation fails; old serving connections remain valid.
     config['root_certificate'] = config['tls']['root_certificate']
-    config['knowledge']['root_certificate'] = config['tls']['root_certificate']
+    config['substrate']['root_certificate'] = config['tls']['root_certificate']
     return install_identities(config, lock)
 
 
@@ -415,10 +415,10 @@ def install_identities(config, lock):
         raise ValueError('Connected cluster differs from runtime declaration')
     print('Reconciling scoped runtime credentials and database roles...', flush=True)
     helper('application-runtime.py', ['--phase', 'prepare'], config)
-    knowledge_config = dict(config['knowledge'], psql=config['pgbin'] + '/psql', admin_socket=config['pgsocket'],
+    substrate_config = dict(config['substrate'], psql=config['pgbin'] + '/psql', admin_socket=config['pgsocket'],
         admin_role=config['pg_os_user'], admin_os_user=config['pg_os_user'], schema_owner=config['database_owner'],
         lock=config['host_lock'], client_address='127.0.0.1')
-    helper('knowledge-role.py', payload=knowledge_config)
+    helper('database-role.py', payload=substrate_config)
     mcp, state, prefix = config['mcp'], Path(config['mcp']['state']), Path(config['prefix'])
     try:
         account = pwd.getpwnam(mcp['user'])
@@ -432,13 +432,13 @@ def install_identities(config, lock):
         directory.mkdir(parents=True, exist_ok=True)
         directory.chmod(0o700)
         os.chown(directory, account.pw_uid, account.pw_gid)
-    helper('knowledge-role.py', payload=dict(knowledge_config, role=mcp['role'], peer_user=mcp['user'],
+    helper('database-role.py', payload=dict(substrate_config, role=mcp['role'], peer_user=mcp['user'],
                                             connection_limit=mcp['connection_limit']))
-    fresh = helper('knowledge-sync.py', ['--host', config['host'], '--credentials', config['credentials'],
+    fresh = helper('database-sync.py', ['--host', config['host'], '--credentials', config['credentials'],
         '--user', config['runtime_user'], '--prefix', config['prefix'], '--machine-file', config['machine_file'],
         '--lock', config['host_lock'], '--bao-address', config['bao_address'], '--application-record', config['record'],
         '--root-certificate', config['root_certificate']])
-    SYNC.validate_knowledge_receipt(prefix, fresh['native_receipt'])
+    SYNC.validate_substrate_receipt(prefix, fresh['native_receipt'])
     machine, api, mcp_env = Path(config['machine_file']), prefix / 'app/laplace-api.env', prefix / 'app/laplace-mcp.env'
     dropins = [Path(f'/etc/systemd/system/laplace-{service}.service.d/runtime-identity.conf') for service in ('api', 'mcp')]
     for path in dropins:
@@ -452,16 +452,16 @@ def install_identities(config, lock):
 
     print('Activating API and MCP identities; failed verification restores serving configuration...', flush=True)
     with SYNC.configuration_transaction([machine, api, mcp_env, *dropins], recover):
-        mcp_connection = connection(dict(mcp, database=config['knowledge']['database'], port=config['port']), True, config['pgsocket'])
-        knowledge_connection = connection(config['knowledge'])
-        SYNC.assignments(machine, {'LAPLACE_KNOWLEDGE_RUNTIME_DB': knowledge_connection,
+        mcp_connection = connection(dict(mcp, database=config['substrate']['database'], port=config['port']), True, config['pgsocket'])
+        substrate_connection = connection(config['substrate'])
+        SYNC.assignments(machine, {'LAPLACE_DATABASE_RUNTIME_DB': substrate_connection,
             'LAPLACE_MCP_RUNTIME_DB': mcp_connection, 'LAPLACE_MCP_USER': mcp['user'],
             'LAPLACE_MCP_STATE_DIR': state, 'LAPLACE_MCP_LOG_DIR': state / 'logs',
             'LAPLACE_APP_DBNAME': config['database'], 'LAPLACE_APP_PGHOST': config['pgsocket'],
             'LAPLACE_APP_PGPORT': config['port'], 'LAPLACE_APP_ROLE': config['database_owner'],
-            'LAPLACE_BAO_KNOWLEDGE_HOST': config['host'], 'LAPLACE_API_VERIFICATION_URL': config['public_base']})
+            'LAPLACE_BAO_DATABASE_HOST': config['host'], 'LAPLACE_API_VERIFICATION_URL': config['public_base']})
         SYNC.assignments(machine, {'LAPLACE_RUNTIME_DB_ROOT_CERTIFICATE': config['root_certificate']})
-        SYNC.assignments(api, {'LAPLACE_DB': knowledge_connection})
+        SYNC.assignments(api, {'LAPLACE_DB': substrate_connection})
         SYNC.assignments(mcp_env, {'LAPLACE_DB': mcp_connection, 'LAPLACE_OPS_LOG_DIR': state / 'logs',
             'LAPLACE_OUT': state / 'out', 'LAPLACE_AGENTS_CONFIG': state / 'agents.json'})
         SYNC.atomic(dropins[1], f'[Service]\nUser={mcp["user"]}\nGroup={mcp["user"]}\nUMask=0077\n'
@@ -472,24 +472,24 @@ def install_identities(config, lock):
         helper('application-runtime.py', ['--phase', 'activate'], config)
         verification = helper('application-runtime.py', ['--phase', 'verify'], config)
         verification['mcp'] = mcp_verify(config)
-        knowledge_args = ['runuser', '-u', config['runtime_user'], '--', config['pgbin'] + '/psql',
-            '-XwAt', '-v', 'ON_ERROR_STOP=1', '-h', config['knowledge']['database_host'],
-            '-p', str(config['port']), '-U', config['knowledge']['role'], '-d', config['knowledge']['database'], '-f', '-']
-        knowledge_env = dict(os.environ, PGPASSFILE=str(Path(config['state']) / '.pgpass'),
+        substrate_args = ['runuser', '-u', config['runtime_user'], '--', config['pgbin'] + '/psql',
+            '-XwAt', '-v', 'ON_ERROR_STOP=1', '-h', config['substrate']['database_host'],
+            '-p', str(config['port']), '-U', config['substrate']['role'], '-d', config['substrate']['database'], '-f', '-']
+        substrate_env = dict(os.environ, PGPASSFILE=str(Path(config['state']) / '.pgpass'),
                              PGSSLMODE='verify-full', PGSSLROOTCERT=config['root_certificate'], PGCONNECT_TIMEOUT='10')
-        knowledge_env.pop('PGPASSWORD', None)
-        actual = checked(knowledge_args, env=knowledge_env,
+        substrate_env.pop('PGPASSWORD', None)
+        actual = checked(substrate_args, env=substrate_env,
             input="SELECT current_user; SELECT encode(laplace.perfcache_receipt(),'hex');", timeout=20)
-        if actual.splitlines() != [config['knowledge']['role'], fresh['native_receipt']]:
-            raise ValueError('API knowledge identity/native operation differs from the selected substrate')
-        refused = subprocess.run(knowledge_args, env=knowledge_env, input='SELECT * FROM app.tenants LIMIT 1;',
+        if actual.splitlines() != [config['substrate']['role'], fresh['native_receipt']]:
+            raise ValueError('API substrate identity/native operation differs from the selected substrate')
+        refused = subprocess.run(substrate_args, env=substrate_env, input='SELECT * FROM app.tenants LIMIT 1;',
                                  text=True, capture_output=True, timeout=20)
         if not refused.returncode or 'permission denied' not in refused.stderr:
-            raise ValueError('API knowledge login can cross the application data boundary')
-        verification['knowledge'] = {'role': config['knowledge']['role'], 'native_receipt': fresh['native_receipt'],
+            raise ValueError('API substrate login can cross the application data boundary')
+        verification['substrate'] = {'role': config['substrate']['role'], 'native_receipt': fresh['native_receipt'],
                                      'application_data': 'denied'}
         peer_args = ['runuser', '-u', mcp['user'], '--', config['pgbin'] + '/psql', '-XwAt', '-v', 'ON_ERROR_STOP=1',
-            '-h', config['pgsocket'], '-p', str(config['port']), '-U', mcp['role'], '-d', config['knowledge']['database'], '-f', '-']
+            '-h', config['pgsocket'], '-p', str(config['port']), '-U', mcp['role'], '-d', config['substrate']['database'], '-f', '-']
         peer_result = checked(peer_args, input="SELECT current_user; SELECT encode(laplace.perfcache_receipt(),'hex');", timeout=20)
         if peer_result.splitlines() != [mcp['role'], fresh['native_receipt']]:
             raise ValueError('MCP peer identity/native operation differs from the selected substrate')
@@ -505,7 +505,7 @@ def install_identities(config, lock):
     # This existing setup operation installs a root-owned credential refresh timer.
     # A timer failure leaves verified serving identities in place and is retryable.
     install_refresh(config, lock)
-    checked(['systemctl', 'is-active', '--quiet', 'laplace-knowledge-refresh.timer'], timeout=10)
+    checked(['systemctl', 'is-active', '--quiet', 'laplace-database-refresh.timer'], timeout=10)
     verification['credential_refresh_timer'] = 'active'
     return verification
 
@@ -520,8 +520,8 @@ def install_refresh(config, lock):
         info = path.stat()
         if path.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
             raise ValueError('Credential refresh code requires root-owned, non-writable parents: ' + str(path))
-    script = directory / 'knowledge-sync.py'
-    SYNC.atomic(script, (HERE / 'knowledge-sync.py').read_text(), 0o755, 0, 0)
+    script = directory / 'database-sync.py'
+    SYNC.atomic(script, (HERE / 'database-sync.py').read_text(), 0o755, 0, 0)
     arguments = ['--host', config['host'], '--credentials', config['credentials'],
                  '--user', config['runtime_user'], '--prefix', config['prefix'],
                  '--machine-file', config['machine_file'], '--bao-address', config['bao_address'],
@@ -533,18 +533,23 @@ def install_refresh(config, lock):
             pass_fds=(lock.fileno(),), timeout=120)
     launcher = directory / 'refresh'
     SYNC.atomic(launcher, '#!/bin/sh\nset -eu\nexec ' + shlex.join(command) + '\n', 0o755, 0, 0)
-    # Keep the installed timer identity so an upgrade never runs two refresh owners.
+    # Retire the previous timer before enabling its replacement so credentials
+    # have one refresh owner during a naming migration.
+    legacy_timer = 'laplace-knowledge-refresh.timer'
+    if checked(['systemctl', 'show', legacy_timer, '-p', 'LoadState', '--value'], timeout=10) == 'loaded':
+        checked(['systemctl', 'disable', '--now', legacy_timer], timeout=20)
+        checked(['systemctl', 'stop', 'laplace-knowledge-refresh.service'], timeout=30)
     executable = str(launcher).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$')
-    SYNC.atomic(Path('/etc/systemd/system/laplace-knowledge-refresh.service'),
+    SYNC.atomic(Path('/etc/systemd/system/laplace-database-refresh.service'),
                 '[Unit]\nDescription=Refresh Laplace monorepo workload credentials through OpenBao\n'
                 'After=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\n'
                 f'ExecStart="{executable}"\nNoNewPrivileges=true\nUMask=0077\n', 0o644, 0, 0)
-    SYNC.atomic(Path('/etc/systemd/system/laplace-knowledge-refresh.timer'),
+    SYNC.atomic(Path('/etc/systemd/system/laplace-database-refresh.timer'),
                 '[Unit]\nDescription=Refresh Laplace monorepo workload credentials\n[Timer]\n'
                 'OnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n[Install]\n'
                 'WantedBy=timers.target\n', 0o644, 0, 0)
     checked(['systemctl', 'daemon-reload'], timeout=20)
-    checked(['systemctl', 'enable', '--now', 'laplace-knowledge-refresh.timer'], timeout=20)
+    checked(['systemctl', 'enable', '--now', 'laplace-database-refresh.timer'], timeout=20)
 
 
 def main():
@@ -599,7 +604,7 @@ def main():
             # The newly enabled timer may fire immediately. Release the installation
             # lock before waiting for its independent credential-refresh operation.
             fcntl.flock(lock, fcntl.LOCK_UN)
-            checked(['systemctl', 'start', 'laplace-knowledge-refresh.service'], timeout=90)
+            checked(['systemctl', 'start', 'laplace-database-refresh.service'], timeout=90)
             receipt['status'] = 'passed'
         except Exception as error:
             receipt.update(status='failed', error=str(error))

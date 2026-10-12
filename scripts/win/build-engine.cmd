@@ -44,7 +44,7 @@ cmake -B "%LAPLACE_ENGINE_BUILD%" -S engine -G Ninja ^
   "-DLAPLACE_UCDXML_ZIP=%LAPLACE_UCD%\ucdxml\ucd.all.grouped.zip" ^
   "-DLAPLACE_DUCET_FILE=%LAPLACE_UCD%\uca\allkeys.txt" ^
   "-DLAPLACE_UCD_CONFORMANCE_DIR=%LAPLACE_UCD%\ucd"
-if errorlevel 1 goto fail
+if not "!errorlevel!"=="0" goto fail
 
 :build
 set "BUILD_FLAGS="
@@ -54,7 +54,7 @@ if defined TARGETS (
 ) else (
   cmake --build "%LAPLACE_ENGINE_BUILD%" %BUILD_FLAGS%
 )
-if errorlevel 1 goto fail
+if not "!errorlevel!"=="0" goto fail
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win
 exit /b 0

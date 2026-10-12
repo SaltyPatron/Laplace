@@ -55,6 +55,12 @@ The product is the same web, navigable: browse, rank, entity, evidence, trajecto
 
 ## Operating it
 
+Hart-desktop is development, hart-server is staging, and hart-prod is the inexpensive always-on production web host.
+Hart-cloud is an on-demand AVX-512 database VM, kept off when unused to preserve trial credit. Production can fail over
+from hart-cloud to hart-server; hart-prod also has local PostgreSQL for fallback and application accounts/billing.
+Preserve those environment boundaries and the intentional failover. Inspect the selected target and the Operations
+operating guide before resetting a database; a current production connection to hart-server is not a placement error.
+
 Use the installed machine while building it. MCP (`laplace-substrate` on the host), the OpenAI-compatible endpoint, SQL, and the CLI call the same operations. A read through those surfaces is evidence of what the running process does. It does not revise the invention.
 
 ## Comments

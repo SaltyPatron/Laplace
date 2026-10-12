@@ -113,6 +113,18 @@ jobs:
       - name: Exercise installed database recreation and failure recovery
         run: bash tests/database-recreation.sh
 
+      - name: Verify ingestion completion with owner and restricted database roles
+        run: bash tests/ingest-completion.sh
+
+      - name: Retain ingestion completion results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ingest-completion-${{ github.sha }}
+          path: ${{ runner.temp }}/ingest-completion-results
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Bundle the verified application for production
         if: github.event_name == 'push' || inputs.promote
         id: bundle
