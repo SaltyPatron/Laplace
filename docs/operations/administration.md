@@ -18,6 +18,22 @@ Each personal or organization workspace has its own membership, invitations,
 billing, and API clients. In **Settings**, select a section instead of loading all
 account operations at once.
 
+On a phone, use the **Settings page** selector. Search members by email or name,
+and API clients by application name or key prefix. Revoked keys remain available
+through **Include revoked keys**. Removing a member, revoking a key or invitation,
+and ending a sign-in session each show the affected target before submission.
+
+An invitation first shows its workspace, inviter, role, and expiration. Accepting
+one preserves an existing membership's role. If acceptance succeeds but workspace
+selection fails, **Open workspace** retries selection without consuming the link
+again. The workspace picker refreshes after acceptance. Creating a workspace uses
+the same recovery behavior: **Open created workspace** does not create another.
+
+API keys are masked until revealed or copied. Save a new key before creating the
+next one; the secret cannot be retrieved after leaving the page. Revoking a
+different key does not discard the new key waiting to be saved. Clipboard failures
+leave a selectable field for manual copying.
+
 | Role | Account operations |
 | --- | --- |
 | Member | Use workspace tools, inspect usage, and manage own sign-in sessions |

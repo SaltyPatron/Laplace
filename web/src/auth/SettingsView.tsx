@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Button, ErrorText, Input, Modal, Muted, Panel, Select } from '@ui';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Button, ErrorText, Input, Modal, Muted, Panel, Select, useReadResource } from '@ui';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import { useAppStore } from '../store';
 import { AccountControls } from './AccountControls';
 import { useSectionParam } from '../layout/useSectionParam';
 import { roleName } from './access';
+import { WorkspaceInvitation } from './WorkspaceInvitation';
+import { CopyField } from './CopyField';
 import styles from './SettingsView.module.css';
 
 interface Workspace { tenantId: string; displayName: string; kind: string; role: string }
@@ -27,20 +29,16 @@ interface WebSession { sessionId: string; createdAt: string; lastSeenAt: string;
 interface ApiKey { key_prefix: string; label: string | null; created_at: string; revoked_at: string | null }
 
 function useRemote<T>(path: string | null, revision: number) {
-  const [state, setState] = useState<{ value: T | null; error: string; loading: boolean }>({ value: null, error: '', loading: false });
+  const { tenant, authUser } = useAppStore();
+  const read = useReadResource<T>({ key: JSON.stringify(['account', authUser?.id, tenant, path]), enabled: !!path,
+    read: (signal) => apiGet<T>(path!, { signal }) });
+  const previous = useRef(revision);
   useEffect(() => {
-    if (!path) { setState({ value: null, error: '', loading: false }); return; }
-    const controller = new AbortController();
-    setState({ value: null, error: '', loading: true });
-    void apiGet<T>(path, { signal: controller.signal }).then(
-      (value) => { if (!controller.signal.aborted) setState({ value, error: '', loading: false }); },
-      (error: unknown) => {
-        if (!controller.signal.aborted) setState({ value: null, error: error instanceof Error ? error.message : 'Request failed.', loading: false });
-      },
-    );
-    return () => controller.abort();
-  }, [path, revision]);
-  return state;
+    if (previous.current === revision) return;
+    previous.current = revision;
+    if (path) void read.reload();
+  }, [path, revision, read.reload]);
+  return { value: path ? read.data : null, error: path ? read.error?.message ?? '' : '', loading: !!path && read.busy, refresh: read.refresh };
 }
 
 const date = (value: string) => new Date(value).toLocaleString();
@@ -48,33 +46,50 @@ const SECTIONS = ['workspace', 'members', 'clients', 'billing', 'security', 'per
 const SECTION_NAMES = ['Workspace', 'Members & invitations', 'API clients', 'Plans & billing', 'Sign-in sessions', 'Roles & permissions'];
 
 export function SettingsView() {
+  const { authUser, tenant } = useAppStore();
+  return <WorkspaceSettings key={JSON.stringify([authUser?.id, tenant])} />;
+}
+
+type PendingAction = { kind: 'member'; value: Member } | { kind: 'key'; value: ApiKey }
+  | { kind: 'invitation'; value: Invitation } | { kind: 'session'; value: WebSession };
+
+function WorkspaceSettings() {
   const [section, setSection] = useSectionParam('section', [...SECTIONS], 'workspace');
   const { authReady, authUser, authProviders, tenant } = useAppStore();
   const location = useLocation();
+  const navigate = useNavigate();
   const [revision, refresh] = useState(0);
   const [busy, setBusy] = useState('');
   const busyRef = useRef(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
+  const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | null>(null);
   const [rename, setRename] = useState('');
   const [keyLabel, setKeyLabel] = useState('');
-  const [secret, setSecret] = useState('');
+  const [secret, setSecret] = useState<{ key: string; keyPrefix: string } | null>(null);
   const [inviteLink, setInviteLink] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
   const [roleMember, setRoleMember] = useState<Member | null>(null);
   const [memberRole, setMemberRole] = useState('member');
-  const [joinToken, setJoinToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('join') ?? '');
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [clientSearch, setClientSearch] = useState('');
+  const [showRevoked, setShowRevoked] = useState(false);
+  const joinToken = new URLSearchParams(location.hash.slice(1)).get('join') ?? '';
   const account = useRemote<Account>(authReady && authUser ? '/v1/account' : null, revision);
   const active = account.value?.workspaces.find((w) => w.tenantId === account.value?.tenantId);
-  const manages = active?.role === 'owner' || active?.role === 'admin';
+  const manages = !account.error && (active?.role === 'owner' || active?.role === 'admin');
   const members = useRemote<{ members: Member[] }>(manages && section === 'members' ? '/v1/account/members' : null, revision);
   const invitations = useRemote<{ invitations: Invitation[] }>(manages && section === 'members' ? '/v1/account/invitations' : null, revision);
   const roleEvents = useRemote<{ events: { eventId: number; person: string; actor: string; previousRole: string; role: string; occurredAt: string }[] }>(manages && section === 'members' ? '/v1/account/role-events' : null, revision);
   const keys = useRemote<{ keys: ApiKey[] }>(manages && section === 'clients' ? '/v1/billing/keys' : null, revision);
   const sessions = useRemote<{ sessions: WebSession[] }>(authReady && authUser && section === 'security' ? '/v1/auth/sessions' : null, revision);
+  const visibleMembers = members.value?.members.filter((member) => `${member.email ?? ''} ${member.displayName ?? ''}`.toLocaleLowerCase().includes(memberSearch.trim().toLocaleLowerCase()));
+  const visibleKeys = keys.value?.keys.filter((key) => (showRevoked || !key.revoked_at)
+    && `${key.label ?? ''} ${key.key_prefix}`.toLocaleLowerCase().includes(clientSearch.trim().toLocaleLowerCase()));
 
-  useEffect(() => { setSecret(''); setInviteLink(''); }, [tenant, authUser?.id]);
+  useEffect(() => { setSecret(null); setInviteLink(''); }, [tenant, authUser?.id]);
   useEffect(() => { setRename(active?.displayName ?? ''); }, [active?.displayName]);
 
   async function run(name: string, operation: () => Promise<void>) {
@@ -89,6 +104,29 @@ export function SettingsView() {
     await apiPost(`/v1/account/workspaces/${encodeURIComponent(id)}/select`, {});
     // Reload clears all old-workspace explorer, conversation and billing state.
     window.location.assign('/settings');
+  }
+  function reviewAction(action: PendingAction) { setError(''); setMessage(''); setPendingAction(action); }
+  async function confirmAction() {
+    if (!pendingAction) return;
+    const action = pendingAction;
+    await run(action.kind, async () => {
+      if (action.kind === 'member') {
+        await apiDelete(`/v1/account/members/${action.value.userId}`);
+        setMessage(`${action.value.email || action.value.displayName || 'Member'} removed from this workspace.`);
+      } else if (action.kind === 'key') {
+        await apiPost('/v1/billing/keys/revoke', { key_prefix: action.value.key_prefix });
+        if (secret?.keyPrefix === action.value.key_prefix) setSecret(null);
+        setMessage('API key revoked. Applications using it no longer have access.');
+      } else if (action.kind === 'invitation') {
+        await apiDelete(`/v1/account/invitations/${action.value.invitationId}`);
+        setInviteLink(''); setMessage('Invitation revoked. Its link can no longer be accepted.');
+      } else {
+        await apiDelete(`/v1/auth/sessions/${encodeURIComponent(action.value.sessionId)}`);
+        if (action.value.current) { window.location.assign('/settings'); return; }
+        setMessage('Session revoked. That session must sign in again.');
+      }
+      setPendingAction(null); refresh((value) => value + 1);
+    });
   }
   const returnUrl = `${location.pathname}${location.search}${location.hash}`;
 
@@ -108,22 +146,19 @@ export function SettingsView() {
         <div><h1>{active?.displayName || 'Workspace settings'}</h1><Muted>{authUser.email || authUser.displayName} · {active ? roleName(active.role) : account.value ? 'Choose a workspace' : 'Loading access…'}</Muted></div>
         <Button variant="ghost" disabled={!!busy} onClick={() => refresh((n) => n + 1)}>Refresh</Button>
       </header>
+      <label className={styles.mobileSections}>Settings page<Select value={section} onChange={(event) => setSection(event.target.value as typeof SECTIONS[number])}>
+        {SECTIONS.map((item, index) => <option key={item} value={item}>{SECTION_NAMES[index]}</option>)}</Select></label>
       <nav className={styles.sections} aria-label="Workspace settings sections">{SECTIONS.map((item, index) =>
         <button key={item} aria-current={section === item ? 'page' : undefined} onClick={() => setSection(item)}>{SECTION_NAMES[index]}</button>)}</nav>
       {error && <ErrorText>{error}</ErrorText>}
       {message && <p role="status">{message}</p>}
-      {account.loading && <Muted>Loading workspace and subscription…</Muted>}
+      {account.loading && <Muted>{account.value ? 'Refreshing workspace…' : 'Loading workspace and subscription…'}</Muted>}
       {account.error && <ErrorText>{account.error}</ErrorText>}
       {account.value && !active && <p role="status">You no longer belong to the selected workspace. Choose another workspace from the account menu, or create one in Workspace settings.</p>}
 
-      {joinToken && <Panel title="Workspace invitation">
-        <p>This one-use invitation grants access to the inviting workspace. Accept only an invitation from someone you trust.</p>
-        <Button disabled={!!busy} onClick={() => void run('join', async () => {
-          const result = await apiPost<{ tenantId: string }>('/v1/account/invitations/accept', { token: joinToken });
-          setJoinToken(''); window.history.replaceState(null, '', '/settings');
-          await selectWorkspace(result.tenantId);
-        })}>Accept invitation</Button>
-      </Panel>}
+      {joinToken && <WorkspaceInvitation key={joinToken} token={joinToken} selectWorkspace={selectWorkspace}
+        onAccepted={() => refresh((n) => n + 1)}
+        onDismiss={() => navigate({ pathname: location.pathname, search: location.search, hash: '' }, { replace: true })} />}
 
       {account.value && <>
         {section === 'workspace' && <Panel title="Workspace settings">
@@ -143,15 +178,23 @@ export function SettingsView() {
             await apiPut('/v1/account/workspace', { name: rename }); refresh((n) => n + 1); setMessage('Workspace name saved.');
           }); }}>
             <label className={styles.field}>Workspace name<Input value={rename} onChange={(e) => setRename(e.target.value)} required maxLength={160} /></label>
-            <Button type="submit" disabled={!!busy}>Save name</Button>
+            <Button type="submit" loading={busy === 'rename'} disabled={!!busy || !rename.trim() || rename.trim() === active?.displayName}>Save name</Button>
           </form>}
           <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void run('create', async () => {
-            const created = await apiPost<Workspace>('/v1/account/workspaces', { name: workspaceName });
-            await selectWorkspace(created.tenantId);
+            const created = createdWorkspace ?? await apiPost<Workspace>('/v1/account/workspaces', { name: workspaceName });
+            setCreatedWorkspace(created);
+            refresh((n) => n + 1);
+            try { await selectWorkspace(created.tenantId); }
+            catch (failure) {
+              const detail = failure instanceof Error ? failure.message : 'The request failed.';
+              throw new Error(`Workspace "${created.displayName}" was created, but switching to it failed. ${detail}`);
+            }
           }); }}>
-            <label className={styles.field}>New company workspace<Input value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} required maxLength={160} placeholder="Company name" /></label>
-            <Button type="submit" disabled={!!busy}>Create workspace</Button>
+            <label className={styles.field}>New company workspace<Input value={workspaceName} disabled={!!busy || !!createdWorkspace} onChange={(e) => setWorkspaceName(e.target.value)} required maxLength={160} placeholder="Company name" /></label>
+            <Button type="submit" loading={busy === 'create'} disabled={!!busy || (!createdWorkspace && !workspaceName.trim())}>{createdWorkspace ? 'Open created workspace' : 'Create workspace'}</Button>
           </form>
+          {createdWorkspace && <div role="status"><p><strong>{createdWorkspace.displayName}</strong> is created. Open it using the button above or the workspace picker.</p>
+            <Button variant="ghost" disabled={!!busy} onClick={() => { setCreatedWorkspace(null); setWorkspaceName(''); setError(''); }}>Create another workspace</Button></div>}
         </Panel>}
 
         {section === 'billing' && <Panel title="Subscription">
@@ -169,36 +212,34 @@ export function SettingsView() {
         </Panel>}
 
         {section === 'members' && manages && <Panel title="Members & invitations">
+          <label className={styles.field}>Find a member<Input type="search" value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Email address or name" /></label>
           {members.loading && <Muted>Loading members…</Muted>}
           {members.error && <ErrorText>{members.error}</ErrorText>}
-          {members.value?.members.map((member) => <div className={styles.row} key={member.userId}>
+          {visibleMembers?.length === 0 && <Muted>{memberSearch ? 'No members match this search.' : 'No members were returned.'}</Muted>}
+          {visibleMembers?.map((member) => <div className={styles.row} key={member.userId}>
             <div><strong>{member.email || member.displayName || member.userId}</strong><br /><Muted>{member.displayName} · {roleName(member.role)}</Muted></div>
-            {active?.role === 'owner' && <Button variant="ghost" disabled={!!busy} onClick={() => { setRoleMember(member); setMemberRole(member.role); }}>Change role</Button>}
+            {active?.role === 'owner' && <Button variant="ghost" disabled={!!busy} onClick={() => { setError(''); setRoleMember(member); setMemberRole(member.role); }}>Change role</Button>}
             {member.userId !== account.value?.userId && (active?.role === 'owner' || member.role === 'member') &&
-              <Button variant="ghost" disabled={!!busy} onClick={() => {
-                if (!window.confirm(`Remove ${member.displayName || member.email || member.userId} from this workspace?`)) return;
-                void run('remove-member', async () => { await apiDelete(`/v1/account/members/${member.userId}`); refresh((n) => n + 1); });
-              }}>Remove</Button>}
+              <Button variant="ghost" disabled={!!busy} onClick={() => reviewAction({ kind: 'member', value: member })}>Remove</Button>}
           </div>)}
           <p>Invitation links are single-use and expire in seven days. Anyone signed in who holds the link can join; send it privately.</p>
           <div className={styles.form}>
             <label className={styles.field}>Invitation role<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
               <option value="member">Member</option>{active?.role === 'owner' && <option value="admin">Administrator</option>}
             </select></label>
-            <Button disabled={!!busy} onClick={() => void run('invite', async () => {
+            <Button disabled={!!busy} loading={busy === 'invite'} onClick={() => void run('invite', async () => {
               const result = await apiPost<{ invitationPath: string }>('/v1/account/invitations', { role: inviteRole });
               setInviteLink(new URL(result.invitationPath, window.location.origin).href); refresh((n) => n + 1);
             })}>Create invitation</Button>
           </div>
-          {inviteLink && <label className={styles.field}>Copy this private invitation link<Input readOnly value={inviteLink} onFocus={(e) => e.currentTarget.select()} /></label>}
+          {inviteLink && <CopyField key={inviteLink} label="Private invitation link" value={inviteLink} />}
           {invitations.loading && <Muted>Loading invitations…</Muted>}
           {invitations.error && <ErrorText>{invitations.error}</ErrorText>}
           {invitations.value?.invitations.map((invitation) => <div className={styles.row} key={invitation.invitationId}>
-            <span>{invitation.role} invitation · expires {date(invitation.expiresAt)}</span>
-            <Button variant="ghost" disabled={!!busy} onClick={() => void run('revoke-invitation', async () => {
-              await apiDelete(`/v1/account/invitations/${invitation.invitationId}`); setInviteLink(''); refresh((n) => n + 1);
-            })}>Revoke</Button>
+            <span>{roleName(invitation.role)} invitation · expires {date(invitation.expiresAt)}</span>
+            <Button variant="ghost" disabled={!!busy} onClick={() => reviewAction({ kind: 'invitation', value: invitation })}>Revoke invitation</Button>
           </div>)}
+          {invitations.value?.invitations.length === 0 && <Muted>No pending invitations.</Muted>}
           <Muted>Workspace API keys are separate service credentials. Rotate any key shared with a departing member.</Muted>
           <h3>Recent role changes</h3>
           {roleEvents.loading && <Muted>Loading role history…</Muted>}{roleEvents.error && <ErrorText>{roleEvents.error}</ErrorText>}
@@ -209,46 +250,48 @@ export function SettingsView() {
         {section === 'clients' && manages && <Panel title="API clients">
           <p>Give each application its own labeled API key. Keys act for this workspace and are shown only once. They do not grant platform administration.</p>
           <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void run('key', async () => {
-            const result = await apiPost<{ key: string }>('/v1/billing/keys', { label: keyLabel });
-            setSecret(result.key); setKeyLabel(''); refresh((n) => n + 1);
+            if (secret) return;
+            const result = await apiPost<{ key: string; keyPrefix: string }>('/v1/billing/keys', { label: keyLabel });
+            setSecret(result); setKeyLabel(''); refresh((n) => n + 1);
           }); }}>
-            <label className={styles.field}>Application name<Input value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} maxLength={160} placeholder="Analytics pipeline, desktop client…" /></label>
-            <Button type="submit" disabled={!!busy}>Create API key</Button>
+            <label className={styles.field}>Application name<Input required value={keyLabel} onChange={(e) => setKeyLabel(e.target.value)} maxLength={160} placeholder="Analytics pipeline, desktop client…" /></label>
+            <Button type="submit" loading={busy === 'key'} disabled={!!busy || !!secret || !keyLabel.trim()}>Create API key</Button>
           </form>
           {secret && <div className={styles.secret}>
-            <label className={styles.field}>Save this key now<Input readOnly value={secret} autoComplete="off" onFocus={(e) => e.currentTarget.select()} /></label>
-            <Button variant="ghost" onClick={() => setSecret('')}>Hide key</Button>
+            <CopyField key={secret.keyPrefix} label="Save this key now" value={secret.key} secret />
+            <Muted>Save this key before creating another. It cannot be retrieved after leaving this page.</Muted>
+            <Button variant="ghost" onClick={() => setSecret(null)}>I have saved this key</Button>
           </div>}
+          <div className={styles.form}>
+            <label className={styles.field}>Find an API client<Input type="search" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Application name or key prefix" /></label>
+            <label><input type="checkbox" checked={showRevoked} onChange={(event) => setShowRevoked(event.target.checked)} /> Include revoked keys</label>
+          </div>
           {keys.loading && <Muted>Loading keys…</Muted>}
           {keys.error && <ErrorText>{keys.error}</ErrorText>}
           {keys.value?.keys.length === 0 && <Muted>No API keys have been created for this workspace.</Muted>}
-          {keys.value?.keys.map((key) => <div className={styles.row} key={key.key_prefix}>
-            <div><strong>{key.label || 'Unlabeled key'}</strong><br /><code>{key.key_prefix}</code> · {key.revoked_at ? 'revoked' : 'active'}</div>
-            {!key.revoked_at && <Button variant="ghost" disabled={!!busy} onClick={() => {
-              if (!window.confirm(`Revoke ${key.label || key.key_prefix}? Applications using it will lose access.`)) return;
-              void run('revoke-key', async () => { await apiPost('/v1/billing/keys/revoke', { key_prefix: key.key_prefix }); setSecret(''); refresh((n) => n + 1); });
-            }}>Revoke</Button>}
+          {keys.value && keys.value.keys.length > 0 && visibleKeys?.length === 0 && <Muted>No API clients match these filters.</Muted>}
+          {visibleKeys?.map((key) => <div className={styles.row} key={key.key_prefix}>
+            <div><strong>{key.label || 'Unlabeled key'}</strong><br /><code>{key.key_prefix}</code> · {key.revoked_at ? 'revoked' : 'active'}<br /><Muted>Created {date(key.created_at)}{key.revoked_at ? ` · Revoked ${date(key.revoked_at)}` : ''}</Muted></div>
+            {!key.revoked_at && <Button variant="ghost" disabled={!!busy} onClick={() => reviewAction({ kind: 'key', value: key })}>Revoke key</Button>}
           </div>)}
           <details><summary>Connect your application</summary><p>Base URL: <code>{window.location.origin}/v1</code></p><p>Authentication: <code>Authorization: Bearer YOUR_API_KEY</code></p><p>Use a separate key for each application so it can be revoked independently. Keep secrets in your application's secret store.</p></details>
         </Panel>}
 
-        {(section === 'clients' || section === 'members') && !manages && <Panel title="Workspace administrator access needed"><p>Your role is {roleName(active?.role)}. An owner or administrator manages workspace members and application credentials.</p><Link to="/settings?section=permissions">View role permissions</Link></Panel>}
+        {(section === 'clients' || section === 'members') && !manages && !account.error && <Panel title="Workspace administrator access needed"><p>{active ? `Your workspace role is ${roleName(active.role)}.` : 'Choose a workspace you belong to.'} An owner or administrator manages workspace members and application credentials.</p><Link to="/settings?section=permissions">View role permissions</Link></Panel>}
 
         {section === 'security' && <Panel title="Signed-in sessions">
           {sessions.loading && <Muted>Loading sessions…</Muted>}
           {sessions.error && <ErrorText>{sessions.error}</ErrorText>}
           {sessions.value?.sessions.map((session) => <div className={styles.row} key={session.sessionId}>
             <div><strong>{session.current ? 'This session' : 'Other signed-in session'}</strong><br />
-              <Muted>Created {date(session.createdAt)} · expires {date(session.expiresAt)}</Muted></div>
-            <Button variant="ghost" disabled={!!busy} onClick={() => void run('session', async () => {
-              await apiDelete(`/v1/auth/sessions/${encodeURIComponent(session.sessionId)}`);
-              if (session.current) window.location.assign('/settings'); else refresh((n) => n + 1);
-            })}>{session.current ? 'Sign out' : 'Revoke'}</Button>
+              <Muted>Last active {date(session.lastSeenAt)} · expires {date(session.expiresAt)}</Muted></div>
+            <Button variant="ghost" disabled={!!busy} onClick={() => reviewAction({ kind: 'session', value: session })}>{session.current ? 'Sign out' : 'Revoke session'}</Button>
           </div>)}
+          {sessions.value?.sessions.length === 0 && <Muted>No active sessions were returned. Refresh to check again.</Muted>}
         </Panel>}
 
         {section === 'permissions' && <><Panel title="Workspace roles">
-          <p>Your role: <strong>{roleName(active?.role)}</strong>. These permissions apply to <strong>{active?.displayName}</strong>.</p>
+          <p>{active ? <>Your role: <strong>{roleName(active.role)}</strong>. These permissions apply to <strong>{active.displayName}</strong>.</> : 'Choose a workspace to see your membership role.'}</p>
           <div className={styles.roleCards}>{account.value.workspaceRoles?.map((role) => <section key={role.id}><h3>{role.name}</h3><ul>{role.permissions.map((permission) => <li key={permission}>{permission}</li>)}</ul></section>)}</div>
           <p>Platform access is assigned separately for shared ingestion and system administration. <Link to="/operator">Open administration</Link>.</p>
         </Panel><Panel title="Data scope and configuration">
@@ -272,14 +315,24 @@ export function SettingsView() {
       </>}
       <Modal open={roleMember !== null} onClose={() => { if (!busy) setRoleMember(null); }} title="Change workspace role" actions={<>
         <Button variant="ghost" disabled={!!busy} onClick={() => setRoleMember(null)}>Cancel</Button>
-        <Button disabled={!!busy || memberRole === roleMember?.role} onClick={() => void run('member-role', async () => {
+        <Button loading={busy === 'member-role'} disabled={!!busy || memberRole === roleMember?.role} onClick={() => void run('member-role', async () => {
           if (!roleMember) return;
           await apiPut(`/v1/account/members/${roleMember.userId}/role`, { role: memberRole });
           setRoleMember(null); refresh((n) => n + 1); setMessage('Workspace role updated.');
         })}>Save role</Button></>}>
-        <p>{roleMember?.email || roleMember?.displayName}</p><label className={styles.field}>Workspace role<Select value={memberRole} onChange={(event) => setMemberRole(event.target.value)}>
+        <p>{roleMember?.email || roleMember?.displayName}</p><label className={styles.field}>Workspace role<Select disabled={!!busy} value={memberRole} onChange={(event) => setMemberRole(event.target.value)}>
           <option value="member">Member</option><option value="admin">Administrator</option><option value="owner">Owner</option>
         </Select></label><p>Owners can assign roles. At least one owner must remain in the workspace.</p>{error && <ErrorText role="alert">{error}</ErrorText>}
+      </Modal>
+      <Modal open={pendingAction !== null} onClose={() => { if (!busy) setPendingAction(null); }}
+        title={pendingAction?.kind === 'member' ? 'Remove workspace member?' : pendingAction?.kind === 'key' ? 'Revoke API key?' : pendingAction?.kind === 'invitation' ? 'Revoke invitation?' : 'End signed-in session?'}
+        actions={<><Button variant="ghost" disabled={!!busy} onClick={() => setPendingAction(null)}>Cancel</Button>
+          <Button disabled={!!busy} loading={!!busy} onClick={() => void confirmAction()}>{pendingAction?.kind === 'member' ? 'Remove member' : pendingAction?.kind === 'key' ? 'Revoke key' : pendingAction?.kind === 'invitation' ? 'Revoke invitation' : 'End session'}</Button></>}>
+        {pendingAction?.kind === 'member' && <p>Remove <strong>{pendingAction.value.email || pendingAction.value.displayName}</strong> from <strong>{active?.displayName}</strong>. They will lose this workspace's access. A workspace administrator can invite them again.</p>}
+        {pendingAction?.kind === 'key' && <p>Revoke <strong>{pendingAction.value.label || pendingAction.value.key_prefix}</strong>. Applications using this key will stop authenticating. A replacement key must be created and installed in each affected application.</p>}
+        {pendingAction?.kind === 'invitation' && <p>This {roleName(pendingAction.value.role).toLowerCase()} invitation to <strong>{active?.displayName}</strong> will stop working. Existing memberships remain active.</p>}
+        {pendingAction?.kind === 'session' && <p>{pendingAction.value.current ? 'Sign out of this browser session.' : `End the session last active ${date(pendingAction.value.lastSeenAt)}.`} A new sign-in will be required to use that session again.</p>}
+        {error && <ErrorText role="alert">{error}</ErrorText>}
       </Modal>
     </div>
   );

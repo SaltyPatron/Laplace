@@ -27,6 +27,7 @@ public sealed class PlatformAccessDatabaseTests : IClassFixture<GoldenFactory>
     private static async Task Cleanup(NpgsqlDataSource database, params IdentityAccount[] people)
     {
         await using var command = database.CreateCommand("""
+            DELETE FROM app.workspace_invitations WHERE created_by = ANY(@users) OR accepted_by = ANY(@users);
             DELETE FROM app.platform_role_events WHERE user_id = ANY(@users);
             DELETE FROM app.users WHERE user_id = ANY(@users);
             DELETE FROM app.tenants WHERE tenant_id = ANY(@tenants);
@@ -130,9 +131,29 @@ public sealed class PlatformAccessDatabaseTests : IClassFixture<GoldenFactory>
             using var discovery = System.Text.Json.JsonDocument.Parse(await client.GetStringAsync("/v1/account"));
             Assert.Equal(0, discovery.RootElement.GetProperty("subscriptions").GetArrayLength());
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/v1/account/workspaces/{member.TenantId}/select", new { })).StatusCode);
-            await using var membership = database.CreateCommand("INSERT INTO app.tenant_memberships(tenant_id, user_id, role) VALUES($1, $2, 'member')");
-            membership.Parameters.AddWithValue(member.TenantId); membership.Parameters.AddWithValue(owner.UserId);
-            await membership.ExecuteNonQueryAsync();
+            // A valid invitation can recover access even when the login ticket's
+            // selected workspace no longer has a membership for this user.
+            var token = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            await using var invitation = database.CreateCommand("""
+                INSERT INTO app.workspace_invitations(invitation_id, tenant_id, token_hash, role, created_by, expires_at)
+                VALUES($1, $2, $3, 'member', $4, now() + interval '1 day')
+                """);
+            invitation.Parameters.AddWithValue(Guid.NewGuid()); invitation.Parameters.AddWithValue(member.TenantId);
+            invitation.Parameters.AddWithValue(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token)));
+            invitation.Parameters.AddWithValue(member.UserId);
+            await invitation.ExecuteNonQueryAsync();
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/v1/account/invitations/preview", new { token = "invalid" })).StatusCode);
+            using var preview = await client.PostAsJsonAsync("/v1/account/invitations/preview", new { token });
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+            Assert.True(preview.Headers.CacheControl?.NoStore);
+            using var details = System.Text.Json.JsonDocument.Parse(await preview.Content.ReadAsStringAsync());
+            Assert.Equal("member", details.RootElement.GetProperty("role").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(details.RootElement.GetProperty("workspaceName").GetString()));
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, details.RootElement.GetProperty("currentRole").ValueKind);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/v1/account/members")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/v1/account/invitations/accept", new { token })).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/v1/account/invitations/preview", new { token })).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/v1/account/invitations/accept", new { token })).StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/v1/account/workspaces/{member.TenantId}/select", new { })).StatusCode);
         }
         finally { await Cleanup(database, owner, member); }
