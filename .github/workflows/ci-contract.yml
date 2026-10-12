@@ -13,6 +13,18 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
+  windows-native-package:
+    name: Windows native package integrity
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Reject stale native SQL before packaging
+        shell: pwsh
+        run: ./tests/windows-native-package.ps1
+
   contract:
     name: Static CI/CD contract
     runs-on: ubuntu-24.04
