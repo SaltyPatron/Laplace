@@ -17,6 +17,9 @@ public sealed record ApiKeyRecord(
 
 public sealed record IssuedApiKey(string Key, ApiKeyRecord Record);
 
+internal sealed class ApiKeyTenantNotFoundException(string tenant, Exception inner)
+    : Exception($"Tenant '{tenant}' does not exist. Choose an existing workspace before issuing a key.", inner);
+
 public interface IApiKeyStore
 {
     Task PutAsync(ApiKeyRecord record, CancellationToken ct);
@@ -78,23 +81,31 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         FROM app.api_keys
         """;
 
-    public Task PutAsync(ApiKeyRecord record, CancellationToken ct)
+    public async Task PutAsync(ApiKeyRecord record, CancellationToken ct)
     {
         const string sql = """
             INSERT INTO app.api_keys (key_hash, key_prefix, tenant, label, created_at, revoked_at, last_used_at)
             VALUES (@key_hash, @key_prefix, @tenant, @label, @created_at, @revoked_at, @last_used_at)
             ON CONFLICT (key_hash) DO NOTHING;
             """;
-        return NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
+        try
         {
-            p.AddWithValue("key_hash", record.KeyHash);
-            p.AddWithValue("key_prefix", record.KeyPrefix);
-            p.AddWithValue("tenant", record.Tenant);
-            p.AddWithValue("label", (object?)record.Label ?? DBNull.Value);
-            p.AddWithValue("created_at", record.CreatedAt);
-            p.AddWithValue("revoked_at", (object?)record.RevokedAt ?? DBNull.Value);
-            p.AddWithValue("last_used_at", (object?)record.LastUsedAt ?? DBNull.Value);
-        }, ct: ct);
+            await NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
+            {
+                p.AddWithValue("key_hash", record.KeyHash);
+                p.AddWithValue("key_prefix", record.KeyPrefix);
+                p.AddWithValue("tenant", record.Tenant);
+                p.AddWithValue("label", (object?)record.Label ?? DBNull.Value);
+                p.AddWithValue("created_at", record.CreatedAt);
+                p.AddWithValue("revoked_at", (object?)record.RevokedAt ?? DBNull.Value);
+                p.AddWithValue("last_used_at", (object?)record.LastUsedAt ?? DBNull.Value);
+            }, ct: ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ForeignKeyViolation
+                                         && ex.ConstraintName == "api_keys_tenant_fk")
+        {
+            throw new ApiKeyTenantNotFoundException(record.Tenant, ex);
+        }
     }
 
     public Task<ApiKeyRecord?> TryGetAsync(string keyHash, CancellationToken ct) =>

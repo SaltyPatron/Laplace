@@ -131,7 +131,8 @@ internal static class BillingIdentityEndpoints
         })
         .WithTags("billing")
         .Accepts<ApiKeyIssueRequest>("application/json")
-        .Produces<ApiKeyIssueResponse>();
+        .Produces<ApiKeyIssueResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
 
         app.MapPost("/v1/billing/operator/bootstrap", async (
             HttpRequest request,
