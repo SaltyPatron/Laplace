@@ -103,7 +103,7 @@ internal static class Program
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("reset", RunReset);
     }
 
-    [System.ComponentModel.Description("DROP DATABASE + re-create empty (full Layer-1 wipe).")]
+    [System.ComponentModel.Description("Recreate from installed migrations, preserving configuration and access; deletes data.")]
     internal sealed class NukeCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("nuke", RunNuke);
@@ -223,7 +223,7 @@ internal static class Program
 
         Console.WriteLine($"[migrate nuke] Re-create \"{targetDb}\" using its installed configuration and migrations.");
         Console.WriteLine("Loses ALL substrate data: entities, physicalities, attestations.");
-        Console.WriteLine("Loses the extensions (CREATE EXTENSION must run again on next 'up').");
+        Console.WriteLine("Rebuilds extensions from installed migrations; preserves database configuration and access.");
         if (!Confirmed("NUKE"))
         {
             Console.WriteLine("Aborted.");

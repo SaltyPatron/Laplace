@@ -52,8 +52,9 @@ for iteration in 1 2; do
     [[ "$(printf "SELECT count(*) FROM pg_stat_activity WHERE datname='%s' AND application_name='%s-active';" "$name" "$name" | P postgres)" == 1 ]] && break
     sleep 0.1
   done
+  [[ "$(printf "SELECT count(*) FROM pg_stat_activity WHERE datname='%s' AND application_name='%s-active';" "$name" "$name" | P postgres)" == 1 ]] || { echo 'FAIL live connection was not established'; exit 1; }
   migrate nuke --yes
-  wait "$active" || true # The live session must be disconnected by cutover.
+  if wait "$active"; then echo 'FAIL live connection was not disconnected by recreation'; exit 1; fi
   psql -X -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$name" \
     -v target="$name" -v reader="$reader" -v owner="$owner" <<'SQL'
 SELECT (pg_get_userbyid(datdba)=:'owner' AND datconnlimit=23 AND datlocprovider='i' AND datlocale='und') AS preserved

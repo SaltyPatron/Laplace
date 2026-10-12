@@ -282,11 +282,13 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
             encoding="utf-8",
         )
         for name, label in (
-            ("db-migrations.sh", "migration"),
-            ("pipeline.sh", "pipeline"),
-            ("check-database-health.sh", "health"),
+            ("scripts/db-migrations.sh", "migration"),
+            ("deploy/linux/site.sh", "site"),
+            ("scripts/check-database-health.sh", "health"),
         ):
-            (self.seed / "scripts" / name).write_text(
+            path = self.seed / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
                 '#!/usr/bin/env bash\nset -euo pipefail\n' + ownership
                 + 'event="' + label + ':$*"\n'
                 + 'printf "%s\\n" "$event" >> "$TEST_EVENTS"\n'
@@ -341,13 +343,13 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         ])
 
     def test_database_operations_are_direct(self):
-        pipeline = "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env"
+        site = "site:database extensions"
         cases = (
             ("status", ["migration:status", "health:fixture_database"]),
-            ("migrate", ["migration:up", "health:fixture_database"]),
-            ("repair", [pipeline, "health:fixture_database"]),
+            ("migrate", [site, "migration:up", "health:fixture_database"]),
+            ("repair", [site, "migration:up", "health:fixture_database"]),
             ("remigrate", ["migration:reset --yes", "migration:up", "health:fixture_database"]),
-            ("recreate", ["migration:nuke --yes", "migration:up", pipeline, "health:fixture_database"]),
+            ("recreate", ["migration:nuke --yes", "health:fixture_database"]),
         )
         for operation, expected in cases:
             with self.subTest(operation=operation):
@@ -365,18 +367,16 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
             [
                 "environment",
                 "migration:nuke --yes",
-                "migration:up",
-                "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env",
                 "health:fixture_database",
             ],
         )
 
     def test_database_failure_stops_later_work(self):
-        self.env["TEST_FAIL_EVENT"] = "migration:up"
+        self.env["TEST_FAIL_EVENT"] = "migration:nuke --yes"
         result = self.execute_database("recreate")
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertEqual(self.events.read_text().splitlines(), [
-            "environment", "migration:nuke --yes", "migration:up"
+            "environment", "migration:nuke --yes"
         ])
 
     def test_removed_hidden_aliases_do_not_start_database_work(self):
