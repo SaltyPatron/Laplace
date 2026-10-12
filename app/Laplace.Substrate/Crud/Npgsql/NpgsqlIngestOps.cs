@@ -60,8 +60,11 @@ public static class NpgsqlIngestOps
             ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)
             """, timeoutSeconds: 0, ct: ct, label: "analyze_post_ingest_validation");
 
+    public sealed record GinMaintenance(string Index, long? PagesCleaned);
+
     /// <summary>
-    /// Flushes every GIN pending list after a bulk write burst.
+    /// Flushes owned GIN pending lists after a bulk write burst; unowned indexes
+    /// remain under PostgreSQL's autovacuum maintenance.
     /// <para>
     /// GIN with <c>fastupdate</c> buffers inserts in an unordered pending list that is
     /// merged only when it exceeds <c>gin_pending_list_limit</c>, and every search scans
@@ -70,9 +73,10 @@ public static class NpgsqlIngestOps
     /// never scan a populated list, without waiting for autovacuum.
     /// </para>
     /// </summary>
-    public static Task CleanGinPendingListsAsync(
+    public static Task<IReadOnlyList<GinMaintenance>> CleanGinPendingListsAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteNonQueryAsync(conn, SqlCatalog.Get("ingest.clean_gin_pending_lists").Text,
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ingest.clean_gin_pending_lists"),
+            static row => new GinMaintenance(row.GetString(0), row.IsDBNull(1) ? null : row.GetInt64(1)),
             timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
 
     public static Task<long> EvidenceCountForSourceNameAsync(

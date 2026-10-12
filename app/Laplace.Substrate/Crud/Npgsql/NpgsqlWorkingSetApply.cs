@@ -130,13 +130,14 @@ public sealed partial class NpgsqlSubstrateWriter
     public async Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
         _tier0LayerComplete = false;
-        // Every ingest's completion drains GIN pending lists after the consensus
-        // writer has drained, whatever host drives it. A failed drain fails
-        // completion rather than reporting the admitted rows read-ready.
+        // Pending GIN entries are already queryable. Owned bulk loaders can merge
+        // them now; workload roles leave index maintenance to autovacuum.
         var drain = System.Diagnostics.Stopwatch.StartNew();
         await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await NpgsqlIngestOps.CleanGinPendingListsAsync(conn, ct).ConfigureAwait(false);
-        _log.LogInformation("WS_APPLY completion gin_drain_ms={GinMs}", drain.ElapsedMilliseconds);
+        var indexes = await NpgsqlIngestOps.CleanGinPendingListsAsync(conn, ct).ConfigureAwait(false);
+        _log.LogInformation("WS_APPLY completion gin_drain_ms={GinMs} indexes_cleaned={Cleaned} indexes_deferred_to_autovacuum={Deferred}",
+            drain.ElapsedMilliseconds, indexes.Count(index => index.PagesCleaned.HasValue),
+            indexes.Count(index => !index.PagesCleaned.HasValue));
     }
 
     private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)

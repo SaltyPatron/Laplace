@@ -14,11 +14,12 @@ $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'
 $null=New-Item -ItemType Directory -Path $published -Force
 foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplace.Cli',(Join-Path $published 'cli')))){
-    & dotnet publish (Join-Path $repo ('app/'+$component[0]+'/'+$component[0]+'.csproj')) -c Release --no-self-contained -o $component[1] -p:OpenApiGenerateDocuments=false -p:OpenApiGenerateDocumentsOnBuild=false --nologo
+    & dotnet publish (Join-Path $repo ('app/'+$component[0]+'/'+$component[0]+'.csproj')) -c Release --no-self-contained -o $component[1] --nologo
     if($LASTEXITCODE){throw "Publish failed: $($component[0])"}
 }
 Push-Location (Join-Path $repo 'web')
 try {
+    if (-not (Test-Path -LiteralPath 'openapi/openapi.json')) { throw 'The endpoint build did not generate web/openapi/openapi.json.' }
     & npm ci --no-audit --no-fund
     if($LASTEXITCODE){throw 'Frontend dependency installation failed.'}
     & npm run build

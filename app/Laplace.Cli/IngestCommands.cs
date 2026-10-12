@@ -577,19 +577,15 @@ internal static partial class IngestCommands
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
             persistEvidence: persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
-        var writer = (ISubstrateWriter)accumulator;
-        // Every source runs the generic ingest order: extract the whole source into
-        // staging, then load the staged set once (novelty trunk to leaf, new records leaf
-        // to trunk, merged claims) and score it (StagedSourceWriter).
-        await using var staged = new StagedSourceWriter(accumulator, ds, innerWriter.Durability,
-            IngestTopology.Current.ApplyPartitions, loggerFactory.CreateLogger<StagedSourceWriter>());
-        writer = staged;
+        // Evidence, consensus, masks and completion tokens land together through the
+        // transactional bulk writer. Runtime ingestion does not replace schema objects.
+        ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory,
             new NpgsqlIngestObservability(ds, persistEvidence));
 
         string destination = dec is RepoDecomposer { VerifiedRepository: not null }
-            ? "configured PostgreSQL (verified Git corpus)" : ConnString;
+            ? "configured PostgreSQL (verified Git corpus)" : LaplaceInstall.RedactConnectionString(ConnString);
         Console.WriteLine($"ingest {dec.GetType().Name} source={dec.SourceName} via IngestRunner → {destination} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
