@@ -2,13 +2,18 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot      = (Resolve-Path "$PSScriptRoot\..\.."),
-  [string]$OutDir        = $(if ($env:LAPLACE_IIS_API) { $env:LAPLACE_IIS_API } else { "D:\Data\inetsrv\laplace-api" }),
+  [string]$OutDir,
+  [string]$Installation,
   [string]$EnvFile       = "$PSScriptRoot\laplace-api.env",
   [string]$Configuration = "Release"
 )
 $ErrorActionPreference = "Stop"
-$dataRoot = if ($env:LAPLACE_DATA_ROOT) { $env:LAPLACE_DATA_ROOT } else { "D:\Data\Laplace" }
-$engineBuild = if ($env:LAPLACE_ENGINE_BUILD) { $env:LAPLACE_ENGINE_BUILD } else { Join-Path $dataRoot "build-win" }
+. "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
+if($Installation){& "$PSScriptRoot/Build-IisPackage.ps1" -Installation $Installation -Publish;return}
+if(-not $OutDir){$OutDir=$env:LAPLACE_IIS_API}
+if(-not $OutDir){throw 'Declare LAPLACE_IIS_INSTALLATION or an explicit legacy -OutDir.'}
+$engineBuild=$env:LAPLACE_ENGINE_BUILD
 $proj = "$RepoRoot\app\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj"
 $uciProj = "$RepoRoot\app\Laplace.Chess.Uci\Laplace.Chess.Uci.csproj"
 if (-not (Test-Path $EnvFile)) {
