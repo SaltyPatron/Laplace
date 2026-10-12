@@ -43,13 +43,26 @@ laplace-uci-connect verify --profile mono-staging
 laplace-uci-connect verify --profile mono-prod
 ```
 
-The desktop client launches development locally and reaches staging and production
-over authenticated WSS. The shared controller reaches development through IIS WSS.
+The desktop client reaches development, staging and production over authenticated
+WSS. Engine processes and PostgreSQL credentials remain on service hosts. The human
+client's scoped OpenBao record contains service tokens only; it cannot read the
+engine service's credential record. The shared controller also reaches development through IIS WSS.
 These commands perform real engine searches without starting Lichess games. Client
 configuration is in `%LOCALAPPDATA%\Laplace\mono\chess\uci-client.json`; the launcher
 is in `%LOCALAPPDATA%\Laplace\bin`. No source checkout or build mount is needed to run it.
 
 ## Engine and knowledge binding
+
+The installed controller currently combines engine selection and recording in one
+profile and requires matching engine/writer database identities. This is a constraint
+of the current implementation, not the target configuration model. Account ownership,
+compute placement, read source, write destination and permitted operations are separate
+choices. Installed copies of Stockfish, Cutechess and Fastchess are not a distributed
+scheduler. Work assigned across hosts needs declared resources and operation identities;
+database selection and grants belong behind authenticated application services.
+
+The transport must preserve Laplace's bounded, set-based transfers and native processing;
+replacing each database operation with a scalar HTTP call is not the intended boundary.
 
 The controller runs `Laplace-UCI` with a named connector profile. Connectors can
 launch a process, invoke a configured SSH command, or open an authenticated

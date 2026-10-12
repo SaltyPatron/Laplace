@@ -9,6 +9,39 @@ $ErrorActionPreference='Stop'
 $c=Get-Content -LiteralPath $Configuration -Raw | ConvertFrom-Json
 $root=[IO.Path]::GetFullPath($c.directory)
 if (-not [IO.Path]::IsPathFullyQualified($c.directory)) { throw 'Declare an absolute client installation directory.' }
+# Human chess clients call installed services. Database environments and engine
+# processes belong to those services, not to this user's connector installation.
+$profiles=$c.public_files.'uci-client.json'.profiles
+if (-not $profiles -or $profiles.PSObject.Properties.Count -eq 0) { throw 'Declare at least one service connector profile.' }
+foreach($entry in $profiles.PSObject.Properties) {
+    $profile=$entry.Value
+    $endpoint=$null
+    if ($profile.transport -ne 'websocket' -or
+        -not [Uri]::TryCreate($profile.endpoint,[UriKind]::Absolute,[ref]$endpoint) -or
+        $endpoint.Scheme -ne 'wss' -or $endpoint.UserInfo -or $endpoint.Query -or $endpoint.Fragment) {
+        throw "Client profile $($entry.Name) must address an authenticated WSS service. Install engine processes on a service host."
+    }
+    foreach($field in @('executable','release','arguments','environmentFiles','variables','workingDirectory','sshHost')) {
+        if ($profile.PSObject.Properties[$field]) { throw "Client profile $($entry.Name) must not contain server field $field." }
+    }
+    if (-not [IO.Path]::IsPathFullyQualified($profile.tokenFile) -or
+        [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($profile.tokenFile)) -ine $root -or
+        [IO.Path]::GetFileName($profile.tokenFile) -notin @($c.secret_files.PSObject.Properties.Value)) {
+        throw "Client profile $($entry.Name) must use a declared private service token."
+    }
+}
+foreach($entry in $c.secret_files.PSObject.Properties) {
+    if ($entry.Name -notmatch '^uci_[a-z0-9_]+_token$' -or
+        [IO.Path]::GetFileName($entry.Value) -ne $entry.Value -or $entry.Value -notlike '*.token') {
+        throw 'The human chess client accepts service tokens only; database credentials belong to service installations.'
+    }
+}
+foreach($name in @($c.obsolete_secret_files)) {
+    if ($name -and ([IO.Path]::GetFileName($name) -ne $name -or
+        $name -in @($c.secret_files.PSObject.Properties.Value) -or $name -notin @('engine.env','postgres-root.crt'))) {
+        throw 'Only retired direct-database client artifacts may be removed.'
+    }
+}
 # Persist an explicit executable so startup never selects an unrelated PATH version.
 if ($Operation -ne 'Render') {
     $bao = if ($c.PSObject.Properties['bao'] -and $c.bao) { $c.bao } else { (Get-Command bao).Source }
@@ -25,12 +58,16 @@ function Write-Atomic([string]$Path,[string]$Content) {
 }
 if ($Operation -eq 'Render') {
     $record=Get-Content -LiteralPath (Join-Path $root 'candidate.json') -Raw | ConvertFrom-Json
+    $allowed=@('control_token')+@($c.secret_files.PSObject.Properties.Name)
+    if (@($record.PSObject.Properties.Name | Where-Object { $_ -notin $allowed }).Count) {
+        throw 'The client credential record contains undeclared fields. Use a service-token-only OpenBao record.'
+    }
     if ($record.control_token -notmatch '^[a-f0-9]{64}$') { throw 'The workload record has no valid controller credential.' }
     Write-Atomic (Join-Path $root 'control.token') $record.control_token
     foreach($entry in $c.secret_files.PSObject.Properties) {
         if ([IO.Path]::GetFileName($entry.Value) -ne $entry.Value) { throw 'Secret destinations must remain in the private installation directory.' }
         $value=$record.($entry.Name)
-        if ($value -isnot [string] -or -not $value -or $value.Contains([char]0)) { throw "Missing workload field: $($entry.Name)" }
+        if ($value -isnot [string] -or $value -notmatch '^[a-f0-9]{64}$') { throw "Invalid service token: $($entry.Name)" }
         Write-Atomic (Join-Path $root $entry.Value) $value
     }
     Write-Atomic (Join-Path $root 'render-receipt.json') (@{source='openbao-agent';rendered_utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json)
@@ -81,12 +118,13 @@ if ($Operation -eq 'Install') {
     $shortcut.Save()
 }
 $state=Join-Path $root 'agent-process.json'
+$configurationDigest=(Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash.ToLowerInvariant()
 $active=$false
 if (Test-Path -LiteralPath $state) {
     $previous=Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
     $process=Get-Process -Id $previous.pid -ErrorAction SilentlyContinue
     $active=$process -and $process.Path -eq $previous.executable -and $process.StartTime.ToUniversalTime() -eq ([DateTimeOffset]$previous.started_utc).UtcDateTime
-    if ($active -and $previous.executable -ine $bao) {
+    if ($active -and ($previous.executable -ine $bao -or $previous.configuration_sha256 -ne $configurationDigest)) {
         Stop-Process -Id $process.Id
         $process.WaitForExit()
         $active=$false
@@ -123,7 +161,7 @@ template {
     Remove-Item -LiteralPath (Join-Path $root 'candidate.json') -Force -ErrorAction SilentlyContinue
     $began=[DateTime]::UtcNow
     $process=Start-Process -FilePath $bao -ArgumentList @('agent',('-config="'+(Join-Path $root 'agent.hcl')+'"')) -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'agent.stdout.log') -RedirectStandardError (Join-Path $root 'agent.stderr.log')
-    Write-Atomic $state (@{pid=$process.Id;executable=$bao;started_utc=$process.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json)
+    Write-Atomic $state (@{pid=$process.Id;executable=$bao;started_utc=$process.StartTime.ToUniversalTime().ToString('o');configuration_sha256=$configurationDigest} | ConvertTo-Json)
     $rendered=$false
     for($i=0;$i -lt 60;$i++) {
         $receipt=Join-Path $root 'render-receipt.json'
@@ -143,5 +181,22 @@ foreach($entry in $c.secret_files.PSObject.Properties) {
     if(-not $ready){throw "The workload agent has not rendered $($entry.Name)."}
 }
 $status=Invoke-RestMethod ($c.url.TrimEnd('/')+'/status') -Headers @{Authorization='Bearer '+$token} -TimeoutSec 10
+if ($c.connector) {
+    $connector=Join-Path (Join-Path $c.connector.bin $c.connector.revision) 'laplace-uci-connect.exe'
+    foreach($profile in $profiles.PSObject.Properties.Name) {
+        & $connector verify --configuration (Join-Path $root 'uci-client.json') --profile $profile
+        if ($LASTEXITCODE) { throw "Installed service profile $profile failed its engine handshake and search." }
+    }
+}
+foreach($name in @($c.obsolete_secret_files)) {
+    if (-not $name) { continue }
+    Remove-Item -LiteralPath (Join-Path $root $name) -Force -ErrorAction SilentlyContinue
+}
+Write-Atomic (Join-Path $root 'installation-receipt.json') (@{
+    verified_utc=[DateTime]::UtcNow.ToString('o'); configuration_sha256=$configurationDigest
+    credential_record=$c.record; controller=$status.controller; bot_selection=$status.selection.profile
+    profiles=@($profiles.PSObject.Properties | ForEach-Object { @{id=$_.Name;endpoint=$_.Value.endpoint;transport=$_.Value.transport} })
+    engine_handshake_and_search_verified=[bool]$c.connector; direct_database_credentials=$false
+} | ConvertTo-Json -Depth 6)
 if ($Enrollment) { Remove-Item -LiteralPath $Enrollment -Force }
 Write-Host "Desktop chess control installed: $($status.controller), selection $($status.selection.profile ?? 'Off'). OpenBao uses the DPAPI-enrolled workload; startup is registered for this Windows user."
