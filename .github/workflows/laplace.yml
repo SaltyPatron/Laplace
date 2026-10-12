@@ -110,6 +110,9 @@ jobs:
       - name: Read back
         run: deploy/linux/site.sh smoke
 
+      - name: Exercise installed database recreation and failure recovery
+        run: bash tests/database-recreation.sh
+
       - name: Bundle the verified application for production
         if: github.event_name == 'push' || inputs.promote
         id: bundle

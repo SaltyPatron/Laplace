@@ -111,11 +111,13 @@ jobs:
               health
               ;;
             migrate)
+              bash deploy/linux/site.sh database extensions
               bash scripts/db-migrations.sh up
               health
               ;;
             repair)
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+              bash deploy/linux/site.sh database extensions
+              bash scripts/db-migrations.sh up
               health
               ;;
             reindex)
@@ -129,8 +131,6 @@ jobs:
               ;;
             recreate)
               bash scripts/db-migrations.sh nuke --yes
-              bash scripts/db-migrations.sh up
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
               health
               ;;
             *)
