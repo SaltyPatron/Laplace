@@ -89,7 +89,7 @@ public sealed class LaplaceDataSourceTests
     public void PreservesTheDeclaredPoolInsteadOfUsingClientCpuCount(SubstrateAccess access, string keyword)
     {
         var b = new NpgsqlConnectionStringBuilder(LaplaceDataSource.ConnectionStringFor(
-            access, $"Host=knowledge.example;Database=knowledge;{keyword}=3;Minimum Pool Size=1;Connection Idle Lifetime=75;Connection Pruning Interval=15"));
+            access, $"Host=database.example;Database=database;{keyword}=3;Minimum Pool Size=1;Connection Idle Lifetime=75;Connection Pruning Interval=15"));
 
         Assert.Equal(3, b.MaxPoolSize);
         Assert.Equal(1, b.MinPoolSize);
@@ -98,15 +98,15 @@ public sealed class LaplaceDataSourceTests
     }
 
     [Fact]
-    public void SeparateApplicationAndKnowledgeDataSourcesKeepSeparateConnectionBudgets()
+    public void SeparateApplicationAndDatabaseDataSourcesKeepSeparateConnectionBudgets()
     {
         using var application = LaplaceDataSource.Create(SubstrateAccess.Serving,
             "Host=localhost;Database=app;Maximum Pool Size=2");
-        using var knowledge = LaplaceDataSource.Create(SubstrateAccess.Serving,
-            "Host=knowledge.example;Database=knowledge;Maximum Pool Size=7");
+        using var database = LaplaceDataSource.Create(SubstrateAccess.Serving,
+            "Host=database.example;Database=database;Maximum Pool Size=7");
 
         Assert.Equal(2, new NpgsqlConnectionStringBuilder(application.ConnectionString).MaxPoolSize);
-        Assert.Equal(7, new NpgsqlConnectionStringBuilder(knowledge.ConnectionString).MaxPoolSize);
+        Assert.Equal(7, new NpgsqlConnectionStringBuilder(database.ConnectionString).MaxPoolSize);
     }
 
     [Fact]

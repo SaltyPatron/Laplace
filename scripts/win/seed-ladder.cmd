@@ -12,14 +12,14 @@ if not defined LAPLACE_LADDER_START set "LAPLACE_LADDER_START=floor"
 cd /d "%LAPLACE_ROOT%\app"
 
 if /i "%LAPLACE_LADDER_START%"=="proof" (
-  echo ==== ladder start: proof path - floor + knowledge cluster assumed present ====
+  echo ==== ladder start: proof path - floor + relations cluster assumed present ====
   goto stage_proof
 )
 
 if "%LAPLACE_LADDER_DRY%"=="1" (
   echo ==== [dry] seed-stage floor ====
   echo ==== [dry] seed-stage document ====
-  echo ==== [dry] seed-stage knowledge ====
+  echo ==== [dry] seed-stage relations ====
   if /i not "%LAPLACE_LADDER_STOP%"=="nets" (
     echo ==== [dry] seed-stage usage ====
     if /i not "%LAPLACE_LADDER_STOP%"=="usage" (
@@ -32,7 +32,7 @@ if "%LAPLACE_LADDER_DRY%"=="1" (
 
 call "%~dp0seed-stage.cmd" floor || exit /b 1
 call "%~dp0seed-stage.cmd" document || exit /b 1
-call "%~dp0seed-stage.cmd" knowledge || exit /b 1
+call "%~dp0seed-stage.cmd" relations || exit /b 1
 if /i "%LAPLACE_LADDER_STOP%"=="nets" goto ladder_done
 
 :stage_proof

@@ -1,13 +1,13 @@
 ---
 name: laplace-invention
-description: Complete operating knowledge for every Laplace request and task. Apply automatically before answering or acting so the inventor never has to reteach Laplace.
+description: Complete operating content for every Laplace request and task. Apply automatically before answering or acting so the inventor never has to reteach Laplace.
 metadata:
-  short-description: Laplace invention operating knowledge
+  short-description: Laplace invention operating content
 ---
 
 # Laplace
 
-Laplace is one deterministic, content-addressed, recursively compositional knowledge
+Laplace is one deterministic, content-addressed, recursively compositional content
 and cognition substrate. It replaces opaque repeated dense-model authority with exact
 reusable structure, attributable evidence, uncertainty-bearing standing, sparse indexed
 response, coarse native execution, and inspectable receipts. Apply this model
@@ -22,8 +22,8 @@ The primitive laws compose into binding product consequences documented in `docs
 - Compiler/test/runtime failures and successful fixes are witnessed development trajectories. They should affect later repair and can be compared against other authorized repositories.
 - A repository root is the complete application state. Small changes remint only changed ancestry; unchanged subtrees are shared. Checkout/patch artifacts are realizations of root transitions.
 - Source/bytecode/executable/container decomposition may continue to control/data/dependency structure and target-machine cycle derivation under explicit ISA/microarchitecture/state assumptions.
-- Knowledge scope/authority and compute scope are independent. Knowledge packages/grants govern permitted world/capabilities; hops/fanout/providers/resources govern how deeply/broadly the same intelligence may work.
-- Governance is separate from knowledge: retain facts and provenance; explicitly allow/deny/abstain at operation boundaries with WHY/WHY_NOT receipts.
+- Content scope/authority and compute scope are independent. Content packages/grants govern permitted world/capabilities; hops/fanout/providers/resources govern how deeply/broadly the same intelligence may work.
+- Governance is separate from content: retain facts and provenance; explicitly allow/deny/abstain at operation boundaries with WHY/WHY_NOT receipts.
 - Tests, gates and benchmark receipts validate the product. Never substitute them for implementing the requested capability.
 
 ## Representation
@@ -51,18 +51,18 @@ The primitive laws compose into binding product consequences documented in `docs
   storage capacity do not define the theorem.
 - Managed Karcher-mean paths are a real recipe divergence from native centroid paths;
   boundedness does not make their coordinates or Hilbert addresses identical.
-- Coordinate equality is deliberately many-to-one with respect to knowledge identity. Ordered
+- Coordinate equality is deliberately many-to-one with respect to content identity. Ordered
   compositions such as `c,a,t` and `a,c,t` may share a centroid/Karcher location while
   retaining different canonical ids and trajectories. Geometry is one response plane, not a
   uniqueness allocator; dense shared regions are usable state, not an identity failure.
 
 ## Universal tiered structure and syntax projections
 
-- Canonical Laplace structure is recursive entity composition plus typed physicality trajectories, not an AST object model. The trajectory owns exact constituent identity/order; roles/grammar constraints remain typed knowledge.
+- Canonical Laplace structure is recursive entity composition plus typed physicality trajectories, not an AST object model. The trajectory owns exact constituent identity/order; roles/grammar constraints remain typed content.
 - UAX #29 is the concrete text segmentation case of the tier law. Other modalities use their own deterministic boundary/composition rules over the same tier machinery.
 - Qualified Tree-sitter grammars, native parsers, standards readers, codecs and decoders are providers when needed. Their CST/AST/record output is evidence or an external projection, not a second ontology.
 - Grammar productions, precedence, associativity, delimiter rules, fields and queries may themselves be ingested as entities/relations/attestations and used to derive higher-tier composition.
-- Prefer streaming/native standards readers for large shallow structured sources when they preserve the same facts more directly. Tree-sitter remains valuable for grammar knowledge, compatibility parsing, validation and realization.
+- Prefer streaming/native standards readers for large shallow structured sources when they preserve the same facts more directly. Tree-sitter remains valuable for grammar content, compatibility parsing, validation and realization.
 - Recipes disposition recovered facts into content/physicality, occurrence, provenance, testimony, calculation, packaging/reconstruction or unresolved state. A source's highway nodes (`i46360`, `abandon.01`, `run-51.3.2`, a FrameNet frame, a language code) are content like any other text, one entity in every source that cites them, and what each is is attested by the source that says so. Its internal pointers (a WordNet offset such as `06975898-n`, a synset or sense id, a FrameNet numeric id, a token number or `sent_id`, a row or line number) are packaging: decomposed by the source's notation only for the facts they carry (the type `n`), resolved to the BLAKE3 id of what they point at, and not recorded. A sense key (`dog%1:05:00::`) is WordNet's internal pointer to a lexicalization, resolved through the highway perfcache; rolesets, VerbNet classes, FrameNet frames, frame elements and lexical units, and VerbAtlas frames are highway nodes as the ILI is, each identifier system a road class. A node holding more claims than the fan (NOUN, `eng`) is a fan-limited node: reached, not crossed. English names in manifests and code are developer handles; registries are perfcaches whose bits index content-derived entities. AST/CST/IR may be derived/exported when an external consumer requires them.
 - The same recovered value may participate in multiple classes: e.g. a definition sentence is content with physicality while the claim composition that links the concept to that sentence, witnessed by the source, is separately attributed testimony. The witness is the source trunk: one corpus, one trunk, one witness, its treebanks, lexicons and datasets files under it, and the annotators, speakers and members it names content whose relations it attests. Provenance by containment, the source's record a path over the claims it asserts, is the target; the attestation table stays until a working prototype on real data shows containment answering everything the table answers with nothing lost. A claim is an n-ary composition of content ids (`[lemma, language, ILI]`, the language a part of the strand, `[ILI, hypernym, ILI]`); `(subject, relation, object)` is one shape among many.
 
@@ -79,7 +79,7 @@ The primitive laws compose into binding product consequences documented in `docs
 - Packed ordinal/run widths are local fields, not composition limits. Logical position
   and split RLE support wider sequences; current tests cover 70,000 constituents.
 - Perfcaches are a compositional lattice, not one blob per modality: dense finite tiers may be complete direct-address ROMs; huge tiers may mmap the admitted/hot canonical estate. Numbers can feed pixels/samples; pixels feed patches/regions/images; image+audio caches are reused by video. Cache request-side keys so database indexes remain usable instead of applying per-row functions to indexed columns.
-- Cache modules can be selector-scoped (range/ASCII, explicit color palette, finite-format domain, speech-frequency/filter-bank band, hot/admitted set, dependency closure) and combined into deployment profiles. Subsets preserve global canonical ids/coords and are acceleration state, not knowledge authorization.
+- Cache modules can be selector-scoped (range/ASCII, explicit color palette, finite-format domain, speech-frequency/filter-bank band, hot/admitted set, dependency closure) and combined into deployment profiles. Subsets preserve global canonical ids/coords and are acceleration state, not content authorization.
 - Admission builds one native tier tree, deduplicates equal working-set content, probes
   existence in set-sized batches per tier, and emits missing structure plus every
   occurrence/physicality. Database crossings are O(tiers), not O(nodes/atoms/records).
@@ -140,7 +140,7 @@ are attributable witnesses/providers and export targets, never hidden authority.
 - Per-row SPI, per-element PInvoke/SQL, hot recursive CTEs, uncontrolled LATERAL,
   per-call temp state, per-item commits, and scalar-loop batches are defects.
 - Sparse selection reduces work; coarse execution removes boundary overhead. SIMD/GPU
-  is extra headroom. One knowledge world serves all tiers; tiers vary compute envelopes.
+  is extra headroom. One content world serves all tiers; tiers vary compute envelopes.
 - Product surfaces share browse/rank/entity/evidence/trajectory/neighborhood semantics.
   Domains specialize grammar/presentation, never identity or cognition.
 Stable authority: `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, binding specs

@@ -3,7 +3,7 @@
 #
 # This answers one question only: did database creation/migration/extension sync
 # leave a structurally usable Laplace substrate? It deliberately does NOT require
-# foundation/knowledge data and does NOT call converse/generation/model/chess AI
+# foundation/content data and does NOT call converse/generation/model/chess AI
 # surfaces. Seed completeness belongs to check-substrate-floor.sh; product behavior
 # belongs to Tier=live/eval/smoke.
 set -euo pipefail

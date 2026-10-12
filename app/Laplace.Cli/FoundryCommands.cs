@@ -1783,7 +1783,7 @@ internal static class FoundryCommands
 
     // Writes a cast whose embed/lm_head carry one adjacency readout and whose layers are
     // zero (no-op) with all-ones norms, so logits depend on the last token only. Readout
-    // selection comes from FoundryDefaults (adjacency, knowledge band, trajectory order,
+    // selection comes from FoundryDefaults (adjacency, relations band, trajectory order,
     // lookup).
     private static async Task<int> WriteFaithfulGgufAsync(
         NpgsqlDataSource ds,
@@ -1799,12 +1799,12 @@ internal static class FoundryCommands
         //   grapheme  → letter-bigram order read off the trajectories;
         //   default   → consensus_adjacency: every in-vocab content edge, rank-weighted,
         //               including PRECEDES order edges;
-        //   knowledge → consensus_layer_plane limited to relation rank [lo,hi], which excludes
+        //   relations → consensus_layer_plane limited to relation rank [lo,hi], which excludes
         //               the low-rank order/metadata types (PRECEDES, HAS_DOMAIN, HAS_EXAMPLE).
-        bool knowledge = !grapheme && FoundryDefaults.FaithfulKnowledge;
+        bool relations = !grapheme && FoundryDefaults.FaithfulRelations;
         double rkLo = FoundryDefaults.FaithfulRankLo;
         double rkHi = FoundryDefaults.FaithfulRankHi;
-        // trajOrder: the knowledge band unioned with word continuation read directly off the
+        // trajOrder: the relations band unioned with word continuation read directly off the
         // witnessed trajectories (word_order) rather than folded PRECEDES consensus; both
         // planes are normalized before the union.
         bool trajOrder = !grapheme && FoundryDefaults.FaithfulTrajOrder;
@@ -1817,13 +1817,13 @@ internal static class FoundryCommands
             var order = FoundryExport.Normalize(await FoundryExport.ReadWordOrderAsync(
                 ds, tokenSlots, 1, FoundryDefaults.WordTrajs, cap));
             A = FoundryExport.Union(know, order);
-            Console.WriteLine($"  TRAJORDER readout: knowledge band rank∈[{rkLo},{rkHi}] ∪ exact trajectory continuation "
-                + $"(word_order off LineStrings; {know.Nnz:N0} knowledge + {order.Nnz:N0} order edges)");
+            Console.WriteLine($"  TRAJORDER readout: relations band rank∈[{rkLo},{rkHi}] ∪ exact trajectory continuation "
+                + $"(word_order off LineStrings; {know.Nnz:N0} relations + {order.Nnz:N0} order edges)");
         }
-        else if (knowledge)
+        else if (relations)
         {
             A = await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap);
-            Console.WriteLine($"  KNOWLEDGE readout: consensus content band rank∈[{rkLo},{rkHi}] (IS_A/property/synonym, no PRECEDES glue)");
+            Console.WriteLine($"  RELATIONS readout: consensus content band rank∈[{rkLo},{rkHi}] (IS_A/property/synonym, no PRECEDES glue)");
         }
         else
             A = await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
@@ -1843,10 +1843,10 @@ internal static class FoundryCommands
         Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
             + $"log-odds-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
 
-        // Lookup (knowledge readout, dModel ≥ vocab): embed = I and lm_head[Y][X] = log-odds(X→Y),
+        // Lookup (relations readout, dModel ≥ vocab): embed = I and lm_head[Y][X] = log-odds(X→Y),
         // so logits[Y] = lm_head[Y]·RMSNorm(e_X) is the standing lookup itself, with no SVD. When
         // dModel < vocab the SVD factors above are kept.
-        bool lookup = knowledge && FoundryDefaults.FaithfulLookup && dModel >= vocab;
+        bool lookup = relations && FoundryDefaults.FaithfulLookup && dModel >= vocab;
         if (lookup)
         {
             Array.Clear(embed); Array.Clear(lmHead);
@@ -1867,7 +1867,7 @@ internal static class FoundryCommands
             }
             Console.WriteLine("  LOOKUP: embed=I, lm_head=log-odds(A) — the GEMM IS the attestation lookup (no SVD, no global hub)");
         }
-        else if (knowledge)
+        else if (relations)
             Console.WriteLine($"  (lookup needs dModel≥vocab; dModel={dModel} vocab={vocab} → SVD fallback, may re-introduce the hub)");
 
         // A token with no incoming edge in A is never a continuation; its lm_head row would be an

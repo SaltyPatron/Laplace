@@ -35,11 +35,11 @@ public sealed class ManagedSearchBackend : IChessBackend
     public string Author => "Laplace";
     public IReadOnlyList<string> OptionLines =>
         [$"option name Substrate type combo default {_substrateMode} var substrate var off",
-         "option name Refresh Knowledge type button"];
+         "option name Refresh Database Snapshot type button"];
 
     public void SetOption(string name, string value)
     {
-        if (name.Equals("Refresh Knowledge", StringComparison.OrdinalIgnoreCase))
+        if (name.Equals("Refresh Database Snapshot", StringComparison.OrdinalIgnoreCase))
         {
             // The live writer may be another process or host. Its local invalidation
             // epoch cannot invalidate this process's snapshots or root-evidence cache.
@@ -60,8 +60,8 @@ public sealed class ManagedSearchBackend : IChessBackend
     {
         if (EnsureSearch(info, allowInit: true) && _ds is not null && _substrateMode != "off")
         {
-            var knowledge = ChessKnowledgeIdentity.Read(_ds);
-            info(ChessKnowledgeIdentity.ProtocolPrefix + System.Text.Json.JsonSerializer.Serialize(knowledge));
+            var database = ChessDatabaseIdentity.Read(_ds);
+            info(ChessDatabaseIdentity.ProtocolPrefix + System.Text.Json.JsonSerializer.Serialize(database));
         }
     }
 
@@ -69,7 +69,7 @@ public sealed class ManagedSearchBackend : IChessBackend
     {
         _state = _modality.Initial();
         // A preceding game can have been recorded by another process or machine.
-        SetOption("Refresh Knowledge", "");
+        SetOption("Refresh Database Snapshot", "");
     }
 
     public void SetPosition(string? fen, IReadOnlyList<string> moves)

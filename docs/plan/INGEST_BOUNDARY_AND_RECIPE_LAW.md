@@ -63,9 +63,9 @@ artifact bytes / decoded samples
 
 UAX #29 is the text boundary case: deterministic lower-tier observations compose upward while singleton/span-identical scaffolding collapses to the same canonical identity. Other modalities use different admitted rules over the same mechanism.
 
-Provider CST/AST nodes are evidence/projections, not a mandatory universal ontology. Grammar productions, precedence, associativity, delimiters, field roles and similar structural rules may themselves be admitted as ordinary knowledge and used to derive higher-tier composition from the ordered trajectory. When a standards streaming reader exposes the required XML/CSV/table facts directly, materializing an equivalent Tree-sitter tree is redundant work.
+Provider CST/AST nodes are evidence/projections, not a mandatory universal ontology. Grammar productions, precedence, associativity, delimiters, field roles and similar structural rules may themselves be admitted as ordinary content and used to derive higher-tier composition from the ordered trajectory. When a standards streaming reader exposes the required XML/CSV/table facts directly, materializing an equivalent Tree-sitter tree is redundant work.
 
-Tree-sitter therefore serves as a reusable grammar estate, compatibility parser, validator/realizer and grammar-knowledge source. It is appropriate when its grammar contributes structural information that the tier recipe needs; it is not a blanket container-format router.
+Tree-sitter therefore serves as a reusable grammar estate, compatibility parser, validator/realizer and grammar-database source. It is appropriate when its grammar contributes structural information that the tier recipe needs; it is not a blanket container-format router.
 
 Recipes explicitly disposition recovered facts into content/physicality, occurrence, provenance, attributed testimony, deterministic calculation, packaging/reconstruction or unresolved state. Unknown provider structure remains unresolved; it must not be silently dropped or coerced into content.
 
@@ -107,7 +107,7 @@ algorithms remain provider operations; source filenames, releases and semantic
 field inventories must not select private decomposer implementations.
 
 Native COPY tuple buffers are transport into the shared writer, not delivered
-knowledge or cognition. Repeated identical canonical rows should coalesce within
+content or cognition. Repeated identical canonical rows should coalesce within
 the working set before crossing that boundary, while distinct interpretations,
 occurrences and attributed testimony retain their semantics. Emitted row volume
 does not establish unique durable content or a witnessed answer.
@@ -133,7 +133,7 @@ A source/provider must not own:
 - a source-specific cognition/search engine;
 - silent fallback from unknown field meaning to `content`.
 
-Source-specific semantic knowledge should be declarative profile/recipe data plus the irreducible parser/codec/academic kernel needed to recover that source faithfully.
+Source-specific semantic content should be declarative profile/recipe data plus the irreducible parser/codec/academic kernel needed to recover that source faithfully.
 
 ## Source-generation dependency law
 

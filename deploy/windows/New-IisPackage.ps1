@@ -3,6 +3,9 @@
 param([Parameter(Mandatory)][string]$Published,[Parameter(Mandatory)][string]$Destination,[Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{7,64}$')][string]$Revision)
 . "$PSScriptRoot/iis-runtime.ps1"
 if(-not(Test-Path -LiteralPath (Join-Path $Published 'uci/laplace-uci.exe') -PathType Leaf)){throw 'The application publication must include its UCI runtime. Use Build-IisPackage.ps1.'}
+foreach($component in @('','cli','uci')) {
+    & "$PSScriptRoot/Test-NativeSqlCatalog.ps1" -Library (Join-Path (Join-Path $Published $component) 'laplace_core.dll')
+}
 if(Test-Path -LiteralPath $Destination){throw 'Choose a new package directory; existing packages are immutable.'}
 $null=New-Item -ItemType Directory -Path $Destination
 $files=@(Get-ChildItem -LiteralPath $Published -File -Recurse | Where-Object Name -NotIn @('web.config','iis-package.json','verify-application-release.py') | ForEach-Object {

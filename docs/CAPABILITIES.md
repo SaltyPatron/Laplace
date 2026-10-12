@@ -5,7 +5,7 @@
 Laplace keeps these axes separate:
 
 ```text
-KNOWLEDGE
+CONTENT
   what canonical structures, observations, testimony and calculations exist
 
 AUTHORITY / GOVERNANCE
@@ -19,22 +19,22 @@ COMPUTE
 
 Commercial tiers must not be implemented as progressively less knowledgeable models. The same admitted world remains the world. A request may have a smaller compute envelope, and a principal may have a narrower authorization scope, but neither rule is permission to manufacture a dumber Laplace.
 
-### Knowledge packages and effective mind
+### Content packages and effective mind
 
-A knowledge package is an authority manifest over the shared world, not a duplicated mini-model. It may grant a subtree/scope, source/context set, private tenant corpus, curriculum, licensed domain, or other explicitly governed collection.
+A content package is an authority manifest over the shared world, not a duplicated mini-model. It may grant a subtree/scope, source/context set, private tenant corpus, curriculum, licensed domain, or other explicitly governed collection.
 
 Effective operation scope is conceptually:
 
 ```text
 tenant/world boundary
 ∩ principal/role/relationship grants
-∩ purchased/institutional/private knowledge grants
+∩ purchased/institutional/private content grants
 ∩ active caller-selected scope
 ∩ kernel governance
-= effective knowledge/operation scope
+= effective content/operation scope
 ```
 
-Grant inheritance follows explicit authority/package relations, not arbitrary semantic relations. A Formula 1 package may include its declared engineering subtree; it must not accidentally grant missile knowledge merely because both connect to fluid dynamics.
+Grant inheritance follows explicit authority/package relations, not arbitrary semantic relations. A Formula 1 package may include its declared engineering subtree; it must not accidentally grant missile content merely because both connect to fluid dynamics.
 
 Capabilities are separate from scope. Useful operation rights include:
 
@@ -52,30 +52,30 @@ EXECUTE
 DELEGATE
 ```
 
-Tenant owner/admin/member roles are workspace administration. Knowledge authority is a richer RBAC/ReBAC/capability layer over the substrate.
+Tenant owner/admin/member roles are workspace administration. Content authority is a richer RBAC/ReBAC/capability layer over the substrate.
 
-## Governance does not erase knowledge
+## Governance does not erase content
 
-Knowledge that something exists, is dangerous, illegal, private, restricted, harmful, useful, uncertain, disputed, or benign remains knowledge with provenance. Governance must not pretend the fact disappeared.
+Content that something exists, is dangerous, illegal, private, restricted, harmful, useful, uncertain, disputed, or benign remains content with provenance. Governance must not pretend the fact disappeared.
 
 A policy decision is therefore not:
 
 ```text
-delete dangerous knowledge
+delete dangerous content
 → model cannot know it
 ```
 
 It is:
 
 ```text
-knowledge + evidence about consequences
+content + evidence about consequences
 + principal authority
 + kernel/org/user policy
 + requested operation
 → allow / deny / abstain / require stronger authority
 ```
 
-An abstention can be honest and receipted: relevant knowledge may exist while the current execution lacks authority to couple it into cognition, derive from it, realize it, export it, or act on it. Even disclosure that restricted knowledge exists can itself require `DISCOVER`.
+An abstention can be honest and receipted: relevant content may exist while the current execution lacks authority to couple it into cognition, derive from it, realize it, export it, or act on it. Even disclosure that restricted content exists can itself require `DISCOVER`.
 
 Standing and permission remain distinct. Evidence consensus answers how strongly a proposition is supported; authority answers who may perform an operation. Permission is not identity and is not a popularity vote.
 
@@ -84,7 +84,7 @@ Standing and permission remain distinct. Evidence consensus answers how strongly
 The cybersecurity model follows the same authority substrate.
 
 - **Red Spear** performs authorized adversarial exploration: privilege/scope crossing, inference leakage, stale grants, confused-deputy paths, unsafe derivation/export, cross-tenant leakage, and other boundary attacks.
-- **Blue Shield** enforces effective scope and capabilities at the actual cognition/action boundaries. Forbidden knowledge must not merely be redacted after it has already influenced a result.
+- **Blue Shield** enforces effective scope and capabilities at the actual cognition/action boundaries. Forbidden content must not merely be redacted after it has already influenced a result.
 - **White Judge** is explicit policy/authority adjudication plus receipts, not a hidden judge model. It determines whether a requested transition is lawful under declared authority, governance, provenance and evidence.
 
 All three operate over the same explicit world and must preserve WHY/WHY_NOT receipts.
@@ -144,7 +144,7 @@ The multiscale image basis is a DAG, not a tier-local copy tree. One canonical 2
 
 Cache lookup should produce canonical keys for indexed database/native operations rather than hide indexed columns behind per-row functions.
 
-Cache profiles can be intentionally narrow without creating smaller knowledge worlds. A device may map ASCII rather than all Unicode, a selected color palette rather than every pixel value, or a declared speech-frequency/filter-bank segment rather than every audio calculation. Members retain their global canonical identity. Missing cache entries fall back to canonical execution when available; authorization remains a separate knowledge/governance axis.
+Cache profiles can be intentionally narrow without creating smaller content worlds. A device may map ASCII rather than all Unicode, a selected color palette rather than every pixel value, or a declared speech-frequency/filter-bank segment rather than every audio calculation. Members retain their global canonical identity. Missing cache entries fall back to canonical execution when available; authorization remains a separate content/governance axis.
 
 ## Reusable numeric/scalar structure
 
@@ -320,14 +320,14 @@ Individual intelligence does not require one separately trained model per person
 
 ```text
 shared Laplace world
-+ licensed/institutional knowledge grants
-+ private organizational/personal knowledge
++ licensed/institutional content grants
++ private organizational/personal content
 + witnessed personal experience
 + governance/firmware
 + current active scope
 + current compute envelope
 ```
 
-Knowledge packages can therefore be purchased, assigned by a school, granted by an employer, delegated by role, or temporarily activated without copying opaque weights.
+Content packages can therefore be purchased, assigned by a school, granted by an employer, delegated by role, or temporarily activated without copying opaque weights.
 
 “I know kung fu” is the product verb: grant or materialize an authorized, receipted portion of the existing witnessed world.

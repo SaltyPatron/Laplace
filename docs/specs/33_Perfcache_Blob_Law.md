@@ -213,13 +213,13 @@ Overlapping modules converge by canonical key/record identity; they do not dupli
 
 A higher module may declare dependency closure over lower modules. A palette-specific patch ROM can therefore depend on the exact selected pixel palette generation rather than requiring the complete image universe.
 
-### Cache scope is not knowledge authority
+### Cache scope is not content authority
 
 A cache profile answers **what is resident/accelerated here**, not **what the principal is allowed to know**.
 
-If an authorized value is absent from a mapped cache, the normal canonical path may calculate/read it and optionally publish it into a later cache generation. If the deployment intentionally lacks a fallback (for example, a constrained offline device), the result is a declared local capability/cache miss or remote-fetch requirement, not a different canonical identity and not evidence that the knowledge does not exist.
+If an authorized value is absent from a mapped cache, the normal canonical path may calculate/read it and optionally publish it into a later cache generation. If the deployment intentionally lacks a fallback (for example, a constrained offline device), the result is a declared local capability/cache miss or remote-fetch requirement, not a different canonical identity and not evidence that the content does not exist.
 
-Knowledge-package grants remain governed by the authority layer. A package may recommend or ship a matching cache profile for deployment economics, but the two objects stay distinct.
+Content-package grants remain governed by the authority layer. A package may recommend or ship a matching cache profile for deployment economics, but the two objects stay distinct.
 
 ## Roster
 

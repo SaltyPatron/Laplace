@@ -43,7 +43,7 @@ def verify_workload(config):
         raise ValueError('Workload enrollment must be root-owned and private')
     try:
         token = request('auth/approle/login', json.loads(credential.read_text()))['auth']['client_token']
-        allowed = [f"kv/data/hosts/{config['host']}/{record}" for record in ('knowledge', config['record'])]
+        allowed = [f"kv/data/hosts/{config['host']}/{record}" for record in ('substrate', config['record'])]
         for path in allowed:
             request(path)
             capabilities = request('sys/capabilities-self', {'paths': [path]})['capabilities']
@@ -141,7 +141,7 @@ def main():
     if args.phase == 'verify':
         verify(config)
         return
-    spec = importlib.util.spec_from_file_location('knowledge_sync', Path(__file__).with_name('knowledge-sync.py'))
+    spec = importlib.util.spec_from_file_location('substrate_sync', Path(__file__).with_name('database-sync.py'))
     sync = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sync)
     inherited = os.environ.get('LAPLACE_HOST_LOCK_FD')
@@ -195,7 +195,7 @@ def main():
                 sync.activate(config['runtime_user'], prefix, config['public_base'])
             machine = Path(config['machine_file'])
             with sync.configuration_transaction([machine, data / 'postgresql.auto.conf'], recover_resources):
-                # App-specific names do not retune a co-located knowledge cluster.
+                # App-specific names do not retune a co-located substrate cluster.
                 sync.assignments(machine, {key.replace('LAPLACE_PG_', 'LAPLACE_APP_PG_'): value
                                           for key, value in config['resource_settings'].items()})
                 subprocess.run(['bash', tuner], env=environment, check=True, timeout=180)

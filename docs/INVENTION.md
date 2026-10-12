@@ -1,6 +1,6 @@
 # The Invention
 
-Laplace is one invention: a deterministic, content-addressed, recursively compositional knowledge and cognition substrate in which exact structure, observations, evidence, uncertainty, geometry, computation and realization remain inspectable parts of one machine.
+Laplace is one invention: a deterministic, content-addressed, recursively compositional content and cognition substrate in which exact structure, observations, evidence, uncertainty, geometry, computation and realization remain inspectable parts of one machine.
 
 This document states the invention. Code implements it. Where code, a test, an issue, a plan or a deployed system disagrees with this document, the code is changed to match it.
 
@@ -16,7 +16,7 @@ First, equal canonical content should converge on the same canonical identity in
 
 Second, larger objects are finite recursive compositions of already admitted objects. Their ordered constituent structure is retained exactly rather than compressed into an opaque learned vector.
 
-Third, knowledge about those objects is not fused into identity. Sources witness propositions, calculations derive state, occurrences place content in context, and consensus records standing and uncertainty.
+Third, content about those objects is not fused into identity. Sources witness propositions, calculations derive state, occurrences place content in context, and consensus records standing and uncertainty.
 
 Laplace's engineering thesis follows from those consequences: much of what conventional AI learns into a dense parameter tensor can instead be admitted explicitly, indexed, witnessed, folded and traversed as a live substrate.
 
@@ -60,7 +60,7 @@ The open Super-Fibonacci/radical-inverse placement matters here because the loca
 
 ### Unbounded history does not require unbounded geometric extent
 
-Let `K_t` be the finite set of knowledge structures actually observed/materialized by some finite execution or observation event `t`. Over an unbounded sequence of such events,
+Let `K_t` be the finite set of content structures actually observed/materialized by some finite execution or observation event `t`. Over an unbounded sequence of such events,
 
 ```text
 K_history = union(t in N) K_t
@@ -68,11 +68,11 @@ K_history = union(t in N) K_t
 
 is a countable union of finite sets and is therefore countable. More generally, every finite typed composition/tree/DAG over the countably open Tier-0 law has a finite description and belongs to the same countable structural universe.
 
-Therefore the passage of time does not require Laplace's geometric domain to expand. New knowledge can continue to add canonical structures, occurrences, trajectories, testimony, provenance and higher-order compositions while their geometric realizations remain in the same fixed bounded domain.
+Therefore the passage of time does not require Laplace's geometric domain to expand. New content can continue to add canonical structures, occurrences, trajectories, testimony, provenance and higher-order compositions while their geometric realizations remain in the same fixed bounded domain.
 
-This is the precise sense in which **knowledge from an arbitrarily long past and arbitrarily long future can accumulate in one finite geometric world**, provided `knowledge` means finitely observable/describable structure. A genuinely arbitrary completed infinite object with no finite description is outside the storage claim of every finite machine; it is not required for the Laplace construction.
+This is the precise sense in which **content from an arbitrarily long past and arbitrarily long future can accumulate in one finite geometric world**, provided `content` means finitely observable/describable structure. A genuinely arbitrary completed infinite object with no finite description is outside the storage claim of every finite machine; it is not required for the Laplace construction.
 
-The coordinate is not a container holding all of an object's information, so the construction does not require a unique point for every knowledge object. Multiple structures can share a location while identity, ordered trajectory, composition/DAG structure, relations, evidence and provenance keep them distinct.
+The coordinate is not a container holding all of an object's information, so the construction does not require a unique point for every content object. Multiple structures can share a location while identity, ordered trajectory, composition/DAG structure, relations, evidence and provenance keep them distinct.
 
 ### One bounded geometric world is navigable
 
@@ -91,7 +91,7 @@ concept/entity
   -> next concept/entity
 ```
 
-Distinct knowledge may occupy the same coordinate or region; identity and path structure keep it distinct. Consequently finite geometric extent does not impose one-object-per-point occupancy. The geometry supplies locality and measurable routes through the central knowledge system; the full Laplace object supplies identity, order, semantics, evidence and provenance.
+Distinct content may occupy the same coordinate or region; identity and path structure keep it distinct. Consequently finite geometric extent does not impose one-object-per-point occupancy. The geometry supplies locality and measurable routes through the central content system; the full Laplace object supplies identity, order, semantics, evidence and provenance.
 
 ### Bounded placement
 
@@ -204,9 +204,9 @@ same ordered canonical constituent content
 -> many physicality/trajectory/occurrence references
 ~~~
 
-### Universal tiered composition: structure for all digital knowledge
+### Universal tiered composition: structure for all digital content
 
-Laplace treats syntax and structure as a universal knowledge problem, but its canonical structural form is **entity composition plus typed physicality trajectory**, not a provider-owned AST object model.
+Laplace treats syntax and structure as a universal content problem, but its canonical structural form is **entity composition plus typed physicality trajectory**, not a provider-owned AST object model.
 
 The same law applies across modalities. A lower tier supplies ordered constituents; admitted boundary/composition rules determine higher-tier physicalities; the resulting canonical composition reuses the same global entity wherever it occurs.
 
@@ -225,18 +225,18 @@ UAX #29 is a concrete text instance of this law: code points compose into graphe
 - audio: canonical numbers -> samples -> windows -> segments/tracks;
 - games, tables, models, binaries and other formats use their own admitted composition/role rules over the same canonical machinery.
 
-Sequence is already knowledge. The physicality trajectory preserves exactly which constituents occurred and in what logical order. Grammar productions, precedence, associativity, delimiters, arity, field/role names and similar rules are themselves ordinary entities/relations/attestations. They constrain which higher-tier composition is applicable; they do not require a second semantic universe of parser enums.
+Sequence is already content. The physicality trajectory preserves exactly which constituents occurred and in what logical order. Grammar productions, precedence, associativity, delimiters, arity, field/role names and similar rules are themselves ordinary entities/relations/attestations. They constrain which higher-tier composition is applicable; they do not require a second semantic universe of parser enums.
 
-For example, `[m,u,l,t,i,p,l,i,c,a,t,i,o,n]` is the canonical entity for the observed word "multiplication". A source may attest the claim composition `[multiplication, synonym, *]` in a mathematical/programming context, while other contexts can attest other meanings for `*`. PEMDAS/precedence/associativity knowledge and the observed trajectory determine lawful composition. A parser-specific `MultiplicationOperator` node is therefore optional derived structure, not the meaning itself.
+For example, `[m,u,l,t,i,p,l,i,c,a,t,i,o,n]` is the canonical entity for the observed word "multiplication". A source may attest the claim composition `[multiplication, synonym, *]` in a mathematical/programming context, while other contexts can attest other meanings for `*`. PEMDAS/precedence/associativity content and the observed trajectory determine lawful composition. A parser-specific `MultiplicationOperator` node is therefore optional derived structure, not the meaning itself.
 
 Qualified parsers, standards readers, codecs and decoders remain useful when a physical format requires recovery that cannot be obtained from raw tier segmentation alone. Their output is **provider evidence**, not canonical ontology. Exact fields/spans/errors/ambiguity/reconstruction facts may be retained as occurrences, references, testimony, calculation or packaging state according to the recipe.
 
-Tree-sitter is valuable primarily as a large grammar estate and compatibility parser/validator. Laplace may ingest its grammar productions, queries, precedence/conflict declarations and test corpora as knowledge, and may use Tree-sitter to verify or realize a requested external syntax. It is not required in the hot path merely because a grammar exists. Large shallow XML/CSV/table sources should use streaming standards readers when that preserves the source facts without materializing a redundant CST.
+Tree-sitter is valuable primarily as a large grammar estate and compatibility parser/validator. Laplace may ingest its grammar productions, queries, precedence/conflict declarations and test corpora as content, and may use Tree-sitter to verify or realize a requested external syntax. It is not required in the hot path merely because a grammar exists. Large shallow XML/CSV/table sources should use streaming standards readers when that preserves the source facts without materializing a redundant CST.
 
 AST/CST remains a lawful **projection/export**:
 
 ```text
-canonical entity + trajectory + applicable grammar/role knowledge
+canonical entity + trajectory + applicable grammar/role content
 -> AST / CST / compiler IR / source map / external syntax
 ```
 
@@ -248,11 +248,11 @@ Where a recipe declares exact reconstruction, canonical trajectories plus retain
 
 The canonical composition world is also the construction space for software.
 
-A code-producing operation binds an exact target language/grammar/toolchain generation, couples against known canonical structures and rule knowledge, reuses or minimally mutates existing compositions, then realizes the selected structure into source/AST/IR only as required by the target toolchain.
+A code-producing operation binds an exact target language/grammar/toolchain generation, couples against known canonical structures and rule content, reuses or minimally mutates existing compositions, then realizes the selected structure into source/AST/IR only as required by the target toolchain.
 
 ```text
 requirement / obligation
--> target grammar/toolchain knowledge
+-> target grammar/toolchain content
 -> couple against canonical tier/trajectory structures
 -> reuse / compose / minimally mutate
 -> realize AST/CST/source/IR as required
@@ -261,7 +261,7 @@ requirement / obligation
 -> repair the smallest divergent composition
 ```
 
-This makes syntactically invalid token guessing unnecessary without making AST the substrate ontology. A Bash request is constrained by the admitted Bash grammar/runtime knowledge; a Zsh request requires its own qualified grammar knowledge rather than silently borrowing Bash.
+This makes syntactically invalid token guessing unnecessary without making AST the substrate ontology. A Bash request is constrained by the admitted Bash grammar/runtime content; a Zsh request requires its own qualified grammar content rather than silently borrowing Bash.
 
 Exact duplicate compositions converge by identity. Deeper duplication can be calculated through normalized structural projections, control/data flow, algebraic and behavioral equivalence, trajectory geometry and witnessed outcomes. Compile, link, test, static-analysis, simulation and runtime results become evidence attached to the exact canonical structures/toolchains/environments that produced them.
 
@@ -353,7 +353,7 @@ The 16-bit packed ordinal and run-length fields are carrier fields, not global c
 
 ### Same-space occupancy is intentional
 
-Geometric placement is not a uniqueness allocator. Laplace does not require one empty point for every possible piece of knowledge.
+Geometric placement is not a uniqueness allocator. Laplace does not require one empty point for every possible piece of content.
 
 Two different ordered compositions may share the same centroid/Karcher location because a permutation-invariant center sees the same constituent multiset. For example, the compositions `c,a,t` and `a,c,t` may occupy the same point while remaining different canonical structures:
 
@@ -363,7 +363,7 @@ trajectory(c,a,t) != trajectory(a,c,t)
 coord(c,a,t) may equal coord(a,c,t)
 ```
 
-That is not a collision in the knowledge model. The shared coordinate says something about common constituent locality; the ordered trajectory, content identity, Fréchet curve distance, containment/occurrence structure, relations, witnessing and other typed operators preserve the differences.
+That is not a collision in the content model. The shared coordinate says something about common constituent locality; the ordered trajectory, content identity, Fréchet curve distance, containment/occurrence structure, relations, witnessing and other typed operators preserve the differences.
 
 A dense region can therefore contain many distinct structures and trajectories. Density and convergence are themselves usable substrate state. Coordinate/Hilbert equality may be a candidate/locality signal, never a replacement for canonical identity or ordered structure.
 
@@ -651,13 +651,13 @@ Cache generations record their lower-generation/recipe dependencies. A lower cha
 
 Cache modules may also be selector-scoped while preserving the same canonical members: an ASCII range, an explicit color palette, a generated finite format domain, a speech-oriented frequency/filter-bank band, a hot/admitted set, or the dependency closure of selected higher structures. Several modules can compose into one deployment profile. A subset module never renumbers its members into a new semantic universe.
 
-Cache residency/profile selection is acceleration/deployment state, not knowledge authority. An authorized cache miss falls back to the canonical path when the deployment supports it; a constrained offline deployment reports local capability/cache absence rather than changing identity or pretending the knowledge does not exist.
+Cache residency/profile selection is acceleration/deployment state, not content authority. An authorized cache miss falls back to the canonical path when the deployment supports it; a constrained offline deployment reports local capability/cache absence rather than changing identity or pretending the content does not exist.
 
 Cache-backed database operations should preserve planner/index use by resolving request-side ids/coordinates/Hilbert/ranges before indexed probes instead of wrapping indexed columns in per-row functions.
 
 ## 11. Ingestion is the learning process
 
-Laplace does not require an offline gradient-training cycle to admit new knowledge.
+Laplace does not require an offline gradient-training cycle to admit new content.
 
 The conceptual mapping is:
 
@@ -667,7 +667,7 @@ The conceptual mapping is:
 | learned parameters | explicit reusable identities + witnessed standing |
 | checkpoint | live substrate plus reproducible derived accelerators |
 | fine-tuning | additional scoped evidence/providers |
-| knowledge cutoff | last admitted observation, per source/world |
+| content cutoff | last admitted observation, per source/world |
 | catastrophic forgetting | old evidence remains addressable rather than being overwritten by parameter updates |
 | alignment/policy | explicit source/program/resource law |
 
@@ -679,7 +679,7 @@ A source adapter's job is to recover its source faithfully and map fields into d
 
 ## 12. No architectural fixed context window
 
-Prompt/session history is content and occurrence state inside the same substrate. There is no requirement that knowledge older than a fixed transformer context window become unreachable merely because it fell out of a token buffer.
+Prompt/session history is content and occurrence state inside the same substrate. There is no requirement that content older than a fixed transformer context window become unreachable merely because it fell out of a token buffer.
 
 That does **not** mean every request scans unlimited history. Retrieval and cognition still run under explicit world/time/provider/hop/fanout/resource boundaries. The distinction is that those are execution policies over addressable state, not a hard maximum sequence length baked into a model's parameter architecture.
 
@@ -721,7 +721,7 @@ Seeded corpora and checkpoints are admitted testimony. Unicode T0, WordNet, UD, 
 
 User content is different. A conversation, an upload, a document the operator asked Laplace to keep may require exact realization (the Moby-class roundtrip). That is seeded-vs-user export law: source bytes you must be able to hand back vs world-state you can only snapshot.
 
-Export is therefore a filtered snapshot of current standing, geometry, and selected operators — “I know kung fu,” not `cp model.gguf`. A recipe names which planes (relation, angular, Fréchet, Hausdorff, trajectory, coord) fill which heads. No GPU is required for the native relations: a packed trajectory already is contains (child id in the LINESTRING), co-occurrence (same parent / overlapping runs), and precedes (ordinal). Metric heads compare realized curves in the same finite S³/ball; knowledge can occupy the same region and remain distinct by those typed distances.
+Export is therefore a filtered snapshot of current standing, geometry, and selected operators — “I know kung fu,” not `cp model.gguf`. A recipe names which planes (relation, angular, Fréchet, Hausdorff, trajectory, coord) fill which heads. No GPU is required for the native relations: a packed trajectory already is contains (child id in the LINESTRING), co-occurrence (same parent / overlapping runs), and precedes (ordinal). Metric heads compare realized curves in the same finite S³/ball; content can occupy the same region and remain distinct by those typed distances.
 
 Any exported artifact must retain a reproducible recipe/scope and must not silently copy unknown witness weights simply because the target format expects a tensor. Behavioral validation of exported models is separate from proof of the native substrate architecture.
 
@@ -757,9 +757,9 @@ Mutable database/config/secret/external-system transitions remain explicit oblig
 
 Development itself becomes a witnessed trajectory across roots and failures. A successful repair can subsequently couple against other authorized repositories to find exact duplicates, structurally/algebraically similar implementations, or similarly shaped failure trajectories. Fréchet may compare ordered trajectories where appropriate, alongside structural-projection/dependency/call/control-flow/evidence planes.
 
-## 16. One knowledge world, variable compute
+## 16. One content world, variable compute
 
-Product tiers should not be implemented as progressively knowledge-reduced Laplace variants.
+Product tiers should not be implemented as progressively content-reduced Laplace variants.
 
 Every entitled request addresses the same admitted world. Cost/latency differences are expressed through explicit execution envelopes such as:
 
@@ -779,29 +779,29 @@ Where work is billable, the same physical plan that governs execution should sup
 
 ---
 
-### Knowledge authority, packages and effective scope
+### Content authority, packages and effective scope
 
-One knowledge world does not mean every principal has authority to use every part of it.
+One content world does not mean every principal has authority to use every part of it.
 
-Knowledge, authority and compute are independent axes:
+Content, authority and compute are independent axes:
 
 ```text
-knowledge  = what canonical/witnessed/calculated state exists
+content  = what canonical/witnessed/calculated state exists
 authority  = what this principal may discover/couple/traverse/derive/realize/export/execute
 compute    = how much work this operation may spend over the allowed world
 ```
 
-Knowledge packages are content-addressed authority manifests over the shared world, not separately trained or duplicated smaller models. A school grade, Formula 1 corpus, enterprise private domain, personal history or temporary task scope can be granted through explicit package/authority relations.
+Content packages are content-addressed authority manifests over the shared world, not separately trained or duplicated smaller models. A school grade, Formula 1 corpus, enterprise private domain, personal history or temporary task scope can be granted through explicit package/authority relations.
 
 Grant inheritance follows declared authority/package relations, not arbitrary semantic connectivity. Capabilities such as DISCOVER, INSPECT, SEARCH, COUPLE, TRAVERSE, DERIVE, REALIZE, PERSIST, EXPORT, EXECUTE and DELEGATE remain separately governable.
 
-The effective operation scope is the intersection of tenant/world isolation, principal/role/relationship grants, knowledge entitlements, active caller scope and kernel governance.
+The effective operation scope is the intersection of tenant/world isolation, principal/role/relationship grants, content entitlements, active caller scope and kernel governance.
 
 ### Governance and honest abstention
 
-Governance is not deletion of knowledge. A fact may remain known, including sourced evidence that a capability is dangerous/restricted, while the current principal lacks authority to couple, derive, realize, export or execute it.
+Governance is not deletion of content. A fact may remain known, including sourced evidence that a capability is dangerous/restricted, while the current principal lacks authority to couple, derive, realize, export or execute it.
 
-This permits explicit receipted dispositions such as allow, deny, abstain or require stronger authority. Even revealing that restricted knowledge exists may itself require DISCOVER.
+This permits explicit receipted dispositions such as allow, deny, abstain or require stronger authority. Even revealing that restricted content exists may itself require DISCOVER.
 
 Standing and permission are distinct. Consensus estimates support/uncertainty for propositions; authority decides whether an operation is allowed. A permission decision is not a popularity vote and must not be smuggled into canonical identity.
 

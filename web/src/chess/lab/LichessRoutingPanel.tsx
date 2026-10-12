@@ -5,16 +5,16 @@ import styles from './LichessPanel.module.css';
 
 interface Profile {
   id: string; label: string; environment: string; implementation: string;
-  knowledge: string; maxConcurrent: number; rated: boolean;
+  database: string; maxConcurrent: number; rated: boolean;
 }
-interface KnowledgeTarget { id: string; label: string; identity: { cluster: string; database: string } }
-interface Executor extends Omit<Profile, 'knowledge'> { sources: { id: string; recordingTargets: string[] }[] }
+interface DatabaseTarget { id: string; label: string; identity: { cluster: string; database: string } }
+interface Executor extends Omit<Profile, 'database'> { sources: { id: string; recordingTargets: string[] }[] }
 interface Selection { profile: string | null; revision: number; changedUtc: string; readSource?: string; recordingTarget?: string }
 interface Control {
   controller: string; phase: string; activeProfile: string | null; error?: string;
   selection: Selection;
   activeSelection?: Selection;
-  routing?: { executors: Executor[]; sources: KnowledgeTarget[]; recordingTargets: KnowledgeTarget[] };
+  routing?: { executors: Executor[]; sources: DatabaseTarget[]; recordingTargets: DatabaseTarget[] };
   profiles: Profile[];
   bot?: { connected: boolean; username?: string; gamesRecorded: number; error?: string; recentLog: string[] };
 }
@@ -60,7 +60,7 @@ export function LichessRoutingPanel() {
     finally { setBusy(false); }
   };
   return <Panel className={styles.panel} title="Lichess routing">
-    <p className={styles.intro}>Choose execution, knowledge and recording for the shared bot account. Existing games finish with their current settings before a change takes effect.</p>
+    <p className={styles.intro}>Choose execution, database and recording for the shared bot account. Existing games finish with their current settings before a change takes effect.</p>
     {error && <Alert>{error}</Alert>}
     {connectionError && <Alert>{connectionError}</Alert>}
     {view?.error && <Alert>{view.error}</Alert>}
@@ -72,8 +72,8 @@ export function LichessRoutingPanel() {
         </Select>
       </Field>
       {routing && selected && <>
-        <Field label="Knowledge read source">
-          <Select value={readSource} aria-label="Knowledge read source" disabled={!view?.canControl || busy}
+        <Field label="Database read source">
+          <Select value={readSource} aria-label="Database read source" disabled={!view?.canControl || busy}
             onChange={e => choose(selected, e.target.value, recordingTarget)}>
             <option value="">Select a read source</option>
             {routing.sources.filter(s => executor?.sources.some(r => r.id === s.id)).map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
@@ -88,7 +88,7 @@ export function LichessRoutingPanel() {
         </Field>
         {!valid && <Muted>Select an installed read source and authorized recording destination for this execution location.</Muted>}
       </>}
-      {profile && <p>{'knowledge' in profile && <>Knowledge: <strong>{profile.knowledge}</strong>. </>}Up to {profile.maxConcurrent} games; {profile.rated ? 'rated and casual' : 'casual only'}.</p>}
+      {profile && <p>{'database' in profile && <>Database: <strong>{profile.database}</strong>. </>}Up to {profile.maxConcurrent} games; {profile.rated ? 'rated and casual' : 'casual only'}.</p>}
       <Button onClick={() => void apply()} disabled={!view?.canControl || busy || !valid}>{busy ? 'Saving…' : 'Apply routing'}</Button>
       {!view?.canControl && <Muted>Your signed-in account can view this configuration but does not have permission to change the bot destination.</Muted>}
       <p>Controller: {control.controller}. State: <strong>{control.phase}</strong>. Active: {profiles.find(p => p.id === control.activeProfile)?.label ?? 'none'}.</p>

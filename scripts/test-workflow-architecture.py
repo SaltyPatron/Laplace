@@ -22,15 +22,15 @@ class WorkflowArchitecture(unittest.TestCase):
         maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         delivery = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         deploy = maintenance.split("\n  deploy:\n", 1)[1].split("\n  verify:\n", 1)[0]
-        self.assertIn("inputs.target != 'knowledge'", deploy)
+        self.assertIn("inputs.target != 'cloud'", deploy)
         self.assertIn("promote: ${{ inputs.target == 'production' }}", deploy)
-        start_cloud = delivery.split("\n  knowledge-host:\n", 1)[1].split("\n  production-build:\n", 1)[0]
+        start_cloud = delivery.split("\n  cloud-host:\n", 1)[1].split("\n  production-build:\n", 1)[0]
         self.assertIn("needs.deliver.result == 'success' && inputs.qualify_cloud == true", start_cloud)
         self.assertNotIn("github.event_name == 'push' || inputs.promote", start_cloud)
         production = delivery.split("\n  production:\n", 1)[1]
         self.assertIn("needs: deliver", production)
         self.assertNotIn("needs: production-build", production)
-        staging = delivery.split("\n  knowledge-host:\n", 1)[0]
+        staging = delivery.split("\n  cloud-host:\n", 1)[0]
         self.assertIn("run: deploy/linux/site.sh bundle", staging)
         self.assertIn("qualify_cloud: true", maintenance)
         self.assertIn("promote:\n", delivery)
@@ -65,7 +65,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "runner-environment.yml": "name: Host — runner environment",
             "seed.yml": "name: Internal — substrate ingest",
             "seed-foundation.yml": "name: Data — foundation ingest",
-            "seed-knowledge.yml": "name: Data — knowledge ingest",
+            "seed-relations.yml": "name: Data — relations ingest",
             "seed-documents.yml": "name: Data — documents ingest",
             "seed-code.yml": "name: Data — code ingest",
             "seed-chess.yml": "name: Data — chess ingest",
@@ -471,7 +471,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "Audit — full product qualification",
             "Database — maintenance",
             "Data — foundation ingest",
-            "Data — knowledge ingest",
+            "Data — content ingest",
             "Data — documents ingest",
             "Data — code ingest",
             "Data — chess ingest",

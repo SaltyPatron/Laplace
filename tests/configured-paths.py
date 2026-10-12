@@ -54,10 +54,10 @@ class ConfiguredPaths(unittest.TestCase):
         self.assertNotEqual(*results)
 
     def test_database_does_not_require_build_or_work(self):
-        self.config.write_text('LAPLACE_PG_DIR=/usr/local/pgsql\nLAPLACE_ROLE=declared_owner\nLAPLACE_DBNAME=selected_knowledge\n')
+        self.config.write_text('LAPLACE_PG_DIR=/usr/local/pgsql\nLAPLACE_ROLE=declared_owner\nLAPLACE_DBNAME=selected_content\n')
         values = machine.database(self.config, self.env)
         self.assertEqual(values['PGUSER'], 'declared_owner')
-        self.assertEqual(values['PGDATABASE'], 'selected_knowledge')
+        self.assertEqual(values['PGDATABASE'], 'selected_content')
         paths = machine.paths(self.config, self.env, ROOT)
         self.assertNotIn('LAPLACE_BUILD', paths)
         self.assertNotIn('LAPLACE_WORK', paths)
@@ -89,6 +89,27 @@ class ConfiguredPaths(unittest.TestCase):
         values = machine.database(self.config, self.env)
         self.assertIn('SSL Mode="verifyfull"', values['LAPLACE_DB'])
         self.assertIn('Root Certificate="/trust/ca.pem"', values['LAPLACE_DB'])
+
+    def test_legacy_database_route_preserves_restricted_identity(self):
+        self.config.write_text('LAPLACE_ROLE=migration_owner\nLAPLACE_KNOWLEDGE_ROLE=runtime\n'
+                               'LAPLACE_KNOWLEDGE_RUNTIME_DB="Host=hart-server;Username=runtime;Database=selected"\n')
+        values = machine.database(self.config, self.env)
+        self.assertEqual(values['PGUSER'], 'runtime')
+        self.assertEqual(values['LAPLACE_DATABASE_RUNTIME_DB'], 'Host=hart-server;Username=runtime;Database=selected')
+        self.assertNotIn('LAPLACE_KNOWLEDGE_RUNTIME_DB', values)
+        self.env['LAPLACE_DATABASE_ROLE'] = 'process_runtime'
+        self.assertEqual(machine.database(self.config, self.env)['PGUSER'], 'process_runtime')
+        self.env.pop('LAPLACE_DATABASE_ROLE')
+        self.env['LAPLACE_KNOWLEDGE_ROLE'] = 'legacy_process_runtime'
+        self.assertEqual(machine.database(self.config, self.env)['PGUSER'], 'legacy_process_runtime')
+
+    def test_conflicting_database_aliases_fail_without_exposing_values(self):
+        self.config.write_text('LAPLACE_KNOWLEDGE_RUNTIME_DB=old_secret\nLAPLACE_DATABASE_RUNTIME_DB=new_secret\n')
+        with self.assertRaisesRegex(ValueError, '^Conflicting configuration aliases for: LAPLACE_DATABASE_RUNTIME_DB$'):
+            machine.resolve(self.config, self.env)
+        self.env.update(LAPLACE_KNOWLEDGE_ROLE='old', LAPLACE_DATABASE_ROLE='new')
+        with self.assertRaisesRegex(ValueError, 'Conflicting configuration keys:'):
+            machine.database(self.config, self.env)
 
     def test_no_machine_file_shell_execution(self):
         self.config.write_text('LAPLACE_BUILD="$(touch /not-a-command)"\nLAPLACE_WORK="/work"\n')

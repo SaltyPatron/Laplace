@@ -101,7 +101,7 @@ M2. ALL HEADS SHARE ONE SUBSPACE; RELATIONS RE-MASH IN THE RESIDUAL STREAM.
     FoundryExport.cs:1448 and :1669 via DynInterop.GramSchmidtOrthonormalize. Whether
     the resulting per-head allocation fully cures M2 is a separate question; "never
     implemented" is false.]
-    The knowledge-graph literature learned this lesson a decade ago: a
+    The content-graph literature learned this lesson a decade ago: a
     multi-relational graph is a 3-TENSOR (subject, relation, object); collapsing
     relation slices into one matrix loses the relational structure (RESCAL,
     Nickel 2011), and every serious multi-relational GNN keeps RELATION-SPECIFIC
@@ -421,8 +421,8 @@ DEPTH-4 CONTROLLED COMPARISON (same recipe, one variable — the day's second
   Harness decode = greedy + repeat-penalty 1.4 (deterministic, loop-suppressed;
   hub detector still armed).
 PHASE R RESOLVED (verdict + numbers in doc 18 §6 C-5): rank ablation = perfect
-  double dissociation (next-word: manifest 0.000 vs eff_mu 0.889; knowledge:
-  manifest 0.556 vs eff_mu 0.056). Ranks = knowledge-intent prior; defect =
+  double dissociation (next-word: manifest 0.000 vs eff_mu 0.889; content:
+  manifest 0.556 vs eff_mu 0.056). Ranks = content-intent prior; defect =
   universal application. Fix = intent-conditional band weighting (15 C-b);
   export-side salience scaling now exempts continuation operators.
 PHASE 8 VERIFIED (differential gate PASSED): --scope-source WordNetDecomposer →
@@ -531,8 +531,8 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
     the division crushing glue in the glue-saturated slot, as the theorem
     predicts). Floor-only likelihood: mean rank 1674/7134, hits@50 0.448,
     mrr 0.054 — and the miss tail is LEGITIMATE (expected sets mix bigram
-    continuations with knowledge objects; a bigram floor SHOULD rank 'cart'
-    low after 'dog' — lifting knowledge objects is the LAYERS' job).
+    continuations with content objects; a bigram floor SHOULD rank 'cart'
+    low after 'dog' — lifting content objects is the LAYERS' job).
   THE NEXT NAMED PROBLEM (measured): the correction layers DESTROY the floor —
   Spearman(layer-0, full-forward) = 0.08–0.24. MaxEnt discipline violated:
   corrections must PERTURB the calibrated floor, not overwhelm it. Full-forward
@@ -694,7 +694,7 @@ What WORKS, measured (the competence layer is real):
   recall('hello')              151ms  "an expression of greeting" — DEFINES the
                                       greeting instead of PERFORMING one
   recall('how are you?')       252ms  frame chain (how → Means frame + gloss) —
-                                      knowledge ABOUT the utterance, no response act
+                                      content ABOUT the utterance, no response act
   recall('translate water to japanese')  68.6s → root-caused (below); answer
                                       itself CORRECT: 水 (12 witnesses), お水,
                                       polysemy trail (尿/おしっこ = pass-water
@@ -723,11 +723,11 @@ THE 68s TRANSLATE ROOT CAUSE (Issue 47, fixed in source, 65,311ms → 349ms):
   Function Scans — senses() alone is a 213ms black box the planner cannot see
   through. Rule #1 cure: native SPI *_fast for the translate/senses chain.
 CONVERSATIONAL VERDICT (empirical form of §3): the substrate answered every
-  KNOWLEDGE question about language in sub-second time, including cross-language
+  CONTENT question about language in sub-second time, including cross-language
   identity — and responded to a greeting with its dictionary entry. Competence
   layer: present, grounded, fast (post-47). Performance layer (utterance-act →
   response-act pairs, discourse state, realization beyond templates): not
   attested by any ingested source and not queried by any operator. Chat is not
-  blocked by missing knowledge; it is blocked by the missing TIER-3 DIALOGUE
+  blocked by missing content; it is blocked by the missing TIER-3 DIALOGUE
   OPERATOR (P6) + the generation lane's perf (Issue 49 → GH #409) + sequencing (P7).
 ================================================================================

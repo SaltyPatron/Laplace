@@ -13,15 +13,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
-  windows-runtime-access:
-    name: Windows runtime consumer permissions
+  windows-native-package:
+    name: Windows native package integrity
     runs-on: windows-2025
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Check out exact revision
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Reject stale native SQL before packaging
+        shell: pwsh
+        run: ./tests/windows-native-package.ps1
       - name: Exercise publication permissions on NTFS
         shell: pwsh
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP

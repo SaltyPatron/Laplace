@@ -129,7 +129,7 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     {accountRead.data?.configuration?.stripeMode === 'live' && !accountRead.data.configuration.commercialCatalogApproved && <Banner>
       <strong>Live checkout is intentionally disabled.</strong> The operator must approve the measured commercial catalog before Laplace can accept real payments; development and existing account access remain available.
     </Banner>}
-    <p className={styles.principle}>Every plan addresses the same witnessed Laplace knowledge world. Plans may change declared service allowances, execution depth and breadth, concurrency, and support—not what Laplace is permitted to know.</p>
+    <p className={styles.principle}>Every plan addresses the same witnessed Laplace content world. Plans may change declared service allowances, execution depth and breadth, concurrency, and support—not what Laplace is permitted to know.</p>
     {signedIn && <section className={styles.current} aria-labelledby="current-subscription">
       <div className={styles.sectionHead}>
         <h2 id="current-subscription">Current subscription</h2>

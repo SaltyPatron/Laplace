@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%\app"
 
-set "KNOWLEDGE=wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary"
+set "RELATIONS=wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary"
 
 echo ==== seed-continue: inspect layer completion (batched) ====
 for /f "usebackq delims=" %%c in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0seed-layer-check-batch.ps1"`) do set "%%c"
@@ -21,9 +21,9 @@ if exist "!INGEST!\test-data\text" (
   call "%~dp0seed-stage.cmd" document || exit /b 1
 )
 
-for %%s in (%KNOWLEDGE%) do (
+for %%s in (%RELATIONS%) do (
   if not "!STAT_%%s!"=="t" (
-    echo ==== resume knowledge: %%s ====
+    echo ==== resume relations: %%s ====
     call "%~dp0seed-step.cmd" %%s || exit /b 1
   ) else (
     echo ==== [ok] %%s layer_complete ====

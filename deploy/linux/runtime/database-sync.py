@@ -20,7 +20,7 @@ import urllib.request
 def atomic(path, text, mode, uid, gid):
     if path.is_symlink():
         raise ValueError("Refusing to replace a symbolic-link configuration file")
-    fd, temporary = tempfile.mkstemp(prefix=".knowledge-", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix=".substrate-", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as output:
             output.write(text)
@@ -79,7 +79,7 @@ def activate(user, prefix, base):
             env[key] = parsed[0] if parsed else ''
     result = subprocess.run(["runuser", "-u", user, "--", "python3", str(verifier),
         "--base", base, "--timeout-seconds", "10", "--state-file",
-        str(logs / "knowledge-selection-verification.json")],
+        str(logs / "substrate-selection-verification.json")],
         capture_output=True, text=True, timeout=60, env=env)
     if result.returncode:
         if os.environ.get('LAPLACE_INSTALL_CAPTURE_DIAGNOSTICS') == '1':
@@ -89,11 +89,11 @@ def activate(user, prefix, base):
             journal = subprocess.run(['journalctl', '-u', 'laplace-api', '--since', started,
                 '--no-pager', '-o', 'cat', '-n', '100'], text=True, capture_output=True, timeout=10)
             print(journal.stdout, file=sys.stderr)
-        raise ValueError("Selected knowledge failed installed application verification; configuration will be restored")
+        raise ValueError("Selected substrate failed installed application verification; configuration will be restored")
 
 
-def validate_knowledge_receipt(prefix, candidate_receipt):
-    """Knowledge contents may differ; the loaded Tier-0 coordinate contract may not."""
+def validate_substrate_receipt(prefix, candidate_receipt):
+    """Substrate contents may differ; the loaded Tier-0 coordinate contract may not."""
     selected = None
     for line in (prefix / "app/laplace-api.env").read_text().splitlines():
         key, sep, value = line.partition("=")
@@ -101,14 +101,14 @@ def validate_knowledge_receipt(prefix, candidate_receipt):
             value = value.strip()
             selected = shlex.split(value)[0] if value.startswith(('"', "'")) else value
     if not selected or not Path(selected).is_absolute():
-        raise ValueError("The installed API must declare its Tier-0 artifact before knowledge selection")
+        raise ValueError("The installed API must declare its Tier-0 artifact before substrate selection")
     with Path(selected).open("rb") as stream:
         if stream.read(8) != struct.pack("<II", 0x4652504C, 4):
             raise ValueError("Unsupported installed Tier-0 format")
         stream.seek(-16, os.SEEK_END)
         installed_receipt = stream.read(16).hex()
     if installed_receipt != candidate_receipt or installed_receipt == "0" * 32:
-        raise ValueError("Selected knowledge is incompatible with the installed Tier-0 artifact")
+        raise ValueError("Selected substrate is incompatible with the installed Tier-0 artifact")
     return installed_receipt
 
 
@@ -122,7 +122,7 @@ def main():
     parser.add_argument("--lock", type=Path, default=Path("/run/lock/laplace/host-resource.lock"))
     parser.add_argument("--bao-address", required=True)
     parser.add_argument("--root-certificate", type=Path, help="Verify both declared database endpoints against this installation's CA")
-    parser.add_argument("--select", action="store_true", help="Select the credential's knowledge target and restart the API")
+    parser.add_argument("--select", action="store_true", help="Select the credential's substrate target and restart the API")
     parser.add_argument("--application-record", help="Additional host KV record for the API's restricted application login")
     parser.add_argument("--restart-on-change", action="store_true", help="Reload pools after verified credentials change")
     parser.add_argument("--verification-base", help="Required with --select: the installed API URL to verify after activation")
@@ -154,13 +154,13 @@ def main():
 
     try:
         token = request("auth/approle/login", json.loads(args.credentials.read_text()))["auth"]["client_token"]
-        record = request("kv/data/hosts/" + args.host + "/knowledge")["data"]["data"]
+        record = request("kv/data/hosts/" + args.host + "/substrate")["data"]["data"]
         host, database, role = (record[name] for name in ("database_host", "database", "role"))
         if not all(isinstance(v, str) and re.fullmatch(r"[a-zA-Z0-9._-]+", v) for v in (host, database, role)):
-            raise ValueError("Invalid knowledge selection")
+            raise ValueError("Invalid substrate selection")
         port = int(record["port"])
         if not 1 <= port <= 65535 or not re.fullmatch(r"[0-9a-f]{64}", record["password"]):
-            raise ValueError("Invalid knowledge credential")
+            raise ValueError("Invalid substrate credential")
         account = pwd.getpwnam(args.user)
         pgpass = Path(account.pw_dir) / ".pgpass"
         env = dict(os.environ, PGPASSWORD=record["password"], PGSSLMODE="require", PGCONNECT_TIMEOUT="10")
@@ -172,11 +172,11 @@ def main():
             "-Atqc", "SELECT current_user, encode(laplace.perfcache_receipt(), 'hex')"], env=env,
             text=True, capture_output=True, timeout=20)
         if check.returncode or not check.stdout.startswith(role + "|"):
-            raise ValueError("Knowledge database authentication/native receipt check failed: " + check.stderr.strip())
+            raise ValueError("Substrate database authentication/native receipt check failed: " + check.stderr.strip())
         if args.select and (not args.machine_file.is_file() or not (args.prefix / "app/laplace-api.env").is_file()):
             raise ValueError("Existing machine declaration and application environment are required")
         if args.select:
-            validate_knowledge_receipt(args.prefix, check.stdout.strip().split("|", 1)[1])
+            validate_substrate_receipt(args.prefix, check.stdout.strip().split("|", 1)[1])
         prefix = f"{host}:{port}:{database}:{role}:"
         previous = pgpass.read_text().splitlines() if pgpass.exists() else []
         lines = [line for line in previous if not line.startswith(prefix)]
@@ -205,14 +205,14 @@ def main():
             atomic(pgpass, "\n".join(lines) + "\n", 0o600, account.pw_uid, account.pw_gid)
             if args.select:
                 assignments(args.machine_file, {"LAPLACE_PGHOST": host, "LAPLACE_PGPORT": port,
-                    "LAPLACE_DBNAME": database, "LAPLACE_KNOWLEDGE_ROLE": role, "LAPLACE_DB_SSLMODE": "Require",
+                    "LAPLACE_DBNAME": database, "LAPLACE_DATABASE_ROLE": role, "LAPLACE_DB_SSLMODE": "Require",
                     "LAPLACE_CONNINFO": f"host={host} port={port} user={role} dbname={database} sslmode=require"})
                 assignments(args.prefix / "app/laplace-api.env", {"LAPLACE_DB":
                     f"Host={host};Port={port};Username={role};Database={database};SSL Mode=Require"})
                 activate(args.user, args.prefix, args.verification_base)
             elif args.restart_on_change and changed:
                 activate(args.user, args.prefix, args.verification_base)
-        print(json.dumps({"host": args.host, "knowledge_host": host, "database": database, "role": role,
+        print(json.dumps({"host": args.host, "substrate_host": host, "database": database, "role": role,
             "authenticated": True, "native_receipt": check.stdout.strip().split("|", 1)[1],
             "selection_updated": args.select, "credentials_changed": changed,
             "application_credential": bool(args.application_record)}))

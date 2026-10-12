@@ -10,7 +10,7 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 4. **Open Tier-0 address law; finite observed generations.** Tier-0 ranks are not bounded by Unicode or a terminal population `N`; the abstract law admits `n ∈ N`. Any concrete perfcache/database/observation is finite. Unicode's 1,114,112 positions are one selected finite standards window, not Tier-0 capacity.
 5. **Countably unbounded finite composition family.** A finite or countable observed/admitted basis can form countably unbounded finite recursive compositions; finite trees/DAGs over a countable basis remain countable.
 6. **Bounded recursive placement.** Under the native centroid law, children in a closed bounded ball produce a parent in that same ball; induction keeps every finite recursive composition inside the fixed domain.
-7. **Navigable bounded knowledge world.** The finite geometric extent is traversable through typed locality/geometry/trajectory and semantic/evidence planes; concept-to-concept movement is not reduced to one scalar distance, and multiple distinct structures may occupy the same coordinate/region.
+7. **Navigable bounded content world.** The finite geometric extent is traversable through typed locality/geometry/trajectory and semantic/evidence planes; concept-to-concept movement is not reduced to one scalar distance, and multiple distinct structures may occupy the same coordinate/region.
 8. **Convex realized-path closure.** A realized trajectory resolves child physicality coordinates; line segments between points inside a convex ball also remain inside it.
 9. **Radix- and dimension-independent construction law.** The recursive/countability and convex-closure arguments do not depend on binary notation or exactly four dimensions. Radix, dimension and numeric format are executable representation choices.
 10. **S³ Super-Fibonacci atom placement.** The text/primitive generation uses deterministic, near-uniform placements on the unit 3-sphere as the boundary of the current 4D frame.
@@ -38,7 +38,7 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 29. **Trust-class lattice.** Curated sources, tools, conventional models, responses and feedback have declared source semantics rather than one untyped global weight.
 30. **Dependence-aware evidence.** Multiple paths/witnesses are useful only to the degree their evidence roots are actually independent; provenance remains available to prevent duplicate dependence from masquerading as independent confirmation.
 
-## Ingestion and the knowledge mesh
+## Ingestion and the content mesh
 
 31. **One ordered ingest spine.** Enumerate/unpack, stream, decompose, deduplicate, accumulate, persist and fold under one deterministic protocol rather than source-private execution engines.
 32. **Pure omni-modal decomposers.** Source adapters recover source structure and emit the common substrate change algebra; they do not own private identity, SQL-write or consensus laws.
@@ -89,12 +89,12 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 65. **Typed channels remain typed.** Structure, role compatibility, relation identity, ordinal/gap state, evidence, contradiction, standing, source dependence, geometry and provenance are not prematurely collapsed into one universal relevance score.
 66. **Policy normally follows interpretation.** Caller-supplied relation/provider masks are valid explicit constraints, but a convenience mask must not masquerade as cognition when Laplace is supposed to infer what the observation means.
 67. **Sparse star expansion.** Once oriented, cognition expands indexed responders around the current root/frontier rather than performing an all-world comparison.
-68. **Hops and fanout as compute coordinates.** Search depth, branch/frontier width, source/operator scope and other explicit budgets govern how much of the same knowledge world one request activates.
+68. **Hops and fanout as compute coordinates.** Search depth, branch/frontier width, source/operator scope and other explicit budgets govern how much of the same content world one request activates.
 69. **A*/Dijkstra/walk/trajectory/geometry as operators, not cognition itself.** Search algorithms execute within the selected program; none alone defines interpretation or intelligence.
 70. **Dynamic-frontier autoregression.** Every selected/emitted constituent changes the active trajectory, bindings and obligations, causing the next response field/frontier to be recomputed.
 71. **Functional Q/K/V/O reconstruction without transformer math.** Active observation/bindings/obligations play the Q role; indexed typed addresses play K; coupling is QK-like relevance; responding facts/evidence/calculations play V; the receipted fold into updated state plays O.
 72. **Named channel/head analogues.** Relation/provider/tier/context/operator planes remain explicit rather than anonymous latent attention heads.
-73. **No fixed context-window ontology.** Historical discourse remains addressable content/occurrence state; per-request resource boundaries limit execution without making older knowledge structurally unreachable.
+73. **No fixed context-window ontology.** Historical discourse remains addressable content/occurrence state; per-request resource boundaries limit execution without making older content structurally unreachable.
 
 ## Conversation, operations and serving
 
@@ -121,7 +121,7 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 
 ## Resource, billing and capacity laws
 
-91. **One knowledge world, variable compute.** Product tiers change the execution envelope, not the amount of world knowledge Laplace is allowed to know.
+91. **One content world, variable compute.** Product tiers change the execution envelope, not the amount of world content Laplace is allowed to know.
 92. **Preflight from the real physical plan.** `EXPLAIN`/planner state can estimate hops, fanout, rows/cells, operators, provider work, I/O and other billable dimensions before expensive execution.
 93. **Reserve, enforce, receipt, reconcile.** Compute credits can be reserved against an admitted upper bound, enforced during execution, measured from actual work and reconciled/refunded afterward.
 94. **Adaptive early completion.** If convergence/uncertainty/obligation state is already sufficient, execution may stop before consuming the full envelope and return unused reserved capacity.
@@ -142,21 +142,21 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 106. **Falsifiable operator-generation law.** Sparse intersections/dot products, incidence/transport, Laplacian/spectral methods, Lanczos, QR/Gram-Schmidt, SVD, Procrustes, geometric metrics, Glicko-2, A*/best-first and other mathematics apply only through contracts naming input state, assumptions, scope/evidence roots, direction/roles, numeric boundary, resources, output, loss/approximation, provenance and counterexamples.
 107. **Theorem / implementation / witness / benchmark separation.** Mathematical closure is proved mathematically; executable serialization and reconstruction are tested; finite windows may be exhaustively checked; live databases supply implementation witnesses; performance claims require exact receipts. None is silently substituted for another.
 
-108. **Knowledge authority as a separate axis.** What exists in the shared world, what a principal may use, and how much compute one operation may spend are independent state.
-109. **Knowledge packages as authority manifests.** Curriculum, licensed domains, enterprise/private corpora and personal scopes grant governed access/capabilities over shared canonical knowledge rather than minting smaller trained models.
+108. **Content authority as a separate axis.** What exists in the shared world, what a principal may use, and how much compute one operation may spend are independent state.
+109. **Content packages as authority manifests.** Curriculum, licensed domains, enterprise/private corpora and personal scopes grant governed access/capabilities over shared canonical content rather than minting smaller trained models.
 110. **Capability-scoped cognition.** DISCOVER/INSPECT/SEARCH/COUPLE/TRAVERSE/DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE may be granted independently over an explicit scope.
-111. **Governance without epistemic erasure.** Restricted or dangerous knowledge remains attributable knowledge; governance decides permitted operations and can produce explicit receipted abstention instead of pretending the fact is unknown.
+111. **Governance without epistemic erasure.** Restricted or dangerous content remains attributable content; governance decides permitted operations and can produce explicit receipted abstention instead of pretending the fact is unknown.
 112. **Adversary/defender/judge as one authority algebra.** Red Spear probes boundaries, Blue Shield enforces them, and White Judge adjudicates declared authority/policy/evidence without introducing a hidden judge model.
-113. **Grammar-constrained software construction.** Program generation operates over exact admitted target grammar knowledge plus canonical tier/trajectory structure and type/API/dependency obligations; AST/CST/source are projections or realizations for consumers/toolchains, not the canonical ontology.
+113. **Grammar-constrained software construction.** Program generation operates over exact admitted target grammar content plus canonical tier/trajectory structure and type/API/dependency obligations; AST/CST/source are projections or realizations for consumers/toolchains, not the canonical ontology.
 114. **Generation-by-reuse before novelty.** Construction first reuses exact canonical tier/trajectory code structure, then composes known structures, then minimally adapts close structures, and only then creates genuinely novel structure; AST/CST may be projected where required.
 115. **Duplicate implementation convergence.** Exact canonical tier/trajectory duplicates converge by identity; derived AST/CST shape, control/data flow, algebraic form and behavioral evidence can expose deeper redundant implementations for consolidation.
-116. **Witnessed repair trajectory.** Compiler/linker/test/analyzer/simulator/runtime failures and successful fixes remain ordered evidence attached to exact code/toolchain/environment identities; failed attempts are reusable negative knowledge.
+116. **Witnessed repair trajectory.** Compiler/linker/test/analyzer/simulator/runtime failures and successful fixes remain ordered evidence attached to exact code/toolchain/environment identities; failed attempts are reusable negative content.
 117. **Cross-repository analogical maintenance.** A repair can couple against other authorized repositories through exact identity, tier/trajectory structure, derived AST/dependency/control-flow shape, trajectory/Fréchet geometry, diagnostics and evidence to surface similar latent problems.
 118. **Repository root as complete application state.** A bounded code change remints only changed structure and ancestry while the rest of the application root is structurally shared; a checkout is a realization of that root.
 119. **Root-transition patch/deployment.** A patch may be represented as R0 → R1 plus missing closure and derivation/verification receipts, with mutable migrations/config/external obligations explicitly modeled.
 120. **Program-to-hardware derivation.** Source/bytecode/object/executable decomposition can continue through control/data/dependency structure to target ISA/microarchitecture scheduling, symbolic execution counts, resource-constrained cycles and machine time.
 121. **Calculated-versus-observed execution.** Benchmarks and hardware counters witness/calibrate the explicit machine-cost model; they do not replace exact/symbolic derivation with context-free averages.
-122. **Personal effective mind by composition.** A person's usable Laplace state is shared world + granted packages/private knowledge + witnessed experience + governance + active scope + compute envelope, not a separately trained opaque model.
+122. **Personal effective mind by composition.** A person's usable Laplace state is shared world + granted packages/private content + witnessed experience + governance + active scope + compute envelope, not a separately trained opaque model.
 123. **Tests/gates are proof, not product.** Verification machinery is subordinate evidence for executable capabilities and must not become the implementation target when the accepted scope requires the actual construction/query/security/export/deployment behavior.
 
 124. **Canonical scalar trajectories.** Finite digital numbers such as 255 or 0.34567 compose from their exact canonical codepoint sequence into reusable scalar roots; repeated modality occurrences reuse the scalar identity instead of minting arbitrary numeric Tier-0 atoms.
@@ -177,6 +177,6 @@ This catalog names the mechanisms and preservation laws of the invention. The co
 
 Laplace replaces opaque probabilistic runtime authority with exact reusable structure, bounded physicality, source-retaining testimony, uncertainty-bearing consensus, query-relative web response, sparse hop/fanout execution, coarse native operators and deterministic receipts.
 
-Models, corpora, conversations, code, games, tools and users are participants in one witnessed world rather than disconnected knowledge silos or separately trained intelligence products.
+Models, corpora, conversations, code, games, tools and users are participants in one witnessed world rather than disconnected content silos or separately trained intelligence products.
 
 Seeded corpora and checkpoints are witnessed and folded at ingest; their files are provenance, not an export authority. User content Laplace was asked to keep may require exact realization. Conventional model export is a filtered snapshot of current standing, geometry and selected operators — not a bit-perfect copy of an ingested GGUF, and not a GPU replay of retained weights.

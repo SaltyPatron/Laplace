@@ -468,8 +468,8 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             Consensus: new ConsensusHealth(5_000_000, 1_500_000, 3.33m, 4.2m, 9001),
             MultiSourceEntityCount: 250_000,
             TopRelations: [TopEdge()],
-            Sources: [new ExploreSourceRow("WordNet", 1_000_000, 500_000, "knowledge", "L2", "synsets")],
-            Stages: [new ExploreStageRow("knowledge", 2, "WordNet hub", [new ExploreStageSourceRow("wordnet", "L2", "synsets", null)])],
+            Sources: [new ExploreSourceRow("WordNet", 1_000_000, 500_000, "relations", "L2", "synsets")],
+            Stages: [new ExploreStageRow("relations", 2, "WordNet hub", [new ExploreStageSourceRow("wordnet", "L2", "synsets", null)])],
             FeaturedRefs: ["dog", "whale"]));
 
     public Task<ExploreResolveResponse?> ExploreResolveAsync(string reference, CancellationToken ct)

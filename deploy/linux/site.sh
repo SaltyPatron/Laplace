@@ -52,7 +52,7 @@ LAPLACE_MCP_HTTP_PORT="${LAPLACE_MCP_HTTP_PORT:-5190}"   # 5188 is Laplace-MCP's
 LAPLACE_MCP_ORIGIN="${LAPLACE_MCP_ORIGIN:-https://mcp.hartonomous.com}"
 LAPLACE_MCP_URL="http://127.0.0.1:$LAPLACE_MCP_HTTP_PORT"
 
-export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER="${LAPLACE_KNOWLEDGE_ROLE:-${LAPLACE_ROLE:-laplace}}"
+export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER="${LAPLACE_DATABASE_ROLE:-${LAPLACE_ROLE:-laplace}}"
 export LAPLACE_DBNAME="${LAPLACE_DBNAME:-laplace-mono}"
 export PGDATABASE="$LAPLACE_DBNAME"
 export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
@@ -68,7 +68,7 @@ export LAPLACE_INSTALL_PREFIX LAPLACE_ENGINE_BUILD="$SITE_BUILD/engine"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
 
-# The knowledge cluster's own build, where there is one (the knowledge host): the extensions are built against it and
+# The PostgreSQL cluster's own build, where there is one (the database host): the extensions are built against it and
 # installed under this prefix for its major. A hosting host has no such build and runs only receive, publish, restart
 # and smoke, which need none of this; a phase that does need it says so when it runs.
 if [[ -x "$LAPLACE_PG_PREFIX/bin/pg_config" ]]; then
@@ -78,7 +78,7 @@ else
 fi
 EXT_LIBDIR="$LAPLACE_INSTALL_PREFIX/lib/postgresql/${PG_MAJOR:-none}"
 EXT_SHARE="$LAPLACE_INSTALL_PREFIX/share/postgresql/${PG_MAJOR:-none}"
-need_pg() { [[ -n "$PG_MAJOR" ]] || fail "no PostgreSQL build at $LAPLACE_PG_PREFIX: this phase runs on the knowledge host"; }
+need_pg() { [[ -n "$PG_MAJOR" ]] || fail "no PostgreSQL build at $LAPLACE_PG_PREFIX: this phase runs on the database host"; }
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 say()  { echo; echo "=== $*   $(date -u +%H:%M:%S)"; }
@@ -351,7 +351,7 @@ api_env() {
   # Migrations keep their schema-owning identity; only the serving environment
   # receives the explicitly declared application runtime connection.
   local runtime_app_db="${LAPLACE_APP_RUNTIME_DB:-${LAPLACE_APP_DB:-}}"
-  local runtime_knowledge_db="${LAPLACE_KNOWLEDGE_RUNTIME_DB:-$LAPLACE_DB}"
+  local runtime_substrate_db="${LAPLACE_DATABASE_RUNTIME_DB:-$LAPLACE_DB}"
   [[ -z "${LAPLACE_APP_RUNTIME_DB:-}" || -n "${LAPLACE_APP_DB:-}" ]] || fail "application runtime selection requires the migration database declaration"
   [[ -f "$env_file" ]] || install -m 0664 "$ROOT/deploy/linux/laplace-api.env.example" "$env_file"
   t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
@@ -359,7 +359,7 @@ api_env() {
     [[ -n "$key" ]] || continue
     if grep -q "^$key=" "$env_file"; then sed -i "s|^$key=.*|$key=$val|" "$env_file"; else printf '%s=%s\n' "$key" "$val" >> "$env_file"; fi
   done <<EOF
-LAPLACE_DB=$runtime_knowledge_db
+LAPLACE_DB=$runtime_substrate_db
 ${runtime_app_db:+LAPLACE_APP_DB=$runtime_app_db}
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
@@ -578,7 +578,7 @@ phase_smoke() {
   else
     echo "  laplace-mcp.service is not declared on this host: sudo bash deploy/linux/site-host.sh"; echo "| MCP endpoint | not declared on this host |" >> "$SUMMARY"
   fi
-  # Empty knowledge is valid; unavailable SQL, authentication, native execution or
+  # An empty substrate database is valid; unavailable SQL, authentication, native execution or
   # incompatible loaded artifacts are deployment failures and block promotion.
   if python3 "$ROOT/scripts/verify-application-release.py" --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" \
       --state-file "${LAPLACE_VERIFICATION_STATE:-$LAPLACE_APP_DIR/logs/application-verification.json}"; then

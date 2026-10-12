@@ -17,7 +17,7 @@ if exist "%LOCK%" (
 echo %DATE% %TIME% pid=%PID% > "%LOCK%"
 
 echo ==== SEED EVERYTHING ==== > "%LOG%"
-echo   STAGES: floor^(unicode iso639^) document knowledge^(cili wordnet omw verbnet propbank semlink atomic2020 mapnet wordframenet framenet ud conceptnet wiktionary^) usage^(tatoeba opensubtitles^) code^(stack repo tiny-codes^) models^(tinyllama phi qwen^) >> "%LOG%"
+echo   STAGES: floor^(unicode iso639^) document relations^(cili wordnet omw verbnet propbank semlink atomic2020 mapnet wordframenet framenet ud conceptnet wiktionary^) usage^(tatoeba opensubtitles^) code^(stack repo tiny-codes^) models^(tinyllama phi qwen^) >> "%LOG%"
 echo   log=%LOG% >> "%LOG%"
 echo. >> "%LOG%"
 

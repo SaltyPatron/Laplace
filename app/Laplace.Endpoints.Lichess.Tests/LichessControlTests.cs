@@ -10,13 +10,36 @@ namespace Laplace.Endpoints.Lichess.Tests;
 public sealed class LichessControlTests
 {
     [Fact]
+    public void ExistingProfilePreservesItsDatabaseAndRejectsConflictingNames()
+    {
+        var root = Directory.CreateTempSubdirectory("laplace-profile-upgrade-").FullName;
+        try
+        {
+            var file = Path.Combine(root, "control.json");
+            var config = new LichessControlConfiguration(1, 5189, Path.Combine(root, "state"),
+                Path.Combine(root, "token"), Path.Combine(root, "connector"), Path.Combine(root, "connector.json"),
+                new() { ["staging"] = new("Staging", "staging", "laplace-mono", "selected-database",
+                    Path.Combine(root, "connection"), "staging") });
+            var legacy = JsonSerializer.Serialize(config, LichessControlConfiguration.Json)
+                .Replace("\"database\":", "\"knowledge\":");
+            File.WriteAllText(file, legacy);
+            var upgraded = LichessControlConfiguration.Read(file);
+            Assert.Equal("selected-database", upgraded.Profiles["staging"].Database);
+            Assert.DoesNotContain("\"knowledge\"", JsonSerializer.Serialize(upgraded, LichessControlConfiguration.Json));
+            File.WriteAllText(file, legacy.Replace("\"knowledge\":", "\"database\": \"different\", \"knowledge\":"));
+            Assert.Throws<InvalidDataException>(() => LichessControlConfiguration.Read(file));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task IndependentRoutingPersistsAllowedTupleAndRejectsUninstalledGrant()
     {
         var root = Directory.CreateTempSubdirectory("laplace-routing-").FullName;
         try
         {
-            var source = new Laplace.Chess.Service.ChessKnowledgeIdentity("123", "admitted-world");
-            var destination = new Laplace.Chess.Service.ChessKnowledgeIdentity("456", "live-observations");
+            var source = new Laplace.Chess.Service.ChessDatabaseIdentity("123", "admitted-world");
+            var destination = new Laplace.Chess.Service.ChessDatabaseIdentity("456", "live-observations");
             var routing = new LichessRouting(
                 new() { ["desktop"] = new("Desktop", "development", "laplace-mono",
                     new() { ["curated"] = new("desktop-curated", ["observations"]) }) },
@@ -67,7 +90,7 @@ public sealed class LichessControlTests
             File.WriteAllText(tokenPath, token);
             var config = new LichessControlConfiguration(1, number, Path.Combine(root, "selection.json"), tokenPath,
                 Path.Combine(root, "connector"), Path.Combine(root, "connector.json"),
-                new() { ["staging"] = new("Staging", "staging", "laplace-mono", "knowledge", Path.Combine(root, "connection"), "staging") });
+                new() { ["staging"] = new("Staging", "staging", "laplace-mono", "database", Path.Combine(root, "connection"), "staging") });
             File.WriteAllText(configPath, JsonSerializer.Serialize(config, LichessControlConfiguration.Json));
             await using (var app = ControlledLichessHost.Build(configPath))
             {

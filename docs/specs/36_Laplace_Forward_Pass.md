@@ -4,7 +4,7 @@
 
 Laplace uses one stateful, typed execution program for conversation, code, games, model-scoped queries, analysis and export. API adapters bind requests to this program; they do not implement rival cognition/generation paths.
 
-The program operates over one shared witnessed substrate. It does not first choose a smaller knowledge model and it does not assume one interpretation merely to decide which part of the world may respond.
+The program operates over one shared witnessed substrate. It does not first choose a smaller content model and it does not assume one interpretation merely to decide which part of the world may respond.
 
 ## Canonical program
 
@@ -16,7 +16,7 @@ The stages are semantic contracts, not an instruction to introduce eleven SQL/cl
 
 ### RESOLVE
 
-Admit/resolve the exact current observation/root, constituent occurrences, session/context identities, prior discourse bindings, world/time/source boundary, open obligations and requested output contract. Resolve the principal/tenant plus principal/role/relationship authority, granted knowledge packages/capabilities, active caller-selected scope and kernel governance that define the effective operation boundary.
+Admit/resolve the exact current observation/root, constituent occurrences, session/context identities, prior discourse bindings, world/time/source boundary, open obligations and requested output contract. Resolve the principal/tenant plus principal/role/relationship authority, granted content packages/capabilities, active caller-selected scope and kernel governance that define the effective operation boundary.
 
 Unicode/grammar decomposition and tier ascent/descent recover structure. They do not privilege one token, noun, regex, topic word or renderable label as the interpretation root.
 
@@ -126,13 +126,13 @@ STEER is query-relative. It must not silently reintroduce a global popularity sc
 
 Select under the declared deterministic or stochastic policy.
 
-The selected item/act must be supported by the admitted evidence and constraints, and selection must retain enough receipt state to explain which routes/standing/obligations determined eligibility. Authority is checked again at the requested act: permission to inspect/couple knowledge does not automatically grant DERIVE, REALIZE, PERSIST, EXPORT, EXECUTE or DELEGATE.
+The selected item/act must be supported by the admitted evidence and constraints, and selection must retain enough receipt state to explain which routes/standing/obligations determined eligibility. Authority is checked again at the requested act: permission to inspect/couple content does not automatically grant DERIVE, REALIZE, PERSIST, EXPORT, EXECUTE or DELEGATE.
 
 Pooled model consensus is consumed as witnessed standing/state. N external model answers are not adjudicated here by a hidden judge.
 
 ### REALIZE
 
-Render the selected semantic act/entity/action into the requested surface without using rendering to reclassify it. REALIZE is itself an authority boundary: an operation may know that relevant knowledge exists yet honestly abstain from revealing operational detail when the principal lacks realization authority. Even disclosure that a restricted scope exists may require DISCOVER.
+Render the selected semantic act/entity/action into the requested surface without using rendering to reclassify it. REALIZE is itself an authority boundary: an operation may know that relevant content exists yet honestly abstain from revealing operational detail when the principal lacks realization authority. Even disclosure that a restricted scope exists may require DISCOVER.
 
 Realization is bulk/batchable and preserves exact identity. It is subject to the same native execution-grain law as the rest of Laplace; one selected structure must not become thousands of avoidable SQL/PInvoke/high-level per-constituent crossings.
 
@@ -185,13 +185,13 @@ admitted deterministic calculations and their receipts
 The pass may materialize an in-memory frontier, residual state, candidate set or
 operator-local cache to execute efficiently. Such state is a bounded working
 projection over the shared substrate. It must retain canonical ids/routes needed to
-rejoin durable state, must not become an untracked private knowledge graph, and must
+rejoin durable state, must not become an untracked private content graph, and must
 not be treated as a second semantic authority.
 
 Laplace has no fixed transformer-style token context window. A request is still
 finite: its compute envelope bounds hops, fanout, candidate work, provider/operator
 scope, memory, I/O, concurrency and output. These are execution limits over the same
-addressable knowledge world, not a rule that state older than a fixed token count is
+addressable content world, not a rule that state older than a fixed token count is
 discarded or inaccessible.
 
 ## Processing layers and extensibility
@@ -215,9 +215,9 @@ new target architecture requires an explicit mapping/writer plus validation.
 
 ## Compute envelope and preflight
 
-Hops, fanout/frontier width, provider/operator families, candidate work, trajectory expansion, calculation work, memory/I/O/concurrency and realization/output are explicit execution dimensions over the **same knowledge world**.
+Hops, fanout/frontier width, provider/operator families, candidate work, trajectory expansion, calculation work, memory/I/O/concurrency and realization/output are explicit execution dimensions over the **same content world**.
 
-An entitled lower-cost request is not implemented by pointing it at a deliberately knowledge-reduced Laplace model.
+An entitled lower-cost request is not implemented by pointing it at a deliberately content-reduced Laplace model.
 
 Where work is billable or capacity-controlled, the forward program should support:
 
@@ -333,7 +333,7 @@ MCP, HTTP, CLI/SQL inspection, streaming and export adapters must agree at this 
 - Default relation/provider masks do not choose the interpretation before query-relative response is computed.
 - Multiple independent routes converging on one candidate are visible in the trace; dependence/provenance prevents duplicate roots from masquerading as independent support.
 - Hop/fanout/resource ceilings bound actual work over the same substrate and appear in preflight + execution receipts.
-- Effective knowledge/capability authority is resolved explicitly; unauthorized knowledge cannot influence cognition merely because final output would later be redacted.
+- Effective content/capability authority is resolved explicitly; unauthorized content cannot influence cognition merely because final output would later be redacted.
 - Honest abstention/WHY_NOT can distinguish unknown, unsupported, resource-exhausted and known-but-not-authorized-to-realize states.
 - Multi-turn correction, anaphora, topic return and abstention work after restart.
 - Each emitted constituent changes the next-step coupling/frontier state.

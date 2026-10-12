@@ -68,7 +68,7 @@ $$;
 --
 -- Pillar 5 (2026-07-20): PRECEDES-consensus leg removed. word_order reads the
 -- ordered sequence straight from laplace.physicalities.trajectory via
--- laplace_trajectory_constituents, which is the same knowledge PRECEDES
+-- laplace_trajectory_constituents, which is the same content PRECEDES
 -- materialized as redundant laplace.attestations(Pillar 3a, e5e1b42).
 DROP FUNCTION IF EXISTS laplace.pos_class_transitions(bytea[], int, double precision);
 CREATE OR REPLACE FUNCTION generation.pos_class_transitions(

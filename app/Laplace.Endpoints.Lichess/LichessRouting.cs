@@ -2,9 +2,9 @@ using Laplace.Chess.Service;
 
 namespace Laplace.Endpoints.Lichess;
 
-internal sealed record LichessReadSource(string Label, string Implementation, ChessKnowledgeIdentity Identity);
+internal sealed record LichessReadSource(string Label, string Implementation, ChessDatabaseIdentity Identity);
 internal sealed record LichessRecordingTarget(string Label, string Environment, string Implementation,
-    string ConnectionFile, ChessKnowledgeIdentity Identity);
+    string ConnectionFile, ChessDatabaseIdentity Identity);
 internal sealed record LichessExecutionRoute(string ConnectorProfile, string[] RecordingTargets);
 internal sealed record LichessExecutor(string Label, string Environment, string Implementation,
     Dictionary<string, LichessExecutionRoute> Sources, int MaxConcurrent = 2,
@@ -79,12 +79,12 @@ internal sealed record LichessRouting(Dictionary<string, LichessExecutor> Execut
             throw new InvalidDataException("Monorepo chess routes require named monorepo installations.");
     }
 
-    private static void RequireIdentity(ChessKnowledgeIdentity identity)
+    private static void RequireIdentity(ChessDatabaseIdentity identity)
     {
         if (identity is null || !ulong.TryParse(identity.Cluster, out _) || string.IsNullOrWhiteSpace(identity.Database))
             throw new InvalidDataException("A source or destination must declare its actual PostgreSQL cluster and database identity.");
     }
 }
 
-internal sealed record LichessActivation(string Label, string ConnectorProfile, ChessKnowledgeIdentity? ReadIdentity,
-    string ConnectionFile, ChessKnowledgeIdentity? WriteIdentity, int MaxConcurrent, LichessChallengePolicy Policy);
+internal sealed record LichessActivation(string Label, string ConnectorProfile, ChessDatabaseIdentity? ReadIdentity,
+    string ConnectionFile, ChessDatabaseIdentity? WriteIdentity, int MaxConcurrent, LichessChallengePolicy Policy);

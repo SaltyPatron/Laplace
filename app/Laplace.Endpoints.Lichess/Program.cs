@@ -26,7 +26,7 @@ if (args.Length is 2 or 4 && args[0] == "--verify-routing")
     {
         var connection = ManagedServiceDatabase.Resolve(File.ReadAllText(target.ConnectionFile).Trim());
         using var source = LaplaceDataSource.Create(SubstrateAccess.Serving, connection);
-        if (ChessKnowledgeIdentity.Read(source) != target.Identity)
+        if (ChessDatabaseIdentity.Read(source) != target.Identity)
             throw new InvalidOperationException($"Recording destination {id} does not match its declared identity.");
         Console.WriteLine($"Recording destination verified: {id}");
     }

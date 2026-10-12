@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Laplace.Chess.Service;
 using Laplace.Chess.Service.Uci;
@@ -7,7 +8,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Endpoints.Lichess;
 
 internal sealed record LichessProfile(string Label, string Environment, string Implementation,
-    string Knowledge, string ConnectionFile, string ConnectorProfile, int MaxConcurrent = 2,
+    string Database, string ConnectionFile, string ConnectorProfile, int MaxConcurrent = 2,
     string[]? Speeds = null, bool Rated = false);
 
 internal sealed record LichessControlConfiguration(int Version, int Port, string StateFile,
@@ -19,7 +20,17 @@ internal sealed record LichessControlConfiguration(int Version, int Port, string
 
     public static LichessControlConfiguration Read(string path)
     {
-        var c = JsonSerializer.Deserialize<LichessControlConfiguration>(File.ReadAllText(path), Json)
+        var document = JsonNode.Parse(File.ReadAllText(path))
+            ?? throw new InvalidDataException("Empty Lichess controller configuration.");
+        if (document["profiles"] is JsonObject profiles)
+            foreach (var (_, profile) in profiles)
+                if (profile is JsonObject fields && fields.Remove("knowledge", out var legacy))
+                {
+                    if (fields.TryGetPropertyValue("database", out var current) && !JsonNode.DeepEquals(current, legacy))
+                        throw new InvalidDataException("Conflicting database names in Lichess profile.");
+                    fields["database"] = legacy;
+                }
+        var c = document.Deserialize<LichessControlConfiguration>(Json)
             ?? throw new InvalidDataException("Empty Lichess controller configuration.");
         if (c.Port is < 1 or > 65535
             || !(c.Version == 1 && c.Routing is null && c.Profiles is { Count: > 0 }
@@ -31,7 +42,7 @@ internal sealed record LichessControlConfiguration(int Version, int Port, string
         foreach (var (id, p) in c.Profiles)
         {
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(p.Label)
-                || string.IsNullOrWhiteSpace(p.Environment) || string.IsNullOrWhiteSpace(p.Knowledge)
+                || string.IsNullOrWhiteSpace(p.Environment) || string.IsNullOrWhiteSpace(p.Database)
                 || p.Implementation != "laplace-mono" || string.IsNullOrWhiteSpace(p.ConnectorProfile)
                 || !Path.IsPathFullyQualified(p.ConnectionFile))
                 throw new InvalidDataException($"Invalid monorepo Lichess profile: {id}.");
@@ -52,11 +63,11 @@ internal sealed record LichessControlConfiguration(int Version, int Port, string
         return new(legacy.Label, legacy.ConnectorProfile, null, legacy.ConnectionFile, null, legacy.MaxConcurrent, Policy(legacy));
     }
 
-    public UciLichessEngine Engine(LichessActivation profile, ChessKnowledgeIdentity knowledge) =>
+    public UciLichessEngine Engine(LichessActivation profile, ChessDatabaseIdentity database) =>
         new(profile.Label, new UciProcessStart(ConnectorExecutable,
             ["connect", "--configuration", ConnectorConfiguration, "--profile", profile.ConnectorProfile],
             HandshakeTimeout: TimeSpan.FromSeconds(120)), new Dictionary<string, string>(), 300)
-        { RequiredKnowledge = knowledge };
+        { RequiredDatabase = database };
 
     public static string Connection(LichessActivation profile) =>
         ManagedServiceDatabase.Resolve(File.ReadAllText(profile.ConnectionFile).Trim());

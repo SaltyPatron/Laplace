@@ -520,7 +520,7 @@ export function StorageProofView() {
       <header className={styles.hero}>
         <div>
           <span className={styles.eyebrow}>Executable storage proof · T0 ROM {STORAGE_PROOF_SURFACE_VERSION}</span>
-          <h2>Storage Proof · deterministic knowledge structure in one bounded 4-D world</h2>
+          <h2>Storage Proof · deterministic content structure in one bounded 4-D world</h2>
           <p>
             This surface executes the real decomposition/composition kernels and reports their
             calculated invariants: canonical Merkle convergence, S³ Tier-0 placement, bounded
@@ -617,7 +617,7 @@ export function StorageProofView() {
                 <h3>What the receipts mean</h3>
                 <p>
                   A fixed bounded geometric domain carries a countably open Tier-0 address law and
-                  recursively composed observed knowledge. Identity, physicality, locality, packed
+                  recursively composed observed content. Identity, physicality, locality, packed
                   structure and realized trajectory are deterministic but non-interchangeable state.
                 </p>
               </div>
@@ -688,7 +688,7 @@ export function StorageProofView() {
               </article>
 
               <article className={styles.lawCard}>
-                <span className={styles.lawStep}>06 · central knowledge world</span>
+                <span className={styles.lawStep}>06 · central content world</span>
                 <strong>Complexity and telemetry accumulate without enlarging the geometric boundary</strong>
                 <p>
                   Every observed composition becomes another canonical addressable structure whose

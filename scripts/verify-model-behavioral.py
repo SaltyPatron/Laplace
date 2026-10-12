@@ -6,7 +6,7 @@ load, emit tokens, and pass exit-code smoke tests while producing nothing
 real (see .scratchpad/02 and the FAITHFUL/LOOKUP retirement). This harness
 gates on CONTENT: the expected continuations for each probe word are pulled
 from the substrate's own consensus — the same evidence the model was synthesized
-from — so a passing model demonstrably carries the knowledge it claims to
+from — so a passing model demonstrably carries the content it claims to
 transcribe, and the known failure shapes (global-frequency-hub collapse,
 prompt-echo loops, flat/empty output) are each detected explicitly.
 
@@ -35,7 +35,7 @@ DEFAULT_PROBES = [
 # Phase 7 depth-k content-WORD metric (2026-07-08): determiners/prepositions ARE
 # attested PRECEDES objects, so glue hits inflate content_pass_rate. Hits are
 # additionally scored with this stoplist excluded; content_word_pass_rate is the
-# number that adjudicates knowledge transfer (doc 14 P10).
+# number that adjudicates content transfer (doc 14 P10).
 GLUE_WORDS = frozenset("""
 the a an of to in on at by for with and or but nor so yet as if that this these
 those his her its their our your my is are was were be been being am do does did

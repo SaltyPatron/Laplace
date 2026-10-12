@@ -2,9 +2,9 @@
 
 Tree-sitter is a grammar-provider and compatibility parsing estate for the substrate.
 It is not the universal container-format engine and its CST is not Laplace's canonical
-knowledge representation. Canonical structure is tiered entity composition plus exact
+content representation. Canonical structure is tiered entity composition plus exact
 physicality trajectories; grammar productions/fields/precedence/conflicts can be admitted
-as ordinary knowledge that constrains higher-tier composition.
+as ordinary content that constrains higher-tier composition.
 
 Use these parsers when their grammar contributes source structure, validation or realization
 that the active recipe needs. Do not route a bulk/structured source through Tree-sitter merely

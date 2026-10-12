@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Installed Linux monorepo command; configuration selects runtime and knowledge."""
+"""Installed Linux monorepo command; configuration selects runtime and database."""
 import json
 import os
 from pathlib import Path
@@ -22,7 +22,7 @@ def main():
     selection = os.environ.get('LAPLACE_MONO_PROFILE') or config['default_profile']
     if args[:1] == ['--profiles']:
         for name, profile in config['profiles'].items():
-            print(f"{name}\t{profile['knowledge']['host']}\t{profile['knowledge']['database']}\t{profile['runtime']['directory']}")
+            print(f"{name}\t{profile['database']['host']}\t{profile['database']['database']}\t{profile['runtime']['directory']}")
         return 0
     if args[:1] == ['--profile']:
         if len(args) < 2:
@@ -36,9 +36,9 @@ def main():
     executable = absolute(profile['runtime']['directory'], 'runtime directory') / 'Laplace.Cli'
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise ValueError(f'Installed monorepo CLI is missing or not executable: {executable}')
-    knowledge = profile['knowledge']
+    database = profile['database']
     if args[:1] == ['--where']:
-        print(json.dumps(dict(implementation='laplace-mono', profile=selection, configuration=str(config_path), executable=str(executable), knowledge_host=knowledge['host'], knowledge_database=knowledge['database'], knowledge_role=knowledge['role']), indent=2))
+        print(json.dumps(dict(implementation='laplace-mono', profile=selection, configuration=str(config_path), executable=str(executable), database_host=database['host'], database_name=database['database'], database_role=database['role']), indent=2))
         return 0
     env = dict(os.environ)
     for name in ('LAPLACE_DB', 'LAPLACE_APP_DB', 'PGPASSWORD', 'PGPASSFILE', 'LAPLACE_ENGINE_BUILD', 'LAPLACE_EXT_BUILD', 'LAPLACE_BUILD_ROOT', 'LAPLACE_PERFCACHE_BIN', 'LAPLACE_NATIVE_DIR'):
@@ -46,12 +46,12 @@ def main():
     env.update(profile.get('environment', {}))
     offline = not args or '--help' in args or '-h' in args or args[0] in ('decompose', 'cpu-topology')
     if not offline:
-        if profile['credential']['kind'] != 'peer' or not knowledge['host'].startswith('/'):
+        if profile['credential']['kind'] != 'peer' or not database['host'].startswith('/'):
             raise ValueError('This Linux profile requires an installed local peer mapping; no service credential is borrowed')
-        if not 0 < int(knowledge['port']) < 65536 or int(knowledge['pool_max']) < 1:
+        if not 0 < int(database['port']) < 65536 or int(database['pool_max']) < 1:
             raise ValueError('Invalid database port or connection budget')
-        fields = dict(Host=knowledge['host'], Port=knowledge['port'], Database=knowledge['database'], Username=knowledge['role'])
-        fields['Maximum Pool Size'] = knowledge['pool_max']
+        fields = dict(Host=database['host'], Port=database['port'], Database=database['database'], Username=database['role'])
+        fields['Maximum Pool Size'] = database['pool_max']
         env['LAPLACE_DB'] = ';'.join(key + '="' + str(value).replace('"', '""') + '"' for key, value in fields.items())
     # Preserve the caller's working directory and arguments, including relative inputs.
     os.execve(executable, [str(executable), *args], env)

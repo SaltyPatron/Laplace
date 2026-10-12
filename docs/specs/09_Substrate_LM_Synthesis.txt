@@ -46,10 +46,10 @@ Functional alignment is calculated from token testimony, factors, trajectories,
 geometry, relation behavior, salience, and observed outcomes while retaining both
 source circuits.
 
-Knowledge authority and model-source scope
+Content authority and model-source scope
 ------------------------------------------
 
-Source A/B/A+B scoping is a diagnostic/export evidence scope after effective principal authority has been resolved. It is not a knowledge-package implementation and not a commercial path for intentionally smaller intelligence.
+Source A/B/A+B scoping is a diagnostic/export evidence scope after effective principal authority has been resolved. It is not a content-package implementation and not a commercial path for intentionally smaller intelligence.
 
 A caller may materialize a narrow target artifact while the live Laplace substrate remains fully knowledgeable within the caller's actual grants. Compute tiers continue to vary hops/fanout/resources over the same authorized world.
 

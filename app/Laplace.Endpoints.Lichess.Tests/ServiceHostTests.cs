@@ -13,7 +13,7 @@ public sealed class ServiceHostTests
         try
         {
             Environment.SetEnvironmentVariable("LAPLACE_DB",
-                "Host=knowledge.example;Username=bot;Database=laplace;Password=test-only-sentinel;SSL Mode=Require");
+                "Host=database.example;Username=bot;Database=laplace;Password=test-only-sentinel;SSL Mode=Require");
             var error = Assert.Throws<InvalidOperationException>(() => LichessServiceHost.Build(new(Port: 0)));
             Assert.DoesNotContain("test-only-sentinel", error.ToString());
         }

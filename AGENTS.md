@@ -1,6 +1,6 @@
 # Laplace
 
-Laplace is one deterministic, content-addressed, recursively compositional knowledge and cognition substrate. It is the machine that replaces opaque learned-tensor authority for every operation those tensors are asked to perform: language, code, games, images, audio, models, and the rest of finite digital structure. The OpenAI-compatible endpoint, MCP, SQL, CLI, and web surface are that machine's interfaces. They are not adapters around a hidden model, and they are not a separate product from the substrate.
+Laplace is one deterministic, content-addressed, recursively compositional content and cognition substrate. It is the machine that replaces opaque learned-tensor authority for every operation those tensors are asked to perform: language, code, games, images, audio, models, and the rest of finite digital structure. The OpenAI-compatible endpoint, MCP, SQL, CLI, and web surface are that machine's interfaces. They are not adapters around a hidden model, and they are not a separate product from the substrate.
 
 This file says how that machine is implemented here. The invention itself is `docs/INVENTION.md`, `docs/INVENTIONS.md`, `docs/CAPABILITIES.md`, and the binding specs. Code implements those documents. A comment, issue, plan, audit, or commit message does not define a smaller machine.
 
@@ -43,9 +43,9 @@ RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
 
 COUPLE is the typed response of every eligible plane to that observation. It is not one relevance score, and a caller mask does not substitute for it unless the caller asked for that constraint. ORIENT keeps a real ambiguity when the observation supports more than one reading. After that, expansion is a sparse indexed star. Hops and fanout are how far and how wide that star runs. A*, walks, geometry, chess search, and other domain procedures are operators inside the program.
 
-Perfcaches are a lattice of derived read-only maps over structure that is already canonical: a dense tier can be a direct-address ROM; a huge tier caches the admitted estate. Video reuses image and audio maps. A cache is not a second authority and not a smaller knowledge world.
+Perfcaches are a lattice of derived read-only maps over structure that is already canonical: a dense tier can be a direct-address ROM; a huge tier caches the admitted estate. Video reuses image and audio maps. A cache is not a second authority and not a smaller content world.
 
-Knowledge, authority, and compute are separate. The admitted world is one world. Grants say who may discover, couple, traverse, derive, realize, export, or execute which of it. Hops, fanout, and measured resources say how much work one operation may spend. Governance can refuse an operation. It does not delete the fact.
+Content, authority, and compute are separate. The admitted world is one world. Grants say who may discover, couple, traverse, derive, realize, export, or execute which of it. Hops, fanout, and measured resources say how much work one operation may spend. Governance can refuse an operation. It does not delete the fact.
 
 PostgreSQL stores and indexes that world. Native C and C++ run the repeated work: parse, compose, search, fold, encode. SPI moves sets between them. C# and SQL orchestrate sessions, contracts, and transport. They do not become the inner loop. A batch whose body calls a scalar operation per element is still one-at-a-time work.
 
@@ -54,6 +54,12 @@ Ingest enumerates the selected artifacts, recovers source structure with a provi
 The product is the same web, navigable: browse, rank, entity, evidence, trajectory, neighborhood. Chess, code, and conversation specialize presentation and grammar. They do not specialize identity or cognition. Constructed code is grammar-constrained composition with reuse, not token generation. A repository root is one application object. Export of a model is a recipe over current standing and structure, not a copy of an ingested checkpoint.
 
 ## Operating it
+
+Hart-desktop is development, hart-server is staging, and hart-prod is the inexpensive always-on production web host.
+Hart-cloud is an on-demand AVX-512 database VM, kept off when unused to preserve trial credit. Production can fail over
+from hart-cloud to hart-server; hart-prod also has local PostgreSQL for fallback and application accounts/billing.
+Preserve those environment boundaries and the intentional failover. Inspect the selected target and the Operations
+operating guide before resetting a database; a current production connection to hart-server is not a placement error.
 
 Use the installed machine while building it. MCP (`laplace-substrate` on the host), the OpenAI-compatible endpoint, SQL, and the CLI call the same operations. A read through those surfaces is evidence of what the running process does. It does not revise the invention.
 

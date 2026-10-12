@@ -14,7 +14,7 @@
 -- trajectory already holds the ordered sequence losslessly, and word_order
 -- reads it via laplace_trajectory_constituents. Keeping a PRECEDES leg here is
 -- what forced every text lane to keep emitting the redundant edges; both legs
--- above are geometry-derived, so the same knowledge arrives without them.
+-- above are geometry-derived, so the same content arrives without them.
 -- Emitted w = log((c(x,y) + k) / (c(x) + k*V)) — add-k smoothing over the
 -- vocab, so each row is a proper (log) conditional distribution up to the
 -- unseen-mass remainder. NEGATIVE values are expected and meaningful.

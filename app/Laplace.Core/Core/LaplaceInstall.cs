@@ -112,7 +112,7 @@ public static class LaplaceInstall
     /// <summary>
     /// The application's own database: accounts, sessions, API keys, billing, the <c>app</c> schema.
     /// LAPLACE_APP_DB when it is set; otherwise the database LAPLACE_DB names, so a host with one
-    /// database is unchanged. The knowledge substrate never lives here.
+    /// database is unchanged. The content substrate never lives here.
     /// </summary>
     public static string AppConnectionString()
     {

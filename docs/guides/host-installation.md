@@ -42,10 +42,10 @@ selects it. A declared missing file fails. `--as-is` uses the checked-out revisi
 ordinary privileged setup fast-forwards the clean checkout before running it.
 
 Service files use the configured installation prefix, lock directory, PostgreSQL
-service, runtime accounts and mutable state directories. The existing `laplace-api`,
-`laplace-mcp` and `laplace-knowledge-refresh` unit names are retained during this
-ownership change. They have not yet been renamed to the desired `laplace-mono-*`
-namespace. Refactor and modular Laplace are separate installations.
+service, runtime accounts and mutable state directories. The API and MCP retain
+their existing service names. `laplace-database-refresh` refreshes their database
+credentials; installation stops and disables the previous timer before enabling
+the replacement. Refactor and modular Laplace are separate installations.
 
 The installed refresh executable is root-owned, outside the source checkout. Its
 timer logs into OpenBao with the workload's own enrollment, verifies the selected

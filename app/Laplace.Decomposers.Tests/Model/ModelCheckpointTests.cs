@@ -6,7 +6,7 @@ using Xunit;
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// A checkpoint header is source provenance, not model knowledge. Its tensor
+/// A checkpoint header is source provenance, not model content. Its tensor
 /// names, dtypes, dimensions and order compose into native physical trajectories;
 /// literal tensor values neither enter identities nor emit attestations.
 /// </summary>

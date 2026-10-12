@@ -39,7 +39,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 |---|---|---|
 | #1044 | tier-0 admission: all 1,114,240 codepoints are placed on the glome — including 2,048 surrogates that cannot appear in any UTF-8 content and ~753k codepoints with no recorded properties | Decided (inventor, 2026-09-25): surrogates and unassigned codepoints get assigned too, so every codepoint in the window gets its rank and placement. The open radical-inverse law (t = radicalInverse(rank), r = √t) spreads any prefix over the whole shell and densifies it without moving earlier addresses, so the tail costs nothing geometrically (storage proof page). Applies to the P0 Unicode reseed. |
 | #1715 | Standing math: trust sets certainty, relation rank stays out of truth standing | Workstream A. |
-| #1720 | Native forward pass over curated knowledge: bindings, key facts, coupling and realization in native code | Workstream F; reword 'standing distribution' to typed standing. |
+| #1720 | Native forward pass over curated content: bindings, key facts, coupling and realization in native code | Workstream F; reword 'standing distribution' to typed standing. |
 | #1725 | EPIC: Assimilation roadmap — corpus chat and model ingestion meet in one consensus | Roadmap epic. |
 
 ## 3. P1: the core machine
@@ -63,7 +63,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 | #1722 | Move every curated source onto a recipe generation and retire the legacy decomposers | Workstream H; absorbs #1471/#1472/#1713. |
 | #1723 | Vocabulary governance: retire variant relations, entity OR-masks, highway bit budget | Workstream I. |
 | #1724 | Process: materialize locally and replay SQL before every push; verify the substrate, not claim counts | Workstream J. |
-| #1726 | Personality firmware: the Gödel engine's programs over the operation ISA, detached from the knowledge | Workstream K. |
+| #1726 | Personality firmware: the Gödel engine's programs over the operation ISA, detached from the content | Workstream K. |
 
 ## 4. P2: capability on the core
 
@@ -123,7 +123,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Why |
 |---|---|---|
-| #436 | governance: adversarial analysis of prompt-injection-as-attestation before the write path opens beyond the operator | Knowledge-authority/governance analysis; meets K's self-witnessing reconciliation. |
+| #436 | governance: adversarial analysis of prompt-injection-as-attestation before the write path opens beyond the operator | Content-authority/governance analysis; meets K's self-witnessing reconciliation. |
 | #1420 | product/firmware: COMBINE two arbitrary entities through typed coupling/search and realize a receipted composition | COMBINE as firmware over forward program. |
 
 **OpenAI/MCP surface**
@@ -185,12 +185,12 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 |---|---|---|
 | #504 | ingest: decide the git-lane relation ledger (reuse vs new) BEFORE codegen — one reseed should pay for it | NEEDS INVENTOR DECISION: git-lane relations reserved; respect one relation per meaning and highway budget. |
 
-**knowledge authority**
+**content authority**
 
 | Issue | Title | Why |
 |---|---|---|
-| #1425 | Billing + entitlements: knowledge packages and preflight measured compute | Packages; knowledge/authority/compute separation. |
-| #1708 | P0 knowledge authority: packages, capabilities, effective-mind scoping, and Red/Blue/Judge enforcement | Packages/capabilities; authority before COUPLE. |
+| #1425 | Billing + entitlements: content packages and preflight measured compute | Packages; content/authority/compute separation. |
+| #1708 | P0 content authority: packages, capabilities, effective-mind scoping, and Red/Blue/Judge enforcement | Packages/capabilities; authority before COUPLE. |
 
 **perfcache**
 
@@ -290,7 +290,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Why |
 |---|---|---|
-| #371 | Uncracked-List E — WSD witness loop (living priors) | Parked (inventor, 2026-09-25). Reframe as frayed-edge/gap detection, a 'periodic table of knowledge' where the structure of known knowledge exposes its gaps: the Gödel incompleteness lane (#1726) with the fray census (#1048). It is not the engine attesting its own disambiguations. |
+| #371 | Uncracked-List E — WSD witness loop (living priors) | Parked (inventor, 2026-09-25). Reframe as frayed-edge/gap detection, a 'periodic table of content' where the structure of known content exposes its gaps: the Gödel incompleteness lane (#1726) with the fray census (#1048). It is not the engine attesting its own disambiguations. |
 
 **SQL/perf**
 
@@ -461,7 +461,7 @@ For #1099 and #756 (capital(France)), a proposed answer that needs no new relati
 
 | Issue | Title | Why |
 |---|---|---|
-| #1421 | product: Knowledge Arena — deterministic games over pinned Laplace worlds with receipted hops/fanout | Knowledge Arena game firmware. |
+| #1421 | product: Content Arena — deterministic games over pinned Laplace worlds with receipted hops/fanout | Content Arena game firmware. |
 
 **schema hygiene**
 

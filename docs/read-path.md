@@ -264,7 +264,7 @@ EXPLAIN / plan
 -> reconcile unused reserve
 ```
 
-This controls how far/broadly one request may pull the same knowledge world. It is not implemented by choosing a deliberately less knowledgeable Laplace model.
+This controls how far/broadly one request may pull the same content world. It is not implemented by choosing a deliberately less knowledgeable Laplace model.
 
 Predicted wall time is calibrated from prior receipts; actual elapsed time still depends on cache state, scheduler contention, storage and concurrent work.
 

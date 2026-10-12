@@ -34,7 +34,7 @@
       "key": "WordNet",
       "evidence": 1000000,
       "content": 500000,
-      "stage": "knowledge",
+      "stage": "relations",
       "layer": "L2",
       "role": "synsets",
       "id_hex": null
@@ -42,7 +42,7 @@
   ],
   "stages": [
     {
-      "stage": "knowledge",
+      "stage": "relations",
       "order": 2,
       "law": "WordNet hub",
       "sources": [

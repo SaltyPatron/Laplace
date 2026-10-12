@@ -129,7 +129,7 @@ internal static class Program
         var applied = new List<DbUp.Engine.SqlScript>();
 
         // The app schema (accounts, sessions, keys, billing) has a database of its own when LAPLACE_APP_DB is set:
-        // its scripts go there and nowhere else; the knowledge database takes the rest. One database takes all.
+        // its scripts go there and nowhere else; the substrate database takes the rest. One database takes all.
         foreach (var (target, filter, label) in targets)
         {
             EnsureDatabase.For.PostgresqlDatabase(target);
@@ -251,7 +251,7 @@ internal static class Program
         return scope.StartsWith("app_", StringComparison.Ordinal) || scope.StartsWith("browser_", StringComparison.Ordinal);
     }
 
-    // Where the scripts go: the knowledge database and, when LAPLACE_APP_DB names one, the application database.
+    // Where the scripts go: the substrate database and, when LAPLACE_APP_DB names one, the application database.
     private static IEnumerable<(string connectionString, Func<string, bool> filter, string label)> Targets(string connectionString)
     {
         if (!LaplaceInstall.HasSeparateAppDatabase)
@@ -261,7 +261,7 @@ internal static class Program
         }
         var app = LaplaceInstall.AppConnectionString();
         Console.WriteLine($"Application database connection: {LaplaceInstall.RedactConnectionString(app)}");
-        yield return (connectionString, path => !IsAppScript(path), "knowledge database");
+        yield return (connectionString, path => !IsAppScript(path), "substrate database");
         yield return (app, IsAppScript, "application database");
     }
 

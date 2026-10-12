@@ -105,4 +105,4 @@ depth (#757) → retrieval-as-player. Each unlocks the next's measurability;
 the eval harness gains a probe class before each wires. The usage-layer
 seeds (Tatoeba / OpenSubtitles, post decomposer-rework) are the data lever
 running in parallel — generation feeds on usage, and the substrate is
-knowledge-heavy, usage-light today.
+content-heavy, usage-light today.
