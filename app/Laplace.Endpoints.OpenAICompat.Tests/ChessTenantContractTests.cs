@@ -25,23 +25,29 @@ public sealed class ChessTenantContractTests
         Assert.NotNull(requestType);
         Assert.DoesNotContain(
             requestType!.GetProperties(BindingFlags.Instance | BindingFlags.Public),
-            p => p.Name.Equals("Tenant", StringComparison.OrdinalIgnoreCase));
+            p => p.Name.Equals("Tenant", StringComparison.OrdinalIgnoreCase)
+                || p.Name.Equals("User", StringComparison.OrdinalIgnoreCase)
+                || p.Name.Equals("Requester", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void PlaySessionOwnership_IsExactTenantMatch()
+    public void PlaySessionOwnership_RequiresTheAuthenticatedRequesterIncludingWithinOneWorkspace()
     {
+        var owner = new OperationPrincipal("tenant-a", "alice", "browser", "google");
         var session = new PlaySession(
             Hash128.OfCanonical("test/chess/play/tenant-binding"),
             "test/chess/play", recordToSubstrate: false,
-            tenantId: "tenant-a");
+            tenantId: "tenant-a", userId: "alice", requester: owner);
         var owns = ChessEndpointsType.GetMethod(
             "OwnsPlaySession", BindingFlags.Static | BindingFlags.NonPublic);
 
         Assert.NotNull(owns);
-        Assert.True((bool)owns!.Invoke(null, new object?[] { session, "tenant-a" })!);
-        Assert.False((bool)owns.Invoke(null, new object?[] { session, "tenant-b" })!);
-        Assert.False((bool)owns.Invoke(null, new object?[] { null, "tenant-a" })!);
+        Assert.True((bool)owns!.Invoke(null, new object?[] { session, owner })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { session, owner with { TenantId = "tenant-b" } })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { session, owner with { Subject = "bob" } })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { session, owner with { Authentication = "api_key" } })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { session, null })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { null, owner })!);
     }
 
 }

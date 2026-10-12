@@ -39,7 +39,7 @@ public sealed record ChessExploreResponse(
     string Fen, string? Player, IReadOnlyList<ChessExploreMove> Moves);
 
 public sealed record ChessPlayStart(Guid SessionId, string Fen, string Status = "ongoing", int Ply = 0,
-    string TenantId = "public", string? UserId = null, string GameId = "");
+    string TenantId = "public", string? UserId = null, string GameId = "", OperationPrincipal? Requester = null);
 
 public sealed record ChessPlayMoveResult(
     string Fen, bool Terminal, string Status, bool Legal, int Ply,
@@ -422,22 +422,22 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public async Task<ChessPlayStart> StartPlaySessionAsync(
         bool recordToSubstrate = true, IReadOnlyList<string>? moves = null,
-        string tenantId = "public", string? userId = null, CancellationToken ct = default)
+        string tenantId = "public", string? userId = null, CancellationToken ct = default,
+        OperationPrincipal? requester = null)
     {
         await EngineAsync(ct);
         var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
-        var humanName = string.IsNullOrWhiteSpace(userId)
-            ? tenantId == "public" ? "Browser player" : tenantId
-            : userId;
-        var humanId = ChessVocabulary.PlayerId(humanName);
+        // An authenticated account does not establish a canonical chess player.
+        // A participant relation requires a recorded player record, not a name hash.
+        const string humanName = "Browser player";
         var id = liveHost.StartPlaySession(
             recordToSubstrate,
             tenantId: tenantId,
             userId: userId,
-            whitePlayerId: humanId,
+            whitePlayerId: null,
             whitePlayerName: humanName,
             blackPlayerId: ChessVocabulary.LaplacePlayerId,
-            blackPlayerName: "Laplace");
+            blackPlayerName: "Laplace", requester: requester);
         var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
 
@@ -463,9 +463,10 @@ public sealed class ChessEngineService : IAsyncDisposable
         session.State = state;
         session.PlyCount = session.Moves.Count;
         var status = _modality.Terminal(state) is { } t ? Describe(t) : "ongoing";
+        session.SaveOperation();
         return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount,
             session.TenantId, session.UserId,
-            Convert.ToHexString(session.EventId.ToBytes()).ToLowerInvariant());
+            Convert.ToHexString(session.EventId.ToBytes()).ToLowerInvariant(), session.Requester);
     }
 
     private static ChessMove? FindLegalUci(ChessState state, string uci)
@@ -498,6 +499,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         session.State = next;
         session.Moves.Add(uci);
         session.PlyCount = session.Moves.Count;
+        session.SaveOperation();
 
         if (session.RecordToSubstrate)
         {
@@ -542,6 +544,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         session.State = next;
         session.Moves.Add(mv.ToUci());
         session.PlyCount = session.Moves.Count;
+        session.SaveOperation();
 
         if (session.RecordToSubstrate)
         {
