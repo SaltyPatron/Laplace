@@ -1,0 +1,136 @@
+# Shared data validation for setup, credential rendering and ordinary publication.
+$ErrorActionPreference='Stop'
+function Read-IisInstallation([string]$Path) {
+    $c=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if($c.version -ne 1 -or $c.host -ne $env:COMPUTERNAME.ToLowerInvariant()){throw 'IIS declaration version or host does not match.'}
+    foreach($key in 'directory','publish','bao','machine_env') {
+        if(-not [IO.Path]::IsPathFullyQualified($c.$key)){throw "Declare an absolute $key path."}
+    }
+    if([IO.Path]::GetFullPath($c.directory).TrimEnd('\') -eq [IO.Path]::GetPathRoot($c.directory).TrimEnd('\')){throw 'The installation cannot be a volume root.'}
+    foreach($key in 'site','pool','role'){if($c.$key -notmatch '^[a-zA-Z0-9-]+$'){throw "Invalid $key."}}
+    foreach($key in 'origin','address') {
+        $uri=[Uri]$c.$key
+        if(-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne '/'){throw "Declare an HTTPS origin for $key."}
+    }
+    foreach($key in 'knowledge','appdb','api','identity','certificate','chess') {
+        if($c.records.$key -notmatch '^kv/data/[a-zA-Z0-9_/-]+$' -or $c.records.$key -match '/\.?\./'){throw "Invalid $key credential reference."}
+    }
+    if($c.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Declare the package revision.'}
+    if($c.database.pool_max -lt 1 -or $c.database.port -lt 1 -or $c.database.port -gt 65535){throw 'Invalid database budget or port.'}
+    return $c
+}
+function Write-IisAtomic([string]$Path,[string]$Content) {
+    $temp=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.new'
+    [IO.File]::WriteAllText($temp,$Content)
+    [IO.File]::Move($temp,$Path,$true)
+}
+function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
+function Test-IisPackage([string]$Path) {
+    foreach($file in @('Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','Laplace.Endpoints.OpenAICompat.runtimeconfig.json','wwwroot/index.html','laplace_core.dll','laplace_dynamics.dll','laplace_synthesis.dll','laplace_syzygy.dll','share/laplace/laplace_t0_perfcache.bin','cli/Laplace.Cli.exe')) {
+        if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS package: $file"}
+    }
+    $manifest=Get-Content (Join-Path $Path 'iis-package.json') -Raw | ConvertFrom-Json
+    if(-not $manifest.files -or $manifest.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Incomplete package manifest.'}
+    if(Test-Path -LiteralPath (Join-Path $Path 'web.config')){throw 'The package contains a host-specific web.config; use New-IisPackage.ps1.'}
+    $listed=@($manifest.files.path)
+    foreach($required in 'Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','cli\Laplace.Cli.exe'){
+        if($required -notin $listed){throw "Untracked required package file: $required"}
+    }
+    if(@(Get-ChildItem -LiteralPath $Path -File -Recurse|Where-Object Name -NE 'iis-package.json').Count -ne $listed.Count){throw 'Package files differ from the manifest.'}
+    foreach($file in $manifest.files) {
+        $target=[IO.Path]::GetFullPath((Join-Path $Path $file.path))
+        if(-not $target.StartsWith([IO.Path]::GetFullPath($Path).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Package member escapes the package.'}
+        if((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $file.sha256){throw "Package digest mismatch: $($file.path)"}
+    }
+    return $manifest
+}
+function Get-IisEnvironment($c,$records) {
+    $state=Join-Path $c.directory 'state'
+    $values=[ordered]@{}
+    foreach($item in $c.environment.PSObject.Properties){
+        if($item.Name -notmatch '^(LAPLACE_|ASPNETCORE_|DOTNET_|OMP_|MKL_)' -or $item.Name -match 'TOKEN|SECRET|PASSWORD|AUTH_DEV_PRINCIPAL|API_KEY'){throw 'Public environment must contain only non-secret runtime configuration.'}
+        $values[$item.Name]=[string]$item.Value
+    }
+    foreach($item in @(@('knowledge','knowledge_database','knowledge_role','LAPLACE_DB'),@('appdb','application_database','application_role','LAPLACE_APP_DB'))) {
+        $record=$records.($item[0]);$database=$c.database.($item[1]);$role=$c.database.($item[2])
+        if($record.database_host -ne $c.database.host -or $record.database -ne $database -or $record.role -ne $role -or $record.port -ne $c.database.port){throw 'Credential database selection differs from this installation.'}
+        if($record.password -notmatch '^[a-f0-9]{64}$' -or $record.database_host -notmatch '^[a-zA-Z0-9.-]+$' -or $database -notmatch '^[a-z0-9_-]+$' -or $role -notmatch '^[a-z0-9_-]+$'){throw 'Invalid database credential contract.'}
+        $ca=Join-Path $state 'postgres-root.crt'
+        $values[$item[3]]="Host=$($record.database_host);Port=$($record.port);Database=$database;Username=$role;Password=$($record.password);SSL Mode=VerifyFull;Root Certificate=$ca;Maximum Pool Size=$($c.database.pool_max)"
+    }
+    if($records.api.operator_token -notmatch '^[a-f0-9]{64}$'){throw 'Missing runtime operator credential.'}
+    $values.LAPLACE_OPERATOR_TOKEN=$records.api.operator_token
+    foreach($provider in 'google','microsoft') {
+        $id=$records.identity.("${provider}_client_id");$secret=$records.identity.("${provider}_client_secret")
+        if(-not $id -or -not $secret){throw "Missing $provider provider configuration."}
+        $values["LAPLACE_AUTH_$($provider.ToUpperInvariant())_CLIENT_ID"]=$id
+        $values["LAPLACE_AUTH_$($provider.ToUpperInvariant())_CLIENT_SECRET"]=$secret
+    }
+    $values.LAPLACE_PUBLIC_BASE_URL=$c.origin.TrimEnd('/')
+    $values.LAPLACE_AUTH_MODE='identity';$values.LAPLACE_BILLING_STORE='postgres'
+    $values.LAPLACE_DATA_PROTECTION_KEYS=Join-Path $state 'keys'
+    $values.LAPLACE_OPS_LOG_DIR=Join-Path $state 'logs'
+    $values.LAPLACE_LICHESS_CONTROL_CLIENT=Join-Path $state 'chess-client.json'
+    return $values
+}
+function Get-IisWebConfig([string]$Revision,[string]$LogDirectory) {
+    $log=[Security.SecurityElement]::Escape((Join-Path $LogDirectory 'iis'))
+    return '<configuration><system.webServer><handlers><add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" /></handlers><aspNetCore processPath=".\releases\'+$Revision+'\Laplace.Endpoints.OpenAICompat.exe" hostingModel="inprocess" stdoutLogEnabled="true" stdoutLogFile="'+$log+'" /></system.webServer></configuration>'
+}
+function Test-IisEndpoint($c,[string]$OperatorToken='',[string]$ApiKey='',[string]$Base='') {
+    $base=if($Base){$Base.TrimEnd('/')}else{$c.origin.TrimEnd('/')}
+    $health=Invoke-RestMethod "$base/health" -NoProxy -TimeoutSec 20
+    if($health.status -ne 'ok'){throw 'IIS application liveness failed.'}
+    $ready=Invoke-WebRequest "$base/health/ready" -NoProxy -TimeoutSec 20 -SkipHttpErrorCheck
+    $state=$ready.Content | ConvertFrom-Json
+    if($state.substrate_reachable -ne $true -or $state.perfcache_ready -ne $true){throw 'IIS substrate or native perfcache is unavailable.'}
+    $page=Invoke-WebRequest $base -NoProxy -TimeoutSec 20
+    if($page.Content -notmatch '<html'){throw 'The installed UI was not served.'}
+    $auth=Invoke-RestMethod "$base/v1/auth/config" -NoProxy -TimeoutSec 20
+    foreach($name in 'google','microsoft'){if($name -notin @($auth.providers.id)){throw "IIS $name authentication is not configured."}}
+    if(-not $OperatorToken -and -not $ApiKey){throw 'Authenticated verification requires an operator credential or a workload API key.'}
+    $issued=$null
+    try {
+        if(-not $ApiKey){
+            $issued=Invoke-RestMethod "$base/v1/billing/operator/keys" -Method Post -ContentType application/json -Body '{"tenant":"deployment-verification","label":"iis-installed-runtime-check"}' -Headers @{'X-Laplace-Operator-Token'=$OperatorToken} -NoProxy -TimeoutSec 20
+            $ApiKey=$issued.api_key
+            if($ApiKey -notlike 'sk-laplace-*' -or -not $issued.key_prefix){throw 'Verification key issuance failed.'}
+        }
+        $headers=@{Authorization="Bearer $ApiKey"}
+        $op=Invoke-RestMethod "$base/v1/op" -Method Post -ContentType application/json -Body '{"name":"ops.substrate_counts","max_rows":20}' -Headers $headers -NoProxy -TimeoutSec 20
+        if($op.object -ne 'op.result' -or $op.name -ne 'ops.substrate_counts'){throw 'Typed substrate operation returned the wrong contract.'}
+        $body='{"text":"Laplace deployment validation."}'
+        $proof=Invoke-RestMethod "$base/v1/explore/storage-proof" -Method Post -ContentType application/json -Body $body -Headers $headers -NoProxy -TimeoutSec 20
+        if($proof.perfcache_aligned -ne $true -or -not $proof.perfcache_receipt_hex -or $proof.perfcache_receipt_hex -ne $proof.database_perfcache_receipt_hex -or $proof.database_perfcache_error){throw 'API and PostgreSQL native artifacts disagree.'}
+        foreach($name in 'tier0_rom','merkle_recomposition','trajectory_roundtrip'){
+            if(-not @($proof.invariants | Where-Object {$_.key -eq $name -and $_.passed -eq $true}).Count){throw "Native storage invariant failed: $name"}
+        }
+        if(@($proof.invariants | Where-Object {$_.passed -ne $true}).Count){throw 'Native storage proof contains a failed invariant.'}
+        $decomposition=Invoke-RestMethod "$base/v1/explore/decompose" -Method Post -ContentType application/json -Body $body -Headers $headers -NoProxy -TimeoutSec 20
+        if(-not $proof.root_id_hex -or $proof.root_id_hex -ne $decomposition.root_id_hex){throw 'Native operations disagree on canonical identity.'}
+        $chess=Invoke-RestMethod "$base/chess/lichess/control" -Headers $headers -NoProxy -TimeoutSec 20
+        if($chess.available -ne $true){throw 'The declared Lichess controller is unavailable through this application.'}
+    } finally {
+        if($issued -and $issued.key_prefix){
+            $null=Invoke-RestMethod "$base/v1/billing/keys/revoke" -Method Post -ContentType application/json -Body (Iis-Json @{key_prefix=$issued.key_prefix}) -Headers @{Authorization="Bearer $ApiKey"} -NoProxy -TimeoutSec 20
+        }
+    }
+    $redirects=@{}
+    if($base -eq $c.origin.TrimEnd('/')){
+        $handler=[Net.Http.HttpClientHandler]::new();$handler.AllowAutoRedirect=$false;$handler.UseProxy=$false
+        $client=[Net.Http.HttpClient]::new($handler);$client.Timeout=[TimeSpan]::FromSeconds(20)
+        try{
+            foreach($provider in 'google','microsoft'){
+                $response=$client.GetAsync("$base/v1/auth/login/$provider").GetAwaiter().GetResult()
+                try{
+                    $location=[string]$response.Headers.Location
+                    if([int]$response.StatusCode -ne 302 -or $location -notmatch '[?&]redirect_uri=([^&]+)'){throw "$provider did not issue its authorization redirect."}
+                    $callback=[Net.WebUtility]::UrlDecode($Matches[1])
+                    if($callback -ne "$base/signin-$provider"){throw "$provider callback differs from the declared origin."}
+                    $redirects[$provider]=$callback
+                }finally{$response.Dispose()}
+            }
+        }finally{$client.Dispose();$handler.Dispose()}
+    }
+    return @{verified_utc=[DateTime]::UtcNow.ToString('o');origin=$base;health='passed';substrate='passed';perfcache='passed';ui='passed';providers=@($auth.providers.id);callbacks=$redirects;authenticated_sql='passed';native_storage='passed';lichess_controller='passed';product_ready=$state.ready}
+}

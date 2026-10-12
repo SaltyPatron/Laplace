@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
+if defined LAPLACE_IIS_INSTALLATION goto managed_iis
 set "LAPLACE_IIS_SETTINGS_RESOLVED="
 for /f "usebackq delims=" %%L in (`pwsh -NoProfile -File "%~dp0..\..\deploy\windows\site-settings.ps1" -ForCmd`) do set "%%L"
 if not defined LAPLACE_IIS_SETTINGS_RESOLVED exit /b 1
@@ -187,3 +188,7 @@ goto wait_svc
 echo ==== restart IIS app pool %POOL% after failure ====
 "%APPCMD%" start apppool /apppool.name:%POOL% >nul 2>&1
 exit /b 1
+
+:managed_iis
+pwsh -NoProfile -File "%~dp0..\..\deploy\windows\Publish-IisStaged.ps1" -Installation "%LAPLACE_IIS_INSTALLATION%" -Published "%LAPLACE_PUBLISH_ENDPOINT%"
+exit /b %ERRORLEVEL%

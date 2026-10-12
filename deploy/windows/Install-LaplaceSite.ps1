@@ -1,7 +1,13 @@
 #requires -Version 7
 [CmdletBinding()]
-param([switch]$Plan)
+param([switch]$Plan,[string]$Installation,[string]$Enrollment)
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
+if($Installation){
+  & "$PSScriptRoot/Install-IisRuntime.ps1" -Installation $Installation -Enrollment $Enrollment -Plan:$Plan
+  return
+}
 $settings=(& "$PSScriptRoot/site-settings.ps1" | ConvertFrom-Json)
 if ($Plan) { $settings | ConvertTo-Json; return }
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -34,7 +40,11 @@ if (-not ((& $appcmd list module /name:AspNetCoreModuleV2 2>$null) -match 'AspNe
   throw "AspNetCoreModuleV2 not registered in IIS. Install the .NET 10 Hosting Bundle (winget install Microsoft.DotNet.HostingBundle.10) then 'iisreset'."
 }
 
-New-Item -ItemType Directory $PhysicalPath -Force | Out-Null
+foreach($file in 'web.config','Laplace.Endpoints.OpenAICompat.dll'){
+  if(-not(Test-Path -LiteralPath (Join-Path $PhysicalPath $file) -PathType Leaf)){
+    throw "Incomplete IIS installation: missing $file at $PhysicalPath. Use -Installation with a complete package and workload declaration."
+  }
+}
 
 # The site's web.config maps the aspNetCore handler (every ASP.NET Core publish does); IIS refuses a site-level
 # <handlers> while the section is locked at the server (overrideModeDefault="Deny", IIS's default), and answers every
@@ -69,8 +79,8 @@ if ($certificate) {
   } finally { $manager.Dispose() }
 }
 
-& $appcmd start apppool /apppool.name:$PoolName 2>$null | Out-Null
-& $appcmd start site    /site.name:$SiteName    2>$null | Out-Null
+if((Invoke-AppCmd list apppool $PoolName /text:state).Trim() -ne 'Started'){Invoke-AppCmd start apppool /apppool.name:$PoolName | Out-Null}
+if((Invoke-AppCmd list site $SiteName /text:state).Trim() -ne 'Started'){Invoke-AppCmd start site /site.name:$SiteName | Out-Null}
 $actualPath=(Invoke-AppCmd list vdir "$SiteName/" /text:physicalPath).Trim()
 $actualBindings=(Invoke-AppCmd list site $SiteName /text:bindings).Trim()
 if ($actualPath -ne $PhysicalPath -or $actualBindings -ne $binding) { throw 'Installed IIS path or binding differs from the declaration.' }

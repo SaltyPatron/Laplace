@@ -1,0 +1,78 @@
+# Monorepo IIS installation
+
+The monorepo owns this installer and its API, UI and CLI package. It does not install
+Laplace-Refactor or replace the modular `laplace` implementation. The UCI connector
+has its own installation in Laplace-UCI.
+
+`deploy/windows/Install-LaplaceSite.ps1 -Installation <installation.json>` installs
+the declared IIS site, application pool, TLS binding and OpenBao credential agent.
+Run installation as Administrator. After installation, the declaration is recorded
+in `LAPLACE_IIS_INSTALLATION` in the machine environment file; repeating
+`Install-LaplaceSite.ps1` uses that declaration.
+Repair preserves the last successfully selected release in `web/active.json`;
+it does not revert an ordinary publication to the initial setup package.
+
+The declaration specifies the host, HTTPS origin, runtime and published package
+directories, site/pool names, deployer SID, database selection and connection budget,
+public environment settings, certificate trust, controller address and exact OpenBao
+record references. Paths are data. The installed process has no source/build mount
+dependency. Database passwords, provider secrets and controller credentials are not
+part of the declaration or application package.
+
+| Installed location, relative to `directory` | Purpose and access |
+| --- | --- |
+| `web/releases/<revision>` | Complete immutable application/native/CLI/UI payload; pool reads, declared deployer publishes |
+| `web/web.config` | Selects the executable in the release; contains no credentials |
+| `state/keys` | Persistent browser data-protection keys; pool can write |
+| `state/logs` and `state/output` | Application logs and declared output; pool can write |
+| `state/postgres-root.crt` | Database trust; pool can read |
+| `state/chess-client.json` and `state/control.token` | Controller selection client; pool can read |
+| `agent` | Protected AppRole enrollment, agent executable/configuration and render log; SYSTEM and Administrators only |
+| `receipts` | Successful setup/publication results |
+
+`Enroll-IisRuntime.ps1` uses an authorized OpenBao enrollment operator once to create
+an AppRole that can read only the six declared records. Its enrollment file is
+encrypted for the enrolling Windows user. Run elevated installation as that same
+user. The installed OpenBao Agent authenticates independently and refreshes records;
+it never invokes a human login. The renderer updates only this pool's environment,
+controller client and HTTPS certificate, recycling the pool when environment values
+change. IIS protects pool environment configuration; secrets are not embedded in
+the deployer-writable package.
+
+Build and ordinary publication, in an unelevated PowerShell session:
+
+```powershell
+# LAPLACE_API_KEY is a workload API key used to verify authenticated operations.
+& .\deploy\windows\Build-IisPackage.ps1 -Installation $installation -Publish
+```
+
+The existing `deploy/windows/publish.ps1`, `scripts/win/publish-deploy.cmd` and
+`scripts/win/deploy-api.cmd` select this installation when
+`LAPLACE_IIS_INSTALLATION` is configured. The first two build the application/CLI
+and UI; `deploy-api.cmd` packages the already staged output. Their managed IIS path
+does not use `appcmd`, mirror over a running release, or require elevation.
+
+To publish an already prepared package:
+
+```powershell
+& .\deploy\windows\Publish-IisRuntime.ps1 -Installation $installation -Package $package
+```
+
+Publication verifies the file hashes, selects the release through `web.config`,
+then checks HTTPS, the UI, both provider redirects, authenticated SQL, native storage
+invariants and the declared Lichess controller. Failed verification restores the
+previous release selection. Setup also verifies again after recycling the real pool
+and retires an explicitly declared legacy site only after those checks pass.
+Actual Google/Microsoft account interaction remains a separate browser check.
+
+Before privileged installation, `Test-IisPackage.ps1` can run the package in IIS
+Express with the installed ASP.NET Core module against its real selected databases.
+It authenticates using the new AppRole, checks access denial to a supplied unrelated
+record, runs the authenticated operations and revokes its temporary token. This
+pre-install check does not establish machine IIS ACLs, HTTP.sys TLS binding, service
+startup or the real named HTTPS origin; setup verifies those on the installed host.
+
+Microsoft documents the [ASP.NET Core IIS module configuration](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/web-config)
+and [application pool environment variables](https://learn.microsoft.com/en-us/iis/configuration/system.applicationhost/applicationpools/add/environmentvariables/).
+OpenBao documents [Agent as a Windows service](https://openbao.org/docs/agent-and-proxy/agent/winsvc/)
+and [template refresh and execution](https://openbao.org/docs/agent-and-proxy/agent/template/).
