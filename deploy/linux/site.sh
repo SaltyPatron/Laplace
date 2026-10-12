@@ -85,13 +85,14 @@ say()  { echo; echo "=== $*   $(date -u +%H:%M:%S)"; }
 fail() { echo "::error::$*" >&2; exit 1; }
 host_lock() {
   local path="${LAPLACE_HOST_LOCK:-$LAPLACE_LOCKS/host-resource.lock}" mode="${1:-exclusive}"
+  local wait="${LAPLACE_HOST_LOCK_WAIT_SECONDS:-0}" flag
+  [[ "$wait" =~ ^[0-9]+$ ]] || fail "LAPLACE_HOST_LOCK_WAIT_SECONDS must be a nonnegative integer"
+  case "$mode" in shared) flag=-s ;; exclusive) flag=-x ;; *) fail "invalid host lock mode: $mode" ;; esac
   [[ -d "$(dirname "$path")" ]] || fail "missing shared host lock directory: $path"
   if ! [[ /proc/self/fd/8 -ef "$path" ]]; then exec 8>>"$path"; fi
-  if [[ "$mode" == shared ]]; then
-    flock -sn 8 || fail "another deployment holds $path"
-  else
-    flock -xn 8 || fail "another deployment or ingest holds $path"
-  fi
+  flock "$flag" -n 8 && return 0
+  echo "Waiting up to ${wait}s for $path ($mode)" >&2
+  flock "$flag" -w "$wait" 8 || fail "host lock deadline expired: $path; no deployment phase ran"
 }
 revision() {
   local app="$1" rev web

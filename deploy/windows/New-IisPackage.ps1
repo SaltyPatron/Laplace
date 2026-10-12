@@ -11,6 +11,8 @@ $files=@(Get-ChildItem -LiteralPath $Published -File -Recurse | Where-Object Nam
     Copy-Item -LiteralPath $_.FullName -Destination $target
     @{path=$relative;sha256=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()}
 })
-Write-IisAtomic (Join-Path $Destination 'iis-package.json') (Iis-Json @{revision=$Revision;created_utc=[DateTime]::UtcNow.ToString('o');files=$files})
+$identity=(@($files|Sort-Object path|ForEach-Object {$_.path+':'+$_.sha256}) -join "`n")
+$digest=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant()
+Write-IisAtomic (Join-Path $Destination 'iis-package.json') (Iis-Json @{revision=$digest;source_revision=$Revision;created_utc=[DateTime]::UtcNow.ToString('o');files=$files})
 $null=Test-IisPackage $Destination
 Write-Host "Packaged $($files.Count) verified files at $Destination"

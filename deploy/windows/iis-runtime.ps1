@@ -25,6 +25,9 @@ function Write-IisAtomic([string]$Path,[string]$Content) {
     [IO.File]::Move($temp,$Path,$true)
 }
 function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
+function Get-IisPageAssets([string]$Html) {
+    @([regex]::Matches($Html,'(?:src|href)="(/assets/[^"]+)"') | ForEach-Object {$_.Groups[1].Value} | Select-Object -Unique)
+}
 function Test-IisPackage([string]$Path) {
     foreach($file in @('Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','Laplace.Endpoints.OpenAICompat.runtimeconfig.json','wwwroot/index.html','laplace_core.dll','laplace_dynamics.dll','laplace_synthesis.dll','laplace_syzygy.dll','share/laplace/laplace_t0_perfcache.bin','cli/Laplace.Cli.exe')) {
         if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS package: $file"}
@@ -37,6 +40,11 @@ function Test-IisPackage([string]$Path) {
         if($required -notin $listed){throw "Untracked required package file: $required"}
     }
     if(@(Get-ChildItem -LiteralPath $Path -File -Recurse|Where-Object Name -NE 'iis-package.json').Count -ne $listed.Count){throw 'Package files differ from the manifest.'}
+    $assets=Get-IisPageAssets (Get-Content -LiteralPath (Join-Path $Path 'wwwroot/index.html') -Raw)
+    if(-not $assets){throw 'The UI entry point has no compiled asset references.'}
+    foreach($asset in $assets){
+        if(-not(Test-Path -LiteralPath (Join-Path $Path ('wwwroot/'+$asset.TrimStart('/'))) -PathType Leaf)){throw "Missing compiled UI asset: $asset"}
+    }
     foreach($file in $manifest.files) {
         $target=[IO.Path]::GetFullPath((Join-Path $Path $file.path))
         if(-not $target.StartsWith([IO.Path]::GetFullPath($Path).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Package member escapes the package.'}
@@ -86,6 +94,12 @@ function Test-IisEndpoint($c,[string]$OperatorToken='',[string]$ApiKey='',[strin
     if($state.substrate_reachable -ne $true -or $state.perfcache_ready -ne $true){throw 'IIS substrate or native perfcache is unavailable.'}
     $page=Invoke-WebRequest $base -NoProxy -TimeoutSec 20
     if($page.Content -notmatch '<html'){throw 'The installed UI was not served.'}
+    $assets=Get-IisPageAssets $page.Content
+    if(-not $assets){throw 'The UI entry point has no compiled asset references.'}
+    foreach($asset in $assets){
+        $response=Invoke-WebRequest ($base+$asset) -NoProxy -TimeoutSec 20
+        if(-not $response.RawContentLength -or [string]$response.Headers['Content-Type'] -match 'text/html'){throw "Invalid compiled UI asset response: $asset"}
+    }
     $auth=Invoke-RestMethod "$base/v1/auth/config" -NoProxy -TimeoutSec 20
     foreach($name in 'google','microsoft'){if($name -notin @($auth.providers.id)){throw "IIS $name authentication is not configured."}}
     if(-not $OperatorToken -and -not $ApiKey){throw 'Authenticated verification requires an operator credential or a workload API key.'}
@@ -132,5 +146,5 @@ function Test-IisEndpoint($c,[string]$OperatorToken='',[string]$ApiKey='',[strin
             }
         }finally{$client.Dispose();$handler.Dispose()}
     }
-    return @{verified_utc=[DateTime]::UtcNow.ToString('o');origin=$base;health='passed';substrate='passed';perfcache='passed';ui='passed';providers=@($auth.providers.id);callbacks=$redirects;authenticated_sql='passed';native_storage='passed';lichess_controller='passed';product_ready=$state.ready}
+    return @{verified_utc=[DateTime]::UtcNow.ToString('o');origin=$base;health='passed';substrate='passed';perfcache='passed';ui='passed';ui_entry_assets=$assets.Count;providers=@($auth.providers.id);callbacks=$redirects;authenticated_sql='passed';native_storage='passed';lichess_controller='passed';product_ready=$state.ready}
 }
