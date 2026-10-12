@@ -11,6 +11,44 @@ An operator must sign in with a browser account explicitly listed in the host's
 `api-client.json`. Tenant ownership does not grant control of the shared bot.
 The browser never receives the bot token or the API-to-controller credential.
 
+## Hart installation
+
+These installed monorepo surfaces all address the controller on hart-prod:
+
+| Environment | Open the selector | Engine profile | Engine host |
+| --- | --- | --- | --- |
+| Development | http://localhost:5187/lab/lichess on hart-desktop | `mono-development` | hart-desktop, private IIS HTTPS at `uci-dev.hartonomous.com` |
+| Staging | https://staging.hartonomous.com/lab/lichess | `mono-staging` | hart-server, private nginx HTTPS |
+| Production | https://api.hartonomous.com/lab/lichess | `mono-prod` | hart-prod, local connector |
+
+Sign in, select **Laplace on hart-desktop**, **Laplace on hart-server**, or
+**Laplace on hart-prod**, then **Apply destination**. **Off** stops accepting new
+games and lets active games finish. The selector controls the same single bot
+account from every UI; it does not create one bot per environment.
+
+All three installed profiles currently read and admit knowledge to hart-server's
+`laplace-mono` database while hart-cloud is off. Selecting an engine host does not
+change the knowledge database or automatically start hart-cloud. The installed
+controller declaration at `/etc/laplace-mono/chess/agent/installation.json` owns
+these bindings; its `public_files` contain the controller and connector profiles.
+These are monorepo engines, not Refactor or modular engine deployments.
+
+From a new ordinary PowerShell terminal on hart-desktop, the installed client works
+from any directory:
+
+```powershell
+laplace-uci-connect catalog
+laplace-uci-connect verify --profile mono-development
+laplace-uci-connect verify --profile mono-staging
+laplace-uci-connect verify --profile mono-prod
+```
+
+The desktop client launches development locally and reaches staging and production
+over authenticated WSS. The shared controller reaches development through IIS WSS.
+These commands perform real engine searches without starting Lichess games. Client
+configuration is in `%LOCALAPPDATA%\Laplace\mono\chess\uci-client.json`; the launcher
+is in `%LOCALAPPDATA%\Laplace\bin`. No source checkout or build mount is needed to run it.
+
 ## Engine and knowledge binding
 
 The controller runs `Laplace-UCI` with a named connector profile. Connectors can
