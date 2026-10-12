@@ -27,5 +27,6 @@ try {
     $result.revision=$manifest.revision
     $receipt=Join-Path $c.directory ('receipts/publication-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')+'.json')
     Write-IisAtomic $receipt (Iis-Json $result)
+    Write-IisAtomic (Join-Path $web 'active.json') (Iis-Json @{revision=$manifest.revision})
     Write-Host "Published $($manifest.revision) at $($c.origin); authenticated SQL and native storage verified. Receipt: $receipt"
 } finally {$lock.Dispose()}

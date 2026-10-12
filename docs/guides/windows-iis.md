@@ -9,6 +9,8 @@ the declared IIS site, application pool, TLS binding and OpenBao credential agen
 Run installation as Administrator. After installation, the declaration is recorded
 in `LAPLACE_IIS_INSTALLATION` in the machine environment file; repeating
 `Install-LaplaceSite.ps1` uses that declaration.
+Repair preserves the last successfully selected release in `web/active.json`;
+it does not revert an ordinary publication to the initial setup package.
 
 The declaration specifies the host, HTTPS origin, runtime and published package
 directories, site/pool names, deployer SID, database selection and connection budget,

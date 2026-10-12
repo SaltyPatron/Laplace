@@ -60,6 +60,12 @@ if($Operation -eq 'Render') {
     Write-IisAtomic $receiptPath (Iis-Json @{rendered_utc=[DateTime]::UtcNow.ToString('o');source='openbao-agent';pool=$c.pool;environment_changed=$changed;certificate=$certificate.Thumbprint;certificate_digest=$certDigest})
     return
 }
+$selection=Join-Path $web 'active.json'
+if(Test-Path -LiteralPath $selection){
+    $active=Get-Content -LiteralPath $selection -Raw|ConvertFrom-Json
+    if($active.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'The installed release selection is invalid.'}
+    $c.revision=$active.revision;$c.publish=Join-Path $web ('releases/'+$c.revision)
+}
 $manifest=Test-IisPackage $c.publish
 if($manifest.revision -ne $c.revision){throw 'Package revision differs from the installation declaration.'}
 if(-not(Test-Path -LiteralPath $c.bao -PathType Leaf)){throw 'Declared OpenBao executable is missing.'}
@@ -113,11 +119,13 @@ Write-IisAtomic $webConfig (Get-IisWebConfig $c.revision (Join-Path $state 'logs
 foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-runtime.ps1') -Destination (Join-Path $root 'iis-runtime.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Publish-IisRuntime.ps1') -Destination (Join-Path $root 'Publish-IisRuntime.ps1') -Force
-Write-IisAtomic (Join-Path $root 'installation.json') (Iis-Json $c)
-Write-IisAtomic (Join-Path $private 'installation.json') (Iis-Json $c)
 $service=$c.pool+'-credentials'
 if(Get-Service $service -ErrorAction SilentlyContinue){Stop-Service $service}
-$bao=Join-Path $private 'bao.exe';Copy-Item -LiteralPath $c.bao -Destination $bao -Force
+$bao=Join-Path $private 'bao.exe'
+if([IO.Path]::GetFullPath($c.bao) -ne [IO.Path]::GetFullPath($bao)){Copy-Item -LiteralPath $c.bao -Destination $bao -Force}
+$c.bao=$bao;$c.publish=$release
+Write-IisAtomic (Join-Path $root 'installation.json') (Iis-Json $c)
+Write-IisAtomic (Join-Path $private 'installation.json') (Iis-Json $c)
 if($Enrollment){
     Write-IisAtomic (Join-Path $private 'role-id') $e.role_id
     Write-IisAtomic (Join-Path $private 'secret-id') $e.secret_id
@@ -206,5 +214,6 @@ Write-IisAtomic $c.machine_env (($machine -join "`r`n")+"`r`n")
 $verified.revision=$c.revision;$verified.credential_source='openbao-agent';$verified.legacy_site_retired=$c.legacy_site
 $receiptPath=Join-Path $root ('receipts/setup-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')+'.json')
 Write-IisAtomic $receiptPath (Iis-Json $verified)
+Write-IisAtomic $selection (Iis-Json @{revision=$c.revision})
 if($Enrollment){Remove-Item -LiteralPath $Enrollment -Force}
 Write-Host "Installed and verified $($c.origin). Receipt: $receiptPath"
