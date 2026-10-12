@@ -164,6 +164,8 @@ The main delivery workflow builds, installs, manages the database lifecycle and 
 
 For everyday use without a checkout or build shell, see the
 [installed monorepo CLI](docs/guides/installed-mono-client.md).
+For installed database status, migration, repair and recreation through the
+GitHub runner, see [database maintenance](docs/guides/database-maintenance.md).
 
 For substrate introspection after installation:
 
