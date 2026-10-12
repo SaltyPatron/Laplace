@@ -33,7 +33,7 @@ const TABS: { id: string; label: string; path: string; blurb: string }[] = [
     id: 'gauntlet',
     label: 'Gauntlet',
     path: '/lab/gauntlet',
-    blurb: 'laplace-uci vs Stockfish through cutechess-cli, with the full process transcript.',
+    blurb: 'Laplace vs Stockfish through Fastchess or Cutechess, with the full process transcript.',
   },
   {
     id: 'calibration',

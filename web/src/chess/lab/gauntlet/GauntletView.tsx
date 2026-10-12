@@ -22,11 +22,8 @@ import { streamLabEvents, type LabCatalog, type LabEvent, type LabJob } from '..
 import { normalizeKind } from '../experiments';
 import styles from './GauntletView.module.css';
 
-/** The four binaries a gauntlet needs, in the order the run touches them. */
-const REQUIRED: { key: string; label: string; fix: string }[] = [
-  { key: 'cutechess', label: 'cutechess-cli', fix: 'LAPLACE_CUTECHESS' },
+const ENGINES: { key: string; label: string; fix: string }[] = [
   { key: 'stockfish', label: 'Stockfish', fix: 'LAPLACE_STOCKFISH' },
-  { key: 'qt', label: 'Qt runtime', fix: 'LAPLACE_QT_BIN' },
   { key: 'laplaceUci', label: 'laplace-uci', fix: 'ships beside the API host — publish it' },
 ];
 
@@ -41,6 +38,7 @@ interface Preview {
 }
 
 interface Setup {
+  conductor: 'fastchess' | 'cutechess';
   clock: 'seconds' | 'depth';
   st: string;
   depth: string;
@@ -56,6 +54,7 @@ interface Setup {
 }
 
 const DEFAULT_SETUP: Setup = {
+  conductor: 'fastchess',
   clock: 'seconds',
   st: '1',
   depth: '8',
@@ -101,7 +100,11 @@ export function GauntletView() {
   );
   const active = gauntlets.find((j) => j.id === activeId) ?? null;
   const running = active !== null && RUNNING.has(active.state);
-  const missing = REQUIRED.filter((r) => !engines[r.key]?.found);
+  const required = setup.conductor === 'fastchess'
+    ? [{ key: 'fastchess', label: 'Fastchess', fix: 'LAPLACE_FASTCHESS' }, ...ENGINES]
+    : [{ key: 'cutechess', label: 'Cutechess', fix: 'LAPLACE_CUTECHESS' }, ...ENGINES,
+      { key: 'qt', label: 'Qt runtime', fix: 'LAPLACE_QT_BIN' }];
+  const missing = required.filter((r) => !engines[r.key]?.found);
 
   const refresh = useCallback(async () => {
     try {
@@ -131,6 +134,7 @@ export function GauntletView() {
   // drift from CutechessRunner.BuildArguments. Debounced — the sliders move continuously.
   useEffect(() => {
     const q = new URLSearchParams({
+      conductor: setup.conductor,
       rounds: setup.rounds || '2',
       depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
       st: setup.clock === 'seconds' ? setup.st || '1' : '0',
@@ -223,6 +227,7 @@ export function GauntletView() {
     setErr(null);
     try {
       const config: Record<string, string> = {
+        conductor: setup.conductor,
         rounds: setup.rounds,
         elo: setup.elo || '2000',
         limitStrength: String(setup.limitStrength),
@@ -277,7 +282,7 @@ export function GauntletView() {
         <div>
           <h3>Engine Gauntlet</h3>
           <Muted>
-            laplace-uci against Stockfish, driven by cutechess-cli with paired openings, color swaps,
+            Laplace against Stockfish, driven by the selected match conductor with paired openings, color swaps,
             captured UCI traffic, and runtime engine-identity verification.
           </Muted>
         </div>
@@ -285,7 +290,7 @@ export function GauntletView() {
       </header>
 
       <section className={styles.readiness} aria-label="Gauntlet binaries">
-        {REQUIRED.map((r) => {
+        {required.map((r) => {
           const probe = engines[r.key];
           return (
             <Tooltip key={r.key}>
@@ -297,7 +302,7 @@ export function GauntletView() {
               <TooltipContent>
                 {probe?.found
                   ? `${probe.path} (${probe.source})`
-                  : `Not found. Set ${r.fix} in deploy/secrets/chess-lab.env`}
+                  : `Not installed or unavailable: ${r.fix}`}
               </TooltipContent>
             </Tooltip>
           );
@@ -307,8 +312,7 @@ export function GauntletView() {
       {missing.length > 0 && (
         <Alert>
           {missing.length === 1 ? 'One binary is' : `${missing.length} binaries are`} missing, so no
-          gauntlet can start: {missing.map((m) => `${m.label} (${m.fix})`).join(', ')}. Build them with
-          scripts/bootstrap-chess-lab.sh, or point chess-lab.env at existing ones.
+          match can start with this conductor: {missing.map((m) => m.label).join(', ')}.
         </Alert>
       )}
 
@@ -318,6 +322,11 @@ export function GauntletView() {
         <div className={styles.setupCol}>
         <Panel className={styles.setup} title="Match setup">
           <div className={styles.form}>
+            <Field label="Match conductor" help="Fastchess runs engine matches. Cutechess provides an alternative conductor. This selection does not change the Lichess bot or the selected knowledge source." className={styles.wide}>
+              <SegmentedControl value={setup.conductor}
+                onValueChange={(v) => setSetup((s) => ({ ...s, conductor: v as Setup['conductor'] }))}
+                options={['fastchess', 'cutechess']} label="Match conductor" />
+            </Field>
             <Field
               label="Clock"
               help="Per-move seconds is watchable. Fixed depth is a matched limit applied to both engines, not unrestricted Stockfish search."
@@ -332,7 +341,7 @@ export function GauntletView() {
             </Field>
 
             {setup.clock === 'seconds' ? (
-              <Field label="Seconds per move" valueDisplay={`${setup.st}s`} help="cutechess st, with a 2s time margin, applied to both engines.">
+              <Field label="Seconds per move" valueDisplay={`${setup.st}s`} help="The same per-move time budget and margin are applied to both engines.">
                 <SliderField
                   min={0.1}
                   max={10}
@@ -455,7 +464,7 @@ export function GauntletView() {
 
         <Panel title="Game results">
           {games.length === 0 ? (
-            <Muted>Finished games land here as cutechess adjudicates them.</Muted>
+            <Muted>Finished games appear here as the match conductor reports them.</Muted>
           ) : (
             <div className={styles.tableScroll}>
               <table className={styles.table}>

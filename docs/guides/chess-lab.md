@@ -440,7 +440,7 @@ Web → **Lab**, which is three surfaces, not one page:
 | Route | Surface | For |
 | --- | --- | --- |
 | `/lab` | Experiments | In-process substrate runs: lift test, overlay ladder, learned PST, tactics, review |
-| `/lab/gauntlet` | Engine Gauntlet | laplace-uci vs Stockfish through cutechess-cli |
+| `/lab/gauntlet` | Engine Gauntlet | Laplace vs Stockfish through the selected Fastchess or Cutechess conductor |
 | `/lab/lichess` | Lichess | Bot connectivity, player-game fetch |
 
 Each shows only its own jobs. Jobs that play games stream every ply over SSE as
@@ -448,11 +448,16 @@ board events, rendered on a live board:
 
 - **Gauntlet** — Laplace vs Stockfish. Config: `rounds` (games), `st` (sec/move,
   default 1), `elo` (Stockfish cap, default 2000), `limitStrength` (default true),
-  `concurrency`, `ingest`.
+  `concurrency`, `ingest`, and `conductor` (`fastchess` by default, or `cutechess`).
+  The **Match conductor** control selects the installed match tool. Readiness and
+  the command preview follow that selection; Fastchess does not require Qt.
+  Cutechess may use Qt deployed beside its executable, without an installed Qt SDK.
+  Changing the conductor does not change the shared Lichess bot selection or a
+  knowledge connection. Those are separate configurations.
   Setting `depth` > 0 switches to the unclocked depth mode. The form previews
   the exact argv before you start it, from the same `BuildArguments` the job
   uses, resolved against this host's binaries:
-  `GET /chess/lab/cutechess/preview?rounds=&depth=&st=&elo=&limitStrength=&concurrency=`.
+  `GET /chess/lab/cutechess/preview?conductor=fastchess&rounds=&depth=&st=&elo=&limitStrength=&concurrency=`.
 - `substrate-test` — consensus-guided vs pure search, in-process, parallel;
   the live board follows the most recent game, selector pins one.
 - `ladder` — eval-term ablation ladder, same live view.
@@ -545,8 +550,8 @@ as the directories holding its files), and `none` plays without tables. Use the
 host calibration report to choose resources for the intended workload. `auto` and
 `system` NUMA policies respect process affinity; `hardware` deliberately ignores it.
 
-`conductor` selects `cutechess` (the default, cutechess-cli) or `fastchess`
-(`LAPLACE_FASTCHESS`), which conducts matches, SPRT and the ladder (Laplace-Wiki
+`conductor` selects `fastchess` (the lab default, `LAPLACE_FASTCHESS`) or
+`cutechess` (`LAPLACE_CUTECHESS`). Fastchess conducts matches, SPRT and the ladder (Laplace-Wiki
 Sequence/Conflicts.md K1). Both receive the same engines, budget, paired openings
 and PGN; fastchess also takes `affinity`, a CPU list every engine process is
 pinned to, which time-controlled games on a hybrid CPU need. fastchess's engine

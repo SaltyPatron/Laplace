@@ -271,7 +271,7 @@ public sealed class ChessLabPathsTests
     [Fact]
     public void QtBin_MissingWhenUnset()
     {
-        var probe = ChessLabPaths.ResolveQtBinForTest(null);
+        var probe = ChessLabPaths.ResolveQtBin(null);
 
         Assert.Equal("missing", probe.Source);
         Assert.False(probe.Found);
@@ -289,7 +289,7 @@ public sealed class ChessLabPathsTests
             string name = OperatingSystem.IsWindows() ? "Qt6Core.dll"
                 : OperatingSystem.IsMacOS() ? "libQt6Core.6.dylib" : "libQt6Core.so.6";
             File.WriteAllText(Path.Combine(dir, name), "runtime fixture");
-            var probe = ChessLabPaths.ResolveQtBinForTest(dir);
+            var probe = ChessLabPaths.ResolveQtBin(dir);
             Assert.Equal("config", probe.Source);
             Assert.Equal(dir, probe.Path);
             Assert.True(probe.Found);
@@ -305,7 +305,7 @@ public sealed class ChessLabPathsTests
         try
         {
             File.WriteAllText(Path.Combine(dir, "unrelated-library.so"), "unrelated");
-            var probe = ChessLabPaths.ResolveQtBinForTest(dir);
+            var probe = ChessLabPaths.ResolveQtBin(dir);
             Assert.Equal("config", probe.Source);
             Assert.Equal(dir, probe.Path);
             Assert.False(probe.Found);
@@ -325,10 +325,34 @@ public sealed class ChessLabPathsTests
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(qmake, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                Assert.False(ChessLabPaths.ResolveQtBinForTest(dir).Found);
+                Assert.False(ChessLabPaths.ResolveQtBin(dir).Found);
                 File.SetUnixFileMode(qmake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
-            Assert.True(ChessLabPaths.ResolveQtBinForTest(dir).Found);
+            Assert.True(ChessLabPaths.ResolveQtBin(dir).Found);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void QtBin_UsesConductorRuntimeButDoesNotOverrideExplicitSelection()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"qt-deployed-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string library = OperatingSystem.IsWindows() ? "Qt6Core.dll"
+                : OperatingSystem.IsMacOS() ? "libQt6Core.6.dylib" : "libQt6Core.so.6";
+            File.WriteAllText(Path.Combine(dir, library), "runtime fixture");
+            var executable = Path.Combine(dir, "cutechess-cli");
+            var packaged = ChessLabPaths.ResolveQtBin(null, executable);
+            Assert.True(packaged.Found);
+            Assert.Equal("packaged", packaged.Source);
+            Assert.Equal(dir, packaged.Path);
+            var explicitlyMissing = ChessLabPaths.ResolveQtBin(Path.Combine(dir, "absent"), executable);
+            Assert.False(explicitlyMissing.Found);
+            Assert.Equal("config", explicitlyMissing.Source);
+            File.Delete(Path.Combine(dir, library));
+            Assert.False(ChessLabPaths.ResolveQtBin(null, executable).Found);
         }
         finally { Directory.Delete(dir, recursive: true); }
     }

@@ -124,7 +124,7 @@ internal static class ChessEndpoints
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
-                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true", conductor = "cutechess", affinity = "", stockfishThreads = "", stockfishHashMb = "", stockfishNumaPolicy = "", stockfishSyzygyPath = "" } },
+                    new { kind = "cutechess", label = "Laplace vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true", conductor = "fastchess", affinity = "", stockfishThreads = "", stockfishHashMb = "", stockfishNumaPolicy = "", stockfishSyzygyPath = "" } },
                     new { kind = "lichess-fetch", label = "Ingest player games", @default = new { site = "chesscom", all = "true", max = "1000", ingest = "true" } },
                     new { kind = "player-profile", label = "Acquire and associate player profiles", @default = new { site = "chesscom", ingest = "true" } },
                     new { kind = "fide-search", label = "Search FIDE players", @default = new { limit = "25" } },
@@ -150,7 +150,7 @@ internal static class ChessEndpoints
                 StockfishElo = elo ?? 2000,
                 StockfishLimitStrength = limitStrength ?? true,
                 Concurrency = Math.Max(1, concurrency ?? 1),
-                Conductor = string.IsNullOrWhiteSpace(conductor) ? "cutechess" : conductor.Trim().ToLowerInvariant(),
+                Conductor = string.IsNullOrWhiteSpace(conductor) ? "fastchess" : conductor.Trim().ToLowerInvariant(),
                 Affinity = string.IsNullOrWhiteSpace(affinity) ? null : affinity.Trim(),
                 PgnOut = Path.Combine(ChessLabPaths.LabDir, "{job}", "games.pgn"),
                 Event = "chess-lab/cutechess/{job}",
@@ -223,7 +223,15 @@ internal static class ChessEndpoints
             var config = req.Config?.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()) ?? new Dictionary<string, string>();
             if (kind == ChessLabJobKind.Cutechess)
             {
-                try { _ = new CutechessOptions().WithStockfishConfiguration(config); }
+                try
+                {
+                    var options = new CutechessOptions
+                    {
+                        Conductor = config.GetValueOrDefault("conductor", "fastchess").Trim().ToLowerInvariant(),
+                        Affinity = config.GetValueOrDefault("affinity"),
+                    }.WithStockfishConfiguration(config);
+                    options.ValidateStockfishConfiguration();
+                }
                 catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             }
             var requester = RequestPrincipal(await resolver.ResolveAsync(ctx, ct));
