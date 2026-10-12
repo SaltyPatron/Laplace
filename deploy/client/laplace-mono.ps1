@@ -25,12 +25,12 @@ function Read-ProfileRuntime($Profile) {
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Installed monorepo CLI is missing: $executable" }
     $executable
 }
-function Read-KnowledgeCredential($Credential) {
+function Read-DatabaseCredential($Credential) {
     $address = [Uri]$Credential.address
     if (-not $address.IsAbsoluteUri -or $address.Scheme -ne 'https' -or $address.UserInfo -or $address.Query -or $address.Fragment -or $address.AbsolutePath -ne '/') {
         throw 'OpenBao address must be an HTTPS origin.'
     }
-    if ($Credential.record -notmatch '^kv/data/[a-zA-Z0-9_/-]+$' -or $Credential.record -match '//|/\.\.?(/|$)') { throw 'Invalid knowledge credential reference.' }
+    if ($Credential.record -notmatch '^kv/data/[a-zA-Z0-9_/-]+$' -or $Credential.record -match '//|/\.\.?(/|$)') { throw 'Invalid database credential reference.' }
     if ($Credential.kind -ne 'openbao-dpapi-user') { throw 'Windows client requires its enrolled OpenBao identity.' }
     $secure = $null; $token = $null
     try {
@@ -48,7 +48,7 @@ function Read-KnowledgeCredential($Credential) {
         return $response.data.data
     } catch {
         # Do not expose request bodies, tokens or decrypted enrollment in errors.
-        throw 'Cannot read the selected knowledge credential using this Windows user enrollment. Check OpenBao reachability and the declared role/record.'
+        throw 'Cannot read the selected database credential using this Windows user enrollment. Check OpenBao reachability and the declared role/record.'
     } finally {
         if ($secure) { $secure.Dispose() }
         if ($token) {
@@ -64,7 +64,7 @@ try {
     if ($config.version -ne 1) { throw 'Unsupported monorepo client configuration version.' }
     $selection = if ($env:LAPLACE_MONO_PROFILE) { $env:LAPLACE_MONO_PROFILE } else { $config.default_profile }
     if ($arguments.Count -gt 0 -and $arguments[0] -eq '--profiles') {
-        foreach ($name in $config.profiles.Keys) { $p=$config.profiles[$name]; [pscustomobject]@{Profile=$name;Host=$p.knowledge.host;Database=$p.knowledge.database;Runtime=$p.runtime.directory} }
+        foreach ($name in $config.profiles.Keys) { $p=$config.profiles[$name]; [pscustomobject]@{Profile=$name;Host=$p.database.host;Database=$p.database.database;Runtime=$p.runtime.directory} }
         exit 0
     }
     if ($arguments.Count -gt 0 -and $arguments[0] -eq '--profile') {
@@ -75,7 +75,7 @@ try {
     $profile=$config.profiles[$selection]
     $executable=Read-ProfileRuntime $profile
     if ($arguments.Count -gt 0 -and $arguments[0] -eq '--where') {
-        [ordered]@{implementation='laplace-mono';profile=$selection;configuration=$configPath;executable=$executable;knowledge_host=$profile.knowledge.host;knowledge_database=$profile.knowledge.database;knowledge_role=$profile.knowledge.role} | ConvertTo-Json
+        [ordered]@{implementation='laplace-mono';profile=$selection;configuration=$configPath;executable=$executable;database_host=$profile.database.host;database_name=$profile.database.database;database_role=$profile.database.role} | ConvertTo-Json
         exit 0
     }
     $start=[Diagnostics.ProcessStartInfo]::new($executable)
@@ -88,16 +88,16 @@ try {
     foreach ($name in $profile.environment.Keys) { $start.Environment[$name]=[string]$profile.environment[$name] }
     $offline = $arguments.Count -eq 0 -or $arguments.Contains('--help') -or $arguments.Contains('-h') -or $arguments[0] -in @('decompose','cpu-topology')
     if (-not $offline) {
-        $knowledge=$profile.knowledge
-        $record=Read-KnowledgeCredential $profile.credential
-        if ($record.database_host -ne $knowledge.host -or $record.database -ne $knowledge.database -or $record.role -ne $knowledge.role -or [int]$record.port -ne [int]$knowledge.port -or -not $record.password) {
-            throw 'OpenBao knowledge selection differs from this profile; CLI was not started.'
+        $database=$profile.database
+        $record=Read-DatabaseCredential $profile.credential
+        if ($record.database_host -ne $database.host -or $record.database -ne $database.database -or $record.role -ne $database.role -or [int]$record.port -ne [int]$database.port -or -not $record.password) {
+            throw 'OpenBao database selection differs from this profile; CLI was not started.'
         }
-        $trust=Absolute-Path $knowledge.root_certificate 'PostgreSQL CA certificate'
+        $trust=Absolute-Path $database.root_certificate 'PostgreSQL CA certificate'
         if (-not (Test-Path -LiteralPath $trust -PathType Leaf)) { throw 'The selected PostgreSQL trust certificate is missing.' }
-        if ([int]$knowledge.pool_max -lt 1 -or [int]$knowledge.port -lt 1 -or [int]$knowledge.port -gt 65535) { throw 'Invalid database port or connection budget.' }
+        if ([int]$database.pool_max -lt 1 -or [int]$database.port -lt 1 -or [int]$database.port -gt 65535) { throw 'Invalid database port or connection budget.' }
         $connection=[Data.Common.DbConnectionStringBuilder]::new()
-        foreach ($pair in @{Host=$knowledge.host;Port=[string]$knowledge.port;Database=$knowledge.database;Username=$knowledge.role;Password=$record.password;'SSL Mode'='VerifyFull';'Root Certificate'=$trust;'Maximum Pool Size'=[string]$knowledge.pool_max}.GetEnumerator()) { $connection[$pair.Key]=$pair.Value }
+        foreach ($pair in @{Host=$database.host;Port=[string]$database.port;Database=$database.database;Username=$database.role;Password=$record.password;'SSL Mode'='VerifyFull';'Root Certificate'=$trust;'Maximum Pool Size'=[string]$database.pool_max}.GetEnumerator()) { $connection[$pair.Key]=$pair.Value }
         $start.Environment['LAPLACE_DB']=$connection.ConnectionString
         $record=$null; $connection=$null
     }

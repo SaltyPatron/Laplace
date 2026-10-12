@@ -50,7 +50,7 @@ bash scripts/check-database-health.sh --installed-runtime
 
 The connection uses `PGHOST`, `PGPORT`, `PGUSER` and `PGDATABASE` when explicitly
 set. Otherwise it reads `LAPLACE_PGHOST`, `LAPLACE_PGPORT`,
-`LAPLACE_KNOWLEDGE_ROLE` / `LAPLACE_ROLE`, and `LAPLACE_DBNAME`. The local socket
+`LAPLACE_DATABASE_ROLE` / `LAPLACE_ROLE`, and `LAPLACE_DBNAME`. The local socket
 default is PostgreSQL's `/tmp`; the monorepo database default is `laplace-mono`.
 There is no implicit administrator role. Declared TLS mode and CA certificate are
 preserved. Application database routing remains separate through

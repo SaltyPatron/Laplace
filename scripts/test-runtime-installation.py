@@ -45,7 +45,7 @@ class RuntimeBoundaries(unittest.TestCase):
                 value = {'capabilities': ['read']}
             else:
                 name = path.rsplit('/', 1)[1]
-                item = config if name == config['record'] else config['knowledge']
+                item = config if name == config['record'] else config['substrate']
                 record = {key: item[key] for key in ('database_host', 'database', 'role', 'port')}
                 record['password'] = 'a' * 64
                 if conflict:
@@ -214,7 +214,7 @@ class RuntimeBoundaries(unittest.TestCase):
         for change in ('role', 'pool', 'state', 'user'):
             config = copy.deepcopy(CONFIG)
             if change == 'role':
-                config['knowledge']['role'] = config['database_owner']
+                config['substrate']['role'] = config['database_owner']
             elif change == 'pool':
                 config['mcp']['pool_max'] = config['mcp']['connection_limit'] + 1
             elif change == 'state':
@@ -259,7 +259,7 @@ class RuntimeBoundaries(unittest.TestCase):
                           'password': 'a' * 64, 'client_address': '127.0.0.1', 'lock': str(lock_path),
                           'psql': '/no-executable', 'admin_socket': temporary, 'port': 5432}
                 env = dict(os.environ, LAPLACE_HOST_LOCK_FD=str(lock.fileno()))
-                command = [sys.executable, str(RUNTIME / 'knowledge-role.py')]
+                command = [sys.executable, str(RUNTIME / 'database-role.py')]
                 result = subprocess.run(command, input=json.dumps(config), text=True, capture_output=True,
                                         env=env, pass_fds=(lock.fileno(),), timeout=10)
                 # It passed the nested lock, reaching the deliberately missing SQL executable.

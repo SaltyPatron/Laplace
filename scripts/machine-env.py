@@ -9,6 +9,24 @@ import shlex
 import hashlib
 
 
+LEGACY_DATABASE_KEYS = {
+    'LAPLACE_KNOWLEDGE_ROLE': 'LAPLACE_DATABASE_ROLE',
+    'LAPLACE_KNOWLEDGE_RUNTIME_DB': 'LAPLACE_DATABASE_RUNTIME_DB',
+    'LAPLACE_BAO_KNOWLEDGE_HOST': 'LAPLACE_BAO_DATABASE_HOST',
+}
+
+
+def canonical_process(process):
+    values = dict(process)
+    for old, new in LEGACY_DATABASE_KEYS.items():
+        legacy = values.pop(old, '')
+        if legacy:
+            if values.get(new) and values[new] != legacy:
+                raise ValueError(f'Conflicting configuration keys: {old} and {new}')
+            values[new] = legacy
+    return values
+
+
 def machine_file(process):
     if process.get('LAPLACE_MACHINE_ENV'):
         return Path(process['LAPLACE_MACHINE_ENV'])
@@ -16,19 +34,21 @@ def machine_file(process):
 
 
 def resolve(path, process, explicit=False):
-    values = dict(process)
-    declarations = {}
+    values = canonical_process(process)
+    # Emit translated process settings as well: consumers import only this output.
+    declarations = {new: values[new] for old, new in LEGACY_DATABASE_KEYS.items() if process.get(old)}
     try:
         content = path.read_text(encoding='utf-8-sig')
     except FileNotFoundError:
         if explicit:
             raise ValueError('LAPLACE_MACHINE_ENV does not name an existing file')
-        return {'LAPLACE_CONFIG_SOURCE': 'defaults'}
+        return {**declarations, 'LAPLACE_CONFIG_SOURCE': 'defaults'}
     lexer = shlex.shlex(content, posix=True)
     lexer.whitespace = '\r\n'
     lexer.whitespace_split = True
     lexer.escape = ''  # Backslashes in paths are data.
     seen = set()
+    configured = {}
     for item in lexer:
         match = re.fullmatch(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*', item, re.S)
         if not match:
@@ -37,11 +57,16 @@ def resolve(path, process, explicit=False):
         if name.upper() in seen:
             raise ValueError('Duplicate machine configuration key: ' + name)
         seen.add(name.upper())
+        name = LEGACY_DATABASE_KEYS.get(name, name)
         if '\0' in value:
             raise ValueError('NUL in machine configuration key: ' + name)
+        if name in configured and configured[name] != value:
+            raise ValueError('Conflicting configuration aliases for: ' + name)
+        configured[name] = value
         if not values.get(name):
             def expand(reference):
                 key = next(part for part in reference.groups() if part is not None)
+                key = LEGACY_DATABASE_KEYS.get(key, key)
                 if key not in values:
                     raise ValueError('Undefined configuration reference: ' + key)
                 return values[key]
@@ -56,7 +81,7 @@ def paths(path, process, checkout):
     """Resolve operational directories from the host declaration, without mount names."""
     declarations = resolve(path, process, bool(process.get('LAPLACE_MACHINE_ENV')))
     values = dict(declarations)
-    values.update({k: v for k, v in process.items() if v})
+    values.update({k: v for k, v in canonical_process(process).items() if v})
     result = dict(declarations)
 
     def directory(name, value):
@@ -90,11 +115,11 @@ def paths(path, process, checkout):
 
 def database(path, process):
     result = resolve(path, process, bool(process.get('LAPLACE_MACHINE_ENV')))
-    values = {**result, **{k: v for k, v in process.items() if v}}
+    values = {**result, **{k: v for k, v in canonical_process(process).items() if v}}
     for name, value in {
         'PGHOST': values.get('LAPLACE_PGHOST', '/tmp'),
         'PGPORT': values.get('LAPLACE_PGPORT', '5432'),
-        'PGUSER': values.get('LAPLACE_KNOWLEDGE_ROLE') or values.get('LAPLACE_ROLE'),
+        'PGUSER': values.get('LAPLACE_DATABASE_ROLE') or values.get('LAPLACE_ROLE'),
         'PGDATABASE': values.get('LAPLACE_DBNAME', 'laplace-mono'),
     }.items():
         result[name] = values.get(name) or value

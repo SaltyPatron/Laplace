@@ -36,7 +36,7 @@ class SiteWorkflow < Minitest::Test
   end
 
   def test_bundle_keeps_receipts_and_missing_artifact_fails
-    upload = @jobs.fetch('deliver').fetch('steps').find { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
+    upload = @jobs.fetch('deliver').fetch('steps').find { |step| step.fetch('name', '') == 'Retain the verified production package' }
     assert_equal true, upload.fetch('with').fetch('include-hidden-files')
     assert_equal 'error', upload.fetch('with').fetch('if-no-files-found')
   end
