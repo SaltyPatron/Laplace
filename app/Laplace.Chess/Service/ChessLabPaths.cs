@@ -148,13 +148,17 @@ public static class ChessLabPaths
         return new Probe(installExe, false, "missing");
     }
 
-    internal static Probe ResolveQtBinForTest(string? configValue)
+    internal static Probe ResolveQtBin(string? configValue, string? cutechessPath = null)
     {
         if (!string.IsNullOrWhiteSpace(configValue))
         {
             var p = configValue.Trim();
             return new Probe(p, ContainsQtArtifacts(p), "config");
         }
+
+        if (cutechessPath is not null && Path.GetDirectoryName(cutechessPath) is { } adjacent
+            && ContainsQtArtifacts(adjacent))
+            return new Probe(adjacent, true, "packaged");
 
         return new Probe(null, false, "missing");
     }
@@ -319,12 +323,8 @@ public static class ChessLabPaths
     private static Probe ResolveQtBin()
     {
         var fromConfig = ChessRuntimeConfiguration.Read("LAPLACE_QT_BIN");
-        if (!string.IsNullOrWhiteSpace(fromConfig))
-        {
-            var p = fromConfig.Trim();
-            if (ContainsQtArtifacts(p))
-                return new Probe(p, true, "config");
-        }
+        var selected = ResolveQtBin(fromConfig, Cutechess is { Found: true } cc ? cc.Path : null);
+        if (selected.Source == "config" || selected.Found) return selected;
 
         if (!OperatingSystem.IsWindows())
         {
