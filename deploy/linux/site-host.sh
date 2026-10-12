@@ -21,16 +21,21 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
 host_args=("$@")
 as_is=false; routing_only=false; browser_setup=false; identity_enrollment=''
 chess_setup=false; chess_configuration=''; chess_enrollment=''
+runtime_only=false; runtime_manifest=''; check=false
 while (( $# )); do
   case "$1" in
     --as-is) as_is=true ;;
     --routing-only) routing_only=true ;;
     --browser-setup) browser_setup=true ;;
     --chess-setup) chess_setup=true ;;
+    --runtime-only) runtime_only=true ;;
+    --check) check=true ;;
+    --runtime-manifest)
+      (( $# >= 2 )) || { echo '--runtime-manifest requires a path' >&2; exit 2; }
+      runtime_manifest=$2; shift ;;
     --chess-configuration|--chess-enrollment)
       (( $# >= 2 )) || { echo "$1 requires a path" >&2; exit 2; }
       if [[ "$1" == --chess-configuration ]]; then chess_configuration=$2; else chess_enrollment=$2; fi
@@ -42,6 +47,9 @@ while (( $# )); do
   esac
   shift
 done
+if ! "$check"; then
+  [[ "$(id -u)" == 0 ]] || { echo "run with sudo: sudo bash $0"; exit 1; }
+fi
 # The declaration is public; credentials alongside it retain their own modes.
 machine_config_permissions() {
   local directory=${1:-/etc/laplace}
@@ -50,7 +58,7 @@ machine_config_permissions() {
     chmod 644 "$directory/machine.env"
   fi
 }
-machine_config_permissions
+if ! "$check"; then machine_config_permissions; fi
 # the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), as site.sh reads it: what this host
 # names differently from the defaults below is said there once, never on a command line
 machine_values=$(python3 "$HERE/../../scripts/machine-env.py")
@@ -91,7 +99,8 @@ current() {
   fi
   echo "=== $repo is at its upstream: ${after:0:12} ($branch)"
 }
-if "$as_is"; then echo "=== run as it is here, not checked against its upstream (--as-is): $(git -C "$HERE" rev-parse --short=12 HEAD 2>/dev/null || echo 'no revision')"
+if "$check"; then :
+elif "$as_is"; then echo "=== run as it is here, not checked against its upstream (--as-is): $(git -C "$HERE" rev-parse --short=12 HEAD 2>/dev/null || echo 'no revision')"
 elif [[ -n "${LAPLACE_SITE_HOST_CURRENT:-}" ]]; then echo "=== at ${LAPLACE_SITE_HOST_CURRENT:0:12}"
 else current || exit 1; fi
 private_browser_route() {
@@ -117,10 +126,30 @@ chess_runtime() {
   if [[ -n "$chess_enrollment" ]]; then args+=(--enrollment "$chess_enrollment"); fi
   python3 "$HERE/chess-host.py" "${args[@]}"
 }
+application_runtime() {
+  local args=()
+  if [[ -n "$runtime_manifest" ]]; then args+=(--manifest "$runtime_manifest"); fi
+  local selected
+  selected=$(python3 "$HERE/runtime/install.py" --select "${args[@]}")
+  if [[ -z "$selected" ]]; then
+    if "$runtime_only"; then echo 'No monorepo runtime installation declared for this host' >&2; return 1; fi
+    return 0
+  fi
+  if "$check"; then args=(--check); else args=(); fi
+  python3 "$HERE/runtime/install.py" --manifest "$selected" "${args[@]}"
+}
+if "$check"; then
+  python3 "$HERE/service-units.py"
+  application_runtime
+  exit
+fi
+if "$runtime_only"; then application_runtime; exit; fi
 if "$chess_setup"; then chess_runtime; exit; fi
 if "$browser_setup"; then private_browser_route; browser_identity; chess_runtime; exit; fi
 if "$routing_only"; then private_browser_route; exit; fi
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
+# Resolve every service path and identity before changing the installation.
+python3 "$HERE/service-units.py" >/dev/null
 say() { printf '  %-44s %s\n' "$1" "$2"; }
 
 echo "=== directories"
@@ -136,9 +165,7 @@ if ! [[ /proc/self/fd/8 -ef "$LOCKS/host-resource.lock" ]]; then exec 8>>"$LOCKS
 flock -xn 8 || { echo 'Another deployment or ingest owns the host lock' >&2; exit 1; }
 
 echo "=== units"
-install -m 0644 "$HERE/laplace-api.service" /etc/systemd/system/laplace-api.service
-install -m 0644 "$HERE/laplace-api-restart.service" /etc/systemd/system/laplace-api-restart.service
-install -m 0644 "$HERE/laplace-api-restart.path" /etc/systemd/system/laplace-api-restart.path
+python3 "$HERE/service-units.py" --output /etc/systemd/system
 systemctl daemon-reload
 systemctl enable -q laplace-api.service
 systemctl enable -q --now laplace-api-restart.path
@@ -162,9 +189,6 @@ if [[ ! -s "$PREFIX/secrets/mcp.env" ]]; then
   say "$PREFIX/secrets/mcp.env" "made: LAPLACE_MCP_TOKEN (64 hex)"
 else say "$PREFIX/secrets/mcp.env" "kept"; fi
 chown "$RUN_USER:$RUN_GROUP" "$PREFIX/secrets/mcp.env"; chmod 0640 "$PREFIX/secrets/mcp.env"
-install -m 0644 "$HERE/laplace-mcp.service" /etc/systemd/system/laplace-mcp.service
-install -m 0644 "$HERE/laplace-mcp-restart.service" /etc/systemd/system/laplace-mcp-restart.service
-install -m 0644 "$HERE/laplace-mcp-restart.path" /etc/systemd/system/laplace-mcp-restart.path
 systemctl daemon-reload
 systemctl enable -q laplace-mcp.service
 systemctl enable -q --now laplace-mcp-restart.path
@@ -196,6 +220,7 @@ else say "ufw" "not active: nothing to do"; fi
 # Identity refresh owns the same deployment lock. Release the setup lock before
 # running its activation; the root-owned enrollment survives source updates.
 flock -u 8
+application_runtime
 browser_identity
 chess_runtime
 

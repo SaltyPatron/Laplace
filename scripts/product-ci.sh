@@ -51,6 +51,8 @@ run_ci_contract_checks() {
     scripts/atomic-directory-exchange.py
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
+  python3 scripts/test-runtime-installation.py
+  python3 scripts/test-service-units.py
   python3 scripts/test-product-ci-artifact-ownership.py
   python3 scripts/test-seed-workflow-ownership.py
   ruby tests/site-workflow.rb

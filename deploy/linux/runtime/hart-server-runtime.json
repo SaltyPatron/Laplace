@@ -1,0 +1,53 @@
+{
+  "host": "hart-server",
+  "required_directories": ["/hosting", "/data/pgdata"],
+  "operator": "ahart",
+  "record": "application-runtime",
+  "database_host": "127.0.0.1",
+  "database": "laplace-mono",
+  "role": "laplace_staging_app",
+  "database_owner": "laplace",
+  "port": 5432,
+  "pool_max": 2,
+  "connection_limit": 6,
+  "pgbin": "/usr/local/pgsql/bin",
+  "pgsocket": "/tmp",
+  "database_data": "/data/pgdata",
+  "database_service": "pgdata",
+  "pg_os_user": "postgres",
+  "runtime_user": "laplace-api",
+  "state": "/hosting/laplace/runtime/api",
+  "prefix": "/opt/laplace",
+  "machine_file": "/etc/laplace/machine.env",
+  "host_lock": "/run/lock/laplace/host-resource.lock",
+  "credentials": "/etc/laplace/runtime-approle.json",
+  "bao_role": "laplace-hart-server-runtime",
+  "bao_address": "https://openbao.hartonomous.com",
+  "public_base": "http://127.0.0.1:5187",
+  "work": "/var/lib/laplace/installation/receipts",
+  "tls": {
+    "mode": "self-signed-local",
+    "subject": "Laplace PostgreSQL hart-server",
+    "dns_names": ["hart-server", "localhost"],
+    "ip_addresses": ["127.0.0.1"],
+    "valid_days": 365,
+    "renew_before_days": 30,
+    "root_certificate": "/etc/laplace/postgres-runtime.crt"
+  },
+  "knowledge": {
+    "database_host": "127.0.0.1",
+    "database": "laplace-mono",
+    "role": "laplace_staging_knowledge",
+    "port": 5432,
+    "pool_max": 2,
+    "connection_limit": 6
+  },
+  "mcp": {
+    "user": "laplace-mcp",
+    "role": "laplace_mcp_runtime",
+    "state": "/hosting/laplace/runtime/mcp",
+    "pool_max": 2,
+    "connection_limit": 4,
+    "base": "http://127.0.0.1:5190"
+  }
+}
