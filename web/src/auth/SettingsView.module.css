@@ -47,6 +47,13 @@
 .configuration dt { font-weight: 600; }
 .configuration dd { margin: 0; overflow-wrap: anywhere; }
 .root code { overflow-wrap: anywhere; }
+.sections { display: flex; gap: .4rem; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-default); padding-bottom: .8rem; }
+.sections button { padding: .6rem .9rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
+.sections [aria-current="page"] { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); font-weight: 600; }
+.roleCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
+.roleCards section { padding: 1rem; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
+.roleCards h3 { margin: 0 0 .7rem; }
+.roleCards ul { padding-left: 1.2rem; line-height: 1.8; }
 @media (max-width: 40rem) {
   .configuration { grid-template-columns: 1fr; }
   .configuration dd { margin-bottom: .5rem; }

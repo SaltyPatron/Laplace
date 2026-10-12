@@ -50,7 +50,7 @@ public sealed class ServiceControlTests
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var error = body.RootElement.GetProperty("error");
             Assert.Equal("authentication_error", error.GetProperty("type").GetString());
-            Assert.Equal("operator_token_required", error.GetProperty("code").GetString());
+            Assert.Equal("platform_permission_required", error.GetProperty("code").GetString());
         }
     }
 

@@ -1,83 +1,81 @@
 import { expect, test } from '@playwright/test';
 
-/**
- * The operator console, rendered.
- *
- * Every other check on this surface passes without a browser: the components
- * typecheck, the bundle builds, the endpoints answer curl. None of that proves a
- * section renders — a throw inside one component blanks the tab while the build
- * stays green, which is the failure this file exists to catch.
- *
- * These run against a live substrate: Activity reads ops.activity, Repair reads
- * ops.index_health, Agents reads the routing catalog. Row COUNTS are deliberately
- * not asserted — a healthy substrate has zero invalid indexes and may have zero
- * long-running backends, so asserting rows would fail on a working system. What is
- * asserted is that each section reaches its surface and renders an answer rather
- * than an error.
- */
-test.describe('operator console', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/operator');
-    await expect(page.getByRole('heading', { name: 'Operator' })).toBeVisible();
-  });
+// These exercise the production components with explicit transport fixtures.
+// Endpoint and PostgreSQL tests prove authorization independently of the UI.
+const fixture = '/tests/admin-quality.html';
 
-  test('warns that it is not a privilege boundary', async ({ page }) => {
-    // The banner is load-bearing, not decoration: with auth stubbed every
-    // operation here is reachable over plain HTTP without the console.
-    await expect(page.getByText(/Privileges are not enforced/i)).toBeVisible();
-  });
+test('administrator finds a person, reviews permissions, and sees the saved history', async ({ page }) => {
+  await page.goto(fixture);
+  await page.getByRole('button', { name: 'People & roles', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Search people by email or name' }).fill('manager@example.test');
+  await page.getByRole('button', { name: 'Search people', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Change role', exact: true })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Change role', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Platform role', exact: true }).selectOption('observer');
+  await expect(page.getByRole('dialog')).toContainText('View ingestion and system activity');
+  await page.getByRole('button', { name: 'Save access', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('1');
+  await expect(page.getByRole('region', { name: 'Recent access changes' })).toContainText('Operations manager → Observer');
+});
 
-  test('exposes all five sections', async ({ page }) => {
-    for (const section of ['ingest', 'activity', 'ops', 'repair', 'agents']) {
-      await expect(page.getByRole('radio', { name: section, exact: true })).toBeVisible();
-    }
-  });
+test('refused access changes remain actionable without reporting success', async ({ page }) => {
+  await page.goto(`${fixture}?reject=1&page=${encodeURIComponent('/operator?section=access')}`);
+  await page.getByRole('button', { name: 'Change role', exact: true }).first().click();
+  await page.getByRole('combobox', { name: 'Platform role', exact: true }).selectOption('');
+  await page.getByRole('button', { name: 'Save access', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Keep at least one platform administrator');
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('0');
+});
 
-  test('activity renders live backends from ops.activity', async ({ page }) => {
-    await page.getByRole('radio', { name: 'activity', exact: true }).click();
-    await expect(page.getByRole('heading', { name: /^Activity/ })).toBeVisible();
-    // Either a table of backends or the explicit empty statement — never the
-    // loading text left stranded, which is what a failed op call looks like.
-    await expect(
-      page.getByRole('columnheader', { name: 'pid' })
-        .or(page.getByText(/No backend matches this filter/i)),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/Reading ops\.activity/)).toHaveCount(0);
-  });
+test('ingestion reviews the server destination before one launch', async ({ page }) => {
+  await page.goto(`${fixture}?page=${encodeURIComponent('/operator?section=ingest')}`);
+  await page.getByRole('combobox', { name: '1. Source', exact: true }).selectOption('document');
+  await page.getByRole('textbox', { name: /2. Server file or folder/ }).fill('/vault/example-documents');
+  await page.getByRole('button', { name: 'Review run', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('fixture-server');
+  await expect(page.getByRole('dialog')).toContainText('Shared knowledge base');
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('0');
+  await page.getByRole('button', { name: 'Start run', exact: true }).click();
+  await expect(page.getByText(/Launched Documents/)).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('1');
+  await page.getByRole('button', { name: 'Stop job…', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Data already committed remains available');
+  await page.getByRole('button', { name: 'Keep running', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('1');
+});
 
-  test('repair renders index health and its repair actions', async ({ page }) => {
-    await page.getByRole('radio', { name: 'repair', exact: true }).click();
-    await expect(page.getByRole('heading', { name: /^Index health/ })).toBeVisible();
-    await expect(
-      page.getByText(/No invalid index/i).or(page.getByRole('columnheader', { name: 'index' })),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole('button', { name: 'Rebuild invalid indexes' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'ANALYZE substrate' })).toBeVisible();
-  });
+test('observer sees journal and services without mutation controls', async ({ page }) => {
+  await page.goto(`${fixture}?role=observer&page=${encodeURIComponent('/operator?section=ingest')}`);
+  await expect(page.getByRole('heading', { name: 'Ingestion runs', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New ingestion run' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Services', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Refresh MCP' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start MCP…' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'People & roles', exact: true })).toHaveCount(0);
+});
 
-  test('agents renders the routing table without leaking a credential', async ({ page }) => {
-    await page.getByRole('radio', { name: 'agents', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Routes' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'credential' })).toBeVisible({
-      timeout: 15_000,
-    });
+test('revocation removes a previously open administrative tool', async ({ page }) => {
+  await page.goto(`${fixture}?page=${encodeURIComponent('/operator?section=access')}`);
+  await expect(page.getByRole('heading', { name: 'Find a person' })).toBeVisible();
+  await page.getByRole('button', { name: 'Revoke platform role' }).click();
+  await page.getByRole('button', { name: 'Refresh access' }).click();
+  await expect(page.getByRole('heading', { name: 'Access needed' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Change role' })).toHaveCount(0);
+});
 
-    // Every installed provider is a row, credentialed or not.
-    await expect(page.getByRole('cell', { name: 'anthropic', exact: true }).first()).toBeVisible();
+test('failed access reads provide retry instead of claiming the user has no role', async ({ page }) => {
+  await page.goto(`${fixture}?accessError=1`);
+  await expect(page.getByRole('alert')).toContainText('Access service unavailable');
+  await expect(page.getByText('Your account has no platform role.', { exact: false })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Restore access read' }).click();
+  await page.getByRole('button', { name: 'Retry Your access' }).click();
+  await expect(page.getByRole('heading', { name: 'Platform tools' })).toBeVisible();
+});
 
-    // The table reports the VARIABLE NAME and a verdict. A key value on this page
-    // would be a real leak: the console is unauthenticated.
-    const body = (await page.locator('body').innerText()).toLowerCase();
-    expect(body).toContain('anthropic_api_key');
-    expect(body).not.toMatch(/sk-[a-z0-9]{16,}/);
-  });
-
-  test('ops console badges writes from the server policy, not a name regex', async ({ page }) => {
-    await page.getByRole('radio', { name: 'ops', exact: true }).click();
-    await expect(page.getByRole('heading', { name: /^Catalog/ })).toBeVisible({ timeout: 15_000 });
-    await page.getByPlaceholder('filter by name…').fill('evict_source');
-    // ops.evict_source matches no write-ish substring, so a regex would badge it
-    // as harmless. It is the one operation on the surface that destroys testimony.
-    await expect(page.getByText('destroys data')).toBeVisible({ timeout: 15_000 });
-  });
+test('phone navigation reaches services without horizontal page overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(fixture);
+  await page.getByRole('combobox', { name: 'Administration page', exact: true }).selectOption('services');
+  await expect(page.getByRole('heading', { name: 'MCP', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

@@ -230,7 +230,7 @@ internal static class ServiceControlEndpoints
             if (!IsSafeTransport(request)) return Results.BadRequest(new { error = "https_required" });
             if (!Services.TryGetValue(service, out var selected)) return Results.NotFound();
             return await ExecuteAsync(control, selected, ServiceAction.Status, ct);
-        }).WithTags("admin").WithDescription("Requires X-Laplace-Operator-Token over HTTPS. Only mcp and lichess are allowed.")
+        }).WithTags("admin").WithDescription("Requires platform.read or an installation credential over HTTPS. Only mcp and lichess are allowed.")
             .Produces<ServiceControlResult>(200).Produces(400).Produces(401).Produces(404).Produces(409).Produces(503);
 
         app.MapPost("/v1/admin/services/{service}/{action}", async (string service, string action,
@@ -241,7 +241,7 @@ internal static class ServiceControlEndpoints
             if (!Services.TryGetValue(service, out var selected) || !Actions.TryGetValue(action, out var verb))
                 return Results.NotFound();
             return await ExecuteAsync(control, selected, verb, ct);
-        }).WithTags("admin").WithDescription("Requires X-Laplace-Operator-Token over HTTPS. Only mcp/lichess and start/stop/restart are allowed; 202 means accepted, not ready.")
+        }).WithTags("admin").WithDescription("Requires services.manage or an installation credential over HTTPS. Only mcp/lichess and start/stop/restart are allowed; 202 means accepted, not ready.")
             .Produces<ServiceControlResult>(202).Produces(400).Produces(401).Produces(404).Produces(409).Produces(503);
     }
 

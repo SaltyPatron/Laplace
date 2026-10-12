@@ -19,6 +19,12 @@ internal static class IngestAdminEndpoints
 
     public static void MapIngestAdminEndpoints(this WebApplication app)
     {
+        app.MapGet("/v1/admin/ingest/sources", (Laplace.Decomposers.Composition.ISeedDecomposerResolver resolver) => Results.Ok(new
+        {
+            sources = Laplace.Decomposers.Composition.SeedIngestComposition.RegisteredSourceKeys.Concat(resolver.SelectedGenerationKeys)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase),
+            scope = "registered_providers", host = Environment.MachineName, cliAvailable = IngestProcessRunner.ResolveCliBinary() is not null
+        })).WithTags("admin");
         app.MapGet("/v1/admin/ingest/processes", () =>
         {
             var rows = IngestProcessRunner.ActiveProcesses()
