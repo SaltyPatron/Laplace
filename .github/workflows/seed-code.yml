@@ -31,7 +31,7 @@ permissions:
 jobs:
   resolve:
     name: Resolve code preset
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 2
     outputs:
       source: ${{ steps.pick.outputs.source }}

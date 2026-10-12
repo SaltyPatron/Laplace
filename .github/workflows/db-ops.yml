@@ -3,6 +3,12 @@ name: Database — maintenance
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: "Knowledge host: staging is hart-server; knowledge is hart-cloud (must already be running)"
+        type: choice
+        required: true
+        default: staging
+        options: [staging, knowledge]
       operation:
         description: "database lifecycle operation"
         type: choice
@@ -16,7 +22,7 @@ permissions:
 jobs:
   db:
     name: DB — ${{ inputs.operation }}
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, '${{ inputs.target }}']
     timeout-minutes: 420
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}

@@ -118,7 +118,7 @@ jobs:
     # Freshness is read-only and must remain available when hosted Actions
     # billing is unavailable; product delivery itself already depends on this
     # repository's self-hosted product runner.
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 2
     outputs:
       execute: ${{ steps.freshness.outputs.execute }}
@@ -200,7 +200,7 @@ jobs:
       # Delivery remains non-preemptibly serialized at the installed-host boundary.
       group: ${{ inputs.skip_if_superseded && (inputs.stage == 'mainline' || inputs.stage == 'release-delivery') && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
       cancel-in-progress: false
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 420
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}

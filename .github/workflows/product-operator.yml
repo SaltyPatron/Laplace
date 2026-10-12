@@ -94,7 +94,7 @@ jobs:
   forward-chat-proof:
     if: inputs.operation == 'forward-chat-proof'
     name: Capture forward chat lifecycle receipt
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, '${{ inputs.target }}']
     timeout-minutes: 10
     permissions:
       contents: read

@@ -65,7 +65,7 @@ permissions:
 jobs:
   seed:
     name: "${{ inputs.mode }} ${{ inputs.source }} → ${{ inputs.database }}"
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 720
     env:
       TARGET_SHA: ${{ github.sha }}
