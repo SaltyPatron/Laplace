@@ -65,9 +65,15 @@
     <Copy SourceFiles="@(LaplacePublishedNative)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="false" />
     <Exec Command="&quot;$(LaplaceRepoRoot)\scripts\win\engine-runtime.cmd&quot; &quot;$(PublishDir)&quot;" />
     <Exec Command="pwsh -NoProfile -File &quot;$(LaplaceRepoRoot)\scripts\win\publish-zstd.ps1&quot; -Destination &quot;$(PublishDir).&quot;" />
-    <Error Condition="!Exists('$(LaplaceBuildWin)\core\perfcache\laplace_t0_perfcache.bin')"
-           Text="Missing Tier-0 publish input. Build laplace_t0_perfcache before publishing." />
-    <Copy SourceFiles="$(LaplaceBuildWin)\core\perfcache\laplace_t0_perfcache.bin"
+    <ItemGroup>
+      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_t0_perfcache.bin" />
+      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_highway_perfcache.bin" />
+      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_chess_position_perfcache.bin"
+                                Condition="Exists('$(LaplaceBuildWin)\core\perfcache\laplace_chess_position_perfcache.bin')" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(LaplacePublishedPerfcache.Identity)')"
+           Text="Missing required runtime perfcache: %(LaplacePublishedPerfcache.Identity). Build the selected native runtime before publishing." />
+    <Copy SourceFiles="@(LaplacePublishedPerfcache)"
           DestinationFolder="$(PublishDir)\share\laplace" SkipUnchangedFiles="false" />
   </Target>
 </Project>

@@ -8,10 +8,12 @@ public enum MoveFlags : byte
     EnPassant = 2,
     Castle = 4,
     Promotion = 8,
+    Drop = 16,
 }
 
 public readonly record struct ChessMove(int From, int To, Piece Promotion, MoveFlags Flags)
 {
+    public bool IsDrop => (Flags & MoveFlags.Drop) != 0;
     public bool IsPromotion => (Flags & MoveFlags.Promotion) != 0;
     public bool IsCastle => (Flags & MoveFlags.Castle) != 0;
     public bool IsKingSideCastle => IsCastle && Board.FileOf(To) == CastlePaths.KingSideKingFile;
@@ -19,6 +21,7 @@ public readonly record struct ChessMove(int From, int To, Piece Promotion, MoveF
 
     public string ToUci()
     {
+        if (IsDrop) return $"{Board.PieceToChar(Board.TypeOf(Promotion))}@{Board.SquareToAlgebraic(To)}";
         string s = Board.SquareToAlgebraic(From) + Board.SquareToAlgebraic(To);
         if (IsPromotion)
         {

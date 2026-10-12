@@ -26,7 +26,7 @@ public static class ChessPositionIdentity
     ///   rnbqkbnr/pppppppp/8/8/PPPPPPPP/PPPPPPPP/PPPPPPPP/4K3 w kq - 0 1
     /// occupy 41 squares.
     /// </summary>
-    internal const int MaxAtoms = MaxHeaderAtoms + 64;
+    internal const int MaxAtoms = MaxHeaderAtoms + 64 + 1 + 10 + 64 + 2;
 
     internal const byte SideDomain = 1;
     internal const byte CastlingDomain = 2;
@@ -40,6 +40,9 @@ public static class ChessPositionIdentity
     internal const byte MoveFlagsDomain = 19;
     internal const byte MovePromotionDomain = 20;
     internal const byte AnnotationMissingDomain = 32;
+    internal const byte DropRuleDomain = 40;
+    internal const byte PocketFirstDomain = 41;
+    internal const byte PromotedSquareDomain = 51;
 
     internal readonly record struct Atom(byte Domain, ushort Value, Hash128 Digest, bool HasDigest)
     {
@@ -56,7 +59,7 @@ public static class ChessPositionIdentity
     public static Hash128 PositionId(Board board, ChessVariantRules? rules = null)
     {
         Span<Atom> atoms = stackalloc Atom[MaxAtoms];
-        int n = FillAtoms(board, rules ?? ChessVariantRules.Standard, atoms);
+        int n = FillAtoms(board, rules ?? board.Rules, atoms);
         Span<Hash128> ids = stackalloc Hash128[n];
         for (int i = 0; i < n; i++) ids[i] = AtomId(atoms[i]);
         return Hash128.Merkle(PositionTier, ids);
@@ -65,10 +68,10 @@ public static class ChessPositionIdentity
     internal static int FillMoveAtoms(Piece moving, ChessMove move, Span<Atom> atoms)
     {
         atoms[0] = Atom.Scalar(MovePieceDomain, checked((ushort)PieceOrdinal(moving)));
-        atoms[1] = Atom.Scalar(MoveFromDomain, checked((ushort)BitIndex(move.From)));
+        atoms[1] = Atom.Scalar(MoveFromDomain, move.IsDrop ? (ushort)64 : checked((ushort)BitIndex(move.From)));
         atoms[2] = Atom.Scalar(MoveToDomain, checked((ushort)BitIndex(move.To)));
         atoms[3] = Atom.Scalar(MoveFlagsDomain, (ushort)move.Flags);
-        atoms[4] = Atom.Scalar(MovePromotionDomain, PromotionOrdinal(move.Promotion));
+        atoms[4] = Atom.Scalar(MovePromotionDomain, move.IsDrop ? (ushort)0 : PromotionOrdinal(move.Promotion));
         return 5;
     }
 
@@ -84,7 +87,9 @@ public static class ChessPositionIdentity
     internal static int FillAtoms(Board board, ChessVariantRules rules, Span<Atom> atoms)
     {
         int n = 0;
-        if (!rules.IsStandard)
+        if (rules == ChessVariants.Crazyhouse)
+            atoms[n++] = Atom.Scalar(DropRuleDomain, 1);
+        else if (!rules.IsStandard)
         {
             string surface = rules.Surface();
             int capacity = Encoding.UTF8.GetMaxByteCount(surface.Length);
@@ -107,6 +112,17 @@ public static class ChessPositionIdentity
             Piece piece = board.Squares[Board.Sq(Bitboards.FileOfBit(bit), Bitboards.RankOfBit(bit))];
             ushort packed = (ushort)((PieceOrdinal(piece) << 6) | bit);
             atoms[n++] = Atom.Scalar(PieceSquareDomain, packed);
+        }
+        if (rules.Drops)
+        {
+            for (int i = 0; i < board.Pockets.Length; i++)
+                if (board.Pockets[i] != 0) atoms[n++] = Atom.Scalar((byte)(PocketFirstDomain + i), board.Pockets[i]);
+            foreach (int bit in Bitboards.Bits(board.Promoted))
+                atoms[n++] = Atom.Scalar(PromotedSquareDomain, (ushort)bit);
+        }
+        if (rules.WinByCheckCount > 0) {
+            atoms[n++] = Atom.Scalar(52, checked((ushort)board.Checks[0]));
+            atoms[n++] = Atom.Scalar(53, checked((ushort)board.Checks[1]));
         }
         return n;
     }
@@ -133,9 +149,9 @@ public static class ChessPositionIdentity
                 map[AtomId(Atom.Scalar(domain, v))] = (domain, v);
         }
         Add(MovePieceDomain, 12);      // PieceOrdinal, white 0-5 then black 6-11
-        Add(MoveFromDomain, 64);       // BitIndex: (rank << 3) | file
+        Add(MoveFromDomain, 65);       // 64 is the reserve, not a board square.
         Add(MoveToDomain, 64);
-        Add(MoveFlagsDomain, 16);      // MoveFlags is a 4-bit set
+        Add(MoveFlagsDomain, 32);
         Add(MovePromotionDomain, 16);  // PromotionOrdinal, sentinel included
         return map;
     }
@@ -246,14 +262,30 @@ public static class ChessPositionIdentity
                     break;
                 }
                 case RulesDomain:
-                    // The rules atom does not change the board payload; Chess960 rook geometry
-                    // is read from its own atom below.
+                    var rules = ChessVariants.Conventional.Select(v => v.Rules).FirstOrDefault(
+                        r => Hash128.Blake3(Encoding.UTF8.GetBytes(r.Surface())) == atom.Digest);
+                    if (rules is null) return false;
+                    board.Rules = rules;
+                    break;
+                case DropRuleDomain:
+                    if (atom.Value != 1) return false;
+                    board.Rules = ChessVariants.Crazyhouse;
+                    break;
+                case >= PocketFirstDomain and < PocketFirstDomain + 10:
+                    board.Pockets[atom.Domain - PocketFirstDomain] = atom.Value;
+                    break;
+                case 52: board.Checks[0] = atom.Value; break;
+                case 53: board.Checks[1] = atom.Value; break;
+                case PromotedSquareDomain:
+                    if (atom.Value >= 64) return false;
+                    board.Promoted |= 1UL << atom.Value;
                     break;
                 default:
                     return false;
             }
         }
 
+        if (!board.Rules.Drops && (board.Promoted != 0 || board.Pockets.Any(p => p != 0))) return false;
         if (!ResolveCastlingRookFiles(board, rookOverride)) return false;
         return board.FindKing(white: true) >= 0 && board.FindKing(white: false) >= 0;
     }

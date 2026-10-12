@@ -516,8 +516,8 @@ internal static class ChessWitnessHydrator
 
     /// <summary>Replay the complete typed input after the strict reader has reserved its
     /// checked expanded work; the UI replay window does not apply.</summary>
-    internal static ChessReplayResult ReplayAdmittedLine(IReadOnlyList<Hash128> moveIds, string? startFen)
-        => ChessReplay.Replay(moveIds, startFen, maxPlies: moveIds.Count);
+    internal static ChessReplayResult ReplayAdmittedLine(IReadOnlyList<Hash128> moveIds, string? startFen, ChessVariantRules? rules = null)
+        => ChessReplay.Replay(moveIds, startFen, maxPlies: moveIds.Count, rules: rules);
 
     private static async Task<IReadOnlyList<ChessWitnessedGame>> MaterializeAsync(
         NpgsqlDataSource ds, IReadOnlyList<(Hash128 Line, Hash128 Event, GameMeta Meta)> wanted,
@@ -579,8 +579,9 @@ internal static class ChessWitnessHydrator
             if (positionOutcomeResults is not null && gm.SetupObj != default && startFen is null)
                 throw new InvalidDataException("Selected playing corpus could not be completely reconstructed: missing recorded start position.");
 
+            var rules = gm.SetupObj != default && setupBoards.TryGetValue(gm.SetupObj, out var ruleBoard) ? ruleBoard.Rules : null;
             var modality = new ChessModality();
-            if (ChessAnalyze.InitialState(startFen, modality) is not { } initial) continue;
+            if (ChessAnalyze.InitialState(startFen, modality, rules) is not { } initial) continue;
             Hash128 expectedStart = ChessCompose.PositionId(initial.Initial.Board);
             Hash128 startPositionId;
             Hash128[] moveIds;
@@ -605,8 +606,8 @@ internal static class ChessWitnessHydrator
             // Strict callers reserved every expanded occurrence before MaterializeAsync.
             // A UI replay window is not a semantic limit on an admitted recorded game.
             var replay = positionOutcomeResults is null
-                ? ChessReplay.Replay(moveIds, startFen)
-                : ReplayAdmittedLine(moveIds, startFen);
+                ? ChessReplay.Replay(moveIds, startFen, rules: rules)
+                : ReplayAdmittedLine(moveIds, startFen, rules);
             if (replay.Truncated is not null || replay.Plies.Count != moveIds.Length) continue;
             var moves = replay.Plies.Select(static p => p.San).ToArray();
             string?[]? comments = RenderLane(
@@ -628,7 +629,7 @@ internal static class ChessWitnessHydrator
                 gm.Black != default ? gm.Black : null,
                 startFen, clockTokens, evalTokens, quality, spent)
                 {
-                    MoveIds = moveIds, StartPositionId = startPositionId,
+                    MoveIds = moveIds, StartPositionId = startPositionId, Rules = rules,
                     AdmittedReplay = positionOutcomeResults is null ? null : replay
                 });
         }

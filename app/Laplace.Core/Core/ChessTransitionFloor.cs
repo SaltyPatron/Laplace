@@ -68,7 +68,9 @@ public static unsafe class ChessTransitionFloor
                 Base = pointer;
                 try
                 {
-                    long length = _view.Capacity;
+                    // Windows may round a mapped view up to a page. The serialized
+                    // trailer and record count are bounded by the opened file's length.
+                    long length = source.Length;
                     if (length < HeaderSize + TrailerBytes)
                         throw new InvalidOperationException("chess transition floor record layout mismatch");
                     if (*(uint*)Base != Magic || *(uint*)(Base + 4) != Version)

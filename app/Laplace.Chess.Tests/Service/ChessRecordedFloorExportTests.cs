@@ -46,7 +46,7 @@ public sealed class ChessRecordedFloorExportTests
         var first = Game(1, ["e4", "e5"]);
         var unrelated = Game(2, ["d4", "d5", "c4"]);
         Hash128[] ids = [first.PlayingId];
-        var file = new ChessRecordedSelection.FileIdentity("/build/selection.json", 1, new string('a', 64));
+        var file = new ChessRecordedSelection.FileIdentity(Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "selection.json"), 1, new string('a', 64));
         var selection = new Inventory.SelectionReceipt(file, file, file, 1, Inventory.PlayingIdsDigest(ids));
         var receipt = await Export.ExportAsync(directory.Options(),
             new Inventory.SelectedReadSource(new Source([first, unrelated]), ids, selection), CancellationToken.None);
@@ -151,11 +151,11 @@ public sealed class ChessRecordedFloorExportTests
     [Fact]
     public void ExportOptionsRejectUnknownDuplicateAndOverflowedBounds()
     {
-        Assert.Throws<ArgumentException>(() => Export.Parse(["--output-dir", "/build/test",
+        Assert.Throws<ArgumentException>(() => Export.Parse(["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "test"),
             "--maximum-export-mib", "1", "--maximum-export-mib", "2"]));
-        Assert.Throws<ArgumentException>(() => Export.Parse(["--output-dir", "/build/test", "--merge-fan-in", "1"]));
-        Assert.Throws<ArgumentException>(() => Export.Parse(["--output-dir", "/build/test", "--unknown", "7"]));
-        Assert.Throws<OverflowException>(() => Export.Parse(["--output-dir", "/build/test",
+        Assert.Throws<ArgumentException>(() => Export.Parse(["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "test"), "--merge-fan-in", "1"]));
+        Assert.Throws<ArgumentException>(() => Export.Parse(["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "test"), "--unknown", "7"]));
+        Assert.Throws<OverflowException>(() => Export.Parse(["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "test"),
             "--maximum-spill-mib", long.MaxValue.ToString()]));
     }
 

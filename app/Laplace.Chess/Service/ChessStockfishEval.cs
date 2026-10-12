@@ -78,7 +78,7 @@ public static class ChessStockfishEval
         ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight)
     {
         var m = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return null;
+        if (ChessAnalyze.InitialState(game.StartFen, m, game.Rules) is not { } start) return null;
 
         int n = game.Moves.Count;
         var evals = new int?[n + 1];

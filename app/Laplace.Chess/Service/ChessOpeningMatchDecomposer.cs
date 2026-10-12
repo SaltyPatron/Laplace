@@ -173,7 +173,7 @@ public sealed class ChessOpeningMatchDecomposer
     internal static List<Hash128>? ReplayPositionIds(ChessWitnessedGame w)
     {
         var m = new ChessModality();
-        if (ChessAnalyze.InitialState(w.StartFen, m) is not { } start) return null;
+        if (ChessAnalyze.InitialState(w.StartFen, m, w.Rules) is not { } start) return null;
         var state = start.Initial;
         var ids = new List<Hash128>(w.Moves.Count + 1);
         lock (ChessCompose.Gate)

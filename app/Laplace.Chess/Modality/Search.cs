@@ -239,7 +239,9 @@ public sealed class Search
         // utility invalidates TT scores because a repeated/drawn node's value is contextual.
         int rootAdvantageCp = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
                               + (_activePositionEvaluator?.Evaluate(b) ?? 0);
-        bool rootRuleDraw = b.HalfmoveClock >= 100
+        if (ChessModality.RuleWinner(b) is { } rootWinner)
+            return new Result(null, rootWinner == (b.WhiteToMove ? 0 : 1) ? Mate : -Mate, 0, 0);
+        bool rootRuleDraw = (!b.Rules.Drops && b.HalfmoveClock >= 100)
                             || IsInsufficientMaterial(b)
                             || IsThreefoldCurrent(repetitionStart);
         if (rootRuleDraw)
@@ -248,7 +250,7 @@ public sealed class Search
             // contempt for an outcome chess law has already closed as a draw.
             rootAdvantageCp = 0;
         }
-        else if (_tablebase?.Invoke(b) is { } rootTablebase)
+        else if (b.Rules.IsStandard && _tablebase?.Invoke(b) is { } rootTablebase)
         {
             rootAdvantageCp = rootTablebase.Wdl switch
             {
@@ -399,7 +401,8 @@ public sealed class Search
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
-        if (ply > 0 && (b.HalfmoveClock >= 100
+        if (ChessModality.RuleWinner(b) is { } winner) return winner == (b.WhiteToMove ? 0 : 1) ? Mate - ply : -Mate + ply;
+        if (ply > 0 && ((!b.Rules.Drops && b.HalfmoveClock >= 100)
                         || IsInsufficientMaterial(b)
                         || IsThreefoldCurrent(repetitionStart)))
             return DrawScoreAtPly(ply);
@@ -408,7 +411,7 @@ public sealed class Search
         // each child probe then determines which legal move preserves the best WDL result. WDL
         // draw remains exact truth, but its decision utility depends on whether the root was
         // winning, equal or losing; exact wins/losses retain their much larger tablebase scale.
-        if (ply > 0 && _tablebase?.Invoke(b) is { } tablebase)
+        if (ply > 0 && b.Rules.IsStandard && _tablebase?.Invoke(b) is { } tablebase)
         {
             int distance = Math.Min(Math.Abs(tablebase.Dtz), 1_000);
             return tablebase.Wdl switch
@@ -545,7 +548,8 @@ public sealed class Search
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
-        if (ply > 0 && (b.HalfmoveClock >= 100
+        if (ChessModality.RuleWinner(b) is { } winner) return winner == (b.WhiteToMove ? 0 : 1) ? Mate - ply : -Mate + ply;
+        if (ply > 0 && ((!b.Rules.Drops && b.HalfmoveClock >= 100)
                         || IsInsufficientMaterial(b)
                         || IsThreefoldCurrent(repetitionStart)))
             return DrawScoreAtPly(ply);
@@ -618,11 +622,11 @@ public sealed class Search
 
     private static bool ResetsRepetition(Board b, ChessMove move)
     {
-        Piece moving = b.Squares[move.From];
+        Piece moving = b.MovingPiece(move);
         bool pawn = Board.TypeOf(moving) == Piece.WPawn;
         bool capture = b.Squares[move.To] != Piece.Empty
                        || (move.Flags & MoveFlags.EnPassant) != 0;
-        return pawn || capture;
+        return !b.Rules.Drops && (pawn || capture);
     }
 
     // The TT value of a board can depend on how many times repetition-relevant positions have
@@ -679,7 +683,7 @@ public sealed class Search
         if (m == ttMove) return 1_000_000;
         var victim = b.Squares[m.To];
         if (victim != Piece.Empty)
-            return 100_000 + PieceValue[Math.Abs((sbyte)victim)] * 10 - PieceValue[Math.Abs((sbyte)b.Squares[m.From])];
+            return 100_000 + PieceValue[Math.Abs((sbyte)victim)] * 10 - PieceValue[Math.Abs((sbyte)b.MovingPiece(m))];
         if ((m.Flags & MoveFlags.EnPassant) != 0) return 100_000 + 100 * 10 - 100;
         if ((m.Flags & MoveFlags.Promotion) != 0) return 90_000 + PieceValue[Math.Abs((sbyte)m.Promotion)];
         if (m == k0 || m == k1) return 80_000;
@@ -693,7 +697,7 @@ public sealed class Search
     {
         var victim = b.Squares[m.To];
         int v = victim != Piece.Empty ? PieceValue[Math.Abs((sbyte)victim)] : 100;
-        return v * 10 - PieceValue[Math.Abs((sbyte)b.Squares[m.From])];
+        return v * 10 - PieceValue[Math.Abs((sbyte)b.MovingPiece(m))];
     }
 
     private void RecordKiller(Board b, ChessMove m, int ply)
@@ -712,6 +716,7 @@ public sealed class Search
 
     private static bool IsInsufficientMaterial(Board b)
     {
+        if (!b.Rules.IsStandard) return ChessModality.IsInsufficientMaterial(b);
         int whiteKnights = 0, whiteBishops = 0, blackKnights = 0, blackBishops = 0;
         bool whiteBishopOnLight = false, whiteBishopOnDark = false;
         bool blackBishopOnLight = false, blackBishopOnDark = false;

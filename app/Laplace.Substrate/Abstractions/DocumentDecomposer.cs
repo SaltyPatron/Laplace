@@ -98,14 +98,15 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (File.Exists(path))
         {
-            if (string.Equals(Path.GetExtension(path), ".txt", StringComparison.Ordinal))
+            if (IsTextDocument(path))
                 yield return Path.GetFullPath(path);
             yield break;
         }
 
         if (!Directory.Exists(path)) yield break;
 
-        foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
+        foreach (string file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                                         .Where(IsTextDocument)
                                          .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f, path))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
@@ -118,13 +119,13 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
         if (File.Exists(path))
         {
             string full = Path.GetFullPath(path);
-            bool supported = string.Equals(Path.GetExtension(full), ".txt", StringComparison.Ordinal);
+            bool supported = IsTextDocument(full);
             return new IngestArtifactGraph(
                 [BuildArtifact(
                     full,
                     Path.GetFileName(full),
                     supported ? IngestArtifactDisposition.Admitted : IngestArtifactDisposition.Unsupported,
-                    supported ? "" : "DocumentDecomposer currently admits plain-text .txt files only")]);
+                    supported ? "" : UnsupportedFormat)]);
         }
 
         if (!Directory.Exists(path)) return null;
@@ -142,17 +143,22 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
                         relative,
                         IngestArtifactDisposition.ExcludedWithReason,
                         "vendored or build-tree artifact is outside DocumentDecomposer source ownership");
-                if (!string.Equals(Path.GetExtension(full), ".txt", StringComparison.Ordinal))
+                if (!IsTextDocument(full))
                     return BuildArtifact(
                         full,
                         relative,
                         IngestArtifactDisposition.Unsupported,
-                        "DocumentDecomposer currently admits plain-text .txt files only");
+                        UnsupportedFormat);
                 return BuildArtifact(full, relative, IngestArtifactDisposition.Admitted, "");
             })
             .ToArray();
         return new IngestArtifactGraph(artifacts);
     }
+
+    private const string UnsupportedFormat = "DocumentDecomposer admits UTF-8 text documents (.txt, .md, .markdown); this format requires another provider";
+
+    private static bool IsTextDocument(string path) => Path.GetExtension(path).ToLowerInvariant()
+        is ".txt" or ".md" or ".markdown";
 
     private static IngestArtifact BuildArtifact(
         string fullPath,

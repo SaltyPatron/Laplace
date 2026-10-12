@@ -217,12 +217,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     internal static ChessParsedReplay MaterializeParsedReplay(ChessGameRecord game)
     {
         var modality = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } start)
+        if (ChessAnalyze.InitialState(game.StartFen, modality, game.Rules) is not { } start)
             return ChessParsedReplay.Empty;
 
         int moveCount = game.ResolvedMoves.Length;
         var boards = new Board[moveCount + 1];
         var positions = new ChessComposed[moveCount + 1];
+        if (game.ReplayBoards is { } replayBoards)
+        {
+            for (int ply = 0; ply <= moveCount; ply++) positions[ply] = ChessCompose.Position(replayBoards[ply]);
+            return new ChessParsedReplay(replayBoards, positions, game.ResolvedMoves, start.StandardStart);
+        }
         var board = start.Initial.Board;
         boards[0] = board;
         positions[0] = ChessCompose.Position(board);
@@ -309,13 +314,53 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     internal static ChessGameRecord? TryParseGame(string gameText, bool requireNormalCompletion = false,
         bool requireCompleteSource = false)
     {
+        try
+        {
+            string variant = PgnGames.TagStr(gameText, "Variant");
+            var rules = ChessVariants.ByName(variant);
+            if (!string.IsNullOrWhiteSpace(variant) && (rules is null || !NativeChessRules.Supports(rules)))
+                throw new InvalidDataException(
+                    $"recording replay is not implemented for variant '{DiagnosticTag(variant)}'; "
+                    + "its positions and moves cannot be admitted under standard chess rules");
+            return ParseGameCore(gameText, requireNormalCompletion, requireCompleteSource);
+        }
+        catch (InvalidDataException ex)
+        {
+            string link = PgnGames.TagStr(gameText, "Link");
+            if (string.IsNullOrWhiteSpace(link)) link = PgnGames.TagStr(gameText, "Site");
+            throw new InvalidDataException(
+                $"PGN {DiagnosticTag(PgnGames.TagStr(gameText, "White"))} vs "
+                + $"{DiagnosticTag(PgnGames.TagStr(gameText, "Black"))} "
+                + $"({DiagnosticTag(PgnGames.TagStr(gameText, "Date"))}; {DiagnosticTag(link)}): {ex.Message}", ex);
+        }
+    }
+
+    private static string DiagnosticTag(string value)
+        => new(value.Take(240).Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+
+    private static ChessGameRecord? ParseGameCore(string gameText, bool requireNormalCompletion,
+        bool requireCompleteSource)
+    {
         bool strict = requireNormalCompletion || requireCompleteSource;
         var gameBytes = Encoding.UTF8.GetBytes(gameText);
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
         {
             if (strict && !ast.Diagnostics.SyntaxComplete)
-                throw new InvalidDataException("normal recorded PGN requires a complete native syntax parse");
+            {
+                var diagnostics = ast.Diagnostics;
+                string location = "";
+                for (int i = 0; i < ast.NodeCount; i++)
+                {
+                    var node = ast.GetNode(i);
+                    if (!ast.NodeTypeIs(node.NodeTypeId, "ERROR"u8)) continue;
+                    location = $"; first syntax error at UTF-8 bytes {node.StartByte}..{node.EndByte}";
+                    break;
+                }
+                throw new InvalidDataException(
+                    $"recorded PGN requires a complete native syntax parse "
+                    + $"(errors={diagnostics.ErrorNodeCount}, missing={diagnostics.MissingNodeCount}{location})");
+            }
             if (strict)
             {
                 int games = 0;
@@ -358,10 +403,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             throw new InvalidDataException("normal recorded PGN declares SetUp=1 without its FEN");
         if (strict && startFen is null && !string.IsNullOrEmpty(PgnGames.TagStr(gameText, "FEN")))
             throw new InvalidDataException("normal recorded PGN has a FEN without SetUp=1");
+        var variantRules = ChessVariants.ByName(PgnGames.TagStr(gameText, "Variant")) ?? ChessVariants.Standard;
+        if (!variantRules.IsStandard)
+            startFen = Board.FromFen(startFen ?? ChessModality.StartFen, variantRules).ToFen();
         var replay = TryReplayLineDetailed(moves, startFen,
             expectedNormalOutcome: requireNormalCompletion ? result : null,
             expectedSourceOutcome: requireCompleteSource ? result : null,
-            requireSourceTerminal: requireSourceTerminal);
+            requireSourceTerminal: requireSourceTerminal, rules: variantRules);
         if (replay is null)
         {
             if (strict)
@@ -388,11 +436,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             BlackName = blackName,
             Date = date,
             StartFen = startFen,
+            Rules = variantRules,
             InitialWhiteToMove = replay.InitialWhiteToMove,
             PositionIds = replay.PositionIds,
             ResolvedMoves = replay.Moves,
             MovingPieces = replay.MovingPieces,
             MoveIds = replay.MoveIds,
+            ReplayBoards = replay.Boards,
             NormalCompletionVerified = requireNormalCompletion,
             CompleteSourceVerified = strict,
         };
@@ -432,10 +482,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     internal static ChessLineReplay? TryReplayLineDetailed(
         IReadOnlyList<string> sans, string? startFen, GameOutcome? expectedNormalOutcome = null,
-        GameOutcome? expectedSourceOutcome = null, bool requireSourceTerminal = false)
+        GameOutcome? expectedSourceOutcome = null, bool requireSourceTerminal = false, ChessVariantRules? rules = null)
     {
         var m = new ChessModality();
-        if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
+        if (ChessAnalyze.InitialState(startFen, m, rules) is not { } start) return null;
         var board = start.Initial.Board.Clone();
         // The ordinary move owner supports kingless puzzle positions. They must
         // never certify a normal completed game, nor may the nonmoving king
@@ -457,19 +507,22 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (history is not null && sans.Count == 0)
             throw new InvalidDataException("normal recorded game must contain a legal move from a nonterminal start");
         var scratch = new List<ChessMove>(16);
+        var nativeReplay = !board.Rules.IsStandard ? NativeChessRules.Replay(board, sans)
+            : ((Board[] Boards, ChessMove[] Moves)?)null;
         for (int ply = 0; ply < sans.Count; ply++)
         {
             if (history is not null && m.Terminal(new ChessState(board, history)) is not null)
                 throw new InvalidDataException("normal recorded game contains a move after its terminal position");
-            var mv = San.Resolve(board, sans[ply], scratch);
+            var mv = nativeReplay is { } replay ? replay.Moves[ply] : San.Resolve(board, sans[ply], scratch);
             if (mv is null) return null;
-            Piece moving = board.Squares[mv.Value.From];
+            Piece moving = board.MovingPiece(mv.Value);
             moves[ply] = mv.Value;
             movingPieces[ply] = moving;
             var moveId = ChessCompose.MoveId(moving, mv.Value);
             moveIds[ply] = moveId;
             var tKey = ChessCompose.TransitionKey(ids[ply], moveId);
-            MoveApply.Make(board, mv.Value);
+            if (nativeReplay is { } native) board = native.Boards[ply + 1];
+            else MoveApply.Make(board, mv.Value);
             if (ChessTransitionFloor.TryLookup(tKey, out var toId))
             {
                 ids[ply + 1] = toId;
@@ -501,7 +554,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             if (!requireSourceTerminal && legal.Count == 0 && forced != sourceOutcome)
                 throw new InvalidDataException("complete source game's forced terminal outcome differs from its result");
         }
-        return new ChessLineReplay(ids, moves, movingPieces, moveIds, start.Initial.Board.WhiteToMove);
+        return new ChessLineReplay(ids, moves, movingPieces, moveIds, start.Initial.Board.WhiteToMove)
+            { Boards = nativeReplay?.Boards };
     }
 
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
@@ -527,19 +581,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 b, lineId, parsed.MoveIds, result, initialWhiteToMove.Value,
                 src, PgnWitnessWeight);
 
-        RecordStartPosition(b, lineId, playingId, gameText, src);
+        RecordStartPosition(b, lineId, playingId, parsed.StartFen, src, parsed.Rules);
         RecordOpeningHeaders(b, lineId, gameText, src);
         RecordPlayingTrajectory(b, parsed, src);
     }
 
     private static void RecordStartPosition(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, Hash128 src)
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string? fen, Hash128 src, ChessVariantRules? rules)
     {
-        if (PgnGames.TagStr(gameText, "SetUp") != "1") return;
-        string fen = PgnGames.TagStr(gameText, "FEN");
         if (string.IsNullOrWhiteSpace(fen)) return;
         Board board;
-        try { board = Board.FromFen(fen); }
+        try { board = Board.FromFen(fen, rules); }
         catch (FormatException) { return; }
         Hash128 positionId = ChessGraph.EmitPosition(b, board, src);
         b.AddAttestation(NativeAttestation.Categorical(
@@ -566,7 +618,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 b, parsed.MovingPieces[i], parsed.ResolvedMoves[i], src, nowUs);
 
         var modality = new ChessModality();
-        if (ChessAnalyze.InitialState(parsed.StartFen, modality) is not { } start)
+        if (ChessAnalyze.InitialState(parsed.StartFen, modality, parsed.Rules) is not { } start)
             throw new InvalidOperationException("PGN line lost its admitted start position");
         var startPoint = ChessGraph.ComposePositionPoint(start.Initial.Board);
         if (parsed.PositionIds.Length == 0 || startPoint.Id != parsed.PositionIds[0])
@@ -851,7 +903,10 @@ internal sealed record ChessLineReplay(
     ChessMove[] Moves,
     Piece[] MovingPieces,
     Hash128[] MoveIds,
-    bool InitialWhiteToMove);
+    bool InitialWhiteToMove)
+{
+    internal Board[]? Boards { get; init; }
+}
 
 internal sealed record ChessParsedReplay(
     Board[] Boards,
@@ -880,6 +935,7 @@ public sealed record ChessGameRecord(
     internal string? BlackName { get; init; }
     internal string? Date { get; init; }
     internal string? StartFen { get; init; }
+    internal ChessVariantRules? Rules { get; init; }
     // Admission evidence from the native legal replay, never an identity salt.
     internal bool? InitialWhiteToMove { get; init; }
 
@@ -887,6 +943,7 @@ public sealed record ChessGameRecord(
     internal ChessMove[] ResolvedMoves { get; init; } = [];
     internal Piece[] MovingPieces { get; init; } = [];
     internal Hash128[] MoveIds { get; init; } = [];
+    internal Board[]? ReplayBoards { get; init; }
     internal bool NormalCompletionVerified { get; init; }
     internal bool CompleteSourceVerified { get; init; }
 

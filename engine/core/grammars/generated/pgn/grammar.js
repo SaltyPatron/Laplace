@@ -85,6 +85,8 @@ module.exports = grammar({
     
     
     san_move: $ => token(choice(
+      // Drop moves carry a reserve piece (omitted for pawns), not a from-square.
+      seq(optional(/[PNBRQ]/), '@', /[a-h][1-8]/, optional(/[+#]/), optional(/[!?]{1,2}/)),
       
       seq(
         choice('O-O-O', 'O-O', '0-0-0', '0-0'),

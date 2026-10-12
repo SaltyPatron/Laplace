@@ -84,7 +84,7 @@ internal static class FoundryCommands
             string outputPath = ((recipeFrom is null && nativeVocab == 0) ? positional.ElementAtOrDefault(1) : positional.ElementAtOrDefault(0))
                 ?? Path.Combine(LaplaceInstall.ResolveGgufOutputDir(), "laplace-foundry.gguf");
             if (string.IsNullOrEmpty(outputPath))
-                return Fail("usage: laplace synthesize substrate <recipe.json> <output.gguf>\n"
+                return Fail("usage: laplace-mono synthesize substrate <recipe.json> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --recipe-from <recipe-id-prefix> --tokenizer <dir> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>\n"
                           + "  [--scope-source <name,name,...>]  Build-A-Bear: synthesis ONLY the named sources' re-folded consensus (laplace.recipe synthesis runs)");
@@ -109,7 +109,7 @@ internal static class FoundryCommands
         }
 
         return Fail(
-            "usage: laplace synthesize <subcommand> [args]\n"
+            "usage: laplace-mono synthesize <subcommand> [args]\n"
             + "  substrate <recipe.json> [output.gguf]                        synthesis consensus into a recipe-file mold\n"
             + "  substrate --recipe-from <id-prefix> --tokenizer <dir> [out]  synthesis a mold discovered from a deposed model ('*' = the only one)\n");
     }
@@ -471,7 +471,7 @@ internal static class FoundryCommands
     {
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
             return Fail(
-                "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
+                "usage: laplace-mono synthesize substrate <recipe.json> [output.gguf]\n"
                 + $"  (recipe not found: {recipePath})");
 
 

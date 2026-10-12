@@ -81,7 +81,7 @@ internal static class QueryCommands
     {
         if (string.IsNullOrWhiteSpace(goal))
         {
-            Console.Error.WriteLine("usage: laplace recall \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
+            Console.Error.WriteLine("usage: laplace-mono recall \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
             return 2;
         }
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
@@ -115,7 +115,7 @@ internal static class QueryCommands
 
     public static async Task<int> NeighborsAsync(string word)
     {
-        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace neighbors <word>");
+        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace-mono neighbors <word>");
         int k = 10;
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
@@ -214,7 +214,7 @@ internal static class QueryCommands
     {
         string prompt = string.Join(' ', args).Trim();
         if (string.IsNullOrWhiteSpace(prompt))
-            return Fail("usage: laplace chat <prompt>");
+            return Fail("usage: laplace-mono chat <prompt>");
 
         CodepointPerfcache.Load(ResolveBlob());
 
@@ -264,7 +264,7 @@ internal static class QueryCommands
 
     public static async Task<int> AttestAsync(string[] args)
     {
-        const string usage = "usage: laplace attest <confirm|refute> <tok1> [tok2...]\n"
+        const string usage = "usage: laplace-mono attest <confirm|refute> <tok1> [tok2...]\n"
             + "       laplace attest <confirm|refute> <subject> <RELATION_TYPE> <object>";
         if (args.Length < 2)
             return Fail(usage);
@@ -354,7 +354,7 @@ internal static class QueryCommands
 
     public static async Task<int> InspectAsync(string text)
     {
-        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace inspect <text>");
+        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace-mono inspect <text>");
         CodepointPerfcache.Load(ResolveBlob());
 
         using var tree = TextDecomposer.Run(text);

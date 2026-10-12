@@ -7,7 +7,7 @@ public static class PositionContent
     public static bool IncludeFeatureTokens { get; set; }
 
     public static string Surface(Board b, string canonicalEp)
-        => Surface(b, canonicalEp, ChessVariantRules.Standard);
+        => Surface(b, canonicalEp, b.Rules);
 
     /// <summary>
     /// The position's content surface, under a RULE SET.
@@ -42,7 +42,16 @@ public static class PositionContent
             int f = Bitboards.FileOfBit(bit), r = Bitboards.RankOfBit(bit);
             sb.Append(' ').Append(Board.PieceToChar(b.Squares[Board.Sq(f, r)])).Append(Alg(f, r));
         }
+        if (rules.Drops)
+        {
+            for (int i = 0; i < b.Pockets.Length; i++)
+                if (b.Pockets[i] != 0) sb.Append(" pocket:").Append(i).Append(':').Append(b.Pockets[i]);
+            foreach (int bit in Bitboards.Bits(b.Promoted)) sb.Append(" promoted:").Append(Alg(bit & 7, bit >> 3));
+        }
 
+
+        if (rules.WinByCheckCount > 0)
+            sb.Append(" checks:").Append(b.Checks[0]).Append(':').Append(b.Checks[1]);
 
         // wpawns:/bpawns:/wpf:/bpf:/mat: USED TO BE APPENDED HERE. They are gone from the
         // identity surface deliberately (plan item 6b).
@@ -200,10 +209,29 @@ public static class PositionContent
     /// to draw a board or seed an engine, not to adjudicate fifty-move claims. Returns false
     /// on anything that doesn't parse as a surface.
     /// </summary>
+    public static bool TryBoardFromSurface(string surface, out Board board)
+    {
+        board = null!;
+        if (!TryFenFromSurface(surface, out var fen)) return false;
+        var rules = surface.StartsWith("rules:")
+            ? ChessVariants.Conventional.Select(v => v.Rules).FirstOrDefault(r => r.Surface() == surface.Split(' ')[0][6..])
+            : null;
+        try { board = Board.FromFen(fen, rules); return true; }
+        catch (FormatException) { return false; }
+    }
+
     public static bool TryFenFromSurface(string surface, out string fen)
     {
         fen = "";
         var tok = surface.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var rules = ChessVariants.Standard;
+        if (tok.Length > 0 && tok[0].StartsWith("rules:")) {
+            var selected = ChessVariants.Conventional.Select(v => v.Rules).FirstOrDefault(r => r.Surface() == tok[0][6..]);
+            if (selected is null) return false;
+            rules = selected; tok = tok[1..];
+        }
+        bool drops = rules.Drops;
+        var checks = new uint[2];
         if (tok.Length < 3 || !tok[0].StartsWith("stm:") || !tok[1].StartsWith("cr:") || !tok[2].StartsWith("ep:"))
             return false;
 
@@ -213,9 +241,31 @@ public static class PositionContent
         if (stm is not ("w" or "b")) return false;
 
         var board = new char[8, 8];
+        var pockets = new ushort[10];
+        ulong promoted = 0;
         for (int i = 3; i < tok.Length; i++)
         {
             var t = tok[i];
+            if (rules.WinByCheckCount > 0 && t.StartsWith("checks:")) {
+                var c = t.Split(':');
+                if (c.Length != 3 || !uint.TryParse(c[1], out checks[0]) || !uint.TryParse(c[2], out checks[1])
+                    || checks.Any(n => n > rules.WinByCheckCount)) return false;
+                continue;
+            }
+            if (drops && t.StartsWith("pocket:"))
+            {
+                var fields = t.Split(':');
+                if (fields.Length != 3 || !int.TryParse(fields[1], out int index) || index is < 0 or >= 10
+                    || !ushort.TryParse(fields[2], out ushort count)) return false;
+                pockets[index] = count;
+                continue;
+            }
+            if (drops && t.StartsWith("promoted:"))
+            {
+                if (t.Length != 11 || t[9] is < 'a' or > 'h' || t[10] is < '1' or > '8') return false;
+                promoted |= 1UL << ((t[10] - '1') * 8 + t[9] - 'a');
+                continue;
+            }
             if (t.StartsWith("wpawns:")) break; // trailing feature sections, no more pieces
             if (t.Length != 3) return false;
             char piece = t[0];
@@ -235,14 +285,23 @@ public static class PositionContent
                 if (p == '\0') { empty++; continue; }
                 if (empty > 0) { sb.Append(empty); empty = 0; }
                 sb.Append(p);
+                if ((promoted & (1UL << (rank * 8 + file))) != 0) sb.Append('~');
             }
             if (empty > 0) sb.Append(empty);
             if (rank > 0) sb.Append('/');
         }
+        if (drops)
+        {
+            sb.Append('[');
+            for (int i = 0; i < pockets.Length; i++) sb.Append("PNBRQpnbrq"[i], pockets[i]);
+            sb.Append(']');
+        }
         sb.Append(' ').Append(stm)
           .Append(' ').Append(string.IsNullOrEmpty(cr) ? "-" : cr)
           .Append(' ').Append(string.IsNullOrEmpty(ep) ? "-" : ep)
-          .Append(" 0 1");
+          ;
+        if (rules.WinByCheckCount > 0) sb.Append(' ').Append(rules.WinByCheckCount - checks[0]).Append('+').Append(rules.WinByCheckCount - checks[1]);
+        sb.Append(" 0 1");
         fen = sb.ToString();
         return true;
     }

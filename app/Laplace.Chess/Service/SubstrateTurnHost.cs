@@ -97,7 +97,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             }
             if (resolved is null) return;
             moves.Add(ChessGraph.EmitMove(
-                b, board.Squares[resolved.Value.From], resolved.Value,
+                b, board.MovingPiece(resolved.Value), resolved.Value,
                 ChessVocabulary.SourceId, nowUs));
         }
 

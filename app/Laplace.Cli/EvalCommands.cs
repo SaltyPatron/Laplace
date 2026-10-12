@@ -10,7 +10,7 @@ internal static class EvalCommands
         if (args.Length > 0 && args[0] == "generation")
             return await GenerationAsync(args);
         if (args.Length == 0 || args[0] != "ingest-fidelity")
-            return Fail("usage: laplace eval ingest-fidelity [relation] [ground-truth] [n] | laplace eval generation [prompt] [steps] [seeds-csv]");
+            return Fail("usage: laplace-mono eval ingest-fidelity [relation] [ground-truth] [n] | laplace eval generation [prompt] [steps] [seeds-csv]");
 
         string relation = args.Length > 1 ? args[1] : "SIMILAR_TO";
         string gt = args.Length > 2 ? args[2] : "IS_SYNONYM_OF";

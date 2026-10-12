@@ -60,8 +60,11 @@ public static class NpgsqlIngestOps
             ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)
             """, timeoutSeconds: 0, ct: ct, label: "analyze_post_ingest_validation");
 
+    public sealed record GinMaintenance(string Index, long? PagesCleaned);
+
     /// <summary>
-    /// Flushes every GIN pending list after a bulk write burst.
+    /// Flushes owned GIN pending lists after a bulk write burst; unowned indexes
+    /// remain under PostgreSQL's autovacuum maintenance.
     /// <para>
     /// GIN with <c>fastupdate</c> buffers inserts in an unordered pending list that is
     /// merged only when it exceeds <c>gin_pending_list_limit</c>, and every search scans
@@ -70,9 +73,10 @@ public static class NpgsqlIngestOps
     /// never scan a populated list, without waiting for autovacuum.
     /// </para>
     /// </summary>
-    public static Task CleanGinPendingListsAsync(
+    public static Task<IReadOnlyList<GinMaintenance>> CleanGinPendingListsAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteNonQueryAsync(conn, SqlCatalog.Get("ingest.clean_gin_pending_lists").Text,
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ingest.clean_gin_pending_lists"),
+            static row => new GinMaintenance(row.GetString(0), row.IsDBNull(1) ? null : row.GetInt64(1)),
             timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
 
     public static Task<long> EvidenceCountForSourceNameAsync(
@@ -190,16 +194,17 @@ public static class NpgsqlIngestOps
                        realize.canonical_id('Model_Circuit'), 3)
             """, null, ct, "model_circuit_trajectory_count");
 
-    public readonly record struct SourceEvidenceRow(string Source, long Evidence);
+    public readonly record struct SourceEvidenceRow(string? Source, long Evidence, string? SourceId);
 
     public static Task<IReadOnlyList<SourceEvidenceRow>> AttestationCountsBySourceAsync(
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT s.source, s.evidence
+            SELECT s.source, s.evidence, encode(s.source_id, 'hex')
             FROM ops.source_counts() s
             ORDER BY s.evidence DESC
             """,
-            static r => new SourceEvidenceRow(r.GetString(0), r.GetInt64(1)),
+            static r => new SourceEvidenceRow(r.IsDBNull(0) ? null : r.GetString(0), r.GetInt64(1),
+                r.IsDBNull(2) ? null : r.GetString(2)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "attestation_counts_by_source");
 
     public readonly record struct UnicodeAtomProbeRow(

@@ -139,7 +139,7 @@ public static class ChessTacticOutcomes
     internal static bool TryReplay(ChessWitnessedGame game, out IReadOnlyList<Board> boards)
     {
         var modality = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } start)
+        if (ChessAnalyze.InitialState(game.StartFen, modality, game.Rules) is not { } start)
         {
             boards = Array.Empty<Board>();
             return false;

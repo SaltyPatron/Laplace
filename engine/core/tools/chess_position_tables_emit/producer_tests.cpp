@@ -118,8 +118,8 @@ void run_controls() {
 
     super_fibonacci(128, g_byte_coords);
     std::vector<chess_emit::Record> reference;
-    check(emit_tier1_alphabet(reference) == 0 && reference.size() == 1001u, "finite atom coverage");
-    check(emit_move_alphabet(reference) == 0 && reference.size() == 230377u, "finite move coverage");
+    check(emit_tier1_alphabet(reference) == 0 && reference.size() == 1376u, "finite atom coverage");
+    check(emit_move_alphabet(reference) == 0 && reference.size() == 231360u, "finite move coverage");
     const size_t alphabet_size = reference.size();
     for (const auto& line : {a, a, alias, b}) {
         chess_emit::Record item{};
@@ -134,7 +134,7 @@ void run_controls() {
         for (size_t i = reference.size(); i > 0u; --i) {
             const size_t at = i - 1u;
             const uint8_t origin = at >= alphabet_size ? chess_emit::board_origin :
-                at >= 1001u ? chess_emit::move_origin : chess_emit::atom_origin;
+                at >= 1376u ? chess_emit::move_origin : chess_emit::atom_origin;
             producer.add(reference[at], origin);
         }
         stats = producer.publish(output_path, source);
@@ -185,7 +185,7 @@ void run_controls() {
     {
         chess_emit::Producer producer(memory, spill, scratch);
         for (size_t i = 0; i < alphabet_size; ++i)
-            producer.add(reference[i], i < 1001u ? chess_emit::atom_origin : chess_emit::move_origin);
+            producer.add(reference[i], i < 1376u ? chess_emit::atom_origin : chess_emit::move_origin);
         const auto primary_replay = chess_emit::scan(input_path, compose_surface, &producer);
         const auto additional_replay = chess_emit::scan(extra_path, compose_surface, &producer);
         check(primary_replay.occurrences == 4u && additional_replay.occurrences == 1u,

@@ -168,13 +168,20 @@ internal sealed class RoundtripCommand : ForwardCommand<RoundtripCommand.Setting
     }
 }
 
-[Description("Roundtrip a file through the database (ingest then rebuild from stored content).")]
+[Description("Rebuild a file from stored content. --read-only verifies an earlier ingestion without writing.")]
 internal sealed class DbRoundtripCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
     {
         var raw = Raw(ctx);
-        return DecompositionCommands.DbRoundtripAsync(raw.Length > 0 ? raw[0] : "");
+        bool readOnly = raw.Contains("--read-only");
+        var paths = raw.Where(arg => arg != "--read-only").ToArray();
+        if (paths.Length != 1)
+        {
+            Console.Error.WriteLine("usage: laplace-mono db-roundtrip <file> [--read-only]");
+            return Task.FromResult(2);
+        }
+        return DecompositionCommands.DbRoundtripAsync(paths[0], readOnly);
     }
 }
 

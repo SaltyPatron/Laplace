@@ -159,7 +159,7 @@ internal static partial class IngestCommands
 
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
-            return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
+            return Fail("usage: laplace-mono ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
                         + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
                         // Source list comes from the dispatch table TryDispatch routes through.
                         + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
@@ -186,7 +186,7 @@ internal static partial class IngestCommands
     private static async Task<int> IngestChainAsync(string[] specs)
     {
         if (specs.Length == 0)
-            return Fail("usage: laplace ingest chain \"<source [path] [flags]>\" ...\n"
+            return Fail("usage: laplace-mono ingest chain \"<source [path] [flags]>\" ...\n"
                         + "  example: laplace ingest chain unicode iso639 cili wordnet \"document D:\\Data\\Ingest\\test-data\\text\"");
 
         var parsed = specs.Select(spec => ParseIngestCliArgs(spec.Split(' ',
@@ -241,7 +241,7 @@ internal static partial class IngestCommands
     internal static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(modelDir))
-            return Fail("usage: laplace ingest safetensors <snapshot-dir>\n"
+            return Fail("usage: laplace-mono ingest safetensors <snapshot-dir>\n"
                         + "  HF snapshot: config.json + tokenizer.json + *.safetensors\n"
                         + "  (safetensors are not self-contained like GGUF — the directory is the witness unit)\n"
                         + "  Also accepts an HF hub cache root or models--* family dir (resolves snapshots/<rev>).");
@@ -302,7 +302,7 @@ internal static partial class IngestCommands
     {
         if (string.IsNullOrWhiteSpace(cli.Path) || string.IsNullOrWhiteSpace(cli.SecondPath))
             return Fail(
-                "usage: laplace ingest model-corroborate <first-snapshot> <second-snapshot>\n"
+                "usage: laplace-mono ingest model-corroborate <first-snapshot> <second-snapshot>\n"
                 + "  Both content-distinct snapshots must already be deposited model sources.");
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
@@ -346,9 +346,9 @@ internal static partial class IngestCommands
     internal static async Task<int> IngestDocumentAsync(IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(cli.Path))
-            return Fail("usage: laplace ingest document <file-or-directory>\n"
+            return Fail("usage: laplace-mono ingest document <file-or-directory>\n"
                         + "  Deposits whole documents (entities + physicalities + PRECEDES bigrams).\n"
-                        + "  Bit-perfect proof: laplace db-roundtrip <file>  (reconstruct + compare).");
+                        + "  Bit-perfect proof: laplace-mono db-roundtrip <file>  (reconstruct + compare).");
         if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
             return Fail($"ingest document: path not found: {cli.Path}");
 
@@ -365,7 +365,7 @@ internal static partial class IngestCommands
     internal static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(cli.Path))
-            return Fail("usage: laplace ingest recipe <recipe.json>\n"
+            return Fail("usage: laplace-mono ingest recipe <recipe.json>\n"
                         + "  Deposits a Mold-A-Model recipe (the simulated UI POST) as a content-addressed\n"
                         + "  Model_Recipe entity, fetchable by export via structural.model_recipes() / --recipe-from.");
         if (!File.Exists(cli.Path))
@@ -400,7 +400,7 @@ internal static partial class IngestCommands
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
-            return Fail("usage: laplace ingest code <file-or-directory>");
+            return Fail("usage: laplace-mono ingest code <file-or-directory>");
         return await IngestViaRunnerAsync(
             CliRuntime.Decomposers.Resolve("code"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
@@ -410,7 +410,7 @@ internal static partial class IngestCommands
         ValidateVerifiedGitArguments(cli);
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
-            return Fail("usage: laplace ingest repo <repository-root>");
+            return Fail("usage: laplace-mono ingest repo <repository-root>");
         IDecomposer decomposer = CliRuntime.Decomposers.Resolve("repo");
         if (cli.GitCorpusSelection is not null)
         {
@@ -446,7 +446,7 @@ internal static partial class IngestCommands
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
-            return Fail("usage: laplace ingest tabular <file-or-directory>");
+            return Fail("usage: laplace-mono ingest tabular <file-or-directory>");
         return await IngestViaRunnerAsync(
             CliRuntime.Decomposers.Resolve("tabular"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
@@ -455,7 +455,7 @@ internal static partial class IngestCommands
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
-            return Fail("usage: laplace ingest parquet <file-or-directory>");
+            return Fail("usage: laplace-mono ingest parquet <file-or-directory>");
         return await IngestViaRunnerAsync(
             CliRuntime.Decomposers.Resolve("parquet"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
@@ -577,19 +577,15 @@ internal static partial class IngestCommands
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
             persistEvidence: persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
-        var writer = (ISubstrateWriter)accumulator;
-        // Every source runs the generic ingest order: extract the whole source into
-        // staging, then load the staged set once (novelty trunk to leaf, new records leaf
-        // to trunk, merged claims) and score it (StagedSourceWriter).
-        await using var staged = new StagedSourceWriter(accumulator, ds, innerWriter.Durability,
-            IngestTopology.Current.ApplyPartitions, loggerFactory.CreateLogger<StagedSourceWriter>());
-        writer = staged;
+        // The shared writer persists bulk evidence, folds accepted testimony and
+        // records completion. Runtime ingestion does not replace schema objects.
+        ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory,
             new NpgsqlIngestObservability(ds, persistEvidence));
 
         string destination = dec is RepoDecomposer { VerifiedRepository: not null }
-            ? "configured PostgreSQL (verified Git corpus)" : ConnString;
+            ? "configured PostgreSQL (verified Git corpus)" : LaplaceInstall.RedactConnectionString(ConnString);
         Console.WriteLine($"ingest {dec.GetType().Name} source={dec.SourceName} via IngestRunner → {destination} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
@@ -781,7 +777,7 @@ internal static partial class IngestCommands
         {
             Console.WriteLine(
                 $"  witness [{decomposer.SourceName}] exact source counts deferred "
-                + "(workflow gate; explicit: laplace stats <cli-source>)");
+                + "(workflow gate; explicit: laplace-mono stats <cli-source>)");
             return;
         }
 
@@ -793,7 +789,10 @@ internal static partial class IngestCommands
             try
             {
                 foreach (var row in await NpgsqlIngestOps.AttestationCountsBySourceAsync(conn, timeoutSeconds: 120))
-                    Console.WriteLine($"    {row.Source,-44}: {row.Evidence,12:N0} att");
+                {
+                    var label = row.Source ?? $"<unrendered source {row.SourceId ?? "(null)"}>";
+                    Console.WriteLine($"    {label,-44}: {row.Evidence,12:N0} att");
+                }
             }
             catch (Exception ex) when (ex is NpgsqlException { InnerException: TimeoutException } or TimeoutException)
             {

@@ -609,6 +609,19 @@ public static class ChessLabRunners
                 lab.AddArtifact(slot, "games.pgn", outPath);
             completed = true;
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Keep the exact downloaded input reachable from the failed job, including
+            // the archive that did not finish admission. Successful prior commits remain.
+            if (outPath is not null && File.Exists(outPath))
+            {
+                if (!persistPgn)
+                    outPath = ChessLabStorage.PersistArtifact(outPath, LabDir, slot.Job.Id, "games.pgn");
+                lab.AddArtifact(slot, "games.pgn", outPath);
+                lab.Publish(slot, new ChessLabLogEvent("info", "Downloaded PGN retained as games.pgn on this failed job."));
+            }
+            throw;
+        }
         finally
         {
             if (ingestor is not null) await ingestor.DisposeAsync();

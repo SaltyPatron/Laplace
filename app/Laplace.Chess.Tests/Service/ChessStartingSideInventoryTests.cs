@@ -14,7 +14,7 @@ public sealed class ChessStartingSideInventoryTests
     [Fact]
     public void ParseRequiresExplicitNewOutputAndPositiveBoundedOptions()
     {
-        var options = Inventory.Parse(["--output-dir", "/build/inventory-evidence", "--page-size", "2",
+        var options = Inventory.Parse(["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "inventory-evidence"), "--page-size", "2",
             "--maximum-materialized-mib", "3", "--maximum-retained-mib", "4", "--deadline-seconds", "5"]);
         Assert.Equal(2, options.PageSize);
         Assert.Equal(3L * 1024 * 1024, options.MaterializedBytes);
@@ -23,16 +23,16 @@ public sealed class ChessStartingSideInventoryTests
         foreach (string[] bad in new string[][]
         {
             [], ["--output-dir"], ["--output-dir", "relative"],
-            ["--output-dir", "/build/x", "--page-size", "0"],
-            ["--output-dir", "/build/x", "--page-size", "257"],
-            ["--output-dir", "/build/x", "--page-size", "-1"],
-            ["--output-dir", "/build/x", "--deadline-seconds", "2147483647"],
-            ["--output-dir", "/build/x", "--unknown", "1"],
-            ["--output-dir", "/build/x", "--page-size", "1", "--page-size", "2"]
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--page-size", "0"],
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--page-size", "257"],
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--page-size", "-1"],
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--deadline-seconds", "2147483647"],
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--unknown", "1"],
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--page-size", "1", "--page-size", "2"]
         })
             Assert.Throws<ArgumentException>(() => Inventory.Parse(bad));
         Assert.Throws<OverflowException>(() => Inventory.Parse(
-            ["--output-dir", "/build/x", "--maximum-materialized-mib", long.MaxValue.ToString()]));
+            ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "x"), "--maximum-materialized-mib", long.MaxValue.ToString()]));
     }
 
     [Fact]
@@ -186,17 +186,17 @@ public sealed class ChessStartingSideInventoryTests
     [Fact]
     public void ExplicitSelectionRequiresBothAbsoluteManifestAndExactDigest()
     {
-        string[] basis = ["--output-dir", "/build/inventory-evidence"];
-        var parsed = Inventory.Parse([.. basis, "--recorded-selection", "/build/selection.json",
+        string[] basis = ["--output-dir", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "inventory-evidence")];
+        var parsed = Inventory.Parse([.. basis, "--recorded-selection", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "selection.json"),
             "--recorded-selection-sha256", new string('a', 64)]);
-        Assert.Equal("/build/selection.json", parsed.RecordedSelection);
+        Assert.Equal(Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "selection.json"), parsed.RecordedSelection);
         Assert.Equal(new string('a', 64), parsed.RecordedSelectionSha256);
         foreach (string[] extra in new string[][]
         {
-            ["--recorded-selection", "/build/selection.json"],
+            ["--recorded-selection", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "selection.json")],
             ["--recorded-selection-sha256", new string('a', 64)],
             ["--recorded-selection", "relative", "--recorded-selection-sha256", new string('a', 64)],
-            ["--recorded-selection", "/build/selection.json", "--recorded-selection-sha256", new string('A', 64)],
+            ["--recorded-selection", Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "selection.json"), "--recorded-selection-sha256", new string('A', 64)],
         })
             Assert.Throws<ArgumentException>(() => Inventory.Parse([.. basis, .. extra]));
     }
@@ -268,7 +268,7 @@ public sealed class ChessStartingSideInventoryTests
 
     private static Inventory.SelectionReceipt Descriptor(IReadOnlyList<Hash128> ids)
     {
-        var identity = new ChessRecordedSelection.FileIdentity("/build/fixture.json", 1, new string('a', 64));
+        var identity = new ChessRecordedSelection.FileIdentity(Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "fixture.json"), 1, new string('a', 64));
         return new(identity, identity, identity, ids.Count, Inventory.PlayingIdsDigest(ids));
     }
 

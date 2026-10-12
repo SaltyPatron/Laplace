@@ -22,6 +22,7 @@
   <ItemGroup>
     <None Update="Fixtures/position-playing-game-*.pgn" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/inspect-*.pgn" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/chess-variant-*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

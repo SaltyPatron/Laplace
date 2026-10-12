@@ -54,7 +54,7 @@ internal static class EvictCommands
             }
         }
         if (sourceName is null)
-            return Fail("usage: laplace evict <sourceName> [--relations A,B] [--marker-types X,Y] [--rederive]");
+            return Fail("usage: laplace-mono evict <sourceName> [--relations A,B] [--marker-types X,Y] [--rederive]");
 
         KnownLanes.TryGetValue(sourceName, out var lane);
         markerTypeNames ??= lane.MarkerTypes;

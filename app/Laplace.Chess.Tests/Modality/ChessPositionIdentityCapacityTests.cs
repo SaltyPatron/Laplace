@@ -46,6 +46,6 @@ public sealed class ChessPositionIdentityCapacityTests
     [Fact]
     public void MaxAtoms_CoversHeaderPlusEverySquare()
     {
-        Assert.Equal(ChessPositionIdentity.MaxHeaderAtoms + 64, ChessPositionIdentity.MaxAtoms);
+        Assert.True(ChessPositionIdentity.MaxAtoms >= ChessPositionIdentity.MaxHeaderAtoms + 64 + 10 + 64);
     }
 }

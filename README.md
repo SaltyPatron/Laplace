@@ -162,6 +162,9 @@ bash scripts/test-parallel.sh --engine
 
 The main delivery workflow builds, installs, manages the database lifecycle and publishes the application on the managed host. Windows entry points live under `scripts/win/`.
 
+For everyday use without a checkout or build shell, see the
+[installed monorepo CLI](docs/guides/installed-mono-client.md).
+
 For substrate introspection after installation:
 
 ```sql

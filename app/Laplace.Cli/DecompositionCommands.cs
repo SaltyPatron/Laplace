@@ -35,27 +35,32 @@ namespace Laplace.Cli;
 
 internal static class DecompositionCommands
 {
-    public static async Task<int> DbRoundtripAsync(string path)
+    public static async Task<int> DbRoundtripAsync(string path, bool readOnly = false)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return Fail($"usage: laplace db-roundtrip <file>  (not found: {path})");
+            return Fail($"usage: laplace-mono db-roundtrip <file>  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        var loggerFactory = CliRuntime.LoggerFactory;
-        var inner = new NpgsqlSubstrateWriter(ds);
-        await using var accumulator = new ConsensusAccumulatingWriter(inner, ds,
-            logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
-        ISubstrateWriter writer = accumulator;
-
         byte[] original = File.ReadAllBytes(path);
-
-        var swR = Stopwatch.StartNew();
-        await ContentRoundtrip.BootstrapAsync(writer);
-        Hash128 docId = await ContentRoundtrip.RecordAsync(writer, original);
-        swR.Stop();
-        Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
-
-        Console.WriteLine($"consensus: {accumulator.CellsFolded,10:N0} relations from {accumulator.ObservationsAccumulated:N0} bigram matches (folded inline at apply)");
+        Hash128 docId;
+        if (readOnly)
+        {
+            docId = ContentTierSpine.ResolveRoot(original)
+                ?? throw new InvalidDataException("Input has no decomposable text content root.");
+            Console.WriteLine($"expected : {original.Length,10:N0} bytes → document {Hex(docId)} (read-only; nothing recorded)");
+        }
+        else
+        {
+            var inner = new NpgsqlSubstrateWriter(ds);
+            await using var accumulator = new ConsensusAccumulatingWriter(inner, ds,
+                logger: CliRuntime.LoggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
+            var swR = Stopwatch.StartNew();
+            await ContentRoundtrip.BootstrapAsync(accumulator);
+            docId = await ContentRoundtrip.RecordAsync(accumulator, original);
+            swR.Stop();
+            Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
+            Console.WriteLine($"consensus: {accumulator.CellsFolded,10:N0} relations from {accumulator.ObservationsAccumulated:N0} bigram matches (folded inline at apply)");
+        }
 
         var swX = Stopwatch.StartNew();
         byte[] rebuilt = await ContentRoundtrip.ReconstructAsync(ds, docId);
@@ -75,7 +80,7 @@ internal static class DecompositionCommands
 
     public static int Decompose(string text)
     {
-        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace decompose <text>");
+        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace-mono decompose <text>");
         CodepointPerfcache.Load(ResolveBlob());
 
         using var tree = TextDecomposer.Run(text);
@@ -90,7 +95,7 @@ internal static class DecompositionCommands
     public static int Roundtrip(string path, string? outPath)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return Fail($"usage: laplace roundtrip <file> [out]  (not found: {path})");
+            return Fail($"usage: laplace-mono roundtrip <file> [out]  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
 
         byte[] original = File.ReadAllBytes(path);

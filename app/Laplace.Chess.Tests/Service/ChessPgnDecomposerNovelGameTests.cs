@@ -7,6 +7,50 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessPgnDecomposerNovelGameTests
 {
+    [Theory]
+    [InlineData("Atomic")]
+    [InlineData("Unknown rules")]
+    public void VariantCannotAcquireStandardChessTestimonyEvenBeforeItsFirstSpecialMove(string variant)
+    {
+        string pgn = $"[Event \"Live Chess\"]\n[White \"Hikaru\"]\n[Black \"DanielRensch\"]\n"
+            + $"[Date \"2016.05.16\"]\n[Variant \"{variant}\"]\n[Result \"1-0\"]\n"
+            + "[Link \"https://www.chess.com/game/live/1580881725\"]\n\n1. d4 Nf6 1-0\n";
+        foreach (bool strict in new[] { false, true })
+        {
+            var error = Assert.Throws<InvalidDataException>(
+                () => ChessPgnDecomposer.TryParseGame(pgn, requireCompleteSource: strict));
+            Assert.Contains($"not implemented for variant '{variant}'", error.Message);
+            Assert.Contains("Hikaru vs DanielRensch", error.Message);
+            Assert.Contains("2016.05.16", error.Message);
+            Assert.Contains("https://www.chess.com/game/live/1580881725", error.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData("Standard")]
+    [InlineData("Chess960")]
+    public void SupportedRuleNamesKeepExistingPositionAndMoveIdentity(string variant)
+    {
+        string pgn = "[Event \"Source\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1. d4 Nf6 1-0\n";
+        var original = ChessPgnDecomposer.TryParseGame(pgn, requireCompleteSource: true)!;
+        var tagged = ChessPgnDecomposer.TryParseGame($"[Variant \"{variant}\"]\n" + pgn, requireCompleteSource: true)!;
+        Assert.Equal(original.PositionIds, tagged.PositionIds);
+        Assert.Equal(original.MoveIds, tagged.MoveIds);
+    }
+
+    [Fact]
+    public void MalformedSyntaxReportsTheSourceAndNativeDiagnosticLocation()
+    {
+        string pgn = "[Event \"Broken\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Result \"1-0\"]\n"
+            + "[Link \"https://example.org/game/123\"]\n\n1. e4 @@d5 1-0\n";
+        var error = Assert.Throws<InvalidDataException>(
+            () => ChessPgnDecomposer.TryParseGame(pgn, requireCompleteSource: true));
+        Assert.Contains("Alice vs Bob", error.Message);
+        Assert.Contains("https://example.org/game/123", error.Message);
+        Assert.Contains("errors=", error.Message);
+        Assert.Contains("UTF-8 bytes", error.Message);
+    }
+
     [Fact]
     public void ChessSizing_RunnerAndPipelineRetainResidentGameWidth()
     {

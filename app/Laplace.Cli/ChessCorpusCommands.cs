@@ -8,7 +8,7 @@ namespace Laplace.Cli;
 internal static class ChessCorpusCommands
 {
     internal const string Usage =
-        "usage: laplace chess measure-corpus --pgn /absolute/games.pgn --evidence-root /absolute/new-evidence-directory\n"
+        "usage: laplace-mono chess measure-corpus --pgn /absolute/games.pgn --evidence-root /absolute/new-evidence-directory\n"
         + "  [--games 75000] [--minimum-seconds 30] [--replays 1] [--deadline-seconds 3600]\n"
         + "  [--expected-sha256 lowercase-64-character-SHA256]\n"
         + "  Measures complete authentic PGNs through ordinary recording, readback, and replay.\n"

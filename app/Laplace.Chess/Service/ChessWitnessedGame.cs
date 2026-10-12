@@ -22,6 +22,7 @@ public sealed record ChessWitnessedGame(
     double[]? SpentSeconds = null)
     : ITrunkRootRecord
 {
+    public Laplace.Modality.Chess.ChessVariantRules? Rules { get; init; }
     public Hash128 TrunkRootId => PlayingId;
 
     /// <summary>
