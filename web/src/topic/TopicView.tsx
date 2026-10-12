@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { useRouteText } from '../layout/useRouteText';
 import { Button, ConsensusBadge, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
 import { describeFailure } from '../api/client';
 import { entityRecord, entityTaxonomy, runQuery, type TaxonomyResponse } from '../query/api';
@@ -15,11 +16,11 @@ import styles from './TopicView.module.css';
  * translations, the IS_A taxonomy, the mesh position and the entity record.
  */
 export function TopicView() {
-  const { ref = '' } = useParams();
+  const ref = useRouteText('/topic/:ref', 'ref');
   const nav = useNavigate();
-  const [ask, setAsk] = useState(decodeURIComponent(ref));
+  const [ask, setAsk] = useState(ref);
 
-  useEffect(() => setAsk(decodeURIComponent(ref)), [ref]);
+  useEffect(() => setAsk(ref), [ref]);
 
   return (
     <div className={styles.page}>
@@ -31,7 +32,7 @@ export function TopicView() {
           onChange={(e) => setAsk(e.target.value)} />
         <Button type="submit" disabled={!ask.trim()}>Look up</Button>
       </form>
-      {ref ? <TopicBody topicRef={decodeURIComponent(ref)} /> : (
+      {ref ? <TopicBody key={ref} topicRef={ref} /> : (
         <Muted className={styles.hint}>One lookup, every read: definition, taxonomy tree, rated facts, translations, mesh position.</Muted>
       )}
     </div>
@@ -50,12 +51,17 @@ function TopicBody({ topicRef }: { topicRef: string }) {
   const [taxonomy, setTaxonomy] = useState<TaxonomyResponse | null>(null);
   const [mesh, setMesh] = useState<MeshResponse | null>(null);
   const [record, setRecord] = useState<EntityRecord | null>(null);
+  const [errors, setErrors] = useState<Partial<Record<'define' | 'facts' | 'translations' | 'taxonomy' | 'mesh' | 'record', string>>>({});
 
   useEffect(() => {
     let stale = false;
     setIdHex(null); setNotFound(false); setFailure(null);
     setDefine(null); setFacts(null); setTranslations(null);
     setTaxonomy(null); setMesh(null); setRecord(null);
+    setErrors({});
+    const failedRead = (section: keyof typeof errors) => (error: unknown) => {
+      if (!stale) setErrors((current) => ({ ...current, [section]: describeFailure(error).message }));
+    };
 
     exploreResolve(topicRef).then((hit) => {
       if (stale) return;
@@ -63,12 +69,12 @@ function TopicBody({ topicRef }: { topicRef: string }) {
       setIdHex(hit.id_hex); setLabel(hit.label);
 
       // Independent reads; each section renders when its read returns.
-      runQuery({ topic: topicRef, shape: 'define' }).then((r) => !stale && setDefine(r)).catch(() => {});
-      runQuery({ topic: topicRef, shape: 'band_facts', limit: 30 }).then((r) => !stale && setFacts(r)).catch(() => {});
-      runQuery({ topic: topicRef, shape: 'translate' }).then((r) => !stale && setTranslations(r)).catch(() => {});
-      entityTaxonomy(hit.id_hex).then((r) => !stale && setTaxonomy(r)).catch(() => {});
-      exploreMesh(hit.id_hex).then((r) => !stale && setMesh(r)).catch(() => {});
-      entityRecord(hit.id_hex).then((r) => !stale && setRecord(r)).catch(() => {});
+      runQuery({ topic: topicRef, shape: 'define' }).then((r) => !stale && setDefine(r)).catch(failedRead('define'));
+      runQuery({ topic: topicRef, shape: 'band_facts', limit: 30 }).then((r) => !stale && setFacts(r)).catch(failedRead('facts'));
+      runQuery({ topic: topicRef, shape: 'translate' }).then((r) => !stale && setTranslations(r)).catch(failedRead('translations'));
+      entityTaxonomy(hit.id_hex).then((r) => !stale && setTaxonomy(r)).catch(failedRead('taxonomy'));
+      exploreMesh(hit.id_hex).then((r) => !stale && setMesh(r)).catch(failedRead('mesh'));
+      entityRecord(hit.id_hex).then((r) => !stale && setRecord(r)).catch(failedRead('record'));
     }).catch((error) => {
       if (stale) return;
       const failed = describeFailure(error);
@@ -91,6 +97,7 @@ function TopicBody({ topicRef }: { topicRef: string }) {
     <>
       <header className={styles.head}>
         <h2 className={styles.title}>{label}</h2>
+        {errors.record && <ErrorText role="alert">Record: {errors.record}</ErrorText>}
         {record && (
           <span className={styles.record}>
             {record.confirmed} confirmed · {record.contested} contested · {record.refuted} refuted · {record.thin} thin
@@ -106,7 +113,7 @@ function TopicBody({ topicRef }: { topicRef: string }) {
 
       <div className={styles.grid}>
         <Panel title="Definition">
-          {define === null ? <LoadingText /> : define.rows.length === 0 ? <Muted>No witnessed glosses.</Muted> : (
+          {errors.define ? <ErrorText role="alert">{errors.define}</ErrorText> : define === null ? <LoadingText /> : define.rows.length === 0 ? <Muted>No witnessed glosses.</Muted> : (
             <ul className={styles.rows}>
               {define.rows.map((r, i) => (
                 <li key={i} className={styles.row}>
@@ -119,11 +126,11 @@ function TopicBody({ topicRef }: { topicRef: string }) {
         </Panel>
 
         <Panel title="Taxonomy — the IS_A tree">
-          {taxonomy === null ? <LoadingText /> : <TaxonomyTree tax={taxonomy} />}
+          {errors.taxonomy ? <ErrorText role="alert">{errors.taxonomy}</ErrorText> : taxonomy === null ? <LoadingText /> : <TaxonomyTree tax={taxonomy} />}
         </Panel>
 
         <Panel title="Translations — the ILI hub across languages">
-          {translations === null ? <LoadingText /> : translations.rows.length === 0
+          {errors.translations ? <ErrorText role="alert">{errors.translations}</ErrorText> : translations === null ? <LoadingText /> : translations.rows.length === 0
             ? <Muted>No cross-lingual surfaces witnessed yet.</Muted>
             : (
               <div className={styles.chips}>
@@ -135,7 +142,7 @@ function TopicBody({ topicRef }: { topicRef: string }) {
         </Panel>
 
         <Panel title="Strongest facts, by band">
-          {facts === null ? <LoadingText /> : facts.rows.length === 0 ? <Muted>No rated facts yet.</Muted> : (
+          {errors.facts ? <ErrorText role="alert">{errors.facts}</ErrorText> : facts === null ? <LoadingText /> : facts.rows.length === 0 ? <Muted>No rated facts yet.</Muted> : (
             <ul className={styles.rows}>
               {facts.rows.map((r, i) => (
                 <li key={i} className={styles.row}>
@@ -148,7 +155,7 @@ function TopicBody({ topicRef }: { topicRef: string }) {
         </Panel>
 
         <Panel title="Mesh position — the hubs it plays for">
-          {mesh === null ? <LoadingText /> : mesh.belongs_to.length === 0 ? <Muted>A root — nothing above it.</Muted> : (
+          {errors.mesh ? <ErrorText role="alert">{errors.mesh}</ErrorText> : mesh === null ? <LoadingText /> : mesh.belongs_to.length === 0 ? <Muted>A root — nothing above it.</Muted> : (
             <ul className={styles.rows}>
               {mesh.belongs_to.slice(0, 10).map((l, i) => (
                 <li key={i} className={styles.row}>

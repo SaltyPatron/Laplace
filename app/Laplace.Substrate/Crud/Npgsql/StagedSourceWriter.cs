@@ -28,7 +28,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// PostgreSQL stores and sorts; native code merges and folds; this class sequences the
 /// operations and moves COPY streams. No record becomes a managed object.
 /// </summary>
-public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics, IPhysicalityClosure, IAsyncDisposable
+public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics, IDeferredApplyMetrics, IPhysicalityClosure, IAsyncDisposable
 {
     private readonly ISubstrateWriter _inner;
     private readonly NpgsqlDataSource _ds;
@@ -40,6 +40,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     private readonly List<SubstrateChange> _held = [];
     private bool _staged;
     private long _observations, _cells;
+    private long _entitiesInserted, _physicalitiesInserted, _attestationsInserted;
     private int _epochRoute = -1;
     private int _modulus;
 
@@ -77,6 +78,10 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
     public long CellsFolded => Interlocked.Read(ref _cells)
         + ((_inner as IConsensusFoldMetrics)?.CellsFolded ?? 0);
+
+    public (long Entities, long Physicalities, long Attestations) DeferredRowsInserted =>
+        (Interlocked.Read(ref _entitiesInserted), Interlocked.Read(ref _physicalitiesInserted),
+         Interlocked.Read(ref _attestationsInserted));
 
     // Writes outside the source's stream (vocabulary and provenance at initialization)
     // keep their own writer.
@@ -312,11 +317,13 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
         // The new records of every table, by the partition they land in.
         await ExecuteAsync(control, null, Sql("stage.new_sets"), ct).ConfigureAwait(false);
+        long newEntities;
         await using (var closure = new NpgsqlCommand(Sql("stage.closure"), control) { CommandTimeout = 0 })
         await using (var reader = await closure.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             await reader.ReadAsync(ct).ConfigureAwait(false);
-            _closure.Record(reader.GetInt64(0), reader.GetInt64(1));
+            newEntities = reader.GetInt64(0);
+            _closure.Record(newEntities, reader.GetInt64(1));
         }
         await Mark("new sets");
 
@@ -328,6 +335,12 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         // One transaction makes every rebuilt leaf of the source visible at once: a stored
         // composition's subtree, its claims and their standing all appear together.
         await SwapAsync(control, work, ct).ConfigureAwait(false);
+        // Entity leaf work also includes mask updates of existing rows. Only the
+        // novelty census counts inserts; report them after the swap commits.
+        Interlocked.Add(ref _entitiesInserted, newEntities);
+        Interlocked.Add(ref _physicalitiesInserted,
+            work.Where(static leaf => leaf.Table == "physicalities").Sum(static leaf => leaf.NewRows));
+        Interlocked.Add(ref _attestationsInserted, checked((long)claimsOut));
         await Mark("swap");
 
         _log.LogInformation(

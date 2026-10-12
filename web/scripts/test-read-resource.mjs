@@ -118,8 +118,8 @@ test('all JSON transports forward AbortSignal and declared request scope', async
   });
   assert.equal(calls.length, 3);
   for (const { init } of calls) {
-    assert.equal(init.signal, signal); assert.equal(init.headers['X-Laplace-Tenant'], 'A');
-    assert.equal(init.headers['X-Laplace-Quote-Id'], 'Q');
+    assert.equal(init.signal, signal); assert.equal(new Headers(init.headers).get('X-Laplace-Tenant'), 'A');
+    assert.equal(new Headers(init.headers).get('X-Laplace-Quote-Id'), 'Q');
   }
   assert.equal(calls[1].init.body, '{"text":" King "}'); assert.equal(calls[2].init.body, ' { "a":1 }\n');
 });
@@ -147,6 +147,27 @@ test('network and write failure are never silently retried', async () => {
     await assert.rejects(apiPost('/write', {}), /network down/);
   });
   assert.equal(calls, 1);
+});
+
+test('a failed shared GET releases its key and a later read can recover', async () => {
+  let calls = 0;
+  const gate = deferred();
+  await withFetch(async () => {
+    calls++;
+    if (calls === 1) return gate.promise;
+    return Response.json({ recovered: true });
+  }, async () => {
+    const first = apiGet('/recover');
+    const second = apiGet('/recover');
+    assert.equal(first, second);
+    const failed = assert.rejects(first, (error) => error instanceof ApiError && error.status === 503);
+    gate.resolve(Response.json({ error: { message: 'temporarily unavailable' } }, { status: 503 }));
+    await failed;
+    assert.deepEqual(await apiGet('/recover'), { recovered: true });
+    assert.equal(calls, 2);
+    // Let any rejected cleanup promise reach Node's unhandled-rejection check.
+    await new Promise((resolve) => setImmediate(resolve));
+  });
 });
 
 const { operationArguments, initialOperationDraft } = await load('../src/ui/lib/operationFields.ts');

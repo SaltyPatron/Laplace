@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { decodeRouteText } from '../layout/useRouteText';
 import { Breadcrumb } from './components/Breadcrumb';
 import { LoadingText } from '@ui';
 import { useExploreStore } from './store';
@@ -75,13 +76,13 @@ function ExploreBreadcrumb() {
 
   const stageMatch = pathname.match(/\/explore\/stage\/([^/]+)/);
   if (stageMatch) {
-    const stage = decodeURIComponent(stageMatch[1]);
+    const stage = decodeRouteText(stageMatch[1]);
     segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
     segments.push({ label: stage, to: `/explore/stage/${stageMatch[1]}` });
   }
   const sourceMatch = pathname.match(/\/explore\/source\/([^/]+)/);
   if (sourceMatch) {
-    const source = decodeURIComponent(sourceMatch[1]);
+    const source = decodeRouteText(sourceMatch[1]);
     segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
     if (crumb.stage) segments.push({ label: crumb.stage, to: `/explore/stage/${encodeURIComponent(crumb.stage)}` });
     segments.push({ label: source, to: `/explore/source/${sourceMatch[1]}` });

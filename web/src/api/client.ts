@@ -140,9 +140,10 @@ export function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   if (existing) return existing as Promise<T>;
   const pending = request<T>(path, {}, opts);
   inflightGets.set(key, pending);
-  void pending.finally(() => {
+  const release = () => {
     if (inflightGets.get(key) === pending) inflightGets.delete(key);
-  });
+  };
+  void pending.then(release, release);
   return pending;
 }
 

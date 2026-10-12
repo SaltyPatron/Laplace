@@ -20,7 +20,7 @@ export function Scoreboard() {
         <Count value={pulse?.entities ?? null} label="Entities" hint="deduplicated content" />
         <Count value={pulse?.attestations ?? null} label="Attestations" hint="witnessed assertions" live />
         <Count value={pulse?.consensus ?? null} label="Consensus edges" hint="folded ratings" live />
-        <Count value={pulse?.physicalities ?? null} label="Geometries" hint="content placed on S³" />
+        <Count value={pulse?.physicalities ?? null} label="Physicalities" hint="typed realizations of content" />
       </div>
     </section>
   );

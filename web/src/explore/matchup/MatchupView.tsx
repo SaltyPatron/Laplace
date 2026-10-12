@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
+import { useRouteText } from '../../layout/useRouteText';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
 import { exploreMatchup, exploreMatchupVerdict } from '../../query/api';
 import type { Matchup, MatchupSide, MatchupVerdict, TapeRow } from '../../query/types';
@@ -14,13 +15,20 @@ import styles from './MatchupView.module.css';
  * record and peak source Elo from the folded game results.
  */
 export function MatchupView() {
-  const { x = '', y = '' } = useParams();
+  const x = useRouteText('/explore/matchup/:x/:y', 'x');
+  const y = useRouteText('/explore/matchup/:x/:y', 'y');
   const [params] = useSearchParams();
   const nav = useNavigate();
   const { tenant, quoteId } = useAppStore();
 
-  const [xInput, setXInput] = useState(decodeURIComponent(x) || params.get('x') || '');
-  const [yInput, setYInput] = useState(decodeURIComponent(y) || params.get('y') || '');
+  const queryX = params.get('x') ?? '';
+  const queryY = params.get('y') ?? '';
+  const [xInput, setXInput] = useState(x || queryX);
+  const [yInput, setYInput] = useState(y || queryY);
+  useEffect(() => {
+    setXInput(x || queryX);
+    setYInput(y || queryY);
+  }, [x, y, queryX, queryY]);
 
   const [data, setData] = useState<Matchup | null>(null);
   const [verdict, setVerdict] = useState<MatchupVerdict | null>(null);
@@ -40,7 +48,7 @@ export function MatchupView() {
     setGated(false);
 
     const opts = { tenant, quoteId };
-    exploreMatchup(decodeURIComponent(x), decodeURIComponent(y), opts)
+    exploreMatchup(x, y, opts)
       .then((m) => { if (!stale) setData(m); })
       .catch((e) => {
         if (stale) return;
@@ -50,7 +58,7 @@ export function MatchupView() {
       .finally(() => { if (!stale) setLoading(false); });
 
     // The verdict is a separate path-search request so the cards and tape render without it.
-    exploreMatchupVerdict(decodeURIComponent(x), decodeURIComponent(y), opts)
+    exploreMatchupVerdict(x, y, opts)
       .then((v) => { if (!stale) setVerdict(v); })
       .catch((e) => {
         if (stale) return;

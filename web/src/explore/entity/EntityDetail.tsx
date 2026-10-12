@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useRouteText } from '../../layout/useRouteText';
 import {
   ErrorText,
   LoadingText,
@@ -371,11 +372,11 @@ export function EntityDetail() {
 }
 
 export function ResolveRedirect() {
-  const { ref = '' } = useParams();
+  const ref = useRouteText('/explore/resolve/:ref', 'ref');
   const nav = useNavigate();
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    const surface = decodeURIComponent(ref);
+    const surface = ref;
     setError(null);
     exploreResolve(surface)
       .then((r) =>

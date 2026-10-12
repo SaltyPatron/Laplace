@@ -2287,7 +2287,8 @@ public static partial class NpgsqlSubstrateReads
                 CROSS JOIN LATERAL consensus.edges_raw(
                     @topic, 'both', b.type_ids, @limit, true, 'eff_mu') z
             )
-            SELECT z.name || ' · ' || consensus.relation_canonical(z.type_id) || ' → '
+            SELECT z.name || ' · ' || consensus.relation_canonical(z.type_id)
+                     || CASE z.direction WHEN 'in' THEN ' ← ' ELSE ' → ' END
                      || converse.label_or_hex(z.neighbour_id) AS reply,
                    consensus.eff_mu_display(z.rating, z.rd) AS eff_mu,
                    z.witness_count

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { useRouteText } from '../../layout/useRouteText';
 import { LoadingText } from '@ui';
 
 const ENTITY_HEX = /^[0-9a-f]{32}$/i;
@@ -11,11 +12,11 @@ const ENTITY_HEX = /^[0-9a-f]{32}$/i;
  * containment and name candidates.
  */
 export function ResolveBrowseRedirect() {
-  const { ref = '' } = useParams();
+  const ref = useRouteText('/explore/resolve/:ref', 'ref');
   const nav = useNavigate();
 
   useEffect(() => {
-    const surface = decodeURIComponent(ref).trim();
+    const surface = ref.trim();
     if (!surface) {
       nav('/explore', { replace: true });
       return;

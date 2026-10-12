@@ -82,6 +82,8 @@ public sealed class IngestRunner
         var log = _loggerFactory.CreateLogger($"Ingest:{decomposer.SourceName}");
         var sw = Stopwatch.StartNew();
         var foldMetrics = _writer as IConsensusFoldMetrics;
+        var deferredMetrics = _writer as IDeferredApplyMetrics;
+        var deferredAtStart = deferredMetrics?.DeferredRowsInserted ?? default;
         long foldObservationsAtStart = foldMetrics?.ObservationsAccumulated ?? 0;
         long foldCellsAtStart = foldMetrics?.CellsFolded ?? 0;
         var failures = new List<IngestFailure>();
@@ -535,6 +537,13 @@ public sealed class IngestRunner
                     await bulkRun.CompleteAsync(
                         phase => _obs.OnCompletionPhase(decomposer.SourceName, phase))
                         .ConfigureAwait(false);
+                    if (deferredMetrics is not null)
+                    {
+                        var committed = deferredMetrics.DeferredRowsInserted;
+                        Interlocked.Add(ref counters._entitiesInserted, committed.Entities - deferredAtStart.Entities);
+                        Interlocked.Add(ref counters._physicalitiesInserted, committed.Physicalities - deferredAtStart.Physicalities);
+                        Interlocked.Add(ref counters._attestationsInserted, committed.Attestations - deferredAtStart.Attestations);
+                    }
                 }
                 finally
                 {

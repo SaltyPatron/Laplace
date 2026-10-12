@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { LoadingText, Muted, Panel } from '@ui';
+import { Link } from 'react-router-dom';
+import { useRouteText } from '../../layout/useRouteText';
+import { ErrorText, LoadingText, Muted, Panel } from '@ui';
+import { describeFailure } from '../../api/client';
 import { exploreCatalog } from '../api';
 import { useExploreStore } from '../store';
 import type { ExploreStageRow } from '../types';
@@ -12,20 +14,30 @@ import styles from './Browse.module.css';
  * as not yet ingested.
  */
 export function StageBrowse() {
-  const { stageId } = useParams();
+  const stageId = useRouteText('/explore/stage/:stageId', 'stageId');
   const setBreadcrumb = useExploreStore((s) => s.setBreadcrumb);
   const [stage, setStage] = useState<ExploreStageRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = decodeURIComponent(stageId ?? '');
+    let stale = false;
+    const id = stageId ?? '';
+    setLoading(true); setStage(null); setError(null);
     exploreCatalog().then((c) => {
+      if (stale) return;
       const hit = c.stages.find((s) => s.stage === id) ?? null;
       setStage(hit);
       if (hit) setBreadcrumb({ stage: hit.stage });
-    });
+    }).catch((failure) => {
+      if (!stale) setError(describeFailure(failure).message);
+    }).finally(() => { if (!stale) setLoading(false); });
+    return () => { stale = true; };
   }, [stageId, setBreadcrumb]);
 
-  if (!stage) return <LoadingText>Loading stage…</LoadingText>;
+  if (error) return <ErrorText role="alert">{error}</ErrorText>;
+  if (loading) return <LoadingText>Loading stage…</LoadingText>;
+  if (!stage) return <Muted>No catalog stage matches “{stageId}”.</Muted>;
 
   return (
     <Panel title={`Stage — ${stage.stage}`}>

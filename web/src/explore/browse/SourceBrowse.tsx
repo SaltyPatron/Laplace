@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useRouteText } from '../../layout/useRouteText';
 import { Button, ErrorText, Muted, Panel, ReadStatus, Stack, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../../ui/lib/resultRows';
@@ -12,7 +13,7 @@ import styles from '../catalog/WarehouseHome.module.css';
 
 /** Catalog, selected source and sampled testimony have separate read scopes. */
 export function SourceBrowse() {
-  const { sourceKey = '' } = useParams(); // Router already decoded this segment.
+  const sourceKey = useRouteText('/explore/source/:sourceKey', 'sourceKey');
   const { tenant, quoteId, authUser } = useAppStore();
   return <SourceWorkspace key={JSON.stringify([tenant, authUser?.id, sourceKey])} sourceKey={sourceKey} tenant={tenant} quoteId={quoteId} />;
 }

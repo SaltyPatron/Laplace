@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { apiGet, describeFailure } from '../api/client';
 import { useVisiblePolling } from '@ui';
+import { useAppStore } from '../store';
 
 export interface Pulse {
   at: number;
@@ -27,15 +28,30 @@ export interface PulseState {
  * rate from consecutive samples (zero at rest).
  */
 export function usePulse(intervalMs = 4000): PulseState {
+  const authReady = useAppStore((state) => state.authReady);
+  const scope = useAppStore((state) => JSON.stringify([state.tenant, state.authUser?.id, state.devPrincipal]));
+  const [refusedScope, setRefusedScope] = useState<string | null>(null);
+  const activeScope = useRef(scope);
   const [pulse, setPulse] = useState<Pulse | null>(null);
   const [ratePerSec, setRate] = useState(0);
   const [reachable, setReachable] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const prev = useRef<Pulse | null>(null);
 
+  useLayoutEffect(() => {
+    activeScope.current = scope;
+    setRefusedScope(null);
+    prev.current = null;
+    setPulse(null);
+    setRate(0);
+    setFailure(null);
+    setReachable(true);
+  }, [scope]);
+
   useVisiblePolling(async () => {
     try {
       const next = await apiGet<Pulse>('/v1/pulse');
+      if (activeScope.current !== scope) return;
       setReachable(true);
       setFailure(null);
       const p = prev.current;
@@ -47,11 +63,13 @@ export function usePulse(intervalMs = 4000): PulseState {
       prev.current = next;
       setPulse(next);
     } catch (error) {
+      if (activeScope.current !== scope) return;
       const failed = describeFailure(error);
+      if (failed.kind === 'auth' || failed.kind === 'forbidden') setRefusedScope(scope);
       setReachable(failed.kind !== 'network' && failed.kind !== 'server' && failed.kind !== 'unavailable');
       setFailure(failed.message);
     }
-  }, { intervalMs });
+  }, { intervalMs, enabled: authReady && refusedScope !== scope });
 
 
   return { pulse, ratePerSec, reachable, failure };
