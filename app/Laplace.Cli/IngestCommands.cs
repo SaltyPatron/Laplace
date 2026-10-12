@@ -577,8 +577,8 @@ internal static partial class IngestCommands
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
             persistEvidence: persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
-        // Evidence, consensus, masks and completion tokens land together through the
-        // transactional bulk writer. Runtime ingestion does not replace schema objects.
+        // The shared writer persists bulk evidence, folds accepted testimony and
+        // records completion. Runtime ingestion does not replace schema objects.
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory,

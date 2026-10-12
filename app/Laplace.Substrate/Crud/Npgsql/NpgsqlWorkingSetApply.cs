@@ -1151,10 +1151,10 @@ public sealed partial class NpgsqlSubstrateWriter
         var present = new HashSet<Hash128>();
         if (ids.Count == 0) return present;
 
-        // Memory bounds the chunk; the apply connections share the set so every
-        // backend probes its slice concurrently.
-        int probeChunkIds = Math.Min(ApplySizing.ProbeChunkIds,
-            Math.Max(1, (ids.Count + ApplyParallelism - 1) / ApplyParallelism));
+        // Fill a bounded request before opening another connection. Splitting a
+        // small set by CPU count multiplies network requests without needing more
+        // memory. Sets exceeding the transit budget still use bounded parallelism.
+        int probeChunkIds = ApplySizing.ProbeChunkIds;
         int chunkCount = (ids.Count + probeChunkIds - 1) / probeChunkIds;
         var perChunk = new List<Hash128>[chunkCount];
 
