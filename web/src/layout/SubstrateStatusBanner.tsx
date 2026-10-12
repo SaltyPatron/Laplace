@@ -8,15 +8,15 @@ function defaultDetail(report: Readiness): string {
   if (report.detail?.trim()) return report.detail.trim();
   if (!report.substrate_reachable) return 'The PostgreSQL substrate cannot be reached.';
   if (!report.perfcache_ready) return 'The T0 perfcache is not loaded.';
-  if (Number(report.entities) === 0) return 'The substrate is empty.';
-  if (Number(report.consensus_relations) === 0) return 'The substrate has no consensus relations yet.';
+  if (!(report.has_entities ?? (Number(report.entities) > 0))) return 'The substrate is empty.';
+  if (!(report.has_consensus ?? (Number(report.consensus_relations) > 0))) return 'The substrate has no consensus relations yet.';
   return 'Substrate is not ready.';
 }
 
 function statusTitle(report: Readiness): string {
   if (!report.substrate_reachable) return 'Substrate unavailable.';
   if (!report.perfcache_ready) return 'Substrate runtime incomplete.';
-  if (Number(report.entities) === 0 || Number(report.consensus_relations) === 0)
+  if (!(report.has_entities ?? (Number(report.entities) > 0)) || !(report.has_consensus ?? (Number(report.consensus_relations) > 0)))
     return 'Substrate incomplete.';
   return 'Substrate not ready.';
 }
@@ -49,6 +49,7 @@ export function SubstrateStatusBanner() {
             substrate_reachable: false,
             entities: 0,
             consensus_relations: 0,
+            counts_are_estimates: true,
             perfcache_ready: false,
             detail: 'Could not reach /health/status.',
           });
