@@ -85,7 +85,7 @@ $active=$false
 if (Test-Path -LiteralPath $state) {
     $previous=Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
     $process=Get-Process -Id $previous.pid -ErrorAction SilentlyContinue
-    $active=$process -and $process.Path -eq $previous.executable -and $process.StartTime.ToUniversalTime().ToString('o') -eq $previous.started_utc
+    $active=$process -and $process.Path -eq $previous.executable -and $process.StartTime.ToUniversalTime() -eq ([DateTimeOffset]$previous.started_utc).UtcDateTime
     if ($active -and $previous.executable -ine $bao) {
         Stop-Process -Id $process.Id
         $process.WaitForExit()
