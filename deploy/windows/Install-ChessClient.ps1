@@ -9,6 +9,15 @@ $ErrorActionPreference='Stop'
 $c=Get-Content -LiteralPath $Configuration -Raw | ConvertFrom-Json
 $root=[IO.Path]::GetFullPath($c.directory)
 if (-not [IO.Path]::IsPathFullyQualified($c.directory)) { throw 'Declare an absolute client installation directory.' }
+# Persist an explicit executable so startup never selects an unrelated PATH version.
+if ($Operation -ne 'Render') {
+    $bao = if ($c.PSObject.Properties['bao'] -and $c.bao) { $c.bao } else { (Get-Command bao).Source }
+    $baoVersion = (& $bao version | Out-String).Trim()
+    if ($LASTEXITCODE -or $baoVersion -notmatch '^OpenBao v(\d+\.\d+\.\d+)\s' -or [version]$Matches[1] -lt [version]'2.7.1') {
+        throw 'Declare bao as an OpenBao 2.7.1-or-newer executable; older renewal retry behavior is unsafe.'
+    }
+    $c | Add-Member -NotePropertyName bao -NotePropertyValue $bao -Force
+}
 function Write-Atomic([string]$Path,[string]$Content) {
     $temporary=$Path+'.new'
     [IO.File]::WriteAllText($temporary,$Content)
@@ -77,6 +86,11 @@ if (Test-Path -LiteralPath $state) {
     $previous=Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
     $process=Get-Process -Id $previous.pid -ErrorAction SilentlyContinue
     $active=$process -and $process.Path -eq $previous.executable -and $process.StartTime.ToUniversalTime().ToString('o') -eq $previous.started_utc
+    if ($active -and $previous.executable -ine $bao) {
+        Stop-Process -Id $process.Id
+        $process.WaitForExit()
+        $active=$false
+    }
 }
 if (-not $active) {
     $secure=ConvertTo-SecureString (Get-Content -LiteralPath (Join-Path $root 'enrollment.dpapi') -Raw).Trim()
@@ -108,7 +122,6 @@ template {
     Write-Atomic (Join-Path $root 'agent.hcl') $agent
     Remove-Item -LiteralPath (Join-Path $root 'candidate.json') -Force -ErrorAction SilentlyContinue
     $began=[DateTime]::UtcNow
-    $bao=(Get-Command bao).Source
     $process=Start-Process -FilePath $bao -ArgumentList @('agent',('-config="'+(Join-Path $root 'agent.hcl')+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'agent.stdout.log') -RedirectStandardError (Join-Path $root 'agent.stderr.log')
     Write-Atomic $state (@{pid=$process.Id;executable=$bao;started_utc=$process.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json)
     $rendered=$false

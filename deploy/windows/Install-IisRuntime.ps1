@@ -6,6 +6,12 @@ $c=Read-IisInstallation $Installation
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
 if($Plan){$c | ConvertTo-Json -Depth 12;return}
 if($Operation -eq 'Verify'){Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY | ConvertTo-Json;return}
+if($Operation -eq 'Install'){
+    $baoVersion=(& $c.bao version | Out-String).Trim()
+    if($LASTEXITCODE -or $baoVersion -notmatch '^OpenBao v(\d+\.\d+\.\d+)\s' -or [version]$Matches[1] -lt [version]'2.7.1'){
+        throw 'Declare an OpenBao 2.7.1-or-newer executable before installing the credential service.'
+    }
+}
 if(-not ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'IIS, machine certificates and workload service installation require Administrator PowerShell.'}
 Add-Type -Path "$env:windir/System32/inetsrv/Microsoft.Web.Administration.dll"
 function Protect-IisDirectory([string]$Path,[string]$PoolRights='',[string]$DeployerRights='') {
