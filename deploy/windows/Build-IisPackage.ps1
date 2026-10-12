@@ -10,7 +10,6 @@ if($EngineBuild){$env:LAPLACE_ENGINE_BUILD=[IO.Path]::GetFullPath($EngineBuild)}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $revision=(& git -C $repo rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
-if(& git -C $repo status --porcelain --untracked-files=no){throw 'Commit source changes before producing a named release.'}
 $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid().ToString('N'))
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'
 $null=New-Item -ItemType Directory -Path $published -Force

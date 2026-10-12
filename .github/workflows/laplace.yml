@@ -64,6 +64,10 @@ permissions:
   contents: read
   id-token: write   # the knowledge host is started through GCP workload identity federation: a short-lived token, no stored key
 
+env:
+  # Credential refresh and component installation use the same host lock.
+  LAPLACE_HOST_LOCK_WAIT_SECONDS: "600"
+
 concurrency:
   group: laplace-promotion
   cancel-in-progress: false

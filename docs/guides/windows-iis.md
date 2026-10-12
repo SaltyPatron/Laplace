@@ -58,7 +58,11 @@ To publish an already prepared package:
 & .\deploy\windows\Publish-IisRuntime.ps1 -Installation $installation -Package $package
 ```
 
-Publication verifies the file hashes, selects the release through `web.config`,
+Release identifiers are derived from the packaged file paths and hashes; the source
+commit is recorded separately. Rebuilding a changed workspace does not masquerade
+as the same package merely because its Git HEAD is unchanged.
+
+Publication verifies the file hashes and referenced UI assets, selects the release through `web.config`,
 then checks HTTPS, the UI, both provider redirects, authenticated SQL, native storage
 invariants and the declared Lichess controller. Failed verification restores the
 previous release selection. Setup also verifies again after recycling the real pool
