@@ -83,8 +83,8 @@ test('mesh landing shows the honest modality map', async ({ page }) => {
 // stage→source drill was broken (cli names never matched live keys) and the
 // source page had no roster at all.
 test('stage drills into a live source with a roster', async ({ page }) => {
-  await page.goto('/explore/stage/knowledge');
-  await expect(page.getByText('Stage — knowledge')).toBeVisible({ timeout: 15_000 });
+  await page.goto('/explore/stage/relations');
+  await expect(page.getByText('Stage — relations')).toBeVisible({ timeout: 15_000 });
   await page.getByText('wordnet', { exact: true }).click();
   await expect(page).toHaveURL(/\/explore\/source\//, { timeout: 15_000 });
   await expect(page.getByText('Roster — what this witness asserts')).toBeVisible();
@@ -93,7 +93,7 @@ test('stage drills into a live source with a roster', async ({ page }) => {
 });
 
 test('unseeded cadence source is honestly labelled on the stage page', async ({ page }) => {
-  await page.goto('/explore/stage/knowledge');
+  await page.goto('/explore/stage/relations');
   await expect(page.getByText('not yet ingested').first()).toBeVisible({ timeout: 15_000 });
 });
 

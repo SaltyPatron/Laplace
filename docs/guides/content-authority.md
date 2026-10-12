@@ -1,11 +1,11 @@
-# Knowledge authority, governance and security
+# Content authority, governance and security
 
-Laplace uses one canonical knowledge world, but not one universal permission set.
+Laplace uses one canonical content world, but not one universal permission set.
 
-Knowledge, authority and compute are separate axes.
+Content, authority and compute are separate axes.
 
 ~~~text
-KNOWLEDGE
+CONTENT
   what canonical structures, observations, testimony and calculations exist
 
 AUTHORITY
@@ -15,24 +15,24 @@ COMPUTE
   how deeply/broadly one operation may search the authorized world
 ~~~
 
-This separation is required for enterprise isolation, schools/curricula, commercial knowledge packages, personal/private knowledge, honest abstention and security.
+This separation is required for enterprise isolation, schools/curricula, commercial content packages, personal/private content, honest abstention and security.
 
-## Knowledge packages
+## Content packages
 
-A knowledge package is an authority manifest over shared canonical state. It is not a smaller model and does not need to duplicate its content.
+A content package is an authority manifest over shared canonical state. It is not a smaller model and does not need to duplicate its content.
 
 Examples include Grade 7 mathematics, Formula 1 engineering, an employer's private project corpus, a department's internal procedures, a personal/private history scope, or a temporary incident-response package.
 
 A package may contain other declared scopes/packages. Inheritance follows explicit authority/package relations, not arbitrary semantic graph edges.
 
-Buying Formula 1 knowledge must not accidentally grant unrelated restricted aerospace knowledge merely because both domains connect through fluid dynamics.
+Buying Formula 1 content must not accidentally grant unrelated restricted aerospace content merely because both domains connect through fluid dynamics.
 
-## Knowledge package versus cache profile
+## Content package versus cache profile
 
-A knowledge package may ship or recommend a matching perfcache deployment profile, but the two objects are intentionally different.
+A content package may ship or recommend a matching perfcache deployment profile, but the two objects are intentionally different.
 
 ~~~text
-knowledge grant:
+content grant:
   what this principal may use
 
 cache profile:
@@ -61,7 +61,7 @@ speech assistant deployment
     hot audio windows/phrases
 ~~~
 
-Removing a cache module does not revoke knowledge. Revoking a knowledge grant does not require rewriting the canonical cache identity of shared public structures, though runtime enforcement must ensure unauthorized cached records cannot enter COUPLE.
+Removing a cache module does not revoke content. Revoking a content grant does not require rewriting the canonical cache identity of shared public structures, though runtime enforcement must ensure unauthorized cached records cannot enter COUPLE.
 
 This separation lets deployment/storage economics be optimized independently of authorization.
 
@@ -75,7 +75,7 @@ INSPECT   retrieve explicit content
 SEARCH    locate members
 COUPLE    allow state to influence cognition
 TRAVERSE  follow authorized relations
-DERIVE    calculate new knowledge
+DERIVE    calculate new content
 REALIZE   disclose/render a result
 PERSIST   save derived state
 EXPORT    take state outside the current boundary
@@ -91,7 +91,7 @@ A user may be allowed to reason from private material but not export it. A secur
 tenant/world boundary
 ∩ principal identity
 ∩ role and relationship authority
-∩ knowledge-package grants
+∩ content-package grants
 ∩ active caller-selected scope
 ∩ capability grants
 ∩ kernel/org/user governance
@@ -100,14 +100,14 @@ tenant/world boundary
 
 The effective boundary is part of execution state and receipts.
 
-## Governance does not rewrite knowledge
+## Governance does not rewrite content
 
-A fact remains knowledge even when acting on it is forbidden.
+A fact remains content even when acting on it is forbidden.
 
-The system must not implement governance by deleting knowledge, corrupting standing, or pretending an entity does not exist.
+The system must not implement governance by deleting content, corrupting standing, or pretending an entity does not exist.
 
 ~~~text
-knowledge/evidence
+content/evidence
 + requested operation
 + effective authority
 + governance
@@ -153,8 +153,8 @@ A person's effective mind can be composed rather than separately trained:
 
 ~~~text
 shared Laplace world
-+ institutional/licensed knowledge grants
-+ private organizational/personal knowledge
++ institutional/licensed content grants
++ private organizational/personal content
 + witnessed personal experience
 + governance/firmware
 + active scope
@@ -167,13 +167,13 @@ A school can grant curriculum packages by grade/course. An employer can add/remo
 
 ## Billing is orthogonal
 
-A principal may own a broad knowledge package and request a cheap surface scan. Another request may use the same package but purchase deep/wide analysis.
+A principal may own a broad content package and request a cheap surface scan. Another request may use the same package but purchase deep/wide analysis.
 
-More compute never grants additional knowledge authority. Lower compute never means a deliberately dumber model.
+More compute never grants additional content authority. Lower compute never means a deliberately dumber model.
 
 See docs/BILLING_PLACEHOLDER_MIGRATION.md and docs/guides/machine-cost-analysis.md.
 
 
 ## Current implementation owner
 
-#1708 owns first-class knowledge packages/grants/capabilities, forward-pass enforcement, honest authority receipts, and Red Spear / Blue Shield / White Judge execution.
+#1708 owns first-class content packages/grants/capabilities, forward-pass enforcement, honest authority receipts, and Red Spear / Blue Shield / White Judge execution.

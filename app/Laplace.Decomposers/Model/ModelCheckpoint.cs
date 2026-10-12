@@ -19,7 +19,7 @@ public static class ModelCheckpoint
 
     // Compose the checkpoint header as source structure. Tensor data ranges are
     // deliberately absent: opaque weight bytes are a source witness, never a
-    // knowledge entity. The ordered header path, dtype, and dimensions are enough
+    // content entity. The ordered header path, dtype, and dimensions are enough
     // to retain inspectable checkpoint provenance without minting testimony.
     //
     // Header levels are staged in batches. The common native kernel determines every

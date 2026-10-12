@@ -54,7 +54,7 @@ class WorkflowOwnership(unittest.TestCase):
             "options: [quick, throughput, core, scale, dag, moby, query, chess, geometry, recorded, all]",
             text,
         )
-        # the measured host is chosen by its tier label (knowledge is hart-cloud, the AVX-512 machine; staging is hart-server)
+        # the measured host is chosen by its tier label (relations is hart-cloud, the AVX-512 machine; staging is hart-server)
         self.assertEqual(text.count('runs-on: [self-hosted, laplace, "${{ inputs.host }}"]'), 1)
         self.assertEqual(text.count("host-resource.lock"), 1)
         self.assertNotIn("\nconcurrency:\n", text)
@@ -135,7 +135,7 @@ class SeedHostOwnership(unittest.TestCase):
             "seed-code.yml",
             "seed-documents.yml",
             "seed-foundation.yml",
-            "seed-knowledge.yml",
+            "seed-relations.yml",
             "seed-models.yml",
         ):
             with self.subTest(workflow=name):
@@ -156,7 +156,7 @@ class SeedHostOwnership(unittest.TestCase):
             "seed-code.yml",
             "seed-documents.yml",
             "seed-foundation.yml",
-            "seed-knowledge.yml",
+            "seed-relations.yml",
             "seed-models.yml",
         }
         actual = {p.name for p in WORKFLOWS.glob("seed-*.yml")}

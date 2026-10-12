@@ -1,8 +1,8 @@
 # The Name Game — human-vs-Laplace identity, realization and latency proof
 
-The Name Game is one small Knowledge Arena surface that makes several Laplace laws visible to a human without first explaining the entire substrate.
+The Name Game is one small Content Arena surface that makes several Laplace laws visible to a human without first explaining the entire substrate.
 
-It is deliberately **not** a declaration of Laplace's limits or a private game intelligence stack. Active ownership remains in the current Knowledge Arena/entity-world/forward issues; related work in other repositories is coordination only.
+It is deliberately **not** a declaration of Laplace's limits or a private game intelligence stack. Active ownership remains in the current Content Arena/entity-world/forward issues; related work in other repositories is coordination only.
 
 ## Product hook
 

@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Knowledge host: staging is hart-server; knowledge is hart-cloud (must already be running)"
+        description: "Cloud host: staging is hart-server; cloud is hart-cloud (must already be running)"
         type: choice
         required: true
         default: staging
-        options: [staging, knowledge]
+        options: [staging, cloud]
       operation:
         description: "database lifecycle operation"
         type: choice

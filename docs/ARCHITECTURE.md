@@ -17,7 +17,7 @@ The PostgreSQL extension persists four primary substrate families under `extensi
 | `attestations` | source-attributed typed testimony/observation |
 | `consensus` | folded proposition standing: rating, RD, volatility, witness count and related state |
 
-Everything else (journals, working-set and index bookkeeping) is operational state around these four tables, not knowledge. `docs/INVENTORY.md` is the generated catalog.
+Everything else (journals, working-set and index bookkeeping) is operational state around these four tables, not content. `docs/INVENTORY.md` is the generated catalog.
 
 Every entity has a physicality; entities are both building blocks and content. A physicality has no identity of its own: it is one row per entity, keyed by the entity's id, and attestations are of entities only, never of physicalities; an attestation recording that an entity has a physicality adds nothing and is not admitted. As built, `laplace_physicality_id_compute` and `PhysicalityId.cs` give a physicality an id, BLAKE3(entity id ‖ type); that violates the identity law (Laplace#1731 item 16).
 
@@ -280,7 +280,7 @@ active root/frontier
 
 A* or Dijkstra is therefore one operator for one cost/goal contract, not the definition of cognition. The same is true of strongest-walk, n-gram continuation or geometric proximity.
 
-Hops, fanout, candidate/frontier budgets and eligible operator/provider families are the execution and billing dimensions: they bound work over one shared knowledge world.
+Hops, fanout, candidate/frontier budgets and eligible operator/provider families are the execution and billing dimensions: they bound work over one shared content world.
 
 ---
 
@@ -311,7 +311,7 @@ Perfcaches are derived accelerators. They may make selected direct addresses eff
 
 `engine/synthesis/` contains checkpoint/tokenizer/tensor readers and model-related native machinery. `engine/dynamics/` contains graph/spectral/algebra operators such as eigenmaps, Procrustes, Gram-Schmidt and related math. Foundry/export code materializes consumer formats such as GGUF under explicit recipes.
 
-A conventional checkpoint is a source. A model token is its text entity (the model's `king` is the same content id as any other `king`); the model-local token id is only an ordinal in the vocabulary composition. Tensor values are transient operands: they are read to derive the model's knowledge as trajectories — ordered compositions over decoded token content ids — and are never retained as weights or written as token-pair attestations. A circuit is a coordinate `[model witness, plane, layer, head, …]`. Export is a filtered snapshot of current standing, geometry and selected operators under a recipe.
+A conventional checkpoint is a source. A model token is its text entity (the model's `king` is the same content id as any other `king`); the model-local token id is only an ordinal in the vocabulary composition. Tensor values are transient operands: they are read to derive the model's content as trajectories — ordered compositions over decoded token content ids — and are never retained as weights or written as token-pair attestations. A circuit is a coordinate `[model witness, plane, layer, head, …]`. Export is a filtered snapshot of current standing, geometry and selected operators under a recipe.
 
 Export and reconstruction follow the same execution-grain law: no one-tensor-cell-at-a-time or one-constituent-at-a-time boundary crossings.
 
@@ -353,7 +353,7 @@ Every loader publishes through one dependency manifest, so video reuses loaded i
 Cache/native lookup should resolve request-side keys before SQL/SPI queries so ordinary
 database indexes remain eligible.
 
-Selector-scoped modules are part of the registry. A deployment may load an ASCII range, an explicit color palette, a generated finite format domain, a speech/filter-bank calculation band, a hot/admitted set or the dependency closure of selected higher roots. These modules preserve global canonical ids/coords; they change residency/acceleration, not knowledge authority.
+Selector-scoped modules are part of the registry. A deployment may load an ASCII range, an explicit color palette, a generated finite format domain, a speech/filter-bank calculation band, a hot/admitted set or the dependency closure of selected higher roots. These modules preserve global canonical ids/coords; they change residency/acceleration, not content authority.
 
 
 
@@ -373,9 +373,9 @@ Compiler/test/runtime failures and fixes are first-class ordered observations. T
 
 ### Authority and compute
 
-Tenant isolation, knowledge grants/capabilities, active scope, governance and compute envelope are separate inputs to execution. Unauthorized state must not merely be redacted after influencing cognition; COUPLE/ROUTE/REALIZE/EXPORT/EXECUTE eligibility must honor the effective authority boundary.
+Tenant isolation, content grants/capabilities, active scope, governance and compute envelope are separate inputs to execution. Unauthorized state must not merely be redacted after influencing cognition; COUPLE/ROUTE/REALIZE/EXPORT/EXECUTE eligibility must honor the effective authority boundary.
 
-Hops/fanout/resources determine cognition depth/breadth over the allowed world. Knowledge entitlement does not imply unlimited compute, and compute allowance does not grant forbidden knowledge.
+Hops/fanout/resources determine cognition depth/breadth over the allowed world. Content entitlement does not imply unlimited compute, and compute allowance does not grant forbidden content.
 
 ### Machine-cost lane
 

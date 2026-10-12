@@ -11,10 +11,10 @@ class SiteWorkflow < Minitest::Test
   end
 
   def test_production_requires_staging_and_cloud_qualification_is_explicit
-    assert_equal 'deliver', @jobs.fetch('knowledge-host').fetch('needs')
-    assert_equal %w[deliver knowledge-host], @jobs.fetch('production-build').fetch('needs')
+    assert_equal 'deliver', @jobs.fetch('cloud-host').fetch('needs')
+    assert_equal %w[deliver cloud-host], @jobs.fetch('production-build').fetch('needs')
     assert_equal 'deliver', @jobs.fetch('production').fetch('needs')
-    assert_includes @jobs.fetch('knowledge-host').fetch('if'), 'inputs.qualify_cloud == true'
+    assert_includes @jobs.fetch('cloud-host').fetch('if'), 'inputs.qualify_cloud == true'
     %w[deliver production-build production].each do |name|
       refute @jobs.fetch(name).fetch('steps').any? { |step| step['continue-on-error'] }
     end
@@ -30,8 +30,8 @@ class SiteWorkflow < Minitest::Test
   end
 
   def test_lease_release_waits_for_cloud_qualification_and_handles_failure
-    release = @jobs.fetch('knowledge-host-release')
-    assert_equal %w[knowledge-host production-build], release.fetch('needs')
+    release = @jobs.fetch('cloud-host-release')
+    assert_equal %w[cloud-host production-build], release.fetch('needs')
     assert_includes release.fetch('if'), 'always()'
   end
 

@@ -30,7 +30,7 @@ changing ownership. It refuses to demote or remove the last owner. Role changes
 appear in the workspace's history. API keys are separate credentials; remove or
 rotate keys given to a departing member.
 
-Workspaces are account and billing boundaries over the shared knowledge base.
+Workspaces are account and billing boundaries over the shared substrate.
 They do not create private copies of admitted content or imply private data
 isolation.
 

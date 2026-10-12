@@ -133,8 +133,8 @@ declare -A LAYER=(
   [conceptnet]=12 [atomic2020]=13 [ud]=14 [wiktionary]=15
   [tatoeba]=16 [opensubtitles]=17
 )
-KNOWLEDGE=(wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
-LADDER=(iso639 "${KNOWLEDGE[@]}")
+RELATIONS=(wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
+LADDER=(iso639 "${RELATIONS[@]}")
 [[ $FULL -eq 1 ]] && LADDER+=(tatoeba opensubtitles)
 for src in "${LADDER[@]}"; do
   should_run "$src" || continue

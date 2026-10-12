@@ -12,6 +12,7 @@ major=$(pg_config --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')
 export PGOPTIONS="-c dynamic_library_path=$prefix/lib/postgresql/$major:\$libdir -c extension_control_path=$prefix/share/postgresql/$major:\$system -c session_preload_libraries=laplace_substrate"
 export LAPLACE_DB="$LAPLACE_DB;Options=$PGOPTIONS"
 export LAPLACE_REUSE_INSTALLED_NATIVE=1
+export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
 export LAPLACE_PERFCACHE_BIN
 LAPLACE_PERFCACHE_BIN=$(find "$prefix/share/laplace" -maxdepth 1 -name 'laplace_t0_perfcache*.bin' -print -quit)
 [[ -f "$LAPLACE_PERFCACHE_BIN" ]]

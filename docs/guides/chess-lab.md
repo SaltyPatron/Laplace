@@ -462,7 +462,7 @@ board events, rendered on a live board:
   the command preview follow that selection; Fastchess does not require Qt.
   Cutechess may use Qt deployed beside its executable, without an installed Qt SDK.
   Changing the conductor does not change the shared Lichess bot selection or a
-  knowledge connection. Those are separate configurations.
+  content connection. Those are separate configurations.
   Setting `depth` > 0 switches to the unclocked depth mode. The form previews
   the exact argv before you start it, from the same `BuildArguments` the job
   uses, resolved against this host's binaries:

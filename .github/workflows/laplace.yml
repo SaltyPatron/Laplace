@@ -9,8 +9,8 @@ run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs
 # this workflow has no manual dispatch (scripts/validate-pipeline.py: manual dispatch belongs in product-operator.yml).
 #
 # After hart-server verification, hart-prod receives the same staged application and
-# native closure. Its declared knowledge connection selects hart-server or hart-cloud;
-# application promotion does not start a knowledge host or change that selection.
+# native closure. Its declared substrate connection selects hart-server or hart-cloud;
+# application promotion does not start a database host or change that selection.
 # hart-cloud is started only by an explicitly requested isolated qualification.
 # Serialize complete promotions so two revisions cannot interleave shared staging
 # artifacts or overwrite each other's cloud lease while waiting on later hosts.
@@ -62,7 +62,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # the knowledge host is started through GCP workload identity federation: a short-lived token, no stored key
+  id-token: write   # the database host is started through GCP workload identity federation: a short-lived token, no stored key
 
 env:
   # Credential refresh and component installation use the same host lock.
@@ -116,12 +116,17 @@ jobs:
       - name: Verify ingestion completion with owner and restricted database roles
         run: bash tests/ingest-completion.sh
 
+      - name: Verify database profile upgrades and UCI database identity protocol
+        run: bash tests/database-names.sh
+
       - name: Retain ingestion completion results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ingest-completion-${{ github.sha }}
-          path: ${{ runner.temp }}/ingest-completion-results
+          path: |
+            ${{ runner.temp }}/ingest-completion-results
+            ${{ runner.temp }}/database-name-results
           if-no-files-found: error
           retention-days: 14
 
@@ -141,7 +146,7 @@ jobs:
           retention-days: 7
           compression-level: 1
 
-  knowledge-host:
+  cloud-host:
     name: Cloud qualification — start the explicitly requested host
     needs: deliver
     if: needs.deliver.result == 'success' && inputs.qualify_cloud == true
@@ -181,12 +186,12 @@ jobs:
 
   production-build:
     name: Cloud qualification — build, load extensions and exercise the selected runtime
-    needs: [deliver, knowledge-host]
-    if: needs.knowledge-host.result == 'success'
-    runs-on: [self-hosted, laplace, Laplace, knowledge]
+    needs: [deliver, cloud-host]
+    if: needs.cloud-host.result == 'success'
+    runs-on: [self-hosted, laplace, Laplace, cloud]
     timeout-minutes: 240
     concurrency:
-      group: laplace-site-knowledge
+      group: laplace-site-cloud
       cancel-in-progress: false
       queue: max
     env:
@@ -211,10 +216,10 @@ jobs:
       - name: Stage and exercise the native CLI with its published dependencies
         run: deploy/linux/site.sh app
 
-  knowledge-host-release:
+  cloud-host-release:
     name: Cloud qualification — release the host to stop when idle
-    needs: [knowledge-host, production-build]
-    if: always() && needs.knowledge-host.result == 'success'
+    needs: [cloud-host, production-build]
+    if: always() && needs.cloud-host.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

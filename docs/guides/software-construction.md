@@ -1,6 +1,6 @@
 # Structural software construction
 
-This guide explains the software-development consequence of Laplace's canonical tiered compositions, physicality trajectories, grammar/rule knowledge, witnessing, query-relative coupling and forward program. AST/CST/IR are derived projections for external toolchains, not a parallel canonical ontology.
+This guide explains the software-development consequence of Laplace's canonical tiered compositions, physicality trajectories, grammar/rule content, witnessing, query-relative coupling and forward program. AST/CST/IR are derived projections for external toolchains, not a parallel canonical ontology.
 
 It is a product/implementation guide under docs/INVENTION.md, docs/CAPABILITIES.md, and specs 36/37. It does not define a private code-generation architecture.
 

@@ -532,7 +532,7 @@ not in the index. No covering/INCLUDE index exists for the substrate's most comm
 
 An earlier item proposed materialising an entity's "primary language" to replace `cand_lang`'s
 per-read argmax. **Withdrawn.** INVENTION §7: *language is a render-time choice, not a property
-of knowledge — testimony in any language strengthens consensus readable in every language*,
+of content — testimony in any language strengthens consensus readable in every language*,
 and spec 36 §3.1 makes the frontier concept-level and language-free with realization choosing
 the surface last. Attaching a primary language to an entity puts a rendering property on
 content. The projection would have made a wrong model faster.
@@ -689,7 +689,7 @@ Masked by S1 until checkout worked (31906799492).
       family is equivalent — measured live, `IS_A` holds 3 members against the 2 wanted,
       `IS_SYNONYM_OF` holds only itself against 11.
 
-### S3. Four "failed" knowledge seeds that SUCCEEDED — **already fixed, re-running**
+### S3. Four "failed" content seeds that SUCCEEDED — **already fixed, re-running**
 
 `795e1a54` (08-13) restored a throughput gate that parses
 `$RUNNER_TEMP/laplace-ingest/laplace-ingest-<source>.log` for `INGEST_TIMING` — a line that

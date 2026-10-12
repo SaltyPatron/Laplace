@@ -7,7 +7,7 @@ for the entity type, not an identity. Hparams are also emitted as queryable scal
 `model_recipes()` / `--recipe-from` — never a disk file. A hand-written recipe is a **dev fixture**
 that simulates an ingest or user-create event; it goes through deposit like any other.
 
-This schema describes a target artifact projection. It is not Laplace's native cognition architecture, not a knowledge package, and not a product-tier definition.
+This schema describes a target artifact projection. It is not Laplace's native cognition architecture, not a content package, and not a product-tier definition.
 
 ## Authority and scope boundary
 
@@ -27,7 +27,7 @@ Commercial "quick/standard/deep" levels are compute envelopes over the same auth
 | `rope` | bool (parameter-free; metadata only) |
 | `tie_embeddings` | bool |
 | `norm` | `"rmsnorm"` \| `"layernorm"` |
-| `vocab` | target consumer vocabulary/materialization selection — see below; this is export state, not the live knowledge boundary |
+| `vocab` | target consumer vocabulary/materialization selection — see below; this is export state, not the live content boundary |
 | `embed` | operator for `embed_tokens` (default `{"op":"coord"}`) |
 | `lm_head` | operator for `lm_head` (default `{"op":"trajectory"}`) |
 | `layers` | array of layer specs — the operator array |
@@ -71,7 +71,7 @@ Each head/embed/lm_head/ffn is one operator. Operators map to the fixed ETL (see
 ## Knobs vs derived vs fixed (for UI + descriptor refactor)
 
 Three buckets — the boundary is *the user designs the vessel and chooses what fills it; the substrate
-determines every weight value; the math turning knowledge into weights is fixed.*
+determines every weight value; the math turning content into weights is fixed.*
 
 **1. KNOBS (user chooses — no single correct value):**
 - Topology: `hidden_size`\*, `num_layers`, `num_heads`/layer, `kv_heads`, `intermediate_size`\*
@@ -96,7 +96,7 @@ UI states: a knob-with-derived-default shows the substrate's natural value and f
 "deviates from substrate-natural." Constraints link knobs (`head_dim` integer, `experts_per_token ≤
 num_experts`, `kv_heads` divides `heads`) → validate/grey-out, not free fields.
 
-The target model may be deliberately finite/narrow as a consumer artifact. That is different from routing a cheaper Laplace request to a deliberately knowledge-reduced model.
+The target model may be deliberately finite/narrow as a consumer artifact. That is different from routing a cheaper Laplace request to a deliberately content-reduced model.
 
 ## Validation by ablation (per-operator signatures)
 

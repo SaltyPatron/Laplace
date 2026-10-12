@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION consensus.usage_overlap(p_x bytea, p_y bytea)
 BEGIN ATOMIC
     -- Pillar 5 (2026-07-20): shared-usage is read from the GEOMETRY. The usage
     -- neighbourhood of a point is the adjacent content constituent in every
-    -- trajectory containing it -- the same knowledge PRECEDES materialised as
+    -- trajectory containing it -- the same content PRECEDES materialised as
     -- redundant laplace.attestations(Pillar 3a, e5e1b42). BIDIRECTIONAL, as the
     -- consensus form was: the trajectory holds the exact sequence, so both
     -- directions are readable and the measure is never truncated to fit the walk.

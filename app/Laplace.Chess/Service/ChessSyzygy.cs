@@ -84,7 +84,7 @@ public sealed class SyzygyNativeProber : ISyzygyProber
 /// Syzygy tablebase admission. Fathom decodes package entries into exact optimal transitions,
 /// composed as content-addressed position → typed move → position trajectory segments with
 /// WDL/DTZ on the vertices. The mapped package is a decoding/search perfcache, not the
-/// admitted knowledge. Recorded games use the per-position path; material packages use the
+/// admitted content. Recorded games use the per-position path; material packages use the
 /// compact graph path.
 /// </summary>
 public static class ChessSyzygy

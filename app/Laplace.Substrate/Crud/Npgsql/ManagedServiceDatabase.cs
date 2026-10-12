@@ -4,7 +4,7 @@ using global::Npgsql;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Uses the installation's knowledge route independently of the worker's execution host.
+/// Uses the installation's content route independently of the worker's execution host.
 /// Local sockets and loopback connections retain host authentication; remote database
 /// connections require certificate and hostname verification. Credentials come from the
 /// installed workload configuration, not from a caller's HTTP request.

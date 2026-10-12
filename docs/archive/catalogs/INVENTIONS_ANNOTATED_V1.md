@@ -44,7 +44,7 @@ vocabularies that accreted around these inventions without ever being consolidat
 8.  THE ATTESTATION 5-TUPLE UNIVERSAL REDUCTION. Every fact from every source type —
     dictionary, chess game, treebank, user prompt, neural checkpoint — reduces to
     (subject, relation_type, object, source, outcome/score). One epistemic algebra
-    for all knowledge. (attestation_engine.c.)
+    for all content. (attestation_engine.c.)
 9.  THE THREE-LAYER RESOLUTION. CONTENT deduped by hash / EVIDENCE one provenanced
     row per assertion / CONSENSUS folded by (subject, type, object) — the
     simultaneous answer to "dedupe it, isolate it, and still aggregate it."

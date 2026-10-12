@@ -347,7 +347,7 @@ Optional GPU/AVX providers must hold logical semantics constant and prove parity
 ## Non-success
 
 - “a checkpoint is only testimony; none of its structure is content”;
-- “all model knowledge reduces to persisted token->token rows”;
+- “all model content reduces to persisted token->token rows”;
 - tokenizer-local integer/piece used as canonical world identity;
 - source-local head/layer ordinal used as cross-model functional identity;
 - storing combinatorial pair tables when an exact factor/trajectory representation already contains the irreducible information;

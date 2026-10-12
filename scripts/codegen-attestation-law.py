@@ -1441,7 +1441,7 @@ def emit_firmware_law(path: Path) -> None:
         "#pragma once\n\n#include <stddef.h>\n#include <stdint.h>\n\n"
         '#include "laplace/core/hash128.h"\n\n'
         "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
-        "/* A personality firmware image (spec 39): cognition policy, never knowledge. */\n"
+        "/* A personality firmware image (spec 39): cognition policy, never content. */\n"
         "typedef struct laplace_firmware_image {\n"
         "    const char* name;\n    const char* image_class;\n    uint32_t version;\n"
         f"{members}\n"

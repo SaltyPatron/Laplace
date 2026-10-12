@@ -32,7 +32,7 @@ Loss / optimizer history     witnessed outcomes and standing uncertainty-bearing
 Authority law
 -------------
 
-A target construction may only consume source/context/evidence state within the principal's effective knowledge/capability scope, including EXPORT when a consumer artifact leaves the current boundary.
+A target construction may only consume source/context/evidence state within the principal's effective content/capability scope, including EXPORT when a consumer artifact leaves the current boundary.
 
 A narrow exported model is a deliberately finite consumer artifact. It does not redefine the live Laplace world as less knowledgeable and must not be used as the cheap-tier execution path.
 

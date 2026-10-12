@@ -274,7 +274,7 @@ internal static class AppComposition
         {
             try
             {
-                // accounts, keys and billing live in the application database (LAPLACE_APP_DB), not with the knowledge
+                // accounts, keys and billing live in the application database (LAPLACE_APP_DB), not with the content
                 dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving, baseConnectionString: LaplaceInstall.AppConnectionString());
                 BillingPostgres.BillingSchemaProbe.EnsureQuotesTableReachable(dataSource);
                 mode = "postgres";
@@ -290,7 +290,7 @@ internal static class AppComposition
         }
         services.AddSingleton(new BillingStoreMode(mode, detail));
         // Identity, sessions, API keys and billing share the application database
-        // pool. Knowledge selection must never move these records with it.
+        // pool. Content selection must never move these records with it.
         services.AddKeyedSingleton<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey, (_, _) =>
             dataSource ?? LaplaceDataSource.Create(SubstrateAccess.Serving,
                 baseConnectionString: LaplaceInstall.AppConnectionString()));

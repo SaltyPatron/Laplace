@@ -11,11 +11,11 @@ on:
         default: verify
         options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
       target:
-        description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the knowledge host"
+        description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the database host"
         type: choice
         required: true
         default: staging
-        options: [staging, production, knowledge]
+        options: [staging, production, cloud]
 
 permissions:
   contents: read
@@ -23,17 +23,17 @@ permissions:
 
 jobs:
   unsupported-deployment:
-    name: Reject a knowledge host as an application deployment target
-    if: inputs.operation == 'deploy' && inputs.target == 'knowledge'
+    name: Reject a database host as an application deployment target
+    if: inputs.operation == 'deploy' && inputs.target == 'cloud'
     runs-on: ubuntu-24.04
     steps:
       - run: |
-          echo 'Application deployment supports staging or production. Select qualify-cloud for isolated knowledge-host qualification.' >&2
+          echo 'Application deployment supports staging or production. Select qualify-cloud for isolated cloud-host qualification.' >&2
           exit 2
 
   deploy:
     name: Deploy to ${{ inputs.target }}
-    if: inputs.operation == 'deploy' && inputs.target != 'knowledge'
+    if: inputs.operation == 'deploy' && inputs.target != 'cloud'
     uses: ./.github/workflows/laplace.yml
     with:
       promote: ${{ inputs.target == 'production' }}

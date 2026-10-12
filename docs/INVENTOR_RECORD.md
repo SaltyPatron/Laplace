@@ -30,7 +30,7 @@ Every statement below is Anthony Hart's own typed words, quoted verbatim from hi
 
 > Laplace speaks Unicode and renders language — 2026-09-05
 
-> I've been working on Laplace since March 2025 with a fairly ridiculous objective: rethink the conventional transformer and eliminate the requirement for GPUs — while still allowing GPUs and other accelerators to be used for performance when available. … What if many of the things modern AI treats as expensive runtime calculations could instead be represented as persistent, structured knowledge? … One of the larger ideas behind Laplace is that information normally buried inside a trained AI model may instead be represented by a dynamic, persistent state — and that state could potentially be checkpointed into a functional model without requiring conventional GPU-heavy training or gradient descent to create it. — Patreon post 1, 2026-08-26
+> I've been working on Laplace since March 2025 with a fairly ridiculous objective: rethink the conventional transformer and eliminate the requirement for GPUs — while still allowing GPUs and other accelerators to be used for performance when available. … What if many of the things modern AI treats as expensive runtime calculations could instead be represented as persistent, structured content? … One of the larger ideas behind Laplace is that information normally buried inside a trained AI model may instead be represented by a dynamic, persistent state — and that state could potentially be checkpointed into a functional model without requiring conventional GPU-heavy training or gradient descent to create it. — Patreon post 1, 2026-08-26
 
 ---
 
@@ -318,7 +318,7 @@ Every statement below is Anthony Hart's own typed words, quoted verbatim from hi
 
 > The idea was that in Laplace, my dot products dont point to empty space where we get ANN and pick the highest probability based on distance or whatever... The idea was that the dot products would essentially point exactly... "the capital of france is" in Laplace would point exactly to ONLY "Paris" — 2026-08-08
 
-> sessions with user/tenant/turn/session/etc metadata... Laplace literally never forgets and has an infinite context window because Laplace IS the context window... Laplace is an AI that should be able to use any part of its own knowledge as the prompt itself and reason about it... This is why i dont give a shit about the dot products or cosine similarities... i fucking generate those at export — 2026-09-04
+> sessions with user/tenant/turn/session/etc metadata... Laplace literally never forgets and has an infinite context window because Laplace IS the context window... Laplace is an AI that should be able to use any part of its own content as the prompt itself and reason about it... This is why i dont give a shit about the dot products or cosine similarities... i fucking generate those at export — 2026-09-04
 
 > How with physicality trajectories … i have everything from stochastic gradient descent, reinforcement learning, cosine similarity, dot products, probability, etc... but without all of the flaws of conventional AI — 2026-09-25
 
@@ -356,9 +356,9 @@ Every statement below is Anthony Hart's own typed words, quoted verbatim from hi
 
 ## Conventional models: ingestion, round table, export
 
-> An AI model being ingested isn't just recording the raw weights and doing stupid sloppy lazy stuff... glicko-2 acts as that weight, so when an AI model relates "king" to "queen" with this given weight/intensity/score/etc... it translates to a laplace set of records, attestations, scores, etc... We're not throwing sentences at the conventional AI model and recording what shakes out... we ETL scrape the model for its weights encoded to laplace records... no raw weights or binary blob storage... we compute the knowledge into laplace and the SQL transformer can query those records for Q, K, V, O, etc... — 2026-09-25
+> An AI model being ingested isn't just recording the raw weights and doing stupid sloppy lazy stuff... glicko-2 acts as that weight, so when an AI model relates "king" to "queen" with this given weight/intensity/score/etc... it translates to a laplace set of records, attestations, scores, etc... We're not throwing sentences at the conventional AI model and recording what shakes out... we ETL scrape the model for its weights encoded to laplace records... no raw weights or binary blob storage... we compute the content into laplace and the SQL transformer can query those records for Q, K, V, O, etc... — 2026-09-25
 
-> We literally should be able to ingest TinyLlama and start querying with SQL for the Q, K, V, O, etc just like a forward pass but... we have everything hashed, indexed, pathed, etc... i know what layer in which head and what weight and what token and what index, etc... i can do filtered searches instead of brute force just on a conventional model... the attestations, physicality trajectory, observations, etc all enable that same functionality so when put together they aggregate knowledge and capability meaning that Laplace assimilates knowledge — 2026-09-25
+> We literally should be able to ingest TinyLlama and start querying with SQL for the Q, K, V, O, etc just like a forward pass but... we have everything hashed, indexed, pathed, etc... i know what layer in which head and what weight and what token and what index, etc... i can do filtered searches instead of brute force just on a conventional model... the attestations, physicality trajectory, observations, etc all enable that same functionality so when put together they aggregate content and capability meaning that Laplace assimilates content — 2026-09-25
 
 > We aren't storing raw weights or other stupid lazy binary storage... tokens map to indexes which map to tensors/heads/layers/etc... Laplace stores paths as trajectories, as a merkle dag, with deduplication and run length encoding... same content = same hash... things deduplicate and we only need to record a certain number of the actual attestations from an AI model, whereas the trajectories from the model with glicko-2 and all of that? Thats what replaces the conventional transformer — 2026-09-05
 
@@ -438,7 +438,7 @@ Every statement below is Anthony Hart's own typed words, quoted verbatim from hi
 
 ## Product
 
-> Patreon does not become Laplace. Patreon simply becomes an external witness that says, essentially: "This account is currently entitled to this membership tier." Laplace can then apply its own versioned entitlement policy to that fact. That means payment does not become knowledge, ownership, governance, or authority. … support provider → verified entitlement → Laplace privileges — Patreon post 2, 2026-08-26
+> Patreon does not become Laplace. Patreon simply becomes an external witness that says, essentially: "This account is currently entitled to this membership tier." Laplace can then apply its own versioned entitlement policy to that fact. That means payment does not become content, ownership, governance, or authority. … support provider → verified entitlement → Laplace privileges — Patreon post 2, 2026-08-26
 
 > If i can't export a functional model, i cant sell that product... if i can't chat with Laplace, i cant sell that product... if laplace doesn't code, i can't sell that product... if laplace doesnt work as an openai endpoint to function just like conventional AI or through the MCP, same thing — 2026-09-07
 

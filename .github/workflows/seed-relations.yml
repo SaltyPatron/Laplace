@@ -1,11 +1,11 @@
-name: Data — knowledge ingest
-run-name: "Knowledge ingest — ${{ inputs.source }} → ${{ inputs.database }}"
+name: Data — relations ingest
+run-name: "Relations ingest — ${{ inputs.source }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Knowledge source"
+        description: "Relations source"
         type: choice
         required: true
         default: omw

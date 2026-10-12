@@ -292,13 +292,13 @@ exit /b 1
 echo seed-step commands (run one at a time):
 echo   floor:     unicode  iso639
 echo   document:  document ^<path^>
-echo   knowledge: wordnet  omw  verbnet  propbank  framenet  mapnet  wordframenet  semlink  conceptnet  atomic2020  ud  wiktionary
+echo   relations: wordnet  omw  verbnet  propbank  framenet  mapnet  wordframenet  semlink  conceptnet  atomic2020  ud  wiktionary
 echo   usage:     tatoeba  opensubtitles
 echo   chess:     chess ^<path^>  openings ^<path^>  chess-books ^<path^>
 echo   code:      stack ^<path^>  repo ^<path^>  tiny-codes ^<path^>
 echo   models:    model-tinyllama  model-phi  model-qwen  safetensors ^<snapshot-dir^>
 echo.
-echo stages: seed-stage floor ^| document ^| knowledge ^| usage ^| code ^| models
+echo stages: seed-stage floor ^| document ^| relations ^| usage ^| code ^| models
 exit /b 0
 
 :usage

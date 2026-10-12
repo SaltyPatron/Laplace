@@ -6,7 +6,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class CodeForwardAuthorityTests
 {
     [Fact]
-    public void AdapterLeavesKnowledgeAndProviderSelectionToCanonicalForwardProgram()
+    public void AdapterLeavesContentAndProviderSelectionToCanonicalForwardProgram()
     {
         string sql = NpgsqlSubstrateReads.ForwardCodeSql;
 

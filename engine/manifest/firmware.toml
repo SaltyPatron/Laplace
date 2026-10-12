@@ -2,7 +2,7 @@
 #
 # An image is an immutable cognition policy over the ISA: which trajectories receive
 # computation (ROUTE), how the field is steered and a constituent selected (STEER,
-# SELECT), and how much is realized (REALIZE). It never changes knowledge, truth or
+# SELECT), and how much is realized (REALIZE). It never changes content, truth or
 # standing; relation rank and the standing law are not firmware.
 #
 # An image's id is the content id of its canonical serialization (codegen

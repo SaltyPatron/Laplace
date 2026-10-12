@@ -69,13 +69,13 @@ public sealed class UciClientTests
     };
 
     [Fact]
-    public void ReadinessCarriesTheActualKnowledgeIdentity()
+    public void ReadinessCarriesTheActualDatabaseIdentity()
     {
         using var fake = new FakeEngine(line => line == "isready"
-            ? ["info string laplace knowledge {\"cluster\":\"cluster-1\",\"database\":\"knowledge-1\"}", "readyok"]
+            ? ["info string laplace database {\"cluster\":\"cluster-1\",\"database\":\"database-1\"}", "readyok"]
             : Standard(line));
         fake.Client.NewGame();
-        Assert.Equal(new ChessKnowledgeIdentity("cluster-1", "knowledge-1"), fake.Client.KnowledgeIdentity);
+        Assert.Equal(new ChessDatabaseIdentity("cluster-1", "database-1"), fake.Client.DatabaseIdentity);
     }
 
     [Fact]

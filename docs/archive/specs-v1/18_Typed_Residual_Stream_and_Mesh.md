@@ -209,7 +209,7 @@ SECTION 4 — SELECTORS: CONDITIONAL HEADS FROM ATTESTED EDGES
 ================================================================================
 The single biggest architectural absence in the current synthesis (14 §1.8, audit-confirmed):
 no head is conditional on the prompt's MEANING — QK encodes "which tokens are related
-under r," never "this context is ASKING about r." The selection knowledge is attested:
+under r," never "this context is ASKING about r." The selection content is attested:
 
   - "capital" EVOKES_FRAME its frame; frames map to relation families; relation types
     are themselves entities with definitions. Synthesis EVOKES_FRAME/definition planes as QK
@@ -273,9 +273,9 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
   C-5  Salience-rank adjudication — MEASURED 2026-07-08 (plan Phase R, read-side
        ablation, 12 probe words, hit@10 across all relation types):
          next-word intent:  manifest-rank 0.000   eff_mu-only 0.889
-         knowledge intent:  manifest-rank 0.556   eff_mu-only 0.056
+         content intent:  manifest-rank 0.556   eff_mu-only 0.056
        VERDICT: a perfect double dissociation. The hand-authored ranks are a
-       KNOWLEDGE-INTENT PRIOR — excellent at surfacing taxonomic/definitional
+       CONTENT-INTENT PRIOR — excellent at surfacing taxonomic/definitional
        objects, catastrophic when applied to generation (PRECEDES at 0.18 buries
        every corpus continuation). Neither table replacement nor vindication:
        the defect is UNIVERSAL APPLICATION of one intent's prior. Prescription =
@@ -283,7 +283,7 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
        selects which bands weight the read); on the export side, salience
        scaling now exempts continuation operators (FoundryCommands o_proj fill).
        "Counted, not chosen" resolution: the ranks stay hand-authored as the
-       knowledge prior; what gets COUNTED is which prior each intent invokes.
+       content prior; what gets COUNTED is which prior each intent invokes.
   C-6  POS/SENSE/DEPREL QUERY-GRAIN AUDIT (2026-07-09, live-verified; prompted by
        the eff_mu-head observation that the consensus's global top is annotation
        scaffolding — IS_A 'NN'→'NOUN' at eff_mu 3214 / 1.24M witnesses):

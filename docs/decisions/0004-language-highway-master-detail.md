@@ -47,7 +47,7 @@ A rough language-highway mapping is:
 
 | League site | Language highway |
 |---|---|
-| league | highway / knowledge family |
+| league | highway / content family |
 | division/conference | layer (ISO, ILI, synset, frame, POS, sense, deprel, …) |
 | team | highway node such as synset/frame/class/roleset |
 | position | relation/role type |
