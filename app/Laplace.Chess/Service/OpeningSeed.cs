@@ -10,9 +10,10 @@ public static class OpeningSeed
     {
         get
         {
-            var configured = LaplaceInstall.TryReadConfig("LAPLACE_CHESS_OPENINGS", "chess-lab.env");
+            var configured = ChessRuntimeConfiguration.Read("LAPLACE_CHESS_OPENINGS");
             if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
-            var dataRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+            var dataRoot = ChessRuntimeConfiguration.Read("LAPLACE_DATA")
+                ?? ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT");
             var gamesDir = !string.IsNullOrWhiteSpace(dataRoot)
                 ? Path.Combine(dataRoot.Trim(), "Games", "Chess")
                 : LaplaceInstall.ResolveChessGamesDir();

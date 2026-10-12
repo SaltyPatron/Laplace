@@ -25,6 +25,31 @@ function Write-IisAtomic([string]$Path,[string]$Content) {
     [IO.File]::Move($temp,$Path,$true)
 }
 function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
+function Get-IisChessAccess($c) {
+    $file=$c.environment.LAPLACE_CHESS_ENV
+    if(-not $file){return}
+    if(-not [IO.Path]::IsPathFullyQualified($file) -or -not(Test-Path -LiteralPath $file -PathType Leaf)){throw 'LAPLACE_CHESS_ENV must name an existing absolute public configuration file.'}
+    [pscustomobject]@{Path=$file;Rights='ReadAndExecute';Directory=$false}
+    $executables=@('LAPLACE_STOCKFISH','LAPLACE_CUTECHESS','LAPLACE_CUTECHESS_GUI','LAPLACE_FASTCHESS','LAPLACE_ORDO','LAPLACE_LC0','LAPLACE_UCI','LAPLACE_ZSTD_LIBRARY')
+    $files=@('LAPLACE_LC0_NET','LAPLACE_CUTECHESS_GUI_RECEIPT')
+    $directories=@('LAPLACE_DATA','LAPLACE_SYZYGY','LAPLACE_CHESS_OPENINGS','LAPLACE_CHESS_BOOKS','LAPLACE_QT_BIN')
+    foreach($line in [IO.File]::ReadLines($file)){
+        if($line.TrimStart().StartsWith('#') -or -not $line.Contains('=')){continue}
+        $key,$value=$line.Split('=',2);$key=$key.Trim();$value=$value.Trim().Trim('"',"'")
+        if($key -match 'TOKEN|SECRET|PASSWORD|API_KEY'){throw 'The shared chess configuration must not contain credentials.'}
+        if($key -notin ($executables+$files+$directories+@('LAPLACE_CHESS_LAB_DIR'))){continue}
+        if(-not [IO.Path]::IsPathFullyQualified($value)){throw "Declare an absolute $key path."}
+        if($key -eq 'LAPLACE_CHESS_LAB_DIR'){
+            if([IO.Path]::GetFullPath($value).TrimEnd('\') -eq [IO.Path]::GetPathRoot($value).TrimEnd('\')){throw 'Chess job output cannot be a volume root.'}
+            [pscustomobject]@{Path=$value;Rights='Modify';Directory=$true}
+        }else{
+            $kind=if($key -in $directories){'Container'}else{'Leaf'}
+            if(-not(Test-Path -LiteralPath $value -PathType $kind)){throw "Declared $key is missing: $value"}
+            $path=if($key -in $executables){Split-Path -Parent $value}else{$value}
+            [pscustomobject]@{Path=$path;Rights='ReadAndExecute';Directory=($key -notin $files)}
+        }
+    }
+}
 function Get-IisPageAssets([string]$Html) {
     @([regex]::Matches($Html,'(?:src|href)="(/assets/[^"]+)"') | ForEach-Object {$_.Groups[1].Value} | Select-Object -Unique)
 }
@@ -34,6 +59,11 @@ function Test-IisPackage([string]$Path) {
     }
     $manifest=Get-Content (Join-Path $Path 'iis-package.json') -Raw | ConvertFrom-Json
     if(-not $manifest.files -or $manifest.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Incomplete package manifest.'}
+    if($manifest.components -contains 'uci'){
+        foreach($file in 'laplace-uci.exe','laplace-uci.dll','laplace-uci.deps.json','laplace-uci.runtimeconfig.json','laplace_core.dll','laplace_syzygy.dll','laplace_dynamics.dll','laplace_synthesis.dll','share/laplace/laplace_t0_perfcache.bin','share/laplace/laplace_highway_perfcache.bin','stockfish-profiles.json','lc0-profiles.json','chess-ladder-release.json','cutechess-release.json','stockfish-release.json','zstd-release.json'){
+            if(-not(Test-Path -LiteralPath (Join-Path $Path ('uci/'+$file)) -PathType Leaf)){throw "Incomplete IIS chess runtime: uci/$file"}
+        }
+    }
     if(Test-Path -LiteralPath (Join-Path $Path 'web.config')){throw 'The package contains a host-specific web.config; use New-IisPackage.ps1.'}
     $listed=@($manifest.files.path)
     foreach($required in 'Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','cli\Laplace.Cli.exe'){

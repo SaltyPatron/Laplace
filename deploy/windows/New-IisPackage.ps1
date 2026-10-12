@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$Published,[Parameter(Mandatory)][string]$Destination,[Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{7,64}$')][string]$Revision)
 . "$PSScriptRoot/iis-runtime.ps1"
+if(-not(Test-Path -LiteralPath (Join-Path $Published 'uci/laplace-uci.exe') -PathType Leaf)){throw 'The application publication must include its UCI runtime. Use Build-IisPackage.ps1.'}
 if(Test-Path -LiteralPath $Destination){throw 'Choose a new package directory; existing packages are immutable.'}
 $null=New-Item -ItemType Directory -Path $Destination
 $files=@(Get-ChildItem -LiteralPath $Published -File -Recurse | Where-Object Name -NotIn @('web.config','iis-package.json','verify-application-release.py') | ForEach-Object {
@@ -13,6 +14,6 @@ $files=@(Get-ChildItem -LiteralPath $Published -File -Recurse | Where-Object Nam
 })
 $identity=(@($files|Sort-Object path|ForEach-Object {$_.path+':'+$_.sha256}) -join "`n")
 $digest=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant()
-Write-IisAtomic (Join-Path $Destination 'iis-package.json') (Iis-Json @{revision=$digest;source_revision=$Revision;created_utc=[DateTime]::UtcNow.ToString('o');files=$files})
+Write-IisAtomic (Join-Path $Destination 'iis-package.json') (Iis-Json @{revision=$digest;source_revision=$Revision;created_utc=[DateTime]::UtcNow.ToString('o');components=@('api','cli','uci');files=$files})
 $null=Test-IisPackage $Destination
 Write-Host "Packaged $($files.Count) verified files at $Destination"

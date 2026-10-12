@@ -31,19 +31,18 @@ The normal Linux host setup and product publish invoke
 `scripts/bootstrap-chess-lab.sh --cutechess-gui` and build both official CMake
 targets, `cli` and `gui`. Windows publishing invokes
 `scripts/win/build-cutechess.cmd` and builds Stockfish from its Git checkout.
-The source trees use `LAPLACE_EXTERNAL`: `/build/external` by default on the
-Linux host and the repository's `external` directory on Windows. Source updates
-verify the official upstream revision and preserve local changes. Stockfish's
-executable is used directly from its build output under `stockfish/src`.
+Select dependency sources through `LAPLACE_EXTERNAL` and builds through the
+machine's declared build paths. These directories need no particular mount name.
+Source updates verify the official upstream revision and preserve local changes.
+`LAPLACE_STOCKFISH` selects the executable; `LAPLACE_STOCKFISH_SOURCE` explicitly
+selects a source build when that is wanted.
 
 `LAPLACE_STOCKFISH_SOURCE` may explicitly select another existing source checkout.
 A manually staged folder is not assumed to be Laplace's configured external
 root. The existing `LAPLACE_STOCKFISH` executable override still takes precedence.
-On hart-server, the verified official Git checkout is `/build/external/stockfish`.
-The observed `/vault/External/Stockfish/SF_19` directory contains staged source and
-executables, but no Git checkout was found there. Its name does not select the
-runtime. The installer updates the configured official checkout, builds it with
-upstream's Makefile and matching NNUE, and uses that checkout's `src/stockfish`.
+Directory names do not establish the selected runtime. The installer uses the
+declared checkout, upstream's Makefile and matching NNUE. Historical host paths
+in the calibration notes below are evidence locations, not installation requirements.
 
 Run the installed dependency report, `laplace-uci check` (JSON; exit 1 when a
 required check fails):
@@ -52,12 +51,41 @@ required check fails):
 /opt/laplace/app/laplace-uci check --prefix /opt/laplace --check-latest --cutechess-gui
 ```
 
-On Windows, provide the published UCI executable and use the same environment as
-the application's build/publish configuration:
+The installed monorepo command exposes its packaged UCI lab from any working
+directory, with the selected client's database credentials:
 
-```bat
-"%LAPLACE_TOOLS%\chess\app\laplace-uci.exe" check --uci "%LAPLACE_TOOLS%\chess\app\laplace-uci.exe" --check-latest
+```powershell
+laplace-mono chess lab check --require-ladder --require-data --cutechess-gui
 ```
+
+Declare `LAPLACE_CHESS_ENV` as an absolute path to a public `NAME=value` file
+using the keys in `deploy/windows/chess-lab.env.example`. The API, CLI and
+monorepo UCI read this same file. Explicit process values override the file;
+the file precedes legacy install-local settings. A missing selected file fails
+with its configuration error. Keep tokens and database passwords in their scoped
+credential records, outside this file.
+
+For IIS, put that file path in the installation declaration's
+`environment.LAPLACE_CHESS_ENV` and run `Install-LaplaceSite.ps1 -Installation
+<declaration.json>`. Setup verifies the paths, grants the pool read/execute access
+to selected tools and assets, and grants write access only to the selected chess
+job output directory. The ordinary client profile declares the same file in its
+`environment`. Source code and compiler shells are not prerequisites for these
+installed commands.
+
+The monorepo's `laplace-uci` executable and the separate **Laplace-UCI** repository
+are different components: the former implements this repository's chess engine
+and lab commands; the latter transports configured engine sessions between
+machines and clients. The shared Lichess controller selects the environment for
+the one bot account and continues admitting live games through the selected
+implementation. Fastchess conducts matches; Cutechess supplies a watched GUI and
+comparison conductor; Stockfish and Lc0 are explicitly selected providers and
+comparators. Configuring these tools does not substitute their moves for Laplace's.
+
+Windows Cutechess installation deploys its Qt runtime beside the executable.
+Installed verification checks those libraries, the recorded executable hash,
+and actual QApplication/platform initialization. It does not require the original
+source checkout or the build SDK to remain on the consumer machine.
 
 The report exercises the configured Stockfish binary and Laplace UCI binary,
 checks Cute Chess's actual version/runtime, inventories opening files and paired

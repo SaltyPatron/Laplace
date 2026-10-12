@@ -1,7 +1,7 @@
 #requires -Version 7
-# Update the shared source checkout, build the CLI, and deploy Qt DLLs/plugins.
+# Update the shared source checkout, build both interfaces, and deploy Qt DLLs/plugins.
 [CmdletBinding()]
-param()
+param([string]$Destination)
 $ErrorActionPreference = 'Stop'
 function Invoke-Checked {
     param([string]$File, [string[]]$Arguments)
@@ -17,11 +17,11 @@ $external = if ($env:LAPLACE_EXTERNAL) { $env:LAPLACE_EXTERNAL } else { Join-Pat
 $work = Join-Path $env:LAPLACE_BUILD_ROOT 'work\chess-tools'
 New-Item -ItemType Directory -Force -Path $work, $build | Out-Null
 $env:TMPDIR = $env:TMP = $env:TEMP = $work
-$source = & python $helper --source-dir (Join-Path $external 'cutechess')
+$source = & py -3 $helper --source-dir (Join-Path $external 'cutechess')
 if ($LASTEXITCODE -ne 0) { throw 'CuteChess source update failed' }
 $source = "$source".Trim()
 $qtRoot = if ($env:LAPLACE_QT_ROOT) { $env:LAPLACE_QT_ROOT } else { Join-Path $env:LAPLACE_DEPS_PREFIX 'qt' }
-$qt = & python (Join-Path $repo 'scripts\provision-chess-qt.py') --root $qtRoot --work $work
+$qt = & py -3 (Join-Path $repo 'scripts\provision-chess-qt.py') --root $qtRoot --work $work
 if ($LASTEXITCODE -ne 0) { throw 'Qt SDK provisioning failed' }
 $qt = "$qt".Trim()
 $vcvars = $env:LAPLACE_VCVARS
@@ -46,15 +46,37 @@ if (-not $env:VSCMD_VER) {
 }
 $zstdSource = if ($env:LAPLACE_ZSTD_SOURCE) { $env:LAPLACE_ZSTD_SOURCE } else { Join-Path $external 'zstd' }
 $zstdBuild = if ($env:LAPLACE_ZSTD_BUILD) { $env:LAPLACE_ZSTD_BUILD } else { Join-Path $env:LAPLACE_BUILD_ROOT 'build-zstd' }
-Invoke-Checked python @((Join-Path $repo 'scripts\install-zstd.py'), '--source-dir', $zstdSource, '--build-dir', $zstdBuild)
-Invoke-Checked python @($helper, '--verify-source', $source, '--reset-build-cache', $build)
+Invoke-Checked py @('-3', (Join-Path $repo 'scripts\install-zstd.py'), '--source-dir', $zstdSource, '--build-dir', $zstdBuild)
+Invoke-Checked py @('-3', $helper, '--verify-source', $source, '--reset-build-cache', $build)
 $env:GIT_NO_REPLACE_OBJECTS = '1'
 Invoke-Checked cmake @('-S', $source, '-B', $build, '-G', 'Ninja',
     '-DCMAKE_BUILD_TYPE=Release', '-DWITH_TESTS=OFF', '-DCMAKE_C_COMPILER=cl',
     '-DCMAKE_CXX_COMPILER=cl', "-DCMAKE_PREFIX_PATH=$qt")
-Invoke-Checked cmake @('--build', $build, '--clean-first', '--target', 'cli')
+Invoke-Checked cmake @('--build', $build, '--target', 'cli', 'gui')
 $binary = Join-Path $build 'cutechess-cli.exe'
 Invoke-Checked (Join-Path $qt 'bin\windeployqt.exe') @('--release', '--compiler-runtime', '--no-translations', '--dir', $build, $binary)
-Invoke-Checked python @($helper, '--verify-source', $source, '--binary', $binary,
+Invoke-Checked py @('-3', $helper, '--verify-source', $source, '--binary', $binary,
     '--qt-version', $lock.qt_version, '--receipt', (Join-Path $build 'laplace-cutechess-build.json'))
+$gui = Join-Path $build 'cutechess.exe'
+Invoke-Checked (Join-Path $qt 'bin\windeployqt.exe') @('--release', '--compiler-runtime', '--no-translations', '--dir', $build, $gui)
+Invoke-Checked py @('-3', $helper, '--verify-source', $source, '--binary', $gui, '--gui', '--qt-prefix', $qt,
+    '--qt-version', $lock.qt_version, '--work', $work, '--receipt', (Join-Path $build 'laplace-cutechess-gui-build.json'))
+if (-not $Destination) {
+    $Destination = if ($env:LAPLACE_CUTECHESS_PREFIX) { $env:LAPLACE_CUTECHESS_PREFIX }
+        else { Join-Path $env:LAPLACE_DEPS_PREFIX ('cutechess/'+$lock.version) }
+}
+$Destination = [IO.Path]::GetFullPath($Destination)
+$null = New-Item -ItemType Directory -Path $Destination -Force
+foreach ($name in 'cutechess-cli.exe','cutechess.exe') {
+    $installed = Join-Path $Destination $name
+    Copy-Item -LiteralPath (Join-Path $build $name) -Destination $installed -Force
+    Invoke-Checked (Join-Path $qt 'bin\windeployqt.exe') @('--release','--compiler-runtime','--no-translations','--dir',$Destination,$installed)
+}
+Copy-Item -LiteralPath (Join-Path $qt 'plugins/platforms/qoffscreen.dll') -Destination (Join-Path $Destination 'platforms/qoffscreen.dll') -Force
+Invoke-Checked py @('-3', $helper, '--verify-source', $source, '--binary', (Join-Path $Destination 'cutechess-cli.exe'),
+    '--qt-version', $lock.qt_version, '--receipt', (Join-Path $Destination 'laplace-cutechess-build.json'))
+Invoke-Checked py @('-3', $helper, '--verify-source', $source, '--binary', (Join-Path $Destination 'cutechess.exe'),
+    '--gui', '--qt-prefix', $Destination, '--qt-version', $lock.qt_version, '--work', $work,
+    '--receipt', (Join-Path $Destination 'laplace-cutechess-gui-build.json'))
+Write-Host "Installed CuteChess GUI and CLI: $Destination"
 Write-Host "CuteChess $($lock.version) and Qt $($lock.qt_version) ready: $binary"

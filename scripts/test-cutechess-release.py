@@ -64,6 +64,7 @@ class CuteChessReleaseTests(unittest.TestCase):
         self.assertIn(self.lock['commit'], pins.read_text())
         self.assertEqual(cutechess.run(['git', '-C', target, 'rev-parse', f'refs/laplace/previous/{self.old}']), self.old)
 
+    @unittest.skipUnless(hasattr(os, "geteuid"), "POSIX file ownership")
     def test_group_writer_preserves_manifest_owner_and_inode(self):
         target = cutechess.provision(self.root / 'external/cutechess', self.lock)
         pins = target.parent / 'PINS.tsv'
@@ -352,6 +353,7 @@ class CuteChessReleaseTests(unittest.TestCase):
         self.assertEqual([['--fresh']], [args for args in commands if '--fresh' in args])
         self.assertEqual(2, sum('--clean-first' in args for args in commands))
 
+    @unittest.skipUnless(os.name != "nt", "POSIX executable fixture")
     def test_post_build_receipt_binds_exact_source_and_probed_binary(self):
         source, binary, receipt_path = self.build_fixture()
         receipt = cutechess.verify_build(source, binary, self.lock, '6.11.2', receipt_path)
@@ -362,6 +364,7 @@ class CuteChessReleaseTests(unittest.TestCase):
         self.assertEqual(cutechess.digest(binary), receipt['binary_sha256'])
         self.assertEqual(cutechess.digest(binary.parent / 'CMakeCache.txt'), receipt['cmake_cache_sha256'])
 
+    @unittest.skipUnless(os.name != "nt", "POSIX executable fixture")
     def test_header_changed_during_probe_cannot_replace_prior_receipt(self):
         source, binary, receipt_path = self.build_fixture()
         cutechess.verify_build(source, binary, self.lock, '6.11.2', receipt_path)
@@ -380,6 +383,7 @@ class CuteChessReleaseTests(unittest.TestCase):
         self.assertEqual(previous, receipt_path.read_bytes())
         self.assertEqual('during runtime verification\n', (source / 'source.h').read_text())
 
+    @unittest.skipUnless(os.name != "nt", "POSIX executable fixture")
     def test_binary_changed_during_probe_cannot_receive_receipt(self):
         source, binary, receipt_path = self.build_fixture()
         original_probe = cutechess.probe
@@ -474,6 +478,8 @@ class CuteChessReleaseTests(unittest.TestCase):
             self.assertFalse(Path(path).exists())
         installed = self.root / "installed-cutechess"
         shutil.copy2(binary, installed)
+        # Runtime verification uses deployed bytes; the build checkout need not exist.
+        source.rename(source.with_name(source.name + "-offline"))
         checked = cutechess.verify_gui_install(installed, receipt_path, self.lock, scratch)
         self.assertEqual(cutechess.digest(installed), checked["runtime"]["binary_sha256"])
         self.assertEqual([str(installed)], checked["runtime"]["direct_launch"]["argv"])
@@ -516,11 +522,11 @@ class CuteChessReleaseTests(unittest.TestCase):
             launch.assert_not_called()
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux direct GUI installed file contract")
-    def test_gui_changed_source_binary_or_plugin_cannot_reuse_receipt(self):
+    def test_gui_changed_binary_or_plugin_cannot_reuse_receipt(self):
         source, binary, sdk, receipt_path = self.gui_fixture()
         work = self.root / "probe-work"
         cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, work)
-        for target in (source / "source.h", binary, sdk / "plugins/platforms/libqoffscreen.so"):
+        for target in (binary, sdk / "plugins/platforms/libqoffscreen.so"):
             with self.subTest(target=target):
                 original = target.read_bytes()
                 target.write_bytes(original + b"\nchanged\n")

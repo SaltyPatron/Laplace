@@ -27,6 +27,7 @@ internal static class ChessCommands
             "learned-eval-test" => await LearnedEvalTestAsync(args[1..]),
             "tactics" => await TacticsAsync(args[1..]),
             "lichess" => await LichessAsync(args[1..]),
+            "lab" => await RunUciAsync(args[1..]),
             "match" => await MatchAsync(args[1..]),
             "bench" => Bench(args[1..]),
             "measure-corpus" => await ChessCorpusCommands.RunAsync(args[1..]),
@@ -71,7 +72,8 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace-mono chess <selfplay|move|fetch|record|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus|verify-recorded-corpus|export-recorded-pgn>\n"
+        "usage: laplace-mono chess <selfplay|move|fetch|record|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|lab|measure-corpus|verify-recorded-corpus|export-recorded-pgn>\n"
+        + "  lab <check|match|ladder|analyse|inspect> [options]   (installed monorepo UCI tools, using this client's credentials and configuration)\n"
         + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
@@ -503,17 +505,25 @@ internal static class ChessCommands
     /// finishes its in-flight games.
     /// </summary>
     private static async Task<int> LichessAsync(string[] args)
+        => await RunUciAsync(["lichess", .. args]);
+
+    private static async Task<int> RunUciAsync(string[] args)
     {
+        if (args.Length == 0) return Fail("usage: laplace-mono chess lab <check|match|ladder|analyse|inspect> [options]");
         string? uci = ChessLabPaths.LaplaceUciExecutable();
         if (uci is null)
-            return Fail("laplace chess lichess runs laplace-uci lichess, and laplace-uci is not built or published (scripts/win/publish-uci.cmd)");
+            return Fail("The selected monorepo installation has no UCI runtime. Install the complete application package or declare LAPLACE_UCI.");
         var psi = new System.Diagnostics.ProcessStartInfo(uci) { UseShellExecute = false };
-        psi.ArgumentList.Add("lichess");
         foreach (var a in args) psi.ArgumentList.Add(a);
-        Console.CancelKeyPress += (_, e) => e.Cancel = true;
-        using var process = System.Diagnostics.Process.Start(psi);
-        if (process is null) return Fail($"could not start {uci}");
-        await process.WaitForExitAsync();
-        return process.ExitCode;
+        ConsoleCancelEventHandler cancel = (_, e) => e.Cancel = true;
+        Console.CancelKeyPress += cancel;
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process is null) return Fail($"could not start {uci}");
+            await process.WaitForExitAsync();
+            return process.ExitCode;
+        }
+        finally { Console.CancelKeyPress -= cancel; }
     }
 }

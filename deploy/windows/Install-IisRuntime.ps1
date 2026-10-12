@@ -3,6 +3,7 @@
 param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
 . "$PSScriptRoot/iis-runtime.ps1"
 $c=Read-IisInstallation $Installation
+$chessAccess=@(Get-IisChessAccess $c)
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
 if($Plan){$c | ConvertTo-Json -Depth 12;return}
 if($Operation -eq 'Verify'){Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY | ConvertTo-Json;return}
@@ -113,6 +114,13 @@ if($c.environment.LAPLACE_DATA){
     Set-Acl -LiteralPath $c.environment.LAPLACE_DATA -AclObject $acl
 }
 Write-IisAtomic (Join-Path $state 'postgres-root.crt') $c.database.certificate
+foreach($entry in $chessAccess){
+    if($entry.Directory){$null=New-Item -ItemType Directory -Path $entry.Path -Force}
+    $acl=Get-Acl -LiteralPath $entry.Path
+    $inheritance=if($entry.Directory){'ContainerInherit,ObjectInherit'}else{'None'}
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(('IIS APPPOOL\'+$c.pool),$entry.Rights,$inheritance,'None','Allow'))
+    Set-Acl -LiteralPath $entry.Path -AclObject $acl
+}
 $release=Join-Path $web ('releases/'+$c.revision)
 if(Test-Path -LiteralPath $release){$null=Test-IisPackage $release}else{
     $null=New-Item -ItemType Directory -Path $release -Force

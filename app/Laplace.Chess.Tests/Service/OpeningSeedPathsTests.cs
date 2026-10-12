@@ -28,6 +28,7 @@ public sealed class OpeningSeedPathsTests
     public void DataRootAndExplicitCorpusOverrideAreHonored()
     {
         var priorData = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        var priorCorpus = Environment.GetEnvironmentVariable("LAPLACE_DATA");
         var priorOpenings = Environment.GetEnvironmentVariable("LAPLACE_CHESS_OPENINGS");
         string root = Path.Combine(Path.GetTempPath(), $"opening-root-{Guid.NewGuid():N}");
         string refreshed = Path.Combine(root, "Games", "Chess", "lichess-openings");
@@ -35,8 +36,12 @@ public sealed class OpeningSeedPathsTests
         File.WriteAllText(Path.Combine(refreshed, "a.tsv"), "eco\tname\tpgn\n");
         try
         {
+            Environment.SetEnvironmentVariable("LAPLACE_DATA", null);
             Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", root);
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", null);
+            Assert.Equal(refreshed, OpeningSeed.DefaultDir);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", Path.Combine(root, "service-state"));
+            Environment.SetEnvironmentVariable("LAPLACE_DATA", root);
             Assert.Equal(refreshed, OpeningSeed.DefaultDir);
             string explicitPath = Path.Combine(root, "operator-selected");
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", explicitPath);
@@ -45,6 +50,7 @@ public sealed class OpeningSeedPathsTests
         finally
         {
             Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", priorData);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA", priorCorpus);
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", priorOpenings);
             Directory.Delete(root, recursive: true);
         }

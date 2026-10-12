@@ -23,6 +23,14 @@ internal static class ChessRuntimeConfiguration
             && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_STOCKFISH_SOURCE")))
             return null;
 
+        if (Environment.GetEnvironmentVariable("LAPLACE_CHESS_ENV") is { Length: > 0 } declaration)
+        {
+            if (!Path.IsPathFullyQualified(declaration) || !File.Exists(declaration))
+                throw new InvalidOperationException("LAPLACE_CHESS_ENV must name an existing absolute configuration file.");
+            var value = ReadFile(declaration, key);
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+        }
+
         if (InstallPrefix is { } prefix)
         {
             // First file with a value wins; the last assignment within that file
