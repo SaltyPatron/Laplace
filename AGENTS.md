@@ -67,14 +67,14 @@ Inspect the host before allocating builds, databases, or install copies. A path 
 
 | Purpose | Place |
 | --- | --- |
-| Installed runtime | `/opt/laplace` |
-| PostgreSQL data | `/opt/laplace/pgdata` |
-| PostgreSQL WAL | `/var/lib/pgwal` |
-| Build and tool scratch | `/build` |
-| PostgreSQL spill | `/pgtemp` |
-| Admitted source estate | `/vault` |
+| Installed runtime | `LAPLACE_INSTALL_PREFIX` |
+| PostgreSQL data | `LAPLACE_PGDATA` in the selected cluster declaration |
+| PostgreSQL WAL | `LAPLACE_PGWAL` in the selected cluster declaration |
+| Build and tool scratch | `LAPLACE_BUILD`, `LAPLACE_WORK`, and their resolved per-worktree directories |
+| PostgreSQL spill | `LAPLACE_PGTEMP` in the selected cluster declaration |
+| Admitted source estate | `LAPLACE_DATA` |
 
-Prepare a replacement on `/build`. Copy it into place only after the replacement is complete. Do not delete a serving file, a library symlink, or a PostgreSQL module a database still has loaded. Do not create a second PostgreSQL server for an ordinary repair. Do not use `/tmp` or the source-estate disk as build scratch. `TMPDIR` belongs under `/build`.
+Read the selected machine declaration through `scripts/machine-env.py`; a directory does not have to be a mount point. Prepare replacements in the configured build/work directories. Copy them into place only after they are complete. Do not delete a serving file, a library symlink, or a PostgreSQL module a database still has loaded. Do not create a second PostgreSQL server for an ordinary repair. `TMPDIR` belongs in the resolved scratch directory, separate from serving files, databases and source data.
 
 Implementation lands on `main`. One install is one revision: application, native prefix, PostgreSQL execution module, perfcache, and extension catalog identify the same build.
 

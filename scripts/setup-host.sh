@@ -4,9 +4,8 @@
 #
 #   sudo bash scripts/setup-host.sh
 #
-# Machine bring-up only. Runtime Lichess/Stripe credentials are NOT read from
-# ~/.config/shell/secrets.env for deploy — CI publish writes /opt/laplace/secrets
-# from GitHub repository Secrets (sync from Windows: sync-github-secrets.cmd).
+# Default setup delegates to deploy/linux/site-host.sh, including its declared
+# API/MCP workload, browser identity and chess installations.
 # =============================================================================
 
 set -euo pipefail
@@ -30,6 +29,13 @@ export LAPLACE_OPERATOR
 
 MODE="${1:-setup}"
 
+# The installed site and its credential lifecycle have one owner. The legacy
+# cluster bootstrap below is retained only for its explicitly named operations.
+if [[ "$MODE" == setup ]]; then
+    if (( $# )); then shift; fi
+    exec bash "$REPO_DIR/deploy/linux/site-host.sh" "$@"
+fi
+
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 red()    { printf '\033[0;31m%s\033[0m\n' "$1"; }
@@ -48,7 +54,8 @@ usage() {
     cat <<EOF
 Usage: sudo bash $0
 
-  setup                    (default) Full host bring-up, including managed services.
+  setup                    (default) Monorepo service/runtime setup on the declared shared host.
+                           Accepts site-host.sh options, including --check and --runtime-only.
   storage                  Repair shared storage and runner environment; verify both writers.
   shared-workspace         Repair operator/runner checkout ownership only; no build or restart.
   migrations               Apply database migrations only; reuse the completed build.
@@ -63,9 +70,9 @@ managed-services optionally accepts --address, --network and --hostname. Setting
 are persisted; omitted values preserve the installed configuration on later runs.
 Boot maintenance, an hourly timer and CI deploy reapply the installed host policy.
 
-After setup: push to main (CI publish owns /opt/laplace/secrets from GitHub
-repository Secrets: LICHESS_API, STRIPE_API_SECRET, STRIPE_WEBHOOK_SECRET).
-Push secrets from a Windows workstation: scripts\\win\\sync-github-secrets.cmd
+The default setup reuses the installed PostgreSQL cluster and scoped OpenBao
+enrollment. Shared host provisioning belongs to Laplace-Operations. Build and
+publication run through deploy/linux/site.sh without sudo.
 EOF
 }
 
@@ -277,76 +284,6 @@ layer1_build_install_extensions() {
     green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
-do_setup() {
-    if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
-        red "setup needs root — run: sudo bash scripts/setup-host.sh"
-        exit 1
-    fi
-    ensure_dotnet_present
-
-    say "Layer 0a — account, apt (incl. nginx/stockfish/Qt), /opt/laplace"
-    sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" prefix
-
-    layer0_5_build_deps
-
-    say "Layer 0b — runner, PG cluster, API unit, chess-lab, secrets seed"
-    sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" bootstrap
-
-    say "Layer 0c — agent ops lever: guarded runner bounce (sudoers drop-in)"
-    # scripts/runner-bounce.sh refuses unless the ingest journal, database
-    # backends, CLI processes, and Runner.Worker ALL prove quiet — then and
-    # only then restarts the runner unit (the stale-busy wedge measured
-    # 2026-08-06 cost ~15min with no lever). This drop-in grants passwordless
-    # restart for exactly that one unit and nothing else. Idempotent:
-    # content-compared, visudo-validated, removed on validation failure.
-    RUNNER_UNIT="actions.runner.SaltyPatron-Laplace.hart-server.service"
-    # The rule targets whoever ran setup (SUDO_USER), never a hard-coded name —
-    # a hard-coded account grants the lever to the wrong user on another host.
-    BOUNCE_USER="${SUDO_USER:-}"
-    if [ -z "$BOUNCE_USER" ]; then
-        red "SUDO_USER unset — run via sudo so the bounce rule targets the operator account"
-        exit 1
-    fi
-    SUDOERS_LINE="$BOUNCE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart $RUNNER_UNIT"
-    SUDOERS_FILE="/etc/sudoers.d/laplace-runner-bounce"
-    if [ ! -f "$SUDOERS_FILE" ] || [ "$(sudo cat "$SUDOERS_FILE")" != "$SUDOERS_LINE" ]; then
-        printf '%s\n' "$SUDOERS_LINE" | sudo tee "$SUDOERS_FILE" >/dev/null
-        sudo chmod 440 "$SUDOERS_FILE"
-        if ! sudo visudo -cf "$SUDOERS_FILE"; then
-            sudo rm -f "$SUDOERS_FILE"
-            red "sudoers drop-in failed validation — removed"
-            exit 1
-        fi
-        green "installed $SUDOERS_FILE"
-    else
-        green "runner-bounce sudoers already current"
-    fi
-
-    # Billing is part of setup — not a separate human mode.
-    seed_billing_from_operator_files
-
-    # Privileged host policy is Layer 0 state. Reconcile it before any unprivileged
-    # compilation so a Layer 1 source/build failure cannot leave CI pinned to an
-    # obsolete root helper and force the operator through another full bootstrap.
-    managed_services_setup
-
-    layer1_build_install_extensions
-    # Reconcile once more after Layer 1 so full bootstrap exits with the same final
-    # host-policy convergence guarantee it historically provided, while the early
-    # reconciliation above ensures a compiler/migration failure cannot strand CI on
-    # obsolete privileged helpers.
-    layer1_up
-    managed_services_setup
-
-    say "DONE — host ready. CI owns deploys + runtime secrets."
-    cat <<EOF
-
-  Human once:  sudo bash scripts/setup-host.sh
-  Secrets:     scripts\\win\\sync-github-secrets.cmd  (from Windows .env → GitHub Secrets)
-  CI forever:  push to main → laplace.yml publish → /opt/laplace/secrets
-
-EOF
-}
 
 do_status() {
     say "Layer 0 — bootstrap status"
@@ -391,7 +328,7 @@ do_stripe() {
 }
 
 case "$MODE" in
-    setup)          do_setup ;;
+
     storage)
         sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" bash "$SCRIPT_DIR/setup-storage.sh"
         sudo systemctl restart actions.runner.SaltyPatron-Laplace.hart-server.service
