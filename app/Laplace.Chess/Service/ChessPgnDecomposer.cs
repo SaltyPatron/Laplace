@@ -309,13 +309,52 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     internal static ChessGameRecord? TryParseGame(string gameText, bool requireNormalCompletion = false,
         bool requireCompleteSource = false)
     {
+        try
+        {
+            string variant = PgnGames.TagStr(gameText, "Variant");
+            if (!string.IsNullOrWhiteSpace(variant) && ChessVariants.ByName(variant)?.IsStandard != true)
+                throw new InvalidDataException(
+                    $"recording replay is not implemented for variant '{DiagnosticTag(variant)}'; "
+                    + "its positions and moves cannot be admitted under standard chess rules");
+            return ParseGameCore(gameText, requireNormalCompletion, requireCompleteSource);
+        }
+        catch (InvalidDataException ex)
+        {
+            string link = PgnGames.TagStr(gameText, "Link");
+            if (string.IsNullOrWhiteSpace(link)) link = PgnGames.TagStr(gameText, "Site");
+            throw new InvalidDataException(
+                $"PGN {DiagnosticTag(PgnGames.TagStr(gameText, "White"))} vs "
+                + $"{DiagnosticTag(PgnGames.TagStr(gameText, "Black"))} "
+                + $"({DiagnosticTag(PgnGames.TagStr(gameText, "Date"))}; {DiagnosticTag(link)}): {ex.Message}", ex);
+        }
+    }
+
+    private static string DiagnosticTag(string value)
+        => new(value.Take(240).Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+
+    private static ChessGameRecord? ParseGameCore(string gameText, bool requireNormalCompletion,
+        bool requireCompleteSource)
+    {
         bool strict = requireNormalCompletion || requireCompleteSource;
         var gameBytes = Encoding.UTF8.GetBytes(gameText);
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
         {
             if (strict && !ast.Diagnostics.SyntaxComplete)
-                throw new InvalidDataException("normal recorded PGN requires a complete native syntax parse");
+            {
+                var diagnostics = ast.Diagnostics;
+                string location = "";
+                for (int i = 0; i < ast.NodeCount; i++)
+                {
+                    var node = ast.GetNode(i);
+                    if (!ast.NodeTypeIs(node.NodeTypeId, "ERROR"u8)) continue;
+                    location = $"; first syntax error at UTF-8 bytes {node.StartByte}..{node.EndByte}";
+                    break;
+                }
+                throw new InvalidDataException(
+                    $"recorded PGN requires a complete native syntax parse "
+                    + $"(errors={diagnostics.ErrorNodeCount}, missing={diagnostics.MissingNodeCount}{location})");
+            }
             if (strict)
             {
                 int games = 0;

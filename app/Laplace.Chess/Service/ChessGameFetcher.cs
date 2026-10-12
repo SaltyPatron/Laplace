@@ -113,7 +113,14 @@ public static class ChessGameFetcher
 
                 await w.FlushAsync(ct);
                 if (ready.Count > 0 && onBatchReady is not null)
-                    await onBatchReady(ready, ct);
+                {
+                    log?.Invoke($"  {archiveUrl[^7..]}: validating {ready.Count} downloaded games");
+                    try { await onBatchReady(ready, ct); }
+                    catch (InvalidDataException ex)
+                    {
+                        throw new InvalidDataException($"{archiveUrl}: {ex.Message}", ex);
+                    }
+                }
                 log?.Invoke($"  {archiveUrl[^7..]}: {ready.Count} processed · {kept} total");
                 if (max is { } m && kept >= m) break;
             }
