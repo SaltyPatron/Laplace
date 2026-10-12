@@ -337,11 +337,12 @@ phase_app() {
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/cli/"; done
   mkdir -p "$stage/app/cli/share/laplace" "$stage/app/cli/third-party-licenses"
-  cp "$SITE_BUILD/engine/core/perfcache/laplace_t0_perfcache.bin" "$stage/app/cli/share/laplace/"
+  for cache in laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache; do
+    cp "$SITE_BUILD/engine/core/perfcache/$cache.bin" "$stage/app/cli/share/laplace/"
+  done
   cp -a "$stage/app/third-party-licenses/zstd" "$stage/app/cli/third-party-licenses/"
   [[ -x "$stage/app/cli/Laplace.Cli" ]] || fail "CLI not staged"
-  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
-    "$stage/app/cli/Laplace.Cli" decompose Laplace) || fail "staged CLI native decomposition failed"
+  verify_cli_package "$stage/app/cli" || fail "staged CLI runtime verification failed"
   echo "  staged $(du -sh "$stage/app" | cut -f1) at $stage/app"
 }
 
@@ -515,6 +516,15 @@ phase_bundle() {
   echo "  $(du -sh "$b" | cut -f1) at $b: $(cat "$b/app/.laplace-source-revision")"
 }
 
+verify_cli_package() {
+  local cli="$1" cache
+  for cache in laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache; do
+    [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
+  done
+  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+    "$cli/Laplace.Cli" decompose Laplace)
+}
+
 phase_receive() {
   say "receive the bundle"
   local b="$SITE_WORK/bundle"
@@ -525,8 +535,7 @@ phase_receive() {
   revision "$SITE_WORK/stage/app" >/dev/null
   [[ -d "$SITE_WORK/stage/share/laplace" ]] || fail "bundle perf-caches are missing"
   [[ -x "$SITE_WORK/stage/app/cli/Laplace.Cli" ]] || fail "bundle CLI is missing or not executable"
-  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
-    "$SITE_WORK/stage/app/cli/Laplace.Cli" decompose Laplace) || fail "received CLI native decomposition failed"
+  verify_cli_package "$SITE_WORK/stage/app/cli" || fail "received CLI runtime verification failed"
   echo "  $(cat "$SITE_WORK/stage/app/.laplace-source-revision")"
 }
 
@@ -535,11 +544,10 @@ phase_smoke() {
   say smoke
   local rc=0 url code installed_revision
   if ! installed_revision=$(revision "$LAPLACE_APP_DIR"); then installed_revision=unknown; rc=1; fi
-  if (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
-      "$LAPLACE_APP_DIR/cli/Laplace.Cli" decompose Laplace); then
-    echo '| Installed monorepo CLI native decomposition | passed |' >> "$SUMMARY"
+  if verify_cli_package "$LAPLACE_APP_DIR/cli"; then
+    echo '| Installed monorepo CLI caches and native decomposition | passed |' >> "$SUMMARY"
   else
-    echo '| Installed monorepo CLI native decomposition | FAILED |' >> "$SUMMARY"
+    echo '| Installed monorepo CLI caches and native decomposition | FAILED |' >> "$SUMMARY"
     rc=1
   fi
   {
