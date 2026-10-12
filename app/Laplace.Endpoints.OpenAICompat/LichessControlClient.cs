@@ -7,7 +7,8 @@ using Laplace.Endpoints.OpenAICompat.Auth;
 namespace Laplace.Endpoints.OpenAICompat;
 
 internal sealed record LichessControlClientConfiguration(string Url, string TokenFile, Guid[] Operators);
-internal sealed record LichessProfileSelectionRequest(string? Profile, long ExpectedRevision);
+internal sealed record LichessProfileSelectionRequest(string? Profile, long ExpectedRevision,
+    string? ReadSource = null, string? RecordingTarget = null);
 
 internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<LichessControlClient> log)
 {
@@ -53,7 +54,8 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
         if (User(context.User) is not { } user || !c.Operators.Contains(user))
             return Results.Json(new { error = "Your signed-in account does not have the lichess.configure permission." }, statusCode: 403);
         using var response = await SendAsync(c, HttpMethod.Post, "selection",
-            new { request.Profile, request.ExpectedRevision, actor = $"{Environment.MachineName}/{user:D}" }, ct);
+            new { request.Profile, request.ExpectedRevision, request.ReadSource, request.RecordingTarget,
+                actor = $"{Environment.MachineName}/{user:D}" }, ct);
         if (!response.IsSuccessStatusCode && response.StatusCode is not (HttpStatusCode.Conflict or HttpStatusCode.BadRequest))
             return Failure(response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>(Json, ct);
