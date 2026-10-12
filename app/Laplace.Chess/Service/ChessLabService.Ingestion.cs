@@ -101,7 +101,7 @@ public sealed partial class ChessLabService
                     var receipt = new
                     {
                         schema = "laplace.chess-retained-ingestion/v1",
-                        jobId, disposition, status, error = failure,
+                        jobId, disposition, status, error = failure, requester = slot.Job.Requester,
                         inputs = new { pgnPath, experimentPath = receiptPath, experimentTextSha256 },
                         serviceElapsedSeconds = Stopwatch.GetElapsedTime(serviceStarted).TotalSeconds,
                         serviceElapsedScope = "HTTP service operation through attach/bootstrap/wait, parse, shared apply and exact readback; excludes receipt file serialization and HTTP response transport",

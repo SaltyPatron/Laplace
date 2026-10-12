@@ -6,6 +6,23 @@ graph. The full modality reference — identity law, the three lanes, the
 census, and the closed loop — is [chess.md](chess.md). Verify
 commands against `api('chess')` and `/chess/lab/catalog` if this drifts.
 
+## Request identity and job access
+
+The HTTP lab uses the authenticated workspace and requester resolved by the existing
+Google/Microsoft browser session or validated Laplace API key. A job configuration
+cannot choose its owner. Job state, cancellation, event streams, transcripts, artifacts
+and retained-game ingestion are restricted to that workspace. Jobs predating requester
+tracking are not assigned to whichever user happens to open the page.
+
+Each authenticated job retains `operation.json`; external matches also carry the
+requester in `experiment.json`, which follows the match through recording. The record
+contains the internal account id or validated key prefix, authentication kind and
+provider when present. Credentials and bearer tokens are never included. Request
+authority is operation metadata and does not change content-addressed chess identities.
+
+This does not establish a distributed scheduler or independent database read/write
+selection. Those contracts remain distinct from authentication and engine transport.
+
 ## Measuring guided search, recorded throughput and external play
 
 The in-process guided-versus-classical experiment measures the effect of the

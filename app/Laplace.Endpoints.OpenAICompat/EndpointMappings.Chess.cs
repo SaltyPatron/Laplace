@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Laplace.Chess.Service;
+using Laplace.Engine.Core;
+using Laplace.Endpoints.OpenAICompat.Auth;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -210,7 +212,8 @@ internal static class ChessEndpoints
         }).WithTags("chess-lab");
 
         // Lab jobs are authorized by the /chess/* tenancy and API-key middleware.
-        app.MapPost("/chess/lab/start", (LabStartRequest req, ChessLabService lab) =>
+        app.MapPost("/chess/lab/start", async (HttpContext ctx, LabStartRequest req, ChessLabService lab,
+            ITenantResolver resolver, CancellationToken ct) =>
         {
             if (!Enum.TryParse<ChessLabJobKind>(req.Kind?.Replace("-", ""), ignoreCase: true, out var kind)
                 && !TryParseKind(req.Kind, out kind))
@@ -223,21 +226,33 @@ internal static class ChessEndpoints
                 try { _ = new CutechessOptions().WithStockfishConfiguration(config); }
                 catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             }
-            var id = lab.StartJob(kind, config);
+            var requester = RequestPrincipal(await resolver.ResolveAsync(ctx, ct));
+            if (requester is null) return Results.Unauthorized();
+            var id = lab.StartJob(kind, config, requester);
             return id is null ? Results.Problem("failed to start job") : Results.Json(new { jobId = id });
         }).WithTags("chess-lab");
 
-        app.MapPost("/chess/lab/stop/{jobId}", (string jobId, ChessLabService lab) =>
-            Results.Json(new { stopped = lab.StopJob(jobId) })).WithTags("chess-lab");
+        app.MapPost("/chess/lab/stop/{jobId}", async (HttpContext ctx, string jobId, ChessLabService lab,
+            ITenantResolver resolver, CancellationToken ct) =>
+            OwnsLabJob(lab.GetJob(jobId), (await resolver.ResolveAsync(ctx, ct)).TenantId)
+                ? Results.Json(new { stopped = lab.StopJob(jobId) }) : Results.NotFound()).WithTags("chess-lab");
 
-        app.MapGet("/chess/lab/jobs", (ChessLabService lab) =>
-            Results.Json(lab.ListJobs())).WithTags("chess-lab");
-
-        app.MapGet("/chess/lab/jobs/{jobId}", (string jobId, ChessLabService lab) =>
-            lab.GetJob(jobId) is { } job ? Results.Json(job) : Results.NotFound()).WithTags("chess-lab");
-
-        app.MapGet("/chess/lab/jobs/{jobId}/events", async (HttpContext ctx, string jobId, ChessLabService lab, CancellationToken ct) =>
+        app.MapGet("/chess/lab/jobs", async (HttpContext ctx, ChessLabService lab, ITenantResolver resolver, CancellationToken ct) =>
         {
+            var tenant = await resolver.ResolveAsync(ctx, ct);
+            return Results.Json(lab.ListJobs().Where(job => OwnsLabJob(job, tenant.TenantId)));
+        }).WithTags("chess-lab");
+
+        app.MapGet("/chess/lab/jobs/{jobId}", async (HttpContext ctx, string jobId, ChessLabService lab,
+            ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var job = lab.GetJob(jobId);
+            return OwnsLabJob(job, (await resolver.ResolveAsync(ctx, ct)).TenantId) ? Results.Json(job) : Results.NotFound();
+        }).WithTags("chess-lab");
+
+        app.MapGet("/chess/lab/jobs/{jobId}/events", async (HttpContext ctx, string jobId, ChessLabService lab, ITenantResolver resolver, CancellationToken ct) =>
+        {
+            if (!OwnsLabJob(lab.GetJob(jobId), (await resolver.ResolveAsync(ctx, ct)).TenantId)) { ctx.Response.StatusCode = 404; return; }
             var reader = lab.EventReader(jobId);
             if (reader is null) { ctx.Response.StatusCode = 404; return; }
             ctx.Response.Headers.ContentType = "text/event-stream";
@@ -255,8 +270,9 @@ internal static class ChessEndpoints
         // to late viewers and serves any number of them. `after` is the last seq a client
         // rendered; the stream resumes from the next line the ring still holds.
         app.MapGet("/chess/lab/jobs/{jobId}/terminal", async (
-            HttpContext ctx, string jobId, long? after, ChessLabService lab, CancellationToken ct) =>
+            HttpContext ctx, string jobId, long? after, ChessLabService lab, ITenantResolver resolver, CancellationToken ct) =>
         {
+            if (!OwnsLabJob(lab.GetJob(jobId), (await resolver.ResolveAsync(ctx, ct)).TenantId)) { ctx.Response.StatusCode = 404; return; }
             var terminal = lab.Terminal(jobId);
             if (terminal is null) { ctx.Response.StatusCode = 404; return; }
             ctx.Response.Headers.ContentType = "text/event-stream";
@@ -270,8 +286,10 @@ internal static class ChessEndpoints
             }
         }).WithTags("chess-lab");
 
-        app.MapGet("/chess/lab/jobs/{jobId}/terminal.txt", (string jobId, ChessLabService lab) =>
+        app.MapGet("/chess/lab/jobs/{jobId}/terminal.txt", async (HttpContext ctx, string jobId, ChessLabService lab,
+            ITenantResolver resolver, CancellationToken ct) =>
         {
+            if (!OwnsLabJob(lab.GetJob(jobId), (await resolver.ResolveAsync(ctx, ct)).TenantId)) return Results.NotFound();
             // The on-disk transcript is complete; the in-memory ring is bounded.
             if (lab.GetJob(jobId)?.Artifacts.TryGetValue("transcript.log", out var file) == true
                 && File.Exists(file))
@@ -284,9 +302,11 @@ internal static class ChessEndpoints
             return Results.Text(sb.ToString(), "text/plain; charset=utf-8");
         }).WithTags("chess-lab");
 
-        app.MapGet("/chess/lab/jobs/{jobId}/artifact/{name}", (string jobId, string name, ChessLabService lab) =>
+        app.MapGet("/chess/lab/jobs/{jobId}/artifact/{name}", async (HttpContext ctx, string jobId, string name, ChessLabService lab,
+            ITenantResolver resolver, CancellationToken ct) =>
         {
             var job = lab.GetJob(jobId);
+            if (!OwnsLabJob(job, (await resolver.ResolveAsync(ctx, ct)).TenantId)) return Results.NotFound();
             if (job is null || !job.Artifacts.TryGetValue(name, out var path) || !File.Exists(path))
                 return Results.NotFound();
             // Content type follows the artifact's extension.
@@ -300,10 +320,11 @@ internal static class ChessEndpoints
             return Results.File(path, contentType, name);
         }).WithTags("chess-lab");
 
-        app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (string jobId,
-            ChessLabService lab, CancellationToken ct) =>
+        app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (HttpContext ctx, string jobId,
+            ChessLabService lab, ITenantResolver resolver, CancellationToken ct) =>
         {
             var job = lab.GetJob(jobId);
+            if (!OwnsLabJob(job, (await resolver.ResolveAsync(ctx, ct)).TenantId)) return Results.NotFound();
             if (job is null || !job.Artifacts.TryGetValue("games.pgn", out var path) || !File.Exists(path))
                 return Results.NotFound(new { error = "no games.pgn artifact" });
             if (job.State is ChessLabJobState.Pending or ChessLabJobState.Running)
@@ -316,6 +337,19 @@ internal static class ChessEndpoints
 
     internal static bool OwnsPlaySession(PlaySession? session, string tenantId) =>
         session is not null && string.Equals(session.TenantId, tenantId, StringComparison.Ordinal);
+
+    internal static bool OwnsLabJob(ChessLabJob? job, string tenantId) =>
+        !string.IsNullOrWhiteSpace(tenantId) && job?.Requester is { } requester
+        && string.Equals(requester.TenantId, tenantId, StringComparison.Ordinal);
+
+    internal static OperationPrincipal? RequestPrincipal(TenantContext tenant) => string.IsNullOrWhiteSpace(tenant.TenantId) ? null : tenant.AuthKind switch
+    {
+        "browser" when tenant.Claims.TryGetValue("user_id", out var user) && !string.IsNullOrWhiteSpace(user)
+            => new(tenant.TenantId, user, "browser", tenant.Claims.GetValueOrDefault("provider")),
+        "api_key" when tenant.Claims.TryGetValue("key_prefix", out var key) && !string.IsNullOrWhiteSpace(key)
+            => new(tenant.TenantId, key, "api_key"),
+        _ => null,
+    };
 
     private static bool TryParseKind(string? kind, out ChessLabJobKind parsed) => kind?.ToLowerInvariant() switch
     {
