@@ -11,6 +11,12 @@ in `LAPLACE_IIS_INSTALLATION` in the machine environment file; repeating
 `Install-LaplaceSite.ps1` uses that declaration.
 Repair preserves the last successfully selected release in `web/active.json`;
 it does not revert an ordinary publication to the initial setup package.
+Setup also retains read-only IIS application-pool grants enrolled by companion
+installers on the public runtime. It collects them before replacing directory ACLs
+and applies them to `web`, so subsequent releases inherit the same access.
+The optional `public_runtime_readers` declaration adds explicit account names or
+SIDs. These readers receive only read/execute access to public runtime files;
+`agent` and `state` retain their separate permissions.
 
 The declaration specifies the host, HTTPS origin, runtime and published package
 directories, site/pool names, deployer SID, database selection and connection budget,
@@ -65,6 +71,12 @@ An explicit missing executable is reported unavailable instead of replaced by a
 different installation. Otherwise the application uses its packaged `uci`
 directory before older tool/build discovery. The separate Laplace-UCI connector
 retains its own declared engine profile; publication does not silently repoint it.
+A connector profile that explicitly follows `web/active.json` uses each published
+UCI release. Publication preserves the selection file's ACL during atomic replacement
+and grants the enrolled runtime readers to a new release before copying its files.
+This prevents API setup or publication from breaking the separately installed UCI
+connector. Run `laplace-uci-connect verify --profile <installed-profile>` after a
+publication to exercise that connector and its selected engine, not only API health.
 
 To publish an already prepared package:
 

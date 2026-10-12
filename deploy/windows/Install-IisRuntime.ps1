@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
 . "$PSScriptRoot/iis-runtime.ps1"
+. "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
 $chessAccess=@(Get-IisChessAccess $c)
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
@@ -81,7 +82,7 @@ if($Enrollment){
     try{$e=([Net.NetworkCredential]::new('', $secure)).Password | ConvertFrom-Json}finally{$secure.Dispose()}
     if($e.role -ne $c.role -or $e.address -ne $c.address -or $e.host -ne $c.host -or -not $e.role_id -or -not $e.secret_id){throw 'Workload enrollment differs from the declared installation.'}
 }elseif(-not(Test-Path (Join-Path $private 'secret-id'))){throw 'Initial setup requires the scoped workload enrollment.'}
-foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','Publish-IisRuntime.ps1'){
+foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','Publish-IisRuntime.ps1'){
     if(-not(Test-Path (Join-Path $PSScriptRoot $file))){throw "Missing installation script: $file"}
 }
 if($c.environment.LAPLACE_DATA -and -not(Test-Path -LiteralPath $c.environment.LAPLACE_DATA -PathType Container)){throw 'Declared source data directory is missing.'}
@@ -101,11 +102,13 @@ try {
     $pool.Recycling.PeriodicRestart.Time=[TimeSpan]::Zero
     $manager.CommitChanges()
 } finally {$manager.Dispose()}
+$runtimeReaders=@(Get-IisRuntimeReaders $c)
 Protect-IisDirectory $root 'ReadAndExecute' 'ReadAndExecute'
 Protect-IisDirectory $private
 Protect-IisDirectory $state 'ReadAndExecute'
 foreach($leaf in 'keys','logs','output'){Protect-IisDirectory (Join-Path $state $leaf) 'Modify'}
 Protect-IisDirectory $web 'ReadAndExecute' 'Modify'
+Grant-IisRuntimeReaders $web $runtimeReaders
 Protect-IisDirectory (Join-Path $root 'receipts') 'ReadAndExecute' 'Modify'
 if($c.environment.LAPLACE_DATA){
     if(-not(Test-Path -LiteralPath $c.environment.LAPLACE_DATA -PathType Container)){throw 'Declared source data directory is missing.'}
@@ -129,8 +132,9 @@ if(Test-Path -LiteralPath $release){$null=Test-IisPackage $release}else{
 }
 $webConfig=Join-Path $web 'web.config'
 $oldConfig=if(Test-Path $webConfig){Get-Content $webConfig -Raw}else{$null}
-Write-IisAtomic $webConfig (Get-IisWebConfig $c.revision (Join-Path $state 'logs'))
-foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
+Write-IisPublicAtomic $webConfig (Get-IisWebConfig $c.revision (Join-Path $state 'logs')) $runtimeReaders
+foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-access.ps1') -Destination (Join-Path $root 'iis-access.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-runtime.ps1') -Destination (Join-Path $root 'iis-runtime.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Publish-IisRuntime.ps1') -Destination (Join-Path $root 'Publish-IisRuntime.ps1') -Force
 $service=$c.pool+'-credentials'
@@ -228,6 +232,6 @@ Write-IisAtomic $c.machine_env (($machine -join "`r`n")+"`r`n")
 $verified.revision=$c.revision;$verified.credential_source='openbao-agent';$verified.legacy_site_retired=$c.legacy_site
 $receiptPath=Join-Path $root ('receipts/setup-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')+'.json')
 Write-IisAtomic $receiptPath (Iis-Json $verified)
-Write-IisAtomic $selection (Iis-Json @{revision=$c.revision})
+Write-IisPublicAtomic $selection (Iis-Json @{revision=$c.revision}) $runtimeReaders
 if($Enrollment){Remove-Item -LiteralPath $Enrollment -Force}
 Write-Host "Installed and verified $($c.origin). Receipt: $receiptPath"

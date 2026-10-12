@@ -13,6 +13,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
+  windows-runtime-access:
+    name: Windows runtime consumer permissions
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Exercise publication permissions on NTFS
+        shell: pwsh
+        run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP
+
   contract:
     name: Static CI/CD contract
     runs-on: ubuntu-24.04
