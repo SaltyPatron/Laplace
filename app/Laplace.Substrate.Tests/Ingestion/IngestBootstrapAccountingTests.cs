@@ -199,8 +199,30 @@ public sealed class IngestBootstrapAccountingTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class InsertAllWriter : ISubstrateWriter, IConsensusFoldMetrics
+    [Fact]
+    public async Task BulkCompletion_AccountsDeferredRowsOncePerRun()
     {
+        var writer = new InsertAllWriter(deferContent: true);
+        var runner = new IngestRunner(writer, new EmptyReader(), NullLoggerFactory.Instance);
+        for (int run = 0; run < 2; run++)
+        {
+            var result = await runner.RunAsync(new BootstrapThenContentDecomposer(), IngestRunOptions.Default with
+            {
+                SkipLayerOrderingCheck = true,
+                SkipSourceCompletion = true,
+            });
+            Assert.Equal(2, result.EntitiesInserted);
+            Assert.Equal(1, result.PhysicalitiesInserted);
+            Assert.Equal(1, result.AttestationsInserted);
+            Assert.Equal(1, result.BootstrapRowsInserted);
+            Assert.Equal(3, result.PayloadRowsInserted);
+        }
+    }
+
+    private sealed class InsertAllWriter(bool deferContent = false) : ISubstrateWriter, IConsensusFoldMetrics, IDeferredApplyMetrics
+    {
+        private (long Entities, long Physicalities, long Attestations) _pending;
+        public (long Entities, long Physicalities, long Attestations) DeferredRowsInserted { get; private set; } = (11, 13, 17);
         public List<string> AppliedUnits { get; } = [];
         public int BootstrapWorkingSets { get; private set; }
         public Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
@@ -234,6 +256,10 @@ public sealed class IngestBootstrapAccountingTests
         {
             Assert.True(Begun, "bulk-run completion cannot precede bulk-run begin");
             Completed = true;
+            DeferredRowsInserted = (DeferredRowsInserted.Entities + _pending.Entities,
+                DeferredRowsInserted.Physicalities + _pending.Physicalities,
+                DeferredRowsInserted.Attestations + _pending.Attestations);
+            _pending = default;
             return Task.CompletedTask;
         }
 
@@ -254,6 +280,13 @@ public sealed class IngestBootstrapAccountingTests
             ObservationsAccumulated += attestations;
             CellsFolded += attestations;
             if (attestations > 0) ConsensusUpsertCalls++;
+            if (deferContent && change.Metadata.SourceContentUnitName == "content/test")
+            {
+                _pending = (_pending.Entities + entities, _pending.Physicalities + physicalities,
+                    _pending.Attestations + attestations);
+                return Task.FromResult(new ApplyResult(entities, 0, physicalities, 0, attestations, 0,
+                    1, TimeSpan.Zero, TrunkShortcircuitHit: false));
+            }
             return Task.FromResult(new ApplyResult(
                 entities, entities,
                 physicalities, physicalities,

@@ -106,14 +106,26 @@ public class StagedSourceWriterTests
         await using var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await using var staged = Staged(inner);
         await staged.ApplyWorkingSetAsync(Change(source, "once", claim));
+        Task fileReceipt = staged.CompleteFileAsync("once");
+        Assert.False(fileReceipt.IsCompleted);
+        Assert.Equal(0, staged.DeferredRowsInserted.Attestations);
         await staged.CompleteBulkRunAsync();
+        await fileReceipt.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(staged.LastFoldDrainWallClock > TimeSpan.Zero);
+        Assert.True(staged.LastFoldSpanWallClock >= staged.LastFoldDrainWallClock);
+        Assert.True(staged.LastWriterMaintenanceWallClock > TimeSpan.Zero);
+        Assert.Equal(1, staged.DeferredRowsInserted.Attestations);
         var standing = await StandingAsync(subject, type, obj);
         Assert.NotNull(standing);
 
         // The same claim again, and beside it a new one: only the new one folds.
         var fresh = Claim(subject, type, obj, source, 1_000_000_000, context: H(34));
         await staged.ApplyWorkingSetAsync(Change(source, "again", claim, fresh));
+        Task secondReceipt = staged.CompleteFileAsync("again");
+        Assert.False(secondReceipt.IsCompleted);
         await staged.CompleteBulkRunAsync();
+        await secondReceipt.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, staged.DeferredRowsInserted.Attestations);
         var after = await StandingAsync(subject, type, obj);
         Assert.Equal(2, after!.Value.Witnesses);
 
@@ -191,12 +203,18 @@ public class StagedSourceWriterTests
         Hash128 isA = await RelationAsync("IS_A");
         Hash128 hasPart = await RelationAsync("HAS_PART");
         var entities = ImmutableArray.Create(new EntityRow(subject, 2, H(63)), new EntityRow(obj, 2, H(63)));
+        var forms = entities.Select(entity => new PhysicalityRow(
+            PhysicalityId.Compute(entity.Id, PhysicalityType.Content), entity.Id, source, PhysicalityType.Content,
+            1, 0, 0, 0, Hilbert128.Encode([1, 0, 0, 0]), null, 0, null, null, 0)).ToImmutableArray();
         await using var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await using (var first = Staged(inner))
         {
             await first.ApplyWorkingSetAsync(Change(source, "lexicon", Claim(subject, isA, obj, source, 1_000_000_000))
-                with { Entities = entities });
+                with { Entities = entities, Physicalities = forms });
             await first.CompleteBulkRunAsync();
+            Assert.Equal(2, first.DeferredRowsInserted.Entities);
+            Assert.Equal(2, first.DeferredRowsInserted.Physicalities);
+            Assert.Equal(1, first.DeferredRowsInserted.Attestations);
         }
         int[] isABit = await BitsAsync("SELECT ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('IS_A'))]");
         foreach (Hash128 entity in new[] { subject, obj })
@@ -206,6 +224,9 @@ public class StagedSourceWriterTests
         {
             await second.ApplyWorkingSetAsync(Change(H(64), "meronymy", Claim(subject, hasPart, obj, H(64), 1_000_000_000)));
             await second.CompleteBulkRunAsync();
+            Assert.Equal(0, second.DeferredRowsInserted.Entities);
+            Assert.Equal(0, second.DeferredRowsInserted.Physicalities);
+            Assert.Equal(1, second.DeferredRowsInserted.Attestations);
         }
         int[] expected = await BitsAsync(
             "SELECT array_agg(b ORDER BY b) FROM (SELECT consensus.relation_highway_bit(laplace.relation_type_id(n)) b "

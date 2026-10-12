@@ -42,9 +42,9 @@ export function GlomeTab({
   );
   const maxOrd = useMemo(() => {
     let m = 0;
-    for (const v of packed) m = Math.max(m, v.ordinal);
+    for (const v of packed) m = Math.max(m, v.ordinal + Math.max(v.run_length, 1) - 1);
     for (const v of realized) m = Math.max(m, v.ordinal);
-    return Math.max(m, 1);
+    return m;
   }, [packed, realized]);
 
   const [selectedOrdinal, setSelectedOrdinal] = useState<number | null>(null);
@@ -60,21 +60,6 @@ export function GlomeTab({
   useEffect(() => {
     setSelectedOrdinal(null);
   }, [entity.id_hex]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      if (maxOrd < 1) return;
-      e.preventDefault();
-      setSelectedOrdinal((prev) => {
-        const cur = prev ?? (e.key === 'ArrowRight' ? 0 : 1);
-        if (e.key === 'ArrowRight') return Math.min(maxOrd, cur + 1);
-        return Math.max(1, cur - 1);
-      });
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [maxOrd]);
 
   const packedNodes = useMemo((): GlomeNode[] => {
     return packed.map((v) => ({
@@ -146,7 +131,14 @@ export function GlomeTab({
 
   return (
     <Panel title="Physicality trajectory" fill>
-      <Stack gap={3} className={styles.body}>
+      <Stack gap={3} className={styles.body} tabIndex={0} role="group" aria-label="Physicality trajectory navigation"
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+          if (maxOrd < 1 || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+          event.preventDefault();
+          const direction = event.key === 'ArrowRight' ? 1 : -1;
+          setSelectedOrdinal((previous) => Math.max(1, Math.min(maxOrd, (previous ?? (direction > 0 ? 0 : 1)) + direction)));
+        }}>
         <div className={styles.panes}>
           <section className={styles.pane}>
             <header className={styles.paneHead}>
@@ -200,7 +192,7 @@ export function GlomeTab({
             className={styles.scrubRange}
             type="range"
             min={1}
-            max={maxOrd}
+            max={Math.max(1, maxOrd)}
             value={selectedOrdinal ?? 1}
             disabled={maxOrd < 1}
             onChange={(e) => setSelectedOrdinal(Number(e.target.value))}
@@ -209,7 +201,7 @@ export function GlomeTab({
             {selectedChip
               ? <>{selectedChip.label} · ord {selectedChip.ordinal}
                   {selectedChip.runLength > 1 ? ` · rle ${selectedChip.runLength}` : ''}</>
-              : <span className={styles.chipMuted}>← → or scrub to link both panes</span>}
+              : <span className={styles.chipMuted}>Focus the trajectory and use ← →, or scrub to link both panes</span>}
           </div>
         </div>
 

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link as RouterLink, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
+import { useRouteText } from '../../layout/useRouteText';
 import { ErrorText, LoadingText, Muted, Panel } from '@ui';
 import { exploreNotFound } from '../api';
 import { EntityLink } from '../components/EntityLink';
@@ -12,17 +13,18 @@ import styles from './NotFoundExplorer.module.css';
 // anchor: nearest witnessed content by position (geodesic) and by shape
 // (Frechet), plus the deterministic decomposition, every piece a live link.
 export function NotFoundExplorer() {
-  const { ref = '' } = useParams();
-  const surface = useMemo(() => decodeURIComponent(ref), [ref]);
+  const surface = useRouteText('/explore/notfound/:ref', 'ref');
   const [data, setData] = useState<ExploreNotFoundResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
+    let stale = false;
     setData(null);
     setErr(null);
     exploreNotFound(surface)
-      .then(setData)
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+      .then((result) => { if (!stale) setData(result); })
+      .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
+    return () => { stale = true; };
   }, [surface]);
 
   if (err) return <ErrorText>{err}</ErrorText>;

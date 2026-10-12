@@ -17,6 +17,12 @@ public interface IConsensusFoldMetrics
     long HighwayMaskPairs => 0;
 }
 
+/// <summary>Lifetime totals for rows committed at bulk completion rather than returned by Apply.</summary>
+public interface IDeferredApplyMetrics
+{
+    (long Entities, long Physicalities, long Attestations) DeferredRowsInserted { get; }
+}
+
 public enum BulkRunCompletionPhase
 {
     ConsensusDrain,

@@ -132,11 +132,11 @@ export function placementBallPos(
   const dirLen = Math.hypot(xmX, y, zmZ);
   if (dirLen <= Number.EPSILON) return [0, 0, 0];
 
-  const fallbackRadius = Math.min(1, Math.hypot(xmX, y, zmZ, zmM) || 1);
+  const fallbackRadius = Math.min(1, Math.hypot(xmX, y, zmZ, zmM));
   const radius4 = Number.isFinite(n.radius) && n.radius >= 0
     ? Math.min(1, n.radius)
     : fallbackRadius;
-  const displayRadius = SHELL * Math.max(0.02, radius4);
+  const displayRadius = SHELL * radius4;
   const scale = displayRadius / dirLen;
   return [xmX * scale, y * scale, zmZ * scale];
 }
