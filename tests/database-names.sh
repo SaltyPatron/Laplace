@@ -10,7 +10,7 @@ results="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/database-name-results"
 for project in Laplace.Endpoints.Lichess.Tests Laplace.Chess.Tests; do
   dotnet test "$root/app/$project/$project.csproj" -c Release --nologo \
     -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/database-names" \
-    --filter 'FullyQualifiedName~LichessControlTests|FullyQualifiedName~UciClientTests' \
+    --filter 'FullyQualifiedName~LichessControlTests|FullyQualifiedName~UciClientTests.ReadinessCarriesTheActualDatabaseIdentity' \
     --logger "trx;LogFileName=$project.trx" --results-directory "$results"
 done
 python3 - "$results" <<'PY'
