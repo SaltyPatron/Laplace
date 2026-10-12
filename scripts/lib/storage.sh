@@ -1,33 +1,21 @@
 #!/usr/bin/env bash
-# Source before invoking tools so their scratch uses the dedicated build volume.
+# Source before invoking tools so scratch follows the host's configured work root.
+source "$(dirname "${BASH_SOURCE[0]}")/installation.sh"
 laplace_storage_init() {
-    local base scratch resolved checkout group
-    group=laplace-runner
+    local scratch resolved checkout group
+    group="${LAPLACE_BUILD_GROUP:-laplace-runner}"
     umask 0002
     checkout=$(realpath -m -- "${ROOT:-$PWD}") || return
     case "$checkout" in
         /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*)
             echo "Laplace checkouts must use permanent storage: $checkout" >&2; return 1 ;;
     esac
-    base=/build/laplace/work
-    if [[ -n "${LAPLACE_SCRATCH_ROOT:-}" && ! -d /build/laplace ]]; then
-        # A machine without the /build volume (Laplace-Operations' layout, deploy/linux/site.sh) names its scratch
-        # root explicitly; it must still be permanent, group-shared storage (checked below).
-        scratch="$LAPLACE_SCRATCH_ROOT"
-        resolved=$(realpath -m -- "$scratch") || return
-        case "$resolved" in
-            /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*)
-                echo "Laplace scratch must be permanent storage: $scratch" >&2; return 1 ;;
-        esac
-    else
-    mountpoint -q /build || { echo 'Laplace requires the /build volume' >&2; return 1; }
-    scratch="${LAPLACE_SCRATCH_ROOT:-$base/scratch}"
+    scratch="${LAPLACE_SCRATCH_ROOT:?Declare LAPLACE_WORK or LAPLACE_SCRATCH_ROOT}"
     resolved=$(realpath -m -- "$scratch") || return
     case "$resolved" in
-        /build/laplace/*) ;;
-        *) echo "Laplace scratch must resolve under /build/laplace: $scratch" >&2; return 1 ;;
+        /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*)
+            echo "Laplace scratch must be permanent storage: $scratch" >&2; return 1 ;;
     esac
-    fi
     mkdir -p -- "$resolved" || return
     if [[ -O "$resolved" ]]; then
         chgrp "$group" "$resolved" || return
@@ -47,7 +35,7 @@ laplace_storage_init() {
 laplace_share_directory() {
     local path="$1"
     [[ -d "$path" && ! -L "$path" && -O "$path" ]] || return 0
-    [[ "$(stat -c '%G' "$path")" == laplace-runner ]] || return 0
+    [[ "$(stat -c '%G' "$path")" == "${LAPLACE_BUILD_GROUP:-laplace-runner}" ]] || return 0
     chmod g+rws -- "$path"
 }
 

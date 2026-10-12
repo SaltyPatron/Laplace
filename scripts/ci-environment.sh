@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Shared environment owner for composite actions and the reserved lifecycle.
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/database.sh"
 laplace_ci_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-set +u
-source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-set -u
+if [[ "${LAPLACE_SETUP_USE_CMAKE:-true}" == true ]]; then
+  set +u
+  source "${LAPLACE_ONEAPI_SETVARS:-/opt/intel/oneapi/setvars.sh}" --force >/dev/null 2>&1
+  set -u
+fi
 export LD_LIBRARY_PATH="$laplace_ci_root/build/engine/core:$laplace_ci_root/build/engine/dynamics:$laplace_ci_root/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-export PGDATABASE="${PGDATABASE:-laplace}"
-export LAPLACE_QUERY_DB="${LAPLACE_QUERY_DB:-laplace}"
-export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE}}"
 export MSBUILDDISABLENODEREUSE=1 UseSharedCompilation=false
 export DOTNET_CLI_USE_MSBUILD_SERVER=0 MSBUILDUSESERVER=0
 laplace_ci_cpus="$(nproc 2>/dev/null || echo 1)"
@@ -31,7 +31,7 @@ fi
 if [[ "${LAPLACE_SETUP_USE_CMAKE:-true}" == true ]]; then
   laplace_ci_cmake_args=(
     --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake"
-    --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake")
+    --work "${LAPLACE_WORK_ROOT}/cmake")
   if [[ "${LAPLACE_PROVISION_TOOLS:-0}" == 1 ]]; then
     laplace_ci_cmake_args+=(--ensure)
   fi

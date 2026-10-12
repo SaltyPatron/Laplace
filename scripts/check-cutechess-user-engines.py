@@ -439,9 +439,8 @@ def main(argv=None):
     for name in ("prefix", "gui_build_receipt", "cli_binary", "cli_build_receipt", "output_dir"):
         path = getattr(args, name)
         require(path.is_absolute(), "acceptance paths must be absolute")
-    require(not args.output_dir.exists() and args.output_dir.parent.is_dir()
-            and args.output_dir.parent.resolve().is_relative_to(Path("/build/laplace")),
-            "output must be a fresh directory below permanent /build/laplace")
+    require(not args.output_dir.exists() and args.output_dir.parent.is_dir(),
+            "output must be a fresh directory with an existing parent")
     args.output_dir.mkdir(mode=0o700)
     output = args.output_dir.resolve()
     result = {"schema": SCHEMA, "status": "failed", "uid": os.geteuid(),

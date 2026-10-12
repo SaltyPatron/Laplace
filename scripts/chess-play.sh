@@ -29,10 +29,6 @@ laplace_storage_init
 API="${LAPLACE_API:-http://hart-server:8080}"
 DEPTH="${LAPLACE_DEPTH:-6}"
 STATE="$(realpath -m -- "${CHESS_STATE:-$TMPDIR/chess-$UID.state}")"
-case "$STATE" in
-    /build/laplace/work/*) ;;
-    *) echo "Chess state must use /build/laplace/work: $STATE" >&2; exit 1 ;;
-esac
 mkdir -p -- "$(dirname "$STATE")"
 START_FEN="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 

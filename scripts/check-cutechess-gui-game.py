@@ -573,8 +573,7 @@ def main(argv=None):
         require(value.is_absolute(), "GUI game paths must be absolute")
     if args.worker:
         return worker(args)
-    require(not args.output_dir.exists() and args.output_dir.parent.is_dir()
-            and args.output_dir.parent.resolve().is_relative_to(Path("/build/laplace")),
+    require(not args.output_dir.exists() and args.output_dir.parent.is_dir(),
             "use a fresh permanent GUI game evidence directory")
     args.output_dir.mkdir(mode=0o700)
     output = args.output_dir.resolve()

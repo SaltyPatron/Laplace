@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from installation_paths import configured
 import re
 import stat
 import subprocess
@@ -267,13 +268,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("select-pin", "source", "prepare-source", "installed", "build-inputs", "restart-needed", "archive"))
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
-    parser.add_argument("--external", type=Path, default=Path(os.environ.get("LAPLACE_EXTERNAL", "/build/external")))
-    parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18")))
+    parser.add_argument("--external", type=Path, default=None)
+    parser.add_argument("--prefix", type=Path, default=None)
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--server-version-num", help="actual SHOW server_version_num read by the activation owner")
     args = parser.parse_args(argv)
     try:
         selected = contract(args.contract)
+        if args.mode in ("select-pin", "source", "prepare-source"):
+            args.external = args.external or configured("LAPLACE_EXTERNAL")
+        elif args.mode != "archive":
+            args.prefix = args.prefix or configured("LAPLACE_PG_PREFIX")
         if args.mode == "select-pin":
             result = {"pin_changed": select_pin(args.external / "PINS.tsv", selected)}
         elif args.mode == "source":

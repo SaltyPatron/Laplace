@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from installation_paths import configured
 import platform
 import queue
 import shutil
@@ -31,8 +32,7 @@ def load_lock():
 
 
 def external_root():
-    default = ROOT / "external" if platform.system() == "Windows" else Path("/build/external")
-    return Path(os.environ.get("LAPLACE_EXTERNAL", str(default))).absolute()
+    return configured("LAPLACE_EXTERNAL")
 
 
 def installed_source(prefix=None):

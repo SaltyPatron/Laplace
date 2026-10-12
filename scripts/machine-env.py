@@ -6,6 +6,13 @@ import os
 from pathlib import Path
 import re
 import shlex
+import hashlib
+
+
+def machine_file(process):
+    if process.get('LAPLACE_MACHINE_ENV'):
+        return Path(process['LAPLACE_MACHINE_ENV'])
+    return Path(process.get('PROGRAMDATA', 'C:/ProgramData')) / 'Laplace/machine.env' if os.name == 'nt' else Path('/etc/laplace/machine.env')
 
 
 def resolve(path, process, explicit=False):
@@ -45,12 +52,86 @@ def resolve(path, process, explicit=False):
     return declarations
 
 
+def paths(path, process, checkout):
+    """Resolve operational directories from the host declaration, without mount names."""
+    declarations = resolve(path, process, bool(process.get('LAPLACE_MACHINE_ENV')))
+    values = dict(declarations)
+    values.update({k: v for k, v in process.items() if v})
+    result = dict(declarations)
+
+    def directory(name, value):
+        value = values.get(name) or value
+        if not value or not Path(value).is_absolute() or Path(value) == Path(Path(value).anchor) or any(c in value for c in '\r\n\0'):
+            raise ValueError(f'Declare an absolute directory for {name} in {path} or the process environment')
+        result[name] = values[name] = str(Path(value))
+        return values[name]
+
+    identity = hashlib.sha256(os.fsencode(Path(checkout).resolve())).hexdigest()[:16]
+    # Installed commands do not need a compiler workspace. Resolve the roots
+    # declared for this host; consumers require only the directories they use.
+    if values.get('LAPLACE_BUILD') or values.get('LAPLACE_BUILD_VOLUME') or values.get('LAPLACE_BUILD_ROOT'):
+        build = directory('LAPLACE_BUILD', values.get('LAPLACE_BUILD_VOLUME') or values.get('LAPLACE_BUILD_ROOT'))
+        build_root = directory('LAPLACE_BUILD_ROOT', str(Path(build) / 'laplace-mono' / 'worktrees' / identity))
+        directory('LAPLACE_BUILD_DIRECTORY', str(Path(build_root) / 'build'))
+        directory('LAPLACE_DEPS_BUILD', str(Path(build) / 'laplace-mono' / 'dependencies'))
+    if values.get('LAPLACE_WORK') or values.get('LAPLACE_WORK_ROOT'):
+        work = directory('LAPLACE_WORK', values.get('LAPLACE_WORK_ROOT'))
+        work_root = directory('LAPLACE_WORK_ROOT', str(Path(work) / 'laplace-mono'))
+        directory('LAPLACE_SCRATCH_ROOT', str(Path(work_root) / 'scratch'))
+        directory('LAPLACE_LOCK_ROOT', values.get('LAPLACE_LOCKS') or str(Path(work_root) / 'locks'))
+    elif values.get('LAPLACE_LOCK_ROOT') or values.get('LAPLACE_LOCKS'):
+        directory('LAPLACE_LOCK_ROOT', values.get('LAPLACE_LOCKS'))
+    if values.get('LAPLACE_EXTERNAL') or values.get('LAPLACE_DEPSRC'):
+        directory('LAPLACE_EXTERNAL', values.get('LAPLACE_DEPSRC'))
+    if values.get('LAPLACE_PG_PREFIX') or values.get('LAPLACE_PG_DIR'):
+        directory('LAPLACE_PG_PREFIX', values.get('LAPLACE_PG_DIR'))
+    return result
+
+
+def database(path, process):
+    result = resolve(path, process, bool(process.get('LAPLACE_MACHINE_ENV')))
+    values = {**result, **{k: v for k, v in process.items() if v}}
+    for name, value in {
+        'PGHOST': values.get('LAPLACE_PGHOST', '/tmp'),
+        'PGPORT': values.get('LAPLACE_PGPORT', '5432'),
+        'PGUSER': values.get('LAPLACE_KNOWLEDGE_ROLE') or values.get('LAPLACE_ROLE'),
+        'PGDATABASE': values.get('LAPLACE_DBNAME', 'laplace-mono'),
+    }.items():
+        result[name] = values.get(name) or value
+        if not result[name]:
+            raise ValueError(f'Declare {name} or its LAPLACE role/connection setting; no administrator identity is assumed')
+    def connection(host, port, user, db, application=False):
+        # Npgsql quoted values preserve semicolons and quotes in configured names.
+        fields = {'Host': host, 'Port': port, 'Username': user, 'Database': db}
+        sslmode = (values.get('LAPLACE_APP_DB_SSLMODE') if application else None) or values.get('LAPLACE_DB_SSLMODE') or values.get('PGSSLMODE')
+        if sslmode:
+            fields['SSL Mode'] = sslmode.replace('-', '')
+        certificate = (values.get('LAPLACE_APP_DB_ROOT_CERTIFICATE') if application else None) or values.get('LAPLACE_DB_ROOT_CERTIFICATE') or values.get('PGSSLROOTCERT')
+        if certificate:
+            fields['Root Certificate'] = certificate
+        return ';'.join(k + '="' + v.replace('"', '""') + '"' for k, v in fields.items())
+    result['LAPLACE_DB'] = values.get('LAPLACE_DB') or connection(*(result[k] for k in ('PGHOST', 'PGPORT', 'PGUSER', 'PGDATABASE')))
+    result['LAPLACE_QUERY_DB'] = values.get('LAPLACE_QUERY_DB') or result['PGDATABASE']
+    if values.get('LAPLACE_APP_DBNAME'):
+        result['LAPLACE_APP_DB'] = values.get('LAPLACE_APP_DB') or connection(
+            values.get('LAPLACE_APP_PGHOST') or result['PGHOST'],
+            values.get('LAPLACE_APP_PGPORT') or result['PGPORT'],
+            values.get('LAPLACE_APP_ROLE') or values.get('LAPLACE_ROLE') or result['PGUSER'],
+            values['LAPLACE_APP_DBNAME'], application=True)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--format', choices=('shell', 'json'), default='shell')
+    parser.add_argument('--paths', action='store_true', help='Resolve configured build, work, scratch and dependency roots')
+    parser.add_argument('--database', action='store_true', help='Resolve the declared monorepo database identity')
+    parser.add_argument('--checkout', type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
-    path = Path(os.environ.get('LAPLACE_MACHINE_ENV') or '/etc/laplace/machine.env')
-    result = resolve(path, os.environ, bool(os.environ.get('LAPLACE_MACHINE_ENV')))
+    path = machine_file(os.environ)
+    result = paths(path, os.environ, args.checkout) if args.paths else resolve(path, os.environ, bool(os.environ.get('LAPLACE_MACHINE_ENV')))
+    if args.database:
+        result.update(database(path, os.environ))
     if args.format == 'json':
         print(json.dumps(result))
     else:

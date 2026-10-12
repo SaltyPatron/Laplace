@@ -12,6 +12,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from installation_paths import configured
 
 from ci_managed_projects import load_projects as load_managed_projects
 
@@ -136,7 +137,7 @@ def fingerprint(root: Path, suite: str) -> tuple[str, dict]:
 def cache_root(value: str | None) -> Path:
     if value:
         return Path(value)
-    return Path(os.environ.get("LAPLACE_QUALIFICATION_ROOT", "/build/laplace/work/qualification"))
+    return Path(os.environ["LAPLACE_QUALIFICATION_ROOT"]) if os.environ.get("LAPLACE_QUALIFICATION_ROOT") else configured("LAPLACE_WORK_ROOT", "qualification")
 
 
 def receipt_path(root: Path, suite: str, digest: str) -> Path:

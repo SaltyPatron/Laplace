@@ -2,25 +2,32 @@
 # Reconcile shared parent directories without replacing users or database files.
 # sudo bash scripts/setup-storage.sh [--check]
 set -euo pipefail
-group=laplace-runner
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/lib/installation.sh"
+group="${LAPLACE_BUILD_GROUP:-laplace-runner}"
 mode="${1:---repair}"
 [[ "$mode" == --repair || "$mode" == --check ]] || exit 2
 getent group "$group" >/dev/null
 umask 0002
-for volume in /build /opt/laplace/pgdata /var/lib/pgwal /pgtemp; do
-    mountpoint -q "$volume" || { echo "Missing storage mount: $volume" >&2; exit 1; }
+# This owner repairs compilation/work directories. PostgreSQL data, WAL and
+# tablespaces retain their database-owner modes and are managed by cluster setup.
+paths=("$LAPLACE_BUILD_ROOT" "$LAPLACE_WORK_ROOT" "$LAPLACE_SCRATCH_ROOT"
+       "$LAPLACE_DEPS_BUILD" "$LAPLACE_LOCK_ROOT" "$LAPLACE_WORK_ROOT/runner" "$LAPLACE_WORK_ROOT/recovery")
+# Validate the complete selection before changing any directory permissions.
+for path in "${paths[@]}"; do
+    resolved=$(realpath -m -- "$path")
+    [[ "$resolved" != / && ! -L "$path" && ! -e "$path/PG_VERSION" ]] || {
+        echo "Expected a workspace directory, not a filesystem root, cluster or symlink: $path" >&2; exit 1;
+    }
+    for protected in "${LAPLACE_PGDATA:-}" "${LAPLACE_PG_DATA:-}" "${LAPLACE_PGWAL:-}" "${LAPLACE_PG_WAL:-}" \
+        "${LAPLACE_PGTEMP:-}" "${LAPLACE_PG_TEMP:-}" "${LAPLACE_APP_DIR:-${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/app}"; do
+        [[ -n "$protected" ]] || continue
+        protected=$(realpath -m -- "$protected")
+        if [[ "$resolved/" == "$protected/"* || "$protected/" == "$resolved/"* ]]; then
+            echo "Workspace overlaps database or serving state: $path; no permissions changed" >&2; exit 1
+        fi
+    done
 done
-
-# Active Laplace storage is named for Laplace. Preserve an existing scratch tree
-# during repair, but stop creating or advertising the old product label.
-if [[ "$mode" == --repair && -d /build/laplace/work/legacy-scratch && ! -e /build/laplace/work/scratch ]]; then
-    mv /build/laplace/work/legacy-scratch /build/laplace/work/scratch
-fi
-
-paths=(/build/laplace /build/laplace/build /build/laplace/work
-       /build/laplace/work/scratch /build/laplace/work/runner /build/laplace/worktrees
-       /build/laplace/recovery /build/laplace/runner
-       /opt/laplace/pgdata /var/lib/pgwal /pgtemp)
 failed=0
 for path in "${paths[@]}"; do
     [[ ! -L "$path" && ! -e "$path/PG_VERSION" ]] || {
@@ -31,59 +38,43 @@ for path in "${paths[@]}"; do
         chgrp "$group" "$path"
         chmod 2770 "$path"
     fi
-    if [[ ! -d "$path" || $(stat -c %G "$path") != "$group" || $(stat -c %a "$path") != 2770 ]]; then
+    if [[ ! -d "$path" || $(stat -c %G "$path") != "$group" || ! -g "$path" || ! -w "$path" ]]; then
         echo "Shared-directory drift: $path (requires $group 2770)" >&2
         failed=1
     fi
 done
-# Ingest runtimes are created later by the operator and the runner. The same
-# g+rws repair setup-host uses on the checkout applies here. PostgreSQL data,
-# WAL, and the serving release tree are not in this walk.
-if [[ -d /opt/laplace/ingest && ! -L /opt/laplace/ingest ]]; then
-    if [[ "$mode" == --repair ]]; then
-        find /opt/laplace/ingest -xdev ! -type l -exec chgrp "$group" {} +
-        find /opt/laplace/ingest -xdev -type d -exec chmod g+rws {} +
-        find /opt/laplace/ingest -xdev -type f -exec chmod g+rwX {} +
-    fi
-    drift="$(find /opt/laplace/ingest -xdev -type d ! -perm -g+w -print -quit)"
-    if [[ -n "$drift" ]]; then
-        echo "Shared-directory drift: $drift (requires group write)" >&2
-        failed=1
-    fi
-fi
 [[ "$failed" == 0 ]] || exit "$failed"
 if [[ "$mode" == --repair ]]; then
     # Only workspace trees are recursive. Never apply build permissions to the
     # data/WAL/tablespace contents or follow a workspace symlink into them.
-    immutable_inputs=$(readlink -m /opt/laplace/package-inputs/postgresql)
-    immutable_releases=$(readlink -m /opt/laplace/releases)
-    for path in /build/laplace/build /build/laplace/work /build/laplace/worktrees; do
+    immutable_inputs=$(readlink -m "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/package-inputs/postgresql")
+    immutable_releases=$(readlink -m "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/releases")
+    for path in "$LAPLACE_BUILD_ROOT" "$LAPLACE_WORK_ROOT"; do
         find "$path" -xdev \( -path "$immutable_inputs" -o -path "$immutable_releases" \) -prune -o ! -type l -exec chgrp "$group" {} +
         find "$path" -xdev \( -path "$immutable_inputs" -o -path "$immutable_releases" \) -prune -o -type d -exec chmod g+rws {} +
         find "$path" -xdev \( -path "$immutable_inputs" -o -path "$immutable_releases" \) -prune -o -type f -exec chmod g+rwX {} +
     done
     while read -r unit _; do
-        [[ "$unit" == actions.runner.SaltyPatron-Laplace.hart-server.service ]] || continue
+        [[ "$unit" == "${LAPLACE_RUNNER_UNIT:-$unit}" ]] || continue
         [[ $(systemctl show "$unit" -p User --value) == laplace-runner ]] || continue
-        scratch=/build/laplace/work/scratch
+        scratch="$LAPLACE_SCRATCH_ROOT"
         dropin="/etc/systemd/system/$unit.d"
         install -d -m 0755 "$dropin"
-        cat > "$dropin/50-laplace-storage.conf" <<EOF
-[Unit]
-RequiresMountsFor=/build /var/lib/agents
-
-[Service]
-Group=laplace-runner
-UMask=0002
-Environment=TMPDIR=$scratch
-Environment=TMP=$scratch
-Environment=TEMP=$scratch
-EOF
-    done < <(systemctl list-unit-files 'actions.runner.SaltyPatron-Laplace.hart-server.service' --no-legend)
+        python3 - "$LAPLACE_WORK_ROOT" "$scratch" "$group" > "$dropin/50-laplace-storage.conf" <<'PY'
+import sys
+def quote(value):
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+work, scratch, group = sys.argv[1:]
+print('[Unit]\nRequiresMountsFor=' + quote(work))
+print('\n[Service]\nGroup=' + group + '\nUMask=0002')
+for name in ('TMPDIR', 'TMP', 'TEMP'):
+    print('Environment=' + quote(name + '=' + scratch))
+PY
+    done < <(systemctl list-unit-files 'actions.runner.SaltyPatron-Laplace.*.service' --no-legend)
     systemctl daemon-reload
     operator="${LAPLACE_OPERATOR:-${SUDO_USER:-}}"
     if [[ -n "$operator" && "$operator" != root && "$operator" != laplace-runner ]]; then
-        probe=$(mktemp -d /build/laplace/work/group-writer-proof.XXXXXXXX)
+        probe=$(mktemp -d "$LAPLACE_WORK_ROOT/group-writer-proof.XXXXXXXX")
         trap 'rm -rf -- "$probe"' EXIT
         chgrp "$group" "$probe"
         chmod 2770 "$probe"

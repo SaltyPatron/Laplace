@@ -14,6 +14,7 @@ import re
 import urllib.request
 import importlib.util
 from pathlib import Path, PurePosixPath
+from installation_paths import configured
 import shutil
 import stat
 import sys
@@ -32,8 +33,7 @@ def require(condition: bool, message: str) -> None:
 
 
 def default_cache() -> Path:
-    return Path(os.environ.get("LAPLACE_CHESS_PGN_CACHE",
-                str(Path(os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")) / "chess-pgn-validation")))
+    return Path(os.environ["LAPLACE_CHESS_PGN_CACHE"]) if os.environ.get("LAPLACE_CHESS_PGN_CACHE") else configured("LAPLACE_WORK_ROOT", "chess-pgn-validation")
 
 
 def artifact_lock() -> dict:

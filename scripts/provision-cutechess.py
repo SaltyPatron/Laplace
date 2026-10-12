@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from installation_paths import configured
 import re
 import shutil
 import stat
@@ -284,7 +285,7 @@ def probe_gui(binary, lock, qt_prefix, work=None):
     binary = binary.resolve(strict=True)
     inventory = gui_inventory(qt_prefix, lock)
     before = digest(binary)
-    scratch = Path(work) if work else Path(os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")) / "chess-tools"
+    scratch = Path(work) if work else configured("LAPLACE_WORK_ROOT") / "chess-tools"
     scratch.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env.update(gui_environment(qt_prefix))
@@ -558,7 +559,7 @@ def install_desktop(prefix, verified, stockfish, work_root=None, calibration_rep
             _publish_desktop_text(retained, raw.decode("utf-8"), 0o644)
             calibration["report"] = str(retained)
     perfcache = desktop_perfcache(prefix)
-    work_root = Path(work_root or os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")).absolute()
+    work_root = Path(work_root).absolute() if work_root else configured("LAPLACE_WORK_ROOT")
     if not work_root.is_dir():
         raise RuntimeError("existing permanent desktop work root is unavailable")
     engine_catalog = prefix / "share/laplace/cutechess-engines.json"

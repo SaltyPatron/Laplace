@@ -8,29 +8,26 @@
 # Used by: scripts/setup-host.sh Layer 0.5, CI deps job, `just build-deps`.
 #
 # Env:
-#   LAPLACE_EXTERNAL       default /build/external
-#   LAPLACE_DEPS_BUILD     default /build/deps
+#   LAPLACE_EXTERNAL       declared source cache (alias: LAPLACE_DEPSRC)
+#   LAPLACE_DEPS_BUILD     derived from the declared LAPLACE_BUILD root
 #   LAPLACE_DEPS_PREFIX    default /opt/laplace
 #   LAPLACE_TARGET_ISA     default AVX2
 #   LAPLACE_FORCE_DEPS=1   ignore stamp; rebuild
 #   LAPLACE_DEPS_USER      default laplace-runner (build as this user when root)
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXT="${LAPLACE_EXTERNAL:-/build/external}"
-# Build tree on the SAME expendable volume as the source, not the database device.
-# It defaulted to /opt/laplace/build/deps — vg-data/lv-laplace on nvme1n1 — so every
-# postgres/gdal/proj compile wrote gigabytes onto the disk serving the heap, which is
-# exactly what moving external/ to /build was meant to stop. Build output is
-# regenerable by definition; it belongs beside the pinned source it is built from.
-BUILD="${LAPLACE_DEPS_BUILD:-/build/deps}"
+EXT="${LAPLACE_EXTERNAL:?Declare LAPLACE_EXTERNAL or LAPLACE_DEPSRC}"
+# Dependency output is configured independently of the source and installed runtime.
+BUILD="${LAPLACE_DEPS_BUILD}"
 PREFIX="${LAPLACE_DEPS_PREFIX:-/opt/laplace}"
 ISA="${LAPLACE_TARGET_ISA:-AVX2}"
 RUN_AS="${LAPLACE_DEPS_USER:-laplace-runner}"
 cmake_bin=$(python3 "$ROOT/scripts/provision-cmake.py" \
   --root "$PREFIX/tools/cmake" \
-  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+  --work "${LAPLACE_WORK_ROOT}/cmake" --ensure)
 export PATH="$cmake_bin:$PATH"
 
 # PIN the generator. It was unset, so cmake picked whatever the ambient

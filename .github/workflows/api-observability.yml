@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 0002
-          lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          lock_root="${LAPLACE_WORK_ROOT:-${LAPLACE_WORK:?Runner must declare LAPLACE_WORK}}"
           mkdir -p "$lock_root"
           exec 9>"$lock_root/host-resource.lock"
           flock 9

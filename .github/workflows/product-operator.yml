@@ -99,10 +99,6 @@ jobs:
     permissions:
       contents: read
     env:
-      PGHOST: /var/run/postgresql
-      PGPORT: 5432
-      PGUSER: laplace_admin
-      PGDATABASE: laplace
       LAPLACE_API_BASE: ${{ vars.LAPLACE_DEPLOYED_API_BASE || 'http://127.0.0.1:5187' }}
       LAPLACE_PROOF_TENANT: ci
       LAPLACE_API_KEY: ${{ secrets.LAPLACE_API_KEY }}
@@ -118,7 +114,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exec 9>/build/laplace/work/host-resource.lock
+          source scripts/lib/database.sh
+          exec 9>>"${LAPLACE_HOST_LOCK:-$LAPLACE_LOCK_ROOT/host-resource.lock}"
           flock 9
           mkdir -p artifacts/forward-chat-lifecycle
           python3 scripts/verify-forward-chat-lifecycle.py \

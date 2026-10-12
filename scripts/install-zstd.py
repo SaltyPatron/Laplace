@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from installation_paths import configured
 import platform
 import re
 import shutil
@@ -40,8 +41,8 @@ def configuration():
 
 
 def external_root():
-    default = ROOT / "external" if os.name == "nt" else Path("/build/external")
-    return Path(configuration().get("LAPLACE_EXTERNAL", str(default))).absolute()
+    value = configuration().get("LAPLACE_EXTERNAL")
+    return Path(value).absolute() if value else configured("LAPLACE_EXTERNAL")
 
 
 def source_root():
@@ -52,7 +53,7 @@ def build_root():
     explicit = configuration().get("LAPLACE_ZSTD_BUILD")
     if explicit:
         return Path(explicit).absolute()
-    base = Path(os.environ.get("LAPLACE_BUILD_ROOT", str(ROOT / "build" if os.name == "nt" else Path("/build/laplace/build"))))
+    base = configured("LAPLACE_DEPS_BUILD")
     return (base / "zstd").absolute()
 
 

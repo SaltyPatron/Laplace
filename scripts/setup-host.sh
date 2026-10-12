@@ -10,6 +10,7 @@
 # =============================================================================
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -139,7 +140,7 @@ seed_billing_from_operator_files() {
 }
 
 layer1_clean_foreign_build_artifacts() {
-    local project proj mutable managed_root=/build/laplace/work/setup-managed
+    local project proj mutable managed_root="$LAPLACE_WORK_ROOT/setup-managed"
 
     # The checkout is intentionally shared by the operator and CI account. The
     # shared group must own directory inheritance; the operator's private primary
@@ -193,10 +194,10 @@ layer1_clean_foreign_build_artifacts() {
 runner_dotnet() {
     sudo -u "$RUNNER_USER" -H \
         PATH="$PATH" \
-        LAPLACE_BUILD_ROOT=/build/laplace/work/setup-managed \
+        LAPLACE_BUILD_ROOT="$LAPLACE_WORK_ROOT/setup-managed" \
         DOTNET_NOLOGO=1 \
         DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-        TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
+        TMPDIR="$LAPLACE_SCRATCH_ROOT" TMP="$LAPLACE_SCRATCH_ROOT" TEMP="$LAPLACE_SCRATCH_ROOT" \
         bash -c "umask 0002; cd '$REPO_DIR' && dotnet $*"
 }
 
@@ -247,7 +248,7 @@ layer1_build_install_extensions() {
     local physical_build
     physical_build="$(sudo python3 "$REPO_DIR/scripts/place-build-directory.py" "$REPO_DIR")"
     case "$physical_build" in
-        /build/laplace/build/laplace-*) ;;
+        "$LAPLACE_BUILD_DIRECTORY") ;;
         *)
             red "refusing unexpected build-tree ownership handoff: $physical_build"
             return 1
@@ -262,8 +263,8 @@ layer1_build_install_extensions() {
     }
     sudo -u "$RUNNER_USER" -H env \
         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
-        LAPLACE_BUILD_ROOT=/build/laplace/work/setup-managed \
-        TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
+        LAPLACE_BUILD_ROOT="$LAPLACE_WORK_ROOT/setup-managed" \
+        TMPDIR="$LAPLACE_SCRATCH_ROOT" TMP="$LAPLACE_SCRATCH_ROOT" TEMP="$LAPLACE_SCRATCH_ROOT" \
         bash -c '
             set -e
             source "$2" --force >/dev/null

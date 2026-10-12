@@ -2,27 +2,27 @@
 # Read-only operator view of the shared host's storage and release usage.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT/scripts/lib/storage.sh"
-laplace_storage_init
+source "$ROOT/scripts/lib/installation.sh"
+prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+app="${LAPLACE_APP_DIR:-$prefix/app}"
 printf 'Mounted storage and inode capacity\n'
-df -hT / /build /var/lib/agents /opt/laplace /opt/laplace/pgdata /var/lib/pgwal /pgtemp /vault
-df -i /opt/laplace/app
+for path in "${LAPLACE_BUILD:-}" "${LAPLACE_WORK:-}" "${LAPLACE_PGDATA:-}" "${LAPLACE_PGWAL:-}" "${LAPLACE_PGTEMP:-}" "${LAPLACE_DATA:-}" "$prefix"; do
+  [[ -n "$path" && -e "$path" ]] && df -hT "$path"
+done
+[[ ! -e "$app" ]] || df -i "$app"
 printf '\nApplication and package disk usage (separate mounts excluded)\n'
-du -x -h -d 3 /opt/laplace 2>/dev/null | sort -h | tail -n 120 || true
+du -x -h -d 3 "$prefix" 2>/dev/null | sort -h | tail -n 120 || true
 printf '\nInstalled service identities and scratch settings\n'
-for unit in laplace-api.service laplace-mcp.service laplace-lichess.service \
-  actions.runner.SaltyPatron-Laplace.hart-server.service \
-  actions.runner.SaltyPatron-Laplace-Refactor.hart-server-refactor.service \
-  actions.runner.SaltyPatron-Laplace-Conventional.hart-server-conventional.service; do
+while read -r unit _; do
   printf '%s\n' "$unit"
   systemctl show "$unit" -p User -p Group -p UMask -p ActiveState
   systemctl show "$unit" -p Environment --value | tr ' ' '\n' | rg '^(TMPDIR|TMP|TEMP)=' || true
-done
+done < <(systemctl list-unit-files 'laplace*.service' 'actions.runner.*Laplace*.service' --no-legend)
 printf '\nApplication release sizes and selected executables\n'
-for release in /opt/laplace/app/releases/runtime.*; do
+for release in "$app"/releases/runtime.*; do
   [[ -d "$release" ]] || continue
   du -sh "$release"
-  for link in /opt/laplace/app/laplace-{lichess,mcp,uci}; do
+  for link in "$app"/laplace-{lichess,mcp,uci}; do
     [[ -L "$link" ]] || continue
     selected=$(readlink -f "$link")
     [[ "$selected" != "$release/"* ]] || printf '  %s -> %s\n' "$link" "$selected"
@@ -35,9 +35,9 @@ for release in /opt/laplace/app/releases/runtime.*; do
   done
 done
 printf '\nManaged application backups\n'
-find /opt/laplace/app-backups -mindepth 1 -maxdepth 1 -type d -name 'managed.*' \
+find "$prefix/app-backups" -mindepth 1 -maxdepth 1 -type d -name 'managed.*' \
   -exec du -sh {} + 2>/dev/null || true
 printf '\nDeleted files still held open\n'
-lsof +L1 /opt/laplace 2>/dev/null | tail -n 200 || true
+lsof +L1 "$prefix" 2>/dev/null | tail -n 200 || true
 printf '\nManaged process memory (arguments omitted)\n'
 ps -eo pid,ppid,user,group,lstart,rss,comm | rg 'laplace|dotnet' || true
