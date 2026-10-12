@@ -94,7 +94,7 @@ def database(path, process):
     for name, value in {
         'PGHOST': values.get('LAPLACE_PGHOST', '/tmp'),
         'PGPORT': values.get('LAPLACE_PGPORT', '5432'),
-        'PGUSER': values.get('LAPLACE_KNOWLEDGE_ROLE') or values.get('LAPLACE_ROLE'),
+        'PGUSER': values.get('LAPLACE_DATABASE_ROLE') or values.get('LAPLACE_ROLE'),
         'PGDATABASE': values.get('LAPLACE_DBNAME', 'laplace-mono'),
     }.items():
         result[name] = values.get(name) or value

@@ -12,7 +12,7 @@ function Read-IisInstallation([string]$Path) {
         $uri=[Uri]$c.$key
         if(-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne '/'){throw "Declare an HTTPS origin for $key."}
     }
-    foreach($key in 'knowledge','appdb','api','identity','certificate','chess') {
+    foreach($key in 'substrate','appdb','api','identity','certificate','chess') {
         if($c.records.$key -notmatch '^kv/data/[a-zA-Z0-9_/-]+$' -or $c.records.$key -match '/\.?\./'){throw "Invalid $key credential reference."}
     }
     if($c.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Declare the package revision.'}
@@ -89,7 +89,7 @@ function Get-IisEnvironment($c,$records) {
         if($item.Name -notmatch '^(LAPLACE_|ASPNETCORE_|DOTNET_|OMP_|MKL_)' -or $item.Name -match 'TOKEN|SECRET|PASSWORD|AUTH_DEV_PRINCIPAL|API_KEY'){throw 'Public environment must contain only non-secret runtime configuration.'}
         $values[$item.Name]=[string]$item.Value
     }
-    foreach($item in @(@('knowledge','knowledge_database','knowledge_role','LAPLACE_DB'),@('appdb','application_database','application_role','LAPLACE_APP_DB'))) {
+    foreach($item in @(@('substrate','substrate_database','substrate_role','LAPLACE_DB'),@('appdb','application_database','application_role','LAPLACE_APP_DB'))) {
         $record=$records.($item[0]);$database=$c.database.($item[1]);$role=$c.database.($item[2])
         if($record.database_host -ne $c.database.host -or $record.database -ne $database -or $record.role -ne $role -or $record.port -ne $c.database.port){throw 'Credential database selection differs from this installation.'}
         if($record.password -notmatch '^[a-f0-9]{64}$' -or $record.database_host -notmatch '^[a-zA-Z0-9.-]+$' -or $database -notmatch '^[a-z0-9_-]+$' -or $role -notmatch '^[a-z0-9_-]+$'){throw 'Invalid database credential contract.'}
