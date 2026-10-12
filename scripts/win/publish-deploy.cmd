@@ -23,6 +23,7 @@ if /i "%~1"=="--skip-managed-build" (
 echo [publish-deploy] unknown argument %~1
 exit /b 2
 :args_done
+if defined LAPLACE_IIS_INSTALLATION goto managed_iis
 
 echo ==== [publish-deploy] billing secrets + Stripe listen ====
 call "%HERE%ensure-billing-runtime.cmd"
@@ -50,4 +51,11 @@ call "%HERE%publish-uci.cmd" || exit /b 1
 call "%HERE%deploy-api.cmd" || exit /b 1
 rem the managed services (Linux: deploy/linux/managed-publish.sh), after the API they serve
 call "%HERE%ensure-managed-services.cmd"
+exit /b %ERRORLEVEL%
+
+:managed_iis
+if "%DO_FULL%"=="1" (
+  call "%HERE%build-engine.cmd" || exit /b 1
+)
+pwsh -NoProfile -File "%HERE%..\..\deploy\windows\Build-IisPackage.ps1" -Installation "%LAPLACE_IIS_INSTALLATION%" -Publish
 exit /b %ERRORLEVEL%
