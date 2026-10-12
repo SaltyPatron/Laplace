@@ -23,6 +23,14 @@ public enum CastleRights : byte
 public sealed class Board
 {
     public readonly Piece[] Squares = new Piece[128];
+    public ChessVariantRules Rules { get; set; } = ChessVariantRules.Standard;
+    public readonly ushort[] Pockets = new ushort[10];
+    public ulong Promoted;
+    public readonly uint[] Checks = new uint[2];
+
+    public Piece MovingPiece(ChessMove move) => move.IsDrop
+        ? (WhiteToMove ? Board.TypeOf(move.Promotion) : (Piece)(-(sbyte)Board.TypeOf(move.Promotion)))
+        : Squares[move.From];
 
     // Piece bitboards, kept in step with Squares so the attack tables (ChessAttacks) can index
     // them. Layout matches Bitboards.Of: slot = (int)piece + 6, bit = (rank << 3) | file.
@@ -135,11 +143,15 @@ public sealed class Board
             WhiteQueenRookFile = WhiteQueenRookFile,
             BlackKingRookFile = BlackKingRookFile,
             BlackQueenRookFile = BlackQueenRookFile,
+            Rules = Rules,
+            Promoted = Promoted,
         };
         Array.Copy(Squares, b.Squares, 128);
         // Copy the maintained bitboards too; copying Squares alone would leave the clone's
         // bitboards empty while its Squares are full.
         Array.Copy(_bb, b._bb, _bb.Length);
+        Array.Copy(Pockets, b.Pockets, Pockets.Length);
+        Array.Copy(Checks, b.Checks, Checks.Length);
         return b;
     }
 
@@ -163,15 +175,40 @@ public sealed class Board
         return -1;
     }
 
-    public static Board FromFen(string fen)
+    public static Board FromFen(string fen, ChessVariantRules? rules = null)
     {
         var parts = fen.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 4)
             throw new FormatException($"Invalid FEN (need >=4 fields): {fen}");
 
-        var b = new Board();
+        var b = new Board { Rules = rules ?? ChessVariantRules.Standard };
         string placement = parts[0];
+        string? pocket = null;
+        int pocketStart = placement.IndexOf('[');
+        if (pocketStart >= 0)
+        {
+            if (!placement.EndsWith(']')) throw new FormatException("Unclosed FEN pocket.");
+            pocket = placement[(pocketStart + 1)..^1];
+            placement = placement[..pocketStart];
+        }
         var ranks = placement.Split('/');
+        if (ranks.Length == 9)
+        {
+            if (pocket is not null) throw new FormatException("FEN has two pockets.");
+            pocket = ranks[8]; ranks = ranks[..8];
+        }
+        if (pocket is not null)
+        {
+            if (rules is not null && !rules.Drops) throw new FormatException("FEN pockets conflict with the declared rules.");
+            b.Rules = rules ?? ChessVariants.Crazyhouse;
+            foreach (char c in pocket)
+            {
+                Piece piece = CharToPiece(c); int type = (int)TypeOf(piece);
+                if (type < 1 || type > 5) throw new FormatException("Invalid reserve piece in FEN.");
+                int index = (IsWhite(piece) ? 0 : 5) + type - 1;
+                b.Pockets[index] = checked((ushort)(b.Pockets[index] + 1));
+            }
+        }
         if (ranks.Length != 8) throw new FormatException($"Invalid FEN ranks: {fen}");
         for (int r = 0; r < 8; r++)
         {
@@ -179,7 +216,15 @@ public sealed class Board
             int file = 0;
             foreach (char c in ranks[r])
             {
+                if (c == '~')
+                {
+                    if (file == 0 || TypeOf(b.Squares[Sq(file - 1, rank)]) is Piece.Empty or Piece.WPawn or Piece.WKing)
+                        throw new FormatException("Invalid promoted-piece marker in FEN.");
+                    b.Promoted |= 1UL << (rank * 8 + file - 1);
+                    continue;
+                }
                 if (char.IsDigit(c)) { file += c - '0'; continue; }
+                if (file >= 8) throw new FormatException($"Invalid FEN rank width: {fen}");
                 b.Set(Sq(file, rank), CharToPiece(c));
                 file++;
             }
@@ -236,8 +281,22 @@ public sealed class Board
 
         // Parsed with the field name and the FEN, so a malformed counter reports which
         // field of which position failed.
-        b.HalfmoveClock = ParseCounter(parts, 4, 0, "halfmove clock", fen);
-        b.FullmoveNumber = ParseCounter(parts, 5, 1, "fullmove number", fen);
+        int counter = 4;
+        string? checkField = parts.Length > 4 && parts[4].Contains('+') ? parts[counter++] :
+            parts.Length > 6 && parts[6].StartsWith('+') ? parts[6] : null;
+        if (checkField is not null) {
+            if (rules is not null && rules.WinByCheckCount == 0) throw new FormatException("Check counters conflict with declared rules.");
+            b.Rules = rules ?? ChessVariants.ThreeCheck;
+            bool given = checkField.StartsWith('+');
+            var counts = checkField.TrimStart('+').Split('+');
+            if (counts.Length != 2) throw new FormatException("Invalid check counters.");
+            for (int i = 0; i < 2; i++) {
+                if (!uint.TryParse(counts[i], out uint n) || n > b.Rules.WinByCheckCount) throw new FormatException("Invalid check counter.");
+                b.Checks[i] = given ? n : (uint)b.Rules.WinByCheckCount - n;
+            }
+        }
+        b.HalfmoveClock = ParseCounter(parts, counter, 0, "halfmove clock", fen);
+        b.FullmoveNumber = ParseCounter(parts, counter + 1, 1, "fullmove number", fen);
         return b;
     }
 
@@ -260,13 +319,22 @@ public sealed class Board
                 if (p == Piece.Empty) { empty++; continue; }
                 if (empty > 0) { sb.Append(empty); empty = 0; }
                 sb.Append(PieceToChar(p));
+                if (Rules.Drops && (Promoted & (1UL << (rank * 8 + file))) != 0) sb.Append('~');
             }
             if (empty > 0) sb.Append(empty);
             if (rank > 0) sb.Append('/');
         }
+        if (Rules.Drops)
+        {
+            sb.Append('[');
+            for (int i = 0; i < Pockets.Length; i++)
+                sb.Append(PieceToChar((Piece)(i < 5 ? i + 1 : -(i - 4))), Pockets[i]);
+            sb.Append(']');
+        }
         sb.Append(' ').Append(WhiteToMove ? 'w' : 'b').Append(' ');
         sb.Append(CastleString());
         sb.Append(' ').Append(EpSquare < 0 ? "-" : SquareToAlgebraic(EpSquare));
+        if (Rules.WinByCheckCount > 0) sb.Append(' ').Append(Rules.WinByCheckCount - Checks[0]).Append('+').Append(Rules.WinByCheckCount - Checks[1]);
         sb.Append(' ').Append(HalfmoveClock);
         sb.Append(' ').Append(FullmoveNumber);
         return sb.ToString();

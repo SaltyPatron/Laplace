@@ -87,6 +87,7 @@ set(LAPLACE_CORE_SOURCES
     src/score.c
     src/codepoint_table.c
     src/chess_position_table.c
+    src/chess_rules.c
     src/modality_number_table.c
     src/vocabulary_table.c
     src/astar.cpp

@@ -478,7 +478,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
         if (move is null)
             throw new InvalidOperationException($"live move '{token}' does not resolve from its pre-move board");
-        return (board, board.Squares[move.Value.From], move.Value);
+        return (board, board.MovingPiece(move.Value), move.Value);
     }
 
     private static void WitnessResult(SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result)

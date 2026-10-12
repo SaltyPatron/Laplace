@@ -114,11 +114,11 @@ public static partial class ChessReplay
     /// legal actions from the current board; PGN/SAN is generated output, never stored identity.
     /// </summary>
     public static ChessReplayResult Replay(
-        IReadOnlyList<Hash128> moveIds, string? startFen = null, int maxPlies = 1024)
+        IReadOnlyList<Hash128> moveIds, string? startFen = null, int maxPlies = 1024, ChessVariantRules? rules = null)
     {
         var board = string.IsNullOrWhiteSpace(startFen)
-            ? Board.FromFen(ChessModality.StartFen)
-            : Board.FromFen(startFen);
+            ? Board.FromFen(ChessModality.StartFen, rules)
+            : Board.FromFen(startFen, rules);
         string canonicalStart = board.ToFen();
         var plies = new List<ChessPly>(Math.Min(moveIds.Count, maxPlies));
         string? truncated = null;
@@ -135,7 +135,7 @@ public static partial class ChessReplay
                 ChessMove? matched = null;
                 foreach (var move in legal)
                 {
-                    Piece moving = board.Squares[move.From];
+                    Piece moving = board.MovingPiece(move);
                     if (ChessCompose.MoveId(moving, move) != moveIds[i]) continue;
                     if (matched is not null)
                     {

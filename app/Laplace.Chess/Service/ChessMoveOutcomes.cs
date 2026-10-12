@@ -82,7 +82,7 @@ public static class ChessMoveOutcomes
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {
         ArgumentNullException.ThrowIfNull(game);
-        var initial = ChessAnalyze.InitialState(game.StartFen, new ChessModality())
+        var initial = ChessAnalyze.InitialState(game.StartFen, new ChessModality(), game.Rules)
             ?? throw new InvalidDataException("hydrated move outcomes have no valid initial board");
         AppendGame(b, game.LineId, game.MoveIds, game.Result,
             initial.Initial.Board.WhiteToMove, SourceId, OutcomeWeight);

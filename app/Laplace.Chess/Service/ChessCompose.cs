@@ -111,9 +111,9 @@ public static class ChessCompose
     /// </summary>
     public static ChessComposed Position(string surface)
     {
-        if (!PositionContent.TryFenFromSurface(surface, out var fen))
-            throw new ArgumentException("not a canonical standard-chess position interchange surface", nameof(surface));
-        return Position(Board.FromFen(fen));
+        if (!PositionContent.TryBoardFromSurface(surface, out var board))
+            throw new ArgumentException("not a canonical chess position interchange surface", nameof(surface));
+        return Position(board);
     }
 
     /// <summary>
@@ -128,7 +128,7 @@ public static class ChessCompose
         Span<ChessPositionIdentity.Atom> atoms =
             stackalloc ChessPositionIdentity.Atom[ChessPositionIdentity.MaxAtoms];
         int count = ChessPositionIdentity.FillAtoms(
-            board, rules ?? ChessVariantRules.Standard, atoms);
+            board, rules ?? board.Rules, atoms);
         var subs = new ChessNode[count];
         var ids = new Hash128[count];
         for (int i = 0; i < count; i++)
@@ -156,9 +156,9 @@ public static class ChessCompose
 
     public static Hash128 PositionId(string surface)
     {
-        if (!PositionContent.TryFenFromSurface(surface, out var fen))
-            throw new ArgumentException("not a canonical standard-chess position interchange surface", nameof(surface));
-        return PositionId(Board.FromFen(fen));
+        if (!PositionContent.TryBoardFromSurface(surface, out var board))
+            throw new ArgumentException("not a canonical chess position interchange surface", nameof(surface));
+        return PositionId(board);
     }
 
     /// <summary>

@@ -222,7 +222,7 @@ public sealed class SubstrateRootBias : IRootBias
             for (int i = 0; i < key.Moves.Length; i++)
             {
                 ChessMove move = key.Moves[i];
-                Hash128 moveId = ChessCompose.MoveId(root.Squares[move.From], move);
+                Hash128 moveId = ChessCompose.MoveId(root.MovingPiece(move), move);
                 moveIds[i] = moveId;
                 Hash128 transitionKey = ChessCompose.TransitionKey(key.Root, moveId);
                 Hash128 toId;

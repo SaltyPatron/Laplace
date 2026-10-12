@@ -33,7 +33,11 @@ internal static class NativeTestBootstrap
                      ("synthesis", "laplace_synthesis"),
                  })
         {
-            var path2 = Path.Combine(engineBuild, sub, name + ".dll");
+            // MSBuild copies the selected native build beside the test assembly.
+            // Preloading a second copy from the build tree gives the process two
+            // independent cores and defeats artifact-identity verification.
+            var path2 = Path.Combine(AppContext.BaseDirectory, name + ".dll");
+            if (!File.Exists(path2)) path2 = Path.Combine(engineBuild, sub, name + ".dll");
             if (!File.Exists(path2)) continue;
             try { NativeLibrary.Load(path2); }
             catch (DllNotFoundException) { }

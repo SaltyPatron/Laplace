@@ -53,7 +53,7 @@ public static class ChessAnalyze
 
         if (!DeriveGame(b, lineId, playingId, result, moves, startFen, wp, bp,
                        clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
-                       spentSeconds, replay))
+                       spentSeconds, replay, witnessed.Rules))
             return false;
 
         // The analysis unit is the playing; one marker and completion per playing and version.
@@ -84,7 +84,7 @@ public static class ChessAnalyze
 
         return new ChessWitnessedGame(
             lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens,
-            spentSeconds);
+            spentSeconds) { Rules = parsed.Rules };
     }
 
     private static bool ValidName(string n) => !string.IsNullOrWhiteSpace(n) && n != "?";
@@ -103,11 +103,11 @@ public static class ChessAnalyze
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
         int engineDepth = 0, double[]? spentSeconds = null,
-        ChessParsedReplay? replay = null)
+        ChessParsedReplay? replay = null, ChessVariantRules? rules = null)
     {
         var m = new ChessModality();
         // An unreadable start position derives nothing; no substitute board is assumed.
-        if (InitialState(startFen, m) is not { } start) return false;
+        if (InitialState(startFen, m, rules) is not { } start) return false;
         var (initial, standardStart) = start;
 
         if (!AppendGame(b, m, initial, sans, result, whitePlayer, blackPlayer, lineId, eventId,
@@ -134,10 +134,10 @@ public static class ChessAnalyze
     /// cannot model (for example X-FEN castling). The caller refuses and counts the game; the
     /// standard start is used only when no start FEN is given.
     /// </summary>
-    public static (ChessState Initial, bool StandardStart)? InitialState(string? startFen, ChessModality m)
+    public static (ChessState Initial, bool StandardStart)? InitialState(string? startFen, ChessModality m, ChessVariantRules? rules = null)
     {
-        if (string.IsNullOrWhiteSpace(startFen)) return (m.Initial(), true);
-        try { return (m.FromFen(startFen), false); }
+        if (string.IsNullOrWhiteSpace(startFen)) return (m.FromFen(ChessModality.StartFen, rules), rules?.IsStandard != false);
+        try { return (m.FromFen(startFen, rules), false); }
         catch (FormatException ex)
         {
             System.Diagnostics.Trace.TraceWarning(
@@ -167,7 +167,7 @@ public static class ChessAnalyze
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
         int engineDepth, double[]? spentSeconds = null, bool standardStart = true,
-        ChessParsedReplay? replay = null)
+        ChessParsedReplay? replay = null, ChessVariantRules? rules = null)
     {
         var src = SourceId;
         double medianSpent = PgnClocks.MedianSpent(spentSeconds);

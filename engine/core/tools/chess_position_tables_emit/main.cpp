@@ -158,7 +158,7 @@ static int square_bit(char file, char rank) {
  * never hashed or admitted as chess content. */
 static int compose_position(std::string_view surface,
                             laplace_chess_perfcache_record_t* out) {
-    std::array<std::string_view, 68> tokens{};
+    std::array<std::string_view, 146> tokens{};
     size_t token_count = 0;
     size_t i = 0;
     while (i < surface.size()) {
@@ -176,11 +176,16 @@ static int compose_position(std::string_view surface,
     size_t at = 0;
     std::vector<atom_t> atoms;
     atoms.reserve(69u);
+    bool drops = false, check_rule = false;
     if (tokens[at].starts_with("rules:")) {
         std::string_view rules = tokens[at++].substr(6);
         if (rules.empty()) return -1;
-        atom_t a{}; a.domain = kRulesDomain; a.has_digest = true;
-        hash128_blake3(reinterpret_cast<const uint8_t*>(rules.data()), rules.size(), &a.digest);
+        drops = rules == "drops:1";
+        check_rule = rules == "winchk:3";
+        atom_t a{};
+        if (drops) { a.domain = 40; a.value = 1; }
+        else { a.domain = kRulesDomain; a.has_digest = true;
+            hash128_blake3(reinterpret_cast<const uint8_t*>(rules.data()), rules.size(), &a.digest); }
         atoms.push_back(a);
     }
     if (at + 3 > token_count || !tokens[at].starts_with("stm:")
@@ -196,8 +201,33 @@ static int compose_position(std::string_view surface,
     struct piece_at_t { uint16_t packed; int bit; };
     std::vector<piece_at_t> pieces;
     pieces.reserve(64u);
+    std::array<uint16_t, 10> pockets{};
+    uint64_t promoted = 0;
+    std::array<uint16_t, 2> checks{};
     for (; at < token_count; ++at) {
         std::string_view t = tokens[at];
+        if (check_rule && t.starts_with("checks:")) {
+            if (t.size() != 10 || t[8] != ':' || t[7] < '0' || t[7] > '3' || t[9] < '0' || t[9] > '3') return -1;
+            checks[0] = (uint16_t)(t[7] - '0'); checks[1] = (uint16_t)(t[9] - '0'); continue;
+        }
+        if (drops && t.starts_with("pocket:")) {
+            const size_t colon = t.find(':', 7);
+            if (colon == std::string_view::npos) return -1;
+            unsigned index = 0, count = 0;
+            auto parse = [](std::string_view text, unsigned& value) {
+                if (text.empty()) return false;
+                for (char c : text) { if (c < '0' || c > '9' || value > 6553) return false; value = value * 10 + c - '0'; }
+                return value <= 65535;
+            };
+            if (!parse(t.substr(7, colon - 7), index) || index >= 10 || !parse(t.substr(colon + 1), count)) return -1;
+            pockets[index] = (uint16_t)count; continue;
+        }
+        if (drops && t.starts_with("promoted:")) {
+            if (t.size() != 11) return -1;
+            const int bit = square_bit(t[9], t[10]);
+            if (bit < 0) return -1;
+            promoted |= UINT64_C(1) << bit; continue;
+        }
         if (t.size() != 3) return -1;
         int po = piece_ordinal(t[0]);
         int bit = square_bit(t[1], t[2]);
@@ -263,6 +293,16 @@ static int compose_position(std::string_view surface,
     for (const auto& p : pieces)
         atoms.push_back(atom_t{kPieceSquareDomain, p.packed, {}, false});
 
+    if (drops) {
+        for (size_t p = 0; p < pockets.size(); ++p) if (pockets[p])
+            atoms.push_back(atom_t{(uint8_t)(41 + p), pockets[p], {}, false});
+        for (uint16_t bit = 0; bit < 64; ++bit) if (promoted & (UINT64_C(1) << bit))
+            atoms.push_back(atom_t{51, bit, {}, false});
+    }
+    if (check_rule) {
+        atoms.push_back(atom_t{52, checks[0], {}, false});
+        atoms.push_back(atom_t{53, checks[1], {}, false});
+    }
     std::vector<hash128_t> ids(atoms.size());
     std::vector<double> coords(atoms.size() * 4);
     for (size_t k = 0; k < atoms.size(); ++k)
@@ -332,6 +372,16 @@ static int emit_tier1_alphabet(Sink& out) {
     for (uint16_t flags : {uint16_t{0}, kMoveDoublePush, kMoveEnPassant,
                            kMoveCastle, kMovePromotion})
         emit_scalar_atom(out, kMoveFlagsDomain, flags);
+    for (uint8_t domain = 52; domain <= 53; ++domain)
+        for (uint16_t count = 0; count <= 3; ++count) emit_scalar_atom(out, domain, count);
+    emit_scalar_atom(out, kMoveFromDomain, 64);
+    emit_scalar_atom(out, kMoveFlagsDomain, 16);
+    emit_scalar_atom(out, 40, 1);
+    for (uint16_t bit = 0; bit < 64; ++bit) emit_scalar_atom(out, 51, bit);
+    // A conventional initial army has 30 non-king pieces. Larger source states
+    // remain composable through the normal cache-miss path.
+    for (uint8_t domain = 41; domain < 51; ++domain)
+        for (uint16_t count = 1; count <= 30; ++count) emit_scalar_atom(out, domain, count);
     for (uint16_t promotion = 0; promotion <= 4; ++promotion)
         emit_scalar_atom(out, kMovePromotionDomain, promotion);
     for (int piece = 0; piece < 12; ++piece) {
@@ -357,6 +407,13 @@ static int emit_move_alphabet(Sink& out) {
                     for (uint16_t promotion = 1; promotion <= 4; ++promotion)
                         emit_move(out, piece, from, to, kMovePromotion, promotion);
             }
+        }
+    }
+    for (uint16_t piece = 0; piece < 12; ++piece) {
+        if (piece % 6 == 5) continue;
+        for (uint16_t to = 0; to < 64; ++to) {
+            if (piece % 6 == 0 && (to < 8 || to >= 56)) continue;
+            emit_move(out, piece, 64, to, 16, 0);
         }
     }
     return 0;
@@ -396,7 +453,7 @@ static void report(const chess_emit::Input& primary, const chess_emit::Input& ad
          << ",\"primary_bytes\":" << primary.bytes << ",\"additional_bytes\":" << additional.bytes
          << ",\"primary_occurrences\":" << primary.occurrences
          << ",\"additional_occurrences\":" << additional.occurrences
-         << ",\"finite_atoms\":1001,\"finite_moves\":229376"
+         << ",\"finite_atoms\":1376,\"finite_moves\":229984"
          << ",\"distinct_board_ids\":";
     if (skipped) json << "null"; else json << stats.board_ids;
     json << ",\"total_records\":" << stats.records << ",\"memory_limit_bytes\":" << memory
@@ -411,11 +468,11 @@ static int emit(const Cli& cli) {
     const auto primary = chess_emit::scan(cli.surfaces);
     const auto additional = chess_emit::scan(cli.additional_surfaces);
     const auto source = chess_emit::source_hash(primary, cli.additional_surfaces.empty() ? nullptr : &additional);
-    if (additional.occurrences > UINT64_MAX - 230377u ||
-        primary.occurrences > UINT64_MAX - 230377u - additional.occurrences)
+    if (additional.occurrences > UINT64_MAX - 231360u ||
+        primary.occurrences > UINT64_MAX - 231360u - additional.occurrences)
         throw std::runtime_error("source occurrence count exceeds producer window");
     const uint64_t spill = cli.maximum_spill_bytes ? cli.maximum_spill_bytes :
-        chess_emit::default_spill_bytes(primary.occurrences + additional.occurrences + 230377u);
+        chess_emit::default_spill_bytes(primary.occurrences + additional.occurrences + 231360u);
     chess_emit::Statistics stats;
     if (chess_emit::validate_blob(cli.output, source, &stats.records)) {
         stats.controlled_memory_bytes = chess_emit::fixed_memory_bytes;
@@ -432,7 +489,7 @@ static int emit(const Cli& cli) {
     RecordSink atoms{producer, chess_emit::atom_origin}, moves{producer, chess_emit::move_origin};
     if (emit_tier1_alphabet(atoms) != 0 || emit_move_alphabet(moves) != 0)
         throw std::runtime_error("finite chess alphabet compose failed");
-    if (atoms.count != 1001u || moves.count != 229376u)
+    if (atoms.count != 1376u || moves.count != 229984u)
         throw std::runtime_error("finite chess alphabet count differs from producer contract");
     const auto repeated_primary = chess_emit::scan(cli.surfaces, compose_surface, &producer);
     const auto repeated_additional = chess_emit::scan(cli.additional_surfaces, compose_surface, &producer);

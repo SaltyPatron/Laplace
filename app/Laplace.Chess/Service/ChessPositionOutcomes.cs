@@ -34,9 +34,7 @@ public static class ChessPositionOutcomes
     internal static void DepositFromParsed(SubstrateChangeBuilder b, ChessGameRecord game)
     {
         var modality = new ChessModality();
-        string? startFen = PgnGames.TagStr(game.GameText, "SetUp") == "1"
-            ? PgnGames.TagStr(game.GameText, "FEN") : null;
-        if (ChessAnalyze.InitialState(startFen, modality) is not { } start) return;
+        if (ChessAnalyze.InitialState(game.StartFen, modality, game.Rules) is not { } start) return;
         var state = start.Initial;
         for (int ply = 0; ply < game.ResolvedMoves.Length; ply++)
         {

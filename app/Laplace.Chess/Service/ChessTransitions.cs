@@ -41,7 +41,7 @@ public static class ChessTransitions
     internal static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {
         var modality = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } initial) return;
+        if (ChessAnalyze.InitialState(game.StartFen, modality, game.Rules) is not { } initial) return;
         var state = initial.Initial;
         var positions = new List<Hash128>(game.Moves.Count + 1)
         {

@@ -59,6 +59,7 @@ public sealed class SyzygyNativeProber : ISyzygyProber
 
     public int? ProbeWdl(Board board)
     {
+        if (!board.Rules.IsStandard) return null;
         var bb = ChessSyzygy.ToBitboards(board);
         int wdl = SyzygyNative.ProbeWdl(
             bb.White, bb.Black, bb.Kings, bb.Queens, bb.Rooks,
@@ -68,6 +69,7 @@ public sealed class SyzygyNativeProber : ISyzygyProber
 
     public SyzygyVerdict? Probe(Board board)
     {
+        if (!board.Rules.IsStandard) return null;
         var bb = ChessSyzygy.ToBitboards(board);
         return SyzygyNative.ProbeRootTransition(
                    bb.White, bb.Black, bb.Kings, bb.Queens, bb.Rooks,
@@ -438,8 +440,9 @@ public static class ChessSyzygy
     {
         b.DeclareSourcePrior(SourceId, Weight);
         var m = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
+        if (ChessAnalyze.InitialState(game.StartFen, m, game.Rules) is not { } start) return;
         var cur = start.Initial;
+        if (!cur.Board.Rules.IsStandard) return;
         var chunks = new List<SyzygyChunkRef>();
         int largest = prober.Largest;
         int n = game.Moves.Count;

@@ -49,7 +49,7 @@ public static class ChessMotifs
     /// immediately recapture). Replaces trying to infer any of this from a SAN string alone.
     public static IEnumerable<string> DetectAtPly(Board before, ChessMove move, Board after)
     {
-        bool moverWhite = Board.IsWhite(before.Squares[move.From]);
+        bool moverWhite = Board.IsWhite(before.MovingPiece(move));
         var attacked = MoveGen.EnemyPiecesAttackedFrom(after, move.To);
 
         int valuableHits = attacked.Count(sq => ForkworthyTargets.Contains(after.Squares[sq]));
@@ -115,7 +115,7 @@ public static class ChessMotifs
         var m = w.Moves[i];
         if (See.Evaluate(before, m, scratch) >= 0) return;
 
-        Piece moved = before.Squares[m.From];
+        Piece moved = before.MovingPiece(m);
         bool moverWhite = before.WhiteToMove;
         bool gambit = w.StandardStart && Board.TypeOf(moved) == Piece.WPawn
                       && before.Castle == CastleRights.All;
@@ -179,6 +179,8 @@ public static class ChessMotifs
             if (p == Piece.Empty || Board.TypeOf(p) == Piece.WKing) continue;
             mat += Board.IsWhite(p) ? See.ValueOf(p) : -See.ValueOf(p);
         }
+        for (int i = 0; i < b.Pockets.Length; i++)
+            mat += (i < 5 ? 1 : -1) * b.Pockets[i] * See.ValueOf((Piece)(i % 5 + 1));
         return whitePov ? mat : -mat;
     }
 

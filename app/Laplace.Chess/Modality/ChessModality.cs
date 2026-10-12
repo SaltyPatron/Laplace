@@ -12,9 +12,9 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
     public ChessState Initial() => FromFen(StartFen);
 
-    public ChessState FromFen(string fen)
+    public ChessState FromFen(string fen, ChessVariantRules? rules = null)
     {
-        var board = Board.FromFen(fen);
+        var board = Board.FromFen(fen, rules);
         return new ChessState(board, ImmutableList.Create(ChessPositionIdentity.PositionId(board)));
     }
 
@@ -36,6 +36,9 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     public static int CapturableEpSquare(Board b)
     {
         if (b.EpSquare < 0) return -1;
+        if (!b.Rules.IsStandard)
+            return MoveGen.Legal(b).Any(move => (move.Flags & MoveFlags.EnPassant) != 0)
+                ? b.EpSquare : -1;
         bool white = b.WhiteToMove;
         Piece pawn = white ? Piece.WPawn : Piece.BPawn;
         int from1 = white ? b.EpSquare - 17 : b.EpSquare + 17;
@@ -62,14 +65,14 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     public ChessState Apply(ChessState state, ChessMove action)
     {
         var nb = state.Board.Clone();
-        Piece moving = nb.Squares[action.From];
+        Piece moving = nb.MovingPiece(action);
         bool isPawn = Board.TypeOf(moving) == Piece.WPawn;
         bool isCapture = nb.Squares[action.To] != Piece.Empty || (action.Flags & MoveFlags.EnPassant) != 0;
 
         MoveApply.Make(nb, action);
 
         Hash128 key = ChessPositionIdentity.PositionId(nb);
-        var history = (isPawn || isCapture)
+        var history = !nb.Rules.Drops && (isPawn || isCapture)
             ? ImmutableList.Create(key)
             : state.RepetitionHistory.Add(key);
 
@@ -84,6 +87,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     private static GameOutcome? Terminal(ChessState state, IReadOnlyList<ChessMove> moves)
     {
         var b = state.Board;
+        if (RuleWinner(b) is { } variantWinner) return GameOutcome.WonBy(variantWinner);
         if (moves.Count == 0)
         {
             if (MoveGen.InCheck(b, b.WhiteToMove))
@@ -95,8 +99,19 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
         }
         // A mating move ends the game before a simultaneous draw counter or
         // repetition claim can supersede its result.
-        if (b.HalfmoveClock >= 100 || IsThreefold(state) || IsInsufficientMaterial(b))
+        if ((!b.Rules.Drops && b.HalfmoveClock >= 100) || IsThreefold(state) || IsInsufficientMaterial(b))
             return GameOutcome.Draw;
+        return null;
+    }
+
+    internal static int? RuleWinner(Board b)
+    {
+        if (b.Rules.WinByCheckCount > 0) for (int side = 0; side < 2; side++)
+            if (b.Checks[side] >= b.Rules.WinByCheckCount) return side;
+        if (b.Rules.WinBySquares.Length > 0) foreach (var square in b.Rules.WinBySquares.Split(',')) {
+            var piece = b.Squares[Board.AlgebraicToSquare(square)];
+            if (Board.TypeOf(piece) == Piece.WKing) return Board.IsWhite(piece) ? 0 : 1;
+        }
         return null;
     }
 
@@ -110,8 +125,13 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
         return count >= 3;
     }
 
-    private static bool IsInsufficientMaterial(Board b)
+    internal static bool IsInsufficientMaterial(Board b)
     {
+        // Reserve material and recyclable minor pieces invalidate standard-chess
+        // dead-position conclusions. Bare kings with empty reserves remain dead.
+        if (b.Rules.WinBySquares.Length > 0) return false;
+        if (b.Rules.Drops || b.Rules.WinByCheckCount > 0)
+            return b.Pockets.All(p => p == 0) && (b.OccupiedBB == (b.PieceBB(Piece.WKing) | b.PieceBB(Piece.BKing)));
         int whiteKnights = 0, whiteBishops = 0, blackKnights = 0, blackBishops = 0;
         bool whiteBishopOnLight = false, whiteBishopOnDark = false;
         bool blackBishopOnLight = false, blackBishopOnDark = false;

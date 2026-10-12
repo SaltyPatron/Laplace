@@ -26,7 +26,7 @@ public static class See
         Array.Copy(b.Squares, sq, 128);
 
         int target = m.To;
-        Piece mover = sq[m.From];
+        Piece mover = b.MovingPiece(m);
         bool moverWhite = Board.IsWhite(mover);
 
         Piece firstVictim;
@@ -43,13 +43,15 @@ public static class See
 
         // A promoted pawn fights on in the exchange as its promotion piece.
         Piece occupant = m.IsPromotion ? m.Promotion : mover;
-        sq[m.From] = Piece.Empty;
+        if (!m.IsDrop) sq[m.From] = Piece.Empty;
         sq[target] = occupant;
 
         // 2 kings + at most 30 other pieces bounds the swap sequence.
         Span<int> gain = stackalloc int[32];
         int d = 0;
-        gain[0] = ValueOf(firstVictim);
+        ulong promoted = b.Promoted;
+        bool promotedOccupant = m.IsPromotion || (!m.IsDrop && IsPromoted(m.From));
+        gain[0] = CaptureValue(firstVictim, IsPromoted(target));
         bool stm = !moverWhite;
 
         while (d < gain.Length - 1)
@@ -61,7 +63,8 @@ public static class See
             if (Board.TypeOf(attacker) == Piece.WKing && KingCaptureDefended(sq, target, from, attacker, byWhite: !stm))
                 break;
             d++;
-            gain[d] = ValueOf(occupant) - gain[d - 1];
+            gain[d] = CaptureValue(occupant, promotedOccupant) - gain[d - 1];
+            promotedOccupant = IsPromoted(from);
             occupant = attacker;
             sq[from] = Piece.Empty;
             sq[target] = occupant;
@@ -71,6 +74,11 @@ public static class See
         // depth the defender may stand pat instead of recapturing at a loss.
         for (; d > 0; d--) gain[d - 1] = -Math.Max(-gain[d - 1], gain[d]);
         return gain[0];
+
+        bool IsPromoted(int square) => (promoted & (1UL << Bitboards.Bit(square))) != 0;
+        int CaptureValue(Piece piece, bool wasPromoted) => ValueOf(piece)
+            + (b.Rules.Drops && piece != Piece.Empty && Board.TypeOf(piece) != Piece.WKing
+                ? ValueOf(wasPromoted ? Piece.WPawn : piece) : 0);
     }
 
     private static bool KingCaptureDefended(Piece[] sq, int target, int from, Piece king, bool byWhite)

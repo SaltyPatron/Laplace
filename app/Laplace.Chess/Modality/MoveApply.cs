@@ -2,7 +2,10 @@ namespace Laplace.Modality.Chess;
 
 public readonly record struct Undo(
     Piece CapturedPiece, int CapturedSquare,
-    CastleRights Castle, int EpSquare, int HalfmoveClock, int FullmoveNumber);
+    CastleRights Castle, int EpSquare, int HalfmoveClock, int FullmoveNumber)
+{
+    internal Board? RuleState { get; init; }
+}
 
 public static class MoveApply
 {
@@ -10,6 +13,12 @@ public static class MoveApply
 
     public static Undo MakeWithUndo(Board b, ChessMove m)
     {
+        if (!b.Rules.IsStandard)
+        {
+            var before = b.Clone();
+            NativeChessRules.Apply(b, m);
+            return new Undo { RuleState = before };
+        }
         bool white = b.WhiteToMove;
         Piece moving = b.Squares[m.From];
         bool isPawn = Board.TypeOf(moving) == Piece.WPawn;
@@ -83,6 +92,17 @@ public static class MoveApply
 
     public static void Unmake(Board b, ChessMove m, in Undo u)
     {
+        if (u.RuleState is { } before)
+        {
+            for (int i = 0; i < 128; i++) if (Board.OnBoard(i)) b.Set(i, before.Squares[i]);
+            Array.Copy(before.Pockets, b.Pockets, before.Pockets.Length);
+            Array.Copy(before.Checks, b.Checks, 2);
+            b.Rules = before.Rules; b.Promoted = before.Promoted;
+            b.Castle = before.Castle; b.EpSquare = before.EpSquare;
+            b.HalfmoveClock = before.HalfmoveClock; b.FullmoveNumber = before.FullmoveNumber;
+            b.WhiteToMove = before.WhiteToMove;
+            return;
+        }
         bool white = !b.WhiteToMove;
 
         if (m.IsCastle)

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 
@@ -286,6 +287,20 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
         if (await PersistedTrajectoryMismatchAsync(games, ct).ConfigureAwait(false) is { } mismatch)
             throw new InvalidDataException(mismatch);
+
+        // Exercise the same reconstruction used by browsing and later analysis.
+        // Matching line hashes alone cannot prove that rules and state can be recovered.
+        var hydrated = await ChessWitnessHydrator.TryHydrateChunkAsync(
+            _ds, games.Select(g => g.PlayingId).Distinct().ToArray(), ct).ConfigureAwait(false);
+        var byPlaying = hydrated.ToDictionary(g => g.PlayingId);
+        foreach (var expected in games)
+        {
+            if (!byPlaying.TryGetValue(expected.PlayingId, out var actual)
+                || actual.LineId != expected.LineId || actual.Result != expected.Result
+                || !actual.MoveIds.SequenceEqual(expected.MoveIds)
+                || (actual.Rules ?? ChessVariants.Standard) != (expected.Rules ?? ChessVariants.Standard))
+                throw new InvalidDataException($"provider game {expected.PlayingId} could not reconstruct its complete recorded state and moves");
+        }
     }
 
     private async Task<string?> PersistedTrajectoryMismatchAsync(

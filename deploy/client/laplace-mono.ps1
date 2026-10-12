@@ -41,10 +41,10 @@ function Read-KnowledgeCredential($Credential) {
             throw 'Client enrollment does not match this profile.'
         }
         $origin = $address.AbsoluteUri.TrimEnd('/') + '/v1/'
-        $login = Invoke-RestMethod -Uri ($origin+'auth/approle/login') -Method Post -ContentType application/json -Body (@{role_id=$enrollment.role_id;secret_id=$enrollment.secret_id} | ConvertTo-Json -Compress)
+        $login = Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 30 -Uri ($origin+'auth/approle/login') -Method Post -ContentType application/json -Body (@{role_id=$enrollment.role_id;secret_id=$enrollment.secret_id} | ConvertTo-Json -Compress)
         $token = $login.auth.client_token
         if (-not $token) { throw 'OpenBao did not issue a workload token.' }
-        $response = Invoke-RestMethod -Uri ($origin+$Credential.record) -Headers @{'X-Vault-Token'=$token}
+        $response = Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 30 -Uri ($origin+$Credential.record) -Headers @{'X-Vault-Token'=$token}
         return $response.data.data
     } catch {
         # Do not expose request bodies, tokens or decrypted enrollment in errors.
@@ -52,7 +52,7 @@ function Read-KnowledgeCredential($Credential) {
     } finally {
         if ($secure) { $secure.Dispose() }
         if ($token) {
-            try { $null = Invoke-RestMethod -Uri ($origin+'auth/token/revoke-self') -Method Post -Headers @{'X-Vault-Token'=$token} -ContentType application/json -Body '{}' }
+            try { $null = Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 30 -Uri ($origin+'auth/token/revoke-self') -Method Post -Headers @{'X-Vault-Token'=$token} -ContentType application/json -Body '{}' }
             catch { throw 'OpenBao could not revoke the temporary credential-read token; CLI was not started.' }
         }
         $enrollment = $null; $token = $null

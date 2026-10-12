@@ -37,7 +37,7 @@ public static class ChessPlayerContextOutcomes
         ArgumentNullException.ThrowIfNull(game);
 
         var modality = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } start)
+        if (ChessAnalyze.InitialState(game.StartFen, modality, game.Rules) is not { } start)
             return;
 
         var state = start.Initial;

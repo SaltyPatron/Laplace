@@ -4,6 +4,11 @@ public static class San
 {
     public static ChessMove? Resolve(Board b, IReadOnlyList<ChessMove> legal, string san)
     {
+        if (!b.Rules.IsStandard)
+        {
+            var move = NativeChessRules.Resolve(b, san);
+            return move is { } m && legal.Contains(m) ? m : null;
+        }
         if (string.IsNullOrWhiteSpace(san)) return null;
         string t = Strip(san.Trim());
         if (t.Length == 0) return null;
@@ -27,6 +32,7 @@ public static class San
     /// </summary>
     public static ChessMove? Resolve(Board b, string san, List<ChessMove> scratch)
     {
+        if (!b.Rules.IsStandard) return NativeChessRules.Resolve(b, san);
         if (string.IsNullOrWhiteSpace(san)) return null;
         string t = Strip(san.Trim());
         if (t.Length == 0) return null;
@@ -127,11 +133,12 @@ public static class San
 
     public static string ToSan(Board b, ChessMove m)
     {
+        if (m.IsDrop) return WithCheckGlyph(b, m, $"{Board.PieceToChar(Board.TypeOf(m.Promotion))}@{Board.SquareToAlgebraic(m.To)}");
         if (m.IsKingSideCastle) return WithCheckGlyph(b, m, "O-O");
         if (m.IsQueenSideCastle) return WithCheckGlyph(b, m, "O-O-O");
 
         var legal = MoveGen.Legal(b);
-        Piece moving = b.Squares[m.From];
+        Piece moving = b.MovingPiece(m);
         Piece type = Board.TypeOf(moving);
         bool isPawn = type == Piece.WPawn;
         bool isCapture = b.Squares[m.To] != Piece.Empty || (m.Flags & MoveFlags.EnPassant) != 0;
@@ -148,7 +155,7 @@ public static class San
         {
             sb.Append(char.ToUpperInvariant(Board.PieceToChar(type)));
             var rivals = legal.Where(x => x.To == m.To && x.From != m.From
-                                          && Board.TypeOf(b.Squares[x.From]) == type).ToList();
+                                          && !x.IsDrop && Board.TypeOf(b.MovingPiece(x)) == type).ToList();
             if (rivals.Count > 0)
             {
                 bool fileUnique = rivals.All(x => Board.FileOf(x.From) != Board.FileOf(m.From));

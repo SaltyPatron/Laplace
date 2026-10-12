@@ -21,7 +21,10 @@ internal static class ChessRecordedFloorWitness
     // Pascal-case retained-record transport written by the inventory. Only its declared
     // fields are decoded; chess interpretation stays in the typed replay.
     internal sealed record RetainedPlaying(string PlayingId, string LineId, string StartPositionId,
-        string? StartFen, string[] MoveIds, string[] Moves, string Result);
+        string? StartFen, string[] MoveIds, string[] Moves, string Result)
+    {
+        public ChessVariantRules? Rules { get; init; }
+    }
 
     internal sealed record FileFact(string Path, long Bytes, string Sha256);
     internal sealed record Selected(string PlayingId, string LineId, string StartPositionId,
@@ -193,14 +196,14 @@ internal static class ChessRecordedFloorWitness
         _ = Id(playing);
         var ids = moves.Select(Id).ToArray();
         string? fen = value.StartFen;
-        var start = Board.FromFen(fen ?? ChessModality.StartFen);
+        var start = Board.FromFen(fen ?? ChessModality.StartFen, value.Rules);
         var startHash = ChessCompose.PositionId(start);
         if (startHash != Id(startId) || ChessCompose.LineId(startHash, ids) != Id(lineId))
             throw new InvalidDataException("Witness start/LINE differs from canonical content.");
         string result = value.Result;
         if (result is not ("1-0" or "0-1" or "1/2-1/2"))
             throw new InvalidDataException("Witness playing lacks a completed recorded result.");
-        var replay = ChessWitnessHydrator.ReplayAdmittedLine(ids, fen);
+        var replay = ChessWitnessHydrator.ReplayAdmittedLine(ids, fen, value.Rules);
         if (replay.Truncated is not null || replay.Plies.Count != ids.Length)
             throw new InvalidDataException("Witness typed line did not replay completely.");
         var sans = value.Moves;
@@ -214,11 +217,11 @@ internal static class ChessRecordedFloorWitness
         {
             var ply = replay.Plies[i];
             var key = ChessCompose.TransitionKey(fromId, ids[i]);
-            var board = Board.FromFen(fromFen);
+            var board = Board.FromFen(fromFen, value.Rules);
             // A tablebase early return or a terminal root would not exercise the ordinary
             // substrate search frontier, so only such positions are accepted here.
             bool ordinarySearch = board.Squares.Count(piece => piece != Piece.Empty) > 7
-                && new ChessModality().Terminal(new ChessModality().FromFen(fromFen)) is null;
+                && new ChessModality().Terminal(new ChessModality().FromFen(fromFen, value.Rules)) is null;
             bool absentPosition = !ChessPositionFloor.TryLookup(fromId, out _, out _, out _, out _, out _, out _, out _);
             bool absentTransition = !ChessTransitionFloor.TryLookup(key, out _);
             if (ordinarySearch && absentPosition && absentTransition)

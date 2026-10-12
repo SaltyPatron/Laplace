@@ -149,7 +149,7 @@ internal static class ChessStartingSideInventory
 
     internal static string StartingSide(ChessWitnessedGame game)
     {
-        var state = ChessAnalyze.InitialState(game.StartFen, new ChessModality())
+        var state = ChessAnalyze.InitialState(game.StartFen, new ChessModality(), game.Rules)
             ?? throw new InvalidDataException("Hydrated start position is unreadable.");
         if (game.StartPositionId is not { } expected || ChessCompose.PositionId(state.Initial.Board) != expected)
             throw new InvalidDataException("Hydrated start does not match the native line's first constituent.");
@@ -228,7 +228,7 @@ internal static class ChessStartingSideInventory
                         {
                             PlayingId = Convert.ToHexStringLower(game.PlayingId.ToBytes()), LineId = game.LineId.ToString(),
                             StartPositionId = game.StartPositionId!.Value.ToString(), StartingSide = side,
-                            Sources = owners, game.StartFen, game.Moves,
+                            Sources = owners, game.StartFen, game.Rules, game.Moves,
                             MoveIds = game.MoveIds.Select(id => id.ToString()).ToArray(),
                             Result = game.Result.ResultToken, WhitePlayer = game.WhitePlayer?.ToString(),
                             BlackPlayer = game.BlackPlayer?.ToString(), game.ClockTokens, game.EvalTokens,

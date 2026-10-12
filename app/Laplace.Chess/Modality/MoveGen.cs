@@ -242,6 +242,7 @@ public static class MoveGen
     // `chess bench` (GH #607). Same moves as the allocating form (perft-gated).
     public static void Legal(Board b, List<ChessMove> pseudoBuf, List<ChessMove> legalBuf)
     {
+        if (!b.Rules.IsStandard) { NativeChessRules.Moves(b, legalBuf, legal: true); return; }
         Pseudo(b, pseudoBuf);
         legalBuf.Clear();
         bool mover = b.WhiteToMove;
@@ -368,6 +369,7 @@ public static class MoveGen
 
     public static void Pseudo(Board b, List<ChessMove> moves)
     {
+        if (!b.Rules.IsStandard) { NativeChessRules.Moves(b, moves, legal: false); return; }
         moves.Clear();
         bool white = b.WhiteToMove;
 
@@ -384,6 +386,7 @@ public static class MoveGen
     /// <summary>Pseudo-legal moves from one occupied square (PGN SAN resolve hot path).</summary>
     public static void PseudoFrom(Board b, int from, List<ChessMove> moves)
     {
+        if (!b.Rules.IsStandard) { NativeChessRules.Moves(b, moves, legal: false, from); return; }
         moves.Clear();
         var p = b.Squares[from];
         if (p == Piece.Empty) return;
@@ -411,6 +414,12 @@ public static class MoveGen
     /// </summary>
     public static bool IsLegal(Board b, ChessMove m)
     {
+        if (!b.Rules.IsStandard)
+        {
+            var legal = new List<ChessMove>();
+            NativeChessRules.Moves(b, legal, legal: true);
+            return legal.Contains(m);
+        }
         bool mover = b.WhiteToMove;
         int kingSq = b.FindKing(mover);
         const MoveFlags CastleAny = MoveFlags.Castle;

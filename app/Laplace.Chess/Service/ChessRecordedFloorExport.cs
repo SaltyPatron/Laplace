@@ -203,7 +203,7 @@ internal static class ChessRecordedFloorExport
             || game.Moves.Count != game.MoveIds.Count || game.StartPositionId is not { } start
             || ChessCompose.LineId(start, game.MoveIds.ToArray()) != game.LineId)
             throw new InvalidDataException("Floor export requires the complete witnessed line and typed move sequence.");
-        var board = Board.FromFen(replay.StartFen);
+        var board = Board.FromFen(replay.StartFen, game.Rules);
         if (ChessCompose.PositionId(board) != start)
             throw new InvalidDataException("Retained replay start differs from the native recorded first constituent.");
         void Reserve(long bytes)
@@ -231,7 +231,7 @@ internal static class ChessRecordedFloorExport
             byte[] encodedId = Convert.FromHexString(ply.PositionId);
             if (encodedId.Length != 16) throw new InvalidDataException("Invalid retained replay position id width.");
             var to = Hash128.FromBytes(encodedId);
-            board = Board.FromFen(ply.Fen);
+            board = Board.FromFen(ply.Fen, game.Rules);
             if (ChessCompose.PositionId(board) != to || ply.Ply != index + 1)
                 throw new InvalidDataException("Retained replay board does not match its canonical position/ordinal.");
             // Reserve an occurrence's maximum output bytes. Duplicate keys can only

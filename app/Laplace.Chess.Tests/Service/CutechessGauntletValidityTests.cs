@@ -11,7 +11,7 @@ public sealed class CutechessGauntletValidityTests
         Rounds = 4,
         SecondsPerMove = 1,
         StockfishElo = 2000,
-        PgnOut = "/tmp/games.pgn",
+        PgnOut = Path.Combine(Environment.GetEnvironmentVariable("TMPDIR") ?? Path.GetTempPath(), "games.pgn"),
     };
 
     [Fact]
@@ -22,7 +22,7 @@ public sealed class CutechessGauntletValidityTests
         Assert.Contains("option.Substrate=substrate", args);
         int openings = args.IndexOf("-openings");
         Assert.True(openings >= 0);
-        Assert.Equal("file=/tmp/openings.epd", args[openings + 1]);
+        Assert.Equal("file=" + Path.Combine(Path.GetDirectoryName(Paired.PgnOut)!, "openings.epd"), args[openings + 1]);
         Assert.Equal("format=epd", args[openings + 2]);
         Assert.Equal("order=sequential", args[openings + 3]);
         int repeat = args.IndexOf("-repeat");

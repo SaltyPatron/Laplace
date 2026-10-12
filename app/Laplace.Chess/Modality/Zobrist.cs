@@ -30,6 +30,11 @@ public static class Zobrist
 
     public static ulong Hash(Board b)
     {
+        if (!b.Rules.IsStandard)
+        {
+            var id = ChessPositionIdentity.PositionId(b);
+            return id.Lo ^ id.Hi;
+        }
         ulong h = 0;
         for (int sq = 0; sq < 128; sq++)
         {

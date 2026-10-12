@@ -8,8 +8,6 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessPgnDecomposerNovelGameTests
 {
     [Theory]
-    [InlineData("Crazyhouse")]
-    [InlineData("Three-check")]
     [InlineData("Atomic")]
     [InlineData("Unknown rules")]
     public void VariantCannotAcquireStandardChessTestimonyEvenBeforeItsFirstSpecialMove(string variant)
@@ -44,7 +42,7 @@ public sealed class ChessPgnDecomposerNovelGameTests
     public void MalformedSyntaxReportsTheSourceAndNativeDiagnosticLocation()
     {
         string pgn = "[Event \"Broken\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Result \"1-0\"]\n"
-            + "[Link \"https://example.org/game/123\"]\n\n1. e4 @d5 1-0\n";
+            + "[Link \"https://example.org/game/123\"]\n\n1. e4 @@d5 1-0\n";
         var error = Assert.Throws<InvalidDataException>(
             () => ChessPgnDecomposer.TryParseGame(pgn, requireCompleteSource: true));
         Assert.Contains("Alice vs Bob", error.Message);

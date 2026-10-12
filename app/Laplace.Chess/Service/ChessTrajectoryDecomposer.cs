@@ -83,7 +83,7 @@ public sealed class ChessTrajectoryDecomposer
     public static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame w, Hash128 sourceId)
     {
         var m = new ChessModality();
-        if (ChessAnalyze.InitialState(w.StartFen, m) is not { } start) return;
+        if (ChessAnalyze.InitialState(w.StartFen, m, w.Rules) is not { } start) return;
         var state = start.Initial;
 
         var line = new List<ChessNode>(w.Moves.Count + 1);
