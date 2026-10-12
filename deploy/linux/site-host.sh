@@ -58,7 +58,6 @@ machine_config_permissions() {
     chmod 644 "$directory/machine.env"
   fi
 }
-if ! "$check"; then machine_config_permissions; fi
 # the machine's own declaration (Laplace-Operations: /etc/laplace/machine.env), as site.sh reads it: what this host
 # names differently from the defaults below is said there once, never on a command line
 machine_values=$(python3 "$HERE/../../scripts/machine-env.py")
@@ -138,6 +137,16 @@ application_runtime() {
   if "$check"; then args=(--check); else args=(); fi
   python3 "$HERE/runtime/install.py" --manifest "$selected" "${args[@]}"
 }
+runtime_storage() {
+  local args=() selected
+  if [[ -n "$runtime_manifest" ]]; then args+=(--manifest "$runtime_manifest"); fi
+  selected=$(python3 "$HERE/runtime/install.py" --select "${args[@]}")
+  if [[ -n "$selected" ]]; then
+    python3 "$HERE/runtime/install.py" --manifest "$selected" --storage-check
+  fi
+}
+runtime_storage
+if ! "$check"; then machine_config_permissions; fi
 if "$check"; then
   python3 "$HERE/service-units.py" --verify
   application_runtime

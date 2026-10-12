@@ -14,9 +14,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$psql = if (Get-Command psql -ErrorAction SilentlyContinue) { 'psql' } else { 'C:\Program Files\PostgreSQL\18\bin\psql.exe' }
+. "$PSScriptRoot/machine-env.ps1"
+$psql = Get-LaplacePostgresTool psql
 
-if (-not $env:PGPASSWORD) { $env:PGPASSWORD = 'postgres' }
 
 
 

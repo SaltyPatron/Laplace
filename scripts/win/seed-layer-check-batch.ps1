@@ -2,8 +2,8 @@ param(
     [string] $Dbname = $(if ($env:LAPLACE_DBNAME) { $env:LAPLACE_DBNAME } else { 'laplace' })
 )
 $ErrorActionPreference = 'Stop'
-$psql = if (Get-Command psql -ErrorAction SilentlyContinue) { 'psql' } else { 'C:\Program Files\PostgreSQL\18\bin\psql.exe' }
-if (-not $env:PGPASSWORD) { $env:PGPASSWORD = 'postgres' }
+. "$PSScriptRoot/machine-env.ps1"
+$psql = Get-LaplacePostgresTool psql
 
 # key -> (source_name, layer) — document uses physicalities probe
 $layers = [ordered]@{

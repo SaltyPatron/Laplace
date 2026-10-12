@@ -55,6 +55,7 @@ if (Test-Path -LiteralPath $env:LAPLACE_DEPENDENCY_MANIFEST -PathType Leaf) {
         if ($fields[0] -notmatch '^[A-Za-z0-9_-]+$' -or $fields[1] -notmatch '^[A-Za-z0-9._-]+$' -or $fields[1] -eq '..') { throw 'Invalid installed dependency manifest' }
         $prefix = [IO.Path]::Combine($env:LAPLACE_DEPS, $fields[0], $fields[1])
         Set-LaplaceDefault ('LAPLACE_DEPENDENCY_' + ($fields[0] -replace '-', '_').ToUpperInvariant() + '_PREFIX') $prefix
+        if ($fields[0] -eq 'postgresql') { Set-LaplaceDefault LAPLACE_PG_DIR $prefix }
         if (Test-Path -LiteralPath $prefix -PathType Container) { $prefixes += $prefix }
         if ($fields[0] -eq 'icu') {
             Set-LaplaceDefault ICU_ROOT $prefix
@@ -69,6 +70,12 @@ if (Test-Path -LiteralPath $env:LAPLACE_DEPENDENCY_MANIFEST -PathType Leaf) {
     } }
     $env:PATH = (@($runtimeDirs) + @($env:PATH -split ';') | Select-Object -Unique) -join ';'
     $values['PATH'] = $env:PATH
+}
+function Get-LaplacePostgresTool([string]$Name) {
+    if ($Name -notmatch '^[a-z_]+$' -or -not $env:LAPLACE_PG_DIR) { throw 'Declare LAPLACE_PG_DIR in the machine configuration.' }
+    $tool = Join-Path $env:LAPLACE_PG_DIR "bin/$Name.exe"
+    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "The declared PostgreSQL tool is missing: $tool" }
+    return $tool
 }
 if ($ForCmd) {
     foreach ($name in $values.Keys) { '{0}={1}' -f $name, [Environment]::GetEnvironmentVariable($name) }

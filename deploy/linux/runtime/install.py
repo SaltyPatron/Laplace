@@ -140,8 +140,33 @@ def selected_manifest(explicit=None):
     return path if path.is_file() else None
 
 
+def storage_preflight(config):
+    # Budget for simultaneous old/new helper and configuration files, using the
+    # actual installer payload rather than a percentage of an unrelated disk.
+    payloads = list(HERE.glob('*.py'))
+    required_bytes = 2 * (sum(path.stat().st_size for path in payloads) + len(json.dumps(config).encode()))
+    paths = [Path(config[key]) for key in ('work', 'prefix', 'state')]
+    paths += [Path(config['mcp']['state']), Path(config['credentials']).parent,
+              Path(config['tls']['root_certificate']).parent, Path('/etc/systemd/system')]
+    result = []
+    for path in paths:
+        parent = path
+        while not parent.exists():
+            parent = parent.parent
+        status = os.statvfs(parent)
+        free = status.f_bavail * status.f_frsize
+        if free < required_bytes or status.f_favail < len(paths) + len(payloads):
+            raise ValueError(f'Insufficient installation space at {path} (filesystem containing {parent}): '
+                             f'{free} bytes and {status.f_favail} inodes available; '
+                             f'{required_bytes} bytes required for installation files. No service configuration changed.')
+        result.append({'path': str(path), 'free_bytes': free, 'free_inodes': status.f_favail,
+                       'installation_bytes': required_bytes})
+    return result
+
+
 def preflight(config):
     validate_declaration(config)
+    storage = storage_preflight(config)
     prefix = Path(config['prefix'])
     for path in (prefix / 'app/laplace-api.env', prefix / 'app/laplace-mcp.env',
                  prefix / 'app/operations/scripts/verify-application-release.py',
@@ -174,7 +199,7 @@ def preflight(config):
             tls_status = 'repair_required'
     return {'host': config['host'], 'release': (prefix / 'app/.laplace-source-revision').read_text().strip(),
             'application_database': config['database'], 'application_data_moved': False,
-            'database_tls': {'status': tls_status, 'root_certificate': str(trust)}}
+            'database_tls': {'status': tls_status, 'root_certificate': str(trust)}, 'storage': storage}
 
 
 class Bao:
@@ -527,6 +552,7 @@ def main():
     parser.add_argument('--manifest', type=Path, help='Absolute runtime declaration; otherwise use the machine declaration or matching host manifest')
     parser.add_argument('--select', action='store_true', help='Resolve and validate declared topology without changing the installation')
     parser.add_argument('--check', action='store_true', help='Check installed prerequisites; root also verifies the private workload enrollment')
+    parser.add_argument('--storage-check', action='store_true', help='Check the filesystems the declared installation will write before changing services')
     args = parser.parse_args()
     manifest = selected_manifest(args.manifest)
     if manifest is None:
@@ -537,6 +563,10 @@ def main():
     if args.select:
         validate_declaration(config)
         print(manifest)
+        return
+    if args.storage_check:
+        validate_declaration(config)
+        print(json.dumps({'storage': storage_preflight(config), 'changed': False}))
         return
     if args.check:
         receipt = preflight(config)
