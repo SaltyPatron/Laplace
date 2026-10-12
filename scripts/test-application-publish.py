@@ -317,6 +317,20 @@ class DeploymentReadinessTests(unittest.TestCase):
             ),
         )
 
+    def test_row_presence_overrides_stale_estimates_in_both_directions(self):
+        self.assertEqual((True, True), self.verify.classify_readiness(self.readiness(
+            ready=True, has_entities=True, has_consensus=True)))
+        self.assertEqual((False, False), self.verify.classify_readiness(self.readiness(
+            entities=100, consensus_relations=100, has_entities=False, has_consensus=False)))
+
+    def test_presence_must_be_boolean_and_ready_requires_both_relations(self):
+        with self.assertRaisesRegex(ValueError, "presence fields"):
+            self.verify.classify_readiness(self.readiness(has_entities="true"))
+        with self.assertRaisesRegex(ValueError, "without both"):
+            self.verify.classify_readiness(self.readiness(
+                ready=True, entities=100, consensus_relations=100,
+                has_entities=True, has_consensus=False))
+
     def test_runtime_failures_and_impossible_ready_state_fail_closed(self):
         cases = [
             self.readiness(substrate_reachable=False),

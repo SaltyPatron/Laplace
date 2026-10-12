@@ -19,7 +19,10 @@ public sealed record ReadinessResponse(
     [property: JsonPropertyName("consensus_relations")] long ConsensusRelations,
     [property: JsonPropertyName("perfcache_ready")] bool PerfcacheReady,
     [property: JsonPropertyName("detail"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Detail = null,
-    [property: JsonPropertyName("chess_perfcache"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChessPerfcacheObservation? ChessPerfcache = null);
+    [property: JsonPropertyName("chess_perfcache"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChessPerfcacheObservation? ChessPerfcache = null,
+    [property: JsonPropertyName("counts_are_estimates")] bool CountsAreEstimates = true,
+    [property: JsonPropertyName("has_entities"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HasEntities = null,
+    [property: JsonPropertyName("has_consensus"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HasConsensus = null);
 
 public sealed record ChessPositionPerfcacheObservation(
     [property: JsonPropertyName("is_loaded")] bool IsLoaded,
