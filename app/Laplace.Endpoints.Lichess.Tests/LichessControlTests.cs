@@ -10,6 +10,50 @@ namespace Laplace.Endpoints.Lichess.Tests;
 public sealed class LichessControlTests
 {
     [Fact]
+    public async Task IndependentRoutingPersistsAllowedTupleAndRejectsUninstalledGrant()
+    {
+        var root = Directory.CreateTempSubdirectory("laplace-routing-").FullName;
+        try
+        {
+            var source = new Laplace.Chess.Service.ChessKnowledgeIdentity("123", "admitted-world");
+            var destination = new Laplace.Chess.Service.ChessKnowledgeIdentity("456", "live-observations");
+            var routing = new LichessRouting(
+                new() { ["desktop"] = new("Desktop", "development", "laplace-mono",
+                    new() { ["curated"] = new("desktop-curated", ["observations"]) }) },
+                new() { ["curated"] = new("Curated world", "laplace-mono", source) },
+                new() { ["observations"] = new("Live observations", "development", "laplace-mono",
+                    Path.Combine(root, "writer.connection"), destination),
+                    ["restricted"] = new("Restricted destination", "production", "laplace-mono",
+                    Path.Combine(root, "restricted.connection"), destination) });
+            routing.Validate();
+            var config = new LichessControlConfiguration(2, 5189, Path.Combine(root, "selection.json"),
+                Path.Combine(root, "token"), Path.Combine(root, "connector"), Path.Combine(root, "connector.json"), new(), routing);
+            var activation = config.Resolve("desktop", "curated", "observations");
+            Assert.Equal(source, activation.ReadIdentity);
+            Assert.Equal(destination, activation.WriteIdentity);
+            Assert.Equal("desktop-curated", activation.ConnectorProfile);
+            using (var controller = new LichessController(config, Microsoft.Extensions.Logging.Abstractions.NullLogger<LichessController>.Instance))
+            {
+                await controller.SelectAsync(new("desktop", 0, "authenticated-user", "curated", "observations"), default);
+                await Assert.ThrowsAsync<ArgumentException>(() => controller.SelectAsync(new("desktop", 1,
+                    "authenticated-user", "curated", "restricted"), default));
+                await Assert.ThrowsAsync<ArgumentException>(() => controller.SelectAsync(new("desktop", 1,
+                    "authenticated-user", "missing", "observations"), default));
+                await Assert.ThrowsAsync<ArgumentException>(() => controller.SelectAsync(new("desktop", 1,
+                    "authenticated-user"), default));
+            }
+            using var restored = new LichessController(config, Microsoft.Extensions.Logging.Abstractions.NullLogger<LichessController>.Instance);
+            var status = JsonSerializer.SerializeToElement(restored.Status(), LichessControlConfiguration.Json);
+            Assert.Equal("curated", status.GetProperty("selection").GetProperty("readSource").GetString());
+            Assert.Equal("observations", status.GetProperty("selection").GetProperty("recordingTarget").GetString());
+            Assert.Equal(1, status.GetProperty("selection").GetProperty("revision").GetInt64());
+            Assert.DoesNotContain("connectionFile", status.GetRawText());
+            Assert.DoesNotContain(root.Replace("\\", "\\\\"), status.GetRawText());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task ControllerAuthenticatesAndPersistsRevisionWithoutStartingABot()
     {
         var root = Directory.CreateTempSubdirectory("laplace-control-").FullName;

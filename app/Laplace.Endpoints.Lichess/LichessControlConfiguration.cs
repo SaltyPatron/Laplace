@@ -12,7 +12,7 @@ internal sealed record LichessProfile(string Label, string Environment, string I
 
 internal sealed record LichessControlConfiguration(int Version, int Port, string StateFile,
     string TokenFile, string ConnectorExecutable, string ConnectorConfiguration,
-    Dictionary<string, LichessProfile> Profiles)
+    Dictionary<string, LichessProfile> Profiles, LichessRouting? Routing = null)
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { WriteIndented = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
@@ -21,7 +21,9 @@ internal sealed record LichessControlConfiguration(int Version, int Port, string
     {
         var c = JsonSerializer.Deserialize<LichessControlConfiguration>(File.ReadAllText(path), Json)
             ?? throw new InvalidDataException("Empty Lichess controller configuration.");
-        if (c.Version != 1 || c.Port is < 1 or > 65535 || c.Profiles.Count == 0)
+        if (c.Port is < 1 or > 65535
+            || !(c.Version == 1 && c.Routing is null && c.Profiles is { Count: > 0 }
+                || c.Version == 2 && c.Routing is not null && c.Profiles is { Count: 0 }))
             throw new InvalidDataException("Invalid Lichess controller version, port or profiles.");
         foreach (var file in new[] { c.StateFile, c.TokenFile, c.ConnectorExecutable, c.ConnectorConfiguration })
             if (string.IsNullOrWhiteSpace(file) || !Path.IsPathFullyQualified(file))
@@ -35,18 +37,27 @@ internal sealed record LichessControlConfiguration(int Version, int Port, string
                 throw new InvalidDataException($"Invalid monorepo Lichess profile: {id}.");
             new LichessOptions(p.MaxConcurrent, Challenges: Policy(p)).Validate();
         }
+        c.Routing?.Validate();
         return c;
     }
 
     public static LichessChallengePolicy Policy(LichessProfile p) =>
         new(p.Speeds?.ToHashSet(StringComparer.OrdinalIgnoreCase), p.Rated);
 
-    public UciLichessEngine Engine(LichessProfile profile, ChessKnowledgeIdentity knowledge) =>
+    public LichessActivation Resolve(string profile, string? readSource, string? recordingTarget)
+    {
+        if (Routing is not null) return Routing.Resolve(profile, readSource, recordingTarget);
+        if (readSource is not null || recordingTarget is not null || !Profiles.TryGetValue(profile, out var legacy))
+            throw new ArgumentException("Unknown installed Lichess profile or independent routing is not installed.");
+        return new(legacy.Label, legacy.ConnectorProfile, null, legacy.ConnectionFile, null, legacy.MaxConcurrent, Policy(legacy));
+    }
+
+    public UciLichessEngine Engine(LichessActivation profile, ChessKnowledgeIdentity knowledge) =>
         new(profile.Label, new UciProcessStart(ConnectorExecutable,
             ["connect", "--configuration", ConnectorConfiguration, "--profile", profile.ConnectorProfile],
             HandshakeTimeout: TimeSpan.FromSeconds(120)), new Dictionary<string, string>(), 300)
         { RequiredKnowledge = knowledge };
 
-    public static string Connection(LichessProfile profile) =>
+    public static string Connection(LichessActivation profile) =>
         ManagedServiceDatabase.Resolve(File.ReadAllText(profile.ConnectionFile).Trim());
 }

@@ -23,7 +23,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 host_args=("$@")
 as_is=false; routing_only=false; browser_setup=false; identity_enrollment=''
-chess_setup=false; chess_configuration=''; chess_enrollment=''
+chess_setup=false; chess_configuration=''; chess_enrollment=''; chess_routing=''
 runtime_only=false; runtime_manifest=''; check=false
 while (( $# )); do
   case "$1" in
@@ -31,6 +31,9 @@ while (( $# )); do
     --routing-only) routing_only=true ;;
     --browser-setup) browser_setup=true ;;
     --chess-setup) chess_setup=true ;;
+    --chess-routing)
+      (( $# >= 2 )) || { echo '--chess-routing requires a declaration path' >&2; exit 2; }
+      chess_setup=true; chess_routing=$2; shift ;;
     --runtime-only) runtime_only=true ;;
     --check) check=true ;;
     --runtime-manifest)
@@ -122,7 +125,9 @@ chess_runtime() {
     return 0
   fi
   local args=(install --configuration "$declaration")
-  if [[ -n "$chess_enrollment" ]]; then args+=(--enrollment "$chess_enrollment"); fi
+  if [[ -n "$chess_routing" ]]; then
+    args=(configure-routing --configuration "$declaration" --routing "$chess_routing")
+  elif [[ -n "$chess_enrollment" ]]; then args+=(--enrollment "$chess_enrollment"); fi
   python3 "$HERE/chess-host.py" "${args[@]}"
 }
 application_runtime() {

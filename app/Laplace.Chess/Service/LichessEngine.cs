@@ -81,10 +81,10 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
             process.NewGame(TimeSpan.FromSeconds(120));
             if (RequiredKnowledge is not null && process.KnowledgeIdentity != RequiredKnowledge)
                 throw new UciEngineException(UciFailure.Rejected,
-                    "The UCI engine and live game writer are connected to different knowledge databases, or the engine did not report its database identity.");
+                    "The UCI engine did not report the configured read source's cluster and database identity.");
             if (RequiredKnowledge is not null && !process.Supports("Refresh Knowledge"))
                 throw new UciEngineException(UciFailure.Rejected,
-                    "The selected Laplace UCI engine cannot refresh knowledge written by the live game recorder; publish the matching monorepo UCI runtime.");
+                    "The selected Laplace UCI engine cannot refresh its configured knowledge source; publish the matching monorepo UCI runtime.");
             // laplace-uci names the engine behind it before its first readyok. Without that line an older
             // laplace-uci ignored --engine and would play as Laplace under another engine's name: refuse it.
             if (Name is "stockfish" or "lc0" && process.Identity.Via is null)

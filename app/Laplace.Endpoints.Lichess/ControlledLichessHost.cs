@@ -8,8 +8,10 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.Lichess;
 
-internal sealed record LichessSelection(string? Profile, long Revision, string? Actor, DateTimeOffset ChangedUtc);
-internal sealed record LichessSelectionRequest(string? Profile, long ExpectedRevision, string Actor);
+internal sealed record LichessSelection(string? Profile, long Revision, string? Actor, DateTimeOffset ChangedUtc,
+    string? ReadSource = null, string? RecordingTarget = null);
+internal sealed record LichessSelectionRequest(string? Profile, long ExpectedRevision, string Actor,
+    string? ReadSource = null, string? RecordingTarget = null);
 
 internal static class ControlledLichessHost
 {
@@ -53,6 +55,7 @@ internal sealed class LichessController : BackgroundService
     private LichessSelection selection;
     private LichessConnectivityService? bot;
     private string? activeProfile;
+    private LichessSelection? activeSelection;
     private string? failure;
     private string phase = "off";
     private long attemptedRevision = -1;
@@ -65,14 +68,24 @@ internal sealed class LichessController : BackgroundService
             ? JsonSerializer.Deserialize<LichessSelection>(File.ReadAllText(config.StateFile), LichessControlConfiguration.Json)
                 ?? throw new InvalidDataException("Empty Lichess selection state.")
             : new(null, 0, null, DateTimeOffset.UtcNow);
-        if (selection.Profile is not null && !config.Profiles.ContainsKey(selection.Profile))
-            throw new InvalidDataException("Persisted Lichess selection no longer exists in the installed profile catalog.");
+        if (config.Routing is not null) selection = config.Routing.Restore(selection);
+        if (selection.Profile is not null)
+            _ = config.Resolve(selection.Profile, selection.ReadSource, selection.RecordingTarget);
     }
 
     public object Status() => new
     {
         controller = Environment.MachineName, selection = Volatile.Read(ref selection),
-        activeProfile, phase, error = failure, bot = bot?.Status(),
+        activeProfile, activeSelection, phase, error = failure, bot = bot?.Status(),
+        routing = config.Routing is not { } routing ? null : new
+        {
+            executors = routing.Executors.Select(p => new { id = p.Key, p.Value.Label, p.Value.Environment,
+                p.Value.Implementation, p.Value.MaxConcurrent, p.Value.Rated,
+                sources = p.Value.Sources.Select(s => new { id = s.Key, recordingTargets = s.Value.RecordingTargets }) }),
+            sources = routing.Sources.Select(p => new { id = p.Key, p.Value.Label, p.Value.Implementation, p.Value.Identity }),
+            recordingTargets = routing.RecordingTargets.Select(p => new { id = p.Key, p.Value.Label, p.Value.Environment,
+                p.Value.Implementation, p.Value.Identity })
+        },
         profiles = config.Profiles.Select(p => new { id = p.Key, p.Value.Label, p.Value.Environment,
             p.Value.Implementation, p.Value.Knowledge, p.Value.MaxConcurrent, p.Value.Rated, p.Value.Speeds })
     };
@@ -81,14 +94,17 @@ internal sealed class LichessController : BackgroundService
     {
         if (string.IsNullOrWhiteSpace(request.Actor) || request.Actor.Length > 160)
             throw new ArgumentException("An authenticated actor is required.");
-        if (request.Profile is not null && !config.Profiles.ContainsKey(request.Profile))
-            throw new ArgumentException("Unknown installed Lichess profile.");
+        if (request.Profile is not null)
+            _ = config.Resolve(request.Profile, request.ReadSource, request.RecordingTarget);
+        else if (request.ReadSource is not null || request.RecordingTarget is not null)
+            throw new ArgumentException("An off selection cannot name a read source or recording destination.");
         await changes.WaitAsync(ct);
         try
         {
             if (selection.Revision != request.ExpectedRevision)
                 throw new InvalidOperationException("The selection changed in another session; refresh before applying.");
-            var next = new LichessSelection(request.Profile, checked(selection.Revision + 1), request.Actor, DateTimeOffset.UtcNow);
+            var next = new LichessSelection(request.Profile, checked(selection.Revision + 1), request.Actor, DateTimeOffset.UtcNow,
+                request.ReadSource, request.RecordingTarget);
             var temporary = config.StateFile + ".new";
             await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(next, LichessControlConfiguration.Json), ct);
             File.Move(temporary, config.StateFile, overwrite: true);
@@ -114,7 +130,7 @@ internal sealed class LichessController : BackgroundService
                         // Stop accepting challenges; the existing game's engine and writer
                         // stay paired until every confirmed game finishes.
                         await bot.StopAsync(stoppingToken);
-                        await bot.DisposeAsync(); bot = null; activeProfile = null;
+                        await bot.DisposeAsync(); bot = null; activeProfile = null; activeSelection = null;
                     }
                     desired = Volatile.Read(ref selection);
                     attemptedRevision = desired.Revision;
@@ -125,17 +141,19 @@ internal sealed class LichessController : BackgroundService
                         phase = "verifying";
                         try
                         {
-                            var profile = config.Profiles[desired.Profile];
+                            var profile = config.Resolve(desired.Profile, desired.ReadSource, desired.RecordingTarget);
                             var connection = LichessControlConfiguration.Connection(profile);
                             using var source = LaplaceDataSource.Create(SubstrateAccess.Serving, connection);
-                            var knowledge = ChessKnowledgeIdentity.Read(source);
-                            var engine = config.Engine(profile, knowledge);
+                            var writer = ChessKnowledgeIdentity.Read(source);
+                            if (profile.WriteIdentity is not null && writer != profile.WriteIdentity)
+                                throw new InvalidOperationException("Recording destination does not match its installed cluster and database identity.");
+                            var engine = config.Engine(profile, profile.ReadIdentity ?? writer);
                             using (engine.Open()) { }
                             var live = await ChessLiveGameHost.CreateAsync(ct: stoppingToken, connString: connection);
                             bot = new LichessConnectivityService(live, log, ownsHost: true, drainGames: true);
-                            if (!bot.Start(profile.MaxConcurrent, LichessControlConfiguration.Policy(profile), engine))
+                            if (!bot.Start(profile.MaxConcurrent, profile.Policy, engine))
                                 throw new InvalidOperationException(bot.Status().Error ?? "Lichess worker could not start.");
-                            activeProfile = desired.Profile; phase = "running";
+                            activeProfile = desired.Profile; activeSelection = desired; phase = "running";
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {

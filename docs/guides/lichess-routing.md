@@ -1,8 +1,9 @@
 # Selecting where the Lichess bot runs
 
 Open **Chess Lab → Lichess** (`/lab/lichess`) for the **Lichess routing** selector. Every configured UI
-addresses the same account controller. Select an installed engine profile, or Off,
-and Apply. The page shows the requested profile, active profile, connection state,
+addresses the same account controller. Select an execution location, knowledge read
+source and game recording destination, or Off, then **Apply routing**. The page shows
+the requested and active selections, connection state,
 game count and initialization failures. Changing a selection stops new challenges
 and drains existing games before starting the new profile. Concurrent edits are
 rejected until the stale page refreshes.
@@ -22,7 +23,7 @@ These installed monorepo surfaces all address the controller on hart-prod:
 | Production | https://api.hartonomous.com/lab/lichess | `mono-prod` | hart-prod, local connector |
 
 Sign in, select **Laplace on hart-desktop**, **Laplace on hart-server**, or
-**Laplace on hart-prod**, then **Apply destination**. **Off** stops accepting new
+**Laplace on hart-prod**, choose the read source and recording destination, then **Apply routing**. **Off** stops accepting new
 games and lets active games finish. The selector controls the same single bot
 account from every UI; it does not create one bot per environment.
 
@@ -51,13 +52,21 @@ These commands perform real engine searches without starting Lichess games. Clie
 configuration is in `%LOCALAPPDATA%\Laplace\mono\chess\uci-client.json`; the launcher
 is in `%LOCALAPPDATA%\Laplace\bin`. No source checkout or build mount is needed to run it.
 
-## Engine and knowledge binding
+## Execution, knowledge and recording
 
-The installed controller currently combines engine selection and recording in one
-profile and requires matching engine/writer database identities. This is a constraint
-of the current implementation, not the target configuration model. Account ownership,
-compute placement, read source, write destination and permitted operations are separate
-choices. Installed copies of Stockfish, Cutechess and Fastchess are not a distributed
+Version 2 controller configuration separates executors, read sources and recording
+destinations. Each executor declares which read sources its installed UCI connectors
+can reach, and each such route declares its authorized recording destinations.
+The API accepts only installed identifiers, never client-supplied connection strings,
+executable paths or credentials. The UI displays these choices independently.
+
+The engine must report the selected read source's exact cluster/database identity.
+The recorder separately verifies the selected write destination. They may differ;
+the controller no longer assumes they are the same database. This does not replicate
+data between them or route recording back into a curated read source.
+
+Account ownership remains one controller with one bot credential. Installed copies
+of Stockfish, Cutechess and Fastchess are not a distributed
 scheduler. Work assigned across hosts needs declared resources and operation identities;
 database selection and grants belong behind authenticated application services.
 
@@ -69,20 +78,44 @@ launch a process, invoke a configured SSH command, or open an authenticated
 WebSocket. The profile declares the implementation, environment and knowledge
 target. Configuration paths belong to the installation; users do not need mounts.
 
-Before accepting challenges, the controller checks the writer's PostgreSQL cluster
-identifier and database against the identity reported by the actual UCI engine.
-The monorepo engine also implements the UCI `Refresh Knowledge` button. Each bot
-decision refreshes the engine's provider snapshots after the confirmed game state
-has been admitted. This crosses process boundaries; a writer's process-local cache
+Before accepting challenges, the controller checks each connection against its own
+declared identity. The monorepo engine implements the UCI `Refresh Knowledge` button;
+each bot decision refreshes its selected read source. A writer's process-local cache
 epoch cannot update a remote engine. Refresh time is charged against the game clock.
 
 Confirmed moves and real outcomes continue through `ChessLiveGameHost` and the
-existing ingestion pipeline. Curated seed promotion does not suspend live admission.
+existing ingestion pipeline. The current host buffers moves and persists the completed
+game; continuous per-move admission remains implementation work. Curated seed promotion
+does not disable recording of played games.
 Stockfish and Lc0 are explicit comparison engines, not substitutes for Laplace.
 Refactor and modular implementations require their own engines and admission
 contracts; the monorepo controller does not claim to implement those contracts.
 
 ## Installation and operation
+
+The version 2 `routing` object has these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `executors[id]` | Label, environment, implementation, challenge limits and available `sources` |
+| `executors[id].sources[sourceId]` | Installed `connectorProfile` and allowed `recordingTargets` |
+| `sources[id]` | Label, implementation, and exact `identity` (`cluster`, `database`) |
+| `recordingTargets[id]` | Label, environment, implementation, scoped service `connectionFile`, and exact `identity` |
+| `legacySelections[profileId]` | Explicit read/write identifiers for preserving a version 1 selection; the two identities must match |
+
+Apply a routing declaration through host setup, using the retained installation so
+future setup runs preserve it:
+
+```sh
+sudo bash deploy/linux/site-host.sh --chess-routing /path/to/routing.json
+```
+
+Setup verifies every declared engine/read connection and recording destination under
+the installed service identity, drains the existing bot, activates the declaration,
+and restores its selected route. Configuration and selection rollback on activation
+failure. A concurrent operator selection is preserved. Ordinary UI routing changes
+require the signed-in operator grant, not sudo or an OpenBao human login. Version 1
+installations remain supported until their own declared routing is installed.
 
 The release pipeline publishes `app/uci/laplace-uci` and `app/lichess-runtime`
 with the same native dependency closure as the monorepo API. The independent

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.error
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('identity_runtime', Path(__file__).with_name('identity-runtime.py'))
@@ -280,14 +281,122 @@ def install(c, source, enrollment_path):
     print(json.dumps({'host': c['host'], 'controller': status['controller'], 'phase': status['phase'], 'selection': status['selection'], 'credentials': 'openbao-agent'}))
 
 
+def configure_routing(c, source, routing_path):
+    if os.geteuid() != 0 or c['host'] != socket.gethostname().lower().split('.')[0]:
+        raise ValueError('Run routing setup as root on its declared host.')
+    directory = Path(c['directory'])
+    if Path(source).resolve() != (directory / 'agent/installation.json').resolve():
+        raise ValueError('Routing setup requires the retained installation declaration, so later setup preserves the selected routes.')
+    deployed = directory / 'controller.json'
+    previous = json.loads(deployed.read_text())
+    candidate = dict(previous, version=2, profiles={}, routing=json.loads(Path(routing_path).read_text()))
+    temporary = directory / 'controller.pending.json'
+    old_installation = Path(source).read_bytes()
+    old_controller = deployed.read_bytes()
+    token = Path(previous['tokenFile']).read_text().strip()
+    origin = c['health_url'].rsplit('/', 1)[0]
+
+    def request(route, body=None):
+        data = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(origin + '/' + route, data=data,
+            headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.load(response)
+
+    def select(selected, revision):
+        return request('selection', dict(profile=selected.get('profile'), readSource=selected.get('readSource'),
+            recordingTarget=selected.get('recordingTarget'), expectedRevision=revision, actor='installation-routing'))
+
+    def ready(selected):
+        for _ in range(120):
+            try:
+                current = request('status')
+                if current['selection']['revision'] != selected['selection']['revision']:
+                    raise ValueError('Selection changed concurrently; preserving the operator selection.')
+                if current['phase'] == 'failed':
+                    raise ValueError(current.get('error') or 'Controller activation failed.')
+                if current['phase'] == 'off' and selected['selection']['profile'] is None:
+                    return current
+                if current['phase'] == 'running' and (current.get('bot') or {}).get('connected'):
+                    return current
+            except (OSError, urllib.error.URLError):
+                pass
+            time.sleep(1)
+        raise RuntimeError('Controller did not reach its selected routing state.')
+
+    try:
+        identity.write(temporary, json.dumps(candidate, indent=2), 0o644)
+        environment = [k + '=' + v for k, v in c['environment'].items()]
+        identity.run(['runuser', '-u', c['user'], '--', 'env', *environment, *c['command'],
+            '--verify-routing', str(temporary), '--selection', previous['stateFile']])
+        original = request('status')['selection']
+        restored = dict(original)
+        if original.get('profile') and not original.get('readSource'):
+            mapping = candidate['routing'].get('legacySelections', {}).get(original['profile'])
+            if not mapping:
+                raise ValueError('Declare the original read/write destination before upgrading this combined profile.')
+            restored.update(mapping)
+        off = select({}, original['revision'])
+        print('Draining the shared bot before applying independent routing...', flush=True)
+        for _ in range(1800):
+            status = request('status')
+            if status['selection']['revision'] != off['selection']['revision']:
+                raise ValueError('Selection changed during drain; no routing configuration was changed.')
+            if status['phase'] == 'off':
+                break
+            time.sleep(1)
+        else:
+            select(original, off['selection']['revision'])
+            raise RuntimeError('Games are still active; original selection restored and no routing configuration changed.')
+        try:
+            c['public_files']['controller.json'] = candidate
+            identity.write(deployed, json.dumps(candidate, indent=2), 0o644)
+            identity.write(Path(source), json.dumps(c, indent=2))
+            identity.run(['systemctl', 'restart', c['service'] + '.service'])
+            ready(off)
+            selected = select(restored, off['selection']['revision'])
+            status = ready(selected)
+        except Exception:
+            # Roll back only our own selection. A concurrent operator decision has priority.
+            try:
+                current = request('status')
+            except (OSError, urllib.error.URLError):
+                current = None
+            if current and current['selection'].get('actor') != 'installation-routing':
+                raise
+            identity.run(['systemctl', 'stop', c['service'] + '.service'])
+            identity.write(deployed, old_controller, 0o644)
+            identity.write(Path(source), old_installation)
+            state = Path(previous['stateFile'])
+            reverted = dict(off['selection'], revision=(current or off)['selection']['revision'])
+            identity.write(state, json.dumps(reverted))
+            account = pwd.getpwnam(c['user'])
+            os.chown(state, account.pw_uid, account.pw_gid)
+            identity.run(['systemctl', 'start', c['service'] + '.service'])
+            ready({'selection': reverted})
+            ready(select(original, reverted['revision']))
+            raise
+        receipt = {'verified_utc': time.time(), 'controller': status['controller'], 'phase': status['phase'],
+            'selection': status['selection'], 'routing': status['routing']}
+        identity.write(Path(c['state']) / 'routing-installation.json', json.dumps(receipt, indent=2))
+        print(json.dumps(receipt))
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['enroll', 'install', 'render', 'export-certificate'])
+    parser.add_argument('operation', choices=['enroll', 'install', 'render', 'export-certificate', 'configure-routing'])
     parser.add_argument('--configuration', required=True)
     parser.add_argument('--enrollment')
+    parser.add_argument('--routing')
     args = parser.parse_args()
     c = config(args.configuration)
-    if args.operation == 'enroll':
+    if args.operation == 'configure-routing':
+        if not args.routing:
+            parser.error('Routing setup requires --routing <declaration.json>.')
+        configure_routing(c, args.configuration, args.routing)
+    elif args.operation == 'enroll':
         if not args.enrollment:
             parser.error('Enrollment needs an output path.')
         enroll(c, args.enrollment)
