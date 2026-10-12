@@ -22,8 +22,13 @@ try {
   const receipt = { file_id: 'a'.repeat(32), document_id: 'b'.repeat(32), content_id: 'c'.repeat(32), metadata_id: 'd'.repeat(32), source_id: 'e'.repeat(32), source: 'fixture', bytes: original.length, modality: null };
   await page.route('**/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/v1/content/text') { calls.push(route.request().postDataJSON()); held = route; return; }
-    if (path === `/v1/content/${receipt.file_id}`) return route.fulfill({ json: { ...receipt, kind: 'file', requested_id: receipt.file_id, name: 'exact.txt', path: 'exact.txt', text: original.toString('utf8'), content_base64: original.toString('base64'), contexts: [], modified_at: null } });
+    if (path === '/v1/content/text/raw') {
+      const request = route.request();
+      calls.push({ body: request.postDataBuffer(), query: new URL(request.url()).searchParams, contentType: request.headers()['content-type'] });
+      held = route; return;
+    }
+    if (path === `/v1/content/${receipt.file_id}`) return route.fulfill({ json: { ...receipt, kind: 'file', requested_id: receipt.file_id, name: 'exact.txt', path: 'exact.txt', text: original.toString('utf8'), content_base64: null, contexts: [], modified_at: null } });
+    if (path === `/v1/content/${receipt.file_id}/raw`) return route.fulfill({ body: original, contentType: 'application/octet-stream' });
     return route.fulfill({ status: 501, json: { error: { message: `Unprovided fixture route ${path}` } } });
   });
   await page.goto(`${server.resolvedUrls.local[0]}__data_test`);
@@ -33,15 +38,19 @@ try {
   await pathInput.focus(); await pathInput.press('End'); await pathInput.press('a'); await expect(pathInput).toBeFocused();
   await pathInput.press('Backspace'); await expect(pathInput).toHaveValue('exact.txt');
   await page.getByRole('button', { name: 'Ingest 2 queued artifacts', exact: true }).click();
-  await expect.poll(() => calls.length).toBe(1); assert.equal(calls[0].content_base64, original.toString('base64'));
+  await expect.poll(() => calls.length).toBe(1);
+  assert.deepEqual(calls[0].body, original);
+  assert.equal(calls[0].contentType, 'application/octet-stream');
+  assert.equal(calls[0].query.get('name'), 'exact.txt');
+  assert.equal(calls[0].query.get('path'), 'exact.txt');
   await page.getByRole('button', { name: 'Another workspace', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Another workspace', exact: true })).toBeVisible();
   await held.fulfill({ json: receipt });
   await page.getByRole('button', { name: 'Open data workspace', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Ingest 1 queued artifact', exact: true })).toBeEnabled(); assert.equal(calls.length, 1);
   await page.getByRole('button', { name: 'Read admitted bytes', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Download returned bytes', exact: true })).toBeEnabled();
-  const downloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: 'Download returned bytes', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Download exact bytes', exact: true })).toBeEnabled();
+  const downloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: 'Download exact bytes', exact: true }).click();
   const download = await downloadPromise; assert.deepEqual(await readFile(await download.path()), original);
   await page.getByRole('button', { name: 'Switch fixture tenant', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Ingest 0 queued artifacts', exact: true })).toBeDisabled();

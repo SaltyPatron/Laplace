@@ -1,4 +1,4 @@
-import { Button, FormRow, Input, Muted, Panel } from '@ui';
+import { Button, ErrorText, FormRow, Input, Muted, Panel } from '@ui';
 import shared from './playShared.module.css';
 
 export interface TrainStatus {
@@ -15,15 +15,22 @@ export interface TrainKnobs {
 
 export interface EnginePanelProps {
   train: TrainStatus | null;
+  busy: boolean;
+  statusError: string | null;
+  actionError: string | null;
+  onRefresh: () => void;
   knobs: TrainKnobs;
   onKnobsChange: (knobs: TrainKnobs) => void;
   onStart: () => void;
   onStop: () => void;
 }
 
-export function EnginePanel({ train, knobs, onKnobsChange, onStart, onStop }: EnginePanelProps) {
+export function EnginePanel({ train, busy, statusError, actionError, onRefresh, knobs, onKnobsChange, onStart, onStop }: EnginePanelProps) {
   return (
     <Panel title="Training">
+      {statusError && <ErrorText role="alert">{statusError}</ErrorText>}
+      {actionError && <ErrorText role="alert">{actionError}</ErrorText>}
+      {statusError && train && <Muted>Last known status:</Muted>}
       {train ? (
         <ul className={shared.stats}>
           <li>state: <b>{train.running ? 'running' : 'idle'}</b></li>
@@ -32,7 +39,7 @@ export function EnginePanel({ train, knobs, onKnobsChange, onStart, onStop }: En
           <li>adjudicated: {train.adjudicated}</li>
           <li>last: {train.lastOutcome || '—'}</li>
         </ul>
-      ) : <Muted>no status</Muted>}
+      ) : <Muted>Training status has not been confirmed.</Muted>}
       <div className={shared.knobs}>
         <FormRow label="games" htmlFor="train-games">
           <Input id="train-games" type="number" min={0} value={knobs.games}
@@ -52,8 +59,9 @@ export function EnginePanel({ train, knobs, onKnobsChange, onStart, onStop }: En
         </FormRow>
       </div>
       <div className={shared.ctlRow}>
-        <Button onClick={onStart} disabled={train?.running}>{knobs.games > 0 ? `Run ${knobs.games}` : 'Run ∞'}</Button>
-        <Button onClick={onStop} disabled={!train?.running}>Stop</Button>
+        <Button onClick={onStart} disabled={busy || !!statusError || train?.running !== false}>{knobs.games > 0 ? `Run ${knobs.games}` : 'Run ∞'}</Button>
+        <Button onClick={onStop} disabled={busy || (!statusError && train?.running === false)}>Stop</Button>
+        <Button onClick={onRefresh} disabled={busy}>Refresh status</Button>
       </div>
       <Muted>games 0 = run until Stop · temp = exploration · weight = per-game evidence · folds online.</Muted>
     </Panel>
