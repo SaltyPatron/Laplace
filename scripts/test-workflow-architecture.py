@@ -22,7 +22,7 @@ class WorkflowArchitecture(unittest.TestCase):
         maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         delivery = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         deploy = maintenance.split("\n  deploy:\n", 1)[1].split("\n  verify:\n", 1)[0]
-        self.assertIn("inputs.target != 'content'", deploy)
+        self.assertIn("inputs.target != 'cloud'", deploy)
         self.assertIn("promote: ${{ inputs.target == 'production' }}", deploy)
         start_cloud = delivery.split("\n  cloud-host:\n", 1)[1].split("\n  production-build:\n", 1)[0]
         self.assertIn("needs.deliver.result == 'success' && inputs.qualify_cloud == true", start_cloud)
@@ -65,7 +65,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "runner-environment.yml": "name: Host — runner environment",
             "seed.yml": "name: Internal — substrate ingest",
             "seed-foundation.yml": "name: Data — foundation ingest",
-            "seed-relations.yml": "name: Data — content ingest",
+            "seed-relations.yml": "name: Data — relations ingest",
             "seed-documents.yml": "name: Data — documents ingest",
             "seed-code.yml": "name: Data — code ingest",
             "seed-chess.yml": "name: Data — chess ingest",
