@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('machine', ROOT / 'scripts/machine-env.py')
@@ -74,10 +76,10 @@ def render(config):
                 + ''.join('Environment=' + quote(name + '=' + temporary) + '\n' for name in ('TMPDIR', 'TMP', 'TEMP'))
                 + 'Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1\n'
                 + f'WorkingDirectory={scalar_path(prefix + "/" + subdir)}\n'
-                + f'EnvironmentFile={quote(prefix + "/app/laplace-" + surface + ".env")}\n')
+                + f'EnvironmentFile={scalar_path(prefix + "/app/laplace-" + surface + ".env")}\n')
         secrets = ('operator', 'lichess', 'stripe', 'identity') if surface == 'api' else ('mcp',)
         for secret in secrets:
-            unit += 'EnvironmentFile=' + ('-' if surface == 'api' else '') + quote(f'{prefix}/secrets/{secret}.env') + '\n'
+            unit += 'EnvironmentFile=' + ('-' if surface == 'api' else '') + scalar_path(f'{prefix}/secrets/{secret}.env') + '\n'
         # ExecStart expands dollars separately from unit quoting.
         unit += ('ExecStart=' + quote(dotnet).replace('$', '$$') + ' ' + quote(executable).replace('$', '$$')
                  + (' --http' if surface == 'mcp' else '') + '\n'
@@ -93,13 +95,31 @@ def render(config):
     return units
 
 
+def verify(directory, names):
+    result = subprocess.run(['systemd-analyze', 'verify', '--man=no',
+                             *[str(directory / name) for name in names]],
+                            capture_output=True, text=True, timeout=30)
+    # systemd can return success while ignoring invalid directives. Its warnings
+    # about these units are failures, independently of the process exit status.
+    diagnostics = [line for line in result.stderr.splitlines() if any(name in line for name in names)]
+    if result.returncode or diagnostics:
+        raise ValueError('Generated service units were rejected: ' + '\n'.join(diagnostics or [result.stderr]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, help='Write all generated units to this directory')
+    parser.add_argument('--verify', action='store_true', help='Validate with the installed systemd parser before writing')
     args = parser.parse_args()
     config = {**machine.resolve(machine.machine_file(os.environ), os.environ,
                                explicit=bool(os.environ.get('LAPLACE_MACHINE_ENV'))), **os.environ}
     units = render(config)
+    if args.verify:
+        with tempfile.TemporaryDirectory(prefix='laplace-units-') as temporary:
+            directory = Path(temporary)
+            for name, content in units.items():
+                (directory / name).write_text(content, encoding='utf-8')
+            verify(directory, units)
     if args.output:
         args.output.mkdir(parents=True, exist_ok=True)
         for name, content in units.items():

@@ -42,6 +42,18 @@ class ServiceUnits(unittest.TestCase):
                                          *map(str, Path(temporary).glob('*.path'))],
                                         capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                diagnostics = [line for line in result.stderr.splitlines() if any(name in line for name in rendered)]
+                self.assertEqual(diagnostics, [], result.stderr)
+
+    def test_ignored_environment_file_is_a_failure_even_when_systemd_exits_zero(self):
+        if not shutil.which('systemd-analyze'):
+            self.skipTest('Requires the actual systemd parser')
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            name = 'laplace-api.service'
+            (directory / name).write_text('[Service]\nExecStart=/usr/bin/true\nEnvironmentFile="/ignored.env"\n')
+            with self.assertRaisesRegex(ValueError, 'EnvironmentFile'):
+                units.verify(directory, [name])
 
     def test_invalid_declarations_are_rejected_before_writing_units(self):
         for name, value in [('LAPLACE_INSTALL_PREFIX', 'relative'), ('LAPLACE_LOCKS', '/'),
