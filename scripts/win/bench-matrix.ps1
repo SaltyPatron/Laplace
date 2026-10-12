@@ -29,7 +29,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$PsqlExe  = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
+. "$PSScriptRoot/machine-env.ps1"
+$PsqlExe = Get-LaplacePostgresTool psql
 $MigDll   = 'D:\Data\Laplace\app\bin\Laplace.Migrations\Release\net10.0\Laplace.Migrations.dll'
 $BenchDb  = 'laplace_bench'   # the ONLY database this script may touch
 $Stamp    = Get-Date -Format 'yyyyMMdd-HHmmss'
