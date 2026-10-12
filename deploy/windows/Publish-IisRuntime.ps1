@@ -11,7 +11,10 @@ $web=Join-Path $c.directory 'web';$target=Join-Path $web ('releases/'+$manifest.
 $lock=[IO.File]::Open((Join-Path $web '.publication.lock'),'OpenOrCreate','ReadWrite','None')
 try {
     $readers=@(Get-IisRuntimeReaders $c)
-    if(Test-Path $target){$null=Test-IisPackage $target}else{
+    if(Test-Path $target){
+        $null=Test-IisPackage $target
+        Grant-IisRuntimeReaders $target $readers
+    }else{
         $null=New-Item -ItemType Directory -Path $target -Force
         Grant-IisRuntimeReaders $target $readers
         Copy-Item -Path (Join-Path $Package '*') -Destination $target -Recurse

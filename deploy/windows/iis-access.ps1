@@ -49,11 +49,20 @@ function Grant-IisRuntimeReaders([string]$Path,[string[]]$Readers) {
     if(-not $Readers){return}
     $acl=Get-Acl -LiteralPath $Path
     $inheritance=if(Test-Path -LiteralPath $Path -PathType Container){'ContainerInherit,ObjectInherit'}else{'None'}
+    $flags=[Security.AccessControl.InheritanceFlags]$inheritance
+    $existing=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+    $changed=$false
     foreach($reader in $Readers) {
+        if(@($existing|Where-Object {
+            $_.IdentityReference.Value -eq $reader -and $_.AccessControlType -eq 'Allow' -and
+            ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadAndExecute) -eq [Security.AccessControl.FileSystemRights]::ReadAndExecute -and
+            ($_.InheritanceFlags -band $flags) -eq $flags -and $_.PropagationFlags -eq 'None'
+        }).Count){continue}
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
             [Security.Principal.SecurityIdentifier]::new($reader),'ReadAndExecute',$inheritance,'None','Allow'))
+        $changed=$true
     }
-    Set-IisFileAccess $Path $acl
+    if($changed){Set-IisFileAccess $Path $acl}
 }
 function Write-IisPublicAtomic([string]$Path,[string]$Content,[string[]]$Readers) {
     $temporary=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.new'

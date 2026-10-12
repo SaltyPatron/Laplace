@@ -28,6 +28,9 @@ if($readers -notcontains $reader -or $readers -contains $writer){throw 'Consumer
 Grant-IisRuntimeReaders $second $readers
 [IO.File]::WriteAllText((Join-Path $second 'engine.exe'),'permission probe')
 Assert-ReadOnly (Join-Path $second 'engine.exe')
+$before=(Get-Acl $second).Sddl
+Grant-IisRuntimeReaders $second $readers
+if((Get-Acl $second).Sddl -ne $before){throw 'Repeated publication changed an already granted ACL.'}
 foreach($revision in 'bbbbbbbb','aaaaaaaa','bbbbbbbb'){
     Write-IisPublicAtomic $selection ('{"revision":"'+$revision+'"}') $readers
     Assert-ReadOnly $selection
