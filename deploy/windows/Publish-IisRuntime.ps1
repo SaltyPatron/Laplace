@@ -7,6 +7,9 @@ $c=Read-IisInstallation $Installation
 if(-not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY to a workload key for authenticated publication verification.'}
 $manifest=Test-IisPackage $Package
 if($manifest.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Invalid package revision.'}
+foreach($component in @('','cli','uci')) {
+    & "$PSScriptRoot/Test-NativeSqlCatalog.ps1" -Library (Join-Path (Join-Path $Package $component) 'laplace_core.dll')
+}
 $web=Join-Path $c.directory 'web';$target=Join-Path $web ('releases/'+$manifest.revision)
 $lock=[IO.File]::Open((Join-Path $web '.publication.lock'),'OpenOrCreate','ReadWrite','None')
 try {
