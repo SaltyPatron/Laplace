@@ -103,7 +103,7 @@ internal static class Program
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("reset", RunReset);
     }
 
-    [System.ComponentModel.Description("DROP DATABASE + re-create empty (full Layer-1 wipe).")]
+    [System.ComponentModel.Description("Recreate from installed migrations, preserving configuration and access; deletes data.")]
     internal sealed class NukeCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("nuke", RunNuke);
@@ -221,41 +221,23 @@ internal static class Program
         var targetDb = b.Database
             ?? throw new InvalidOperationException("Target database name missing from connection string.");
 
-        Console.WriteLine($"[migrate nuke] DROP DATABASE \"{targetDb}\" + re-create empty.");
+        Console.WriteLine($"[migrate nuke] Re-create \"{targetDb}\" using its installed configuration and migrations.");
         Console.WriteLine("Loses ALL substrate data: entities, physicalities, attestations.");
-        Console.WriteLine("Loses the extensions (CREATE EXTENSION must run again on next 'up').");
+        Console.WriteLine("Rebuilds extensions from installed migrations; preserves database configuration and access.");
         if (!Confirmed("NUKE"))
         {
             Console.WriteLine("Aborted.");
             return 1;
         }
 
-        var maintenance = new NpgsqlConnectionStringBuilder(connectionString) { Database = "postgres" };
-        using var conn = new NpgsqlConnection(maintenance.ConnectionString);
-        conn.Open();
-
-        using (var term = new NpgsqlCommand(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
-            "WHERE datname = @db AND pid <> pg_backend_pid()", conn))
+        var app = LaplaceInstall.HasSeparateAppDatabase
+            ? new NpgsqlConnectionStringBuilder(LaplaceInstall.AppConnectionString()) : b;
+        bool includesApp = app.Database == b.Database && app.Host == b.Host && app.Port == b.Port;
+        DatabaseRecreation.Run(connectionString, replacement => RunUpTargets(new[]
         {
-            term.Parameters.AddWithValue("db", targetDb);
-            term.ExecuteNonQuery();
-        }
-
-        var quoted = '"' + targetDb.Replace("\"", "\"\"") + '"';
-        using (var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS {quoted}", conn))
-        {
-            drop.ExecuteNonQuery();
-            Console.WriteLine($"[migrate nuke] Dropped {targetDb}.");
-        }
-        using (var create = new NpgsqlCommand(
-            $"CREATE DATABASE {quoted} OWNER laplace_admin", conn))
-        {
-            create.ExecuteNonQuery();
-            Console.WriteLine($"[migrate nuke] Re-created empty {targetDb}.");
-        }
-
-        Console.WriteLine("[migrate nuke] Done. Run 'up' to re-apply CREATE EXTENSION + grants.");
+            (replacement, (Func<string, bool>)(path => includesApp || !IsAppScript(path)), "replacement database")
+        }));
+        Console.WriteLine("[migrate nuke] Re-created with migrations, database settings and existing access grants.");
         return 0;
     }
 

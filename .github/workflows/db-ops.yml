@@ -68,7 +68,9 @@ jobs:
           export LAPLACE_DB_HEALTH_SCOPE=installed
           source scripts/ci-environment.sh
           host_lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCK_ROOT:-$workspace_lock_root}/host-resource.lock}"
-          if ! [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
+          if [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
+            exec 8>&9
+          else
             exec 8>>"$host_lock"
             flock 8
           fi
@@ -111,11 +113,13 @@ jobs:
               health
               ;;
             migrate)
+              bash deploy/linux/site.sh database extensions
               bash scripts/db-migrations.sh up
               health
               ;;
             repair)
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+              bash deploy/linux/site.sh database extensions
+              bash scripts/db-migrations.sh up
               health
               ;;
             reindex)
@@ -129,8 +133,6 @@ jobs:
               ;;
             recreate)
               bash scripts/db-migrations.sh nuke --yes
-              bash scripts/db-migrations.sh up
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
               health
               ;;
             *)
