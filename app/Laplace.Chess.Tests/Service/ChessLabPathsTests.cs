@@ -8,6 +8,38 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessLabPathsTests
 {
     [Fact]
+    public void ExplicitChessFileIsSharedByApiAndLabAndMissingDeclarationFails()
+    {
+        string root = Directory.CreateTempSubdirectory("chess-declaration-").FullName;
+        string[] keys = ["LAPLACE_CHESS_ENV", "LAPLACE_STOCKFISH", "LAPLACE_STOCKFISH_SOURCE"];
+        var previous = keys.ToDictionary(static key => key, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (string key in keys) Environment.SetEnvironmentVariable(key, null);
+            string executable = Path.Combine(root, "selected-engine.exe"), declaration = Path.Combine(root, "chess.env");
+            File.WriteAllText(executable, "configured engine");
+            File.WriteAllText(declaration, $"LAPLACE_STOCKFISH=\"{executable}\"\nLICHESS_API=private\n");
+            Environment.SetEnvironmentVariable("LAPLACE_CHESS_ENV", declaration);
+            Assert.Equal(executable, ChessLabPaths.Stockfish.Path);
+            var lab = Laplace.Chess.Uci.Lab.ChessLabConfig.Read();
+            Assert.Equal(executable, lab["LAPLACE_STOCKFISH"]);
+            Assert.DoesNotContain("LICHESS_API", lab.Keys);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH", executable + ".missing");
+            Assert.False(ChessLabPaths.Stockfish.Found);
+            Assert.Equal(executable + ".missing", Laplace.Chess.Uci.Lab.ChessLabConfig.Read()["LAPLACE_STOCKFISH"]);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH", null);
+            File.Delete(declaration);
+            Assert.Throws<InvalidOperationException>(() => ChessLabPaths.Stockfish);
+            Assert.Throws<InvalidOperationException>(() => Laplace.Chess.Uci.Lab.ChessLabConfig.Read());
+        }
+        finally
+        {
+            foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void InstalledChessSelectionAndEvaluationSettingsAreSharedByCliAndService()
     {
         string root = Path.Combine(Path.GetTempPath(), $"chess-config-{Guid.NewGuid():N}");
@@ -213,17 +245,27 @@ public sealed class ChessLabPathsTests
     }
 
     [Fact]
-    public void LaplaceUci_IgnoresStaleConfig_InstallRootIsCanonical()
+    public void LaplaceUci_CatalogAndLauncherHonorExplicitSelectionAndDoNotReplaceMissingEngine()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"laplace-install-{Guid.NewGuid():N}");
+        var dir = Path.Combine(Path.GetTempPath(), $"laplace-selected-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         var uci = Path.Combine(dir, "laplace-uci.exe");
-        File.WriteAllText(uci, "");
-
-        // ResolveLaplaceUci has no config key — stale LAPLACE_UCI env cannot override install root.
-        var probe = ChessLabPaths.ResolveLaplaceUciForTest(uci);
-        Assert.True(probe.Found);
-        Assert.Equal(uci, probe.Path);
+        var previous = Environment.GetEnvironmentVariable("LAPLACE_UCI");
+        try
+        {
+            File.WriteAllText(uci, "selected engine");
+            Environment.SetEnvironmentVariable("LAPLACE_UCI", uci);
+            Assert.Equal(new ChessLabPaths.Probe(uci, true, "config"), ChessLabPaths.Catalog["laplaceUci"]);
+            Assert.Equal(uci, ChessLabPaths.LaplaceUciExecutable());
+            File.Delete(uci);
+            Assert.Equal(new ChessLabPaths.Probe(uci, false, "config"), ChessLabPaths.Catalog["laplaceUci"]);
+            Assert.Null(ChessLabPaths.LaplaceUciExecutable());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_UCI", previous);
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     [Fact]

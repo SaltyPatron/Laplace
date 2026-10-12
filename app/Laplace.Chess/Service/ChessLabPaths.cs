@@ -49,30 +49,20 @@ public static class ChessLabPaths
     public static Probe LaplaceUci => ResolveLaplaceUci();
 
     /// <summary>
-    /// laplace-uci for a surface that names an engine (the Lichess connector, the engine endpoint, laplace-uci's own
-    /// laplace backend): an explicit LAPLACE_UCI, this process when it is laplace-uci, the published tool
-    /// (LAPLACE_TOOLS\chess\app, a complete runtime closure), the copy beside this assembly, then the build output or
-    /// PATH. Null when none exists. A copy beside a web host lacks packages the ASP.NET framework supplies to the host,
-    /// so the managed services name the published tool (LAPLACE_UCI, scripts/win/ensure-managed-services.ps1).
+    /// The catalog and every engine launcher use the same selection. An explicit
+    /// LAPLACE_UCI remains authoritative when unavailable; another installation
+    /// must not silently replace the selected engine.
     /// </summary>
     public static string? LaplaceUciExecutable()
-    {
-        if (ChessRuntimeConfiguration.Read("LAPLACE_UCI") is { } configured && File.Exists(configured)) return Path.GetFullPath(configured);
-        string exe = OperatingSystem.IsWindows() ? "laplace-uci.exe" : "laplace-uci";
-        if (Environment.ProcessPath is { } self && Path.GetFileName(self).Equals(exe, StringComparison.OrdinalIgnoreCase)) return self;
-        if (ChessRuntimeConfiguration.Read("LAPLACE_TOOLS") is { } tools && Path.Combine(tools, "chess", "app", exe) is var published
-            && File.Exists(published))
-            return published;
-        if (File.Exists(DeployedLaplaceUciPath)) return DeployedLaplaceUciPath;
-        return LaplaceUci is { Found: true, Path: { } found } ? found : null;
-    }
+        => LaplaceUci is { Found: true, Path: { } found } ? found : null;
 
     public static Probe QtBin => ResolveQtBin();
 
     /// <summary>
     /// Syzygy package root (including nested WDL/DTZ and men-count directories).
     /// An explicit <c>LAPLACE_SYZYGY</c> or <c>chess-lab.env</c> selection is authoritative;
-    /// otherwise use the complete corpus root under <c>LAPLACE_DATA_ROOT</c>. Selecting
+    /// otherwise use the complete corpus root under <c>LAPLACE_DATA</c> (legacy
+    /// <c>LAPLACE_DATA_ROOT</c> when no corpus root is declared). Selecting
     /// only the largest bracket hides the smaller tables needed after captures/promotions.
     /// </summary>
     public static Probe SyzygyDir => ResolveSyzygyDir();
@@ -92,11 +82,11 @@ public static class ChessLabPaths
 
     private static Probe ResolveSyzygyDir()
     {
-        string root = ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT") is { Length: > 0 } r
-            ? r
-            : OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
-        return ResolveSyzygyDirCore(
-            ChessRuntimeConfiguration.Read("LAPLACE_SYZYGY"), root);
+        string? selected = ChessRuntimeConfiguration.Read("LAPLACE_SYZYGY");
+        string? root = ChessRuntimeConfiguration.Read("LAPLACE_DATA")
+            ?? ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT");
+        if (selected is null && root is null) return new Probe(null, false, "unconfigured");
+        return ResolveSyzygyDirCore(selected, root ?? "");
     }
 
     internal static Probe ResolveSyzygyDirCore(string? configuredPath, string dataRoot)
@@ -188,6 +178,32 @@ public static class ChessLabPaths
 
     private static Probe ResolveLaplaceUci()
     {
+        if (ChessRuntimeConfiguration.Read("LAPLACE_UCI") is { } configured)
+        {
+            var selected = Path.GetFullPath(configured);
+            return new Probe(selected, File.Exists(selected), "config");
+        }
+
+        string exe = OperatingSystem.IsWindows() ? "laplace-uci.exe" : "laplace-uci";
+        if (Environment.ProcessPath is { } self && Path.GetFileName(self).Equals(exe, StringComparison.OrdinalIgnoreCase))
+            return new Probe(self, true, "process");
+
+        // The application release carries a complete UCI publication, including
+        // its runtimeconfig, managed dependencies and native libraries.
+        var packaged = Path.Combine(LaplaceInstall.InstallRoot, "uci", exe);
+        if (File.Exists(packaged)) return new Probe(packaged, true, "install");
+        // CLI publications are a sibling of the API and UCI in one release.
+        string parent = Path.GetFullPath(Path.Combine(LaplaceInstall.InstallRoot, ".."));
+        if (File.Exists(Path.Combine(parent, "Laplace.Endpoints.OpenAICompat.dll")))
+            foreach (string sibling in new[] { Path.Combine(parent, "uci", exe), Path.Combine(parent, exe) })
+                if (File.Exists(sibling)) return new Probe(sibling, true, "install");
+
+        if (ChessRuntimeConfiguration.Read("LAPLACE_TOOLS") is { } tools)
+        {
+            var published = Path.Combine(tools, "chess", "app", exe);
+            if (File.Exists(published)) return new Probe(published, true, "tools");
+        }
+
         var installed = DeployedLaplaceUciPath;
         if (File.Exists(installed))
             return new Probe(installed, true, "install");

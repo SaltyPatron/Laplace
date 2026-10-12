@@ -1,6 +1,6 @@
 # Monorepo IIS installation
 
-The monorepo owns this installer and its API, UI and CLI package. It does not install
+The monorepo owns this installer and its API, UI, CLI and chess UCI package. It does not install
 Laplace-Refactor or replace the modular `laplace` implementation. The UCI connector
 has its own installation in Laplace-UCI.
 
@@ -22,6 +22,7 @@ part of the declaration or application package.
 | Installed location, relative to `directory` | Purpose and access |
 | --- | --- |
 | `web/releases/<revision>` | Complete immutable application/native/CLI/UI payload; pool reads, declared deployer publishes |
+| `web/releases/<revision>/uci` | Monorepo chess executable, runtime libraries and engine/release profiles from the same source publication |
 | `web/web.config` | Selects the executable in the release; contains no credentials |
 | `state/keys` | Persistent browser data-protection keys; pool can write |
 | `state/logs` and `state/output` | Application logs and declared output; pool can write |
@@ -51,6 +52,19 @@ The existing `deploy/windows/publish.ps1`, `scripts/win/publish-deploy.cmd` and
 `LAPLACE_IIS_INSTALLATION` is configured. The first two build the application/CLI
 and UI; `deploy-api.cmd` packages the already staged output. Their managed IIS path
 does not use `appcmd`, mirror over a running release, or require elevation.
+
+The package builder publishes the chess UCI application alongside API and CLI.
+Its managed compiler outputs use `iis-publish` below the configured
+`LAPLACE_BUILD_ROOT` (overridable with `-ManagedBuild`), so building an IIS release
+does not overwrite DLLs used by an active local development API. Native inputs
+still come from the selected `LAPLACE_ENGINE_BUILD`; installed execution requires
+neither compiler directory. Existing older packages remain valid rollback inputs.
+
+Chess catalog discovery and engine launch honor the same `LAPLACE_UCI` selection.
+An explicit missing executable is reported unavailable instead of replaced by a
+different installation. Otherwise the application uses its packaged `uci`
+directory before older tool/build discovery. The separate Laplace-UCI connector
+retains its own declared engine profile; publication does not silently repoint it.
 
 To publish an already prepared package:
 

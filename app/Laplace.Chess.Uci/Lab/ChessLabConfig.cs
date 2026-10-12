@@ -22,10 +22,10 @@ public static class ChessLabConfig
         var keys = new HashSet<string>(StringComparer.Ordinal)
         {
             "LAPLACE_STOCKFISH", "LAPLACE_CUTECHESS", "LAPLACE_CUTECHESS_GUI", "LAPLACE_CUTECHESS_GUI_RECEIPT", "LAPLACE_SYZYGY",
-            "LAPLACE_CHESS_OPENINGS", "LAPLACE_DATA_ROOT", "LAPLACE_EXTERNAL", "LAPLACE_STOCKFISH_SOURCE", "LAPLACE_CUTECHESS_BUILD",
+            "LAPLACE_CHESS_OPENINGS", "LAPLACE_DATA", "LAPLACE_DATA_ROOT", "LAPLACE_EXTERNAL", "LAPLACE_STOCKFISH_SOURCE", "LAPLACE_CUTECHESS_BUILD",
             "LAPLACE_QT_BIN", "LAPLACE_CHESS_LAB_DIR", "LAPLACE_ZSTD_LIBRARY", "LAPLACE_ZSTD_WINDOW_LOG_MAX", "LAPLACE_ZSTD_SOURCE",
             "LAPLACE_ZSTD_BUILD", "LAPLACE_FASTCHESS", "LAPLACE_ORDO", "LAPLACE_LC0", "LAPLACE_LC0_NET", "LAPLACE_LC0_BACKEND",
-            "LAPLACE_CHESS_BOOKS",
+            "LAPLACE_CHESS_BOOKS", "LAPLACE_UCI",
         };
         foreach (var suffix in new[] { "THREADS", "HASH_MB", "NUMA_POLICY", "SYZYGY_PATH", "FILE", "TIMEOUT_SECONDS", "PROCESSES" })
             keys.Add("LAPLACE_STOCKFISH_EVAL_" + suffix);
@@ -53,6 +53,12 @@ public static class ChessLabConfig
             api, Path.Combine(prefix, "app", "chess-lab.env"), Path.Combine(prefix, "chess-lab.env"),
             Path.Combine(prefix, "secrets", "chess-lab.env"),
         };
+        if (includeEnvironment && Environment.GetEnvironmentVariable("LAPLACE_CHESS_ENV") is { Length: > 0 } declaration)
+        {
+            if (!Path.IsPathFullyQualified(declaration) || !File.Exists(declaration))
+                throw new InvalidOperationException("LAPLACE_CHESS_ENV must name an existing absolute configuration file.");
+            files.Insert(0, declaration);
+        }
         if ((repoRoot ?? RepoRoot()) is { } root) files.Add(Path.Combine(root, "deploy", "secrets", "chess-lab.env"));
         foreach (var path in files)
         {
@@ -92,9 +98,11 @@ public static class ChessLabConfig
 
     public static string? RepoRoot() => LaplaceInstall.TryRepoRoot(out var root) ? root : null;
 
-    /// <summary>LAPLACE_DATA_ROOT, else D:\Data\Ingest on Windows and /vault/Data elsewhere.</summary>
-    public static string DataRoot(IReadOnlyDictionary<string, string> config)
-        => config.TryGetValue("LAPLACE_DATA_ROOT", out var root) ? root : OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
+    /// <summary>The declared corpus root; legacy installations may use LAPLACE_DATA_ROOT.</summary>
+    public static string? DataRoot(IReadOnlyDictionary<string, string> config)
+        => config.TryGetValue("LAPLACE_DATA", out var root) && !string.IsNullOrWhiteSpace(root) ? root
+            : config.TryGetValue("LAPLACE_DATA_ROOT", out root) && !string.IsNullOrWhiteSpace(root) ? root
+            : null;
 }
 
 /// <summary>The pinned release files (deploy/*.json): beside the binary when published, else the repository's.</summary>

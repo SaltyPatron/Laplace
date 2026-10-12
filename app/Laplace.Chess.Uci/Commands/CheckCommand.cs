@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using Laplace.Chess.Service.Uci;
+using Laplace.Chess.Service;
 using Laplace.Chess.Uci.Lab;
 
 namespace Laplace.Chess.Uci.Commands;
@@ -47,38 +48,34 @@ public static class CheckCommand
         var cfg = config ?? ChessLabConfig.Read(prefix);
         bool windows = OperatingSystem.IsWindows();
         string suffix = windows ? ".exe" : "";
-        string repo = ChessLabConfig.RepoRoot() ?? AppContext.BaseDirectory;
-        string external = cfg.GetValueOrDefault("LAPLACE_EXTERNAL") ?? (windows ? Path.Combine(repo, "external") : "/build/external");
-        string source = cfg.GetValueOrDefault("LAPLACE_STOCKFISH_SOURCE") ?? Path.Combine(external, "stockfish");
-        string stockfish = cfg.GetValueOrDefault("LAPLACE_STOCKFISH") ?? Path.Combine(source, "src", "stockfish" + suffix);
-        string ccDefault = cfg.GetValueOrDefault("LAPLACE_CUTECHESS_BUILD") is { } build ? Path.Combine(build, "cutechess-cli" + suffix)
-            : windows ? Path.Combine(Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT") ?? @"D:\Data\Laplace", "build-cutechess", "cutechess-cli.exe")
-            : Path.Combine(prefix, "bin", "cutechess-cli");
-        string cutechess = cfg.GetValueOrDefault("LAPLACE_CUTECHESS") ?? ccDefault;
-        string uci = cmd.Value("uci") ?? Path.Combine(prefix, "app", "laplace-uci" + suffix);
+        string? stockfish = cfg.GetValueOrDefault("LAPLACE_STOCKFISH")
+            ?? (cfg.GetValueOrDefault("LAPLACE_STOCKFISH_SOURCE") is { } source ? Path.Combine(source, "src", "stockfish" + suffix) : ChessLabPaths.Stockfish.Path);
+        string? cutechess = cfg.GetValueOrDefault("LAPLACE_CUTECHESS")
+            ?? (cfg.GetValueOrDefault("LAPLACE_CUTECHESS_BUILD") is { } build ? Path.Combine(build, "cutechess-cli" + suffix) : ChessLabPaths.Cutechess.Path);
+        string? uci = cmd.Value("uci") ?? cfg.GetValueOrDefault("LAPLACE_UCI") ?? ChessLabPaths.LaplaceUci.Path;
         var report = new List<CheckItem>();
 
         string version = LabLocks.Stockfish["version"]!.GetValue<string>();
         Check(report, "stockfish", () => new JsonObject
         {
-            ["path"] = stockfish, ["version"] = version, ["search"] = ProbeStockfish(probes, stockfish, version),
+            ["path"] = stockfish, ["version"] = version, ["search"] = ProbeStockfish(probes, stockfish ?? throw new InvalidOperationException("Stockfish is not configured."), version),
         });
-        Check(report, "cutechess", () => CutechessProbe.Probe(probes.Runner, cutechess, LabLocks.Cutechess));
-        Check(report, "laplace-uci", () => new JsonObject { ["path"] = uci, ["bestmove"] = CheckUciRuntime(probes, uci) });
+        Check(report, "cutechess", () => CutechessProbe.Probe(probes.Runner, cutechess ?? throw new InvalidOperationException("Cutechess is not configured."), LabLocks.Cutechess));
+        Check(report, "laplace-uci", () => new JsonObject { ["path"] = uci, ["bestmove"] = CheckUciRuntime(probes, uci ?? throw new InvalidOperationException("Laplace UCI is not installed.")) });
         Check(report, "zstandard-pgn-codec", () => probes.Zstd(cfg.GetValueOrDefault("LAPLACE_ZSTD_LIBRARY"),
             int.Parse(cfg.GetValueOrDefault("LAPLACE_ZSTD_WINDOW_LOG_MAX", "27"), System.Globalization.CultureInfo.InvariantCulture),
             LabLocks.Zstd["version"]!.GetValue<string>()));
 
         // the ladder: the conductor, the rating tool, Lc0 and the opening suites (deploy/chess-ladder-release.json)
         bool requireLadder = cmd.Flag("require-ladder");
-        string dataRoot = ChessLabConfig.DataRoot(cfg);
+        string? dataRoot = ChessLabConfig.DataRoot(cfg);
         foreach (var (name, key, action) in new (string, string, Func<JsonNode>)[]
                  {
                      ("fastchess", "LAPLACE_FASTCHESS", () => Fastchess(probes.Runner, Required(cfg, "LAPLACE_FASTCHESS"))),
                      ("ordo", "LAPLACE_ORDO", () => Ordo(probes.Runner, Required(cfg, "LAPLACE_ORDO"))),
                      ("lc0", "LAPLACE_LC0", () => Lc0(Required(cfg, "LAPLACE_LC0"), cfg.GetValueOrDefault("LAPLACE_LC0_NET"), cfg.GetValueOrDefault("LAPLACE_LC0_BACKEND"))),
                      ("opening-suites", "LAPLACE_CHESS_BOOKS", () => Books(cfg.GetValueOrDefault("LAPLACE_CHESS_BOOKS")
-                         ?? Path.Combine(dataRoot, LabLocks.Ladder["books"]!["directory"]!.GetValue<string>().Replace('/', Path.DirectorySeparatorChar)))),
+                         ?? Path.Combine(dataRoot ?? throw new InvalidOperationException("Declare LAPLACE_CHESS_BOOKS or LAPLACE_DATA."), LabLocks.Ladder["books"]!["directory"]!.GetValue<string>().Replace('/', Path.DirectorySeparatorChar)))),
                  })
         {
             if (cfg.ContainsKey(key) || requireLadder || name == "opening-suites") Check(report, name, action, requireLadder);
@@ -90,7 +87,7 @@ public static class CheckCommand
         {
             string gui = cfg.GetValueOrDefault("LAPLACE_CUTECHESS_GUI") ?? Path.Combine(prefix, "bin", "cutechess" + suffix);
             string receipt = cfg.GetValueOrDefault("LAPLACE_CUTECHESS_GUI_RECEIPT")
-                ?? Path.Combine(cfg.GetValueOrDefault("LAPLACE_CUTECHESS_BUILD", "/build/cutechess"), "laplace-cutechess-gui-build.json");
+                ?? Path.Combine(cfg.GetValueOrDefault("LAPLACE_CUTECHESS_BUILD") ?? Path.GetDirectoryName(gui)!, "laplace-cutechess-gui-build.json");
             Check(report, "cutechess-gui", () => probes.CutechessGui(probes.Runner, gui, receipt, LabLocks.Cutechess));
         }
         else
@@ -264,12 +261,12 @@ public static class CheckCommand
 
     /// <summary>Syzygy (every configured root present, every table nonempty and paired WDL/DTZ), the opening TSVs, and a
     /// pointer to the Lichess status endpoint. Pairing finds missing companions; it is not a checksum or a roster proof.</summary>
-    public static List<CheckItem> DataInventory(IReadOnlyDictionary<string, string> cfg, string dataRoot)
+    public static List<CheckItem> DataInventory(IReadOnlyDictionary<string, string> cfg, string? dataRoot)
     {
-        string chess = Path.Combine(dataRoot, "Games", "Chess");
+        string? chess = dataRoot is null ? null : Path.Combine(dataRoot, "Games", "Chess");
         var roots = cfg.GetValueOrDefault("LAPLACE_SYZYGY") is { } configured
             ? configured.Split(Path.PathSeparator).Select(static p => p.Trim()).Where(static p => p.Length > 0).Select(Path.GetFullPath).Distinct().ToList()
-            : [Path.Combine(chess, "syzygy")];
+            : chess is null ? [] : new List<string> { Path.Combine(chess, "syzygy") };
         var missingRoots = roots.Where(static r => !Directory.Exists(r)).ToList();
         var files = roots.Where(Directory.Exists).SelectMany(static r => Directory.EnumerateFiles(r, "*", SearchOption.AllDirectories))
             .Where(static f => Path.GetExtension(f).ToLowerInvariant() is ".rtbw" or ".rtbz").Distinct().ToList();
@@ -288,13 +285,13 @@ public static class CheckCommand
         };
         bool syzygyPresent = roots.Count > 0 && missingRoots.Count == 0 && empty.Count == 0 && wdl.Count > 0 && wdl.SetEquals(dtz);
         var candidates = cfg.GetValueOrDefault("LAPLACE_CHESS_OPENINGS") is { } o ? [o]
-            : new List<string> { Path.Combine(chess, "lichess-openings"), Path.Combine(chess, "openings") };
-        string openingRoot = candidates.FirstOrDefault(static r => "abcde".All(l => File.Exists(Path.Combine(r, l + ".tsv")))) ?? candidates[0];
-        var openingFiles = "abcde".Select(static l => l + ".tsv").Where(f => File.Exists(Path.Combine(openingRoot, f))).ToList();
+            : chess is null ? [] : new List<string> { Path.Combine(chess, "lichess-openings"), Path.Combine(chess, "openings") };
+        string? openingRoot = candidates.FirstOrDefault(static r => "abcde".All(l => File.Exists(Path.Combine(r, l + ".tsv")))) ?? candidates.FirstOrDefault();
+        var openingFiles = "abcde".Select(static l => l + ".tsv").Where(f => openingRoot is not null && File.Exists(Path.Combine(openingRoot, f))).ToList();
         return
         [
-            new CheckItem("syzygy", syzygyPresent ? "present" : "incomplete", false, tables),
-            new CheckItem("openings", openingFiles.Count == 5 ? "present" : "incomplete", false,
+            new CheckItem("syzygy", roots.Count == 0 ? "not-configured" : syzygyPresent ? "present" : "incomplete", false, tables),
+            new CheckItem("openings", openingRoot is null ? "not-configured" : openingFiles.Count == 5 ? "present" : "incomplete", false,
                 new JsonObject { ["path"] = openingRoot, ["files"] = Json.Array(openingFiles) }),
             new CheckItem("lichess", "check-service", false,
                 "GET /chess/lichess/status reports verified BOT account and bot:play access; no separate lichess-bot or python-chess installation is used."),

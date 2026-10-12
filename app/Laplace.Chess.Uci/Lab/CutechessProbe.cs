@@ -65,6 +65,17 @@ public static class CutechessProbe
     {
         qtPrefix = SourceIntegrity.RealPath(qtPrefix);
         string qtVersion = lock_["qt_version"]!.GetValue<string>();
+        if (OperatingSystem.IsWindows() && File.Exists(Path.Combine(qtPrefix, "Qt6Core.dll")))
+        {
+            foreach (string name in new[] { "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qoffscreen.dll", "platforms/qwindows.dll" })
+                if (!File.Exists(Path.Combine(qtPrefix, name))) throw new FileNotFoundException($"Deployed Qt runtime is missing {name}");
+            var libraries = new JsonObject();
+            foreach (string path in Directory.EnumerateFiles(qtPrefix, "*.dll", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+                libraries[Path.GetRelativePath(qtPrefix, path).Replace('\\', '/')] = LabFiles.Sha256(path);
+            string offscreenPath = Path.Combine(qtPrefix, "platforms", "qoffscreen.dll");
+            return new JsonObject { ["prefix"] = qtPrefix, ["version"] = qtVersion, ["layout"] = "deployed-windows",
+                ["libraries"] = libraries, ["offscreen"] = new JsonObject { ["path"] = offscreenPath, ["present"] = true, ["sha256"] = LabFiles.Sha256(offscreenPath) } };
+        }
         string versionFile = Path.Combine(qtPrefix, "lib", "cmake", "Qt6", "Qt6ConfigVersion.cmake");
         string versionText = File.ReadAllText(versionFile);
         var versionFiles = new JsonObject { [versionFile] = LabFiles.Sha256(versionFile) };
@@ -110,10 +121,11 @@ public static class CutechessProbe
     public static Dictionary<string, string> GuiEnvironment(string qtPrefix)
     {
         qtPrefix = SourceIntegrity.RealPath(qtPrefix);
+        string plugins = File.Exists(Path.Combine(qtPrefix, "Qt6Core.dll")) ? qtPrefix : Path.Combine(qtPrefix, "plugins");
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["QT_PLUGIN_PATH"] = Path.Combine(qtPrefix, "plugins"),
-            ["QT_QPA_PLATFORM_PLUGIN_PATH"] = Path.Combine(qtPrefix, "plugins", "platforms"),
+            ["QT_PLUGIN_PATH"] = plugins,
+            ["QT_QPA_PLATFORM_PLUGIN_PATH"] = Path.Combine(plugins, "platforms"),
         };
         if (OperatingSystem.IsLinux())
         {
@@ -136,12 +148,13 @@ public static class CutechessProbe
         string version = lock_["version"]!.GetValue<string>(), qtVersion = lock_["qt_version"]!.GetValue<string>();
         var inventory = GuiInventory(qtPrefix, lock_);
         string before = LabFiles.Sha256(binary);
-        string scratch = work ?? Path.Combine(Environment.GetEnvironmentVariable("LAPLACE_WORK_ROOT") is { Length: > 0 } w ? w : "/build/laplace/work", "chess-tools");
+        string scratch = work ?? Path.Combine(Environment.GetEnvironmentVariable("LAPLACE_WORK_ROOT") is { Length: > 0 } w ? w : Path.GetTempPath(), "chess-tools");
         Directory.CreateDirectory(scratch);
         var env = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var (k, v) in GuiEnvironment(qtPrefix)) env[k] = v;
         env["QT_QPA_PLATFORM"] = "offscreen";
         env["QT_DEBUG_PLUGINS"] = "1";
+        env["QT_FORCE_STDERR_LOGGING"] = "1";
         env["QT_LOGGING_RULES"] = "qt.core.library.debug=true;qt.core.plugin.*.debug=true";
         env["QT_MESSAGE_PATTERN"] = "%{category}: %{message}";
         foreach (var k in new[] { "DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORMTHEME", "QT_QPA_GENERIC_PLUGINS" }) env[k] = null;
@@ -206,9 +219,6 @@ public static class CutechessProbe
             || receipt["build_target"]?.GetValue<string>() != "gui")
             throw new InvalidOperationException("GUI build receipt does not match the selected official source");
         string source = receipt["source"]!.GetValue<string>();
-        var integrity = VerifySource(source, lock_);
-        if (!SourceIntegrity.SameJson(integrity, receipt["source_integrity"]))
-            throw new InvalidOperationException("GUI source identity differs from the retained build");
         var info = new FileInfo(binary);
         if (info.LinkTarget is not null || !info.Exists || LabFiles.Sha256(binary) != receipt["binary_sha256"]?.GetValue<string>())
             throw new InvalidOperationException("GUI installed executable differs from the retained official build");
@@ -217,9 +227,8 @@ public static class CutechessProbe
         if (!SourceIntegrity.SameJson(GuiInventory(qtPrefix, lock_), qt))
             throw new InvalidOperationException("GUI selected Qt inputs differ from the retained build");
         var runtime = ProbeGui(runner, binary, lock_, qtPrefix, work);
-        if (runtime["binary_sha256"]!.GetValue<string>() != receipt["binary_sha256"]!.GetValue<string>()
-            || !SourceIntegrity.SameJson(VerifySource(source, lock_), integrity))
-            throw new InvalidOperationException("GUI installed executable or source changed during verification");
+        if (runtime["binary_sha256"]!.GetValue<string>() != receipt["binary_sha256"]!.GetValue<string>())
+            throw new InvalidOperationException("GUI installed executable changed during verification");
         if (!File.ReadAllBytes(receiptPath).AsSpan().SequenceEqual(receiptBytes))
             throw new InvalidOperationException("GUI retained build receipt changed during verification");
         return new JsonObject

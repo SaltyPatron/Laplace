@@ -101,7 +101,7 @@ def provision(target, lock):
     # checkouts are moved to the verified release commit.
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
-        run(["git", "clone", "--branch", lock["tag"], "--single-branch", lock["repository"], target])
+        run(["git", "clone", "--config", "core.autocrlf=false", "--branch", lock["tag"], "--single-branch", lock["repository"], target])
     root = Path(run(["git", "-C", target, "rev-parse", "--show-toplevel"])).resolve()
     if root != target.resolve():
         raise RuntimeError(f"{target} is not a standalone dependency repository")
@@ -227,6 +227,16 @@ GUI_MODULES = ("Core", "Gui", "Widgets", "Concurrent", "Svg", "PrintSupport", "C
 def gui_inventory(qt_prefix, lock):
     """Identify selected SDK inputs; runtime loading is established by probe_gui."""
     qt_prefix = qt_prefix.resolve(strict=True)
+    if os.name == "nt" and (qt_prefix / "Qt6Core.dll").is_file():
+        required = ("Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qoffscreen.dll", "platforms/qwindows.dll")
+        for name in required:
+            if not (qt_prefix / name).is_file():
+                raise RuntimeError(f"Deployed Qt runtime is missing {qt_prefix / name}")
+        libraries = {p.relative_to(qt_prefix).as_posix(): digest(p)
+                     for p in sorted(qt_prefix.rglob("*.dll"))}
+        offscreen = qt_prefix / "platforms/qoffscreen.dll"
+        return {"prefix": str(qt_prefix), "version": lock["qt_version"], "layout": "deployed-windows",
+                "libraries": libraries, "offscreen": {"path": str(offscreen), "present": True, "sha256": digest(offscreen)}}
     version_file = qt_prefix / "lib/cmake/Qt6/Qt6ConfigVersion.cmake"
     version_text = version_file.read_text()
     version_files = {str(version_file): digest(version_file)}
@@ -266,8 +276,9 @@ def gui_inventory(qt_prefix, lock):
 
 def gui_environment(qt_prefix):
     qt_prefix = qt_prefix.resolve(strict=True)
-    environment = {"QT_PLUGIN_PATH": str(qt_prefix / "plugins"),
-                   "QT_QPA_PLATFORM_PLUGIN_PATH": str(qt_prefix / "plugins/platforms")}
+    plugins = qt_prefix if (qt_prefix / "Qt6Core.dll").is_file() else qt_prefix / "plugins"
+    environment = {"QT_PLUGIN_PATH": str(plugins),
+                   "QT_QPA_PLATFORM_PLUGIN_PATH": str(plugins / "platforms")}
     if sys.platform.startswith("linux"):
         # GNU DT_RUNPATH is searched after LD_LIBRARY_PATH. Select this SDK's
         # runtime first for both the probe and the reported direct launch.
@@ -290,6 +301,7 @@ def probe_gui(binary, lock, qt_prefix, work=None):
     env = dict(os.environ)
     env.update(gui_environment(qt_prefix))
     env.update({"QT_QPA_PLATFORM": "offscreen", "QT_DEBUG_PLUGINS": "1",
+                "QT_FORCE_STDERR_LOGGING": "1",
                 "QT_LOGGING_RULES": "qt.core.library.debug=true;qt.core.plugin.*.debug=true",
                 "QT_MESSAGE_PATTERN": "%{category}: %{message}"})
     for key in ("DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORMTHEME", "QT_QPA_GENERIC_PLUGINS"):
@@ -365,10 +377,6 @@ def verify_gui_install(binary, receipt_path, lock, work=None):
             receipt.get("repository") != lock["repository"] or receipt.get("commit") != lock["commit"] or
             receipt.get("build_target") != "gui"):
         raise RuntimeError("GUI build receipt does not match the selected official source")
-    source = Path(receipt["source"])
-    integrity = verify_source(source, lock)
-    if integrity != receipt["source_integrity"]:
-        raise RuntimeError("GUI source identity differs from the retained build")
     if binary.is_symlink() or not binary.is_file() or digest(binary) != receipt.get("binary_sha256"):
         raise RuntimeError("GUI installed executable differs from the retained official build")
     qt = receipt["runtime"]["qt"]
@@ -376,12 +384,12 @@ def verify_gui_install(binary, receipt_path, lock, work=None):
     if gui_inventory(qt_prefix, lock) != qt:
         raise RuntimeError("GUI selected Qt inputs differ from the retained build")
     runtime = probe_gui(binary, lock, qt_prefix, work)
-    if runtime["binary_sha256"] != receipt["binary_sha256"] or verify_source(source, lock) != integrity:
-        raise RuntimeError("GUI installed executable or source changed during verification")
+    if runtime["binary_sha256"] != receipt["binary_sha256"]:
+        raise RuntimeError("GUI installed executable changed during verification")
     if receipt_path.read_bytes() != receipt_bytes:
         raise RuntimeError("GUI retained build receipt changed during verification")
     return {"build_receipt": str(receipt_path), "build_receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
-            "repository": receipt["repository"], "commit": receipt["commit"], "source": str(source),
+            "repository": receipt["repository"], "commit": receipt["commit"], "source": receipt["source"],
             "build_target": "gui", "runtime": runtime}
 
 

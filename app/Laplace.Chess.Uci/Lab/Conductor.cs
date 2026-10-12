@@ -73,7 +73,9 @@ public static class Conductor
     /// <summary>A 200-move limit, and Syzygy adjudication (5 pieces, both sides) when the tables are installed.</summary>
     public static List<string> Adjudication(IReadOnlyDictionary<string, string> cfg, int maxMoves = 200, bool tablebases = true)
     {
-        var args = new List<string> { "-maxmoves", maxMoves.ToString(CultureInfo.InvariantCulture) };
+        if (maxMoves < 0) throw new ArgumentOutOfRangeException(nameof(maxMoves), "Move limit must be positive, or zero for no move adjudication.");
+        var args = new List<string>();
+        if (maxMoves > 0) args.AddRange(["-maxmoves", maxMoves.ToString(CultureInfo.InvariantCulture)]);
         if (tablebases && cfg.GetValueOrDefault("LAPLACE_SYZYGY") is { Length: > 0 } syzygy)
             args.AddRange(["-tb", syzygy, "-tbpieces", "5", "-tbadjudicate", "BOTH"]);
         return args;

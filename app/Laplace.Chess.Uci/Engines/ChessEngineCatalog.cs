@@ -117,5 +117,5 @@ public static class ChessEngineCatalog
         return list;
     }
 
-    private static string? Config(string key) => LaplaceInstall.TryReadConfig(key, "chess-lab.env");
+    private static string? Config(string key) => Lab.ChessLabConfig.Read().GetValueOrDefault(key);
 }
