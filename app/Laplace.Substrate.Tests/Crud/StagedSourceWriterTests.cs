@@ -106,8 +106,14 @@ public class StagedSourceWriterTests
         await using var inner = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await using var staged = Staged(inner);
         await staged.ApplyWorkingSetAsync(Change(source, "once", claim));
+        Task fileReceipt = staged.CompleteFileAsync("once");
+        Assert.False(fileReceipt.IsCompleted);
         Assert.Equal(0, staged.DeferredRowsInserted.Attestations);
         await staged.CompleteBulkRunAsync();
+        await fileReceipt.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(staged.LastFoldDrainWallClock > TimeSpan.Zero);
+        Assert.True(staged.LastFoldSpanWallClock >= staged.LastFoldDrainWallClock);
+        Assert.True(staged.LastWriterMaintenanceWallClock > TimeSpan.Zero);
         Assert.Equal(1, staged.DeferredRowsInserted.Attestations);
         var standing = await StandingAsync(subject, type, obj);
         Assert.NotNull(standing);
@@ -115,7 +121,10 @@ public class StagedSourceWriterTests
         // The same claim again, and beside it a new one: only the new one folds.
         var fresh = Claim(subject, type, obj, source, 1_000_000_000, context: H(34));
         await staged.ApplyWorkingSetAsync(Change(source, "again", claim, fresh));
+        Task secondReceipt = staged.CompleteFileAsync("again");
+        Assert.False(secondReceipt.IsCompleted);
         await staged.CompleteBulkRunAsync();
+        await secondReceipt.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(2, staged.DeferredRowsInserted.Attestations);
         var after = await StandingAsync(subject, type, obj);
         Assert.Equal(2, after!.Value.Witnesses);

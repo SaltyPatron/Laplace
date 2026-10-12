@@ -59,3 +59,35 @@ the new accounting is separately verified by the tests above.
 
 Application repairs are source changes pending normal review and release. The full-corpus
 ingestion above did run against the installed substrate.
+
+## Staged loading follow-up
+
+The partition scheduler previously admitted `(MaximumPoolSize - 1) / 2` simultaneous
+leaf rebuilds regardless of the configured topology lanes. With the default pool of 100,
+that permits 49 rebuilds even when six lanes were configured. The scheduler now respects
+both limits, and rejects a pool too small for one worker plus its control connection.
+Per-leaf debug measurements separate copy, index/commit, and analyze time. This is a
+concurrency correction; a production throughput improvement has not yet been measured.
+
+File completion now waits for the staged bulk commit and held completion rows. A failed
+bulk completion cancels pending file receipts while preserving the original bulk failure.
+Repeated runs get a new barrier. Cancelling one observer does not cancel the source load.
+
+The staged writer now measures bulk load/drain and cleanup time and forwards its inner
+writer's timing and call counters. Fold spans share an end point and use the longest span,
+so concurrent work is not added twice. These are completion measurements; the staged
+native scoring pass is not misreported as a backend consensus upsert.
+
+Desktop validation of this follow-up:
+
+- The managed test project builds with zero errors (16 existing warnings across projects).
+- Seven new lifecycle/scheduler cases and eight existing ingestion accounting cases pass
+  when their actual test methods and xUnit assertions are invoked by a local console
+  harness. VSTest stalled before reporting discovery/results and was stopped; this is not
+  recorded as a successful VSTest run.
+- The PostgreSQL replay test now additionally checks receipt barriers and positive timing,
+  but those new assertions have not been executed against PostgreSQL in this follow-up.
+- Server SSH in this execution session returned `Permission denied`, including the host's
+  configured IP; DNS queries returned `Access is denied`. These are session access results,
+  not evidence that the server is unavailable. The GitHub connector successfully read the
+  existing PR after the shell's GitHub CLI failed to connect.

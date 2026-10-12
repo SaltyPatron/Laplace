@@ -41,6 +41,8 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     private bool _staged;
     private long _observations, _cells;
     private long _entitiesInserted, _physicalitiesInserted, _attestationsInserted;
+    private TaskCompletionSource? _stageCompletion;
+    private TimeSpan _stagedDrain, _stagedMaintenance, _stagedFoldSpan;
     private int _epochRoute = -1;
     private int _modulus;
 
@@ -78,6 +80,17 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
     public long CellsFolded => Interlocked.Read(ref _cells)
         + ((_inner as IConsensusFoldMetrics)?.CellsFolded ?? 0);
+
+    private IConsensusFoldMetrics? InnerMetrics => _inner as IConsensusFoldMetrics;
+    public TimeSpan LastFoldDrainWallClock => _stagedDrain + (InnerMetrics?.LastFoldDrainWallClock ?? TimeSpan.Zero);
+    public TimeSpan LastWriterMaintenanceWallClock => _stagedMaintenance + (InnerMetrics?.LastWriterMaintenanceWallClock ?? TimeSpan.Zero);
+    public TimeSpan LastFoldSpanWallClock => TimeSpan.FromTicks(Math.Max(_stagedFoldSpan.Ticks,
+        (InnerMetrics?.LastFoldSpanWallClock ?? TimeSpan.Zero).Ticks));
+    public TimeSpan ConsensusUpsertBackendWallClock => InnerMetrics?.ConsensusUpsertBackendWallClock ?? TimeSpan.Zero;
+    public TimeSpan HighwayMaskBackendWallClock => InnerMetrics?.HighwayMaskBackendWallClock ?? TimeSpan.Zero;
+    public long ConsensusUpsertCalls => InnerMetrics?.ConsensusUpsertCalls ?? 0;
+    public long HighwayMaskCalls => InnerMetrics?.HighwayMaskCalls ?? 0;
+    public long HighwayMaskPairs => InnerMetrics?.HighwayMaskPairs ?? 0;
 
     public (long Entities, long Physicalities, long Attestations) DeferredRowsInserted =>
         (Interlocked.Read(ref _entitiesInserted), Interlocked.Read(ref _physicalitiesInserted),
@@ -156,33 +169,75 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
     public Task DrainFoldsAsync() => _inner.DrainFoldsAsync();
 
-    public Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
-        => _inner.CompleteFileAsync(fileLabel, ct);
+    public async Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
+    {
+        // COPY into staging is not a durable file receipt. The source's leaf swap
+        // and held completion rows must commit before its files can finish.
+        TaskCompletionSource? completion = Volatile.Read(ref _stageCompletion);
+        if (completion is not null) await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+        await _inner.CompleteFileAsync(fileLabel, ct).ConfigureAwait(false);
+    }
 
     public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default) => _inner.FinalizeSourceAsync(sourceId, ct);
 
-    public Task BeginBulkRunAsync(CancellationToken ct = default) => _inner.BeginBulkRunAsync(ct);
+    public Task BeginBulkRunAsync(CancellationToken ct = default)
+    {
+        Volatile.Write(ref _stageCompletion, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        _stagedDrain = _stagedMaintenance = _stagedFoldSpan = TimeSpan.Zero;
+        return _inner.BeginBulkRunAsync(ct);
+    }
 
     public Task CompleteBulkRunAsync(CancellationToken ct = default) => CompleteBulkRunAsync(null, ct);
 
     public async Task CompleteBulkRunAsync(Action<BulkRunCompletionPhase>? onPhase, CancellationToken ct = default)
     {
         onPhase?.Invoke(BulkRunCompletionPhase.ConsensusDrain);
-        if (_staged)
+        long foldStarted = _staged ? Stopwatch.GetTimestamp() : 0;
+        try
         {
-            await LoadAsync(ct).ConfigureAwait(false);
-            await DropStageAsync(ct).ConfigureAwait(false);
+            if (_staged)
+            {
+                var drain = Stopwatch.StartNew();
+                try { await LoadAsync(ct).ConfigureAwait(false); }
+                finally
+                {
+                    _stagedDrain = drain.Elapsed;
+                    _stagedFoldSpan = Stopwatch.GetElapsedTime(foldStarted);
+                }
+            }
+            var maintenance = Stopwatch.StartNew();
+            try
+            {
+                if (_staged) await DropStageAsync(ct).ConfigureAwait(false);
+                SubstrateChange[] held;
+                lock (_held) { held = [.. _held]; _held.Clear(); }
+                // Completion rows commit only after every record they vouch for is loaded.
+                if (held.Length > 0) await _inner.ApplyWorkingSetAsync(held, ct).ConfigureAwait(false);
+            }
+            finally { _stagedMaintenance = maintenance.Elapsed; }
+            await _inner.CompleteBulkRunAsync(phase =>
+            {
+                // Both spans now end at the inner writer's fold barrier. Their
+                // maximum is the elapsed span, without adding overlapping work.
+                if (phase == BulkRunCompletionPhase.WriterMaintenance && foldStarted != 0)
+                    _stagedFoldSpan = Stopwatch.GetElapsedTime(foldStarted);
+                onPhase?.Invoke(phase);
+            }, ct).ConfigureAwait(false);
+            Volatile.Read(ref _stageCompletion)?.TrySetResult();
         }
-        SubstrateChange[] held;
-        lock (_held) { held = [.. _held]; _held.Clear(); }
-        // Completion rows commit only after every record they vouch for is loaded.
-        if (held.Length > 0) await _inner.ApplyWorkingSetAsync(held, ct).ConfigureAwait(false);
-        await _inner.CompleteBulkRunAsync(onPhase, ct).ConfigureAwait(false);
+        catch
+        {
+            // Failed loads never publish successful file receipts. Cancel all
+            // observers; the bulk completion call retains the original failure.
+            Volatile.Read(ref _stageCompletion)?.TrySetCanceled();
+            throw;
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
+        Volatile.Read(ref _stageCompletion)?.TrySetCanceled();
         if (_staged)
         {
             try { await DropStageAsync(CancellationToken.None).ConfigureAwait(false); }
@@ -208,6 +263,8 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
                 excluded.Parameters.Add(new NpgsqlParameter { Value = FileEntity.MetadataRelationTypeId.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 await excluded.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
+            if (_stageCompletion is null || _stageCompletion.Task.IsCompleted)
+                Volatile.Write(ref _stageCompletion, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
             Volatile.Write(ref _staged, true);
             _log.LogInformation("STAGED_LOAD extraction stages into {Stage}", _stage);
         }
@@ -433,6 +490,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     // its hash bound, so attaching it rebuilds nothing and scans nothing.
     private async Task BuildLeafAsync(LeafWork leaf, CancellationToken ct)
     {
+        var elapsed = Stopwatch.StartNew();
         string replacement = Replacement(leaf);
         await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await BeginAsync(conn, ct).ConfigureAwait(false);
@@ -446,6 +504,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
                     LeafSql(rows, leaf, replacement), ct).ConfigureAwait(false);
                 await reader.CopyToAsync(sink, 1 << 20, ct).ConfigureAwait(false);
             }
+        TimeSpan copied = elapsed.Elapsed;
         for (int k = 0; k < leaf.Indexes.Count; k++)
         {
             (string name, string definition, bool primary) = leaf.Indexes[k];
@@ -465,8 +524,13 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             + $"(satisfies_hash_partition('laplace.{leaf.Table}'::regclass,{leaf.Modulus},{leaf.Remainder},{PartitionKey[leaf.Table]}))",
             ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        TimeSpan indexed = elapsed.Elapsed;
         // Statistics belong to the table, so they carry through the swap.
         await ExecuteAsync(conn, null, $"ANALYZE laplace.{replacement}", ct).ConfigureAwait(false);
+        _log.LogDebug("STAGED_LEAF {Leaf} existing_estimate={Existing} changed={Changed} "
+            + "copy_ms={CopyMs} index_commit_ms={IndexMs} analyze_ms={AnalyzeMs}",
+            leaf.Leaf, leaf.Rows, leaf.NewRows, copied.TotalMilliseconds,
+            (indexed - copied).TotalMilliseconds, (elapsed.Elapsed - indexed).TotalMilliseconds);
     }
 
     private async Task SwapAsync(NpgsqlConnection control, IReadOnlyList<LeafWork> rebuilt, CancellationToken ct)
@@ -574,16 +638,25 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         }
     }
 
-    // Lanes run as many at a time as the pool admits beside the control connection, so no
-    // lane waits on a connection another lane holds.
+    // The topology bounds concurrent work; the pool may lower that bound while
+    // reserving every connection a worker needs beside the control connection.
     private async Task ForEachLaneAsync(Func<int, Task> lane, int connectionsPerLane, CancellationToken ct)
         => await ForEachAsync(Enumerable.Range(0, _lanes).ToArray(), lane, ct, connectionsPerLane).ConfigureAwait(false);
 
-    private async Task ForEachAsync<T>(IReadOnlyList<T> items, Func<T, Task> body, CancellationToken ct,
+    internal async Task ForEachAsync<T>(IReadOnlyList<T> items, Func<T, Task> body, CancellationToken ct,
         int connectionsPerItem = 1)
     {
-        int pool = new NpgsqlConnectionStringBuilder(_ds.ConnectionString).MaxPoolSize;
-        using var admitted = new SemaphoreSlim(Math.Max(1, (pool - 1) / connectionsPerItem));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(connectionsPerItem);
+        if (items.Count == 0) return;
+        var settings = new NpgsqlConnectionStringBuilder(_ds.ConnectionString);
+        int pool = settings.Pooling ? settings.MaxPoolSize : int.MaxValue;
+        int concurrency = Math.Min(_lanes, (pool - 1) / connectionsPerItem);
+        if (concurrency < 1)
+            throw new InvalidOperationException($"staged loading requires at least {connectionsPerItem + 1} "
+                + $"pooled connections, including its control connection; Maximum Pool Size is {pool}");
+        _log.LogDebug("STAGED_WORK items={Items} workers={Workers} configured_lanes={Lanes}",
+            items.Count, concurrency, _lanes);
+        using var admitted = new SemaphoreSlim(concurrency);
         await Task.WhenAll(items.Select(async item =>
         {
             await admitted.WaitAsync(ct).ConfigureAwait(false);
