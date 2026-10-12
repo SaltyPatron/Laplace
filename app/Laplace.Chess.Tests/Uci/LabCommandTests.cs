@@ -130,6 +130,15 @@ public sealed class LabCommandTests : IDisposable
     // ---- check ----
 
     [Fact]
+    public void UncappedMatchDoesNotAdjudicateBeforeItsFirstMove()
+    {
+        var configuration = new Dictionary<string, string>();
+        Assert.DoesNotContain("-maxmoves", Conductor.Adjudication(configuration, 0, false));
+        Assert.Equal(new[] { "-maxmoves", "200" }, Conductor.Adjudication(configuration, 200, false));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Conductor.Adjudication(configuration, -1, false));
+    }
+
+    [Fact]
     public void DataInventory_ShowsMissingCompanionsEmptyFilesAndOpenings()
     {
         string tables = Path.Combine(_dir, "Games", "Chess", "syzygy", "3-4-5");

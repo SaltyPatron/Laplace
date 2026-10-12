@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,8 +19,14 @@ spec.loader.exec_module(cutechess)
 
 
 class CuteChessReleaseTests(unittest.TestCase):
+    def bootstrap_source(self):
+        scripts = Path(cutechess.__file__).parent
+        text = (scripts / "bootstrap-chess-lab.sh").read_text()
+        return text.replace('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"',
+                            'source ' + shlex.quote(str(scripts / "lib/installation.sh")))
+
     def setUp(self):
-        temporary_root = Path(os.environ.get('LAPLACE_WORK_ROOT', '/build/laplace/work')) / 'tmp'
+        temporary_root = Path(os.environ.get('LAPLACE_WORK_ROOT', tempfile.gettempdir())) / 'tmp'
         temporary_root.mkdir(parents=True, exist_ok=True)
         self.work = tempfile.TemporaryDirectory(prefix='cutechess-release-test-', dir=temporary_root)
         self.addCleanup(self.work.cleanup)
@@ -620,7 +627,7 @@ class CuteChessReleaseTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux bootstrap option/presence selection")
     def test_bootstrap_gui_option_and_existing_artifacts_select_fresh_build(self):
-        bootstrap = Path(cutechess.__file__).with_name("bootstrap-chess-lab.sh").read_text()
+        bootstrap = self.bootstrap_source()
         self.assertTrue(bootstrap.endswith('main "$@"\n'))
         # Exercise the actual option/presence state machine while replacing the
         # downstream installation work. This is not a GUI runtime acceptance.
@@ -865,7 +872,7 @@ main "$@"
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux bootstrap desktop ownership")
     def test_bootstrap_gui_probe_uses_runner_and_only_root_registers_verified_launcher(self):
-        bootstrap = Path(cutechess.__file__).with_name("bootstrap-chess-lab.sh").read_text()
+        bootstrap = self.bootstrap_source()
         script = self.root / "desktop-bootstrap.sh"
         script.write_text(bootstrap.removesuffix('main "$@"\n') + r'''
 id() { if [[ "$*" == -u ]]; then printf '%s\n' "$FIXTURE_UID"; else command id "$@"; fi; }
@@ -906,7 +913,7 @@ verify
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux shared installation directory ownership")
     def test_bootstrap_prepares_existing_public_desktop_directories_for_runner_group(self):
-        bootstrap = Path(cutechess.__file__).with_name("bootstrap-chess-lab.sh").read_text()
+        bootstrap = self.bootstrap_source()
         script = self.root / "desktop-directories.sh"
         # Select the actual root branch while using the caller's real group.
         # install(1) operates only on this fixture's existing owned directories.
