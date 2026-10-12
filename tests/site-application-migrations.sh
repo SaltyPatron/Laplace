@@ -33,12 +33,15 @@ LAPLACE_APP_DB=fixture bash "$work/run.sh"
 [[ "$(cat "$work/order")" == $'migrate\npublish' ]]
 echo 'PASS successful staged migration precedes publication'
 # Receiving a release must not replace serving caches before migrations succeed.
-sed -n '/^phase_receive() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
+sed -n '/^phase_receive() {/,/^}/p; /^verify_cli_package() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
 mkdir -p "$work/bundle/app/wwwroot" "$work/bundle/share/laplace" "$work/installed/share/laplace"
 cp "$work/stage/app/.laplace-source-revision" "$work/bundle/app/"
 cp "$work/stage/app/wwwroot/.laplace-web-source-revision" "$work/bundle/app/wwwroot/"
 touch "$work/bundle/app/Laplace.Endpoints.OpenAICompat.dll"
-mkdir -p "$work/bundle/app/cli"
+mkdir -p "$work/bundle/app/cli/share/laplace"
+for cache in laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache; do
+  printf fixture > "$work/bundle/app/cli/share/laplace/$cache.bin"
+done
 printf '#!/bin/sh\nexit 0\n' > "$work/bundle/app/cli/Laplace.Cli"
 chmod 755 "$work/bundle/app/cli/Laplace.Cli"
 printf new > "$work/bundle/share/laplace/cache"
@@ -49,6 +52,12 @@ LAPLACE_INSTALL_PREFIX="$work/installed" bash -c 'set -euo pipefail; fail() { ec
 [[ "$(cat "$work/stage/share/laplace/cache")" == new ]]
 [[ -x "$work/stage/app/cli/Laplace.Cli" ]]
 echo 'PASS receive stages caches without replacing the serving copy'
+rm "$work/stage/app/cli/share/laplace/laplace_highway_perfcache.bin"
+if bash -c 'set -euo pipefail; source "$SITE_WORK/functions.sh"; verify_cli_package "$SITE_WORK/stage/app/cli"' > "$work/missing-cache-result" 2>&1; then
+  echo 'FAIL accepted CLI package without its highway cache'; exit 1
+fi
+grep -q 'missing laplace_highway_perfcache.bin' "$work/missing-cache-result"
+echo 'PASS missing CLI cache is rejected even when its executable starts'
 
 # Selecting a restricted knowledge identity does not change the application login.
 sed -n '/^export PGHOST=/,/^export LAPLACE_EXTERNAL=/p' "$root/deploy/linux/site.sh" > "$work/connections.sh"
