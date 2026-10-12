@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Development consumes installed dependencies. Explicit operator setup may build them.
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-PG_PREFIX="${LAPLACE_PG_PREFIX:-$PREFIX/pgsql-18}"
-CACHE="${LAPLACE_EXTERNAL:-/build/external}"
+PG_PREFIX="${LAPLACE_PG_PREFIX:?Declare LAPLACE_PG_PREFIX or LAPLACE_PG_DIR}"
+CACHE="${LAPLACE_EXTERNAL:?Declare LAPLACE_EXTERNAL or LAPLACE_DEPSRC}"
 CHECK_ONLY=0
 case "${1:-}" in
   "") ;;

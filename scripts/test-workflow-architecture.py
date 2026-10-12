@@ -99,7 +99,7 @@ class WorkflowArchitecture(unittest.TestCase):
         preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
         stage = reusable.split("  stage:\n", 1)[1]
 
-        self.assertIn("runs-on: [self-hosted, laplace]", preflight)
+        self.assertIn("runs-on: [self-hosted, laplace, staging]", preflight)
         self.assertIn("git ls-remote --heads", preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"', preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"', preflight)
@@ -113,7 +113,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("host-resource.lock", preflight)
         self.assertIn("needs: preflight", stage)
         self.assertIn("if: needs.preflight.outputs.execute == 'true'", stage)
-        self.assertIn("runs-on: [self-hosted, laplace]", stage)
+        self.assertIn("runs-on: [self-hosted, laplace, staging]", stage)
 
         fetch = stage.index('git fetch --no-tags --depth=2 origin "$TARGET_SHA"')
         resolve = stage.index("git ls-remote --heads origin refs/heads/main")
@@ -138,9 +138,9 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('exec {stale_fd}<>"$stale_lock"', stage)
         self.assertIn('flock -n "$stale_fd"', stage)
         self.assertIn('stale_identity="$(printf', stage)
-        self.assertIn('stale_build="/build/laplace/build/laplace-$stale_identity"', stage)
-        self.assertIn('rm -rf "$stale_workspace" "$stale_build"', stage)
-        self.assertIn('for stale_build in /build/laplace/build/laplace-*', stage)
+        self.assertIn('stale_build="$LAPLACE_BUILD/laplace-mono/worktrees/$stale_identity"', stage)
+        self.assertIn('[[ -z "$stale_build" ]] || rm -rf "$stale_build"', stage)
+        self.assertIn('for stale_build in "${build_candidates[@]}"', stage)
         self.assertIn("CMAKE_HOME_DIRECTORY:INTERNAL=", stage)
         self.assertIn('[[ ! -d "$stale_source" ]] || continue', stage)
         self.assertIn('status --porcelain --untracked-files=no', stage)
@@ -449,7 +449,7 @@ class WorkflowArchitecture(unittest.TestCase):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_call:", reusable)
         self.assertNotIn("runs-on: ubuntu-24.04", reusable)
-        self.assertEqual(2, reusable.count("runs-on: [self-hosted, laplace]"))
+        self.assertEqual(2, reusable.count("runs-on: [self-hosted, laplace, staging]"))
         self.assertIn("needs: preflight", reusable)
         self.assertIn("product-worktrees", reusable)
         self.assertIn('product-$TARGET_SHA.lock', reusable)

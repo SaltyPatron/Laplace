@@ -1,11 +1,12 @@
 #!/bin/bash
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VAULT="${LAPLACE_VAULT_TREESITTER:-/vault/Data/TreeSitter}"
-EXTERNAL_ROOT="${LAPLACE_EXTERNAL:-${LAPLACE_SUBMODULE_CACHE:-/build/external}}"
+EXTERNAL_ROOT="${LAPLACE_EXTERNAL:?Declare LAPLACE_EXTERNAL or LAPLACE_DEPSRC}"
 TARGET="$EXTERNAL_ROOT/tree-sitter-grammars"
 DRY_RUN=0
 

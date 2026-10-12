@@ -65,22 +65,18 @@ permissions:
 jobs:
   seed:
     name: "${{ inputs.mode }} ${{ inputs.source }} → ${{ inputs.database }}"
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 720
     env:
       TARGET_SHA: ${{ github.sha }}
-      LAPLACE_DATA_ROOT: /vault/Data
-      LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       LAPLACE_DBNAME: ${{ inputs.database }}
       PGDATABASE: ${{ inputs.database }}
       LAPLACE_INGEST_CONSOLE: ci
-      INGEST_LOGDIR: /build/laplace/work/ingest-logs
       MODE: ${{ inputs.mode }}
       SOURCE_KEY: ${{ inputs.source }}
       PATH_INPUT: ${{ inputs.path }}
       LANGS_INPUT: ${{ inputs.langs }}
       MODEL_PRESET: ${{ inputs.model_preset }}
-      GGUF_OUT: /build/laplace/work/model-outputs/laplace-model-substrate.gguf
     steps:
       - name: Run substrate operation
         env:
@@ -95,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 0002
-          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-${LAPLACE_WORK:?Runner must declare LAPLACE_WORK}}"
           mkdir -p "$workspace_lock_root"
           exec 9>"$workspace_lock_root/host-resource.lock"
           flock 9
@@ -133,6 +129,8 @@ jobs:
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           export LAPLACE_CLI_BIN=/opt/laplace/bin/laplace
           source scripts/ci-environment.sh
+          export INGEST_LOGDIR="${INGEST_LOGDIR:-$LAPLACE_WORK_ROOT/ingest-logs}"
+          export GGUF_OUT="${GGUF_OUT:-$LAPLACE_WORK_ROOT/model-outputs/laplace-model-substrate.gguf}"
 
           # Local CLI runs are outside Actions scheduling. Share the same whole-run
           # heartbeat/beacon interpretation as deployment and Operator recovery.

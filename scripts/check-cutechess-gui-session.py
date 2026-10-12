@@ -13,6 +13,7 @@ import json
 import math
 import os
 from pathlib import Path
+from installation_paths import configured
 import re
 import shutil
 import signal
@@ -318,11 +319,12 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--x11-runtime-receipt", type=Path,
                         help="Authenticated X11 prerequisite selection; never silently ignored")
-    parser.add_argument("--work", type=Path, default=Path(os.environ.get("TMPDIR", "/build/laplace/work")))
+    parser.add_argument("--work", type=Path, default=None)
     parser.add_argument("--timeout-seconds", type=float, default=60)
     parser.add_argument("--internal-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--session-root", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    args.work = args.work or configured("LAPLACE_WORK_ROOT")
     require(sys.platform.startswith("linux"), "virtual X11 acceptance requires Linux")
     require(math.isfinite(args.timeout_seconds) and 10 <= args.timeout_seconds <= 120,
             "timeout must be finite and within 10..120 seconds")

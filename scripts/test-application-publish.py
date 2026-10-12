@@ -878,7 +878,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
             'laplace_require_app_dir_contract() { test -d "$1"; }\n')
         for name in ("verify-api-payload.py", "verify-application-release.py",
                      "verify-chess-floor-serving.py", "chess-floor-artifacts.py",
-                     "accept-chess-environment.py", "web-artifact.py"):
+                     "accept-chess-environment.py", "installation_paths.py", "machine-env.py", "web-artifact.py"):
             shutil.copyfile(ROOT / "scripts" / name, repo / "scripts" / name)
         dotnet = repo / "tools/dotnet"
         dotnet.write_text(
@@ -967,7 +967,7 @@ class UciOnlyDeploymentTests(unittest.TestCase):
             'laplace_require_app_dir_contract() { test -d "$1"; }\n')
         for name in ("verify-api-payload.py", "verify-application-release.py",
                      "verify-chess-floor-serving.py", "chess-floor-artifacts.py",
-                     "accept-chess-environment.py", "check-uci-runtime.py", "publish-applications.sh"):
+                     "accept-chess-environment.py", "installation_paths.py", "machine-env.py", "check-uci-runtime.py", "publish-applications.sh"):
             shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
         deploy = self.root / "deploy/linux/deploy.sh"
         deploy.write_text(deploy.read_text().replace(

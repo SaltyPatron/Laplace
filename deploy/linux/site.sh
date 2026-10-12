@@ -292,7 +292,8 @@ phase_app() {
   # Runtime verification travels with the release; an installed host needs no
   # source checkout or build workspace to prove its authenticated native path.
   mkdir -p "$stage/app/operations/scripts/lib" "$stage/app/operations/deploy/linux"
-  cp "$ROOT/scripts/verify-application-release.py" "$ROOT/scripts/install-stockfish.py" "$stage/app/operations/scripts/"
+  cp "$ROOT/scripts/verify-application-release.py" "$ROOT/scripts/install-stockfish.py" \
+    "$ROOT/scripts/installation_paths.py" "$ROOT/scripts/machine-env.py" "$stage/app/operations/scripts/"
   cp "$ROOT/scripts/lib/chess_source_integrity.py" "$stage/app/operations/scripts/lib/"
   cp "$ROOT/deploy/linux/stockfish-release.json" "$stage/app/operations/deploy/linux/"
   [[ -f "$ROOT/web/openapi/openapi.json" ]] || fail "the endpoint build did not write web/openapi/openapi.json"

@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"
 
 RUNNER_USER="laplace-runner"
 RUNNER_GROUP="laplace-runner"
@@ -72,8 +73,8 @@ LAPLACE_PG_LOG="${LAPLACE_PG_LOG:-/var/log/postgresql}"
 LAPLACE_PG_LOG_RETAIN_DAYS="${LAPLACE_PG_LOG_RETAIN_DAYS:-30}"
 # Git-pinned source checkouts (PINS.tsv), NOT build output — re-clonable, so they
 # live on expendable storage, and compile churn stays off the database device.
-LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
-LAPLACE_SUBMODULE_CACHE="${LAPLACE_SUBMODULE_CACHE:-/build/submodule-modules}"
+LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:?Declare LAPLACE_EXTERNAL or LAPLACE_DEPSRC}"
+LAPLACE_SUBMODULE_CACHE="${LAPLACE_SUBMODULE_CACHE:-$LAPLACE_WORK_ROOT/submodule-modules}"
 export LAPLACE_EXTERNAL LAPLACE_SUBMODULE_CACHE
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
@@ -320,7 +321,7 @@ bootstrap_build_environment() {
     local cmake_bin
     cmake_bin=$(python3 "$(dirname "${BASH_SOURCE[0]}")/provision-cmake.py" \
         --root /opt/laplace/tools/cmake \
-        --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+        --work "${LAPLACE_WORK_ROOT}/cmake" --ensure)
     green "✓ Pinned CMake selected: $cmake_bin"
 }
 
@@ -414,7 +415,7 @@ bootstrap_legacy_runner_teardown() {
     fi
 
     local archive
-    archive=$(mktemp -d /build/laplace/recovery/runner-prev.XXXXXXXX)
+    archive=$(mktemp -d "$LAPLACE_WORK_ROOT/recovery/runner-prev.XXXXXXXX")
     mv "$old" "$archive/actions-runner"
     if [[ -e /home/ahart/_work ]]; then
         mv /home/ahart/_work "$archive/operator-workspace"
@@ -440,13 +441,13 @@ bootstrap_runner_oom_guard() {
     say "Runner OOM guard: OOMScoreAdjust drop-in for $RUNNER_SERVICE"
     local dropin_dir="/etc/systemd/system/$RUNNER_SERVICE.d"
     mkdir -p "$dropin_dir"
-    cat > "$dropin_dir/10-oom-guard.conf" <<'EOF'
+    cat > "$dropin_dir/10-oom-guard.conf" <<EOF
 [Service]
 OOMScoreAdjust=-800
 UMask=0002
-Environment=TMPDIR=/build/laplace/work/scratch
-Environment=TMP=/build/laplace/work/scratch
-Environment=TEMP=/build/laplace/work/scratch
+Environment="TMPDIR=$LAPLACE_SCRATCH_ROOT"
+Environment="TMP=$LAPLACE_SCRATCH_ROOT"
+Environment="TEMP=$LAPLACE_SCRATCH_ROOT"
 Restart=always
 RestartSec=10
 EOF

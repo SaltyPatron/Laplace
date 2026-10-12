@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/database.sh"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 command="${1:-}"

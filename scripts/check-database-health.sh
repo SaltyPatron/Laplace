@@ -9,6 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/database.sh"
 require_source_match=1
 case "${LAPLACE_DB_HEALTH_SCOPE:-source}" in
   source|"") ;;

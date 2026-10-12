@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Place a checkout's build directory on the build volume (/build, or LAPLACE_BUILD_VOLUME) without discarding existing output."""
+"""Place a checkout's build directory at its configured location, preserving existing output."""
 import fcntl
 import hashlib
 import json
@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import time
+import importlib.util
 
 
 def inventory(root):
@@ -53,23 +54,20 @@ def canonicalize_cmake_cache(target, lock_root, identity):
 
 
 def place(checkout):
-    # The volume the build lives on: the host's declaration names it (LAPLACE_BUILD_VOLUME, the runner's build root on
-    # a Laplace-Operations host); without one, the monorepo's own hosts mount /build, and it must be mounted.
-    volume = os.environ.get('LAPLACE_BUILD_VOLUME')
-    if volume:
-        if not Path(volume).is_dir():
-            raise RuntimeError(f'LAPLACE_BUILD_VOLUME is not a directory: {volume}')
-    else:
-        volume = '/build'
-        if subprocess.run(['mountpoint', '-q', volume]).returncode:
-            raise RuntimeError('/build must be mounted (or LAPLACE_BUILD_VOLUME must name the build volume)')
-    volume = Path(volume)
     checkout = checkout.resolve(strict=True)
+    spec = importlib.util.spec_from_file_location('machine_env', Path(__file__).with_name('machine-env.py'))
+    machine = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(machine)
+    config = machine.paths(Path(os.environ.get('LAPLACE_MACHINE_ENV') or '/etc/laplace/machine.env'), os.environ, checkout)
     identity = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
-    target = volume / 'laplace/build' / ('laplace-' + identity)
-    old_target = volume / 'laplace/build' / ('legacy-' + identity)
+    if not config.get('LAPLACE_BUILD_DIRECTORY') or not config.get('LAPLACE_WORK_ROOT'):
+        raise RuntimeError('Declare LAPLACE_BUILD and LAPLACE_WORK in the machine configuration or environment')
+    target = Path(config['LAPLACE_BUILD_DIRECTORY']).resolve()
+    old_target = Path(config['LAPLACE_BUILD']) / 'laplace/build' / ('legacy-' + identity)
     source = checkout / 'build'
-    lock_root = volume / 'laplace/work/build-placement'
+    if target == source or target.is_relative_to(source):
+        raise RuntimeError('The configured external build directory cannot be inside the checkout build pointer')
+    lock_root = Path(config['LAPLACE_WORK_ROOT']) / 'build-placement'
     lock_root.mkdir(parents=True, exist_ok=True)
     with (lock_root / (identity + '.lock')).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -82,6 +80,7 @@ def place(checkout):
                         f'build migration has divergent trees; both retained: {old_target} {target}')
                 shutil.rmtree(old_target)
             else:
+                target.parent.mkdir(parents=True, exist_ok=True)
                 old_target.rename(target)
 
         if source.is_symlink():

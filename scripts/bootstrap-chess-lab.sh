@@ -4,6 +4,7 @@
 # publication deliberately does not rebuild independently versioned chess tools.
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"
 umask 0002
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,15 +13,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNNER_USER="${RUNNER_USER:-laplace-runner}"
 RUNNER_GROUP="${RUNNER_GROUP:-laplace-runner}"
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+EXTERNAL="${LAPLACE_EXTERNAL:?Declare LAPLACE_EXTERNAL or LAPLACE_DEPSRC}"
 QT_ROOT="${LAPLACE_QT_ROOT:-${LAPLACE_DEPS_PREFIX:-/opt/laplace}/qt}"
-WORK="${LAPLACE_WORK_ROOT:-/build/laplace/work}/chess-tools"
+WORK="${LAPLACE_WORK_ROOT}/chess-tools"
 export TMPDIR="$WORK" TMP="$WORK" TEMP="$WORK"
-# Build tree beside the source on /build, not under $PREFIX on the database device.
-# It defaulted to $PREFIX/build-cutechess (nvme1n1) and its CMakeCache pinned
-# CMAKE_HOME_DIRECTORY to the OLD source path, so the first run after the source
-# moved failed with "does not match the source used to generate cache" (2026-08-12).
-CC_BUILD="${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}"
+# Build output follows the declared dependency-build directory.
+CC_BUILD="${LAPLACE_CUTECHESS_BUILD:-$LAPLACE_DEPS_BUILD/cutechess}"
 CC_BIN_DIR="$PREFIX/bin"
 APP_DIR="$PREFIX/app"
 ENV_FILE="$APP_DIR/laplace-api.env"
@@ -80,7 +78,7 @@ build_cutechess() {
   # Tool acquisition belongs to building, not option parsing or read-only verification.
   CMAKE_BIN=$(python3 "$REPO_ROOT/scripts/provision-cmake.py" \
     --root "$PREFIX/tools/cmake" \
-    --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)/cmake
+    --work "${LAPLACE_WORK_ROOT}/cmake" --ensure)/cmake
   src="$(run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --source-dir "$EXTERNAL/cutechess")"
   qt="$(run_as_owner python3 "$SCRIPT_DIR/provision-chess-qt.py" --root "$QT_ROOT" --work "$WORK")"
   # Reset only generated configure metadata through the shared source owner.
@@ -124,7 +122,7 @@ build_zstd() {
   local library
   library="$(run_as_owner python3 "$SCRIPT_DIR/install-zstd.py" \
     --source-dir "${LAPLACE_ZSTD_SOURCE:-$EXTERNAL/zstd}" \
-    --build-dir "${LAPLACE_ZSTD_BUILD:-${LAPLACE_BUILD_ROOT:-/build/laplace/build}/zstd}")"
+    --build-dir "${LAPLACE_ZSTD_BUILD:-$LAPLACE_DEPS_BUILD/zstd}")"
   if [[ -z "${LAPLACE_ZSTD_LIBRARY:-}" ]]; then export LAPLACE_ZSTD_LIBRARY="$library"; fi
 }
 

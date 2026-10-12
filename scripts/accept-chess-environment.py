@@ -13,6 +13,7 @@ import json
 from itertools import islice
 import os
 from pathlib import Path
+from installation_paths import configured
 import re
 import signal
 import subprocess
@@ -586,8 +587,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace")))
-    parser.add_argument("--work", type=Path, default=Path("/build/laplace/work"))
+    parser.add_argument("--work", type=Path, default=None)
     args = parser.parse_args()
+    args.work = args.work or configured("LAPLACE_WORK_ROOT")
     if not args.prefix.is_absolute():
         parser.error("--prefix must be absolute")
     os.environ["LAPLACE_INSTALL_PREFIX"] = str(args.prefix)
@@ -633,7 +635,7 @@ def main():
         config = doctor.configuration(args.prefix, keys={"LAPLACE_CUTECHESS_GUI", "LAPLACE_CUTECHESS_GUI_RECEIPT"})
         command([python, "scripts/check-cutechess-gui-session.py",
                  "--binary", config.get("LAPLACE_CUTECHESS_GUI", str(args.prefix / "bin/cutechess")),
-                 "--receipt", config.get("LAPLACE_CUTECHESS_GUI_RECEIPT", "/build/cutechess/laplace-cutechess-gui-build.json"),
+                 "--receipt", config.get("LAPLACE_CUTECHESS_GUI_RECEIPT") or str(configured("LAPLACE_DEPS_BUILD", "cutechess/laplace-cutechess-gui-build.json")),
                  "--output-dir", args.output_dir / "gui-session", "--work", args.work,
                  "--x11-runtime-receipt", args.output_dir / "x11-runtime.json",
                  "--timeout-seconds", "60"], args.output_dir / "gui-session.log", 90)

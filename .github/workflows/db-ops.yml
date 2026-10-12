@@ -3,6 +3,12 @@ name: Database — maintenance
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: "Knowledge host: staging is hart-server; knowledge is hart-cloud (must already be running)"
+        type: choice
+        required: true
+        default: staging
+        options: [staging, knowledge]
       operation:
         description: "database lifecycle operation"
         type: choice
@@ -13,20 +19,10 @@ on:
 permissions:
   contents: read
 
-env:
-  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
-  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
-  PGHOST: /var/run/postgresql
-  PGPORT: 5432
-  PGUSER: laplace_admin
-  PGDATABASE: laplace
-  LAPLACE_DATA_ROOT: /vault/Data
-  LAPLACE_AUTH_DEV_PRINCIPAL: ${{ vars.LAPLACE_AUTH_DEV_PRINCIPAL }}
-
 jobs:
   db:
     name: DB — ${{ inputs.operation }}
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, '${{ inputs.target }}']
     timeout-minutes: 420
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
@@ -38,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 0002
-          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-${LAPLACE_WORK:?Runner must declare LAPLACE_WORK}}"
           mkdir -p "$workspace_lock_root"
           exec 9>"$workspace_lock_root/host-resource.lock"
           flock 9
@@ -71,6 +67,11 @@ jobs:
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           export LAPLACE_DB_HEALTH_SCOPE=installed
           source scripts/ci-environment.sh
+          host_lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCK_ROOT:-$workspace_lock_root}/host-resource.lock}"
+          if ! [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
+            exec 8>>"$host_lock"
+            flock 8
+          fi
 
           health() {
             bash scripts/check-database-health.sh "$PGDATABASE"

@@ -8,6 +8,9 @@ case "$stage" in
   provision|verify|chess-lab|reconcile|check|build|install|applications|deploy|proof|release-qualification|release-delivery|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
+if [[ "$stage" != check ]]; then
+  source "$ROOT/scripts/lib/installation.sh"
+fi
 
 check_deps() {
   bash scripts/ci-deps.sh --check-only
@@ -57,6 +60,7 @@ run_ci_contract_checks() {
   bash tests/site-host-lock.sh
   bash tests/machine-config.sh
   python3 tests/linux-configuration.py
+  python3 tests/configured-paths.py
   python3 scripts/test-workflow-architecture.py
   python3 scripts/test-benchmark-suite.py
   python3 scripts/test-ci-impact-plan.py
@@ -109,7 +113,7 @@ reuse_qualified_native_build() {
   git cat-file -e "$source_sha^{commit}" 2>/dev/null     || git fetch --no-tags --depth=1 origin "$source_sha" >/dev/null 2>&1     || return 1
   git diff --quiet "$source_sha" HEAD --     CMakeLists.txt cmake engine extension scripts/provision-cmake.py     ':(exclude)engine/**/tests/**'     ':(exclude)extension/**/tests/**'     || return 1
 
-  work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+  work_root="${LAPLACE_WORK_ROOT}"
   source_root="$work_root/product-worktrees/$source_sha"
   [[ -f "$source_root/build/engine/core/liblaplace_core.so" ]] || return 1
   find -L "$source_root/build/engine" -name 'laplace_t0_perfcache*.bin' -print -quit | grep -q . || return 1
@@ -1073,7 +1077,7 @@ run_mainline() {
   # the installed host/database. Wait for an ingest/maintenance owner only AFTER
   # compilation, at the delivery boundary that can mutate or publish installed state.
   (
-    local work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+    local work_root="${LAPLACE_WORK_ROOT}"
     mkdir -p "$work_root"
     exec 9>"$work_root/host-resource.lock"
     flock 9

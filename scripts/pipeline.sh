@@ -15,8 +15,8 @@ LAPLACE_BUILD_DIRECTORY=$(python3 "$ROOT/scripts/place-build-directory.py" "$ROO
 export LAPLACE_BUILD_DIRECTORY
 
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
-LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:?Declare LAPLACE_PG_PREFIX or LAPLACE_PG_DIR}"
+LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:?Declare LAPLACE_EXTERNAL or LAPLACE_DEPSRC}"
 # Days an unreferenced, unleased ingest runtime must be idle before reclamation.
 UNLEASED_RUNTIME_IDLE_DAYS="${UNLEASED_RUNTIME_IDLE_DAYS:-7}"
 
@@ -25,7 +25,7 @@ PYTHON="$(command -v python3 || command -v python || true)"
 
 cmake_args=(
   --root "$LAPLACE_INSTALL_PREFIX/tools/cmake"
-  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake"
+  --work "${LAPLACE_WORK_ROOT}/cmake"
 )
 [[ "${LAPLACE_PROVISION_TOOLS:-0}" != 1 ]] || cmake_args+=(--ensure)
 cmake_bin=$("$PYTHON" "$ROOT/scripts/provision-cmake.py" "${cmake_args[@]}")
@@ -41,9 +41,7 @@ LAPLACE_PG_MAJOR="${LAPLACE_PG_MAJOR:-$("$LAPLACE_PG_PREFIX/bin/pg_config" --ver
 LAPLACE_EXT_SHAREDIR="$LAPLACE_INSTALL_PREFIX/share/postgresql/$LAPLACE_PG_MAJOR/extension"
 LAPLACE_EXT_LIBDIR="$LAPLACE_INSTALL_PREFIX/lib/postgresql/$LAPLACE_PG_MAJOR"
 
-export PGHOST="${PGHOST:-/var/run/postgresql}"
-export PGUSER="${PGUSER:-laplace_admin}"
-export PGDATABASE="${PGDATABASE:-laplace}"
+source "$ROOT/scripts/lib/database.sh"
 
 FRESH_DB=0
 FORCE_FOUNDATION=0
@@ -79,7 +77,7 @@ psql() {
     [[ "$PGHOST" == /* ]] || { echo "::error::root SQL requires local socket" >&2; return 2; }
     runuser -u laplace-runner -- env \
       -u PGPASSWORD -u PGPASSFILE -u PGSERVICE -u PGSERVICEFILE -u PGHOSTADDR \
-      "PGHOST=$PGHOST" "PGPORT=${PGPORT:-5432}" "PGUSER=laplace_admin" \
+      "PGHOST=$PGHOST" "PGPORT=${PGPORT:-5432}" "PGUSER=$PGUSER" \
       "PGDATABASE=$PGDATABASE" "PGOPTIONS=${PGOPTIONS:-}" \
       "$LAPLACE_PG_PREFIX/bin/psql" -X -w "$@"
   else
@@ -130,7 +128,7 @@ ensure_extension_library_path() {
     echo "::notice::PostgreSQL is down; dynamic_library_path is reconciled after the install restarts it"
     return 1
   fi
-  current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path") || return 2
+  current=$(psql -d postgres -U "$PGUSER" -tAX -c "SHOW dynamic_library_path") || return 2
   [[ -n "$current" ]] || return 2
   desired_parts=("$LAPLACE_EXT_LIBDIR" '$libdir')
   IFS=: read -r -a current_parts <<<"$current"
@@ -141,7 +139,7 @@ ensure_extension_library_path() {
   desired=$(IFS=:; echo "${desired_parts[*]}")
   [[ "$current" != "$desired" ]] || return 1
   desired_sql=${desired//\'/\'\'}
-  reloaded=$(psql -d postgres -U laplace_admin -qtAX -v ON_ERROR_STOP=1 \
+  reloaded=$(psql -d postgres -U "$PGUSER" -qtAX -v ON_ERROR_STOP=1 \
     -c "ALTER SYSTEM SET dynamic_library_path = '$desired_sql'" \
     -c "SELECT pg_reload_conf()") || return 2
   [[ "$reloaded" == t ]] || return 2
@@ -155,7 +153,7 @@ postgresql_restart_required() {
     echo "::notice::PostgreSQL is not accepting connections; the install restarts it"
     return 0
   fi
-  running=$(psql -d postgres -U laplace_admin -tAc "SHOW server_version_num") || return 2
+  running=$(psql -d postgres -U "$PGUSER" -tAc "SHOW server_version_num") || return 2
   if "$PYTHON" "$ROOT/scripts/postgresql-release.py" restart-needed \
        --prefix "$LAPLACE_PG_PREFIX" --server-version-num "$running"; then
     return 1
@@ -190,13 +188,13 @@ restart_postgres() {
     systemctl is-active --quiet "$unit" \
       && newpid=$(systemctl show -p MainPID --value "$unit") \
       && [[ -n "$newpid" && "$newpid" != 0 && "$newpid" != "$oldpid" ]] \
-      && psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1
+      && psql -d postgres -U "$PGUSER" -tAc "SELECT 1" >/dev/null 2>&1
   }; do
     tries=$((tries + 1))
     (( tries <= 120 )) || { echo "::error::PostgreSQL did not return after restart" >&2; return 1; }
     sleep 1
   done
-  still=$(psql -d postgres -U laplace_admin -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
+  still=$(psql -d postgres -U "$PGUSER" -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
   [[ "$still" == 0 ]] || { echo "::error::$still PostgreSQL settings remain pending restart" >&2; return 1; }
 }
 
@@ -207,9 +205,9 @@ preloaded_native_restart_required() {
     echo "::notice::PostgreSQL is not accepting connections; the install restarts it"
     return 0
   fi
-  mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
-  observation=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/postgres-preload.XXXXXX")
-  if ! psql -d postgres -U laplace_admin -qtAX -v ON_ERROR_STOP=1 -c \
+  mkdir -p "${LAPLACE_WORK_ROOT}"
+  observation=$(mktemp "${LAPLACE_WORK_ROOT}/postgres-preload.XXXXXX")
+  if ! psql -d postgres -U "$PGUSER" -qtAX -v ON_ERROR_STOP=1 -c \
     "SELECT json_build_object('preload',current_setting('shared_preload_libraries'),
        'maps',pg_read_file('/proc/' || split_part(pg_read_file('postmaster.pid'),chr(10),1) || '/maps'))" \
        >"$observation"; then
@@ -294,7 +292,7 @@ phase_build_app() {
       echo "::notice::managed impact plan selected no build projects"
       return 0
     fi
-    work="${LAPLACE_WORK_ROOT:-/build/laplace/work}/managed-solutions"
+    work="${LAPLACE_WORK_ROOT}/managed-solutions"
     mkdir -p "$work"
     generated="$(mktemp "$work/build.XXXXXX.slnx")"
     "$PYTHON" "$ROOT/scripts/ci_managed_projects.py" --root "$ROOT" solution \
@@ -728,7 +726,7 @@ phase_install() (
   if [[ "$so_before" != "$so_after" || "$library_path_changed" == 1 ]]; then
     local preload
     if postgres_accepting; then
-      preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
+      preload=$(psql -d postgres -U "$PGUSER" -tAc "SHOW shared_preload_libraries")
       if [[ ",${preload// /}," == *",laplace_substrate,"* || ",${preload// /}," == *",laplace_geom,"* ]]; then
         postgres_activation_required=1
       fi
@@ -768,15 +766,15 @@ phase_migrate() {
 
 alter_extension_update() {
   local ext="$1" avail="$2" rc=0 log
-  mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
-  log=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/alter-extension.XXXXXX")
+  mkdir -p "${LAPLACE_WORK_ROOT}"
+  log=$(mktemp "${LAPLACE_WORK_ROOT}/alter-extension.XXXXXX")
   PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
       -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >"$log" 2>&1 || rc=$?
   if [[ "$rc" != 0 ]]; then
     cat "$log" >&2
     if grep -q 'lock timeout\|canceling statement due to lock timeout\|deadlock detected' "$log"; then
-      psql -d "$PGDATABASE" -U laplace_admin -P pager=off -c \
+      psql -d "$PGDATABASE" -U "$PGUSER" -P pager=off -c \
         "SELECT pid,state,wait_event_type,wait_event,now()-COALESCE(xact_start,query_start) AS held,left(query,120) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' ORDER BY COALESCE(xact_start,query_start)" >&2 || true
     fi
   fi
@@ -786,11 +784,11 @@ alter_extension_update() {
 
 sync_one_extension() {
   local ext="$1" avail installed bridge
-  avail=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='$ext'" | tr -d '[:space:]')
-  installed=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT extversion FROM pg_extension WHERE extname='$ext'" | tr -d '[:space:]')
+  avail=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='$ext'" | tr -d '[:space:]')
+  installed=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT extversion FROM pg_extension WHERE extname='$ext'" | tr -d '[:space:]')
   [[ -n "$avail" ]] || { echo "::error::$ext is not available on the server" >&2; return 1; }
   if [[ -z "$installed" ]]; then
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS $ext CASCADE"
+    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS $ext CASCADE"
     return
   fi
   [[ "$installed" != "$avail" ]] || { echo "$ext already at $avail"; return; }
@@ -820,18 +818,18 @@ phase_sync_extension() (
 
   sync_one_extension laplace_geom
   local avail installed bridge log rc=0
-  avail=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'" | tr -d '[:space:]')
-  installed=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'" | tr -d '[:space:]')
+  avail=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'" | tr -d '[:space:]')
+  installed=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'" | tr -d '[:space:]')
   [[ -n "$avail" ]] || { echo "::error::laplace_substrate not available" >&2; return 1; }
   if [[ -z "$installed" ]]; then
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
+    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
   elif [[ "$installed" != "$avail" ]]; then
     bridge="$LAPLACE_EXT_SHAREDIR/laplace_substrate--${installed}--${avail}.sql"
     install -m 664 "$LAPLACE_EXT_SHAREDIR/laplace_substrate_upgrade.sql" "$bridge"
-    mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
-    log=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/substrate-update.XXXXXX")
+    mkdir -p "${LAPLACE_WORK_ROOT}"
+    log=$(mktemp "${LAPLACE_WORK_ROOT}/substrate-update.XXXXXX")
     PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
-      psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+      psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
         -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" >"$log" 2>&1 || rc=$?
     if [[ "$rc" != 0 ]] && grep -q 'could not find function\|could not load library\|undefined symbol' "$log" \
        && ! grep -q 'laplace_execution_[0-9a-f]' "$log"; then
@@ -839,13 +837,13 @@ phase_sync_extension() (
       restart_postgres "preloaded substrate image is stale for new SQL"
       rc=0
       PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
-        psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+        psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
           -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" || rc=$?
     fi
     if [[ "$rc" != 0 ]]; then
       cat "$log" >&2
       if grep -q 'lock timeout\|canceling statement due to lock timeout\|deadlock detected' "$log"; then
-        psql -d "$PGDATABASE" -U laplace_admin -P pager=off -c \
+        psql -d "$PGDATABASE" -U "$PGUSER" -P pager=off -c \
           "SELECT pid,state,wait_event_type,wait_event,now()-COALESCE(xact_start,query_start) AS held,left(query,160) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' ORDER BY COALESCE(xact_start,query_start)" >&2 || true
       fi
       rm -f "$log"
@@ -865,7 +863,7 @@ phase_tune_pg() {
   echo "===== PHASE — TUNE PG ====="
   # shellcheck source=scripts/pg-machine-tuning.sh
   source "$ROOT/scripts/pg-machine-tuning.sh"
-  PG_TUNE_PSQL=(psql -d "$PGDATABASE" -U laplace_admin)
+  PG_TUNE_PSQL=(psql -d "$PGDATABASE" -U "$PGUSER")
   pg_apply_machine_tuning
   local pending
   pending=$(pg_tune_psql -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
@@ -875,9 +873,9 @@ phase_tune_pg() {
 phase_tune_laplace() {
   echo "===== PHASE — TUNE LAPLACE ====="
   local have
-  have=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SELECT to_regclass('laplace.physicalities') IS NOT NULL" 2>/dev/null || echo f)
+  have=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAc "SELECT to_regclass('laplace.physicalities') IS NOT NULL" 2>/dev/null || echo f)
   [[ "$have" == t ]] || { echo "substrate tables absent; tuning skipped"; return 0; }
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 <<'SQL'
+  psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 <<'SQL'
 ALTER TABLE laplace.physicalities ALTER COLUMN coord SET STATISTICS 0;
 ALTER TABLE laplace.physicalities ALTER COLUMN trajectory SET STATISTICS 0;
 DO $$
@@ -911,18 +909,18 @@ phase_perfcache_guc() {
   [[ -n "$bin" && -n "$hwbin" && -n "$vocabbin" && -n "$chessbin" && -n "$transition" ]] || {
     echo "::error::installed perfcache set incomplete" >&2; return 1;
   }
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+  psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
     -c "LOAD 'laplace_substrate'" \
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
     -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '$hwbin'" \
     -c "ALTER SYSTEM SET laplace_substrate.vocabulary_perfcache_path = '$vocabbin'" \
     -c "ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '$chessbin'" \
     -c "SELECT pg_reload_conf()"
-  preload=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SHOW shared_preload_libraries")
+  preload=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAc "SHOW shared_preload_libraries")
   if [[ ",${preload// /}," != *",laplace_substrate,"* ]]; then
     newval=laplace_substrate
     [[ -z "$preload" ]] || newval="$preload,laplace_substrate"
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = '$newval'"
+    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = '$newval'"
     restart_postgres "enable substrate preload"
   fi
 }
@@ -945,7 +943,7 @@ phase_api_env() {
     install -m 0640 -o laplace-runner -g laplace-runner "$example" "$env_file" 2>/dev/null || cp "$example" "$env_file"
   fi
   if grep -q '^LAPLACE_PERFCACHE_BIN=' "$env_file"; then sed -i "s|^LAPLACE_PERFCACHE_BIN=.*|LAPLACE_PERFCACHE_BIN=$bin|" "$env_file"; else printf '\nLAPLACE_PERFCACHE_BIN=%s\n' "$bin" >>"$env_file"; fi
-  local api_db="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=$PGDATABASE"
+  local api_db="LAPLACE_DB=Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$PGDATABASE"
   if grep -q '^LAPLACE_DB=' "$env_file"; then sed -i "s|^LAPLACE_DB=.*|$api_db|" "$env_file"; else printf '\n%s\n' "$api_db" >>"$env_file"; fi
   ops_log_dir="${LAPLACE_OPS_LOG_DIR:-$LAPLACE_INSTALL_PREFIX/app/logs}"
   mkdir -p "$ops_log_dir"; chmod 2775 "$ops_log_dir" 2>/dev/null || true
@@ -977,7 +975,7 @@ phase_api_env() {
     set_api_env LAPLACE_PUBLIC_BASE_URL "${LAPLACE_PUBLIC_BASE_URL%/}"
     set_api_env LAPLACE_DATA_PROTECTION_KEYS "$LAPLACE_INSTALL_PREFIX/secrets/data-protection"
   fi
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+  psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
     -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');"
 }
 

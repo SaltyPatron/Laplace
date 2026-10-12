@@ -2,6 +2,7 @@
 # Non-destructive maintenance of an already-installed Laplace database.
 # Destructive recreation and corpus restoration are explicit operator operations.
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/database.sh"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mode="${1:---prepare}"

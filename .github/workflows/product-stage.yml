@@ -112,23 +112,13 @@ on:
 permissions:
   contents: read
 
-env:
-  LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
-  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
-  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
-  PGHOST: /var/run/postgresql
-  PGPORT: 5432
-  PGUSER: laplace_admin
-  PGDATABASE: laplace
-  LAPLACE_DATA_ROOT: /vault/Data
-
 jobs:
   preflight:
     name: Product — freshness preflight
     # Freshness is read-only and must remain available when hosted Actions
     # billing is unavailable; product delivery itself already depends on this
     # repository's self-hosted product runner.
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 2
     outputs:
       execute: ${{ steps.freshness.outputs.execute }}
@@ -210,7 +200,7 @@ jobs:
       # Delivery remains non-preemptibly serialized at the installed-host boundary.
       group: ${{ inputs.skip_if_superseded && (inputs.stage == 'mainline' || inputs.stage == 'release-delivery') && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
       cancel-in-progress: false
-    runs-on: [self-hosted, laplace]
+    runs-on: [self-hosted, laplace, staging]
     timeout-minutes: 420
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
@@ -268,7 +258,7 @@ jobs:
           umask 0002
 
           control_workspace="$GITHUB_WORKSPACE"
-          work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          work_root="${LAPLACE_WORK_ROOT:-${LAPLACE_WORK:?Runner must declare LAPLACE_WORK}}"
           worktree_root="$work_root/product-worktrees"
           candidate_workspace="$worktree_root/$TARGET_SHA"
           mkdir -p "$worktree_root"
@@ -358,16 +348,21 @@ jobs:
             if flock -n "$stale_fd"; then
               stale_physical="$(readlink -f "$stale_workspace" 2>/dev/null || printf '%s' "$stale_workspace")"
               stale_identity="$(printf '%s' "$stale_physical" | sha256sum | cut -c1-16)"
-              stale_build="/build/laplace/build/laplace-$stale_identity"
+              stale_build=""
+              if [[ -n "${LAPLACE_BUILD:-}" ]]; then
+                stale_build="$LAPLACE_BUILD/laplace-mono/worktrees/$stale_identity"
+              fi
               if [[ -e "$stale_workspace/.git" ]]; then
                 if [[ -z "$(git -C "$stale_workspace" status --porcelain --untracked-files=no)" ]]; then
-                  rm -rf "$stale_workspace" "$stale_build"
+                  rm -rf "$stale_workspace"
+                  [[ -z "$stale_build" ]] || rm -rf "$stale_build"
                   rm -f "$stale_lock"
                 else
                   echo "::warning::preserving dirty inactive candidate worktree: $stale_workspace" >&2
                 fi
               else
-                rm -rf "$stale_workspace" "$stale_build"
+                rm -rf "$stale_workspace"
+                  [[ -z "$stale_build" ]] || rm -rf "$stale_build"
               fi
               flock -u "$stale_fd"
             fi
@@ -397,9 +392,13 @@ jobs:
           # their externally placed CMake trees. Recover those orphaned build trees too.
           # A CMake tree is eligible only when its recorded source is a deleted
           # product-worktree candidate; active/current/native-reuse owners are excluded.
-          for stale_build in /build/laplace/build/laplace-*; do
+          build_candidates=()
+          if [[ -n "${LAPLACE_BUILD:-}" ]]; then
+            build_candidates=("$LAPLACE_BUILD"/laplace-mono/worktrees/*)
+          fi
+          for stale_build in "${build_candidates[@]}"; do
             [[ -d "$stale_build" ]] || continue
-            cache="$stale_build/CMakeCache.txt"
+            cache="$stale_build/build/CMakeCache.txt"
             [[ -f "$cache" ]] || continue
             stale_source="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -1)"
             [[ "$stale_source" == "$worktree_root/"* ]] || continue
