@@ -122,7 +122,7 @@ template {
     Write-Atomic (Join-Path $root 'agent.hcl') $agent
     Remove-Item -LiteralPath (Join-Path $root 'candidate.json') -Force -ErrorAction SilentlyContinue
     $began=[DateTime]::UtcNow
-    $process=Start-Process -FilePath $bao -ArgumentList @('agent',('-config="'+(Join-Path $root 'agent.hcl')+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'agent.stdout.log') -RedirectStandardError (Join-Path $root 'agent.stderr.log')
+    $process=Start-Process -FilePath $bao -ArgumentList @('agent',('-config="'+(Join-Path $root 'agent.hcl')+'"')) -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'agent.stdout.log') -RedirectStandardError (Join-Path $root 'agent.stderr.log')
     Write-Atomic $state (@{pid=$process.Id;executable=$bao;started_utc=$process.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json)
     $rendered=$false
     for($i=0;$i -lt 60;$i++) {
