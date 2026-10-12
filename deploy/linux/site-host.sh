@@ -139,7 +139,7 @@ application_runtime() {
   python3 "$HERE/runtime/install.py" --manifest "$selected" "${args[@]}"
 }
 if "$check"; then
-  python3 "$HERE/service-units.py"
+  python3 "$HERE/service-units.py" --verify
   application_runtime
   exit
 fi
@@ -149,7 +149,7 @@ if "$browser_setup"; then private_browser_route; browser_identity; chess_runtime
 if "$routing_only"; then private_browser_route; exit; fi
 id "$RUN_USER" >/dev/null 2>&1 || { echo "no user $RUN_USER: Laplace-Operations' sudo ./setup.sh packages makes it"; exit 1; }
 # Resolve every service path and identity before changing the installation.
-python3 "$HERE/service-units.py" >/dev/null
+python3 "$HERE/service-units.py" --verify >/dev/null
 say() { printf '  %-44s %s\n' "$1" "$2"; }
 
 echo "=== directories"
@@ -165,7 +165,39 @@ if ! [[ /proc/self/fd/8 -ef "$LOCKS/host-resource.lock" ]]; then exec 8>>"$LOCKS
 flock -xn 8 || { echo 'Another deployment or ingest owns the host lock' >&2; exit 1; }
 
 echo "=== units"
-python3 "$HERE/service-units.py" --output /etc/systemd/system
+# Retain the service configuration and activation state until the entire setup
+# succeeds. A later runtime or routing failure must not leave new broken units.
+unit_snapshot=$(mktemp -d)
+unit_names=(laplace-api.service laplace-api-restart.path laplace-api-restart.service
+            laplace-mcp.service laplace-mcp-restart.path laplace-mcp-restart.service)
+for unit in "${unit_names[@]}"; do
+  [[ ! -e "/etc/systemd/system/$unit" ]] || cp -p "/etc/systemd/system/$unit" "$unit_snapshot/$unit"
+  if systemctl is-active --quiet "$unit"; then touch "$unit_snapshot/$unit.active"; fi
+  if systemctl is-enabled --quiet "$unit" 2>/dev/null; then touch "$unit_snapshot/$unit.enabled"; fi
+done
+finish_units() {
+  local result=$? unit
+  trap - EXIT
+  if (( result != 0 )); then
+    echo 'Setup failed; restoring previous service units and activation state.' >&2
+    set +e
+    for unit in "${unit_names[@]}"; do
+      if [[ -f "$unit_snapshot/$unit" ]]; then cp -p "$unit_snapshot/$unit" "/etc/systemd/system/$unit"
+      else rm -f "/etc/systemd/system/$unit"; fi
+    done
+    systemctl daemon-reload
+    for unit in laplace-api.service laplace-mcp.service laplace-api-restart.path laplace-mcp-restart.path; do
+      if [[ -f "$unit_snapshot/$unit.enabled" ]]; then systemctl enable --quiet "$unit"
+      else systemctl disable --quiet "$unit"; fi
+      if [[ -f "$unit_snapshot/$unit.active" ]]; then systemctl restart "$unit"
+      else systemctl stop "$unit"; fi
+    done
+  fi
+  rm -rf -- "$unit_snapshot"
+  exit "$result"
+}
+trap finish_units EXIT
+python3 "$HERE/service-units.py" --verify --output /etc/systemd/system
 systemctl daemon-reload
 systemctl enable -q laplace-api.service
 systemctl enable -q --now laplace-api-restart.path
