@@ -52,7 +52,7 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus|verify-recorded-corpus|export-recorded-pgn>\n"
+        "usage: laplace-mono chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus|verify-recorded-corpus|export-recorded-pgn>\n"
         + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
@@ -209,7 +209,7 @@ internal static class ChessCommands
     private static async Task<int> ReviewAsync(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--"))
-            return Fail("usage: laplace chess review <pgn-file|dir> [--depth D] [--max-games N] [--re-ingest]");
+            return Fail("usage: laplace-mono chess review <pgn-file|dir> [--depth D] [--max-games N] [--re-ingest]");
         var path = args[0];
         int depth = ArgInt(args, "--depth", 4);
         int maxGames = ArgInt(args, "--max-games", 20);
@@ -424,7 +424,7 @@ internal static class ChessCommands
     private static async Task<int> MoveAsync(string[] args)
     {
         var fen = string.Join(' ', args).Trim();
-        if (fen.Length == 0) return Fail("usage: laplace chess move <fen>");
+        if (fen.Length == 0) return Fail("usage: laplace-mono chess move <fen>");
 
         await using var liveHost = await ChessLiveGameHost.CreateAsync();
         await using var svc = new ChessEngineService(0.5d, liveHost);
@@ -439,7 +439,7 @@ internal static class ChessCommands
     private static async Task<int> FetchAsync(string[] a)
     {
         if (a.Length == 0 || a[0].StartsWith("--"))
-            return Fail("usage: laplace chess fetch <username> [--site chesscom|lichess] [--max N] [--min-tc SECONDS] [--out <path>]\n"
+            return Fail("usage: laplace-mono chess fetch <username> [--site chesscom|lichess] [--max N] [--min-tc SECONDS] [--out <path>]\n"
                       + "  --min-tc: keep only games with base time control >= SECONDS (600 = rapid+classical, drops blitz/bullet)");
         var user = a[0];
         var site = ArgStr(a, "--site", "chesscom");

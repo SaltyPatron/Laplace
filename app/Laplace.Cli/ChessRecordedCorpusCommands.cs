@@ -8,7 +8,7 @@ namespace Laplace.Cli;
 internal static class ChessRecordedCorpusCommands
 {
     internal const string Usage =
-        "usage: laplace chess verify-recorded-corpus --selection-manifest /absolute/selection.json "
+        "usage: laplace-mono chess verify-recorded-corpus --selection-manifest /absolute/selection.json "
         + "--expected-sha256 <lowercase-sha256> --evidence-root /absolute/new-evidence-directory "
         + "[--deadline-seconds 3600]\n"
         + "  Verifies exactly the authenticated completed games and their zero-write replay; it does not qualify a throughput benchmark.";
@@ -49,7 +49,7 @@ internal static class ChessRecordedCorpusCommands
     }
 
     internal const string ExportUsage =
-        "usage: laplace chess export-recorded-pgn --selection-manifest /absolute/selection.json "
+        "usage: laplace-mono chess export-recorded-pgn --selection-manifest /absolute/selection.json "
         + "--expected-sha256 <lowercase-sha256> --output-pgn /absolute/new-selected.pgn\n"
         + "  Exports the exact authenticated original game frames for ordinary admission.";
 

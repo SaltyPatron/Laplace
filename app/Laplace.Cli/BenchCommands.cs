@@ -19,7 +19,7 @@ internal static class BenchCommands
         string? tensor = rest.Length > 1 ? rest[1] : null;
 
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
-            return Fail("usage: laplace svd-exact-bench [model-dir] [tensor]\n" +
+            return Fail("usage: laplace-mono svd-exact-bench [model-dir] [tensor]\n" +
                         "  pass a model dir or rely on install-discovered TinyLlama under the model hub.");
 
         bool pass = SvdExactBench.Run(modelDir, tensor);
@@ -45,7 +45,7 @@ internal static class BenchCommands
                 hub = "";
             }
             if (string.IsNullOrEmpty(hub) || !Directory.Exists(hub))
-                return Fail("usage: laplace model-bench [model-dir | hub-root]\n" +
+                return Fail("usage: laplace-mono model-bench [model-dir | hub-root]\n" +
                             "  pass a model dir or a hub root (default: install-discovered model hub).");
             models = EnumerateHubModels(hub).ToList();
             if (models.Count == 0)

@@ -61,7 +61,7 @@ internal static class Program
         var app = new CommandApp(new DiTypeRegistrar(services));
         app.Configure(config =>
         {
-            config.SetApplicationName("laplace");
+            config.SetApplicationName("laplace-mono");
 
             // A failure prints "error: <Type>: <message>" plus the inner chain to stderr and
             // exits 1, for both parse errors and runtime command exceptions.

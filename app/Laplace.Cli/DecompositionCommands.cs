@@ -38,7 +38,7 @@ internal static class DecompositionCommands
     public static async Task<int> DbRoundtripAsync(string path)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return Fail($"usage: laplace db-roundtrip <file>  (not found: {path})");
+            return Fail($"usage: laplace-mono db-roundtrip <file>  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var loggerFactory = CliRuntime.LoggerFactory;
@@ -75,7 +75,7 @@ internal static class DecompositionCommands
 
     public static int Decompose(string text)
     {
-        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace decompose <text>");
+        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace-mono decompose <text>");
         CodepointPerfcache.Load(ResolveBlob());
 
         using var tree = TextDecomposer.Run(text);
@@ -90,7 +90,7 @@ internal static class DecompositionCommands
     public static int Roundtrip(string path, string? outPath)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return Fail($"usage: laplace roundtrip <file> [out]  (not found: {path})");
+            return Fail($"usage: laplace-mono roundtrip <file> [out]  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
 
         byte[] original = File.ReadAllBytes(path);

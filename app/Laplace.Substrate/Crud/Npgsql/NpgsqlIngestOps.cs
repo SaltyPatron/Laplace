@@ -190,16 +190,17 @@ public static class NpgsqlIngestOps
                        realize.canonical_id('Model_Circuit'), 3)
             """, null, ct, "model_circuit_trajectory_count");
 
-    public readonly record struct SourceEvidenceRow(string Source, long Evidence);
+    public readonly record struct SourceEvidenceRow(string? Source, long Evidence, string? SourceId);
 
     public static Task<IReadOnlyList<SourceEvidenceRow>> AttestationCountsBySourceAsync(
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT s.source, s.evidence
+            SELECT s.source, s.evidence, encode(s.source_id, 'hex')
             FROM ops.source_counts() s
             ORDER BY s.evidence DESC
             """,
-            static r => new SourceEvidenceRow(r.GetString(0), r.GetInt64(1)),
+            static r => new SourceEvidenceRow(r.IsDBNull(0) ? null : r.GetString(0), r.GetInt64(1),
+                r.IsDBNull(2) ? null : r.GetString(2)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "attestation_counts_by_source");
 
     public readonly record struct UnicodeAtomProbeRow(

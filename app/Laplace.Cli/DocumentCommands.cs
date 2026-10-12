@@ -21,7 +21,7 @@ internal static class DocumentCommands
     {
         if (args.Length == 0)
             return Fail(
-                "usage: laplace document <recipe.json> [out-dir]\n"
+                "usage: laplace-mono document <recipe.json> [out-dir]\n"
                 + "  recipe.json   the config.json / recipe file (same path used with 'synthesize substrate')\n"
                 + "  out-dir       where to write provenance.json (default: <recipe-dir>/laplace-provenance/)");
 
