@@ -20,7 +20,7 @@ THESIS (what the invention is)
   glosses, ConceptNet MadeOf/HasA, ILI/CILI, FrameNet/VerbNet/PropBank/SemLink, Wiktionary —
   reconciled by consensus. steam->water+energy->H2O->H,O is a traversal over attested edges,
   grounded + explainable, not a centroid guess. This is categorically MORE than an LLM (which
-  holds the same knowledge implicitly and can hallucinate it).
+  holds the same content implicitly and can hallucinate it).
 
 FAITHFUL DIAGNOSIS (from a real D:\Temp\kfix.gguf run, native-vocab 2000/hops 1/dim 2048/
 layers 2/heads 16)

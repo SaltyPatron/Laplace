@@ -42,7 +42,7 @@ The inventor (spelling normalized):
 
 Three consequences are binding:
 
-- **The world is the tool; firmware is the hand that uses it.** Knowledge records what
+- **The world is the tool; firmware is the hand that uses it.** Content records what
   exists and what was observed. Firmware decides what to do with it. Knowing does not
   decide doing, and doing never edits knowing.
 - **Firmware is a program over the semantic instruction set.** The GPT's steps are
@@ -62,7 +62,7 @@ turns standing into a softmax or a normalized distribution.
 
 **Personality firmware** is a versioned, content-addressed, replayable program over the
 operation ISA (spec 37). It parameterizes and schedules the forward program (spec 36)
-over one shared, pinned knowledge world. It is data the forward program loads, not code
+over one shared, pinned content world. It is data the forward program loads, not code
 paths selected by name.
 
 A firmware image declares, as applicable:
@@ -87,7 +87,7 @@ thresholds, ambiguity investigation, contradiction search, goal arbitration, sem
 preference and realization style (`INVENTION_MODEL.md` §12). Coding firmware is a
 complete engineering procedure over the code lane of spec 36. Game firmware is the rules,
 eligibility and completion law of a game over the same world
-(`docs/guides/knowledge-arena.md`; INVENTIONS #51). All three are the same object.
+(`docs/guides/content-arena.md`; INVENTIONS #51). All three are the same object.
 
 ### 1.1 Identity
 
@@ -128,7 +128,7 @@ impossible to audit (`07_EXECUTION_CONTROL_GODEL_OODA.md` §10).
 |---|---|---|
 | **operation** | one typed semantic transition with operands, preconditions, result kind, authority, resource contract and receipt meaning | a spec 37 opcode (OP0 RESOLVE … OP10 COUPLE) |
 | **program / recipe** | typed operations composed under a goal and a completion/effect contract | the cognition program compiled per pass (`cognition_program.c`), recipes (`recipes/`) |
-| **firmware** | the policy that parameterizes and schedules programs over shared knowledge | this spec; not yet implemented |
+| **firmware** | the policy that parameterizes and schedules programs over shared content | this spec; not yet implemented |
 | **orchestration** | arranges execution; owns no semantics | SQL `generation.forward_program` / `forward_trace` (`walk_continuations.sql.in`), C# endpoints, MCP, CLI |
 | **OODA** | the control cycle over state and consequences: observe → orient → decide → act → observe consequence | the forward pass plus WITNESS plus the later observed outcome (§8.1) |
 | **evidence learning** | new observations publish a new standing epoch | ingestion and the Glicko-2 fold (`INVENTION.md` §11) |
@@ -136,7 +136,7 @@ impossible to audit (`07_EXECUTION_CONTROL_GODEL_OODA.md` §10).
 
 Orchestration that chooses truth or ranking has become a second engine. OODA does not
 create a new calculus. Gödel is not "another pass of the loop". Firmware is not
-knowledge, not authority and not orchestration.
+content, not authority and not orchestration.
 
 ## 3. What firmware parameterizes, stage by stage
 
@@ -172,7 +172,7 @@ SQL defaults for the same parameters are in
 - **`p_output_relation_types`, `p_invocation_context`, the caller's hard relation scope.**
   These are caller contracts (spec 37: an operation may arrive already oriented). They
   are inputs beside firmware, not firmware.
-- **The principal, tenant, knowledge-package grants and capability mask.** These are
+- **The principal, tenant, content-package grants and capability mask.** These are
   authority (spec 37, authority contract). Firmware reads them and cannot widen them.
 - **Relation rank.** The roadmap decided that relation rank is salience applied at
   reading, in coupling (`ASSIMILATION_ROADMAP.md:90`). The election uses it as its first
@@ -194,9 +194,9 @@ SQL defaults for the same parameters are in
    whichever firmware selected the act. Safety is not a firmware and not a habit, and a
    learned habit or accelerated path cannot skip it
    (`TASK_SCOPED_USER_HABITS_SAFETY_AND_AUDIENCE_ADMISSIBILITY.md` §7).
-4. **Alter knowledge.** Firmware cannot add, delete or edit content, physicality,
-   occurrence, testimony, provenance or history. Governance of knowledge is not deletion
-   of knowledge (`INVENTION.md` §16, "Governance and honest abstention").
+4. **Alter content.** Firmware cannot add, delete or edit content, physicality,
+   occurrence, testimony, provenance or history. Governance of content is not deletion
+   of content (`INVENTION.md` §16, "Governance and honest abstention").
 5. **Substitute for ORIENT.** Firmware cannot supply a default relation or provider mask
    before the query-relative field is computed (`INVENTION.md:911`; spec 36 ORIENT and
    acceptance; spec 37 canonical ordering).
@@ -327,7 +327,7 @@ impersonate one another").
 
 Typed incompleteness is a discovery signal, not a defect to hide
 (`INVENTION_MODEL.md` §11; `ASSIMILATION_ROADMAP.md:57`, law 19, "a periodic table of
-knowledge").
+content").
 
 1. **Signal.** A constrained vacancy: repeated typed structure predicts that something
    with a particular signature belongs somewhere, and no supported occupant is present.

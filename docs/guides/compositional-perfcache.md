@@ -151,7 +151,7 @@ sample-rate/window/analyzer recipe
 
 Standalone audio and video soundtrack analysis can both reuse those records.
 
-Do not confuse "human speech frequency profile" with deleting frequencies from Laplace's knowledge. It is a resident calculation/cache profile.
+Do not confuse "human speech frequency profile" with deleting frequencies from Laplace's content. It is a resident calculation/cache profile.
 
 ### Profile composition
 

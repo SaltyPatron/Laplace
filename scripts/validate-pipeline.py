@@ -147,20 +147,20 @@ def manifest_errors(manifest: dict) -> list[str]:
                 continue
             if "path" in src and not src["path"]:
                 errs.append(f"manifest: stage '{name}' cli '{cli}' has empty path")
-            if name == "knowledge":
+            if name == "relations":
                 src_order = src.get("order")
                 if not isinstance(src_order, int):
-                    errs.append(f"manifest: knowledge source '{cli}' missing integer order")
+                    errs.append(f"manifest: database source '{cli}' missing integer order")
                 elif src_order <= prev_src_order:
                     errs.append(
-                        f"manifest: knowledge source '{cli}' order={src_order} "
+                        f"manifest: database source '{cli}' order={src_order} "
                         f"not after prior ({prev_src_order})"
                     )
                 else:
                     prev_src_order = src_order
             clis.append(cli)
 
-        if name in ("floor", "document", "knowledge", "usage") and len(clis) != len(set(clis)):
+        if name in ("floor", "document", "relations", "usage") and len(clis) != len(set(clis)):
             dupes = [c for c in clis if clis.count(c) > 1]
             errs.append(f"manifest: stage '{name}' duplicate cli values: {sorted(set(dupes))}")
 
@@ -172,7 +172,7 @@ def stage_cli_lists(manifest: dict) -> dict[str, list[str]]:
     for stage in manifest["cadence"]:
         name = stage["stage"]
         sources = stage["sources"]
-        if name == "knowledge":
+        if name == "relations":
             ordered = sorted(sources, key=lambda s: s.get("order", 0))
             out[name] = [s["cli"] for s in ordered]
         else:
@@ -180,11 +180,11 @@ def stage_cli_lists(manifest: dict) -> dict[str, list[str]]:
     return out
 
 
-def expected_seed_stage_knowledge(manifest: dict) -> list[str]:
-    """seed-stage.cmd knowledge loop = floor cili (if any) + manifest knowledge order."""
+def expected_seed_stage_relations(manifest: dict) -> list[str]:
+    """seed-stage.cmd relations loop = floor cili (if any) + manifest relations order."""
     stages = stage_cli_lists(manifest)
     prefix = [c for c in stages.get("floor", []) if c == "cili"]
-    return prefix + stages["knowledge"]
+    return prefix + stages["relations"]
 
 
 def flat_ingest_all(manifest: dict) -> list[str]:
@@ -192,7 +192,7 @@ def flat_ingest_all(manifest: dict) -> list[str]:
     stages = stage_cli_lists(manifest)
     skip = {"stack", "repo", "safetensors"}
     order: list[str] = []
-    for stage_name in ("floor", "document", "knowledge", "usage"):
+    for stage_name in ("floor", "document", "relations", "usage"):
         for cli in stages.get(stage_name, []):
             if cli in skip:
                 continue
@@ -217,25 +217,25 @@ def extract_bash_array(text: str, var_name: str) -> list[str] | None:
 
 def parse_ingest_source_all(text: str) -> list[str] | None:
     floor = extract_bash_array(text, "FLOOR")
-    knowledge = extract_bash_array(text, "KNOWLEDGE")
+    relations = extract_bash_array(text, "RELATIONS")
     usage = extract_bash_array(text, "USAGE")
-    if not floor or not knowledge or not usage:
+    if not floor or not relations or not usage:
         return None
-    return floor + ["document"] + knowledge + usage
+    return floor + ["document"] + relations + usage
 
 
-def parse_seed_stage_knowledge(text: str) -> list[str] | None:
-    m = re.search(r":stage_knowledge[\s\S]*?for %%s in \(([^)]+)\)", text, re.IGNORECASE)
+def parse_seed_stage_relations(text: str) -> list[str] | None:
+    m = re.search(r":stage_relations[\s\S]*?for %%s in \(([^)]+)\)", text, re.IGNORECASE)
     if not m:
         return None
     return [s.strip() for s in m.group(1).split() if s.strip()]
 
 
 def parse_audit_ladder(text: str) -> list[str] | None:
-    knowledge = extract_bash_array(text, "KNOWLEDGE")
-    if not knowledge:
+    relations = extract_bash_array(text, "RELATIONS")
+    if not relations:
         return None
-    base = ["iso639", *knowledge]
+    base = ["iso639", *relations]
     full_m = re.search(
         r"\[\[\s*\$FULL\s*-eq\s*1\s*\]\]\s*&&\s*LADDER\+=\(([^)]*)\)", text
     )
@@ -256,10 +256,10 @@ def compare_order(label: str, expected: list[str], actual: list[str] | None) -> 
     return []
 
 
-def compare_audit_base(expected_knowledge: list[str], actual: list[str] | None) -> list[str]:
+def compare_audit_base(expected_relations: list[str], actual: list[str] | None) -> list[str]:
     if actual is None:
         return ["audit-decomposers.sh: could not parse LADDER"]
-    expected_base = ["iso639", *expected_knowledge]
+    expected_base = ["iso639", *expected_relations]
     prefix = actual[: len(expected_base)]
     if prefix != expected_base:
         return [
@@ -280,13 +280,13 @@ def parse_audit_layer_map(text: str) -> dict[str, int] | None:
     return out or None
 
 
-def expected_audit_layer_map(knowledge: list[str]) -> dict[str, int]:
-    """Sequential layer-completion ordinals: iso639=1, then knowledge sources in order."""
+def expected_audit_layer_map(relations: list[str]) -> dict[str, int]:
+    """Sequential layer-completion ordinals: iso639=1, then database sources in order."""
     out: dict[str, int] = {"iso639": 1}
-    for i, cli in enumerate(knowledge, start=2):
+    for i, cli in enumerate(relations, start=2):
         out[cli] = i
-    out["tatoeba"] = len(knowledge) + 2
-    out["opensubtitles"] = len(knowledge) + 3
+    out["tatoeba"] = len(relations) + 2
+    out["opensubtitles"] = len(relations) + 3
     return out
 
 
@@ -455,7 +455,7 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
         )
 
     # CLI keys used only for journal name resolution (verify-ingest-journal.sh
-    # --cli-key) may sit outside the foundation/knowledge ladder.
+    # --cli-key) may sit outside the foundation/relations ladder.
     #
     # What this check is actually protecting against is an ORPHAN GATE: thresholds
     # nothing ever runs, which rot silently and prove nothing. Ladder membership was
@@ -489,7 +489,7 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
         if name in ("code_capstone", "models"):
             continue
         sources = stage["sources"]
-        if name == "knowledge":
+        if name == "relations":
             sources = sorted(sources, key=lambda s: s.get("order", 0))
         for src in sources:
             cli = src["cli"]
@@ -564,7 +564,7 @@ def main() -> int:
     if not foundation:
         errs.append("manifest: missing or empty foundation.sources[]")
     stages = stage_cli_lists(manifest)
-    knowledge = stages["knowledge"]
+    relations = stages["relations"]
     ingest_all_expected = flat_ingest_all(manifest)
 
     ingest_sh = ROOT / "scripts" / "ingest-source.sh"
@@ -639,16 +639,16 @@ def main() -> int:
         parse_ingest_source_all(read_text(ingest_sh)),
     ))
     errs.extend(compare_order(
-        "seed-stage.cmd knowledge",
-        expected_seed_stage_knowledge(manifest),
-        parse_seed_stage_knowledge(read_text(seed_stage)),
+        "seed-stage.cmd relations",
+        expected_seed_stage_relations(manifest),
+        parse_seed_stage_relations(read_text(seed_stage)),
     ))
     errs.extend(compare_audit_base(
-        knowledge,
+        relations,
         parse_audit_ladder(read_text(audit_sh)),
     ))
 
-    expected_layers = expected_audit_layer_map(knowledge)
+    expected_layers = expected_audit_layer_map(relations)
     actual_layers = parse_audit_layer_map(read_text(audit_sh))
     if actual_layers is None:
         errs.append("audit-decomposers.sh: could not parse LAYER map")
@@ -686,7 +686,7 @@ def main() -> int:
 
     print("validate-pipeline: OK")
     print(f"  foundation:      {' -> '.join(foundation)}")
-    print(f"  knowledge order: {' -> '.join(knowledge)}")
+    print(f"  relations order: {' -> '.join(relations)}")
     print(f"  ingest all:      {' -> '.join(ingest_all_expected)}")
     return 0
 

@@ -109,7 +109,7 @@ public sealed class AgentTraceAdapterTests : IDisposable
         {"timestamp":"2026-08-21T16:28:35.000Z","type":"turn_context","payload":{"model":"gpt-5.2-codex","effort":"high","approval_policy":"on-request","cwd":"/home/ahart/Projects/Laplace"}}
         {"timestamp":"2026-08-21T16:28:36.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"what is this repo?"}]}}
         {"timestamp":"2026-08-21T16:28:40.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"scan the README first"}],"encrypted_content":"xxx"}}
-        {"timestamp":"2026-08-21T16:28:41.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A knowledge substrate."}]}}
+        {"timestamp":"2026-08-21T16:28:41.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A content substrate."}]}}
         {"timestamp":"2026-08-21T16:28:42.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"cat\",\"README.md\"]}","call_id":"c1"}}
         {"timestamp":"2026-08-21T16:28:43.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"# Laplace"}}
         {"timestamp":"2026-08-21T16:28:44.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"cached_input_tokens":100,"output_tokens":80,"reasoning_output_tokens":20,"total_tokens":1000},"last_token_usage":{"input_tokens":500,"cached_input_tokens":100,"output_tokens":40,"reasoning_output_tokens":10,"total_tokens":550}}}}
@@ -133,7 +133,7 @@ public sealed class AgentTraceAdapterTests : IDisposable
         Assert.Equal("what is this repo?", s.Turns[0].Text);
 
         var reply = s.Turns[1];
-        Assert.Equal("A knowledge substrate.", reply.Text);
+        Assert.Equal("A content substrate.", reply.Text);
         Assert.Equal("gpt-5.2-codex", reply.Model);
         Assert.Equal("scan the README first", reply.Thinking);
         Assert.Equal(500, reply.Usage!.InputTokens);

@@ -5,7 +5,7 @@ Laplace is specified by the invention documents. These are the documents that sa
 ## Invention
 
 - [`INVENTION.md`](INVENTION.md) — the machine: identity, bounded composition, physicality, trajectory, evidence, coupling, execution, realization.
-- [`CAPABILITIES.md`](CAPABILITIES.md) — what those laws compose into: one knowledge world, separate authority and compute, construction, repair, and machine cost.
+- [`CAPABILITIES.md`](CAPABILITIES.md) — what those laws compose into: one content world, separate authority and compute, construction, repair, and machine cost.
 - [`INVENTIONS.md`](INVENTIONS.md) — the mechanism catalog. It does not override `INVENTION.md`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how this repository implements that machine.
 - [`OPERATING_SEQUENCE.md`](OPERATING_SEQUENCE.md) — admission through a witnessed turn.

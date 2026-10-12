@@ -80,7 +80,7 @@ export function AdminView() {
           </> : <>
             <div><h2 className={styles.sectionTitle}>{selected?.label}</h2><Muted>{selected?.description}</Muted></div>
             <Suspense fallback={<LoadingText>Loading {selected?.label.toLowerCase()}…</LoadingText>}>
-              {section === 'ingest' ? <><div className={styles.toolbar}><Link to="/data">Upload local files</Link><Link to="/explore/warehouse">Browse admitted sources</Link><Muted>Server ingestion affects the shared knowledge base.</Muted></div>
+              {section === 'ingest' ? <><div className={styles.toolbar}><Link to="/data">Upload local files</Link><Link to="/explore/warehouse">Browse admitted sources</Link><Muted>Server ingestion affects the shared substrate.</Muted></div>
                 {permissions.includes('ingestion.manage') && <IngestControl onStarted={() => setRevision((value) => value + 1)} />}
                 <IngestJournal refreshSignal={revision} canManage={permissions.includes('ingestion.manage')} /></>
                 : section === 'activity' ? <Activity canManage={permissions.includes('platform.maintain')} />

@@ -51,11 +51,11 @@ on:
         type: boolean
         default: false
       host:
-        description: "the measured host, by its runner's tier label: knowledge is hart-cloud (Sapphire Rapids, AVX-512), staging is hart-server"
+        description: "the measured host, by its runner's tier label: cloud is hart-cloud (Sapphire Rapids, AVX-512), staging is hart-server"
         type: choice
         required: true
-        default: knowledge
-        options: [knowledge, staging]
+        default: cloud
+        options: [cloud, staging]
 
 permissions:
   contents: read

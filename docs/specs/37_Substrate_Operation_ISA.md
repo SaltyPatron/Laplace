@@ -106,17 +106,17 @@ active state
 
 A*, Dijkstra, strongest-walk, containment, trajectory continuation, geometry and deterministic providers are operators callable by the routed program. No single search operator is the cognition ISA.
 
-## Authority / knowledge-scope contract
+## Authority / content-scope contract
 
-Knowledge state, authority and compute are separate operation inputs.
+Content state, authority and compute are separate operation inputs.
 
 An executable operation may bind:
 
 ```text
 principal / tenant / active identity
 role / relationship authority roots
-knowledge-package grants
-active caller-selected knowledge scope
+content-package grants
+active caller-selected content scope
 capability mask:
   DISCOVER INSPECT SEARCH COUPLE TRAVERSE DERIVE
   REALIZE PERSIST EXPORT EXECUTE DELEGATE
@@ -159,7 +159,7 @@ Execution reports actual work against the same dimensions so unused reserve can 
 
 Artifact/program analysis uses this same contract. Source ASTs, bytecode, object/container formats and decoded machine instructions may lower into control/data/dependency structure with explicit execution-count variables. Given a declared ISA, microarchitecture/scheduling model, memory/initial-state assumptions and clock, the analyzer calculates instruction instances, resource-constrained cycles and machine time. Counts not fixed by the artifact/input remain symbolic or conditional instead of being replaced by benchmark averages. A measured run is a validation/calibration witness over that calculated model, not the definition of the program's computational work.
 
-A lower resource tier changes this execution envelope over the same entitled substrate; it does not silently route to a deliberately knowledge-reduced Laplace model.
+A lower resource tier changes this execution envelope over the same entitled substrate; it does not silently route to a deliberately content-reduced Laplace model.
 
 ## Physical implementation law
 
@@ -217,4 +217,4 @@ Receipts are content-addressable where the corresponding recipe/state boundary i
 - MCP/OpenAI/CLI/SQL requests with equivalent semantic input execute equivalent programs.
 - Model/source ablation changes declared scope/provider state, not endpoint code.
 - Hops/fanout/resource ceilings appear in both preflight and actual receipts.
-- The same knowledge substrate remains addressable across resource tiers; only entitled scope and execution budget change.
+- The same content substrate remains addressable across resource tiers; only entitled scope and execution budget change.

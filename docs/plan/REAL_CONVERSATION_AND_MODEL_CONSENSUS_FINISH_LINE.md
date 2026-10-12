@@ -156,7 +156,7 @@ The semantic stage diagram does not authorize RBAR SQL, recursive CTE cognition,
 
 ## Resource tiers / billing
 
-All entitled tiers query the same knowledge world. Product/resource levels differ by explicit execution envelope, not by pointing cheaper users at an intentionally less knowledgeable Laplace model.
+All entitled tiers query the same content world. Product/resource levels differ by explicit execution envelope, not by pointing cheaper users at an intentionally less knowledgeable Laplace model.
 
 Possible controls include hops, fanout/frontier/candidates, provider/operator families, calculations, memory/I/O/concurrency and output.
 
@@ -199,7 +199,7 @@ A conforming conversation/model-consensus product demonstrates at least:
 - realization occurs after semantic selection;
 - no endpoint-private lookup/template/LLM path substitutes for the canonical program;
 - hop/fanout/resource limits appear in both preflight and actual receipts;
-- lower resource tiers preserve knowledge access and vary compute envelope instead;
+- lower resource tiers preserve content access and vary compute envelope instead;
 - hot repeated execution remains coarse native/set work rather than per-stage/per-candidate RBAR;
 - exact source/artifact/session/output identities make the result reproducible/auditable within its declared deterministic boundary.
 

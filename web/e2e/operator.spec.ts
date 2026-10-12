@@ -33,7 +33,7 @@ test('ingestion reviews the server destination before one launch', async ({ page
   await page.getByRole('textbox', { name: /2. Server file or folder/ }).fill('/vault/example-documents');
   await page.getByRole('button', { name: 'Review run', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('fixture-server');
-  await expect(page.getByRole('dialog')).toContainText('Shared knowledge base');
+  await expect(page.getByRole('dialog')).toContainText('Shared substrate');
   await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('0');
   await page.getByRole('button', { name: 'Start run', exact: true }).click();
   await expect(page.getByText(/Launched Documents/)).toBeVisible();

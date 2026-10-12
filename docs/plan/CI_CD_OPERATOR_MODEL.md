@@ -78,7 +78,7 @@ The intended manual surface is:
 | Workflow | Why an operator runs it |
 | --- | --- |
 | **Data — foundation ingest** | Complete or deliberately rebuild the ordered foundation signal stack. |
-| **Data — knowledge ingest** | Ingest one registered linguistic/knowledge source, optionally scoped by language. |
+| **Data — content ingest** | Ingest one registered linguistic/database source, optionally scoped by language. |
 | **Data — documents ingest** | Ingest a named document collection such as Project Gutenberg or test fixtures. |
 | **Data — code ingest** | Ingest this repository, registered authority repositories, Stack/Tiny Codes, or an explicit advanced corpus. |
 | **Data — chess ingest** | Ingest named game/opening/book/tablebase corpora or run chess-derived ingestion operations. |
@@ -94,7 +94,7 @@ The intended manual surface is:
 | Workflow | Primary inputs | Mutates | Resource ownership / concurrency | Durable result |
 | --- | --- | --- | --- | --- |
 | **Data — foundation ingest** | ladder/source, database, force, advanced path override | canonical substrate data | reusable ingest owner; database/ingest host reservation | journal + source/layer gate evidence |
-| **Data — knowledge ingest** | source, language scope, database, optional replacement/idempotency | selected canonical source | reusable ingest owner; database/ingest host reservation | journal + consensus/layer gate evidence |
+| **Data — content ingest** | source, language scope, database, optional replacement/idempotency | selected canonical source | reusable ingest owner; database/ingest host reservation | journal + consensus/layer gate evidence |
 | **Data — documents ingest** | named collection, database, optional advanced path | document evidence | reusable ingest owner; database/ingest host reservation | journal + document gate evidence |
 | **Data — code ingest** | ingest mode, named corpus, database, optional advanced path | code/repository evidence | reusable ingest owner; database/ingest host reservation | journal evidence and configured gates |
 | **Data — chess ingest** | source, named corpus, Lumbras slice, derived work, replacement/idempotency | chess evidence/derived layers | reusable ingest owner; database/ingest host reservation | journal + chess gate evidence |
@@ -143,7 +143,7 @@ Normal controls:
 
 A custom path is advanced-only. The default is the registered source location.
 
-### Knowledge
+### Content
 
 Normal controls:
 

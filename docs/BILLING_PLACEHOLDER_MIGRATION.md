@@ -74,18 +74,18 @@ actual execution receipt
 reconcile unused reserve + calibrate estimator
 ```
 
-The cheaper product tier is **not** a deliberately less knowledgeable Laplace model. The same admitted knowledge world can be served under different explicit compute envelopes: fewer hops, lower fanout, narrower provider sets, lower concurrency, smaller output budgets, or other declared resource constraints.
+The cheaper product tier is **not** a deliberately less knowledgeable Laplace model. The same admitted content world can be served under different explicit compute envelopes: fewer hops, lower fanout, narrower provider sets, lower concurrency, smaller output budgets, or other declared resource constraints.
 
 A token count may be useful for external comparison. It is not the native unit of Laplace work.
 
-## Knowledge entitlement is separate from compute entitlement
+## Content entitlement is separate from compute entitlement
 
-"One knowledge world, variable compute" forbids selling a deliberately dumber model as the cheap tier. It does **not** mean every principal automatically has authority over every private/licensed/restricted portion of that world.
+"One content world, variable compute" forbids selling a deliberately dumber model as the cheap tier. It does **not** mean every principal automatically has authority over every private/licensed/restricted portion of that world.
 
 Keep two independent entitlement axes:
 
 ```text
-KNOWLEDGE / CAPABILITY ENTITLEMENT
+CONTENT / CAPABILITY ENTITLEMENT
   which scopes/packages the principal may DISCOVER/INSPECT/COUPLE/TRAVERSE/
   DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE
 
@@ -94,7 +94,7 @@ COMPUTE ENTITLEMENT
   work this request may consume
 ```
 
-A knowledge package is an authority manifest over shared canonical state, not a separately trained or copied model. Packages may be purchased, granted by a school/employer, inherited through an explicit role/relationship, or temporarily activated for a task.
+A content package is an authority manifest over shared canonical state, not a separately trained or copied model. Packages may be purchased, granted by a school/employer, inherited through an explicit role/relationship, or temporarily activated for a task.
 
 Stripe/Patreon/contracts are evidence that an external commercial event occurred. They do not become semantic authority; the canonical Laplace entitlement/grant is the authority object.
 

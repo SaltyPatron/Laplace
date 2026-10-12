@@ -1257,7 +1257,7 @@ struct laplace_recipe_stream {
         }
         else if (rule.kind == 9) {
             // Structured text carries its own markup (FrameNet's <def-root>, <fen>,
-            // <ex>): it is XML read by the same XML reader, and its knowledge text is
+            // <ex>): it is XML read by the same XML reader, and its content text is
             // the markup's character data, never the tags.
             f.object = content(stage, markup_text(raw));
         }
@@ -1878,7 +1878,7 @@ struct laplace_recipe_stream {
                 if (hit != seen_here.end() && hit->second == c.value) { chosen = c.prefix; break; }
             }
         }
-        // An empty prefix is a declared excluded subtree (packaging, or knowledge
+        // An empty prefix is a declared excluded subtree (packaging, or content
         // another artifact states), never an undeclared structure.
         if (chosen.empty() && !route.elements.count(path)) return;
         auto composed = route.elements.find(path);

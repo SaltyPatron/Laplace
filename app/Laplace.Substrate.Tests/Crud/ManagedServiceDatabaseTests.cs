@@ -26,9 +26,9 @@ public sealed class ManagedServiceDatabaseTests
     public void VerifiedRemoteRoutePreservesConfiguredDestinationCredentialsAndPort()
     {
         var parsed = new NpgsqlConnectionStringBuilder(ManagedServiceDatabase.Resolve(
-            "Host=knowledge.example;Port=6432;Username=bot;Database=curated;SSL Mode=VerifyFull;"
+            "Host=database.example;Port=6432;Username=bot;Database=curated;SSL Mode=VerifyFull;"
             + "Root Certificate=authority.pem;Password=test-sentinel-not-a-secret;Timeout=5"));
-        Assert.Equal("knowledge.example", parsed.Host);
+        Assert.Equal("database.example", parsed.Host);
         Assert.Equal(6432, parsed.Port);
         Assert.Equal("bot", parsed.Username);
         Assert.Equal("curated", parsed.Database);
@@ -64,10 +64,10 @@ public sealed class ManagedServiceDatabaseTests
         "Host=192.168.1.2;Username=laplace;Database=laplace-mono",
         "Host=/var/run/postgresql,192.168.1.2;Username=laplace_admin;Database=laplace",
         "Host=127.0.0.1,192.168.1.2;Username=laplace;Database=laplace-mono",
-        "Host=knowledge.example;Username=bot;Database=curated;SSL Mode=Require",
-        "Host=knowledge.example;Username=bot;Database=curated;SSL Mode=VerifyCA",
-        "Host=knowledge.example;Database=curated;SSL Mode=VerifyFull",
-        "Host=knowledge.example;Username=bot;SSL Mode=VerifyFull",
+        "Host=database.example;Username=bot;Database=curated;SSL Mode=Require",
+        "Host=database.example;Username=bot;Database=curated;SSL Mode=VerifyCA",
+        "Host=database.example;Database=curated;SSL Mode=VerifyFull",
+        "Host=database.example;Username=bot;SSL Mode=VerifyFull",
         Local + ";Port=test-sentinel-not-a-secret",
         Local + ";Password='test-sentinel-not-a-secret",
         Local + ";unknown-key=test-sentinel-not-a-secret",

@@ -87,7 +87,7 @@ internal sealed class LichessController : BackgroundService
                 p.Value.Implementation, p.Value.Identity })
         },
         profiles = config.Profiles.Select(p => new { id = p.Key, p.Value.Label, p.Value.Environment,
-            p.Value.Implementation, p.Value.Knowledge, p.Value.MaxConcurrent, p.Value.Rated, p.Value.Speeds })
+            p.Value.Implementation, p.Value.Database, p.Value.MaxConcurrent, p.Value.Rated, p.Value.Speeds })
     };
 
     public async Task<object> SelectAsync(LichessSelectionRequest request, CancellationToken ct)
@@ -144,7 +144,7 @@ internal sealed class LichessController : BackgroundService
                             var profile = config.Resolve(desired.Profile, desired.ReadSource, desired.RecordingTarget);
                             var connection = LichessControlConfiguration.Connection(profile);
                             using var source = LaplaceDataSource.Create(SubstrateAccess.Serving, connection);
-                            var writer = ChessKnowledgeIdentity.Read(source);
+                            var writer = ChessDatabaseIdentity.Read(source);
                             if (profile.WriteIdentity is not null && writer != profile.WriteIdentity)
                                 throw new InvalidOperationException("Recording destination does not match its installed cluster and database identity.");
                             var engine = config.Engine(profile, profile.ReadIdentity ?? writer);

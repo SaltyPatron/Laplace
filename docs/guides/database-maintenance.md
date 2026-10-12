@@ -15,8 +15,8 @@ gh run view RUN_ID --repo SaltyPatron/Laplace --log-failed
 
 | Target | Database host |
 | --- | --- |
-| `staging` | hart-server; also the knowledge host used by prod while hart-cloud is offline |
-| `knowledge` | hart-cloud; must already be running, this workflow does not start it |
+| `staging` | hart-server; also the database host used by prod while hart-cloud is offline |
+| `content` | hart-cloud; must already be running, this workflow does not start it |
 
 | Operation | Effect |
 | --- | --- |
@@ -38,12 +38,12 @@ passwords and OpenBao enrollment remain unchanged.
 Data and custom objects outside the installed migrations are discarded. If the
 application/account tables share the selected database, those tables are reset
 too. A separately configured application database is not recreated. Production
-using hart-server's knowledge database sees the staging reset immediately; this
+using hart-server's substrate database sees the staging reset immediately; this
 target is not isolated merely because the workflow calls it staging.
 
 The success result includes database structure, extension and index checks. An
-empty knowledge database can be structurally healthy without having enough
-admitted knowledge for an operation. Recreate does not restore previous corpus
+empty substrate database can be structurally healthy without having enough
+admitted content for an operation. Recreate does not restore previous corpus
 ingestions or declare the product ready.
 
 Ordinary ingestion uses the [installed monorepo client](installed-mono-client.md).

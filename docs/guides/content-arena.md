@@ -1,6 +1,6 @@
-# Knowledge Arena — games over the Laplace world
+# Content Arena — games over the Laplace world
 
-Knowledge Arena turns the existing Laplace entity-world, trajectory, evidence, search and domain surfaces into deterministic/replayable games over the **same canonical substrate**.
+Content Arena turns the existing Laplace entity-world, trajectory, evidence, search and domain surfaces into deterministic/replayable games over the **same canonical substrate**.
 
 It is deliberately a consumer/proving surface of Laplace, not a second game-specific intelligence stack. Active implementation ownership lives in current GitHub issues such as #1401, #1404, #1420 and #1421. Related work in other repositories is coordination, not semantic authority.
 
@@ -101,7 +101,7 @@ CONNECT/Golf may route A*/Dijkstra/best-first path operators. Witness Hunt may r
 
 ## Hops and fanout are gameplay and compute coordinates
 
-Knowledge Arena makes Laplace's explicit compute model visible.
+Content Arena makes Laplace's explicit compute model visible.
 
 A challenge can declare:
 
@@ -116,11 +116,11 @@ wall/resource ceiling
 
 So a player/agent is not only judged on whether it reached the answer; the receipt can show how much of the web it pulled and how efficiently it navigated it.
 
-This also gives direct product intuition for compute credits: deeper/wider play spends a larger execution envelope over the same knowledge world rather than switching to a deliberately dumber/less-informed model.
+This also gives direct product intuition for compute credits: deeper/wider play spends a larger execution envelope over the same content world rather than switching to a deliberately dumber/less-informed model.
 
 ## Flagship modes
 
-### Knowledge Golf
+### Content Golf
 
 ```text
 start entity  = tee
@@ -135,7 +135,7 @@ Possible modes include Daily 9, Speed Golf, Evidence Golf, Historic Golf, Blind 
 
 A direct admissible relation is a hole in one under that rule.
 
-### Highway Race / Knowledge Sprint
+### Highway Race / Content Sprint
 
 Every contestant receives the same ordered start→target challenge queue. Players advance independently as soon as they complete the current round.
 
@@ -267,7 +267,7 @@ Equivalent product fronts should validate/replay against the same semantic recei
 
 ## Acceptance
 
-Knowledge Arena succeeds when:
+Content Arena succeeds when:
 
 - every game operates on canonical shared substrate state rather than a private copy/ontology;
 - two contestants on one ranked generation receive equivalent world/rules/challenge state;

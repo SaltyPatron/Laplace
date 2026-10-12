@@ -16,6 +16,15 @@ $c=Read-IisInstallation $Installation
 if($Publish -and -not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}
 if($EngineBuild){$env:LAPLACE_ENGINE_BUILD=[IO.Path]::GetFullPath($EngineBuild)}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+$env:LAPLACE_ROOT=$repo
+$cache=Join-Path $env:LAPLACE_ENGINE_BUILD 'CMakeCache.txt'
+if(Test-Path -LiteralPath $cache) {
+    $homeLine=Select-String -LiteralPath $cache -Pattern '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$'
+    $configuredSource=if($homeLine){[IO.Path]::GetFullPath($homeLine.Matches[0].Groups[1].Value)}else{''}
+    if($configuredSource.TrimEnd('\','/') -ine (Join-Path $repo 'engine').TrimEnd('\','/')) {
+        throw "The native build directory belongs to another source tree: $configuredSource. Select this checkout's native build directory."
+    }
+}
 $revision=(& git -C $repo rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
 # Native SQL and managed callers belong to the same publication. The native

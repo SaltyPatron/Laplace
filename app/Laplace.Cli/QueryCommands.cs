@@ -394,7 +394,7 @@ internal static class QueryCommands
 
         if (words.Count > 1 || !exists)
         {
-            Console.WriteLine("\n  CONSTITUENT KNOWLEDGE (the substrate answering through the parts it knows):");
+            Console.WriteLine("\n  CONSTITUENT CONTENT (the substrate answering through the parts it knows):");
 
             // One batched read for every part; rows are bucketed by input ordinal.
             var buckets = new Dictionary<int, List<(string Type, string? Obj, decimal Mu, long Wit)>>();

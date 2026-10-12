@@ -8,7 +8,7 @@ set "SCRIPTS=%~dp0"
 
 if /i "%STAGE%"=="floor" goto stage_floor
 if /i "%STAGE%"=="document" goto stage_document
-if /i "%STAGE%"=="knowledge" goto stage_knowledge
+if /i "%STAGE%"=="relations" goto stage_relations
 if /i "%STAGE%"=="usage" goto stage_usage
 if /i "%STAGE%"=="code" goto stage_code
 if /i "%STAGE%"=="models" goto stage_models
@@ -34,7 +34,7 @@ call :require_path "!INGEST!\test-data\text" "  acquire test corpus under !INGES
 call "%SCRIPTS%seed-step.cmd" document "!INGEST!\test-data\text" || exit /b 1
 exit /b 0
 
-:stage_knowledge
+:stage_relations
 
 
 for %%s in (cili wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary) do (
@@ -89,12 +89,12 @@ exit /b 0
 :stage_all
 call "%SCRIPTS%seed-stage.cmd" floor || exit /b 1
 call "%SCRIPTS%seed-stage.cmd" document || exit /b 1
-call "%SCRIPTS%seed-stage.cmd" knowledge || exit /b 1
+call "%SCRIPTS%seed-stage.cmd" relations || exit /b 1
 call "%SCRIPTS%seed-stage.cmd" usage || exit /b 1
 call "%SCRIPTS%seed-stage.cmd" code || exit /b 1
 call "%SCRIPTS%seed-stage.cmd" models || exit /b 1
 exit /b 0
 
 :usage
-echo usage: seed-stage.cmd ^<floor^|document^|knowledge^|usage^|code^|models^|all^>
+echo usage: seed-stage.cmd ^<floor^|document^|relations^|usage^|code^|models^|all^>
 exit /b 2

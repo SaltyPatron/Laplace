@@ -84,7 +84,7 @@ export function PlatformDirectory({ section }: { section: 'workspaces' | 'client
   return <Panel title={section === 'workspaces' ? 'Workspace directory' : 'Connected sign-in providers'}>
     <Button variant="ghost" onClick={() => void read.refresh()}>Refresh directory</Button><ReadStatus label="Directory" resource={read} />
     {section === 'workspaces' ? <>
-      <Muted>These are account and billing workspaces. Membership does not create a private copy of the shared knowledge base.</Muted>
+      <Muted>These are account and billing workspaces. Membership does not create a private copy of the shared substrate.</Muted>
       <div className={styles.directory}>{read.data?.workspaces?.map((workspace) => <div className={styles.directoryRow} key={workspace.tenantId}>
         <div><strong>{workspace.displayName}</strong><Muted>{workspace.kind === 'organization' ? 'Organization' : 'Personal'} · {workspace.members} members</Muted></div>
         <details><summary>Workspace ID</summary><code>{workspace.tenantId}</code></details>

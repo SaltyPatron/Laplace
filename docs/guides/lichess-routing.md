@@ -1,7 +1,7 @@
 # Selecting where the Lichess bot runs
 
 Open **Chess Lab → Lichess** (`/lab/lichess`) for the **Lichess routing** selector. Every configured UI
-addresses the same account controller. Select an execution location, knowledge read
+addresses the same account controller. Select an execution location, content read
 source and game recording destination, or Off, then **Apply routing**. The page shows
 the requested and active selections, connection state,
 game count and initialization failures. Changing a selection stops new challenges
@@ -27,9 +27,9 @@ Sign in, select **Laplace on hart-desktop**, **Laplace on hart-server**, or
 games and lets active games finish. The selector controls the same single bot
 account from every UI; it does not create one bot per environment.
 
-All three installed profiles currently read and admit knowledge to hart-server's
+All three installed profiles currently read and admit content to hart-server's
 `laplace-mono` database while hart-cloud is off. Selecting an engine host does not
-change the knowledge database or automatically start hart-cloud. The installed
+change the substrate database or automatically start hart-cloud. The installed
 controller declaration at `/etc/laplace-mono/chess/agent/installation.json` owns
 these bindings; its `public_files` contain the controller and connector profiles.
 These are monorepo engines, not Refactor or modular engine deployments.
@@ -52,7 +52,7 @@ These commands perform real engine searches without starting Lichess games. Clie
 configuration is in `%LOCALAPPDATA%\Laplace\mono\chess\uci-client.json`; the launcher
 is in `%LOCALAPPDATA%\Laplace\bin`. No source checkout or build mount is needed to run it.
 
-## Execution, knowledge and recording
+## Execution, content and recording
 
 Version 2 controller configuration separates executors, read sources and recording
 destinations. Each executor declares which read sources its installed UCI connectors
@@ -75,11 +75,11 @@ replacing each database operation with a scalar HTTP call is not the intended bo
 
 The controller runs `Laplace-UCI` with a named connector profile. Connectors can
 launch a process, invoke a configured SSH command, or open an authenticated
-WebSocket. The profile declares the implementation, environment and knowledge
+WebSocket. The profile declares the implementation, environment and content
 target. Configuration paths belong to the installation; users do not need mounts.
 
 Before accepting challenges, the controller checks each connection against its own
-declared identity. The monorepo engine implements the UCI `Refresh Knowledge` button;
+declared identity. The monorepo engine implements the UCI `Refresh Database Snapshot` button;
 each bot decision refreshes its selected read source. A writer's process-local cache
 epoch cannot update a remote engine. Refresh time is charged against the game clock.
 

@@ -32,7 +32,7 @@
     product corpus.
 
     Tier=live is intentionally different: it exercises the standing shared substrate
-    and may require foundation/knowledge seeds or deposit durable product episodes.
+    and may require foundation/content seeds or deposit durable product episodes.
     Those are explicit product acceptance probes, not unit/database-health tests, so a
     bare `dotnet test` does not run them accidentally during recreate/reseed work.
 

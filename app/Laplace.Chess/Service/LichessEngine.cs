@@ -33,7 +33,7 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
     public string Name { get; } = name;
     public UciProcessStart Start { get; } = start;
     public long OverheadMs { get; } = overheadMs;
-    public ChessKnowledgeIdentity? RequiredKnowledge { get; init; }
+    public ChessDatabaseIdentity? RequiredDatabase { get; init; }
 
     public static readonly string[] EngineNames = ["laplace", "stockfish", "lc0"];
 
@@ -79,18 +79,18 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
         {
             foreach (var (k, v) in directOptions) process.SetOption(k, v);
             process.NewGame(TimeSpan.FromSeconds(120));
-            if (RequiredKnowledge is not null && process.KnowledgeIdentity != RequiredKnowledge)
+            if (RequiredDatabase is not null && process.DatabaseIdentity != RequiredDatabase)
                 throw new UciEngineException(UciFailure.Rejected,
                     "The UCI engine did not report the configured read source's cluster and database identity.");
-            if (RequiredKnowledge is not null && !process.Supports("Refresh Knowledge"))
+            if (RequiredDatabase is not null && !process.Supports("Refresh Database Snapshot"))
                 throw new UciEngineException(UciFailure.Rejected,
-                    "The selected Laplace UCI engine cannot refresh its configured knowledge source; publish the matching monorepo UCI runtime.");
+                    "The selected Laplace UCI engine cannot refresh its configured database source; publish the matching monorepo UCI runtime.");
             // laplace-uci names the engine behind it before its first readyok. Without that line an older
             // laplace-uci ignored --engine and would play as Laplace under another engine's name: refuse it.
             if (Name is "stockfish" or "lc0" && process.Identity.Via is null)
                 throw new UciEngineException(UciFailure.Protocol,
                     $"{Start.ExePath} did not report running {Name}; republish laplace-uci (scripts/win/publish-uci.cmd)");
-            return new Provider(process, OverheadMs, RequiredKnowledge);
+            return new Provider(process, OverheadMs, RequiredDatabase);
         }
         catch
         {
@@ -102,7 +102,7 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
     private static string? Read(string key)
         => LaplaceInstall.TryReadConfig(key, "lichess.env") ?? LaplaceInstall.TryReadDeploySecret("lichess-service.env", key);
 
-    private sealed class Provider(UciProcess process, long overheadMs, ChessKnowledgeIdentity? requiredKnowledge) : ILichessMoveProvider
+    private sealed class Provider(UciProcess process, long overheadMs, ChessDatabaseIdentity? requiredDatabase) : ILichessMoveProvider
     {
         public EngineIdentity Identity => process.Identity;
 
@@ -110,13 +110,13 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
         {
             ct.ThrowIfCancellationRequested();
             var preparation = System.Diagnostics.Stopwatch.StartNew();
-            if (process.Supports("Refresh Knowledge"))
+            if (process.Supports("Refresh Database Snapshot"))
             {
-                process.SetOption("Refresh Knowledge", "");
+                process.SetOption("Refresh Database Snapshot", "");
                 long available = position.WhiteToMove ? clock.WTimeMs : clock.BTimeMs;
                 process.IsReady(TimeSpan.FromMilliseconds(Math.Clamp(available - overheadMs, 1, 120_000)));
-                if (requiredKnowledge is not null && process.KnowledgeIdentity != requiredKnowledge)
-                    throw new UciEngineException(UciFailure.Rejected, "The selected engine changed knowledge databases during the game.");
+                if (requiredDatabase is not null && process.DatabaseIdentity != requiredDatabase)
+                    throw new UciEngineException(UciFailure.Rejected, "The selected engine changed substrate databases during the game.");
             }
             ct.ThrowIfCancellationRequested();
             long preparationMs = preparation.ElapsedMilliseconds;

@@ -118,7 +118,7 @@ exit "$CLI_RC"
     def test_every_ladder_source_is_accepted_alone(self):
         text = (ROOT / "scripts/ingest-source.sh").read_text(encoding="utf-8")
         ladder = []
-        for name in ("FLOOR", "KNOWLEDGE", "USAGE"):
+        for name in ("FLOOR", "RELATIONS", "USAGE"):
             match = re.search(rf"^{name}=\(([^)]*)\)", text, re.M)
             self.assertIsNotNone(match, name)
             ladder.extend(match.group(1).split())

@@ -8,7 +8,7 @@ Laplace starts from a simple observation: a countably open Tier-0 address law an
 
 That makes text, code, games, media, model checkpoints, conversations and other finite symbolic structures instances of the same machine rather than separate pipelines.
 
-An arbitrarily long history of finite observations remains countable, so adding knowledge over time does not require expanding the geometric extent. The same bounded world can become denser and more richly interconnected while identity, trajectory/composition structure, derived AST/DAG projections, relations, evidence and provenance preserve distinctions that coordinates alone do not.
+An arbitrarily long history of finite observations remains countable, so adding content over time does not require expanding the geometric extent. The same bounded world can become denser and more richly interconnected while identity, trajectory/composition structure, derived AST/DAG projections, relations, evidence and provenance preserve distinctions that coordinates alone do not.
 
 ```text
 source / observation
@@ -37,10 +37,10 @@ These mechanisms compose into the product:
 - **Structural software construction:** code is grammar-derived recursive structure. Generation should reuse, compose or minimally mutate known canonical tier/trajectory structures before inventing new code; AST/CST is realized only when a consumer or toolchain requires it; compile/test/runtime outcomes witness the next repair.
 - **Duplicate-code convergence:** exact canonical tier/trajectory compositions converge automatically; derived AST shape, normalized structure, control/data flow, algebraic form and behavioral evidence can expose deeper duplicate implementations for consolidation.
 - **Whole-application mutation and fast realization:** a repository is one recursively composed application root. A small edit creates new identities only along the changed ancestry; unchanged subtrees are structurally shared. A checkout is an export of the resulting complete root.
-- **Repair knowledge across repositories:** failed and successful development attempts are witnessed trajectories. Their tier/trajectory structure plus derived AST/dependency/diagnostic/Fréchet shapes can surface similar problems in other authorized repositories.
+- **Repair content across repositories:** failed and successful development attempts are witnessed trajectories. Their tier/trajectory structure plus derived AST/dependency/diagnostic/Fréchet shapes can surface similar problems in other authorized repositories.
 - **Deterministic machine-cost analysis:** source, bytecode, executable/container and machine instructions can lower into control/data/dependency structure and then into target-ISA/microarchitecture cycle expressions instead of being reduced to benchmark averages.
-- **One knowledge world with explicit authority and compute:** knowledge packages grant governed scope/capabilities over the shared world; billing meters how deeply and broadly the same intelligence searches it through hops, fanout and physical work.
-- **Governed abstention and security:** knowledge remains knowledge. Authority/firmware decides what may be coupled, derived, realized, exported or executed, with explicit WHY/WHY_NOT receipts.
+- **One content world with explicit authority and compute:** content packages grant governed scope/capabilities over the shared world; billing meters how deeply and broadly the same intelligence searches it through hops, fanout and physical work.
+- **Governed abstention and security:** content remains content. Authority/firmware decides what may be coupled, derived, realized, exported or executed, with explicit WHY/WHY_NOT receipts.
 
 See [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the binding synthesis.
 
@@ -59,7 +59,7 @@ See [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the binding synthesis.
 - **Sparse forward execution.** Hops and fanout bound indexed star expansions over the responding part of the world. A*, Dijkstra, strongest-walk, trajectory continuation, containment, geometry and relation-specific reads are operators inside that program—not the definition of cognition by themselves.
 - **Evidence instead of opaque authority.** Observations become attributed attestations. Consensus carries Glicko-2 rating, RD, volatility and witness count, so support, uncertainty, disagreement and provenance remain queryable.
 - **Learning is online.** Admitting new evidence changes standing without an offline gradient-training cycle. Previously known structure is reused instead of relearned into another copy of a parameter tensor.
-- **One knowledge world, variable compute.** Product/resource tiers can govern hop depth, fanout, providers, search work and other explicit execution budgets without pointing lower-cost requests at a deliberately knowledge-reduced model.
+- **One content world, variable compute.** Product/resource tiers can govern hop depth, fanout, providers, search work and other explicit execution budgets without pointing lower-cost requests at a deliberately content-reduced model.
 - **Modality is grammar, not architecture.** UAX/NFC is the text floor; code uses structural grammars; chess uses moves/positions/lines/games; images, audio, documents and model artifacts decompose through their own typed ladders into the same identity/physicality/evidence substrate.
 - **Receipts are part of the product.** Selection can carry the identities, relation types, standing, uncertainty, source scope, trajectory state and work budget that produced it.
 

@@ -94,8 +94,8 @@ Emission is stateful: every emitted constituent/act changes the active trajector
 ## 5. Cross-cutting law
 
 - **Execution grain** ([`ARCHITECTURE.md`](ARCHITECTURE.md) §6): PostgreSQL owns durable indexed state and set access; native C/C++ owns repeated algorithms; SPI is the prepared set-sized bridge; C#/SQL orchestrate. RBAR in a hot/repeated loop is an architecture defect even when the semantic output is correct.
-- **Knowledge != authority != compute** (spec 37 authority contract; [`CAPABILITIES.md`](CAPABILITIES.md)): governance decides what a principal may discover/couple/realize/execute; standing is not permission; restricted knowledge remains known and attributable.
-- **Resource envelopes and receipts** (spec 36 compute envelope; #1425, #1561): plan/EXPLAIN → reserve → execute under hard counters → actual receipt → reconcile. Hops, fanout and frontier/candidate work are first-class dimensions over the same knowledge world.
+- **Content != authority != compute** (spec 37 authority contract; [`CAPABILITIES.md`](CAPABILITIES.md)): governance decides what a principal may discover/couple/realize/execute; standing is not permission; restricted content remains known and attributable.
+- **Resource envelopes and receipts** (spec 36 compute envelope; #1425, #1561): plan/EXPLAIN → reserve → execute under hard counters → actual receipt → reconcile. Hops, fanout and frontier/candidate work are first-class dimensions over the same content world.
 
 ## 6. Proof and delivery boundaries
 

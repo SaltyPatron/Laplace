@@ -253,7 +253,7 @@ export function SettingsView() {
           <p>Platform access is assigned separately for shared ingestion and system administration. <Link to="/operator">Open administration</Link>.</p>
         </Panel><Panel title="Data scope and configuration">
           {!account.value.configuration.privateDataIsolation && <p className={styles.notice}>
-            Content belongs to one shared knowledge base. Workspace membership controls account access and billing; it does not provide private content isolation. Only upload content intended for this shared environment.
+            Content belongs to one shared substrate. Workspace membership controls account access and billing; it does not provide private content isolation. Only upload content intended for this shared environment.
           </p>}
           <details><summary>Deployment details</summary><dl className={styles.configuration}>
             <dt>Authentication</dt><dd>{account.value.configuration.authMode}</dd>

@@ -9,13 +9,13 @@ public static class FoundryDefaults
     public const int CrawlSeeds = 1000;
     public const int WordTrajs = 400_000;
 
-    /// Faithful writer: per-row cap and the relation-rank band [lo, hi] of the knowledge
+    /// Faithful writer: per-row cap and the relation-rank band [lo, hi] of the relations
     /// readout plane. The band excludes low-rank order/metadata relation types and must
     /// include the rank of the hypernym relation.
     public const int FaithfulCap = 128;
     public const double FaithfulRankLo = 0.55;
     public const double FaithfulRankHi = 0.95;
-    public const bool FaithfulKnowledge = true;
+    public const bool FaithfulRelations = true;
     public const bool FaithfulTrajOrder = true;
     public const bool FaithfulLookup = true;
     public const int LeDegree = 48;

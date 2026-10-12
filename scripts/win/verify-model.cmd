@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 rem verify-model.cmd <model.gguf> [min-pass] -- the truth harness for foundry GGUFs.
 rem
 rem Gates on CONTENT, not exit codes (the FAITHFUL/LOOKUP lesson: models that
-rem "load and emit tokens" can still be knowledge-free). Three legs:
+rem "load and emit tokens" can still be content-free). Three legs:
 rem   1. behavioral: substrate-derived expected continuations per probe word,
 rem      with explicit global-hub-collapse and empty-output detectors
 rem      (scripts/verify-model-behavioral.py).

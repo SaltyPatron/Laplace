@@ -54,10 +54,10 @@ class ConfiguredPaths(unittest.TestCase):
         self.assertNotEqual(*results)
 
     def test_database_does_not_require_build_or_work(self):
-        self.config.write_text('LAPLACE_PG_DIR=/usr/local/pgsql\nLAPLACE_ROLE=declared_owner\nLAPLACE_DBNAME=selected_knowledge\n')
+        self.config.write_text('LAPLACE_PG_DIR=/usr/local/pgsql\nLAPLACE_ROLE=declared_owner\nLAPLACE_DBNAME=selected_content\n')
         values = machine.database(self.config, self.env)
         self.assertEqual(values['PGUSER'], 'declared_owner')
-        self.assertEqual(values['PGDATABASE'], 'selected_knowledge')
+        self.assertEqual(values['PGDATABASE'], 'selected_content')
         paths = machine.paths(self.config, self.env, ROOT)
         self.assertNotIn('LAPLACE_BUILD', paths)
         self.assertNotIn('LAPLACE_WORK', paths)

@@ -10,10 +10,10 @@ namespace Laplace.Decomposers.Model.Tests;
 /// </summary>
 public sealed class RecipeCompileDefaultTests
 {
-    private const string KnowledgeRecipe = """
+    private const string ContentRecipe = """
 {
   "kind": "laplace.recipe",
-  "name": "knowledge",
+  "name": "content",
   "hidden_size": 256,
   "layers": [
     { "heads": [ { "op": "relation", "type": "IS_A" },
@@ -27,7 +27,7 @@ public sealed class RecipeCompileDefaultTests
     [Fact]
     public void OmittedCompile_DoesNotSilentlyDisableDeclaredOperators()
     {
-        var desc = RecipeDescriptor.Parse(KnowledgeRecipe);
+        var desc = RecipeDescriptor.Parse(ContentRecipe);
 
         // lm_head defaults to "trajectory"; that alone does not select continuation.
         Assert.Equal("trajectory", desc.LmHead.Key);
@@ -42,8 +42,8 @@ public sealed class RecipeCompileDefaultTests
     public void ContinuationCompile_IsStillHonouredWhenAskedForExplicitly()
     {
         var desc = RecipeDescriptor.Parse(
-            KnowledgeRecipe.Replace("\"name\": \"knowledge\",",
-                                    "\"name\": \"knowledge\", \"compile\": \"continuation\","));
+            ContentRecipe.Replace("\"name\": \"content\",",
+                                    "\"name\": \"content\", \"compile\": \"continuation\","));
         Assert.True(desc.ContinuationCompile);
     }
 }

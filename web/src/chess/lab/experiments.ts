@@ -183,7 +183,7 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     title: 'Ingest FIDE top players',
     tagline: 'Cohort/profile input — not automatically part of live Search.',
     description:
-      'MOVE-SELECTION PARTICIPATION: INDIRECT. Reads an official FIDE ranking cohort, fetches selected profiles, and writes them as substrate evidence. The job expands player/rating knowledge; move selection changes only when a selected context provider actually consumes that evidence.',
+      'MOVE-SELECTION PARTICIPATION: INDIRECT. Reads an official FIDE ranking cohort, fetches selected profiles, and writes them as substrate evidence. The job expands player/rating content; move selection changes only when a selected context provider actually consumes that evidence.',
     expect: ['Official ranked player table', 'Profile acquisition progress', 'profiles_ingested receipt'],
     tips: ['Start with 25 to inspect the cohort; the official pages currently publish up to 100 per list.'],
     category: 'import',

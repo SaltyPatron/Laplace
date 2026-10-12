@@ -322,7 +322,7 @@ export function GauntletView() {
         <div className={styles.setupCol}>
         <Panel className={styles.setup} title="Match setup">
           <div className={styles.form}>
-            <Field label="Match conductor" help="Fastchess runs engine matches. Cutechess provides an alternative conductor. This selection does not change the Lichess bot or the selected knowledge source." className={styles.wide}>
+            <Field label="Match conductor" help="Fastchess runs engine matches. Cutechess provides an alternative conductor. This selection does not change the Lichess bot or the selected database source." className={styles.wide}>
               <SegmentedControl value={setup.conductor}
                 onValueChange={(v) => setSetup((s) => ({ ...s, conductor: v as Setup['conductor'] }))}
                 options={['fastchess', 'cutechess']} label="Match conductor" />

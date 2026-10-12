@@ -15,5 +15,5 @@ call "%~dp0seed-step.cmd" conceptnet || exit /b 1
 call "%~dp0seed-step.cmd" atomic2020 || exit /b 1
 call "%~dp0seed-step.cmd" ud || exit /b 1
 call "%~dp0seed-step.cmd" wiktionary || exit /b 1
-echo ==== SEMANTIC KNOWLEDGE LAYER COMPLETE ====
+echo ==== SEMANTIC RELATIONS LAYER COMPLETE ====
 exit /b 0

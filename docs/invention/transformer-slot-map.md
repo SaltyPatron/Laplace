@@ -23,7 +23,7 @@ the typed operation program and witnessed substrate state.
 | Layer stack | repeated routed COUPLE → expand/fold/update rounds; exported target layers are consumer recipe slots, not native ontology |
 | Training loss | witnessed outcomes and uncertainty-bearing fold |
 
-Knowledge authority and compute envelopes remain outside consumer tensor slots: a target export may select an authorized source/scope for a declared artifact, but commercial tiers do not redefine the live substrate as smaller knowledge models.
+Content authority and compute envelopes remain outside consumer tensor slots: a target export may select an authorized source/scope for a declared artifact, but commercial tiers do not redefine the live substrate as smaller content models.
 
 ## Governing laws
 

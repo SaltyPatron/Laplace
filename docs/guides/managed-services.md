@@ -220,11 +220,11 @@ Receive stages the application and caches without modifying their serving
 copies. The bundle contains the migration executable and its matching SQL.
 `migrate_app` runs only app/browser migrations against the explicitly declared
 application database; failure prevents publication. Operations log migrations
-belong to the knowledge-side migration set. Application and web revision receipts
+belong to the content-side migration set. Application and web revision receipts
 must agree with the workflow revision; a checkout revision cannot substitute for
 a missing installed receipt. The artifact upload includes those hidden receipts.
 
-The knowledge-host lease is released after hosting delivery/readback, including
+The cloud-host lease is released after hosting delivery/readback, including
 failure, with a five-hour expiry covering the configured build and hosting
 timeouts. Queue delays and overlapping runs still require lifecycle verification;
 this is not proof that the lease cannot expire while a job waits.

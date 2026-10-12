@@ -9,7 +9,7 @@ loop — the lane this completes), 16 (tier-correct attestation).
 ## 0. The one law
 
 A conversational turn is witnessed EXACTLY like a chess ply: content is global and
-deduped, evidence carries full provenance, consensus folds shared knowledge.
+deduped, evidence carries full provenance, consensus folds shared content.
 The three identities and where each lives:
 
 | Identity | Substrate slot | Mint |

@@ -1,6 +1,6 @@
 # Substrate model construction: layers, heads, factors, and readout
 
-The normative construction law is in specs 09 and 12. This file describes consumer/model construction from the substrate; it is not the native Laplace cognition ontology and it does not define commercial intelligence tiers. The live substrate remains one knowledge world under explicit knowledge authority and compute envelopes. This note explains the mechanism without claiming that a particular experimental materializer is the finished design.
+The normative construction law is in specs 09 and 12. This file describes consumer/model construction from the substrate; it is not the native Laplace cognition ontology and it does not define commercial intelligence tiers. The live substrate remains one content world under explicit content authority and compute envelopes. This note explains the mechanism without claiming that a particular experimental materializer is the finished design.
 
 ## Evidence objects
 
@@ -43,7 +43,7 @@ Attested continuation distributions, circuit testimony, relation constraints, an
 realization policy may contribute. A closed-form log-odds lookup is a useful floor, not
 proof of exact contextual completion or general conversation.
 
-Knowledge-package grants are not model-source ablations. Source A/B/A+B is a diagnostic/export scope over authorized evidence; it is not a cheaper product's reduced world.
+Content-package grants are not model-source ablations. Source A/B/A+B is a diagnostic/export scope over authorized evidence; it is not a cheaper product's reduced world.
 
 ## Heterogeneous pooled construction
 

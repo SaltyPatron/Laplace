@@ -65,7 +65,7 @@ Make canonical operation dependencies visible to PostgreSQL/static gates so dead
 
 ## W11 — Seeded capability profiles
 
-Seed declared foundation, linguistic, conversational, code, model and domain profiles through the common admission/evidence machinery and prove each with representative acceptance operations. Capability profiles describe admitted evidence/providers, not separate knowledge-reduced “models.” Historical owner: #761.
+Seed declared foundation, linguistic, conversational, code, model and domain profiles through the common admission/evidence machinery and prove each with representative acceptance operations. Capability profiles describe admitted evidence/providers, not separate content-reduced “models.” Historical owner: #761.
 
 ## W12 — Source roster / coverage semantics
 
@@ -99,15 +99,15 @@ The proof class must match the claim: theorem, executable invariant, finite exha
 
 ## W18 — Structural software construction and repair
 
-Treat repository/code generation as inverse admission over canonical tiered compositions and physicality trajectories. Bind an exact target grammar/toolchain; couple against known canonical structures and grammar/rule knowledge; reuse/compose/minimally mutate before creating novel structure; realize AST/CST/source/IR only for the target consumer; compile/test/analyze/simulate/run; witness outcomes; repair the smallest divergent composition.
+Treat repository/code generation as inverse admission over canonical tiered compositions and physicality trajectories. Bind an exact target grammar/toolchain; couple against known canonical structures and grammar/rule content; reuse/compose/minimally mutate before creating novel structure; realize AST/CST/source/IR only for the target consumer; compile/test/analyze/simulate/run; witness outcomes; repair the smallest divergent composition.
 
 Exact duplicate code converges automatically. Normalized structural projections (including AST when useful), call/dependency/control/data flow, algebraic/behavioral evidence and trajectory/Fréchet similarity should drive deeper consolidation and cross-repository repair discovery. A repository root is the complete application state; checkout is realization/export of that root.
 
 Historical owners include #452/#765/#894 plus current code/toolchain owners.
 
-## W19 — Knowledge authority, governance and security
+## W19 — Content authority, governance and security
 
-Keep knowledge, permission and compute separate. Implement explicit knowledge/package grants plus operation capabilities (DISCOVER/INSPECT/SEARCH/COUPLE/TRAVERSE/DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE), resolved against tenant/role/relationship scope and kernel governance.
+Keep content, permission and compute separate. Implement explicit content/package grants plus operation capabilities (DISCOVER/INSPECT/SEARCH/COUPLE/TRAVERSE/DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE), resolved against tenant/role/relationship scope and kernel governance.
 
 Unauthorized state must not influence COUPLE merely because output could be redacted later. Red Spear/Blue Shield/White Judge map to authorized adversarial exploration, enforcement and explicit policy adjudication/receipt rather than private security cognition stacks.
 
@@ -126,7 +126,7 @@ plan / EXPLAIN
 -> reconcile/refund unused reserve
 ```
 
-Commercial/resource tiers vary compute envelope over the same entitled knowledge world. On a managed host, serviceable capacity reserves database/product/runner/control-plane headroom; full saturation is a separately selected experiment.
+Commercial/resource tiers vary compute envelope over the same entitled content world. On a managed host, serviceable capacity reserves database/product/runner/control-plane headroom; full saturation is a separately selected experiment.
 
 ## Historical analyses
 

@@ -282,7 +282,7 @@ Observed/expert evidence traces to provenance/dependence roots. Calculations tra
 
 ## Resource admission
 
-Chess inherits the same compute-envelope product law. Deeper analysis is more hops/fanout/search/provider/native work over the same entitled knowledge world, not a different deliberately knowledge-reduced chess model.
+Chess inherits the same compute-envelope product law. Deeper analysis is more hops/fanout/search/provider/native work over the same entitled content world, not a different deliberately content-reduced chess model.
 
 Before expensive analysis, the plan can estimate/reserve its search/candidate/provider/resource ceiling and reconcile against the actual receipt afterward.
 

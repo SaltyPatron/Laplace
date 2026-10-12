@@ -141,7 +141,7 @@ export function IngestControl({ onStarted }: { onStarted?: () => void }) {
     <Modal open={review} onClose={() => { if (!starting) setReview(false); }} title="Review ingestion run" actions={<>
       <Button variant="ghost" disabled={starting} onClick={() => setReview(false)}>Back</Button>
       <Button loading={starting} disabled={starting} onClick={() => void start()}>Start run</Button></>}>
-      <dl className={styles.reviewDetails}><dt>Source</dt><dd>{sourceName(source)}</dd><dt>Server</dt><dd>{sourcesRead.data?.host ?? window.location.host}</dd><dt>Location</dt><dd>{path.trim() || 'Configured source location'}</dd><dt>Destination</dt><dd>Shared knowledge base</dd></dl>
+      <dl className={styles.reviewDetails}><dt>Source</dt><dd>{sourceName(source)}</dd><dt>Server</dt><dd>{sourcesRead.data?.host ?? window.location.host}</dd><dt>Location</dt><dd>{path.trim() || 'Configured source location'}</dd><dt>Destination</dt><dd>Shared substrate</dd></dl>
       {argumentsText.trim() && <details><summary>Additional arguments</summary><pre>{argumentsText}</pre></details>}
       <p>The run continues if you leave this page. Progress and completion appear in the ingestion journal.</p>{error && <ErrorText role="alert">{error}</ErrorText>}
     </Modal>

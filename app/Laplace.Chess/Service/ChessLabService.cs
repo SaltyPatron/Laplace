@@ -19,7 +19,7 @@ public sealed partial class ChessLabService
 
     // Job metadata, event channels, transcripts, and per-job files are one lifecycle.
     // They are process-local observability, not the durable chess corpus: completed PGNs
-    // that are meant to become knowledge are already ingested into the substrate. Keeping
+    // that are meant to become content are already ingested into the substrate. Keeping
     // every terminal job forever previously made both _jobs and chess-lab-work append-only.
     internal const int MaxRetainedTerminalJobs = 32;
     internal static readonly TimeSpan OrphanWorkspaceMinimumAge = TimeSpan.FromHours(24);
@@ -48,7 +48,7 @@ public sealed partial class ChessLabService
     {
         // Every new run first bounds process-local history and stale work left by a prior
         // service process. This turns job creation into the maintenance cadence instead of
-        // requiring a separate cron job with weaker knowledge of which jobs are live.
+        // requiring a separate cron job with weaker content of which jobs are live.
         PruneRetainedState(DateTimeOffset.UtcNow);
 
         int running = 0;

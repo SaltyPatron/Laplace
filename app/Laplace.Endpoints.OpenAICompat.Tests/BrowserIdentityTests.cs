@@ -21,14 +21,14 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     public BrowserIdentityTests(GoldenFactory factory) => _factory = factory;
 
     [Fact]
-    public void IdentityStoreResolvesWithoutOpeningTheKnowledgeDatabase()
+    public void IdentityStoreResolvesWithoutOpeningTheContentDatabase()
     {
         using var factory = _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
             services.AddKeyedSingleton<NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey, (_, _) =>
                 new NpgsqlDataSourceBuilder("Host=application.invalid;Database=app;Username=app").Build());
             services.AddSingleton<SubstrateClient>(_ =>
-                throw new InvalidOperationException("Identity attempted to use the knowledge database"));
+                throw new InvalidOperationException("Identity attempted to use the substrate database"));
         }));
         Assert.IsType<PostgresIdentityStore>(factory.Services.GetRequiredService<IIdentityStore>());
     }
@@ -122,7 +122,7 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
             using var factory = _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
             {
                 services.AddKeyedSingleton<NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey, application);
-                services.AddSingleton<SubstrateClient>(_ => throw new InvalidOperationException("Account route opened the knowledge database"));
+                services.AddSingleton<SubstrateClient>(_ => throw new InvalidOperationException("Account route opened the substrate database"));
                 services.AddSingleton(account);
                 services.AddAuthentication(options => options.DefaultAuthenticateScheme = "database-route-test")
                     .AddScheme<AuthenticationSchemeOptions, DatabaseRouteIdentityHandler>("database-route-test", _ => { });
