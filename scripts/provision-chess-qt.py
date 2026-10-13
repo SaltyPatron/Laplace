@@ -36,8 +36,9 @@ def main():
                 os.environ[name] = str(args.work.resolve())
             venv = args.work / f'aqt-{lock["aqtinstall_version"]}'
             python = venv / ('Scripts/python.exe' if windows else 'bin/python')
-            if not python.is_file():
-                run([sys.executable, '-m', 'venv', venv])
+            # Rerunning venv also repairs a prior attempt interrupted before pip
+            # was installed (for example, before the host had python3-venv).
+            run([sys.executable, '-m', 'venv', venv])
             # aqtinstall_source, when the lock names one: a pinned commit of aqtinstall itself, for a Qt the released
             # aqtinstall cannot fetch (Qt 6.11 moved its Windows packages into per-architecture folders; 3.3.0 looks in the old one)
             requirement = f'aqtinstall @ {lock["aqtinstall_source"]}' if lock.get('aqtinstall_source') else f'aqtinstall=={lock["aqtinstall_version"]}'

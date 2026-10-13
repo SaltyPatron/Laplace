@@ -33,6 +33,7 @@ def main():
         (args.output / name).write_text(json.dumps(value, indent=2) + '\n')
 
     catalogue = request('/chess/lab/catalog')
+    save('catalog.json', catalogue)
     for profile in args.profile:
         if not any(p['id'] == profile and p['implementation'] == 'laplace-mono' for p in catalogue['connections']):
             raise RuntimeError('Installed API has no declared monorepo worker ' + profile)
@@ -43,8 +44,10 @@ def main():
             for conductor in conductors:
                 config = dict(conductor=conductor, laplaceProfile=profile, rounds='2', depth='1', concurrency='1',
                     ingest='true', stockfishThreads='1', stockfishHashMb='16', limitStrength='false')
-                if not request('/chess/lab/cutechess/preview?' + urllib.parse.urlencode(config))['ready']:
-                    raise RuntimeError('Installed conductor is not ready: ' + conductor)
+                preview = request('/chess/lab/cutechess/preview?' + urllib.parse.urlencode(config))
+                save(profile + '-' + conductor + '-preview.json', preview)
+                if not preview['ready']:
+                    raise RuntimeError('Installed conductor is not ready: ' + json.dumps(preview))
                 job_id = request('/chess/lab/start', {'kind': 'cutechess', 'config': config})['jobId']
                 print(f'{conductor} running {job_id} on {profile}', flush=True)
                 deadline = time.monotonic() + 480
