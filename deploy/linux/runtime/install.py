@@ -33,6 +33,7 @@ def module(name, path):
 
 SYNC = module('runtime_sync', HERE / 'database-sync.py')
 TLS = module('runtime_tls', HERE / 'runtime_tls.py')
+MACHINE = module('runtime_machine', ROOT / 'scripts/machine-env.py')
 
 
 class CommandFailure(RuntimeError):
@@ -49,7 +50,7 @@ def checked(argv, **kwargs):
 
 
 def declarations(path):
-    return module('runtime_machine', ROOT / 'scripts/machine-env.py').resolve(path, {}, explicit=True)
+    return MACHINE.resolve(path, {}, explicit=True)
 
 
 def validate(config):
@@ -166,6 +167,7 @@ def storage_preflight(config):
 
 def preflight(config):
     validate_declaration(config)
+    MACHINE.update_assignments(Path(config['machine_file']).read_text(), machine_settings(config))
     storage = storage_preflight(config)
     prefix = Path(config['prefix'])
     for path in (prefix / 'app/laplace-api.env', prefix / 'app/laplace-mcp.env',
@@ -199,6 +201,7 @@ def preflight(config):
             tls_status = 'repair_required'
     return {'host': config['host'], 'release': (prefix / 'app/.laplace-source-revision').read_text().strip(),
             'application_database': config['database'], 'application_data_moved': False,
+            'configuration_update': 'verified',
             'database_tls': {'status': tls_status, 'root_certificate': str(trust)}, 'storage': storage}
 
 
@@ -390,6 +393,25 @@ def install(config, lock):
     return install_identities(config, lock)
 
 
+def machine_settings(config):
+    mcp, state = config['mcp'], Path(config['mcp']['state'])
+    substrate = dict(config['substrate'], root_certificate=config['tls']['root_certificate'])
+    return {'LAPLACE_DATABASE_RUNTIME_DB': connection(substrate),
+        'LAPLACE_MCP_RUNTIME_DB': connection(dict(mcp, database=substrate['database'], port=config['port']), True, config['pgsocket']),
+        'LAPLACE_MCP_USER': mcp['user'], 'LAPLACE_MCP_STATE_DIR': state, 'LAPLACE_MCP_LOG_DIR': state / 'logs',
+        'LAPLACE_APP_DBNAME': config['database'], 'LAPLACE_APP_PGHOST': config['pgsocket'],
+        'LAPLACE_APP_PGPORT': config['port'], 'LAPLACE_APP_ROLE': config['database_owner'],
+        'LAPLACE_BAO_DATABASE_HOST': config['host'], 'LAPLACE_API_VERIFICATION_URL': config['public_base'],
+        'LAPLACE_RUNTIME_DB_ROOT_CERTIFICATE': config['tls']['root_certificate']}
+
+
+def write_machine_settings(config):
+    path = Path(config['machine_file'])
+    stat = path.stat()
+    candidate = MACHINE.update_assignments(path.read_text(), machine_settings(config))
+    SYNC.atomic(path, candidate, stat.st_mode & 0o777, stat.st_uid, stat.st_gid)
+
+
 def install_identities(config, lock):
     env = dict(os.environ, LAPLACE_HOST_LOCK_FD=str(lock.fileno()),
                LAPLACE_INSTALL_CAPTURE_DIAGNOSTICS='1',
@@ -452,15 +474,10 @@ def install_identities(config, lock):
 
     print('Activating API and MCP identities; failed verification restores serving configuration...', flush=True)
     with SYNC.configuration_transaction([machine, api, mcp_env, *dropins], recover):
-        mcp_connection = connection(dict(mcp, database=config['substrate']['database'], port=config['port']), True, config['pgsocket'])
-        substrate_connection = connection(config['substrate'])
-        SYNC.assignments(machine, {'LAPLACE_DATABASE_RUNTIME_DB': substrate_connection,
-            'LAPLACE_MCP_RUNTIME_DB': mcp_connection, 'LAPLACE_MCP_USER': mcp['user'],
-            'LAPLACE_MCP_STATE_DIR': state, 'LAPLACE_MCP_LOG_DIR': state / 'logs',
-            'LAPLACE_APP_DBNAME': config['database'], 'LAPLACE_APP_PGHOST': config['pgsocket'],
-            'LAPLACE_APP_PGPORT': config['port'], 'LAPLACE_APP_ROLE': config['database_owner'],
-            'LAPLACE_BAO_DATABASE_HOST': config['host'], 'LAPLACE_API_VERIFICATION_URL': config['public_base']})
-        SYNC.assignments(machine, {'LAPLACE_RUNTIME_DB_ROOT_CERTIFICATE': config['root_certificate']})
+        settings = machine_settings(config)
+        mcp_connection = settings['LAPLACE_MCP_RUNTIME_DB']
+        substrate_connection = settings['LAPLACE_DATABASE_RUNTIME_DB']
+        write_machine_settings(config)
         SYNC.assignments(api, {'LAPLACE_DB': substrate_connection})
         SYNC.assignments(mcp_env, {'LAPLACE_DB': mcp_connection, 'LAPLACE_OPS_LOG_DIR': state / 'logs',
             'LAPLACE_OUT': state / 'out', 'LAPLACE_AGENTS_CONFIG': state / 'agents.json'})
