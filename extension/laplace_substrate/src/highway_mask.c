@@ -1164,8 +1164,12 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
     args[2] = Int64GetDatum(limit_rows);
     if (band_edges_plan == NULL)
     {
+        /* The relation set and page size select the typed ranking index. A
+         * generic LIMIT estimate can instead choose score-only scans and sort
+         * every tied row before returning a small page. Keep the prepared query,
+         * but plan its indexed reads with the actual arguments. */
         SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("consensus.band_edges"),
-            3, argtypes, CURSOR_OPT_GENERIC_PLAN);
+            3, argtypes, CURSOR_OPT_CUSTOM_PLAN);
         if (plan == NULL || SPI_keepplan(plan) != 0)
             elog(ERROR, "consensus_band_edges: cannot retain typed page plan");
         band_edges_plan = plan;
