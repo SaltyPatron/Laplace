@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--base', required=True)
     parser.add_argument('--profile', action='append', required=True)
     parser.add_argument('--conductor', action='append')
+    parser.add_argument('--stockfish-profile', default='')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     key = os.environ['LAPLACE_API_KEY']
@@ -43,7 +44,7 @@ def main():
         for profile in args.profile:
             for conductor in conductors:
                 config = dict(conductor=conductor, laplaceProfile=profile, rounds='2', depth='1', concurrency='1',
-                    ingest='true', stockfishThreads='1', stockfishHashMb='16', limitStrength='false')
+                    stockfishProfile=args.stockfish_profile, ingest='true', stockfishThreads='1', stockfishHashMb='16', limitStrength='false')
                 preview = request('/chess/lab/cutechess/preview?' + urllib.parse.urlencode(config))
                 save(profile + '-' + conductor + '-preview.json', preview)
                 if not preview['ready']:
@@ -70,6 +71,8 @@ def main():
                     raise RuntimeError('Recorded requester differs from the authenticated job.')
                 if experiment['requestedOptions']['laplaceConnection']['id'] != profile:
                     raise RuntimeError('Recorded connection differs from selected worker.')
+                if args.stockfish_profile and experiment['requestedOptions']['stockfishConnection']['id'] != args.stockfish_profile:
+                    raise RuntimeError('Recorded Stockfish connection differs from selected worker.')
                 if not any('info string laplace knowledge ' in line for line in experiment['uciConfiguration'].get('Laplace', [])):
                     raise RuntimeError('Remote Laplace did not report its actual knowledge identity.')
                 result = dict(profile=profile, conductor=conductor, job=job, recording=recording, experiment=experiment)
@@ -78,7 +81,7 @@ def main():
                 print(f'{conductor}/{profile}: {recording["readbackGames"]} recorded games / {recording["readbackPlies"]} plies', flush=True)
                 job_id = None
         config = dict(conductor=conductors[0], laplaceProfile=args.profile[0], rounds='100', depth='20', concurrency='1',
-            ingest='true', stockfishThreads='1', stockfishHashMb='16', limitStrength='false')
+            stockfishProfile=args.stockfish_profile, ingest='true', stockfishThreads='1', stockfishHashMb='16', limitStrength='false')
         job_id = request('/chess/lab/start', {'kind': 'cutechess', 'config': config})['jobId']
         deadline = time.monotonic() + 40
         while 'info string laplace knowledge ' not in request('/chess/lab/jobs/' + job_id + '/terminal.txt', raw=True):

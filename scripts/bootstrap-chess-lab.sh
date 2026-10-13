@@ -86,11 +86,12 @@ ensure_dirs() {
   say "dirs under $PREFIX"
   if [ "$(id -u)" -eq 0 ]; then
     install -d -m 2775 -g "$RUNNER_GROUP" \
-      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
+      "$PREFIX" "$EXTERNAL" "$LAPLACE_DEPS_BUILD" "${LAPLACE_DEPS:-$PREFIX/tools}" \
+      "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
       "$PREFIX/share" "$PREFIX/share/applications" "$PREFIX/share/laplace"
     install -d -m 2770 -g "$RUNNER_GROUP" "$PREFIX/secrets"
   else
-    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
+    mkdir -p "$LAPLACE_DEPS_BUILD" "${LAPLACE_DEPS:-$PREFIX/tools}" "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
       "$PREFIX/share/applications" "$PREFIX/share/laplace"
     chmod 2770 "$PREFIX/secrets" 2>/dev/null || true
   fi
