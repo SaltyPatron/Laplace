@@ -1,8 +1,10 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$Publish)
+param([string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$Publish)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
+if(-not $Installation){throw 'No IIS installation is configured. Use -Installation for initial setup.'}
 if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED)) {
     $developerShell = if($env:LAPLACE_DEVSHELL){$env:LAPLACE_DEVSHELL}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/toolchain/windows/devshell.ps1'}
     if(-not(Test-Path -LiteralPath $developerShell -PathType Leaf)){throw "The configured developer shell is missing: $developerShell"}

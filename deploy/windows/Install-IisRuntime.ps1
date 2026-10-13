@@ -4,9 +4,9 @@ param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[ValidateS
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
-$chessAccess=@(Get-IisChessAccess $c)
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
 if($Plan){$c | ConvertTo-Json -Depth 12;return}
+$chessAccess=@(Get-IisChessAccess $c)
 if($Operation -eq 'Verify'){Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY | ConvertTo-Json;return}
 if($Operation -eq 'Install'){
     $baoVersion=(& $c.bao version | Out-String).Trim()
