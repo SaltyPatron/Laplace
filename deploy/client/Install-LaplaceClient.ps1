@@ -13,6 +13,7 @@ $config=Get-Content -LiteralPath $Configuration -Raw | ConvertFrom-Json -AsHasht
 if ($config.version -ne 1 -or -not $config.profiles.ContainsKey($config.default_profile)) { throw 'Invalid client declaration/default profile.' }
 [void](New-Item -ItemType Directory -Path $Destination,$CommandDirectory -Force)
 Copy-Item -LiteralPath "$PSScriptRoot/laplace-mono.ps1" -Destination (Join-Path $Destination 'laplace-mono.ps1') -Force
+Copy-Item -LiteralPath "$PSScriptRoot/../windows/database-connection.ps1" -Destination (Join-Path $Destination 'database-connection.ps1') -Force
 [IO.File]::WriteAllText((Join-Path $Destination 'client.json'),($config | ConvertTo-Json -Depth 16))
 $launcher=Join-Path $Destination 'laplace-mono.ps1'
 $pwsh=(Get-Command pwsh -CommandType Application).Source
