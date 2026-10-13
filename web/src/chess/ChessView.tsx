@@ -416,7 +416,7 @@ export function ChessView() {
           const finalStatus = retained.state === 'ongoing' ? 'ongoing'
             : retained.result === '1-0' ? 'white wins' : retained.result === '0-1' ? 'black wins' : 'draw';
           const restored = retained.positionFens.map((fen, ply) => ply === 0
-            ? { fen, status: 'ongoing', lastMove: null }
+            ? { fen, status: retained.moves.length === 0 ? finalStatus : 'ongoing', lastMove: null }
             : snapshotFromMove(fen, ply === retained.moves.length ? finalStatus : 'ongoing', retained.moves[ply - 1]));
           if (active) {
             setPositions(restored);
