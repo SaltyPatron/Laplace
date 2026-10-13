@@ -19,8 +19,12 @@ def body(job: str, workflow: str = "laplace.yml") -> str:
     text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
     section = text.split("\n  " + job + ":\n", 1)[1]
     raw = section.split("        run: |\n", 1)[1]
-    return "\n".join(line[10:] for line in raw.splitlines()
-                     if line.startswith("          ")) + "\n"
+    lines = []
+    for line in raw.splitlines():
+        if line.strip() and not line.startswith("          "):
+            break
+        lines.append(line[10:])
+    return "\n".join(lines) + "\n"
 
 
 class WorkspaceFixture(unittest.TestCase):
