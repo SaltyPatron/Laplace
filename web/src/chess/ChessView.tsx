@@ -47,6 +47,7 @@ import styles from './ChessView.module.css';
 
 
 interface PlayStart { sessionId: string; fen: string; status?: string; ply?: number; }
+interface RetainedPlay { sessionId: string; state: string; recordToSubstrate: boolean; moves: string[]; positionFens: string[]; }
 
 interface PlayMoveResult { fen: string; terminal: boolean; status: string; legal: boolean; ply: number; motifs?: string[]; }
 
@@ -121,7 +122,8 @@ export function ChessView() {
 
   const [useSubstrate, setUseSubstrate] = useState(() => savedBoot?.useSubstrate ?? true);
   const [recordToSubstrate, setRecordToSubstrate] = useState(() => savedBoot?.recordToSubstrate ?? true);
-  const [playSessionId, setPlaySessionId] = useState<string | null>(null);
+  const [playSessionId, setPlaySessionId] = useState<string | null>(savedBoot?.sessionId ?? null);
+  const sessionReady = useRef<Promise<string | null> | null>(null);
 
   const [evalMode, setEvalMode] = useState(() => savedBoot?.evalMode ?? false);
 
@@ -383,6 +385,7 @@ export function ChessView() {
         tenant,
       });
       setPlaySessionId(r.sessionId);
+      sessionReady.current = Promise.resolve(r.sessionId);
       return r;
     } catch (e) {
       setErr(`play session failed: ${msg(e)}`);
@@ -394,19 +397,35 @@ export function ChessView() {
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
 
-  // Always keep a server play session (repetition history lives there). Replay local
-  // moves when booting or when the record flag changes.
+  // A retained operation keeps the same requester and game through browser and API restarts.
   useEffect(() => {
-    const moves = historyFromPositions(positionsRef.current);
-    void startPlaySession(recordToSubstrate, moves.length ? moves : undefined).then((r) => {
-      if (r && moves.length > 0) {
-        setResumeNote((prev) => prev ?? `Server session rebuilt · ${moves.length} plies`);
+    if (!savedBoot?.sessionId) return;
+    let active = true;
+    sessionReady.current = (async () => {
+      try {
+          const retained = await apiGet<RetainedPlay>('/chess/play/' + savedBoot.sessionId);
+          if (retained.state !== 'ongoing') throw new Error(`Saved game is ${retained.state}; start a new game explicitly.`);
+          const restored = retained.positionFens.map((fen, ply) => ply === 0
+            ? { fen, status: 'ongoing', lastMove: null }
+            : snapshotFromMove(fen, 'ongoing', retained.moves[ply - 1]));
+          if (active) {
+            setPositions(restored);
+            setViewPly(restored.length - 1);
+            setPlaySessionId(retained.sessionId);
+            setResumeNote(`Resumed saved game · ${retained.moves.length} plies`);
+          }
+          return retained.sessionId;
+      } catch (e) {
+        if (active) setErr(`Cannot resume saved game: ${msg(e)}`);
+        return null;
       }
-    });
-  }, [recordToSubstrate, startPlaySession]);
+    })();
+    return () => { active = false; };
+  }, [savedBoot]);
 
   useEffect(() => {
     savePlayGame({
+      sessionId: playSessionId,
       positions,
       recordToSubstrate,
       searchDepth,
@@ -415,9 +434,10 @@ export function ChessView() {
       flip,
       evalMode,
     });
-  }, [positions, recordToSubstrate, searchDepth, useSubstrate, autoReply, flip, evalMode]);
+  }, [playSessionId, positions, recordToSubstrate, searchDepth, useSubstrate, autoReply, flip, evalMode]);
 
   const ensurePlaySession = useCallback(async () => {
+    if (sessionReady.current) return await sessionReady.current;
     if (playSessionId) return playSessionId;
     const moves = historyFromPositions(positionsRef.current);
     const r = await startPlaySession(recordToSubstrate, moves.length ? moves : undefined);
@@ -864,7 +884,11 @@ export function ChessView() {
 
           onAutoReply={setAutoReply} onFlip={setFlip} onDepth={setSearchDepth}
 
-          onSubstrate={setUseSubstrate} onRecordToSubstrate={setRecordToSubstrate} onEvalMode={setEvalMode}
+          onSubstrate={setUseSubstrate} onRecordToSubstrate={(record) => {
+            setRecordToSubstrate(record);
+            setPlaySessionId(null);
+            sessionReady.current = null;
+          }} onEvalMode={setEvalMode}
 
         />
 

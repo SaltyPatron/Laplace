@@ -496,10 +496,8 @@ public sealed class ChessEngineService : IAsyncDisposable
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
 
-        session.State = next;
-        session.Moves.Add(uci);
-        session.PlyCount = session.Moves.Count;
-        session.SaveOperation();
+        var analysis = new ChessLivePlyAnalysis(Motifs: motifs);
+        session.CommitMove(next, uci, analysis);
 
         if (session.RecordToSubstrate)
         {
@@ -507,7 +505,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 sessionId, session.PlyCount, fromKey, toKey, uci, moverId, ct);
             await liveHost.RecordPlayPlyAnalysisAsync(
                 sessionId, session.PlyCount,
-                new ChessLivePlyAnalysis(Motifs: motifs), ct);
+                analysis, ct);
         }
 
         if (status != "ongoing")
@@ -541,10 +539,8 @@ public sealed class ChessEngineService : IAsyncDisposable
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
         int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
 
-        session.State = next;
-        session.Moves.Add(mv.ToUci());
-        session.PlyCount = session.Moves.Count;
-        session.SaveOperation();
+        var analysis = new ChessLivePlyAnalysis(result.Score, result.Depth, result.Nodes, pv, motifs);
+        session.CommitMove(next, mv.ToUci(), analysis);
 
         if (session.RecordToSubstrate)
         {
@@ -552,7 +548,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 sessionId, session.PlyCount, fromKey, toKey, mv.ToUci(), ChessVocabulary.LaplacePlayerId, ct);
             await liveHost.RecordPlayPlyAnalysisAsync(
                 sessionId, session.PlyCount,
-                new ChessLivePlyAnalysis(result.Score, result.Depth, result.Nodes, pv, motifs), ct);
+                analysis, ct);
         }
         ReturnEngine(search);
 
