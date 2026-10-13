@@ -3,9 +3,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-source "$ROOT/scripts/lib/database.sh"
-source "$ROOT/scripts/lib/storage.sh"
-laplace_storage_init
 preflight_only=0
 if [[ "${1:-}" == --preflight ]]; then preflight_only=1; shift; fi
 # Model qualification on the database host uses CPU execution.
@@ -67,13 +64,6 @@ CORROBORATION_MODEL_DIR="$(resolve_corroboration_snapshot "$MODEL_DIR")" || {
 }
 
 model_slug="$(basename "$(dirname "$(dirname "$MODEL_DIR")")" 2>/dev/null || basename "$MODEL_DIR")"
-GGUF_OUT="${LAPLACE_GGUF_OUT:-$LAPLACE_WORK_ROOT/model-proof/${model_slug}-substrate-ci.gguf}"
-REPORT_OUT="${LAPLACE_MODEL_BEHAVIOR_REPORT:-${GGUF_OUT%.gguf}.behavior.json}"
-runtime="${LAPLACE_APP_DIR:-${LAPLACE_INSTALL_PREFIX:?}/app}"
-CLI=("$runtime/cli/Laplace.Cli")
-export LAPLACE_INGEST_RUNTIME="$runtime/cli"
-export LAPLACE_PERFCACHE_BIN="$runtime/cli/share/laplace/laplace_t0_perfcache.bin"
-export LD_LIBRARY_PATH="$runtime/cli:${LAPLACE_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
 log() { echo "[substrate-ci] $*"; }
 die() { echo "[substrate-ci] ERROR: $*" >&2; exit 1; }
@@ -110,6 +100,16 @@ print(report["selected_llama"])
 ' <<< "$preflight_out")" || die "invalid preliminary model-proof prerequisite report"
 
 (( preflight_only == 0 )) || exit 0
+source "$ROOT/scripts/lib/database.sh"
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+GGUF_OUT="${LAPLACE_GGUF_OUT:-$LAPLACE_WORK_ROOT/model-proof/${model_slug}-substrate-ci.gguf}"
+REPORT_OUT="${LAPLACE_MODEL_BEHAVIOR_REPORT:-${GGUF_OUT%.gguf}.behavior.json}"
+runtime="${LAPLACE_APP_DIR:-${LAPLACE_INSTALL_PREFIX:?}/app}"
+CLI=("$runtime/cli/Laplace.Cli")
+export LAPLACE_INGEST_RUNTIME="$runtime/cli"
+export LAPLACE_PERFCACHE_BIN="$runtime/cli/share/laplace/laplace_t0_perfcache.bin"
+export LD_LIBRARY_PATH="$runtime/cli:${LAPLACE_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 mkdir -p "$(dirname "$GGUF_OUT")" "$(dirname "$REPORT_OUT")"
 psql -X -w -v ON_ERROR_STOP=1 -tAc "SELECT 1" >/dev/null \
   || die "declared database is unreachable"
