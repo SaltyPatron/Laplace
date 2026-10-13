@@ -35,6 +35,7 @@ $null=New-Item -ItemType Directory -Path (Join-Path $root 'state')
 Copy-Item -LiteralPath $trust -Destination (Join-Path $root 'state/postgres-root.crt')
 $iis=[pscustomobject]@{
     directory=$root;origin='https://dev.example.test';environment=[pscustomobject]@{LAPLACE_DATA=$root}
+    chess=[pscustomobject]@{match_engines=$null}
     database=[pscustomobject]@{authentication='sspi';host=$env:COMPUTERNAME;port=5432;pool_max=4;substrate_database='laplace-mono';substrate_role='laplace_desktop_db';application_database='laplace-desktop-app';application_role='laplace_desktop_app'}
     records=[pscustomobject]@{api='kv/data/fixture/api';identity='kv/data/fixture/identity';certificate='kv/data/fixture/certificate';chess='kv/data/fixture/chess'}
 }
