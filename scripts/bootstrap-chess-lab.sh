@@ -25,6 +25,10 @@ CUTECHESS_GUI="${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}"
 APP_DIR="${LAPLACE_APP_DIR:-$PREFIX/app}"
 ENV_FILE="$APP_DIR/laplace-api.env"
 CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
+# API state is setup-owned by the serving identity; compiler scratch is not.
+CHESS_LAB_DIR="${LAPLACE_CHESS_LAB_DIR:-${LAPLACE_API_STATE_DIR:-$PREFIX}/chess-lab-work}"
+API_USER="${LAPLACE_API_USER:-$RUNNER_USER}"
+API_GROUP="${LAPLACE_API_GROUP:-$API_USER}"
 
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
@@ -178,17 +182,19 @@ write_api_env() {
     [ -z "${LAPLACE_ZSTD_BUILD:-}" ] || echo "LAPLACE_ZSTD_BUILD=$LAPLACE_ZSTD_BUILD"
     [ -z "${LAPLACE_ZSTD_WINDOW_LOG_MAX:-}" ] || echo "LAPLACE_ZSTD_WINDOW_LOG_MAX=$LAPLACE_ZSTD_WINDOW_LOG_MAX"
     echo "LAPLACE_CUTECHESS_BUILD=$CC_BUILD"
-    echo "LAPLACE_CHESS_LAB_DIR=$PREFIX/chess-lab-work"
+    printf 'LAPLACE_CHESS_LAB_DIR="%s"\n' "$CHESS_LAB_DIR"
     echo "$marker_end"
   } >> "$ENV_FILE"
 
   if [ "$(id -u)" -eq 0 ]; then
     chgrp "$RUNNER_GROUP" "$ENV_FILE"
     chmod 0640 "$ENV_FILE"
-    install -d -m 2775 -g "$RUNNER_GROUP" "$PREFIX/chess-lab-work"
-  else
-    mkdir -p "$PREFIX/chess-lab-work"
+    install -d -m 0700 -o "$API_USER" -g "$API_GROUP" "$CHESS_LAB_DIR"
+  elif [[ "$(id -un)" == "$API_USER" ]]; then
+    mkdir -p "$CHESS_LAB_DIR"
   fi
+  # An unprivileged update cannot enter another identity's state directory.
+  # The API creates its job directory there on demand under its own identity.
 
   if [[ -n "$sf" && -f "$PREFIX/share/laplace/cutechess-desktop.json" ]]; then
     python3 "$SCRIPT_DIR/provision-cutechess.py" --configure-evaluation "$PREFIX" --desktop-stockfish "$sf"
@@ -227,8 +233,8 @@ verify() {
 }
 
 main() {
-  [[ "$CUTECHESS" == /* && "$CUTECHESS_GUI" == /* ]] || {
-    red "LAPLACE_CUTECHESS and LAPLACE_CUTECHESS_GUI must be absolute executable paths"; return 2;
+  [[ "$CUTECHESS" == /* && "$CUTECHESS_GUI" == /* && "$CHESS_LAB_DIR" == /* ]] || {
+    red "Chess executables and LAPLACE_CHESS_LAB_DIR must be absolute paths"; return 2;
   }
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
