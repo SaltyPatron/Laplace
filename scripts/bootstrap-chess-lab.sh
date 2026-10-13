@@ -36,7 +36,7 @@ run_as_owner() {
     local key
     local -a build_env=("LAPLACE_EXTERNAL=$EXTERNAL" "LAPLACE_INSTALL_PREFIX=$PREFIX" "TMPDIR=$WORK" "TMP=$WORK" "TEMP=$WORK")
     for key in LAPLACE_STOCKFISH_SOURCE LAPLACE_STOCKFISH_COMP LAPLACE_STOCKFISH_ARCH \
-      LAPLACE_STOCKFISH_JOBS LAPLACE_BUILD_JOBS LAPLACE_DEPS_PREFIX CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS CC CXX; do
+      LAPLACE_STOCKFISH_JOBS LAPLACE_BUILD_JOBS LAPLACE_DEPS LAPLACE_DEPS_PREFIX LAPLACE_FASTCHESS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS CC CXX; do
       if [[ -v "$key" ]]; then build_env+=("$key=${!key}"); fi
     done
     sudo -u "$RUNNER_USER" -H env "${build_env[@]}" "$@"
@@ -136,11 +136,12 @@ write_api_env() {
     return 0
   fi
 
-  local sf qt cc selected_source
+  local sf qt cc fastchess selected_source
   selected_source="$(python3 "$SCRIPT_DIR/install-stockfish.py" --print-source)"
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
   cc="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
+  fastchess="$(python3 "$SCRIPT_DIR/install-fastchess.py" --check)"
   [ -x "$cc" ] || cc=""
 
   if [ ! -f "$ENV_FILE" ]; then
@@ -163,6 +164,7 @@ write_api_env() {
   {
     echo "$marker_begin"
     [ -n "$cc" ] && echo "LAPLACE_CUTECHESS=$cc"
+    printf 'LAPLACE_FASTCHESS="%s"\n' "$fastchess"
     if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
       echo "LAPLACE_CUTECHESS_GUI=${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}"
       echo "LAPLACE_CUTECHESS_GUI_RECEIPT=$CC_BUILD/laplace-cutechess-gui-build.json"
@@ -191,7 +193,7 @@ write_api_env() {
   if [[ -n "$sf" && -f "$PREFIX/share/laplace/cutechess-desktop.json" ]]; then
     python3 "$SCRIPT_DIR/provision-cutechess.py" --configure-evaluation "$PREFIX" --desktop-stockfish "$sf"
   fi
-  echo "  CUTECHESS=${cc:-MISSING}  STOCKFISH=${sf:-MISSING}  QT=${qt:-MISSING}"
+  echo "  CUTECHESS=${cc:-MISSING}  FASTCHESS=$fastchess  STOCKFISH=${sf:-MISSING}  QT=${qt:-MISSING}"
   if [ -f "$PREFIX/secrets/lichess.env" ]; then
     green "✓ secrets drop present"
   else
@@ -216,6 +218,7 @@ verify() {
     fi
   fi
   python3 "$SCRIPT_DIR/install-stockfish.py" --check-binary "$sf" || { red "✗ stockfish"; fail=1; }
+  python3 "$SCRIPT_DIR/install-fastchess.py" --check || { red "✗ fastchess"; fail=1; }
   zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO_ROOT/deploy/zstd-release.json")"
   python3 "$SCRIPT_DIR/check-zstd-runtime.py" --require-version "$zstd_version" || { red "✗ native Zstandard PGN decoder"; fail=1; }
   [ -n "$qt" ] || { red "✗ Qt6"; fail=1; }
@@ -246,6 +249,7 @@ main() {
   build_cutechess
   build_zstd
   run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py"
+  run_as_owner python3 "$SCRIPT_DIR/install-fastchess.py"
   verify
   write_api_env
 }
