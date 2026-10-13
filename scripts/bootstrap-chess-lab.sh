@@ -210,8 +210,8 @@ write_api_env() {
   } >> "$ENV_FILE"
 
   if [ "$(id -u)" -eq 0 ]; then
-    chgrp "$RUNNER_GROUP" "$ENV_FILE"
-    chmod 0640 "$ENV_FILE"
+    # Existing runtime readers are installed separately (API, UCI and CLI).
+    # Tool maintenance must retain that file's ownership, mode and ACLs.
     install -d -m 0700 -o "$API_USER" -g "$API_GROUP" "$CHESS_LAB_DIR"
   elif [[ "$(id -un)" == "$API_USER" ]]; then
     mkdir -p "$CHESS_LAB_DIR"
