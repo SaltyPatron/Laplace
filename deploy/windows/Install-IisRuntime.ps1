@@ -1,12 +1,22 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
+param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[string]$Package,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
-$chessAccess=@(Get-IisChessAccess $c)
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
+$selection=Join-Path $web 'active.json'
+if($Package){
+    if($Operation -ne 'Install'){throw '-Package applies only to installation or upgrade.'}
+    $manifest=Test-IisPackage $Package
+    $c.revision=$manifest.revision;$c.publish=[IO.Path]::GetFullPath($Package)
+}elseif($Operation -eq 'Install' -and (Test-Path -LiteralPath $selection)){
+    $active=Get-Content -LiteralPath $selection -Raw|ConvertFrom-Json
+    if($active.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'The installed release selection is invalid.'}
+    $c.revision=$active.revision;$c.publish=Join-Path $web ('releases/'+$c.revision)
+}
 if($Plan){$c | ConvertTo-Json -Depth 12;return}
+$chessAccess=@(Get-IisChessAccess $c)
 if($Operation -eq 'Verify'){Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY | ConvertTo-Json;return}
 if($Operation -eq 'Install'){
     $baoVersion=(& $c.bao version | Out-String).Trim()
@@ -31,6 +41,29 @@ if($Operation -eq 'Render') {
     if($records.chess.control_token -notmatch '^[a-f0-9]{64}$'){throw 'Missing Lichess controller client credential.'}
     Write-IisAtomic (Join-Path $state 'control.token') $records.chess.control_token
     Write-IisAtomic (Join-Path $state 'chess-client.json') (Iis-Json @{url=$c.chess.url;operators=$c.chess.operators;tokenFile=(Join-Path $state 'control.token')})
+    if($c.chess.match_engines){
+        $engineDirectory=Join-Path $state 'engine-connections'
+        $profiles=@{}
+        foreach($entry in $c.chess.match_engines.profiles.PSObject.Properties){
+            $p=$entry.Value;$field=$p.token_field;$endpoint=$null
+            if($entry.Name -notmatch '^[a-zA-Z0-9_-]+$' -or $field -notmatch '^(uci_[a-z0-9_]+|[a-z0-9_]+_uci)_token$' -or
+                $records.chess.$field -notmatch '^[a-f0-9]{64}$' -or
+                -not [Uri]::TryCreate($p.endpoint,[UriKind]::Absolute,[ref]$endpoint) -or
+                $endpoint.Scheme -ne 'wss' -or $endpoint.UserInfo -or $endpoint.Query -or $endpoint.Fragment){
+                throw 'Invalid authenticated match engine profile.'
+            }
+            $profile=@{transport='websocket';tokenFile=(Join-Path $engineDirectory ($entry.Name+'.token'))}
+            foreach($key in 'label','implementation','environment','knowledge','endpoint'){
+                if(-not $p.$key){throw "Match engine profile needs $key."};$profile[$key]=$p.$key
+            }
+            $profiles[$entry.Name]=$profile
+        }
+        $null=New-Item -ItemType Directory -Path $engineDirectory -Force
+        foreach($entry in $c.chess.match_engines.profiles.PSObject.Properties){
+            Write-IisAtomic (Join-Path $engineDirectory ($entry.Name+'.token')) $records.chess.($entry.Value.token_field)
+        }
+        Write-IisAtomic (Join-Path $engineDirectory 'connector.json') (Iis-Json @{version=1;profiles=$profiles})
+    }
     $certBytes=[Convert]::FromBase64String($records.certificate.pfx_base64)
     $certDigest=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($certBytes))
     $receiptPath=Join-Path $private 'render-receipt.json'
@@ -67,12 +100,6 @@ if($Operation -eq 'Render') {
     } finally {$manager.Dispose()}
     Write-IisAtomic $receiptPath (Iis-Json @{rendered_utc=[DateTime]::UtcNow.ToString('o');source='openbao-agent';pool=$c.pool;environment_changed=$changed;certificate=$certificate.Thumbprint;certificate_digest=$certDigest})
     return
-}
-$selection=Join-Path $web 'active.json'
-if(Test-Path -LiteralPath $selection){
-    $active=Get-Content -LiteralPath $selection -Raw|ConvertFrom-Json
-    if($active.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'The installed release selection is invalid.'}
-    $c.revision=$active.revision;$c.publish=Join-Path $web ('releases/'+$c.revision)
 }
 $manifest=Test-IisPackage $c.publish
 if($manifest.revision -ne $c.revision){throw 'Package revision differs from the installation declaration.'}

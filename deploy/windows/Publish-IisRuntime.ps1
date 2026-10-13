@@ -1,6 +1,16 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Installation,[Parameter(Mandatory)][string]$Package)
+param([string]$Installation,[Parameter(Mandatory)][string]$Package)
+$ErrorActionPreference='Stop'
+if(-not $Installation -and -not $env:LAPLACE_IIS_INSTALLATION){
+    if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'installation.json')){
+        $Installation=Join-Path $PSScriptRoot 'installation.json'
+    }else{
+        . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+    }
+}
+if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
+if(-not $Installation){throw 'No IIS installation is configured. Use -Installation for initial setup.'}
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation

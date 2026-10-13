@@ -54,6 +54,7 @@ export interface LabEngine {
 export interface LabCatalog {
   jobs: LabJobSpec[];
   engines: Record<string, LabEngine>;
+  connections?: { id: string; label: string; implementation: string; environment: string; knowledge: string; host: string }[];
 }
 
 /** Server-sent events as a typed async iterator; the one frame parser for the job feed and the raw transcript. */

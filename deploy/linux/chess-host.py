@@ -17,6 +17,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('identity_runtime', Path(__file__).with_name('identity-runtime.py'))
@@ -84,7 +85,93 @@ def render(c, directory):
         identity.write(target, value, 0o600)
         os.chown(target, account.pw_uid, account.pw_gid)
         identity.run(['runuser', '-u', user, '--', 'test', '-r', str(target)])
+    render_match_engines(c, record)
     identity.write(directory / 'render-receipt.json', json.dumps({'source': 'openbao-agent', 'rendered_at': time.time(), 'fields': sorted(c['secret_files'])}))
+
+
+def render_match_engines(c, record):
+    selection = c.get('match_engines')
+    if not selection:
+        return
+    connector = Path(selection['connector'])
+    directory = Path(selection['directory'])
+    service = c.get('api_service', '')
+    if (not connector.is_absolute() or not connector.is_file() or not directory.is_absolute()
+            or directory == directory.parent or not re.fullmatch(r'[a-zA-Z0-9_-]+\.service', service)):
+        raise ValueError('Match engines require installed connector, private directory and API service declarations.')
+    user = identity.run(['systemctl', 'show', service, '--property=User', '--value']).strip()
+    if not user or user == 'root':
+        raise ValueError('Match engines require an unprivileged API service.')
+    account = pwd.getpwnam(user)
+    profiles = {}
+    for name, declared in selection['profiles'].items():
+        field = declared['token_field']
+        endpoint = urllib.parse.urlsplit(declared['endpoint'])
+        if (not re.fullmatch(r'[a-zA-Z0-9_-]+', name) or not re.fullmatch(r'(uci_[a-z0-9_]+|[a-z0-9_]+_uci)_token', field)
+                or endpoint.scheme != 'wss' or not endpoint.hostname or endpoint.username or endpoint.password
+                or endpoint.query or endpoint.fragment or not re.fullmatch(r'[a-f0-9]{64}', record.get(field, ''))):
+            raise ValueError('Invalid authenticated match engine profile: ' + name)
+        profile = {key: declared[key] for key in ['label', 'implementation', 'environment', 'knowledge', 'endpoint']}
+        profile.update(transport='websocket', tokenFile=str(directory / (name + '.token')))
+        profiles[name] = profile
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chown(directory, account.pw_uid, account.pw_gid)
+    os.chmod(directory, 0o700)
+    for name, declared in selection['profiles'].items():
+        path = directory / (name + '.token')
+        identity.write(path, record[declared['token_field']], 0o600)
+        os.chown(path, account.pw_uid, account.pw_gid)
+    path = directory / 'connector.json'
+    identity.write(path, json.dumps({'version': 1, 'profiles': profiles}, indent=2), 0o600)
+    os.chown(path, account.pw_uid, account.pw_gid)
+    identity.run(['runuser', '-u', user, '--', 'test', '-x', str(connector)])
+
+
+def match_engine_environment(selection):
+    return ('[Service]\n'
+        + 'Environment=' + json.dumps('LAPLACE_CHESS_UCI_CONFIG=' + str(Path(selection['directory']) / 'connector.json')) + '\n'
+        + 'Environment=' + json.dumps('LAPLACE_CHESS_UCI_CONNECTOR=' + selection['connector']) + '\n')
+
+
+def configure_match_engines(c, source, engines):
+    private = Path(c['directory']) / 'agent'
+    if (os.geteuid() != 0 or c['host'] != socket.gethostname().lower().split('.')[0]
+            or Path(source).resolve() != (private / 'installation.json').resolve()):
+        raise ValueError('Run match-engine setup as root on the declared host using its retained installation.')
+    candidate = dict(c, match_engines=json.loads(Path(engines).read_text()))
+    enrollment = json.loads((private / 'enrollment.json').read_text())
+    token = identity.login(enrollment)
+    try:
+        record = identity.request(enrollment, c['record'], token)['data']['data']
+    finally:
+        identity.request(enrollment, 'auth/token/revoke-self', token, {})
+    render_match_engines(candidate, record)
+    selection = candidate['match_engines']
+    user = identity.run(['systemctl', 'show', c['api_service'], '--property=User', '--value']).strip()
+    for name in selection['profiles']:
+        identity.run(['runuser', '-u', user, '--', selection['connector'], 'verify', '--configuration',
+            str(Path(selection['directory']) / 'connector.json'), '--profile', name])
+    dropin = Path('/etc/systemd/system') / (c['api_service'] + '.d') / '96-chess-engines.conf'
+    previous = {p: p.read_bytes() if p.exists() else None for p in [Path(source), private / 'chess-host.py', dropin]}
+    try:
+        identity.write(source, json.dumps(candidate, indent=2))
+        identity.write(private / 'chess-host.py', Path(__file__).read_text(), 0o700)
+        dropin.parent.mkdir(exist_ok=True)
+        identity.write(dropin, match_engine_environment(selection), 0o644)
+        identity.run(['systemctl', 'daemon-reload'])
+        identity.run(['systemctl', 'restart', c['api_service']])
+        identity.run(['systemctl', 'is-active', '--quiet', c['api_service']])
+    except BaseException:
+        for path, content in previous.items():
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                identity.write(path, content, 0o644 if path == dropin else 0o700 if path.name == 'chess-host.py' else 0o600)
+        identity.run(['systemctl', 'daemon-reload'])
+        identity.run(['systemctl', 'restart', c['api_service']])
+        raise
+    print(json.dumps({'host': c['host'], 'profiles': sorted(selection['profiles']),
+        'credentials': 'installed-approle', 'configuration': str(Path(selection['directory']) / 'connector.json')}))
 
 
 def export_certificate(c, private):
@@ -248,6 +335,8 @@ def install(c, source, enrollment_path):
         dropin = units / (c['api_service'] + '.d')
         dropin.mkdir(exist_ok=True)
         identity.write(dropin / '95-lichess-control.conf', '[Service]\nEnvironment=LAPLACE_LICHESS_CONTROL_CLIENT=' + str(directory / 'api-client.json') + '\n', 0o644)
+        if c.get('match_engines'):
+            identity.write(dropin / '96-chess-engines.conf', match_engine_environment(c['match_engines']), 0o644)
         identity.run(['systemctl', 'daemon-reload'])
         identity.run(['systemctl', 'restart', c['api_service']])
     if c.get('nginx_server_file'):
@@ -386,13 +475,18 @@ def configure_routing(c, source, routing_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['enroll', 'install', 'render', 'export-certificate', 'configure-routing'])
+    parser.add_argument('operation', choices=['enroll', 'install', 'render', 'export-certificate', 'configure-routing', 'configure-match-engines'])
     parser.add_argument('--configuration', required=True)
     parser.add_argument('--enrollment')
     parser.add_argument('--routing')
+    parser.add_argument('--engines')
     args = parser.parse_args()
     c = config(args.configuration)
-    if args.operation == 'configure-routing':
+    if args.operation == 'configure-match-engines':
+        if not args.engines:
+            parser.error('Match-engine setup requires --engines <declaration.json>.')
+        configure_match_engines(c, args.configuration, args.engines)
+    elif args.operation == 'configure-routing':
         if not args.routing:
             parser.error('Routing setup requires --routing <declaration.json>.')
         configure_routing(c, args.configuration, args.routing)

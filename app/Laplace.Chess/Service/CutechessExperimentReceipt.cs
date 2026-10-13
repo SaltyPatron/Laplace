@@ -69,6 +69,8 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
             case ChessLabTerminalEvent { Engine: { } name } terminal when
                 terminal.Text.StartsWith("id ", StringComparison.Ordinal)
                 || terminal.Text.StartsWith("option name ", StringComparison.Ordinal)
+                || terminal.Text.StartsWith("info string " + ChessDatabaseIdentity.ProtocolPrefix, StringComparison.Ordinal)
+                || terminal.Text.StartsWith("info string laplace worker ", StringComparison.Ordinal)
                 || terminal.Text.StartsWith("setoption name ", StringComparison.Ordinal):
                 if (!UciConfiguration.TryGetValue(name, out var lines)) UciConfiguration[name] = lines = [];
                 var line = $"{terminal.Direction}: {terminal.Text}";

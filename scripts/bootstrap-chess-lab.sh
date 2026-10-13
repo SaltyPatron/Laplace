@@ -23,6 +23,7 @@ CC_BIN_DIR="$PREFIX/bin"
 CUTECHESS="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
 CUTECHESS_GUI="${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}"
 APP_DIR="${LAPLACE_APP_DIR:-$PREFIX/app}"
+export LAPLACE_INSTALL_PREFIX="$PREFIX" LAPLACE_APP_DIR="$APP_DIR"
 ENV_FILE="$APP_DIR/laplace-api.env"
 CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
 # API state is setup-owned by the serving identity; compiler scratch is not.
@@ -51,6 +52,22 @@ run_as_owner() {
   fi
 }
 
+ensure_packages() {
+  command -v dpkg-query >/dev/null || return 0
+  local package
+  local -a missing=()
+  for package in build-essential ninja-build pkg-config python3-venv libgl-dev libopengl-dev libxkbcommon-dev; do
+    [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" == 'install ok installed' ]] || missing+=("$package")
+  done
+  [[ ${#missing[@]} -gt 0 ]] || return 0
+  if [[ $(id -u) -ne 0 ]]; then
+    red "Chess host prerequisites missing: ${missing[*]}. Run scripts/bootstrap-chess-lab.sh through administrator setup."
+    return 1
+  fi
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
 resolve_stockfish() {
   if [[ -n "${LAPLACE_STOCKFISH:-}" ]]; then
     printf '%s\n' "$LAPLACE_STOCKFISH"
@@ -70,11 +87,12 @@ ensure_dirs() {
   say "dirs under $PREFIX"
   if [ "$(id -u)" -eq 0 ]; then
     install -d -m 2775 -g "$RUNNER_GROUP" \
-      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
+      "$PREFIX" "$EXTERNAL" "$LAPLACE_DEPS_BUILD" "${LAPLACE_DEPS:-$PREFIX/tools}" \
+      "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
       "$PREFIX/share" "$PREFIX/share/applications" "$PREFIX/share/laplace"
     install -d -m 2770 -g "$RUNNER_GROUP" "$PREFIX/secrets"
   else
-    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
+    mkdir -p "$LAPLACE_DEPS_BUILD" "${LAPLACE_DEPS:-$PREFIX/tools}" "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
       "$PREFIX/share/applications" "$PREFIX/share/laplace"
     chmod 2770 "$PREFIX/secrets" 2>/dev/null || true
   fi
@@ -89,10 +107,14 @@ build_cutechess() {
     --work "${LAPLACE_WORK_ROOT}/cmake" --ensure)/cmake
   src="$(run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --source-dir "$EXTERNAL/cutechess")"
   qt="$(run_as_owner python3 "$SCRIPT_DIR/provision-chess-qt.py" --root "$QT_ROOT" --work "$WORK")"
-  # Reset only generated configure metadata through the shared source owner.
-  # This also works with CMake launchers that do not recognize --fresh, while
-  # preserving build outputs/receipts and admitting a changed source path or Qt.
-  run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" --reset-build-cache "$CC_BUILD"
+  # CMakeFiles also contains compiled objects. Preserve them on an unchanged
+  # installation; changing the selected source or Qt requires a fresh configure.
+  if ! { [[ -f "$CC_BUILD/CMakeCache.txt" ]] &&
+    grep -Fxq -- "CMAKE_HOME_DIRECTORY:INTERNAL=$src" "$CC_BUILD/CMakeCache.txt" &&
+    grep -Fxq -- 'CMAKE_GENERATOR:INTERNAL=Ninja' "$CC_BUILD/CMakeCache.txt" &&
+    grep -Fxq -- "Qt6_DIR:PATH=$qt/lib/cmake/Qt6" "$CC_BUILD/CMakeCache.txt"; }; then
+    run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" --reset-build-cache "$CC_BUILD"
+  fi
   run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" -S "$src" -B "$CC_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
@@ -131,7 +153,8 @@ build_zstd() {
   local library
   library="$(run_as_owner python3 "$SCRIPT_DIR/install-zstd.py" \
     --source-dir "${LAPLACE_ZSTD_SOURCE:-$EXTERNAL/zstd}" \
-    --build-dir "${LAPLACE_ZSTD_BUILD:-$LAPLACE_DEPS_BUILD/zstd}")"
+    --build-dir "${LAPLACE_ZSTD_BUILD:-$LAPLACE_DEPS_BUILD/zstd}" \
+    --install-directory "${LAPLACE_DEPS:-$PREFIX/tools}/zstd")"
   if [[ -z "${LAPLACE_ZSTD_LIBRARY:-}" ]]; then export LAPLACE_ZSTD_LIBRARY="$library"; fi
 }
 
@@ -189,8 +212,8 @@ write_api_env() {
   } >> "$ENV_FILE"
 
   if [ "$(id -u)" -eq 0 ]; then
-    chgrp "$RUNNER_GROUP" "$ENV_FILE"
-    chmod 0640 "$ENV_FILE"
+    # Existing runtime readers are installed separately (API, UCI and CLI).
+    # Tool maintenance must retain that file's ownership, mode and ACLs.
     install -d -m 0700 -o "$API_USER" -g "$API_GROUP" "$CHESS_LAB_DIR"
   elif [[ "$(id -un)" == "$API_USER" ]]; then
     mkdir -p "$CHESS_LAB_DIR"
@@ -253,7 +276,11 @@ main() {
         -e "$CC_BUILD/laplace-cutechess-gui-build.json" || -n "${LAPLACE_CUTECHESS_GUI:-}" ]]; then
     CUTECHESS_GUI_BUILD=1
   fi
+  ensure_packages
   ensure_dirs
+  # Setup and ordinary tool maintenance share the configured build directory.
+  exec 9>"$LAPLACE_DEPS_BUILD/.chess-tools.lock"
+  flock -x 9
   build_cutechess
   build_zstd
   run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py"

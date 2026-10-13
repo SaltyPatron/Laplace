@@ -9,8 +9,9 @@ import subprocess
 import sys
 
 
-def run(arguments):
-    result = subprocess.run([str(arg) for arg in arguments], stdout=sys.stderr, stderr=sys.stderr, timeout=1800)
+def run(arguments, cwd=None):
+    result = subprocess.run([str(arg) for arg in arguments], cwd=cwd,
+                            stdout=sys.stderr, stderr=sys.stderr, timeout=1800)
     if result.returncode:
         raise RuntimeError(f"{arguments[0]} exited with code {result.returncode}")
 
@@ -20,6 +21,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True, help='existing shared Qt SDK installation root')
     parser.add_argument('--work', type=Path, required=True, help='build volume for Python/tool scratch')
     args = parser.parse_args()
+    args.root, args.work = args.root.resolve(), args.work.resolve()
     lock = json.loads((Path(__file__).resolve().parents[1] / 'deploy/cutechess-release.json').read_text())
     try:
         system = platform.system()
@@ -36,15 +38,16 @@ def main():
                 os.environ[name] = str(args.work.resolve())
             venv = args.work / f'aqt-{lock["aqtinstall_version"]}'
             python = venv / ('Scripts/python.exe' if windows else 'bin/python')
-            if not python.is_file():
-                run([sys.executable, '-m', 'venv', venv])
+            # Rerunning venv also repairs a prior attempt interrupted before pip
+            # was installed (for example, before the host had python3-venv).
+            run([sys.executable, '-m', 'venv', venv])
             # aqtinstall_source, when the lock names one: a pinned commit of aqtinstall itself, for a Qt the released
             # aqtinstall cannot fetch (Qt 6.11 moved its Windows packages into per-architecture folders; 3.3.0 looks in the old one)
             requirement = f'aqtinstall @ {lock["aqtinstall_source"]}' if lock.get('aqtinstall_source') else f'aqtinstall=={lock["aqtinstall_version"]}'
             run([python, '-m', 'pip', 'install', '--disable-pip-version-check', requirement])
             run([python, '-m', 'aqt', 'install-qt', 'windows' if windows else 'linux', 'desktop',
                  lock['qt_version'], 'win64_msvc2022_64' if windows else 'linux_gcc_64',
-                 '-O', args.root, '-m', *lock['qt_modules']])
+                 '-O', args.root.resolve(), '-m', *lock['qt_modules']], cwd=args.work)
         if not all((sdk / f'lib/cmake/{module}/{module}Config.cmake').is_file() for module in required):
             raise RuntimeError(f'Qt {lock["qt_version"]} SDK incomplete: {sdk}')
         # qmake loads the SDK's real Qt runtime, detecting incompatible libc or
