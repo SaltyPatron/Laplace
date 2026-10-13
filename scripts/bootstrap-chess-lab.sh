@@ -106,10 +106,14 @@ build_cutechess() {
     --work "${LAPLACE_WORK_ROOT}/cmake" --ensure)/cmake
   src="$(run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --source-dir "$EXTERNAL/cutechess")"
   qt="$(run_as_owner python3 "$SCRIPT_DIR/provision-chess-qt.py" --root "$QT_ROOT" --work "$WORK")"
-  # Reset only generated configure metadata through the shared source owner.
-  # This also works with CMake launchers that do not recognize --fresh, while
-  # preserving build outputs/receipts and admitting a changed source path or Qt.
-  run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" --reset-build-cache "$CC_BUILD"
+  # CMakeFiles also contains compiled objects. Preserve them on an unchanged
+  # installation; changing the selected source or Qt requires a fresh configure.
+  if ! { [[ -f "$CC_BUILD/CMakeCache.txt" ]] &&
+    grep -Fxq -- "CMAKE_HOME_DIRECTORY:INTERNAL=$src" "$CC_BUILD/CMakeCache.txt" &&
+    grep -Fxq -- 'CMAKE_GENERATOR:INTERNAL=Ninja' "$CC_BUILD/CMakeCache.txt" &&
+    grep -Fxq -- "Qt6_DIR:PATH=$qt/lib/cmake/Qt6" "$CC_BUILD/CMakeCache.txt"; }; then
+    run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" --reset-build-cache "$CC_BUILD"
+  fi
   run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" -S "$src" -B "$CC_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
@@ -272,6 +276,9 @@ main() {
   fi
   ensure_packages
   ensure_dirs
+  # Setup and ordinary tool maintenance share the configured build directory.
+  exec 9>"$LAPLACE_DEPS_BUILD/.chess-tools.lock"
+  flock -x 9
   build_cutechess
   build_zstd
   run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py"
