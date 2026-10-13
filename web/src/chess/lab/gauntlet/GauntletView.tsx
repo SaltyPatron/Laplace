@@ -309,7 +309,7 @@ export function GauntletView() {
           return (
             <Tooltip key={r.key}>
               <TooltipTrigger asChild>
-                <Chip variant={connection || probe?.found ? 'engineOk' : 'engineMissing'}>
+                <Chip variant={connection ? undefined : probe?.found ? 'engineOk' : 'engineMissing'}>
                   {r.label} {connection ? '· ' + connection.host : probe?.found ? '✓' : '✗'}
                 </Chip>
               </TooltipTrigger>
@@ -448,7 +448,7 @@ export function GauntletView() {
                 onChange={(e) => setSetup((s) => ({ ...s, stockfishNumaPolicy: e.target.value }))} />
             </Field>
             <Field label="Stockfish tablebase paths" help="Optional Syzygy directories on the server. Use colons on Linux or semicolons on Windows; include smaller-piece tables.">
-              <Input value={setup.stockfishSyzygyPath} placeholder="Engine default"
+              <Input value={setup.stockfishSyzygyPath} placeholder={setup.stockfishProfile ? 'Configured on the worker' : 'Engine default'} disabled={!!setup.stockfishProfile}
                 aria-label="Stockfish tablebase paths"
                 onChange={(e) => setSetup((s) => ({ ...s, stockfishSyzygyPath: e.target.value }))} />
             </Field>
@@ -481,7 +481,7 @@ export function GauntletView() {
           </div>
 
           <div className={styles.actions}>
-            <Button onClick={() => void start()} disabled={busy || running || missing.length > 0} loading={busy}>
+            <Button onClick={() => void start()} disabled={busy || running || missing.length > 0 || !preview?.ready} loading={busy}>
               {running ? 'Running…' : 'Start gauntlet'}
             </Button>
             <Button variant="ghost" onClick={() => void stop()} disabled={!running}>Stop</Button>
