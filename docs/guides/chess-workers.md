@@ -85,5 +85,26 @@ The retained experiment includes the selected profiles, conductor arguments and
 engine-reported identities. The connector executable's hash identifies transport;
 it is not the remote engine binary's hash.
 
+The selected API host also needs its match conductors. Linux administrator setup
+uses `scripts/bootstrap-chess-lab.sh`; subsequent tool maintenance is the existing
+`chess-lab` product operation. Declare that host's `LAPLACE_WORK`, `LAPLACE_BUILD`,
+`LAPLACE_EXTERNAL` and `LAPLACE_DEPS` before installation. No producer build path is
+a runtime dependency on another machine. This installs the conductor/tool dependencies
+and verifies Stockfish's embedded NNUE through an actual search.
+
+To exercise the installed API and its declared workers, run as the installed deployer:
+
+```sh
+python3 scripts/run-authenticated-verification.py --base https://your-origin -- \
+  python3 scripts/verify-chess-workers.py --base https://your-origin \
+  --profile installed-worker --stockfish-profile installed-stockfish \
+  --output /configured/work/chess-workers
+```
+
+The wrapper issues and revokes a temporary workload API key. The verification runs
+two real recorded games per worker/conductor, checks requester identity and exact
+game/move readback, and cancels a running remote match. Omit `--stockfish-profile`
+to use local Stockfish; repeat `--profile` to exercise several installed workers.
+
 Conductor argument formats follow the upstream [Fastchess manual](https://github.com/Disservin/fastchess/blob/master/man.md)
 and [Cute Chess CLI reference](https://github.com/cutechess/cutechess/blob/master/projects/cli/res/doc/help.txt).

@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True, help='existing shared Qt SDK installation root')
     parser.add_argument('--work', type=Path, required=True, help='build volume for Python/tool scratch')
     args = parser.parse_args()
+    args.root, args.work = args.root.resolve(), args.work.resolve()
     lock = json.loads((Path(__file__).resolve().parents[1] / 'deploy/cutechess-release.json').read_text())
     try:
         system = platform.system()
