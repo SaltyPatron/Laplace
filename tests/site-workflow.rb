@@ -84,16 +84,21 @@ class SiteWorkflow < Minitest::Test
     end
   end
 
-  def test_legacy_full_qualification_stays_explicit_until_ported
+  def test_full_qualification_stays_explicit_and_uses_the_host_lifecycle
     audit = YAML.load_file(File.expand_path('../.github/workflows/full-qualification.yml', __dir__))
     triggers = audit['on'] || audit[true]
     assert triggers.key?('workflow_dispatch')
     refute triggers.key?('schedule')
     settings = audit.fetch('jobs').fetch('qualify').fetch('with')
-    assert_equal 'release-qualification', settings.fetch('stage')
-    assert_equal 'all', settings.fetch('build_components')
-    assert_equal 'all', settings.fetch('dev_suites')
-    assert_equal false, settings.fetch('skip_if_superseded')
+    assert_equal 'qualification', settings.fetch('operation')
+    internal = YAML.load_file(File.expand_path('../.github/workflows/product-stage.yml', __dir__))
+    job = internal.fetch('jobs').fetch('stage')
+    assert_equal @jobs.fetch('deliver').fetch('concurrency'), job.fetch('concurrency')
+    assert_equal ['self-hosted', 'laplace', 'Laplace', 'staging'], job.fetch('runs-on')
+    refute job.fetch('env').keys.any? { |key| key.match?(/SECRET|TOKEN|API_KEY/) }
+    step = job.fetch('steps').find { |s| s.fetch('run', '').include?('site.sh') }
+    assert_includes step.fetch('run'), 'bash deploy/linux/site.sh "$OPERATION"'
+    assert_includes step.fetch('run'), 'set -euo pipefail'
   end
 
   def test_benchmark_targets_the_selected_host

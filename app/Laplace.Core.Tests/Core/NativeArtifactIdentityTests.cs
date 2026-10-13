@@ -57,8 +57,8 @@ public sealed class NativeArtifactIdentityTests
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .Single(a => a.Key == "LaplaceRepoRoot").Value!;
         string engineBuild = Environment.GetEnvironmentVariable("LAPLACE_ENGINE_BUILD") is { Length: > 0 } e
-            ? e : Path.Combine(repo, "build");
-        string built = Path.Combine(engineBuild, "engine", "core", Lib);
+            ? e : Path.Combine(repo, "build", "engine");
+        string built = Path.Combine(engineBuild, "core", Lib);
         Assert.True(File.Exists(built), $"missing native build artifact: {built}");
 
         string loadedSha = Sha(loaded!), builtSha = Sha(built);

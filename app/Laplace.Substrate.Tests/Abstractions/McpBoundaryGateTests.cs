@@ -60,8 +60,11 @@ public sealed class McpBoundaryGateTests
         var bootstrap = Read("deploy", "linux", "bootstrap-host.sh");
         var contract = Read("deploy", "linux", "app-dir-contract.sh");
         var deploy = Read("deploy", "linux", "deploy.sh");
-
-        Assert.Contains("$APP_DIR/mcp-runtime", bootstrap);
+        var host = Read("deploy", "linux", "site-host.sh");
+        var site = Read("deploy", "linux", "site.sh");
+        Assert.Contains("exec bash \"$HERE/site-host.sh\"", bootstrap);
+        Assert.Contains("\"$PREFIX/app/mcp-runtime\"", host);
+        Assert.Contains("$stage/app/mcp-runtime", site);
         Assert.Contains("$app_dir/mcp-runtime", contract);
         Assert.DoesNotContain("mkdir -p \"$APP_DIR/$MCP_RUNTIME_DIR\"", deploy);
         Assert.Contains("laplace_reconcile_app_dir_contract", contract);

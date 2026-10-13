@@ -34,10 +34,14 @@ class LegacyDeliveryContracts < Minitest::Test
       File.chmod(0755, File.join(dir, 'python3'))
       filter = 'LaplaceDynamicsProcrustes\\.RecoversScale'
       env = {'ROOT'=>ROOT, 'PATH'=>"#{dir}:#{ENV.fetch('PATH')}", 'CALL_LOG'=>File.join(dir,'args'), 'CTEST_PARALLEL_LEVEL'=>'1', 'LAPLACE_NATIVE_TEST_FILTER'=>filter}
+      env['LAPLACE_BUILD_DIRECTORY'] = File.join(dir, 'configured build')
+      env['LAPLACE_WORK_ROOT'] = File.join(dir, 'configured work')
       out, status = Open3.capture2e(env, 'bash', '-c', "set -euo pipefail\n#{functions.join("\n")}\nrun_native_dev")
       assert status.success?, out
       args = File.binread(File.join(dir,'args')).split("\0")
       assert_equal filter, args.fetch(args.index('-R') + 1)
+      assert_equal env['LAPLACE_BUILD_DIRECTORY'], args.fetch(args.index('--test-dir') + 1)
+      assert_includes args, '--no-tests=error'
       assert_equal 'regress', args.fetch(args.index('-LE') + 1)
       refute_includes args, 'regress_laplace_substrate'
     end

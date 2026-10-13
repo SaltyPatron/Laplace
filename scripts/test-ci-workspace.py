@@ -19,8 +19,12 @@ def body(job: str, workflow: str = "laplace.yml") -> str:
     text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
     section = text.split("\n  " + job + ":\n", 1)[1]
     raw = section.split("        run: |\n", 1)[1]
-    return "\n".join(line[10:] for line in raw.splitlines()
-                     if line.startswith("          ")) + "\n"
+    lines = []
+    for line in raw.splitlines():
+        if line.strip() and not line.startswith("          "):
+            break
+        lines.append(line[10:])
+    return "\n".join(lines) + "\n"
 
 
 class WorkspaceFixture(unittest.TestCase):
@@ -112,158 +116,42 @@ class WorkspaceFixture(unittest.TestCase):
 
 
 class WorkspaceReservation(WorkspaceFixture):
-    def candidate(self, sha=None):
-        return self.work / "product-worktrees" / (sha or self.target)
+    def prepare_seed(self):
+        path = self.seed / "deploy/linux/site.sh"
+        path.parent.mkdir(parents=True)
+        path.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$TEST_EVENTS"\nexit "${TEST_FAIL_RC:-0}"\n')
 
-    def test_mainline_uses_exact_revision_worktree_and_waits_only_for_that_candidate(self):
-        lock_path = self.work / f"product-{self.target}.lock"
-        lock_path.touch()
-        with lock_path.open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1")
-            process = subprocess.Popen(
-                ["bash", "-c", 'printf "started\\n";\n' + body("mainline")],
-                cwd=self.workspace, env=environment, text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            try:
-                self.assertEqual(process.stdout.readline(), "started\n")
-                candidate = self.candidate()
-                time.sleep(0.25)
-                self.assertIsNone(process.poll())
-                self.assertFalse(candidate.exists(),
-                                 "candidate must not be mutated before its revision lock is owned")
-                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+    def execute_qualification(self, operation="qualification", fail=0, exact=True):
+        self.git(self.workspace, "fetch", "origin", self.target)
+        self.git(self.workspace, "checkout", self.target)
+        return subprocess.run(["bash", "-c", body("stage", "product-stage.yml")],
+            cwd=self.workspace, env=dict(self.env, OPERATION=operation,
+                TARGET_SHA=self.target if exact else self.old,
+                RUNNER_TEMP=str(self.directory / "runner-temp"), TEST_FAIL_RC=str(fail)),
+            capture_output=True, text=True, timeout=15)
+
+    def test_selected_source_runs_in_normal_workspace_without_new_worktrees(self):
+        result = self.execute_qualification()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events.read_text().strip(), "qualification")
+        self.assertTrue(self.marker.exists())
+        self.assertFalse((self.work / "product-worktrees").exists())
+
+    def test_competitive_uses_one_lifecycle_invocation(self):
+        result = self.execute_qualification("competitive")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events.read_text().splitlines(), ["competitive"])
+
+    def test_failure_survives_log_capture(self):
+        result = self.execute_qualification(fail=23)
+        self.assertEqual(result.returncode, 23, result.stderr)
+
+    def test_wrong_revision_and_unknown_operation_cannot_execute(self):
+        for kwargs in ({"exact": False}, {"operation": "reset"}):
+            with self.subTest(**kwargs):
+                result = self.execute_qualification(**kwargs)
+                self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(self.events.exists())
-                self.assertEqual(self.marker.read_text(), "existing qualified build\n")
-                fcntl.flock(lock, fcntl.LOCK_UN)
-                stdout, stderr = process.communicate(timeout=15)
-                self.assertEqual(process.returncode, 0, stdout + stderr)
-                self.assertEqual(self.git(candidate, "rev-parse", "HEAD").strip(), self.target)
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.communicate(timeout=5)
-        self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
-
-    def test_inactive_superseded_candidate_is_reclaimed_before_checkout(self):
-        stale = self.candidate(self.old)
-        stale.parent.mkdir(parents=True, exist_ok=True)
-        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
-        (stale / "build-junk.bin").write_bytes(b"x" * 4096)
-        (self.work / f"product-{self.old}.lock").touch()
-        # Candidates touched inside the two-hour handoff window are preserved.
-        handed_off = time.time() - 3 * 3600
-        os.utime(stale, (handed_off, handed_off))
-
-        result = self.execute("operator")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertFalse(stale.exists())
-        self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
-
-    def test_recent_superseded_candidate_is_preserved_for_handoff(self):
-        stale = self.candidate(self.old)
-        stale.parent.mkdir(parents=True, exist_ok=True)
-        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
-        (self.work / f"product-{self.old}.lock").touch()
-
-        result = self.execute("operator")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(stale.exists())
-        self.assertIn("preserving recent candidate handoff", result.stdout)
-
-    def test_stale_cleanup_does_not_create_missing_revision_lock(self):
-        stale = self.candidate(self.old)
-        stale.parent.mkdir(parents=True, exist_ok=True)
-        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
-
-        result = self.execute("operator")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(stale.exists())
-        self.assertFalse((self.work / f"product-{self.old}.lock").exists())
-
-    def test_active_superseded_candidate_is_never_reclaimed(self):
-        stale = self.candidate(self.old)
-        stale.parent.mkdir(parents=True, exist_ok=True)
-        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
-        stale_lock = self.work / f"product-{self.old}.lock"
-        stale_lock.touch()
-
-        with stale_lock.open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            result = self.execute("operator")
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue(stale.exists())
-            self.assertEqual(self.git(stale, "rev-parse", "HEAD").strip(), self.old)
-
-    def test_superseded_mainline_is_auditable_noop(self):
-        environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1", TARGET_SHA=self.old)
-        result = subprocess.run(
-            ["bash", "-c", body("mainline")],
-            cwd=self.workspace, env=environment,
-            text=True, capture_output=True, timeout=15,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("superseded by", result.stdout)
-        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
-        self.assertFalse(self.candidate(self.old).exists())
-        self.assertEqual(self.marker.read_text(), "existing qualified build\n")
-        self.assertFalse(self.events.exists())
-
-    def test_product_ignored_main_advance_does_not_supersede_candidate(self):
-        policy = self.seed / ".github" / "workflows"
-        policy.mkdir(parents=True)
-        (policy / "policy.yml").write_text("name: Policy only\n", encoding="utf-8")
-        self.git(self.seed, "add", ".github/workflows/policy.yml")
-        self.git(self.seed, "commit", "-m", "policy-only successor")
-        self.git(self.seed, "push", "origin", "HEAD:refs/heads/main")
-
-        result = self.execute("mainline")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("product-equivalent", result.stdout)
-        self.assertNotIn("no product stage executed", result.stdout)
-        self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
-        self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
-
-    def test_operator_uses_requested_stage_in_isolated_candidate(self):
-        result = self.execute("operator")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        candidate = self.candidate()
-        self.assertEqual(self.git(candidate, "rev-parse", "HEAD").strip(), self.target)
-        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
-        self.assertEqual(self.marker.read_text(), "existing qualified build\n")
-        self.assertEqual(self.events.read_text().splitlines(), ["environment", "check"])
-
-    def test_nonrepository_control_workspace_is_not_destroyed(self):
-        shutil.rmtree(self.workspace)
-        self.workspace.mkdir()
-        path = self.workspace / "existing-work.txt"
-        path.write_text("existing work\n", encoding="utf-8")
-        result = self.execute("mainline")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(path.read_text(), "existing work\n")
-        self.assertFalse((self.workspace / ".git").exists())
-        self.assertFalse(self.events.exists())
-
-    def test_tracked_local_control_work_is_not_destroyed(self):
-        path = self.workspace / "source.txt"
-        path.write_text("uncommitted work\n", encoding="utf-8")
-        result = self.execute("mainline")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(path.read_text(), "uncommitted work\n")
-        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
-        self.assertFalse(self.events.exists())
-
-    def test_untracked_control_work_is_preserved_and_cannot_collide_with_candidate_checkout(self):
-        path = self.workspace / "new-source.txt"
-        path.write_text("untracked work\n", encoding="utf-8")
-        result = self.execute("operator")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(path.read_text(), "untracked work\n")
-        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
-        self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
-        self.assertEqual(self.events.read_text().splitlines(), ["environment", "check"])
-
 
 class DatabaseWorkspaceReservation(WorkspaceFixture):
     def prepare_seed(self):

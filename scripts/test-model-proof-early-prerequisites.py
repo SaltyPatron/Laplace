@@ -69,7 +69,7 @@ class EarlyModelPrerequisites(unittest.TestCase):
     def run_proof(self, **changes):
         self.events.unlink(missing_ok=True)
         result = subprocess.run(
-            ["bash", str(self.repo / "scripts" / "model-synthesize-ci.sh")],
+            ["bash", str(self.repo / "scripts" / "model-synthesize-ci.sh"), "--preflight"],
             env=dict(self.env, **changes), text=True, capture_output=True, timeout=30)
         events = self.events.read_text().splitlines() if self.events.exists() else []
         lines = [line[len("MODEL_PROOF_PREFLIGHT "):] for line in result.stdout.splitlines()
@@ -96,8 +96,8 @@ class EarlyModelPrerequisites(unittest.TestCase):
 
     def test_success_is_preliminary_and_uses_exact_selected_models_and_runtime(self):
         result, events, report = self.run_proof()
-        self.assertEqual(events, ["LLAMA_HELP", "DB_CHECK"])
-        self.assertIn("laplace DB unreachable", result.stderr)
+        self.assertEqual(events, ["LLAMA_HELP"])
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(report["preliminary_prerequisites_passed"])
         self.assertFalse(report["full_model_proof_performed"])
         self.assertEqual(report["exact_selected_models"], [str(self.first), str(self.second)])
@@ -130,10 +130,10 @@ class EarlyModelPrerequisites(unittest.TestCase):
         for disabled in ("0", "other"):
             with self.subTest(value=disabled):
                 result, events, report = self.run_proof(LAPLACE_MODEL_PROOF_CODE_CORPORA=disabled)
-                self.assertEqual(events, ["LLAMA_HELP", "DB_CHECK"])
+                self.assertEqual(events, ["LLAMA_HELP"])
                 self.assertTrue(report["preliminary_prerequisites_passed"])
                 self.assertEqual(report["corpora"], [])
-                self.assertIn("laplace DB unreachable", result.stderr)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_malformed_success_report_cannot_supply_a_runtime(self):
         probe = self.repo / "scripts" / "check-model-proof-prerequisites.py"

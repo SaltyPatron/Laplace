@@ -30,12 +30,14 @@ public sealed class OpeningSeedPathsTests
         var priorData = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
         var priorCorpus = Environment.GetEnvironmentVariable("LAPLACE_DATA");
         var priorOpenings = Environment.GetEnvironmentVariable("LAPLACE_CHESS_OPENINGS");
+        var priorPrefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
         string root = Path.Combine(Path.GetTempPath(), $"opening-root-{Guid.NewGuid():N}");
         string refreshed = Path.Combine(root, "Games", "Chess", "lichess-openings");
         Directory.CreateDirectory(refreshed);
         File.WriteAllText(Path.Combine(refreshed, "a.tsv"), "eco\tname\tpgn\n");
         try
         {
+            Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", root);
             Environment.SetEnvironmentVariable("LAPLACE_DATA", null);
             Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", root);
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", null);
@@ -52,6 +54,7 @@ public sealed class OpeningSeedPathsTests
             Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", priorData);
             Environment.SetEnvironmentVariable("LAPLACE_DATA", priorCorpus);
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", priorOpenings);
+            Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", priorPrefix);
             Directory.Delete(root, recursive: true);
         }
     }

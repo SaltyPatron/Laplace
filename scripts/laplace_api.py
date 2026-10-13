@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from urllib.error import HTTPError, URLError
@@ -37,6 +38,8 @@ def _json_request(
         "Content-Type": "application/json",
         "X-Laplace-Tenant": tenant,
     }
+    if api_key := os.environ.get("LAPLACE_API_KEY", "").strip():
+        request_headers["Authorization"] = "Bearer " + api_key
     if session:
         request_headers["X-Laplace-Session"] = session
 

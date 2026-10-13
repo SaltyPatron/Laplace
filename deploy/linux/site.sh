@@ -3,9 +3,8 @@
 # PostgreSQL extensions built against the Operations cluster, installed under $LAPLACE_INSTALL_PREFIX, the database
 # laplace-mono made and migrated, the API + SPA published to $LAPLACE_APP_DIR and restarted, and read back.
 #
-# This is the counterpart of scripts\win\publish-deploy.cmd for Linux on the Operations layout. scripts/pipeline.sh
-# and deploy/linux/deploy.sh stay as they are for the earlier layout (a /build volume, its own cluster under
-# /opt/laplace/pgsql-18, laplace_admin over /var/run/postgresql, sudo -n); nothing here needs root or sudo.
+# Installation, publication, maintenance and qualification share the declared
+# PostgreSQL installation, storage roots and setup-owned restart triggers.
 #
 #   deploy/linux/site.sh                  every phase below, in order
 #   deploy/linux/site.sh build install    one phase, or several
@@ -15,6 +14,8 @@
 # Phases: externals build install database extensions migrate app publish restart smoke   (and: configure migrate_app reset seed serve)
 #         bundle: what the hosting host receives, after app; receive: on the hosting host, before publish
 #         reconcile: drain installed highway work; chess-lab: update the declared external chess tools
+#         qualification: build all components and run development suites without changing installed services
+#         competitive: qualification, installation, database suites, model synthesis and authenticated live suites
 #
 # The machine is set up once by root with deploy/linux/site-host.sh (directories, the unit, nginx, the restart
 # trigger); the runner that runs this is Laplace-Operations' agents.sh's (labels laplace,Laplace). Every value below is
@@ -162,7 +163,7 @@ phase_build() {
   local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings}"
   cmake -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" \
-    -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING=OFF \
+    -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING="${LAPLACE_SITE_BUILD_TESTING:-OFF}" \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
@@ -659,6 +660,7 @@ phase_migrate_app() {
   LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" dotnet "$app/migrations/Laplace.Migrations.dll" app-up
 }
 
+source "$ROOT/deploy/linux/qualification.sh"
 phases=("$@"); [[ ${#phases[@]} -gt 0 ]] || phases=(externals build install database extensions migrate app publish restart smoke)
 lock_needed=; lock_mode=shared
 for p in "${phases[@]}"; do
@@ -670,7 +672,7 @@ done
 for p in "${phases[@]}"; do
   case "$p" in
     chess-lab) phase_chess_lab ;;
-    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|reconcile|seed|serve) "phase_$p" ;;
+    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|reconcile|seed|serve|qualification|competitive) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done

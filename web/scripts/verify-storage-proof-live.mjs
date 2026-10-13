@@ -5,11 +5,13 @@ import { resolve } from 'node:path';
 const apiBase = (process.env.LAPLACE_API_BASE ?? 'http://127.0.0.1:5187').replace(/\/$/, '');
 const uiBase = (process.env.LAPLACE_UI_URL ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
 const outDir = resolve(process.env.LAPLACE_STORAGE_PROOF_EVIDENCE_DIR ?? '../build/eval-proof');
+const apiKey = process.env.LAPLACE_API_KEY;
+if (!apiKey) throw new Error('LAPLACE_API_KEY is required for installed storage proof');
 await mkdir(outDir, { recursive: true });
 
 const proofResponse = await fetch(`${apiBase}/v1/explore/storage-proof`, {
   method: 'POST',
-  headers: { 'content-type': 'application/json', 'x-laplace-tenant': 'ci' },
+  headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
   body: JSON.stringify({ text: 'aa' }),
 });
 if (!proofResponse.ok) throw new Error(`storage-proof endpoint returned ${proofResponse.status}`);
@@ -30,6 +32,13 @@ if (!root.packed_vertices?.length || !root.realized_vertices?.length) {
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+const permittedOrigins = new Set([new URL(apiBase).origin, new URL(uiBase).origin]);
+await page.route('**/*', async (route) => {
+  const request = route.request();
+  const headers = request.headers();
+  if (permittedOrigins.has(new URL(request.url()).origin)) headers.authorization = `Bearer ${apiKey}`;
+  await route.continue({ headers });
+});
 const consoleErrors = [];
 page.on('console', (message) => {
   if (message.type() === 'error') consoleErrors.push(message.text());

@@ -13,6 +13,8 @@ run_browser_dev() {
     printf '%s\n' "$lock_hash" > "$stamp"
   fi
   (cd web && npm run typecheck)
+  export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$LAPLACE_WORK_ROOT/playwright}"
+  (cd web && npx --no-install playwright install chromium)
   selected="${LAPLACE_BROWSER_TEST_SUITES:-all}"
   [[ "$selected" != all ]] || selected="read-resource,workspace-ui,data-ui,chess-ui"
   IFS=',' read -ra suites <<< "$selected"

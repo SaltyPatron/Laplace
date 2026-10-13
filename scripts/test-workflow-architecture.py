@@ -94,59 +94,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("[actions-evidence-archive]", text)
         self.assertIn("cancel-in-progress:", text)
 
-    def test_superseded_push_is_rejected_only_for_product_relevant_changes(self):
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
-        stage = reusable.split("  stage:\n", 1)[1]
-
-        self.assertIn("runs-on: [self-hosted, laplace, staging]", preflight)
-        self.assertIn("git ls-remote --heads", preflight)
-        self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"', preflight)
-        self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"', preflight)
-        self.assertIn('git -C "$probe_repo" show "$TARGET_SHA:scripts/ci-product-freshness.py"', preflight)
-        self.assertIn('git -C "$probe_repo" show "$TARGET_SHA:scripts/ci_product_scope.py"', preflight)
-        self.assertIn('python3 "$freshness_tool" --root "$probe_repo" --base "$TARGET_SHA" --head "$latest_main"', preflight)
-        self.assertIn("product-equivalent", preflight)
-        self.assertIn("product-relevant content changed", preflight)
-        self.assertIn("execute=false", preflight)
-        self.assertNotIn("runs-on: ubuntu-24.04", preflight)
-        self.assertNotIn("host-resource.lock", preflight)
-        self.assertIn("needs: preflight", stage)
-        self.assertIn("if: needs.preflight.outputs.execute == 'true'", stage)
-        self.assertIn("runs-on: [self-hosted, laplace, staging]", stage)
-
-        fetch = stage.index('git fetch --no-tags --depth=2 origin "$TARGET_SHA"')
-        resolve = stage.index("git ls-remote --heads origin refs/heads/main")
-        tree_probe = stage.index('git fetch --no-tags --depth=1 origin "$latest_main"')
-        worktree = stage.index('git worktree add --detach "$candidate_workspace" "$TARGET_SHA"')
-        candidate_lock = stage.index('product-$TARGET_SHA.lock')
-        self.assertLess(fetch, resolve)
-        self.assertLess(resolve, tree_probe)
-        self.assertLess(tree_probe, candidate_lock)
-        self.assertIn('git show "$TARGET_SHA:scripts/ci-product-freshness.py"', stage)
-        self.assertIn('git show "$TARGET_SHA:scripts/ci_product_scope.py"', stage)
-        self.assertIn('python3 "$freshness_tool" --root "$control_workspace" --base "$TARGET_SHA" --head "$latest_main"', stage)
-        self.assertIn("product-equivalent", stage)
-        self.assertIn("product-changing main", stage)
-        self.assertLess(candidate_lock, worktree)
-        self.assertIn("product-worktrees", stage)
-        self.assertIn("git-metadata.lock", stage)
-        self.assertIn("host-resource.lock", stage)
-        stale_lock = stage.index('stale_lock="$work_root/product-$stale_sha.lock"')
-        self.assertLess(stale_lock, candidate_lock)
-        self.assertIn('[[ -e "$stale_lock" ]] || continue', stage)
-        self.assertIn('exec {stale_fd}<>"$stale_lock"', stage)
-        self.assertIn('flock -n "$stale_fd"', stage)
-        self.assertIn('stale_identity="$(printf', stage)
-        self.assertIn('stale_build="$LAPLACE_BUILD/laplace-mono/worktrees/$stale_identity"', stage)
-        self.assertIn('[[ -z "$stale_build" ]] || rm -rf "$stale_build"', stage)
-        self.assertIn('for stale_build in "${build_candidates[@]}"', stage)
-        self.assertIn("CMAKE_HOME_DIRECTORY:INTERNAL=", stage)
-        self.assertIn('[[ ! -d "$stale_source" ]] || continue', stage)
-        self.assertIn('status --porcelain --untracked-files=no', stage)
-        self.assertNotIn('exec {stale_fd}>"$work_root/product-$stale_sha.lock"', stage)
-        self.assertNotIn("build-resource.lock", stage)
-
     def test_ci_policy_scripts_do_not_trigger_or_invalidate_product_delivery(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         impact = (ROOT / "scripts" / "ci-impact-plan.py").read_text(encoding="utf-8")
@@ -175,33 +122,6 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/validate-pipeline.py",
         ):
             self.assertIn(f'- "{path}"', lifecycle)
-
-    def test_reusable_stage_defaults_unscheduled_selectors_to_empty(self):
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        inputs = reusable.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
-        for name in (
-            "managed_db_test_projects",
-            "managed_live_test_projects",
-            "db_suites",
-            "live_suites",
-            "delivery_actions",
-        ):
-            with self.subTest(name=name):
-                start = inputs.index(f"      {name}:\n")
-                rest = inputs[start + len(f"      {name}:\n"):]
-                # Input fields are eight-space-indented; the next six-space key
-                # begins with exactly six spaces after a newline.
-                import re
-                match = re.search(r"\n      [a-zA-Z_][a-zA-Z0-9_]*:\n", rest)
-                block = rest if match is None else rest[:match.start()]
-                self.assertIn('default: ""', block)
-                self.assertNotIn("default: all", block)
-
-    def test_candidate_reclamation_preserves_one_native_qualified_artifact_owner(self):
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        self.assertIn("latest-source --suite native-dev", reusable)
-        self.assertIn("preserve_native_source", reusable)
-        self.assertIn("preserving latest native-qualified candidate", reusable)
 
     def test_managed_project_impact_drives_build_and_test_selection(self):
         pipeline = (ROOT / "scripts" / "pipeline.sh").read_text(encoding="utf-8")
@@ -296,37 +216,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("use exact qualified front-end artifact", deploy)
         self.assertIn("preserve installed front-end artifact", deploy)
         self.assertIn('cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"', deploy)
-    def test_main_qualification_reuses_exact_valid_suite_receipts(self):
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        self.assertIn("dev_suites:", reusable)
-        self.assertIn("build_components:", reusable)
-        self.assertIn("db_suites:", reusable)
-        self.assertIn("live_suites:", reusable)
-        self.assertIn("delivery_actions:", reusable)
-        self.assertIn("publish_scope:", reusable)
-        self.assertIn("LAPLACE_DEV_SUITES:", reusable)
-        self.assertIn("LAPLACE_BUILD_COMPONENTS:", reusable)
-        self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS:", reusable)
-        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS:", reusable)
-        self.assertIn("LAPLACE_MANAGED_TEST_FILTER:", reusable)
-        self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS:", reusable)
-        self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS:", reusable)
-        self.assertIn("LAPLACE_DB_SUITES:", reusable)
-        self.assertIn("LAPLACE_LIVE_SUITES:", reusable)
-        self.assertIn("LAPLACE_DELIVERY_ACTIONS:", reusable)
-        self.assertIn("LAPLACE_PUBLISH_SCOPE:", reusable)
-        self.assertIn("LAPLACE_USE_QUALIFICATION_CACHE:", reusable)
-
-        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
-        matrix = product.split("run_dev_test_matrix() {", 1)[1].split("\n}\n\nrun_dev_tests", 1)[0]
-        self.assertIn("LAPLACE_DEV_SUITES", matrix)
-        self.assertIn("ci-qualification-cache.py check", matrix)
-        self.assertIn("ci-qualification-cache.py record", matrix)
-        self.assertIn("qualification planner kept", matrix)
-        self.assertNotIn("|| rc=$?", matrix)
-        self.assertNotIn("suite_use_cache", matrix)
-        self.assertNotIn("project-subset pass is not a whole", matrix)
-
     def test_test_only_successor_can_carry_undelivered_product_work(self):
         product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
         carry = shell_function(product, "carry_forward_undelivered_impact")
@@ -353,20 +242,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn('- "scripts/product-ci.sh"', lifecycle)
-
-    def test_mainline_builds_before_waiting_for_installed_host(self):
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        stage_body = reusable.split('case "$LAPLACE_STAGE" in', 1)[1].split("esac", 1)[0]
-        self.assertIn("release-qualification|mainline|build|test-dev|check)", stage_body)
-
-        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
-        mainline = product.split("run_mainline() {", 1)[1].split(
-            "\n}\n\nrelease_selected_revision_current()", 1)[0]
-        self.assertIn("run_build", mainline)
-        self.assertIn("host-resource.lock", mainline)
-        self.assertIn("run_release_delivery", mainline)
-        self.assertLess(mainline.index("run_build"), mainline.index("host-resource.lock"))
-        self.assertLess(mainline.index("host-resource.lock"), mainline.index("run_release_delivery"))
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
@@ -404,8 +279,8 @@ class WorkflowArchitecture(unittest.TestCase):
         proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", proof)
         self.assertNotIn("\n  push:\n", proof)
-        for stage in ("release-qualification", "release-candidate", "proof-model", "release-activation"):
-            self.assertIn(f"stage: {stage}", proof)
+        for stage in ("competitive",):
+            self.assertIn(f"operation: {stage}", proof)
         self.assertNotIn("scripts/product-ci.sh", proof)
         self.assertNotIn("runs-on: [self-hosted, laplace]", proof)
 
@@ -444,23 +319,6 @@ class WorkflowArchitecture(unittest.TestCase):
         text = (WORKFLOWS / "seed.yml").read_text(encoding="utf-8")
         self.assertNotIn("scripts/laplace --help", text)
         self.assertIn('exec bash scripts/ensure-foundation.sh', text)
-
-    def test_product_execution_keeps_preflight_and_stage_on_the_product_runner(self):
-        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        self.assertIn("workflow_call:", reusable)
-        self.assertNotIn("runs-on: ubuntu-24.04", reusable)
-        self.assertEqual(2, reusable.count("runs-on: [self-hosted, laplace, staging]"))
-        self.assertIn("needs: preflight", reusable)
-        self.assertIn("product-worktrees", reusable)
-        self.assertIn('product-$TARGET_SHA.lock', reusable)
-        self.assertIn("host-resource.lock", reusable)
-        self.assertNotIn("build-resource.lock", reusable)
-        self.assertIn('exec bash scripts/product-ci.sh "$LAPLACE_STAGE"', reusable)
-
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertNotIn("runs-on: [self-hosted, laplace]", lifecycle)
-        self.assertNotIn("host-resource.lock", lifecycle)
-
 
     def test_operator_runbook_documents_every_operator_and_internal_surface(self):
         runbook = (ROOT / "docs" / "guides" / "CI_OPERATOR_RUNBOOK.md").read_text(encoding="utf-8")

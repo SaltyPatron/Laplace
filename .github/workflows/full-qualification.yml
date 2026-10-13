@@ -16,8 +16,10 @@ on:
         description: "Force serial native tests"
         type: boolean
         default: false
-  # No schedule: product-stage.yml assumes the decommissioned host layout, and the weekly run would land on
-  # hart-server's runner (labels laplace,Laplace). Dispatch it once the stage is ported to deploy/linux/site.sh.
+      model_hub:
+        description: "Existing model corpus root (optional; otherwise host HF_HUB_CACHE)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,12 +29,9 @@ jobs:
     name: Rebuild and qualify every source component
     uses: ./.github/workflows/product-stage.yml
     with:
-      stage: release-qualification
+      operation: qualification
       target_sha: ${{ github.sha }}
-      build_components: all
-      dev_suites: all
       full_clean: ${{ github.event_name == 'workflow_dispatch' && inputs.full_clean || false }}
       force_codegen: ${{ github.event_name == 'workflow_dispatch' && inputs.force_codegen || false }}
       serial_tests: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests || false }}
-      skip_if_superseded: false
-    secrets: inherit
+      model_hub: ${{ inputs.model_hub }}
