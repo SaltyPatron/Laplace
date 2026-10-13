@@ -82,7 +82,7 @@ if($Enrollment){
     try{$e=([Net.NetworkCredential]::new('', $secure)).Password | ConvertFrom-Json}finally{$secure.Dispose()}
     if($e.role -ne $c.role -or $e.address -ne $c.address -or $e.host -ne $c.host -or -not $e.role_id -or -not $e.secret_id){throw 'Workload enrollment differs from the declared installation.'}
 }elseif(-not(Test-Path (Join-Path $private 'secret-id'))){throw 'Initial setup requires the scoped workload enrollment.'}
-foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','Publish-IisRuntime.ps1'){
+foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','database-connection.ps1','Publish-IisRuntime.ps1'){
     if(-not(Test-Path (Join-Path $PSScriptRoot $file))){throw "Missing installation script: $file"}
 }
 if($c.environment.LAPLACE_DATA -and -not(Test-Path -LiteralPath $c.environment.LAPLACE_DATA -PathType Container)){throw 'Declared source data directory is missing.'}
@@ -133,9 +133,10 @@ if(Test-Path -LiteralPath $release){$null=Test-IisPackage $release}else{
 $webConfig=Join-Path $web 'web.config'
 $oldConfig=if(Test-Path $webConfig){Get-Content $webConfig -Raw}else{$null}
 Write-IisPublicAtomic $webConfig (Get-IisWebConfig $c.revision (Join-Path $state 'logs')) $runtimeReaders
-foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
+foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','database-connection.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-access.ps1') -Destination (Join-Path $root 'iis-access.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-runtime.ps1') -Destination (Join-Path $root 'iis-runtime.ps1') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'database-connection.ps1') -Destination (Join-Path $root 'database-connection.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Publish-IisRuntime.ps1') -Destination (Join-Path $root 'Publish-IisRuntime.ps1') -Force
 $service=$c.pool+'-credentials'
 if(Get-Service $service -ErrorAction SilentlyContinue){Stop-Service $service}
@@ -149,7 +150,7 @@ if($Enrollment){
     Write-IisAtomic (Join-Path $private 'secret-id') $e.secret_id
 }
 if(-not(Test-Path (Join-Path $private 'secret-id'))){throw 'Initial setup requires the scoped workload enrollment.'}
-$members=@();foreach($entry in $c.records.PSObject.Properties){$members+=('"'+$entry.Name+'":{{ with secret "'+$entry.Value+'" }}{{ .Data.data | toJSON }}{{ end }}')}
+$members=@();foreach($entry in Get-IisCredentialReferences $c){$members+=('"'+$entry.Name+'":{{ with secret "'+$entry.Value+'" }}{{ .Data.data | toJSON }}{{ end }}')}
 $template='{'+($members -join ',')+'}'
 $agent=@"
 log_file = $(Iis-Json (Join-Path $private 'openbao.log'))

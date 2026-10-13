@@ -38,13 +38,29 @@ part of the declaration or application package.
 | `receipts` | Successful setup/publication results |
 
 `Enroll-IisRuntime.ps1` uses an authorized OpenBao enrollment operator once to create
-an AppRole that can read only the six declared records. Its enrollment file is
+an AppRole that can read only the selected records. Its enrollment file is
 encrypted for the enrolling Windows user. Run elevated installation as that same
 user. The installed OpenBao Agent authenticates independently and refreshes records;
 it never invokes a human login. The renderer updates only this pool's environment,
 controller client and HTTPS certificate, recycling the pool when environment values
 change. IIS protects pool environment configuration; secrets are not embedded in
 the deployer-writable package.
+
+For a Windows database on the same machine, `database.authentication: "sspi"`
+uses the process's Windows identity without fetching or rendering a database
+password. The database host must name this machine or its loopback address.
+The CLI profile uses the same field; it needs no `credential` enrollment in this
+mode. IIS still uses its existing workload enrollment for the API, identity,
+certificate and chess records. The substrate and application password records
+are omitted from its agent template and enrollment policy.
+
+The selected PostgreSQL server must already accept the operator or application
+pool's exact Windows identity for the declared roles and databases. Database
+setup owns those mappings and grants. These client installers do not create a
+cluster, grant database access, or migrate data. Both authentication modes require
+verified database TLS with a certificate matching the declared hostname. Omitting
+`authentication`, or setting it to `scram`, retains the scoped password-record
+contract for existing installations.
 
 Build and ordinary publication, in an unelevated PowerShell session:
 

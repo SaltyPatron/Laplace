@@ -2,6 +2,9 @@
 # Installed monorepo command. It does not import a checkout or compiler shell.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$connectionPolicy=Join-Path $PSScriptRoot 'database-connection.ps1'
+if(-not(Test-Path -LiteralPath $connectionPolicy)){$connectionPolicy=Join-Path $PSScriptRoot '../windows/database-connection.ps1'}
+. $connectionPolicy
 $arguments = [Collections.Generic.List[string]]::new()
 foreach ($argument in $args) { $arguments.Add([string]$argument) }
 $configPath = if ($env:LAPLACE_MONO_CLIENT_CONFIG) { $env:LAPLACE_MONO_CLIENT_CONFIG } else { Join-Path $PSScriptRoot 'client.json' }
@@ -89,17 +92,10 @@ try {
     $offline = $arguments.Count -eq 0 -or $arguments.Contains('--help') -or $arguments.Contains('-h') -or $arguments[0] -in @('decompose','cpu-topology')
     if (-not $offline) {
         $database=$profile.database
-        $record=Read-DatabaseCredential $profile.credential
-        if ($record.database_host -ne $database.host -or $record.database -ne $database.database -or $record.role -ne $database.role -or [int]$record.port -ne [int]$database.port -or -not $record.password) {
-            throw 'OpenBao database selection differs from this profile; CLI was not started.'
-        }
-        $trust=Absolute-Path $database.root_certificate 'PostgreSQL CA certificate'
-        if (-not (Test-Path -LiteralPath $trust -PathType Leaf)) { throw 'The selected PostgreSQL trust certificate is missing.' }
-        if ([int]$database.pool_max -lt 1 -or [int]$database.port -lt 1 -or [int]$database.port -gt 65535) { throw 'Invalid database port or connection budget.' }
-        $connection=[Data.Common.DbConnectionStringBuilder]::new()
-        foreach ($pair in @{Host=$database.host;Port=[string]$database.port;Database=$database.database;Username=$database.role;Password=$record.password;'SSL Mode'='VerifyFull';'Root Certificate'=$trust;'Maximum Pool Size'=[string]$database.pool_max}.GetEnumerator()) { $connection[$pair.Key]=$pair.Value }
-        $start.Environment['LAPLACE_DB']=$connection.ConnectionString
-        $record=$null; $connection=$null
+        $authentication=Get-LaplaceWindowsDatabaseAuthentication $database
+        $record=if($authentication -eq 'sspi'){$null}else{Read-DatabaseCredential $profile.credential}
+        $start.Environment['LAPLACE_DB']=New-LaplaceWindowsDatabaseConnection $database $record
+        $record=$null
     }
     $process=[Diagnostics.Process]::Start($start)
     try { $process.WaitForExit(); $result=$process.ExitCode } finally { $process.Dispose() }

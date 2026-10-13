@@ -1,5 +1,19 @@
 # Shared data validation for setup, credential rendering and ordinary publication.
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/database-connection.ps1"
+function Get-IisDatabaseAuthentication($c) {
+    $authentication=if($c.database.PSObject.Properties['authentication']){$c.database.authentication}else{'scram'}
+    Get-LaplaceWindowsDatabaseAuthentication @{host=$c.database.host;authentication=$authentication}
+}
+function Get-IisCredentialReferences($c) {
+    $authentication=Get-IisDatabaseAuthentication $c
+    foreach($name in 'api','identity','certificate','chess','substrate','appdb'){
+        if($authentication -eq 'sspi' -and $name -in @('substrate','appdb')){continue}
+        $reference=$c.records.$name
+        if($reference -notmatch '^kv/data/[a-zA-Z0-9_/-]+$' -or $reference -match '/\.?\./'){throw "Invalid $name credential reference."}
+        [pscustomobject]@{Name=$name;Value=$reference}
+    }
+}
 function Read-IisInstallation([string]$Path) {
     $c=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     if($c.version -ne 1 -or $c.host -ne $env:COMPUTERNAME.ToLowerInvariant()){throw 'IIS declaration version or host does not match.'}
@@ -12,9 +26,7 @@ function Read-IisInstallation([string]$Path) {
         $uri=[Uri]$c.$key
         if(-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne '/'){throw "Declare an HTTPS origin for $key."}
     }
-    foreach($key in 'substrate','appdb','api','identity','certificate','chess') {
-        if($c.records.$key -notmatch '^kv/data/[a-zA-Z0-9_/-]+$' -or $c.records.$key -match '/\.?\./'){throw "Invalid $key credential reference."}
-    }
+    $null=@(Get-IisCredentialReferences $c)
     if($c.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Declare the package revision.'}
     if($c.database.pool_max -lt 1 -or $c.database.port -lt 1 -or $c.database.port -gt 65535){throw 'Invalid database budget or port.'}
     return $c
@@ -90,11 +102,11 @@ function Get-IisEnvironment($c,$records) {
         $values[$item.Name]=[string]$item.Value
     }
     foreach($item in @(@('substrate','substrate_database','substrate_role','LAPLACE_DB'),@('appdb','application_database','application_role','LAPLACE_APP_DB'))) {
-        $record=$records.($item[0]);$database=$c.database.($item[1]);$role=$c.database.($item[2])
-        if($record.database_host -ne $c.database.host -or $record.database -ne $database -or $record.role -ne $role -or $record.port -ne $c.database.port){throw 'Credential database selection differs from this installation.'}
-        if($record.password -notmatch '^[a-f0-9]{64}$' -or $record.database_host -notmatch '^[a-zA-Z0-9.-]+$' -or $database -notmatch '^[a-z0-9_-]+$' -or $role -notmatch '^[a-z0-9_-]+$'){throw 'Invalid database credential contract.'}
-        $ca=Join-Path $state 'postgres-root.crt'
-        $values[$item[3]]="Host=$($record.database_host);Port=$($record.port);Database=$database;Username=$role;Password=$($record.password);SSL Mode=VerifyFull;Root Certificate=$ca;Maximum Pool Size=$($c.database.pool_max)"
+        $authentication=Get-IisDatabaseAuthentication $c
+        $selection=@{host=$c.database.host;port=$c.database.port;database=$c.database.($item[1]);role=$c.database.($item[2]);pool_max=$c.database.pool_max;authentication=$authentication;root_certificate=(Join-Path $state 'postgres-root.crt')}
+        $record=if($authentication -eq 'sspi'){$null}else{$records.($item[0])}
+        if($authentication -eq 'scram' -and $record.password -notmatch '^[a-f0-9]{64}$'){throw 'Invalid database credential contract.'}
+        $values[$item[3]]=New-LaplaceWindowsDatabaseConnection $selection $record
     }
     if($records.api.operator_token -notmatch '^[a-f0-9]{64}$'){throw 'Missing runtime operator credential.'}
     $values.LAPLACE_OPERATOR_TOKEN=$records.api.operator_token
