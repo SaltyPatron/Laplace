@@ -59,6 +59,21 @@ identifies the consumer; the installer gives only that service account read acce
 installs the two environment settings and uses the existing OpenBao Agent to refresh
 the tokens. No second database, mandatory mount, human credential or new daemon is used.
 
+An already-enrolled Linux installation can add these profiles without restarting
+the Lichess controller:
+
+```sh
+sudo python3 deploy/linux/chess-host.py configure-match-engines \
+  --configuration /path/to/retained/chess/agent/installation.json \
+  --engines /path/to/match-engines.json
+```
+
+This setup authenticates the installed AppRole, verifies a real engine search for
+every declared profile, persists the declaration and restarts the API with its
+configured connections. Future credential renders use the same installed declaration.
+Use the retained installation path declared on that host. The match-engine directory
+must be a dedicated credential directory for that API.
+
 Remote Stockfish receives no coordinator-local Syzygy path. Configure its tablebases
 on its worker. Explicit remote path overrides are rejected. Threads/hash options
 continue to describe that engine session; they are not a cluster-wide resource budget.
