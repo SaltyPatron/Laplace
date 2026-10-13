@@ -406,6 +406,30 @@ WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4
 
 
 class ChessRuntimeEnvironmentTests(unittest.TestCase):
+    def test_declared_application_and_chess_paths_reach_the_child(self):
+        import os
+        wrapper = load_module("chess_runtime_env", "scripts/chess-runtime-env.py")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            application = root / "installed release"
+            application.mkdir()
+            (application / "laplace-api.env").write_text(
+                'LAPLACE_STOCKFISH=/service/stockfish\nLAPLACE_FASTCHESS=/service/fastchess\n')
+            declaration = root / "selected chess.env"
+            declaration.write_text('LAPLACE_STOCKFISH=/selected/stockfish\n'
+                                   'LAPLACE_CUTECHESS="/selected tools/cutechess-cli"\n'
+                                   'LAPLACE_OPERATOR_TOKEN=must-not-forward\n')
+            with mock.patch.dict(os.environ, {
+                "LAPLACE_APP_DIR": str(application), "LAPLACE_CHESS_ENV": str(declaration),
+                "LAPLACE_FASTCHESS": "/explicit/fastchess",
+            }, clear=True), mock.patch.object(wrapper.os, "execvpe") as execute:
+                wrapper.main(["--prefix", str(root), "--", "laplace-uci", "check"])
+            environment = execute.call_args.args[2]
+            self.assertEqual("/selected/stockfish", environment["LAPLACE_STOCKFISH"])
+            self.assertEqual("/selected tools/cutechess-cli", environment["LAPLACE_CUTECHESS"])
+            self.assertEqual("/explicit/fastchess", environment["LAPLACE_FASTCHESS"])
+            self.assertNotIn("LAPLACE_OPERATOR_TOKEN", environment)
+
     def test_installed_runtime_reaches_child_without_artifact_or_log_export(self):
         import contextlib
         import io

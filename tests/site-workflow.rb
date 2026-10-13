@@ -64,6 +64,18 @@ class SiteWorkflow < Minitest::Test
     assert_equal 'read', policy.fetch('permissions').fetch('contents')
   end
 
+  def test_product_maintenance_uses_the_selected_host_and_installed_lifecycle
+    workflow = YAML.load_file(File.expand_path('../.github/workflows/product-operator.yml', __dir__))
+    job = workflow.fetch('jobs').fetch('operator')
+    assert_equal ['self-hosted', 'laplace', '${{ inputs.target }}'], job.fetch('runs-on')
+    refute job.key?('uses'), 'maintenance must not enter the retired source delivery chain'
+    assert_equal false, job.fetch('concurrency').fetch('cancel-in-progress')
+    step = job.fetch('steps').find { |candidate| candidate['env']&.key?('OPERATION') }
+    assert_equal '${{ inputs.operation }}', step.fetch('env').fetch('OPERATION')
+    assert_includes step.fetch('run'), 'bash deploy/linux/site.sh "$OPERATION"'
+    assert_includes step.fetch('run'), 'set -euo pipefail'
+  end
+
   def test_active_runtime_changes_are_not_ignored
     triggers = @workflow['on'] || @workflow[true]
     ignored = triggers.fetch('push').fetch('paths-ignore')

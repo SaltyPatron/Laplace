@@ -83,13 +83,38 @@ jobs:
           if-no-files-found: warn
 
   operator:
-    name: Run explicit product maintenance operation
+    name: ${{ inputs.operation }} on ${{ inputs.target }}
     if: inputs.operation == 'reconcile' || inputs.operation == 'chess-lab'
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: ${{ inputs.operation }}
-      target_sha: ${{ github.sha }}
-    secrets: inherit
+    runs-on: [self-hosted, laplace, '${{ inputs.target }}']
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    concurrency:
+      group: laplace-maintenance-${{ inputs.target }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check out the maintenance implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Operate on the selected installed runtime
+        env:
+          OPERATION: ${{ inputs.operation }}
+          LAPLACE_HOST_LOCK_WAIT_SECONDS: '600'
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          bash deploy/linux/site.sh status | tee artifacts/site-before.json
+          env -u GITHUB_SHA bash deploy/linux/site.sh "$OPERATION" 2>&1 | tee artifacts/maintenance.log
+          bash deploy/linux/site.sh status | tee artifacts/site-after.json
+      - name: Retain the selected target and operation result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: product-maintenance-${{ inputs.target }}-${{ inputs.operation }}-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
 
   forward-chat-proof:
     if: inputs.operation == 'forward-chat-proof'

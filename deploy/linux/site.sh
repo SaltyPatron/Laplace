@@ -14,6 +14,7 @@
 #
 # Phases: externals build install database extensions migrate app publish restart smoke   (and: configure migrate_app reset seed serve)
 #         bundle: what the hosting host receives, after app; receive: on the hosting host, before publish
+#         reconcile: drain installed highway work; chess-lab: update the declared external chess tools
 #
 # The machine is set up once by root with deploy/linux/site-host.sh (directories, the unit, nginx, the restart
 # trigger); the runner that runs this is Laplace-Operations' agents.sh's (labels laplace,Laplace). Every value below is
@@ -63,7 +64,7 @@ export LAPLACE_DB="Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$LAPLACE_
 if [[ -n "${LAPLACE_APP_DBNAME:-}" ]]; then
   export LAPLACE_APP_DB="Host=${LAPLACE_APP_PGHOST:-$PGHOST};Port=${LAPLACE_APP_PGPORT:-$PGPORT};Username=${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-laplace}};Database=$LAPLACE_APP_DBNAME"
 fi
-export LAPLACE_EXTERNAL="$SITE_WORK/external"
+export LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-$SITE_WORK/external}"
 export LAPLACE_INSTALL_PREFIX LAPLACE_ENGINE_BUILD="$SITE_BUILD/engine"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
@@ -118,8 +119,14 @@ phase_externals() {
   local e="$LAPLACE_EXTERNAL" d="$SITE_WORK/deps" name target
   mkdir -p "$e" "$d/pgsql-18/include" "$d/pgsql-18/lib"
   while read -r name target; do
+    # A configured dependency root can hold the source itself. Never create a
+    # nested link inside that checkout or replace it with the default mapping.
+    if [[ -d "$e/$name" && ! -L "$e/$name" ]]; then
+      printf '  %-22s %s\n' "$name" "$e/$name"
+      continue
+    fi
     [[ -e "$target" ]] || fail "external $name: $target is not on this machine"
-    ln -sfn "$target" "$e/$name"; printf '  %-22s %s\n' "$name" "$target"
+    ln -sfnT "$target" "$e/$name"; printf '  %-22s %s\n' "$name" "$target"
   done <<EOF
 blake3                $LAPLACE_DEPSRC/blake3
 tree-sitter           $LAPLACE_DEPSRC/tree-sitter
@@ -601,6 +608,21 @@ phase_status() {
     --machine-file "${LAPLACE_MACHINE_ENV:-/etc/laplace/machine.env}"
 }
 
+phase_reconcile() {
+  say "reconcile highway masks in $PGDATABASE on $PGHOST:$PGPORT as $PGUSER"
+  bash "$ROOT/scripts/reconcile-highway-masks.sh" "$PGDATABASE"
+  bash "$ROOT/scripts/check-database-health.sh" --installed-runtime "$PGDATABASE"
+}
+
+phase_chess_lab() {
+  local uci="${LAPLACE_UCI:-$LAPLACE_APP_DIR/uci/laplace-uci}"
+  [[ -x "$uci" ]] || fail "installed UCI command is missing: $uci"
+  say "update declared chess tools for $LAPLACE_APP_DIR"
+  LAPLACE_APP_DIR="$LAPLACE_APP_DIR" bash "$ROOT/scripts/bootstrap-chess-lab.sh"
+  phase_restart
+  LAPLACE_APP_DIR="$LAPLACE_APP_DIR" python3 "$ROOT/scripts/chess-runtime-env.py" --prefix "$LAPLACE_INSTALL_PREFIX" -- "$uci" check
+}
+
 # ------------------------------------------------------------------------------------------------ seed, serve
 # The foundation through the monorepo's own seed path (ensure-foundation.sh: the CLI's layer-checked ingest).
 phase_seed() {
@@ -647,7 +669,8 @@ done
 [[ -z "$lock_needed" ]] || host_lock "$lock_mode"
 for p in "${phases[@]}"; do
   case "$p" in
-    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|seed|serve) "phase_$p" ;;
+    chess-lab) phase_chess_lab ;;
+    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|reconcile|seed|serve) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done

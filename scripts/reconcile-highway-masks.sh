@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB="${1:-${PGDATABASE:-laplace}}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/database.sh"
+DB="${1:-$PGDATABASE}"
 BATCH="${LAPLACE_HIGHWAY_RECONCILE_BATCH:-50000}"
 
 # One connection, set-sized commands and top-level CALLs. Never a per-entity
 # application loop, and never a full historical scan after population completes.
-psql -X -d "$DB" -U laplace_admin -v ON_ERROR_STOP=1 -v batch="$BATCH" <<'SQL'
+psql -X -w -h "$PGHOST" -p "$PGPORT" -d "$DB" -U "$PGUSER" -v ON_ERROR_STOP=1 -v batch="$BATCH" <<'SQL'
 SELECT (:'batch'::integer >= 1) AS valid_batch \gset
 \if :valid_batch
 SELECT to_regclass('laplace.highway_mask_pending') IS NOT NULL
@@ -30,14 +31,14 @@ CALL laplace.highway_mask_pending_drain(:'batch'::integer);
 -- not have its stale bit resurrected by replaying an older exact pair.
 CALL laplace.highway_mask_drain(:'batch'::integer);
 \else
-\echo highway masks: registry unavailable; exact work retained, not reported as populated
+DO $$ BEGIN RAISE EXCEPTION 'Highway registry unavailable; reconciliation was not performed'; END $$;
 \endif
 SELECT (SELECT complete FROM laplace.highway_mask_population_state WHERE singleton)
            AS historical_population_complete,
        (SELECT count(*) FROM laplace.highway_mask_pending) AS pending_pairs,
        (SELECT count(*) FROM laplace.highway_mask_dirty) AS pending_clears;
 \else
-\echo highway masks: reconciliation surface not installed yet
+DO $$ BEGIN RAISE EXCEPTION 'Highway reconciliation surface is not installed'; END $$;
 \endif
 \else
 DO $$ BEGIN RAISE EXCEPTION 'Highway reconciliation batch must be >= 1'; END $$;

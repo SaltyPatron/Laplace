@@ -20,7 +20,9 @@ export TMPDIR="$WORK" TMP="$WORK" TEMP="$WORK"
 # Build output follows the declared dependency-build directory.
 CC_BUILD="${LAPLACE_CUTECHESS_BUILD:-$LAPLACE_DEPS_BUILD/cutechess}"
 CC_BIN_DIR="$PREFIX/bin"
-APP_DIR="$PREFIX/app"
+CUTECHESS="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
+CUTECHESS_GUI="${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}"
+APP_DIR="${LAPLACE_APP_DIR:-$PREFIX/app}"
 ENV_FILE="$APP_DIR/laplace-api.env"
 CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
 
@@ -62,11 +64,11 @@ ensure_dirs() {
   say "dirs under $PREFIX"
   if [ "$(id -u)" -eq 0 ]; then
     install -d -m 2775 -g "$RUNNER_GROUP" \
-      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
+      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
       "$PREFIX/share" "$PREFIX/share/applications" "$PREFIX/share/laplace"
     install -d -m 2770 -g "$RUNNER_GROUP" "$PREFIX/secrets"
   else
-    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
+    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$(dirname "$CUTECHESS")" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
       "$PREFIX/share/applications" "$PREFIX/share/laplace"
     chmod 2770 "$PREFIX/secrets" 2>/dev/null || true
   fi
@@ -90,7 +92,7 @@ build_cutechess() {
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
   local -a targets=(cli)
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then targets+=(gui); fi
-  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" --build "$CC_BUILD" --clean-first --target "${targets[@]}"
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" --build "$CC_BUILD" --target "${targets[@]}"
   run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" \
     --binary "$CC_BUILD/cutechess-cli" --receipt "$CC_BUILD/laplace-cutechess-build.json"
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
@@ -99,17 +101,18 @@ build_cutechess() {
       --receipt "$CC_BUILD/laplace-cutechess-gui-build.json"
   fi
   local staged
-  staged="$(mktemp "$CC_BIN_DIR/.cutechess-cli.XXXXXX")"
+  staged="$(mktemp "$(dirname "$CUTECHESS")/.cutechess-cli.XXXXXX")"
   if install -m 0755 "$CC_BUILD/cutechess-cli" "$staged"; then
-    mv -Tf "$staged" "$CC_BIN_DIR/cutechess-cli"
+    mv -Tf "$staged" "$CUTECHESS"
   else
     rm -f "$staged"
     return 1
   fi
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
-    staged="$(mktemp "$CC_BIN_DIR/.cutechess.XXXXXX")"
+    mkdir -p "$(dirname "$CUTECHESS_GUI")"
+    staged="$(mktemp "$(dirname "$CUTECHESS_GUI")/.cutechess.XXXXXX")"
     if install -m 0755 "$CC_BUILD/cutechess" "$staged"; then
-      mv -Tf "$staged" "$CC_BIN_DIR/cutechess"
+      mv -Tf "$staged" "$CUTECHESS_GUI"
     else
       rm -f "$staged"
       return 1
@@ -221,6 +224,9 @@ verify() {
 }
 
 main() {
+  [[ "$CUTECHESS" == /* && "$CUTECHESS_GUI" == /* ]] || {
+    red "LAPLACE_CUTECHESS and LAPLACE_CUTECHESS_GUI must be absolute executable paths"; return 2;
+  }
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
       --cutechess-gui) CUTECHESS_GUI_BUILD=1 ;;
