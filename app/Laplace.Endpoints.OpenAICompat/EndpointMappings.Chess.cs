@@ -64,7 +64,8 @@ internal static class ChessEndpoints
             var requester = RequestPrincipal(await resolver.ResolveAsync(ctx, ct));
             if (requester is null) return Results.Unauthorized();
             var operation = ChessPlayOperation.Read(sessionId);
-            return operation?.Requester == requester ? Results.Json(operation) : Results.NotFound();
+            return operation?.Requester == requester ? Results.Json(operation with
+            { PositionFens = operation.ReplayStates().Select(state => state.Board.ToFen()).ToArray() }) : Results.NotFound();
         }).WithTags("chess");
 
         app.MapPost("/chess/play/move", async (HttpContext ctx, PlayMoveRequest req,
@@ -72,7 +73,7 @@ internal static class ChessEndpoints
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
             return await WithPlaySession(ctx, req.SessionId, runtime, resolver,
-                async () => Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct)), ct);
+                async () => Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct)), ct, req.Fen);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/bestmove", async (HttpContext ctx, PlayBestMoveRequest req,
@@ -81,7 +82,7 @@ internal static class ChessEndpoints
         {
             return await WithPlaySession(ctx, req.SessionId, runtime, resolver,
                 async () => Results.Json(await svc.PlayBestMoveAsync(
-                    req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)), ct);
+                    req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)), ct, req.Fen);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/finish", async (HttpContext ctx, PlayFinishRequest req,
@@ -347,10 +348,15 @@ internal static class ChessEndpoints
         requester is not null && session?.Requester == requester;
 
     private static async Task<IResult> WithPlaySession(HttpContext context, Guid sessionId,
-        ChessRuntimeService runtime, ITenantResolver resolver, Func<Task<IResult>> action, CancellationToken ct)
+        ChessRuntimeService runtime, ITenantResolver resolver, Func<Task<IResult>> action, CancellationToken ct,
+        string? expectedFen = null)
     {
         var requester = RequestPrincipal(await resolver.ResolveAsync(context, ct));
         if (requester is null) return Results.Unauthorized();
+        var operation = ChessPlayOperation.Read(sessionId);
+        if (operation?.Requester != requester) return Results.NotFound();
+        if (operation.State != "ongoing")
+            return Results.Conflict(new { error = "play_not_ongoing", operation });
         var live = await runtime.GetAsync(ct);
         var session = live.GetPlaySession(sessionId);
         if (!OwnsPlaySession(session, requester)) return Results.NotFound();
@@ -358,6 +364,8 @@ internal static class ChessEndpoints
         try
         {
             if (!ReferenceEquals(live.GetPlaySession(sessionId), session)) return Results.NotFound();
+            if (expectedFen is not null && session.State?.Board.ToFen() != expectedFen)
+                return Results.Conflict(new { error = "play_position_changed", operation = ChessPlayOperation.Read(sessionId) });
             return await action();
         }
         finally { session.Gate.Release(); }

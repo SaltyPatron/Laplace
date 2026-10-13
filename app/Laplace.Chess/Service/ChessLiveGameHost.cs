@@ -38,6 +38,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly ConcurrentDictionary<Hash128, LiveGameSession> _games = new();
     private readonly ConcurrentDictionary<Guid, PlaySession> _playSessions = new();
+    private readonly object _playRecoveryGate = new();
 
     public long GamesCompleted { get; private set; }
 
@@ -170,11 +171,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         }
     }
 
-    public async Task CompleteGameAsync(
+    public async Task<Hash128> CompleteGameAsync(
         Hash128 eventId, GameOutcome result, bool adjudicated, CancellationToken ct = default)
     {
         if (!_games.TryGetValue(eventId, out var session))
-            return;
+            throw new InvalidOperationException($"game {eventId} is not open");
 
         await _writeGate.WaitAsync(ct);
         try
@@ -287,11 +288,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     session.PositionIds.Take(session.PositionIds.Count - 1), session.MoveIds);
             InvalidateLearnedPst();
             GamesCompleted++;
+            _games.TryRemove(eventId, out _);
+            return playingId;
         }
         finally
         {
             _writeGate.Release();
-            _games.TryRemove(eventId, out _);
         }
     }
 
@@ -371,7 +373,15 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         var session = new PlaySession(
             eventId, learnContext, recordToSubstrate, tenantId, userId,
             whitePlayerId, whitePlayerName, blackPlayerId, blackPlayerName, requester)
-        { Operation = requester is null ? null : ChessPlayOperation.Start(id, requester, recordToSubstrate) };
+        {
+            Metadata = metadata,
+            Operation = requester is null ? null : ChessPlayOperation.Start(id, requester, recordToSubstrate) with
+            {
+                Context = new(learnContext,
+                    whitePlayerId is { } white ? Convert.ToHexString(white.ToBytes()) : null, whitePlayerName,
+                    blackPlayerId is { } black ? Convert.ToHexString(black.ToBytes()) : null, blackPlayerName, metadata),
+            },
+        };
         session.SaveOperation();
         _playSessions[id] = session;
         if (recordToSubstrate)
@@ -382,7 +392,42 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     }
 
     public PlaySession? GetPlaySession(Guid sessionId)
-        => _playSessions.TryGetValue(sessionId, out var s) ? s : null;
+    {
+        if (_playSessions.TryGetValue(sessionId, out var session)) return session;
+        lock (_playRecoveryGate)
+        {
+            if (_playSessions.TryGetValue(sessionId, out session)) return session;
+            var operation = ChessPlayOperation.Read(sessionId);
+            if (operation?.State != "ongoing") return null;
+            session = operation.Restore();
+            if (session.RecordToSubstrate)
+            {
+                var game = new LiveGameSession(session.LearnContext, session.WhitePlayerId, session.BlackPlayerId,
+                    session.WhitePlayerName, session.BlackPlayerName, session.Metadata!);
+                var modality = new ChessModality();
+                var state = modality.FromFen(session.Metadata!.StartFen ?? ChessModality.StartFen);
+                foreach (var uci in session.Moves)
+                {
+                    var move = MoveGen.Legal(state.Board).First(m => m.ToUci() == uci);
+                    var next = modality.Apply(state, move);
+                    var from = modality.StateKey(state);
+                    var to = modality.StateKey(next);
+                    var recorded = ResolveRecordedPly(from, to, uci,
+                        state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId);
+                    game.Moves.Add(uci);
+                    game.Plies.Add(recorded);
+                    game.MoveIds.Add(ChessCompose.MoveId(recorded.MovingPiece, recorded.Move));
+                    if (game.PositionIds.Count == 0) game.PositionIds.Add(ChessCompose.PositionId(from));
+                    game.PositionIds.Add(ChessCompose.PositionId(to));
+                    state = next;
+                }
+                foreach (var (ply, analysis) in operation.Analysis) game.Analysis.Add(ply, analysis);
+                _games[session.EventId] = game;
+            }
+            _playSessions[sessionId] = session;
+            return session;
+        }
+    }
 
     public async Task FinishPlaySessionAsync(Guid sessionId, GameOutcome outcome, bool adjudicated, CancellationToken ct)
     {
@@ -394,7 +439,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 session.SaveOperation("recording", "in_progress", outcome.ResultToken);
                 SetGameMetadata(session.EventId, new ChessLiveGameMetadata(
                     Termination: adjudicated ? "adjudicated" : "normal"));
-                await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
+                var playingId = await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
+                if (session.Operation is { } operation && playingId != Hash128.Zero)
+                    session.Operation = operation with { RecordedPlayingId = Convert.ToHexString(playingId.ToBytes()).ToLowerInvariant() };
             }
             session.SaveOperation("completed", !session.RecordToSubstrate ? "disabled"
                 : session.Moves.Count == 0 ? "empty" : "recorded", outcome.ResultToken);
@@ -725,7 +772,8 @@ public sealed class PlaySession(
     public string? UserId { get; } = userId;
     public OperationPrincipal? Requester { get; } = requester;
     public SemaphoreSlim Gate { get; } = new(1, 1);
-    internal ChessPlayOperation? Operation { get; init; }
+    internal ChessPlayOperation? Operation { get; set; }
+    internal ChessLiveGameMetadata? Metadata { get; init; }
     public Hash128? WhitePlayerId { get; } = whitePlayerId;
     public string? WhitePlayerName { get; } = whitePlayerName;
     public Hash128? BlackPlayerId { get; } = blackPlayerId;
@@ -737,7 +785,23 @@ public sealed class PlaySession(
     internal void SaveOperation(string state = "ongoing", string? recording = null, string? result = null, string? error = null)
     {
         if (Operation is not { } operation) return;
-        (operation with { UpdatedUtc = DateTimeOffset.UtcNow, State = state, Recording = recording ?? operation.Recording,
-            Result = result, Fen = State?.Board.ToFen(), Moves = Moves.ToArray(), Error = error }).Save();
+        var next = operation with { UpdatedUtc = DateTimeOffset.UtcNow, State = state, Recording = recording ?? operation.Recording,
+            Result = result, Fen = State?.Board.ToFen(), Moves = Moves.ToArray(), Error = error };
+        next.Save();
+        Operation = next;
+    }
+
+    internal void CommitMove(ChessState nextState, string uci, ChessLivePlyAnalysis analysis)
+    {
+        if (Operation is { } operation)
+        {
+            var next = operation with { UpdatedUtc = DateTimeOffset.UtcNow, Fen = nextState.Board.ToFen(),
+                Moves = [.. Moves, uci], Analysis = new(operation.Analysis) { [Moves.Count + 1] = analysis } };
+            next.Save();
+            Operation = next;
+        }
+        State = nextState;
+        Moves.Add(uci);
+        PlyCount = Moves.Count;
     }
 }

@@ -13,9 +13,15 @@ field cannot select its owner. Move, engine-search and finish requests require t
 same requester, including within one workspace. `/chess/play/{sessionId}` returns
 that requester's retained operation: moves, current FEN, recording outcome and
 authenticated requester. These files live under `play/` in the configured
-`LAPLACE_CHESS_LAB_DIR`; they survive service publication. They are operation records,
-not canonical player identities, and do not claim to restore a running game after
-a process restart. An account ID is never converted into a player name hash.
+`LAPLACE_CHESS_LAB_DIR`; they survive service publication. An ongoing game resumes
+after an API restart with the same requester, participants, move/repetition history
+and retained engine analysis. Refreshing the browser resumes that operation instead
+of creating another game. The retained trajectory supplies the board history when a
+response was lost. A stale move request returns HTTP 409 and the current operation.
+Completed operations include `recordedPlayingId`, the canonical playing produced by
+recording. A process interrupted during final recording remains explicitly unresolved;
+it is not silently reopened or reported as recorded. These are operation records, not
+canonical player identities. An account ID is never converted into a player name hash.
 
 The HTTP lab uses the authenticated workspace and requester resolved by the existing
 Google/Microsoft browser session or validated Laplace API key. A job configuration

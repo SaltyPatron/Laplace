@@ -7,6 +7,7 @@ import {
 const STORAGE_KEY = 'laplace.chess.play.v1';
 
 export interface SavedPlayGame {
+  sessionId?: string | null;
   positions: PositionSnapshot[];
   recordToSubstrate: boolean;
   searchDepth: number;
