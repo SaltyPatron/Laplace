@@ -51,6 +51,22 @@ run_as_owner() {
   fi
 }
 
+ensure_packages() {
+  command -v dpkg-query >/dev/null || return 0
+  local package
+  local -a missing=()
+  for package in build-essential ninja-build pkg-config python3-venv libgl-dev libopengl-dev libxkbcommon-dev; do
+    [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" == 'install ok installed' ]] || missing+=("$package")
+  done
+  [[ ${#missing[@]} -gt 0 ]] || return 0
+  if [[ $(id -u) -ne 0 ]]; then
+    red "Chess host prerequisites missing: ${missing[*]}. Run scripts/bootstrap-chess-lab.sh through administrator setup."
+    return 1
+  fi
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
 resolve_stockfish() {
   if [[ -n "${LAPLACE_STOCKFISH:-}" ]]; then
     printf '%s\n' "$LAPLACE_STOCKFISH"
@@ -253,6 +269,7 @@ main() {
         -e "$CC_BUILD/laplace-cutechess-gui-build.json" || -n "${LAPLACE_CUTECHESS_GUI:-}" ]]; then
     CUTECHESS_GUI_BUILD=1
   fi
+  ensure_packages
   ensure_dirs
   build_cutechess
   build_zstd
