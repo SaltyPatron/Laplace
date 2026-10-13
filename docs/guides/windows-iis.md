@@ -15,6 +15,12 @@ explicit installation when needed. To inspect the selected declaration without
 administrator access, run `Install-LaplaceSite.ps1 -Plan`.
 Repair preserves the last successfully selected release in `web/active.json`;
 it does not revert an ordinary publication to the initial setup package.
+For an administrator upgrade that also reconciles host configuration, run
+`Install-LaplaceSite.ps1 -Package <package-directory>`. This explicitly selects the
+new verified package while retaining the installed database, paths, worker profiles
+and workload enrollment. No new installation declaration or enrollment file is needed.
+Without `-Package`, setup repairs the active release. Ordinary publication remains
+the unelevated operation below.
 Setup also retains read-only IIS application-pool grants enrolled by companion
 installers on the public runtime. It collects them before replacing directory ACLs
 and applies them to `web`, so subsequent releases inherit the same access.

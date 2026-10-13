@@ -1,10 +1,20 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
+param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[string]$Package,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
+$selection=Join-Path $web 'active.json'
+if($Package){
+    if($Operation -ne 'Install'){throw '-Package applies only to installation or upgrade.'}
+    $manifest=Test-IisPackage $Package
+    $c.revision=$manifest.revision;$c.publish=[IO.Path]::GetFullPath($Package)
+}elseif($Operation -eq 'Install' -and (Test-Path -LiteralPath $selection)){
+    $active=Get-Content -LiteralPath $selection -Raw|ConvertFrom-Json
+    if($active.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'The installed release selection is invalid.'}
+    $c.revision=$active.revision;$c.publish=Join-Path $web ('releases/'+$c.revision)
+}
 if($Plan){$c | ConvertTo-Json -Depth 12;return}
 $chessAccess=@(Get-IisChessAccess $c)
 if($Operation -eq 'Verify'){Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY | ConvertTo-Json;return}
@@ -90,12 +100,6 @@ if($Operation -eq 'Render') {
     } finally {$manager.Dispose()}
     Write-IisAtomic $receiptPath (Iis-Json @{rendered_utc=[DateTime]::UtcNow.ToString('o');source='openbao-agent';pool=$c.pool;environment_changed=$changed;certificate=$certificate.Thumbprint;certificate_digest=$certDigest})
     return
-}
-$selection=Join-Path $web 'active.json'
-if(Test-Path -LiteralPath $selection){
-    $active=Get-Content -LiteralPath $selection -Raw|ConvertFrom-Json
-    if($active.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'The installed release selection is invalid.'}
-    $c.revision=$active.revision;$c.publish=Join-Path $web ('releases/'+$c.revision)
 }
 $manifest=Test-IisPackage $c.publish
 if($manifest.revision -ne $c.revision){throw 'Package revision differs from the installation declaration.'}

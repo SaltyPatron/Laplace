@@ -1,13 +1,14 @@
 #requires -Version 7
 [CmdletBinding()]
-param([switch]$Plan,[string]$Installation,[string]$Enrollment)
+param([switch]$Plan,[string]$Installation,[string]$Enrollment,[string]$Package)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
 if($Installation){
-  & "$PSScriptRoot/Install-IisRuntime.ps1" -Installation $Installation -Enrollment $Enrollment -Plan:$Plan
+  & "$PSScriptRoot/Install-IisRuntime.ps1" -Installation $Installation -Enrollment $Enrollment -Package $Package -Plan:$Plan
   return
 }
+if($Package){throw 'A package update requires an existing installation or an explicit -Installation declaration.'}
 $settings=(& "$PSScriptRoot/site-settings.ps1" | ConvertFrom-Json)
 if ($Plan) { $settings | ConvertTo-Json; return }
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
