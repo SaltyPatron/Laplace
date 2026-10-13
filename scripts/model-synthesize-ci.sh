@@ -3,6 +3,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/database.sh"
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+preflight_only=0
+if [[ "${1:-}" == --preflight ]]; then preflight_only=1; shift; fi
+# Model qualification on the database host uses CPU execution.
+export CUDA_VISIBLE_DEVICES="" HIP_VISIBLE_DEVICES="" GGML_VK_VISIBLE_DEVICES=""
+export LLAMA_ARG_N_GPU_LAYERS=0
 
 newest_weighted_snapshot() {
   local family="$1" root="${LAPLACE_MODEL_HUB:-/vault/models}" snapshot
@@ -59,12 +67,13 @@ CORROBORATION_MODEL_DIR="$(resolve_corroboration_snapshot "$MODEL_DIR")" || {
 }
 
 model_slug="$(basename "$(dirname "$(dirname "$MODEL_DIR")")" 2>/dev/null || basename "$MODEL_DIR")"
-GGUF_OUT="${LAPLACE_GGUF_OUT:-${TMPDIR:-/tmp}/${model_slug}-substrate-ci.gguf}"
+GGUF_OUT="${LAPLACE_GGUF_OUT:-$LAPLACE_WORK_ROOT/model-proof/${model_slug}-substrate-ci.gguf}"
 REPORT_OUT="${LAPLACE_MODEL_BEHAVIOR_REPORT:-${GGUF_OUT%.gguf}.behavior.json}"
-export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace}"
-
-CLI=(dotnet run --project "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-build --)
-export LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+runtime="${LAPLACE_APP_DIR:-${LAPLACE_INSTALL_PREFIX:?}/app}"
+CLI=("$runtime/cli/Laplace.Cli")
+export LAPLACE_INGEST_RUNTIME="$runtime/cli"
+export LAPLACE_PERFCACHE_BIN="$runtime/cli/share/laplace/laplace_t0_perfcache.bin"
+export LD_LIBRARY_PATH="$runtime/cli:${LAPLACE_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
 log() { echo "[substrate-ci] $*"; }
 die() { echo "[substrate-ci] ERROR: $*" >&2; exit 1; }
@@ -100,27 +109,22 @@ if not report.get("preliminary_prerequisites_passed") or not report.get("selecte
 print(report["selected_llama"])
 ' <<< "$preflight_out")" || die "invalid preliminary model-proof prerequisite report"
 
-psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc "SELECT 1" >/dev/null \
-  || die "laplace DB unreachable (just db-up)"
+(( preflight_only == 0 )) || exit 0
+mkdir -p "$(dirname "$GGUF_OUT")" "$(dirname "$REPORT_OUT")"
+psql -X -w -v ON_ERROR_STOP=1 -tAc "SELECT 1" >/dev/null \
+  || die "declared database is unreachable"
 
-psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc \
+psql -X -w -v ON_ERROR_STOP=1 -tAc \
   "SELECT 1 FROM pg_extension WHERE extname='laplace_substrate'" | grep -q 1 \
   || die "laplace_substrate not installed"
 
-[ -f "$ROOT/build/engine/synthesis/liblaplace_synthesis.so" ] \
-  || die "engine not built (just build)"
-[ -f "$ROOT/build/engine/dynamics/liblaplace_dynamics.so" ] \
-  || die "dynamics engine not built (just build)"
-
-if [ ! -f "$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll" ]; then
-  log "building Laplace.Cli"
-  (cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q)
-fi
+[[ -x "${CLI[0]}" && -f "$runtime/cli/liblaplace_synthesis.so" && -f "$runtime/cli/liblaplace_dynamics.so" ]] \
+  || die "installed monorepo CLI/native closure is missing from $runtime/cli"
 
 log "proof model: $MODEL_DIR"
 log "corroborating model: $CORROBORATION_MODEL_DIR"
 log "migrations up + ingest unicode (idempotent; consensus folds, layer-0 marker set)"
-(cd "$ROOT/app" && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up) \
+(cd "$runtime/migrations" && dotnet Laplace.Migrations.dll up) \
   || die "db-up failed"
 (cd "$ROOT/app" && "${CLI[@]}" ingest unicode) \
   || die "ingest unicode failed"
@@ -133,13 +137,13 @@ if [[ "${LAPLACE_MODEL_PROOF_CODE_CORPORA:-1}" == 1 ]]; then
     || die "Stack v2 ingest failed"
 
   for source_name in TinyCodesDecomposer StackDecomposer; do
-    evidence="$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc \
+    evidence="$(psql -X -w -v ON_ERROR_STOP=1 -tAc \
       "SELECT ops.evidence_count(NULL, laplace.source_id('$source_name'))")"
     [ "${evidence:-0}" -gt 0 ] || die "$source_name has no retained evidence after ingest"
     log "  $source_name: $evidence evidence row(s)"
   done
 
-  ast_rows="$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc "
+  ast_rows="$(psql -X -w -v ON_ERROR_STOP=1 -tAc "
     SELECT count(*)
     FROM laplace.attestations a
     WHERE a.source_id IN (laplace.source_id('TinyCodesDecomposer'), laplace.source_id('StackDecomposer'))
@@ -182,7 +186,7 @@ log "evidence/consensus gates"
 check_type_evidence() {
   local rel_type="$1" min="$2"
   local count
-  count=$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc \
+  count=$(psql -X -w -v ON_ERROR_STOP=1 -tAc \
     "SELECT ops.evidence_count(p_type => laplace.relation_type_id('$rel_type'))")
   [ "${count:-0}" -ge "$min" ] || die "type $rel_type has $count evidence rows (need >= $min) — ingest broken"
   log "  $rel_type: $count evidence rows OK"
@@ -192,15 +196,15 @@ check_type_evidence ATTENDS         1000
 check_type_evidence OV_RELATES      1000
 check_type_evidence COMPLETES_TO    1000
 
-cn=$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc "SELECT count(*) FROM laplace.consensus")
+cn=$(psql -X -w -v ON_ERROR_STOP=1 -tAc "SELECT count(*) FROM laplace.consensus")
 [ "${cn:-0}" -gt 0 ] || die "consensus empty after ingest (accumulate-at-ingest produced no rows)"
 log "  consensus: $cn rows OK"
 
 log "SQL model-plane readback"
-probe_subject="$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc \
+probe_subject="$(psql -X -w -v ON_ERROR_STOP=1 -tAc \
   "SELECT encode(subject_id,'hex') FROM laplace.consensus WHERE type_id=laplace.relation_type_id('ATTENDS') ORDER BY witness_count DESC, subject_id LIMIT 1")"
 [[ "$probe_subject" =~ ^[0-9a-fA-F]{32}$ ]] || die "no ATTENDS subject available for SQL model-plane proof"
-probe_rows="$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc \
+probe_rows="$(psql -X -w -v ON_ERROR_STOP=1 -tAc \
   "SELECT count(*) FROM generation.adjudicated_row(decode('$probe_subject','hex'), 8, 'ATTENDS')")"
 [ "${probe_rows:-0}" -gt 0 ] || die "generation.adjudicated_row returned no SQL-visible model evidence"
 log "  generation.adjudicated_row: $probe_rows row(s) for $probe_subject"
@@ -222,7 +226,7 @@ python3 "$ROOT/scripts/verify-model-behavioral.py" \
   --model "$GGUF_OUT" \
   --runner llama \
   --llama "$LLAMA_BIN" \
-  --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+  --db "" \
   --min-pass "${LAPLACE_MODEL_MIN_PASS:-0.5}" \
   --report "$REPORT_OUT" \
   || die "export loaded but failed semantic behavioral proof; see $REPORT_OUT"

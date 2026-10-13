@@ -15,8 +15,7 @@ run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs
 # Serialize complete promotions so two revisions cannot interleave shared staging
 # artifacts or overwrite each other's cloud lease while waiting on later hosts.
 #
-# The earlier delivery chain (product-stage.yml over scripts/pipeline.sh) assumes the decommissioned layout (a /build
-# volume, /opt/laplace/pgsql-18, laplace_admin, sudo -n); it stays callable from full-qualification.yml by dispatch.
+# Explicit full and competitive qualification use the same site lifecycle and host reservation.
 
 on:
   workflow_call:

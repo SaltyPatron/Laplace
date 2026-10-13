@@ -3,482 +3,65 @@ name: Internal — product stage
 on:
   workflow_call:
     inputs:
-      stage:
-        description: "canonical product lifecycle stage"
+      operation:
+        description: "qualification or competitive (includes installed database and model operations)"
         type: string
         required: true
       target_sha:
-        description: "exact repository revision to execute"
+        description: "Exact source revision"
         type: string
         required: true
       full_clean:
         type: boolean
-        required: false
         default: false
       force_codegen:
         type: boolean
-        required: false
         default: false
       serial_tests:
         type: boolean
-        required: false
-        default: false
-      dev_suites:
-        description: "comma-separated development suites selected by the impact planner; empty runs none; all runs the complete matrix"
-        type: string
-        required: false
-        default: ""
-      build_components:
-        description: "comma-separated candidate components that must be built/materialized; empty builds none"
-        type: string
-        required: false
-        default: ""
-      managed_build_projects:
-        description: "comma-separated managed csproj roots selected from ProjectReference impact; empty builds none; all uses Laplace.slnx"
-        type: string
-        required: false
-        default: ""
-      managed_test_projects:
-        description: "comma-separated managed test csproj paths selected from ProjectReference impact; empty runs none"
-        type: string
-        required: false
-        default: ""
-      browser_test_suites:
-        description: "comma-separated browser suites selected by web ownership; typecheck is always included"
-        type: string
-        required: false
-        default: ""
-      managed_test_filter:
-        description: "optional VSTest filter for exact test-only class qualification"
-        type: string
-        required: false
-        default: ""
-      native_test_filter:
-        description: "optional CTest regex selected from affected native components/cases"
-        type: string
-        required: false
-        default: ""
-      managed_db_test_projects:
-        description: "comma-separated DB-tier managed test csproj paths"
-        type: string
-        required: false
-        default: ""
-      managed_db_test_filter:
-        description: "optional VSTest filter for exact DB-tier test classes"
-        type: string
-        required: false
-        default: ""
-      managed_live_test_projects:
-        description: "comma-separated live-tier managed test csproj paths"
-        type: string
-        required: false
-        default: ""
-      managed_live_test_filter:
-        description: "optional VSTest filter for exact live-tier test classes"
-        type: string
-        required: false
-        default: ""
-      native_db_test_filter:
-        description: "optional CTest regex for affected extension regression suites"
-        type: string
-        required: false
-        default: ""
-      db_suites:
-        description: "comma-separated database suites selected by the impact planner"
-        type: string
-        required: false
-        default: ""
-      live_suites:
-        description: "comma-separated live suites selected by the impact planner"
-        type: string
-        required: false
-        default: ""
-      delivery_actions:
-        description: "comma-separated release-delivery mutations selected by the impact planner"
-        type: string
-        required: false
-        default: ""
-      publish_scope:
-        description: "full, api, api-web, uci, or web publication scope; empty means the planner omitted publish"
-        type: string
-        required: false
-        default: ""
-      skip_if_superseded:
-        description: "skip this selected revision if main advanced before host ownership"
-        type: boolean
-        required: false
         default: false
 
 permissions:
   contents: read
 
 jobs:
-  preflight:
-    name: Product — freshness preflight
-    # Freshness is read-only and must remain available when hosted Actions
-    # billing is unavailable; product delivery itself already depends on this
-    # repository's self-hosted product runner.
-    runs-on: [self-hosted, laplace, staging]
-    timeout-minutes: 2
-    outputs:
-      execute: ${{ steps.freshness.outputs.execute }}
-    steps:
-      - name: Reject superseded revision before self-hosted scheduling
-        id: freshness
-        shell: bash
-        env:
-          TARGET_SHA: ${{ inputs.target_sha }}
-          SKIP_IF_SUPERSEDED: ${{ inputs.skip_if_superseded && '1' || '0' }}
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "execute=true" >> "$GITHUB_OUTPUT"
-          [[ "$SKIP_IF_SUPERSEDED" == 1 ]] || exit 0
-
-          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
-          latest_main="$(GIT_CONFIG_COUNT=1 \
-            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-            git ls-remote --heads "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | awk '{print $1}')"
-          [[ -n "$latest_main" ]] || { echo "::error::could not resolve current main" >&2; exit 1; }
-
-          if [[ "$latest_main" != "$TARGET_SHA" ]]; then
-            probe_repo="$(mktemp -d)"
-            trap 'rm -rf "$probe_repo"' EXIT
-            git -C "$probe_repo" init -q
-            git -C "$probe_repo" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
-            GIT_CONFIG_COUNT=1 \
-              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-              git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"
-            GIT_CONFIG_COUNT=1 \
-              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-              git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"
-            freshness_tool="$probe_repo/ci-product-freshness.py"
-            scope_tool="$probe_repo/ci_product_scope.py"
-            git -C "$probe_repo" show "$TARGET_SHA:scripts/ci-product-freshness.py" > "$freshness_tool"
-            git -C "$probe_repo" show "$TARGET_SHA:scripts/ci_product_scope.py" > "$scope_tool"
-            freshness_rc=0
-            python3 "$freshness_tool" --root "$probe_repo" --base "$TARGET_SHA" --head "$latest_main" || freshness_rc=$?
-            if (( freshness_rc == 3 )); then
-              echo "execute=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; self-hosted product work was not scheduled"
-              {
-                echo "## Superseded product stage"
-                echo
-                echo "- Selected: $TARGET_SHA"
-                echo "- Current main: $latest_main"
-                echo "- Result: product-relevant content changed; no self-hosted product work scheduled"
-              } >> "$GITHUB_STEP_SUMMARY"
-            elif (( freshness_rc == 0 )); then
-              echo "::notice::main advanced from $TARGET_SHA to product-equivalent $latest_main; candidate remains valid"
-              {
-                echo "## Product-equivalent successor"
-                echo
-                echo "- Selected: $TARGET_SHA"
-                echo "- Current main: $latest_main"
-                echo "- Result: only product-ignored content changed; candidate remains valid"
-              } >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::error::could not determine product freshness for $TARGET_SHA against $latest_main" >&2
-              exit "$freshness_rc"
-            fi
-            rm -rf "$probe_repo"
-            trap - EXIT
-          fi
-          unset checkout_auth CHECKOUT_TOKEN
-
   stage:
-    needs: preflight
-    if: needs.preflight.outputs.execute == 'true'
-    name: Product — ${{ inputs.stage }}
-    concurrency:
-      # Mainline qualification preemption is owned by laplace.yml, where the
-      # planner's exact suite/project scope is available. Keep this reusable
-      # stage unique per invocation so it cannot cross-cancel an unrelated test.
-      # Delivery remains non-preemptibly serialized at the installed-host boundary.
-      group: ${{ inputs.skip_if_superseded && (inputs.stage == 'mainline' || inputs.stage == 'release-delivery') && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
-      cancel-in-progress: false
-    runs-on: [self-hosted, laplace, staging]
+    name: Staging — ${{ inputs.operation }}
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 420
+    concurrency:
+      group: laplace-site-hart-server
+      cancel-in-progress: false
+      queue: max
     env:
-      LAPLACE_STAGE: ${{ inputs.stage }}
-      LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
-      LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
-      LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
-      LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
-      LAPLACE_DEV_SUITES: ${{ inputs.dev_suites }}
-      LAPLACE_BUILD_COMPONENTS: ${{ inputs.build_components }}
-      LAPLACE_MANAGED_BUILD_PROJECTS: ${{ inputs.managed_build_projects }}
-      LAPLACE_MANAGED_TEST_PROJECTS: ${{ inputs.managed_test_projects }}
-      LAPLACE_BROWSER_TEST_SUITES: ${{ inputs.browser_test_suites }}
-      LAPLACE_MANAGED_TEST_FILTER: ${{ inputs.managed_test_filter }}
-      LAPLACE_NATIVE_TEST_FILTER: ${{ inputs.native_test_filter }}
-      LAPLACE_MANAGED_DB_TEST_PROJECTS: ${{ inputs.managed_db_test_projects }}
-      LAPLACE_MANAGED_DB_TEST_FILTER: ${{ inputs.managed_db_test_filter }}
-      LAPLACE_MANAGED_LIVE_TEST_PROJECTS: ${{ inputs.managed_live_test_projects }}
-      LAPLACE_MANAGED_LIVE_TEST_FILTER: ${{ inputs.managed_live_test_filter }}
-      LAPLACE_NATIVE_DB_TEST_FILTER: ${{ inputs.native_db_test_filter }}
-      LAPLACE_DB_SUITES: ${{ inputs.db_suites }}
-      LAPLACE_LIVE_SUITES: ${{ inputs.live_suites }}
-      LAPLACE_DELIVERY_ACTIONS: ${{ inputs.delivery_actions }}
-      LAPLACE_PUBLISH_SCOPE: ${{ inputs.publish_scope }}
-      LAPLACE_USE_QUALIFICATION_CACHE: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' && '1' || '0' }}
-      LAPLACE_SKIP_IF_SUPERSEDED: ${{ inputs.skip_if_superseded && '1' || '0' }}
-      LICHESS_API: ${{ secrets.LICHESS_API }}
-      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
-      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
-      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
-      LAPLACE_AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_ID }}
-      LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET }}
-      LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
-      LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
-      LAPLACE_PUBLIC_BASE_URL: ${{ vars.LAPLACE_PUBLIC_BASE_URL }}
-      LAPLACE_BILLING_BYPASS: ${{ vars.LAPLACE_BILLING_BYPASS }}
-      LAPLACE_AUTH_DEV_PRINCIPAL: ${{ vars.LAPLACE_AUTH_DEV_PRINCIPAL }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      LAPLACE_HOST_LOCK_WAIT_SECONDS: "600"
+      LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '0' }}
+      LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '0' }}
+      LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '0' }}
     steps:
-      - name: Select exact source, reserve only required resources, execute stage
-        shell: bash
+      - name: Check out the selected source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Execute through the installed host lifecycle
         env:
+          OPERATION: ${{ inputs.operation }}
           TARGET_SHA: ${{ inputs.target_sha }}
-          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          umask 0002
-
-          control_workspace="$GITHUB_WORKSPACE"
-          work_root="${LAPLACE_WORK_ROOT:-${LAPLACE_WORK:?Runner must declare LAPLACE_WORK}}"
-          worktree_root="$work_root/product-worktrees"
-          candidate_workspace="$worktree_root/$TARGET_SHA"
-          mkdir -p "$worktree_root"
-
-          # The runner checkout is only the Git metadata/control repository.
-          # Product work happens in an exact-revision worktree so another revision
-          # can never overwrite this candidate's source or build outputs.
-          exec 7>"$work_root/git-metadata.lock"
-          flock 7
-          cd "$control_workspace"
-          if [[ ! -e .git ]]; then
-            [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
-              echo "::error::nonempty control workspace has no repository; preserving its files" >&2
-              exit 1
-            }
-            git init --initial-branch=main
-            git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
-          fi
-          git diff --quiet
-          git diff --cached --quiet
-
-          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
-          GIT_CONFIG_COUNT=1 \
-            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-            git fetch --no-tags --depth=2 origin "$TARGET_SHA"
-
-          if [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]]; then
-            latest_main="$(GIT_CONFIG_COUNT=1 \
-              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-              git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
-            [[ -n "$latest_main" ]] || { echo "::error::could not resolve current main" >&2; exit 1; }
-            if [[ "$latest_main" != "$TARGET_SHA" ]]; then
-              GIT_CONFIG_COUNT=1 \
-                GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-                GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-                git fetch --no-tags --depth=1 origin "$latest_main"
-              freshness_dir="$(mktemp -d "$work_root/product-freshness.XXXXXX")"
-              freshness_tool="$freshness_dir/ci-product-freshness.py"
-              scope_tool="$freshness_dir/ci_product_scope.py"
-              git show "$TARGET_SHA:scripts/ci-product-freshness.py" > "$freshness_tool"
-              git show "$TARGET_SHA:scripts/ci_product_scope.py" > "$scope_tool"
-              freshness_rc=0
-              python3 "$freshness_tool" --root "$control_workspace" --base "$TARGET_SHA" --head "$latest_main" || freshness_rc=$?
-              rm -rf "$freshness_dir"
-              if (( freshness_rc == 3 )); then
-                unset checkout_auth CHECKOUT_TOKEN
-                echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; no product stage executed"
-                exit 0
-              fi
-              if (( freshness_rc != 0 )); then
-                unset checkout_auth CHECKOUT_TOKEN
-                echo "::error::could not determine product freshness for $TARGET_SHA against $latest_main" >&2
-                exit "$freshness_rc"
-              fi
-              echo "::notice::main advanced from $TARGET_SHA to product-equivalent $latest_main; continuing exact candidate"
-            fi
-          fi
-
-          unset checkout_auth CHECKOUT_TOKEN
-
-          # Candidate worktrees are generated build state, not source authority. Reclaim
-          # inactive superseded candidates BEFORE allocating any new lock/worktree files.
-          # Preserve exactly the most recent native-qualified owner so an unchanged
-          # native graph can be reused instead of rebuilt; the next successful native
-          # qualification advances this pointer and the prior owner becomes reclaimable.
-          preserve_native_source="$(python3 "$control_workspace/scripts/ci-qualification-cache.py" \
-            latest-source --suite native-dev --root "$control_workspace" 2>/dev/null || true)"
-          for stale_workspace in "$worktree_root"/*; do
-            [[ -d "$stale_workspace" ]] || continue
-            [[ "$stale_workspace" != "$candidate_workspace" ]] || continue
-            stale_sha="${stale_workspace##*/}"
-            [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
-            if find "$stale_workspace" -maxdepth 0 -mmin -120 -print -quit | grep -q .; then
-              echo "::notice::preserving recent candidate handoff $stale_sha"
-              continue
-            fi
-            if [[ -n "$preserve_native_source" && "$stale_sha" == "$preserve_native_source" ]]; then
-              echo "::notice::preserving latest native-qualified candidate $stale_sha for artifact reuse"
-              continue
-            fi
-            stale_lock="$work_root/product-$stale_sha.lock"
-            [[ -e "$stale_lock" ]] || continue
-
-            exec {stale_fd}<>"$stale_lock"
-            if flock -n "$stale_fd"; then
-              stale_physical="$(readlink -f "$stale_workspace" 2>/dev/null || printf '%s' "$stale_workspace")"
-              stale_identity="$(printf '%s' "$stale_physical" | sha256sum | cut -c1-16)"
-              stale_build=""
-              if [[ -n "${LAPLACE_BUILD:-}" ]]; then
-                stale_build="$LAPLACE_BUILD/laplace-mono/worktrees/$stale_identity"
-              fi
-              if [[ -e "$stale_workspace/.git" ]]; then
-                if [[ -z "$(git -C "$stale_workspace" status --porcelain --untracked-files=no)" ]]; then
-                  rm -rf "$stale_workspace"
-                  [[ -z "$stale_build" ]] || rm -rf "$stale_build"
-                  rm -f "$stale_lock"
-                else
-                  echo "::warning::preserving dirty inactive candidate worktree: $stale_workspace" >&2
-                fi
-              else
-                rm -rf "$stale_workspace"
-                  [[ -z "$stale_build" ]] || rm -rf "$stale_build"
-              fi
-              flock -u "$stale_fd"
-            fi
-            exec {stale_fd}>&-
-          done
-
-          # A revision's lock outlives its reclaimed worktree unless removed: one empty
-          # file per revision ever built. Remove unheld locks with no worktree, older
-          # than the handoff window, and .NET diagnostic IPC pipes whose process is gone.
-          for stale_lock in "$work_root"/product-*.lock; do
-            [[ -e "$stale_lock" ]] || continue
-            stale_sha="${stale_lock##*/product-}"; stale_sha="${stale_sha%.lock}"
-            [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
-            [[ "$worktree_root/$stale_sha" != "$candidate_workspace" && ! -e "$worktree_root/$stale_sha" ]] || continue
-            find "$stale_lock" -maxdepth 0 -mmin +120 -print -quit | grep -q . || continue
-            exec {stale_fd}<>"$stale_lock"
-            if flock -n "$stale_fd"; then rm -f "$stale_lock"; flock -u "$stale_fd"; fi
-            exec {stale_fd}>&-
-          done
-          for pipe in "$work_root"/clr-debug-pipe-* "$work_root"/dotnet-diagnostic-*; do
-            [[ -e "$pipe" ]] || continue
-            pid="${pipe##*/clr-debug-pipe-}"; pid="${pid##*/dotnet-diagnostic-}"; pid="${pid%%-*}"
-            [[ "$pid" =~ ^[0-9]+$ && ! -d "/proc/$pid" ]] && rm -f "$pipe"
-          done
-
-          # Old versions of this workflow removed candidate worktrees without removing
-          # their externally placed CMake trees. Recover those orphaned build trees too.
-          # A CMake tree is eligible only when its recorded source is a deleted
-          # product-worktree candidate; active/current/native-reuse owners are excluded.
-          build_candidates=()
-          if [[ -n "${LAPLACE_BUILD:-}" ]]; then
-            build_candidates=("$LAPLACE_BUILD"/laplace-mono/worktrees/*)
-          fi
-          for stale_build in "${build_candidates[@]}"; do
-            [[ -d "$stale_build" ]] || continue
-            cache="$stale_build/build/CMakeCache.txt"
-            [[ -f "$cache" ]] || continue
-            stale_source="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -1)"
-            [[ "$stale_source" == "$worktree_root/"* ]] || continue
-            [[ "$stale_source" != "$candidate_workspace" ]] || continue
-            stale_sha="${stale_source##*/}"
-            [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
-            if find "$stale_build" -maxdepth 0 -mmin -120 -print -quit | grep -q .; then
-              continue
-            fi
-            if [[ -n "$preserve_native_source" && "$stale_sha" == "$preserve_native_source" ]]; then
-              continue
-            fi
-            [[ ! -d "$stale_source" ]] || continue
-
-            stale_lock="$work_root/product-$stale_sha.lock"
-            if [[ -e "$stale_lock" ]]; then
-              exec {stale_fd}<>"$stale_lock"
-              if flock -n "$stale_fd"; then
-                rm -rf "$stale_build"
-                flock -u "$stale_fd"
-              fi
-              exec {stale_fd}>&-
-            else
-              rm -rf "$stale_build"
-            fi
-          done
-
-          git worktree prune
-
-          # Reserve this exact candidate only after stale candidates have yielded space.
-          # Holding the metadata lock at the same time closes the create->unlock->lock race.
-          exec 8>"$work_root/product-$TARGET_SHA.lock"
-          flock 8
-          if [[ -e "$candidate_workspace/.git" ]]; then
-            [[ "$(git -C "$candidate_workspace" rev-parse HEAD)" == "$TARGET_SHA" ]] || {
-              echo "::error::candidate worktree path belongs to a different revision: $candidate_workspace" >&2
-              exit 1
-            }
-          else
-            [[ ! -e "$candidate_workspace" || -z "$(find "$candidate_workspace" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]] || {
-              echo "::error::candidate worktree path is nonempty but is not a Git worktree: $candidate_workspace" >&2
-              exit 1
-            }
-            rm -rf "$candidate_workspace"
-            git worktree add --detach "$candidate_workspace" "$TARGET_SHA"
-          fi
-          flock -u 7
-
-          export GITHUB_WORKSPACE="$candidate_workspace"
-          cd "$candidate_workspace"
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
-          git diff --quiet
-          git diff --cached --quiet
-
-          # Serialize only jobs touching the SAME candidate build tree. Different
-          # revisions have independent source/build trees. Mainline owns two phases:
-          # candidate compilation is isolated and must not wait behind a long ingest;
-          # product-ci.sh acquires host-resource.lock only when that built candidate
-          # reaches the installed-host mutation/publication boundary.
-          case "$LAPLACE_STAGE" in
-            release-qualification|mainline|build|test-dev|check)
-              ;;
-            *)
-              exec 9>"$work_root/host-resource.lock"
-              flock 9
-              ;;
-          esac
-
-          {
-            echo "## Product stage execution"
-            echo
-            echo "- Stage: $LAPLACE_STAGE"
-            echo "- Revision: $TARGET_SHA"
-            echo "- Candidate workspace: $candidate_workspace"
-            if [[ "$LAPLACE_STAGE" == release-qualification || "$LAPLACE_STAGE" == mainline || "$LAPLACE_STAGE" == build || "$LAPLACE_STAGE" == test-dev || "$LAPLACE_STAGE" == check ]]; then
-              echo "- Shared installed-host reservation: no"
-            else
-              echo "- Shared installed-host reservation: yes"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          source scripts/ci-environment.sh
-          exec bash scripts/product-ci.sh "$LAPLACE_STAGE"
+          case "$OPERATION" in qualification|competitive) ;; *) exit 2 ;; esac
+          mkdir -p "$RUNNER_TEMP/qualification"
+          export LAPLACE_QUALIFICATION_RESULTS="$RUNNER_TEMP/qualification"
+          export GITHUB_SHA="$TARGET_SHA"
+          bash deploy/linux/site.sh "$OPERATION" 2>&1 | tee "$RUNNER_TEMP/qualification/operation.log"
+      - name: Retain qualification results including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualification-${{ inputs.operation }}-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/qualification
+          if-no-files-found: error
+          retention-days: 14

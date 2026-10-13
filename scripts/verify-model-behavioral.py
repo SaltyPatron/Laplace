@@ -49,17 +49,11 @@ WORD_RE = re.compile(r"[a-z]+")
 
 def psql_rows(db, sql):
     """Run one SQL statement through psql, return list of tab-separated rows."""
-    cmd = ["psql", "-X", "-q", "-t", "-A", "-F", "\t"]
-    for part in db.split():
-        k, _, v = part.partition("=")
-        if k == "host":
-            cmd += ["-h", v]
-        elif k == "user":
-            cmd += ["-U", v]
-        elif k == "dbname":
-            cmd += ["-d", v]
-        elif k == "port":
-            cmd += ["-p", v]
+    cmd = ["psql", "-X", "-w", "-v", "ON_ERROR_STOP=1", "-q", "-t", "-A", "-F", "\t"]
+    # An empty argument uses the selected PG* environment; libpq parses explicit
+    # connection strings, including quoted paths and TLS options, itself.
+    if db:
+        cmd += ["--dbname", db]
     r = subprocess.run(cmd + ["-c", sql], capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:

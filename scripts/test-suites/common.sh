@@ -29,8 +29,7 @@ set_dev_perfcache() {
     return 0
   fi
   # Pre-install qualification must execute the exact candidate ROM, never the
-  # currently installed floor. The physical CMake tree lives on /build and the
-  # checkout-local build symlink is not an authority for artifact selection.
+  # currently installed floor. Resolve the CMake tree from machine configuration.
   build_dir="$(python3 "$ROOT/scripts/place-build-directory.py" "$ROOT")"
   candidate=$(find -L "$build_dir" -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
   [[ -n "$candidate" ]] || {
@@ -54,7 +53,7 @@ set_installed_perfcache() {
 run_ctest() {
   python3 "$ROOT/scripts/provision-cmake.py" \
     --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake" \
-    --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" \
+    --work "${LAPLACE_WORK_ROOT:?}/cmake" \
     --exec-tool ctest -- "$@"
 }
 
@@ -65,7 +64,7 @@ managed_test_solution() {
     return 0
   fi
   [[ -n "$selected" ]] || return 3
-  work="${LAPLACE_WORK_ROOT:-/build/laplace/work}/managed-solutions"
+  work="${LAPLACE_WORK_ROOT:?}/managed-solutions"
   mkdir -p "$work"
   solution="$(mktemp "$work/${label}.XXXXXX.slnx")"
   python3 "$ROOT/scripts/ci_managed_projects.py" --root "$ROOT" solution \
@@ -95,7 +94,7 @@ run_managed_dotnet_tests() {
   [[ "$solution" == "$ROOT/app/Laplace.slnx" ]] || generated="$solution"
 
   local test_log_dir test_log
-  test_log_dir="${LAPLACE_WORK_ROOT:-/build/laplace/work}/managed-test-logs"
+  test_log_dir="${LAPLACE_WORK_ROOT:?}/managed-test-logs"
   mkdir -p "$test_log_dir"
   test_log="$(mktemp "$test_log_dir/${label}.XXXXXX.log")"
 
