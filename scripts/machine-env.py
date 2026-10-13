@@ -33,23 +33,21 @@ def machine_file(process):
     return Path(process.get('PROGRAMDATA', 'C:/ProgramData')) / 'Laplace/machine.env' if os.name == 'nt' else Path('/etc/laplace/machine.env')
 
 
-def resolve(path, process, explicit=False):
-    values = canonical_process(process)
-    # Emit translated process settings as well: consumers import only this output.
-    declarations = {new: values[new] for old, new in LEGACY_DATABASE_KEYS.items() if process.get(old)}
-    try:
-        content = path.read_text(encoding='utf-8-sig')
-    except FileNotFoundError:
-        if explicit:
-            raise ValueError('LAPLACE_MACHINE_ENV does not name an existing file')
-        return {**declarations, 'LAPLACE_CONFIG_SOURCE': 'defaults'}
+def assignment_lexer(content):
     lexer = shlex.shlex(content, posix=True)
     lexer.whitespace = '\r\n'
     lexer.whitespace_split = True
     lexer.escape = ''  # Backslashes in paths are data.
+    return lexer
+
+
+def parse(content, process):
+    values = canonical_process(process)
+    # Emit translated process settings as well: consumers import only this output.
+    declarations = {new: values[new] for old, new in LEGACY_DATABASE_KEYS.items() if process.get(old)}
     seen = set()
     configured = {}
-    for item in lexer:
+    for item in assignment_lexer(content):
         match = re.fullmatch(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*', item, re.S)
         if not match:
             raise ValueError('Invalid machine configuration assignment')
@@ -73,8 +71,60 @@ def resolve(path, process, explicit=False):
             value = re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%', expand, value)
             values[name] = value
             declarations[name] = value
-    declarations['LAPLACE_CONFIG_SOURCE'] = str(path.resolve())
     return declarations
+
+
+def resolve(path, process, explicit=False):
+    try:
+        content = path.read_text(encoding='utf-8-sig')
+    except FileNotFoundError:
+        if explicit:
+            raise ValueError('LAPLACE_MACHINE_ENV does not name an existing file')
+        return {**parse('', process), 'LAPLACE_CONFIG_SOURCE': 'defaults'}
+    return {**parse(content, process), 'LAPLACE_CONFIG_SOURCE': str(path.resolve())}
+
+
+def update_assignments(content, values):
+    """Render a validated update, replacing aliases as one setting and retaining unrelated text."""
+    parse(content, {})  # Contradictory existing declarations are never silently repaired.
+    updates = {}
+    for name, value in values.items():
+        name, value = LEGACY_DATABASE_KEYS.get(name, name), str(value)
+        if name in updates and updates[name] != value:
+            raise ValueError('Conflicting configuration updates for: ' + name)
+        updates[name] = value
+    lines = iter(content.splitlines(keepends=True))
+    result = []
+    written = set()
+    for line in lines:
+        match = re.match(r'[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=', line)
+        if not match:
+            result.append(line)
+            continue
+        entry = line
+        # Quoted multiline values belong to their assignment, including lines
+        # which themselves happen to look like another setting.
+        while True:
+            try:
+                list(assignment_lexer(entry))
+                break
+            except ValueError:
+                entry += next(lines)
+        name = match[1]
+        canonical = LEGACY_DATABASE_KEYS.get(name, name)
+        if canonical in written:
+            continue
+        if canonical in updates:
+            result.append(canonical + '=' + shlex.quote(updates[canonical]) + '\n')
+        else:
+            result.append(entry[:match.start(1)] + canonical + entry[match.end(1):])
+        written.add(canonical)
+    text = ''.join(result)
+    if text and not text.endswith('\n'):
+        text += '\n'
+    text += ''.join(key + '=' + shlex.quote(value) + '\n' for key, value in updates.items() if key not in written)
+    parse(text, {})
+    return text
 
 
 def paths(path, process, checkout):

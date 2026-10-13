@@ -22,6 +22,71 @@ CONFIG = json.loads((RUNTIME / 'hart-server-runtime.json').read_text())
 
 
 class RuntimeBoundaries(unittest.TestCase):
+    def legacy_machine(self, directory):
+        config = copy.deepcopy(CONFIG)
+        path = Path(directory) / 'machine.env'
+        config['machine_file'] = str(path)
+        path.write_text('# Existing host declaration\n'
+            'LAPLACE_AGENT_USER=laplace-runner\n'
+            'export LAPLACE_KNOWLEDGE_RUNTIME_DB = "Host=127.0.0.1;\nUsername=old_runtime;SSL Mode=Require"\n'
+            'DEPENDENT_DB=${LAPLACE_KNOWLEDGE_RUNTIME_DB}\n'
+            'LAPLACE_BAO_KNOWLEDGE_HOST=hart-server\n'
+            'LAPLACE_KNOWLEDGE_ROLE=existing_runtime\n'
+            'DEPENDENT=${LAPLACE_KNOWLEDGE_ROLE}\n'
+            '# Keep unrelated text and quoted lines exactly\n'
+            'UNRELATED="first line\nLAPLACE_DATABASE_RUNTIME_DB=literal content\nlast line"\n')
+        path.chmod(0o640)
+        return config, path
+
+    def test_runtime_configuration_upgrade_is_readable_and_repeatable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, path = self.legacy_machine(directory)
+            owner = path.stat().st_uid, path.stat().st_gid
+            runtime.write_machine_settings(config)
+            first = path.read_text()
+            selected = runtime.declarations(path)
+            self.assertEqual(selected['LAPLACE_DATABASE_RUNTIME_DB'], runtime.machine_settings(config)['LAPLACE_DATABASE_RUNTIME_DB'])
+            self.assertIn('SSL Mode=VerifyFull;', selected['LAPLACE_DATABASE_RUNTIME_DB'])
+            self.assertEqual(selected['DEPENDENT_DB'], selected['LAPLACE_DATABASE_RUNTIME_DB'])
+            self.assertEqual(selected['LAPLACE_DATABASE_ROLE'], 'existing_runtime')
+            self.assertEqual(selected['DEPENDENT'], 'existing_runtime')
+            self.assertEqual(selected['LAPLACE_BAO_DATABASE_HOST'], 'hart-server')
+            self.assertEqual(selected['LAPLACE_AGENT_USER'], 'laplace-runner')
+            self.assertNotIn('export LAPLACE_KNOWLEDGE_RUNTIME_DB', first)
+            self.assertNotIn('LAPLACE_BAO_KNOWLEDGE_HOST', first)
+            self.assertIn('# Keep unrelated text and quoted lines exactly\n'
+                          'UNRELATED="first line\nLAPLACE_DATABASE_RUNTIME_DB=literal content\nlast line"\n', first)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+            self.assertEqual((path.stat().st_uid, path.stat().st_gid), owner)
+            runtime.write_machine_settings(config)
+            self.assertEqual(path.read_text(), first)
+
+    def test_failed_activation_restores_legacy_configuration_after_upgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, path = self.legacy_machine(directory)
+            original = path.read_bytes()
+            recovered = []
+            with self.assertRaisesRegex(RuntimeError, 'injected activation failure'):
+                with runtime.SYNC.configuration_transaction([path], lambda: recovered.append(runtime.declarations(path))):
+                    runtime.write_machine_settings(config)
+                    runtime.declarations(path)
+                    raise RuntimeError('injected activation failure')
+            self.assertEqual(path.read_bytes(), original)
+            self.assertIn('Username=old_runtime;', recovered[0]['LAPLACE_DATABASE_RUNTIME_DB'])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+
+    def test_existing_alias_conflict_fails_before_configuration_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, path = self.legacy_machine(directory)
+            with path.open('a') as stream:
+                stream.write('LAPLACE_DATABASE_RUNTIME_DB=conflicting_private_value\n')
+            original = path.read_bytes()
+            with patch.object(runtime.SYNC, 'atomic') as write:
+                with self.assertRaisesRegex(ValueError, '^Conflicting configuration aliases for: LAPLACE_DATABASE_RUNTIME_DB$'):
+                    runtime.write_machine_settings(config)
+                write.assert_not_called()
+            self.assertEqual(path.read_bytes(), original)
+
     def workload_fixture(self, temporary, *, failure=None, conflict=False):
         config = copy.deepcopy(CONFIG)
         credential = Path(temporary) / 'approle.json'
