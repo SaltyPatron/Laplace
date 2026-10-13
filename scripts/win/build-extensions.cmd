@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
+pwsh -NoProfile -File "%~dp0assert-build-source.ps1" -SourceDirectory "%LAPLACE_ROOT%\extension" -BuildDirectory "%LAPLACE_EXT_BUILD%" || exit /b 1
 set "LAPLACE_RESOURCE_FLAGS="
 if defined LAPLACE_RC set LAPLACE_RESOURCE_FLAGS="-DCMAKE_RC_COMPILER=%LAPLACE_RC%"
 if defined LAPLACE_MT set LAPLACE_RESOURCE_FLAGS=%LAPLACE_RESOURCE_FLAGS% "-DCMAKE_MT=%LAPLACE_MT%"
@@ -28,12 +29,16 @@ if "%SKIP_CODEGEN%"=="0" (
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-ext || exit /b 1
 
-if not exist "%LAPLACE_DEPS_PREFIX%\geos\include\geos_c.h" (
-  echo ERROR: geos missing under %LAPLACE_DEPS_PREFIX% — run scripts\win\build-deps.cmd first
+set "GEOS_PREFIX=%LAPLACE_DEPENDENCY_GEOS_PREFIX%"
+if not defined GEOS_PREFIX set "GEOS_PREFIX=%LAPLACE_DEPS_PREFIX%\geos"
+set "PROJ_PREFIX=%LAPLACE_DEPENDENCY_PROJ_PREFIX%"
+if not defined PROJ_PREFIX set "PROJ_PREFIX=%LAPLACE_DEPS_PREFIX%\proj"
+if not exist "%GEOS_PREFIX%\include\geos_c.h" (
+  echo ERROR: geos missing under %GEOS_PREFIX%
   goto fail
 )
-if not exist "%LAPLACE_DEPS_PREFIX%\proj\include\proj.h" (
-  echo ERROR: proj missing under %LAPLACE_DEPS_PREFIX% — run scripts\win\build-deps.cmd first
+if not exist "%PROJ_PREFIX%\include\proj.h" (
+  echo ERROR: proj missing under %PROJ_PREFIX%
   goto fail
 )
 
@@ -51,6 +56,7 @@ cmake -B "%LAPLACE_EXT_BUILD%" -S extension -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release ^
   -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
   %LAPLACE_RESOURCE_FLAGS% ^
+  "-DLAPLACE_PG_CONFIG=%PGBIN:\=/%/pg_config.exe" ^
   "-DLAPLACE_ENGINE_BUILD=%LAPLACE_ENGINE_BUILD:\=/%" ^
   "-DLAPLACE_DEPS_PREFIX=%LAPLACE_DEPS_PREFIX:\=/%"
 if errorlevel 1 goto fail

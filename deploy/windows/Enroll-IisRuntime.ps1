@@ -18,7 +18,8 @@ function Invoke-Bao([string[]]$Arguments,[string]$InputText='') {
         return $output.GetAwaiter().GetResult()
     } finally {$p.Dispose()}
 }
-$policy=(@($c.records.PSObject.Properties | ForEach-Object {'path "'+$_.Value+'" { capabilities = ["read"] }'}) -join "`n")
+$references=@(Get-IisCredentialReferences $c)
+$policy=(@($references | ForEach-Object {'path "'+$_.Value+'" { capabilities = ["read"] }'}) -join "`n")
 $policy+="`n"+'path "auth/token/lookup-self" { capabilities = ["read"] }'+"`n"+'path "auth/token/renew-self" { capabilities = ["update"] }'+"`n"+'path "auth/token/revoke-self" { capabilities = ["update"] }'
 $null=Invoke-Bao @('policy','write',$c.role,'-') $policy
 $role=@{token_policies=@($c.role);token_no_default_policy=$true;token_ttl='5m';token_max_ttl='10m';secret_id_ttl=0;secret_id_num_uses=0}
@@ -34,4 +35,4 @@ foreach($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','Allow'))
 }
 Set-Acl -LiteralPath $Destination -AclObject $acl
-Write-Host "Prepared encrypted enrollment for $($c.role); policy reads only the six declared records."
+Write-Host "Prepared encrypted enrollment for $($c.role); policy reads only the $($references.Count) selected records."
