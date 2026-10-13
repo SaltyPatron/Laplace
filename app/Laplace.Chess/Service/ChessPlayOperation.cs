@@ -12,6 +12,9 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
 {
     public ChessPlayContext? Context { get; init; }
     public string? RecordedPlayingId { get; init; }
+    public bool? Adjudicated { get; init; }
+    public bool CanRetryRecording => RecordToSubstrate && State is "recording" or "failed"
+        && Adjudicated is not null && Result is "1-0" or "0-1" or "1/2-1/2";
     public Dictionary<int, ChessLivePlyAnalysis> Analysis { get; init; } = new();
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string[]? PositionFens { get; init; }
@@ -31,9 +34,10 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
         return new(id, requester, now, now, record, "ongoing", record ? "pending" : "disabled", null, null, [], null);
     }
 
-    internal PlaySession Restore()
+    internal PlaySession Restore(bool resumeRecording = false)
     {
-        if (State != "ongoing") throw new InvalidOperationException("Only an ongoing play operation can resume.");
+        if (State != "ongoing" && !(resumeRecording && CanRetryRecording))
+            throw new InvalidOperationException("This operation cannot resume play or its retained recording.");
         // Earlier browser operations always started from the standard initial board.
         var context = Context ?? new ChessPlayContext("chess/play/session", null, "Browser player",
             Convert.ToHexString(ChessVocabulary.LaplacePlayerId.ToBytes()), "Laplace",

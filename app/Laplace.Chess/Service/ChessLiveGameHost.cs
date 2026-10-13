@@ -180,7 +180,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await _writeGate.WaitAsync(ct);
         try
         {
-            var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext)
+            using var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext)
                 .DeclareSourcePrior(SourceTrust.Response)
                 .DeclareSourcePrior(ChessTransitions.SourceId, SourceTrust.StructuredCorpus)
                 .DeclareSourcePrior(ChessPositionOutcomes.SourceId, SourceTrust.StructuredCorpus);
@@ -196,7 +196,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 playingId = ChessVocabulary.LivePlayingId(
                     session.WhitePlayerId, session.BlackPlayerId, session.LearnContext,
                     lineId, result.ResultToken, session.Metadata.ExternalGameId);
-                EnsurePlayingEntity(b, playingId, session);
+                b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType);
 
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     playingId, ChessVocabulary.PlaysLineType, lineId,
@@ -282,7 +282,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             }
 
             var change = await b.BuildAsync(ct);
-            await _writer.ApplyAsync(change, ct);
+            try { await _writer.ApplyAsync(change, ct); }
+            finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
             if (session.PositionIds.Count > 1)
                 ChessTransitionObservations.MarkObserved(
                     session.PositionIds.Take(session.PositionIds.Count - 1), session.MoveIds);
@@ -391,52 +392,65 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         return id;
     }
 
-    public PlaySession? GetPlaySession(Guid sessionId)
+    public PlaySession? GetPlaySession(Guid sessionId, bool resumeRecording = false)
     {
         if (_playSessions.TryGetValue(sessionId, out var session)) return session;
         lock (_playRecoveryGate)
         {
             if (_playSessions.TryGetValue(sessionId, out session)) return session;
             var operation = ChessPlayOperation.Read(sessionId);
-            if (operation?.State != "ongoing") return null;
-            session = operation.Restore();
-            if (session.RecordToSubstrate)
-            {
-                var game = new LiveGameSession(session.LearnContext, session.WhitePlayerId, session.BlackPlayerId,
-                    session.WhitePlayerName, session.BlackPlayerName, session.Metadata!);
-                var modality = new ChessModality();
-                var state = modality.FromFen(session.Metadata!.StartFen ?? ChessModality.StartFen);
-                foreach (var uci in session.Moves)
-                {
-                    var move = MoveGen.Legal(state.Board).First(m => m.ToUci() == uci);
-                    var next = modality.Apply(state, move);
-                    var from = modality.StateKey(state);
-                    var to = modality.StateKey(next);
-                    var recorded = ResolveRecordedPly(from, to, uci,
-                        state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId);
-                    game.Moves.Add(uci);
-                    game.Plies.Add(recorded);
-                    game.MoveIds.Add(ChessCompose.MoveId(recorded.MovingPiece, recorded.Move));
-                    if (game.PositionIds.Count == 0) game.PositionIds.Add(ChessCompose.PositionId(from));
-                    game.PositionIds.Add(ChessCompose.PositionId(to));
-                    state = next;
-                }
-                foreach (var (ply, analysis) in operation.Analysis) game.Analysis.Add(ply, analysis);
-                _games[session.EventId] = game;
-            }
+            if (operation is null || (operation.State != "ongoing" && !(resumeRecording && operation.CanRetryRecording)))
+                return null;
+            session = operation.Restore(resumeRecording);
+            if (session.RecordToSubstrate) RestorePlayRecording(session);
             _playSessions[sessionId] = session;
             return session;
         }
     }
 
+    private void RestorePlayRecording(PlaySession session)
+    {
+        var game = new LiveGameSession(session.LearnContext, session.WhitePlayerId, session.BlackPlayerId,
+            session.WhitePlayerName, session.BlackPlayerName, session.Metadata!);
+        var modality = new ChessModality();
+        var state = modality.FromFen(session.Metadata!.StartFen ?? ChessModality.StartFen);
+        foreach (var uci in session.Moves)
+        {
+            var move = MoveGen.Legal(state.Board).First(m => m.ToUci() == uci);
+            var next = modality.Apply(state, move);
+            var from = modality.StateKey(state);
+            var to = modality.StateKey(next);
+            var recorded = ResolveRecordedPly(from, to, uci,
+                state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId);
+            game.Moves.Add(uci);
+            game.Plies.Add(recorded);
+            game.MoveIds.Add(ChessCompose.MoveId(recorded.MovingPiece, recorded.Move));
+            if (game.PositionIds.Count == 0) game.PositionIds.Add(ChessCompose.PositionId(from));
+            game.PositionIds.Add(ChessCompose.PositionId(to));
+            state = next;
+        }
+        if (session.Operation is { } operation)
+            foreach (var (ply, analysis) in operation.Analysis) game.Analysis.Add(ply, analysis);
+        _games[session.EventId] = game;
+    }
+
     public async Task FinishPlaySessionAsync(Guid sessionId, GameOutcome outcome, bool adjudicated, CancellationToken ct)
     {
-        if (!_playSessions.TryGetValue(sessionId, out var session)) return;
+        var session = GetPlaySession(sessionId, resumeRecording: true)
+            ?? throw new InvalidOperationException("The play operation is not available for recording.");
+        if (session.Operation is { State: not "ongoing" } retained)
+        {
+            if (!retained.CanRetryRecording || retained.Result != outcome.ResultToken || retained.Adjudicated != adjudicated)
+                throw new InvalidOperationException("A recording retry must retain the original result and adjudication.");
+        }
         try
         {
             if (session.RecordToSubstrate)
             {
+                if (session.Operation is { } pending)
+                    session.Operation = pending with { Adjudicated = adjudicated };
                 session.SaveOperation("recording", "in_progress", outcome.ResultToken);
+                if (session.Operation is not null) RestorePlayRecording(session);
                 SetGameMetadata(session.EventId, new ChessLiveGameMetadata(
                     Termination: adjudicated ? "adjudicated" : "normal"));
                 var playingId = await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
@@ -452,6 +466,20 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             throw;
         }
         _playSessions.TryRemove(sessionId, out _);
+    }
+
+    public Task RetryPlayRecordingAsync(Guid sessionId, CancellationToken ct)
+    {
+        var operation = GetPlaySession(sessionId, resumeRecording: true)?.Operation;
+        if (operation?.CanRetryRecording != true)
+            throw new InvalidOperationException("There is no retained recording to retry.");
+        var outcome = operation.Result switch
+        {
+            "1-0" => GameOutcome.WonBy(0),
+            "0-1" => GameOutcome.WonBy(1),
+            _ => GameOutcome.Draw,
+        };
+        return FinishPlaySessionAsync(sessionId, outcome, operation.Adjudicated!.Value, ct);
     }
 
     public async Task RecordPlayPlyAsync(
@@ -487,13 +515,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             return GameOutcome.WonBy(Board.FromFen(fen).WhiteToMove ? 0 : 1);
         }
         return GameOutcome.Draw;
-    }
-
-    private static void EnsurePlayingEntity(SubstrateChangeBuilder b, Hash128 playingId, LiveGameSession session)
-    {
-        if (session.EntityEmitted) return;
-        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType);
-        session.EntityEmitted = true;
     }
 
     internal static RecordedPly ResolveRecordedPly(
@@ -749,8 +770,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
         private static string? Prefer(string? next, string? current)
             => string.IsNullOrWhiteSpace(next) ? current : next;
-
-        public bool EntityEmitted { get; set; }
 
     }
 
