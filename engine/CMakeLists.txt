@@ -253,26 +253,34 @@ enable_testing()
 include(CTest)
 
 if(BUILD_TESTING)
-    if(NOT EXISTS "${LAPLACE_EXTERNAL}/googletest/CMakeLists.txt")
-        message(FATAL_ERROR
-            "BUILD_TESTING requires ${LAPLACE_EXTERNAL}/googletest/CMakeLists.txt. "
-            "Run the configured qualification setup or declare a complete LAPLACE_EXTERNAL directory.")
-    else()
-        set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    if(EXISTS "${LAPLACE_EXTERNAL}/googletest/CMakeLists.txt")
         add_subdirectory("${LAPLACE_EXTERNAL}/googletest"
             "${CMAKE_BINARY_DIR}/_deps/googletest" EXCLUDE_FROM_ALL)
-        if(WIN32)
-            # Vendored third-party: gtest's own TUs compile its headers non-SYSTEM,
-            # so its internal warnings (e.g. -Wcharacter-conversion) surface here.
-            foreach(_gt gtest gtest_main gmock gmock_main)
-                if(TARGET ${_gt})
-                    target_compile_options(${_gt} PRIVATE -w)
-                endif()
-            endforeach()
+    else()
+        if(EXISTS "${LAPLACE_EXTERNAL}/googletest")
+            message(FATAL_ERROR "Incomplete GoogleTest source: ${LAPLACE_EXTERNAL}/googletest")
         endif()
-        include(GoogleTest)
+        include(FetchContent)
+        FetchContent_Declare(googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG 063de7e9578f82b369302001269680b4b1553359 # v1.18.0
+            SOURCE_DIR "${LAPLACE_EXTERNAL}/googletest"
+            BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/googletest"
+            EXCLUDE_FROM_ALL)
+        FetchContent_MakeAvailable(googletest)
     endif()
+    if(WIN32)
+        # Vendored third-party: gtest's own TUs compile its headers non-SYSTEM,
+        # so its internal warnings (e.g. -Wcharacter-conversion) surface here.
+        foreach(_gt gtest gtest_main gmock gmock_main)
+            if(TARGET ${_gt})
+                target_compile_options(${_gt} PRIVATE -w)
+            endif()
+        endforeach()
+    endif()
+    include(GoogleTest)
 endif()
 
 add_subdirectory(core)
