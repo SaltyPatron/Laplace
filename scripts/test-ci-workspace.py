@@ -118,6 +118,7 @@ class WorkspaceReservation(WorkspaceFixture):
         path.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$TEST_EVENTS"\nexit "${TEST_FAIL_RC:-0}"\n')
 
     def execute_qualification(self, operation="qualification", fail=0, exact=True):
+        self.git(self.workspace, "fetch", "origin", self.target)
         self.git(self.workspace, "checkout", self.target)
         return subprocess.run(["bash", "-c", body("stage", "product-stage.yml")],
             cwd=self.workspace, env=dict(self.env, OPERATION=operation,

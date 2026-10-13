@@ -394,11 +394,15 @@ public sealed class ChessSyzygyTests
     {
         var priorEnv = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY");
         var priorRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        var priorData = Environment.GetEnvironmentVariable("LAPLACE_DATA");
+        var priorPrefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
         string root = Path.Combine(Path.GetTempPath(), $"syzygy-root-{Guid.NewGuid():N}");
         string tables = Path.Combine(root, "Games", "Chess", "syzygy", "3-4-5");
         Directory.CreateDirectory(tables);
         Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", null);
         Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", root);
+        Environment.SetEnvironmentVariable("LAPLACE_DATA", null);
+        Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", root);
         try
         {
             Assert.False(ChessLabPaths.SyzygyDir.Found);
@@ -413,6 +417,8 @@ public sealed class ChessSyzygyTests
         {
             Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", priorEnv);
             Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", priorRoot);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA", priorData);
+            Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", priorPrefix);
             try { Directory.Delete(root, recursive: true); } catch (IOException) { }
         }
     }

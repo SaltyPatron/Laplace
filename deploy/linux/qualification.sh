@@ -10,6 +10,10 @@ qualification_environment() {
   mkdir -p "$LAPLACE_QUALIFICATION_RESULTS"
   export LAPLACE_SITE_BUILD_TESTING=ON
   export LAPLACE_REUSE_INSTALLED_NATIVE=0
+  if [[ -n "${LAPLACE_QUALIFICATION_MODEL_HUB:-}" ]]; then
+    [[ -d "$LAPLACE_QUALIFICATION_MODEL_HUB" && "$LAPLACE_QUALIFICATION_MODEL_HUB" == /* ]] || fail "model_hub must be an existing absolute directory"
+    export HF_HUB_CACHE="$LAPLACE_QUALIFICATION_MODEL_HUB"
+  fi
   export LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}"
 }
 

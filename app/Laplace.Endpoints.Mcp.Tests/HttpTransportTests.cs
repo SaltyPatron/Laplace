@@ -56,13 +56,13 @@ public sealed class HttpTransportTests
     }
 
     [Fact]
-    public void ProductionHostRejectsTcpOverrideBeforeBuildingListenerOrTools()
+    public void ProductionHostRejectsUnverifiedRemoteRouteBeforeBuildingListenerOrTools()
     {
         var prior = Environment.GetEnvironmentVariable("LAPLACE_DB");
         try
         {
             Environment.SetEnvironmentVariable("LAPLACE_DB",
-                "Host=127.0.0.1;Username=laplace_admin;Database=laplace;Password=test-only-sentinel");
+                "Host=unverified.example.invalid;Username=laplace;Database=laplace-mono;Password=test-only-sentinel");
             var error = Assert.Throws<InvalidOperationException>(() =>
                 McpHttpHost.Build(new(Token, "https://hart-server:8443", Port: 0)));
             Assert.DoesNotContain("test-only-sentinel", error.ToString());

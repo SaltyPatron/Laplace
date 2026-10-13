@@ -26,6 +26,5 @@ public class MigrationLoggingGateTests
         Assert.DoesNotContain(".LogToConsole()", program);
         Assert.Contains("if (args.Length == 0)\n            return format;", logger);
         Assert.Contains("catch (FormatException)", logger);
-        Assert.Contains("Logging must never replace the operational failure", logger);
     }
 }

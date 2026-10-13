@@ -20,6 +20,10 @@ on:
       serial_tests:
         type: boolean
         default: false
+      model_hub:
+        description: "Optional existing model corpus root; otherwise use the host HF_HUB_CACHE"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -38,6 +42,7 @@ jobs:
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '0' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '0' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '0' }}
+      LAPLACE_QUALIFICATION_MODEL_HUB: ${{ inputs.model_hub }}
     steps:
       - name: Check out the selected source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
