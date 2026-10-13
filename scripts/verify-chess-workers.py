@@ -59,12 +59,17 @@ def main():
                     if time.monotonic() >= deadline:
                         raise RuntimeError('Match exceeded its verification observation window.')
                     time.sleep(2)
-                transcript = request('/chess/lab/jobs/' + job_id + '/terminal.txt', raw=True)
-                (args.output / (job_id + '.log')).write_text(transcript)
+                completed_id, job_id = job_id, None
+                save(completed_id + '-job.json', job)
+                transcript = request('/chess/lab/jobs/' + completed_id + '/terminal.txt', raw=True)
+                (args.output / (completed_id + '.log')).write_text(transcript)
                 if job['state'] != 'Completed':
                     raise RuntimeError(f'{conductor}/{profile}: ' + str(job['summary']))
-                recording = request('/chess/lab/jobs/' + job_id + '/artifact/recording.json')
-                experiment = request('/chess/lab/jobs/' + job_id + '/artifact/experiment.json')
+                recording = request('/chess/lab/jobs/' + completed_id + '/artifact/recording.json')
+                save(completed_id + '-recording.json', recording)
+                experiment = request('/chess/lab/jobs/' + completed_id + '/artifact/experiment.json')
+                result = dict(profile=profile, conductor=conductor, job=job, recording=recording, experiment=experiment)
+                save(completed_id + '.json', result)
                 if recording['status'] != 'completed' or recording['readbackGames'] != 2 or recording['readbackPlies'] <= 0:
                     raise RuntimeError('Recorded games did not read back.')
                 if not job.get('requester') or experiment['requester'] != job['requester']:
@@ -73,10 +78,8 @@ def main():
                     raise RuntimeError('Recorded connection differs from selected worker.')
                 if args.stockfish_profile and experiment['requestedOptions']['stockfishConnection']['id'] != args.stockfish_profile:
                     raise RuntimeError('Recorded Stockfish connection differs from selected worker.')
-                if not any('info string laplace knowledge ' in line for line in experiment['uciConfiguration'].get('Laplace', [])):
-                    raise RuntimeError('Remote Laplace did not report its actual knowledge identity.')
-                result = dict(profile=profile, conductor=conductor, job=job, recording=recording, experiment=experiment)
-                save(job_id + '.json', result)
+                if not any('info string laplace database ' in line for line in experiment['uciConfiguration'].get('Laplace', [])):
+                    raise RuntimeError('Remote Laplace did not report its actual database identity.')
                 results.append(result)
                 print(f'{conductor}/{profile}: {recording["readbackGames"]} recorded games / {recording["readbackPlies"]} plies', flush=True)
                 job_id = None
@@ -84,7 +87,7 @@ def main():
             stockfishProfile=args.stockfish_profile, ingest='true', stockfishThreads='1', stockfishHashMb='16', limitStrength='false')
         job_id = request('/chess/lab/start', {'kind': 'cutechess', 'config': config})['jobId']
         deadline = time.monotonic() + 40
-        while 'info string laplace knowledge ' not in request('/chess/lab/jobs/' + job_id + '/terminal.txt', raw=True):
+        while 'info string laplace database ' not in request('/chess/lab/jobs/' + job_id + '/terminal.txt', raw=True):
             if time.monotonic() >= deadline:
                 raise RuntimeError('No remote engine session appeared before cancellation.')
             time.sleep(1)

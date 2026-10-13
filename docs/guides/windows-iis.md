@@ -9,6 +9,10 @@ the declared IIS site, application pool, TLS binding and OpenBao credential agen
 Run installation as Administrator. After installation, the declaration is recorded
 in `LAPLACE_IIS_INSTALLATION` in the machine environment file; repeating
 `Install-LaplaceSite.ps1` uses that declaration.
+Use the retained installation for subsequent setup and publication; a new file
+under a session's work directory is unnecessary. `-Installation` selects another
+explicit installation when needed. To inspect the selected declaration without
+administrator access, run `Install-LaplaceSite.ps1 -Plan`.
 Repair preserves the last successfully selected release in `web/active.json`;
 it does not revert an ordinary publication to the initial setup package.
 Setup also retains read-only IIS application-pool grants enrolled by companion
@@ -66,7 +70,7 @@ Build and ordinary publication, in an unelevated PowerShell session:
 
 ```powershell
 # LAPLACE_API_KEY is a workload API key used to verify authenticated operations.
-& .\deploy\windows\Build-IisPackage.ps1 -Installation $installation -Publish
+& .\deploy\windows\Build-IisPackage.ps1 -Publish
 ```
 
 The existing `deploy/windows/publish.ps1`, `scripts/win/publish-deploy.cmd` and
@@ -97,7 +101,7 @@ publication to exercise that connector and its selected engine, not only API hea
 To publish an already prepared package:
 
 ```powershell
-& .\deploy\windows\Publish-IisRuntime.ps1 -Installation $installation -Package $package
+& .\deploy\windows\Publish-IisRuntime.ps1 -Package $package
 ```
 
 Release identifiers are derived from the packaged file paths and hashes; the source

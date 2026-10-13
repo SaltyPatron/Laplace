@@ -21,6 +21,19 @@ public sealed class CutechessResourceOptionsTests
     }
 
     [Fact]
+    public async Task ReceiptRetainsEngineDatabaseIdentityForEachInstance()
+    {
+        var receipt = new CutechessExperimentReceipt("database", new CutechessOptions(), new Dictionary<string, string>());
+        var message = "info string " + ChessDatabaseIdentity.ProtocolPrefix
+            + "{\"Cluster\":\"7690432169990887775\",\"Database\":\"laplace-mono\"}";
+        await receipt.ObserveAsync(new ChessLabTerminalEvent(ChessLabStream.Uci,
+            message, "Laplace", ChessLabDirection.Recv, 0), CancellationToken.None);
+
+        Assert.Equal(new[] { "recv: " + message }, receipt.UciConfiguration["Laplace"]);
+        Assert.Equal(receipt.UciConfiguration["Laplace"], receipt.UciConfigurationByInstance["Laplace(0)"]);
+    }
+
+    [Fact]
     public void DefaultsLeaveStockfishResourcesAtItsAdvertisedDefaults()
     {
         var options = new CutechessOptions().WithStockfishConfiguration(new Dictionary<string, string>
