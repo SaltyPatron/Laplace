@@ -56,7 +56,7 @@ if($Operation -eq 'Render') {
         foreach($key in $values.Keys){if($current[$key] -cne $values[$key]){$changed=$true}}
         if($changed){
             $collection.Clear()
-            foreach($key in $values.Keys){$entry=$collection.CreateElement('add');$entry['name']=$key;$entry['value']=$values[$key];$collection.Add($entry)}
+            foreach($key in $values.Keys){$entry=$collection.CreateElement('add');$entry['name']=$key;$entry['value']=$values[$key];$null=$collection.Add($entry)}
         }
         $binding=@($site.Bindings | Where-Object {$_.Protocol -eq 'https' -and $_.Host -eq $hostname})
         if($binding.Count -ne 1){throw 'The declared HTTPS binding is missing or ambiguous.'}
