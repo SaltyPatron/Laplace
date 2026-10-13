@@ -339,11 +339,44 @@ def build(source=None, output_root=None, jobs=None, cmake="cmake", rebuild=False
         return library
 
 
+def install_runtime(library, root):
+    """Publish a verified library and its licenses outside compiler scratch."""
+    root = root.absolute()
+    lock = load_lock()
+    verification = probe(library, lock)
+    identity = digest(library)
+    target = root / (lock['version'] + '-' + identity)
+    root.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        with tempfile.TemporaryDirectory(prefix='.install-', dir=root) as temporary:
+            pending = Path(temporary) / 'runtime'
+            pending.mkdir(mode=0o755)
+            shutil.copy2(library, pending / library.name)
+            for name, expected in lock['license_sha256'].items():
+                if digest(library.parent / name) != expected:
+                    raise ValueError('Zstandard runtime license differs from its source release')
+                shutil.copy2(library.parent / name, pending / name)
+            (pending / 'installation.json').write_text(json.dumps({
+                'version': lock['version'], 'source_commit': lock['commit'],
+                'library_sha256': identity, 'build_library': str(library),
+                'verification': verification}, indent=2) + '\n')
+            pending.rename(target)
+    installed = target / library.name
+    if digest(installed) != identity:
+        raise ValueError('Installed Zstandard library differs from the verified build')
+    for name, expected in lock['license_sha256'].items():
+        if digest(target / name) != expected:
+            raise ValueError('Installed Zstandard runtime license changed')
+    probe(installed, lock)
+    return installed
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path)
     parser.add_argument("--prefix", type=Path, help="Installed runtime configuration prefix")
     parser.add_argument("--build-dir", type=Path, help="Persistent base directory for independent source builds")
+    parser.add_argument("--install-directory", type=Path, help="Publish the runtime library and licenses outside the build directory")
     parser.add_argument("--jobs", type=int)
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--rebuild", action="store_true")
@@ -359,7 +392,8 @@ def main():
         elif args.print_path:
             print(configured_library(args.source_dir))
         else:
-            print(build(args.source_dir, args.build_dir, args.jobs, args.cmake, args.rebuild))
+            library = build(args.source_dir, args.build_dir, args.jobs, args.cmake, args.rebuild)
+            print(install_runtime(library, args.install_directory) if args.install_directory else library)
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired) as error:
         print(f"Zstandard: {error}", file=sys.stderr)
         return 1

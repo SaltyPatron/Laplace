@@ -23,6 +23,7 @@ CC_BIN_DIR="$PREFIX/bin"
 CUTECHESS="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
 CUTECHESS_GUI="${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}"
 APP_DIR="${LAPLACE_APP_DIR:-$PREFIX/app}"
+export LAPLACE_INSTALL_PREFIX="$PREFIX" LAPLACE_APP_DIR="$APP_DIR"
 ENV_FILE="$APP_DIR/laplace-api.env"
 CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
 # API state is setup-owned by the serving identity; compiler scratch is not.
@@ -152,7 +153,8 @@ build_zstd() {
   local library
   library="$(run_as_owner python3 "$SCRIPT_DIR/install-zstd.py" \
     --source-dir "${LAPLACE_ZSTD_SOURCE:-$EXTERNAL/zstd}" \
-    --build-dir "${LAPLACE_ZSTD_BUILD:-$LAPLACE_DEPS_BUILD/zstd}")"
+    --build-dir "${LAPLACE_ZSTD_BUILD:-$LAPLACE_DEPS_BUILD/zstd}" \
+    --install-directory "${LAPLACE_DEPS:-$PREFIX/tools}/zstd")"
   if [[ -z "${LAPLACE_ZSTD_LIBRARY:-}" ]]; then export LAPLACE_ZSTD_LIBRARY="$library"; fi
 }
 
