@@ -88,6 +88,11 @@ try {
     foreach ($name in @('LAPLACE_DB','LAPLACE_APP_DB','PGPASSWORD','PGPASSFILE','LAPLACE_ENGINE_BUILD','LAPLACE_EXT_BUILD','LAPLACE_BUILD_ROOT','LAPLACE_PERFCACHE_BIN','LAPLACE_NATIVE_DIR')) {
         [void]$start.Environment.Remove($name)
     }
+    # This profile supplies the complete connection. libpq/Npgsql environment
+    # defaults may select another target or incompatible authentication method.
+    foreach($name in @($start.Environment.Keys|Where-Object { $_.StartsWith('PG',[StringComparison]::OrdinalIgnoreCase) })){
+        [void]$start.Environment.Remove($name)
+    }
     foreach ($name in $profile.environment.Keys) { $start.Environment[$name]=[string]$profile.environment[$name] }
     $offline = $arguments.Count -eq 0 -or $arguments.Contains('--help') -or $arguments.Contains('-h') -or $arguments[0] -in @('decompose','cpu-topology')
     if (-not $offline) {

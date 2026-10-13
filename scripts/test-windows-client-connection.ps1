@@ -18,7 +18,7 @@ if (!String.IsNullOrEmpty(connection.Password)) return 11;
 if (!String.Equals(connection.Host, Environment.MachineName, StringComparison.OrdinalIgnoreCase)) return 12;
 if (connection.Database != "laplace-mono" || connection.Username != "laplace_desktop_db") return 13;
 if (connection.SslMode != SslMode.VerifyFull || !System.IO.File.Exists(connection.RootCertificate)) return 14;
-foreach (var name in new[]{"LAPLACE_APP_DB", "PGPASSWORD", "PGPASSFILE", "LAPLACE_BUILD_ROOT"})
+foreach (var name in new[]{"LAPLACE_APP_DB", "PGPASSWORD", "PGPASSFILE", "PGREQUIREAUTH", "PGHOSTADDR", "PGSERVICE", "LAPLACE_BUILD_ROOT"})
     if (!String.IsNullOrEmpty(Environment.GetEnvironmentVariable(name))) return 15;
 if (args.Length != 2 || args[0] != "connection-probe" || args[1] != "argument with spaces") return 16;
 Console.WriteLine("child-process-contract-passed");
@@ -43,7 +43,7 @@ function Invoke-Client {
     foreach($value in @('-NoProfile','-File',(Join-Path $client 'laplace-mono.ps1'),'connection-probe','argument with spaces')){$info.ArgumentList.Add($value)}
     $info.Environment['LAPLACE_MONO_CLIENT_CONFIG']=$configFile
     $info.Environment['LAPLACE_MONO_PROFILE']='development'
-    foreach($name in 'LAPLACE_DB','LAPLACE_APP_DB','PGPASSWORD','PGPASSFILE','LAPLACE_BUILD_ROOT'){$info.Environment[$name]='ambient-tripwire'}
+    foreach($name in 'LAPLACE_DB','LAPLACE_APP_DB','PGPASSWORD','PGPASSFILE','PGREQUIREAUTH','PGHOSTADDR','PGSERVICE','LAPLACE_BUILD_ROOT'){$info.Environment[$name]='ambient-tripwire'}
     $process=[Diagnostics.Process]::Start($info)
     try{
         $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
