@@ -161,7 +161,8 @@ class CMakeProvisionTests(unittest.TestCase):
         env = dict(os.environ, PATH=str(hostile) + os.pathsep + os.environ["PATH"],
                    PYTHONDONTWRITEBYTECODE="1", WRONG_CTEST_MARKER=str(marker),
                    LAPLACE_INSTALL_PREFIX=str(self.base / "install"),
-                   LAPLACE_WORK_ROOT=str(self.work), CTEST_PARALLEL_LEVEL="7")
+                   LAPLACE_WORK_ROOT=str(self.work),
+                   LAPLACE_BUILD_DIRECTORY=str(self.base / "declared build"), CTEST_PARALLEL_LEVEL="7")
         # Isolate tool dispatch from installed-floor selection, while executing
         # both actual native-suite functions and the actual companion-tool owner.
         shell = ("set -euo pipefail\nROOT=$1\n" + "\n".join(functions)
@@ -173,7 +174,8 @@ class CMakeProvisionTests(unittest.TestCase):
         self.assertEqual("ctest", output["tool"])
         self.assertEqual(str(selected / "ctest"), output["selected"])
         self.assertEqual(str(self.base), output["cwd"])
-        self.assertEqual(["--test-dir", "build", "--output-on-failure", "-j", "7", selector, "regress"],
+        self.assertEqual(["--test-dir", str(self.base / "declared build"), "--no-tests=error",
+                          "--output-on-failure", "-j", "7", selector, "regress"],
                          output["argv"])
         self.assertFalse(marker.exists(), "ambient old CTest was invoked")
         self.assertIn("CMake execution: " + str(selected / "ctest"), completed.stderr)
