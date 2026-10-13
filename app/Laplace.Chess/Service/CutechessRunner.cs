@@ -376,11 +376,13 @@ public static partial class CutechessRunner
     /// line. fastchess keeps one pair of engine processes per game thread, so (thread, engine name) names a
     /// process; each gets the next instance number, as Cute Chess numbers its engine processes.
     /// </summary>
-    internal static string? FastchessTrafficAsCutechess(string line, Dictionary<(int Thread, string Engine), int> instances)
+    internal static string? FastchessTrafficAsCutechess(string line, Dictionary<(string Thread, string Engine), int> instances)
     {
         var m = FastchessEngineTrafficRegex().Match(line);
         if (!m.Success) return null;
-        int thread = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+        // The logger's thread token is an opaque process key, not a game index.
+        // Linux emits values wider than Int32; no arithmetic is performed on it.
+        string thread = m.Groups[1].Value;
         string engine = m.Groups[2].Value;
         if (!instances.TryGetValue((thread, engine), out int instance))
             instances[(thread, engine)] = instance = instances.Count;
@@ -518,7 +520,7 @@ public static partial class CutechessRunner
         // read it to the end once fastchess has exited, presenting each complete line as Cute Chess debug traffic.
         async Task FollowEngineLogAsync(string path)
         {
-            var instances = new Dictionary<(int Thread, string Engine), int>();
+            var instances = new Dictionary<(string Thread, string Engine), int>();
             while (!File.Exists(path) && !proc.HasExited)
                 await Task.Delay(100, CancellationToken.None);
             if (!File.Exists(path)) return;
