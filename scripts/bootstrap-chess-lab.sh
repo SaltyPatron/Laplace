@@ -27,6 +27,8 @@ ENV_FILE="$APP_DIR/laplace-api.env"
 CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
 # API state is setup-owned by the serving identity; compiler scratch is not.
 CHESS_LAB_DIR="${LAPLACE_CHESS_LAB_DIR:-${LAPLACE_API_STATE_DIR:-$PREFIX}/chess-lab-work}"
+lab_override=$(python3 "$SCRIPT_DIR/chess-runtime-env.py" --prefix "$PREFIX" --value LAPLACE_CHESS_LAB_DIR --unmanaged)
+[[ -z "$lab_override" ]] || CHESS_LAB_DIR="$lab_override"
 API_USER="${LAPLACE_API_USER:-$RUNNER_USER}"
 API_GROUP="${LAPLACE_API_GROUP:-$API_USER}"
 

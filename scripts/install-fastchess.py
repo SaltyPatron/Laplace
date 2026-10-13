@@ -28,7 +28,8 @@ def selection(lock):
     spec.loader.exec_module(module)
     values = configuration()
     selected = values.get('LAPLACE_FASTCHESS') or module.configuration(
-        configured('LAPLACE_INSTALL_PREFIX'), keys={'LAPLACE_FASTCHESS'}).get('LAPLACE_FASTCHESS')
+        configured('LAPLACE_INSTALL_PREFIX'), keys={'LAPLACE_FASTCHESS'},
+        include_managed=False).get('LAPLACE_FASTCHESS')
     if selected:
         path = Path(selected)
         if not path.is_absolute():

@@ -25,7 +25,7 @@ KEYS.update("LAPLACE_STOCKFISH_EVAL_" + suffix for suffix in
             ("THREADS", "HASH_MB", "NUMA_POLICY", "SYZYGY_PATH", "FILE", "TIMEOUT_SECONDS", "PROCESSES"))
 
 
-def configuration(prefix, keys=None, api_environment=None, include_environment=True):
+def configuration(prefix, keys=None, api_environment=None, include_environment=True, include_managed=True):
     allowed = KEYS if keys is None else keys
     result = {}
     application = Path(os.environ.get("LAPLACE_APP_DIR", str(prefix / "app"))) if include_environment else prefix / "app"
@@ -41,7 +41,15 @@ def configuration(prefix, keys=None, api_environment=None, include_environment=T
         supplied = api_environment if path == application / "laplace-api.env" else None
         if supplied is not None or path.is_file():
             selected = {}
+            managed = False
             for line in (supplied if supplied is not None else path.read_text(encoding="utf-8")).splitlines():
+                if line.strip() == '# >>> laplace-runner managed: chess-lab env >>>':
+                    managed = True
+                elif line.strip() == '# <<< laplace-runner managed: chess-lab env <<<':
+                    managed = False
+                    continue
+                if managed and not include_managed:
+                    continue
                 if line.lstrip().startswith("#"):
                     continue
                 key, sep, value = line.partition("=")
@@ -63,8 +71,13 @@ def configuration(prefix, keys=None, api_environment=None, include_environment=T
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace")))
+    parser.add_argument("--value", choices=sorted(KEYS), help="Print one public chess setting")
+    parser.add_argument("--unmanaged", action="store_true", help="Ignore generated tool selections when resolving installation overrides")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args(argv)
+    if arguments.value:
+        print(configuration(arguments.prefix, keys={arguments.value}, include_managed=not arguments.unmanaged).get(arguments.value, ""))
+        return
     command = arguments.command
     if command[:1] == ["--"]:
         command = command[1:]
