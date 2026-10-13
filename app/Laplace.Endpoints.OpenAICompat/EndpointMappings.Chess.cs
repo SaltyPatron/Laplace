@@ -146,6 +146,10 @@ internal static class ChessEndpoints
                     new { kind = "fide-roster", label = "Ingest FIDE top players", @default = new { cohort = "open", limit = "25", ingest = "true" } },
                 },
                 engines,
+                connections = ChessEngineConnections.Read().Select(p => new
+                {
+                    p.Id, p.Label, p.Implementation, p.Environment, p.Knowledge, p.Host,
+                }),
             });
         }).WithTags("chess-lab");
 
@@ -154,7 +158,7 @@ internal static class ChessEndpoints
         app.MapGet("/chess/lab/cutechess/preview", (
             int? rounds, int? depth, double? st, int? elo, int? concurrency, bool? limitStrength,
             string? stockfishThreads, string? stockfishHashMb, string? stockfishNumaPolicy, string? stockfishSyzygyPath,
-            string? conductor, string? affinity) =>
+            string? conductor, string? affinity, string? laplaceProfile, string? stockfishProfile) =>
         {
             var options = new CutechessOptions
             {
@@ -177,15 +181,19 @@ internal static class ChessEndpoints
                     ["stockfishHashMb"] = stockfishHashMb ?? "",
                     ["stockfishNumaPolicy"] = stockfishNumaPolicy ?? "",
                     ["stockfishSyzygyPath"] = stockfishSyzygyPath ?? "",
+                    ["laplaceProfile"] = laplaceProfile ?? "",
+                    ["stockfishProfile"] = stockfishProfile ?? "",
                 };
                 // the same effective tablebase path the job gives Stockfish
-                options = options.WithStockfishConfiguration(stockfishConfig)
+                options = ChessEngineConnections.Select(options.WithStockfishConfiguration(stockfishConfig), stockfishConfig)
                     .WithInstalledSyzygy(stockfishConfig, ChessLabPaths.InstalledSyzygyEnginePath);
                 options.ValidateStockfishConfiguration();
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
-            var catalog = ChessLabPaths.Catalog;
+            var catalog = ChessLabPaths.Catalog.ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (options.LaplaceConnection is { } laplaceConnection) catalog["laplaceUci"] = laplaceConnection.Probe;
+            if (options.StockfishConnection is { } stockfishConnection) catalog["stockfish"] = stockfishConnection.Probe;
             bool fastchess = options.Conductor == "fastchess";
             var required = new List<(string Name, string Key, string Hint)>
             {
@@ -245,6 +253,7 @@ internal static class ChessEndpoints
                         Affinity = config.GetValueOrDefault("affinity"),
                     }.WithStockfishConfiguration(config);
                     options.ValidateStockfishConfiguration();
+                    _ = ChessEngineConnections.Select(options, config);
                 }
                 catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             }

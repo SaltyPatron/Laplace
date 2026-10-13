@@ -286,9 +286,9 @@ public static class ChessLabRunners
             Affinity = cfg.TryGetValue("affinity", out var affinity) && !string.IsNullOrWhiteSpace(affinity) ? affinity.Trim() : null,
             PgnOut = pgnOut,
             Event = $"chess-lab/cutechess/{slot.Job.Id}",
-        }.WithStockfishConfiguration(cfg)
-         // Stockfish gets the installed Syzygy tables unless the job names a path or "none"
-         .WithInstalledSyzygy(cfg, ChessLabPaths.InstalledSyzygyEnginePath);
+        }.WithStockfishConfiguration(cfg);
+        options = ChessEngineConnections.Select(options, cfg)
+            .WithInstalledSyzygy(cfg, ChessLabPaths.InstalledSyzygyEnginePath);
         options.ValidateStockfishConfiguration();
 
         // PGN Event already carries this stable experiment id. Keep its original description;

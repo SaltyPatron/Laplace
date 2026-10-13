@@ -38,6 +38,13 @@ function Write-IisAtomic([string]$Path,[string]$Content) {
 }
 function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
 function Get-IisChessAccess($c) {
+    if($c.chess.match_engines){
+        $connector=$c.chess.match_engines.connector
+        if(-not [IO.Path]::IsPathFullyQualified($connector) -or -not(Test-Path -LiteralPath $connector -PathType Leaf)){
+            throw 'Match engines require an existing absolute connector executable.'
+        }
+        [pscustomobject]@{Path=(Split-Path -Parent $connector);Rights='ReadAndExecute';Directory=$true}
+    }
     $file=$c.environment.LAPLACE_CHESS_ENV
     if(-not $file){return}
     if(-not [IO.Path]::IsPathFullyQualified($file) -or -not(Test-Path -LiteralPath $file -PathType Leaf)){throw 'LAPLACE_CHESS_ENV must name an existing absolute public configuration file.'}
@@ -121,6 +128,10 @@ function Get-IisEnvironment($c,$records) {
     $values.LAPLACE_DATA_PROTECTION_KEYS=Join-Path $state 'keys'
     $values.LAPLACE_OPS_LOG_DIR=Join-Path $state 'logs'
     $values.LAPLACE_LICHESS_CONTROL_CLIENT=Join-Path $state 'chess-client.json'
+    if($c.chess.match_engines){
+        $values.LAPLACE_CHESS_UCI_CONNECTOR=$c.chess.match_engines.connector
+        $values.LAPLACE_CHESS_UCI_CONFIG=Join-Path $state 'engine-connections/connector.json'
+    }
     return $values
 }
 function Get-IisWebConfig([string]$Revision,[string]$LogDirectory) {

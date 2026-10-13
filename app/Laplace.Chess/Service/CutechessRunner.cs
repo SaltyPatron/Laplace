@@ -10,6 +10,8 @@ namespace Laplace.Chess.Service;
 /// <summary>Everything the gauntlet needs to build a conductor (cutechess-cli or fastchess) invocation.</summary>
 public sealed partial record CutechessOptions
 {
+    public ChessEngineConnection? LaplaceConnection { get; init; }
+    public ChessEngineConnection? StockfishConnection { get; init; }
     /// <summary>
     /// The match conductor: <c>cutechess</c> (cutechess-cli, the default and the GUI lab's continuity) or
     /// <c>fastchess</c> (pentanomial statistics, CPU affinity, no Qt; the conductor for matches, SPRT and the
@@ -115,6 +117,7 @@ public sealed partial record CutechessOptions
     /// </summary>
     public CutechessOptions WithInstalledSyzygy(IReadOnlyDictionary<string, string> config, Func<string?> installedProbePath)
     {
+        if (StockfishConnection is not null) return this;
         if (config.TryGetValue("stockfishSyzygyPath", out var raw) && !string.IsNullOrWhiteSpace(raw))
             return raw.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)
                 ? this with { StockfishSyzygyPath = null }
@@ -149,6 +152,32 @@ public sealed partial record CutechessOptions
 
 public static partial class CutechessRunner
 {
+    private static List<string> EngineArguments(CutechessOptions options, string laplace, string stockfish)
+    {
+        var args = new List<string>();
+        void Engine(string name, string fallback, ChessEngineConnection? connection)
+        {
+            args.AddRange(["-engine", "name=" + name, "cmd=" + (connection?.Executable ?? fallback), "proto=uci"]);
+            if (connection is null) return;
+            if (options.Conductor == "cutechess")
+                args.AddRange(connection.Arguments.Select(a => "arg=" + a));
+            else
+                args.Add("args=" + string.Join(' ', connection.Arguments.Select(QuoteEngineArgument)));
+        }
+        Engine("Laplace", laplace, options.LaplaceConnection);
+        args.Add("option.Substrate=substrate");
+        Engine("Stockfish", stockfish, options.StockfishConnection);
+        args.Add($"option.UCI_LimitStrength={options.StockfishLimitStrength.ToString().ToLowerInvariant()}");
+        return args;
+    }
+
+    internal static string QuoteEngineArgument(string value)
+    {
+        if (value.Any(char.IsControl) || value.Contains('"'))
+            throw new ArgumentException("Engine arguments cannot contain control characters or quotes.");
+        return value.Any(char.IsWhiteSpace) || value.Contains('\'') ? "\"" + value + "\"" : value;
+    }
+
     [GeneratedRegex(@"Score of .*?:\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex ScoreRegex();
 
@@ -211,12 +240,7 @@ public static partial class CutechessRunner
         // Every key=value is its own argv token; cutechess-cli reads a single joined token as
         // one engine parameter. proto=uci is required because cutechess defaults to xboard.
         // Laplace's substrate mode is passed explicitly so the receipt records it.
-        var args = new List<string>
-        {
-            "-engine", "name=Laplace", $"cmd={laplaceUci}", "proto=uci", "option.Substrate=substrate",
-            "-engine", "name=Stockfish", $"cmd={stockfish}", "proto=uci",
-            $"option.UCI_LimitStrength={o.StockfishLimitStrength.ToString().ToLowerInvariant()}",
-        };
+        var args = EngineArguments(o, laplaceUci, stockfish);
         if (o.StockfishLimitStrength)
             args.Add($"option.UCI_Elo={o.StockfishElo}");
         if (!string.IsNullOrWhiteSpace(o.StockfishNumaPolicy))
@@ -296,12 +320,7 @@ public static partial class CutechessRunner
     /// </summary>
     internal static IReadOnlyList<string> BuildFastchessArguments(CutechessOptions o, string laplaceUci, string stockfish)
     {
-        var args = new List<string>
-        {
-            "-engine", "name=Laplace", $"cmd={laplaceUci}", "proto=uci", "option.Substrate=substrate",
-            "-engine", "name=Stockfish", $"cmd={stockfish}", "proto=uci",
-            $"option.UCI_LimitStrength={o.StockfishLimitStrength.ToString().ToLowerInvariant()}",
-        };
+        var args = EngineArguments(o, laplaceUci, stockfish);
         if (o.StockfishLimitStrength)
             args.Add($"option.UCI_Elo={o.StockfishElo}");
         if (!string.IsNullOrWhiteSpace(o.StockfishNumaPolicy))
@@ -436,9 +455,9 @@ public static partial class CutechessRunner
         var catalog = ChessLabPaths.Catalog;
         bool fastchess = options.Conductor == "fastchess";
         var cc = catalog[fastchess ? "fastchess" : "cutechess"];
-        var sf = catalog["stockfish"];
+        var sf = options.StockfishConnection?.Probe ?? catalog["stockfish"];
         var qt = catalog["qt"];
-        var uci = catalog["laplaceUci"];
+        var uci = options.LaplaceConnection?.Probe ?? catalog["laplaceUci"];
         string conductorName = fastchess ? "fastchess" : "cutechess-cli";
 
         if (!cc.Found || !sf.Found || !uci.Found)

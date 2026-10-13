@@ -31,6 +31,29 @@ if($Operation -eq 'Render') {
     if($records.chess.control_token -notmatch '^[a-f0-9]{64}$'){throw 'Missing Lichess controller client credential.'}
     Write-IisAtomic (Join-Path $state 'control.token') $records.chess.control_token
     Write-IisAtomic (Join-Path $state 'chess-client.json') (Iis-Json @{url=$c.chess.url;operators=$c.chess.operators;tokenFile=(Join-Path $state 'control.token')})
+    if($c.chess.match_engines){
+        $engineDirectory=Join-Path $state 'engine-connections'
+        $profiles=@{}
+        foreach($entry in $c.chess.match_engines.profiles.PSObject.Properties){
+            $p=$entry.Value;$field=$p.token_field;$endpoint=$null
+            if($entry.Name -notmatch '^[a-zA-Z0-9_-]+$' -or $field -notmatch '^(uci_[a-z0-9_]+|[a-z0-9_]+_uci)_token$' -or
+                $records.chess.$field -notmatch '^[a-f0-9]{64}$' -or
+                -not [Uri]::TryCreate($p.endpoint,[UriKind]::Absolute,[ref]$endpoint) -or
+                $endpoint.Scheme -ne 'wss' -or $endpoint.UserInfo -or $endpoint.Query -or $endpoint.Fragment){
+                throw 'Invalid authenticated match engine profile.'
+            }
+            $profile=@{transport='websocket';tokenFile=(Join-Path $engineDirectory ($entry.Name+'.token'))}
+            foreach($key in 'label','implementation','environment','knowledge','endpoint'){
+                if(-not $p.$key){throw "Match engine profile needs $key."};$profile[$key]=$p.$key
+            }
+            $profiles[$entry.Name]=$profile
+        }
+        $null=New-Item -ItemType Directory -Path $engineDirectory -Force
+        foreach($entry in $c.chess.match_engines.profiles.PSObject.Properties){
+            Write-IisAtomic (Join-Path $engineDirectory ($entry.Name+'.token')) $records.chess.($entry.Value.token_field)
+        }
+        Write-IisAtomic (Join-Path $engineDirectory 'connector.json') (Iis-Json @{version=1;profiles=$profiles})
+    }
     $certBytes=[Convert]::FromBase64String($records.certificate.pfx_base64)
     $certDigest=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($certBytes))
     $receiptPath=Join-Path $private 'render-receipt.json'

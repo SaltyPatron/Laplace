@@ -8,6 +8,7 @@ import {
   Muted,
   Panel,
   SegmentedControl,
+  Select,
   SliderField,
   Toggle,
   Tooltip,
@@ -38,6 +39,8 @@ interface Preview {
 }
 
 interface Setup {
+  laplaceProfile: string;
+  stockfishProfile: string;
   conductor: 'fastchess' | 'cutechess';
   clock: 'seconds' | 'depth';
   st: string;
@@ -54,6 +57,8 @@ interface Setup {
 }
 
 const DEFAULT_SETUP: Setup = {
+  laplaceProfile: '',
+  stockfishProfile: '',
   conductor: 'fastchess',
   clock: 'seconds',
   st: '1',
@@ -80,6 +85,7 @@ const RUNNING = new Set(['Running', 'Pending']);
 
 export function GauntletView() {
   const [engines, setEngines] = useState<LabCatalog['engines']>({});
+  const [connections, setConnections] = useState<NonNullable<LabCatalog['connections']>>([]);
   const [setup, setSetup] = useState<Setup>(DEFAULT_SETUP);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [jobs, setJobs] = useState<LabJob[]>([]);
@@ -104,7 +110,9 @@ export function GauntletView() {
     ? [{ key: 'fastchess', label: 'Fastchess', fix: 'LAPLACE_FASTCHESS' }, ...ENGINES]
     : [{ key: 'cutechess', label: 'Cutechess', fix: 'LAPLACE_CUTECHESS' }, ...ENGINES,
       { key: 'qt', label: 'Qt runtime', fix: 'LAPLACE_QT_BIN' }];
-  const missing = required.filter((r) => !engines[r.key]?.found);
+  const connectionFor = (key: string) => connections.find(p => p.id ===
+    (key === 'laplaceUci' ? setup.laplaceProfile : key === 'stockfish' ? setup.stockfishProfile : undefined));
+  const missing = required.filter((r) => !connectionFor(r.key) && !engines[r.key]?.found);
 
   const refresh = useCallback(async () => {
     try {
@@ -113,6 +121,7 @@ export function GauntletView() {
         apiGet<LabJob[]>('/chess/lab/jobs'),
       ]);
       setEngines(catalog.engines ?? {});
+      setConnections(catalog.connections ?? []);
       setJobs(list);
       setErr(null);
       return list;
@@ -134,6 +143,8 @@ export function GauntletView() {
   // drift from CutechessRunner.BuildArguments. Debounced — the sliders move continuously.
   useEffect(() => {
     const q = new URLSearchParams({
+      laplaceProfile: setup.laplaceProfile,
+      stockfishProfile: setup.stockfishProfile,
       conductor: setup.conductor,
       rounds: setup.rounds || '2',
       depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
@@ -149,7 +160,7 @@ export function GauntletView() {
     const timer = setTimeout(() => {
       void apiGet<Preview>(`/chess/lab/cutechess/preview?${q}`)
         .then(setPreview)
-        .catch(() => setPreview(null));
+        .catch((e) => { setPreview(null); setErr(e instanceof Error ? e.message : String(e)); });
     }, 180);
     return () => clearTimeout(timer);
   }, [setup]);
@@ -227,6 +238,8 @@ export function GauntletView() {
     setErr(null);
     try {
       const config: Record<string, string> = {
+        laplaceProfile: setup.laplaceProfile,
+        stockfishProfile: setup.stockfishProfile,
         conductor: setup.conductor,
         rounds: setup.rounds,
         elo: setup.elo || '2000',
@@ -292,15 +305,16 @@ export function GauntletView() {
       <section className={styles.readiness} aria-label="Gauntlet binaries">
         {required.map((r) => {
           const probe = engines[r.key];
+          const connection = connectionFor(r.key);
           return (
             <Tooltip key={r.key}>
               <TooltipTrigger asChild>
-                <Chip variant={probe?.found ? 'engineOk' : 'engineMissing'}>
-                  {r.label} {probe?.found ? '✓' : '✗'}
+                <Chip variant={connection || probe?.found ? 'engineOk' : 'engineMissing'}>
+                  {r.label} {connection ? '· ' + connection.host : probe?.found ? '✓' : '✗'}
                 </Chip>
               </TooltipTrigger>
               <TooltipContent>
-                {probe?.found
+                {connection ? `${connection.label} · ${connection.environment} · ${connection.knowledge}` : probe?.found
                   ? `${probe.path} (${probe.source})`
                   : `Not installed or unavailable: ${r.fix}`}
               </TooltipContent>
@@ -322,6 +336,18 @@ export function GauntletView() {
         <div className={styles.setupCol}>
         <Panel className={styles.setup} title="Match setup">
           <div className={styles.form}>
+            {(['laplaceProfile', 'stockfishProfile'] as const).map((key) => (
+              <Field key={key} label={key === 'laplaceProfile' ? 'Laplace worker' : 'Stockfish worker'} className={styles.wide}
+                help="Engine execution is separate from this match's recording service. A selected remote connection stays on that worker for the game.">
+                <Select aria-label={key === 'laplaceProfile' ? 'Laplace worker' : 'Stockfish worker'}
+                  value={setup[key]} onChange={(e) => setSetup(s => ({ ...s, [key]: e.target.value,
+                    ...(key === 'stockfishProfile' ? { stockfishSyzygyPath: '' } : {}) }))}>
+                  <option value="">This installation</option>
+                  {connections.filter(p => p.implementation === (key === 'laplaceProfile' ? 'laplace-mono' : 'stockfish'))
+                    .map(p => <option key={p.id} value={p.id}>{p.label} · {p.environment} · {p.knowledge}</option>)}
+                </Select>
+              </Field>
+            ))}
             <Field label="Match conductor" help="Fastchess runs engine matches. Cutechess provides an alternative conductor. This selection does not change the Lichess bot or the selected database source." className={styles.wide}>
               <SegmentedControl value={setup.conductor}
                 onValueChange={(v) => setSetup((s) => ({ ...s, conductor: v as Setup['conductor'] }))}
