@@ -52,4 +52,41 @@ public sealed class ChessPlayRecoveryTests
         foreach (var state in new[] { "completed", "recording", "failed" })
             Assert.Throws<InvalidOperationException>(() => (Game() with { State = state }).Restore());
     }
+
+    [Theory]
+    [InlineData("recording")]
+    [InlineData("failed")]
+    public void RecordingRecoveryRetainsResultAuthorityAndAnalysisWithoutReopeningPlay(string state)
+    {
+        var game = Game("e2e4", "e7e5") with
+        {
+            State = state, Recording = "in_progress", Result = "1/2-1/2", Adjudicated = true,
+            Analysis = new() { [1] = new(ScoreCpSideToMove: 7, Depth: 3, Nodes: 84, Pv: ["e2e4"]) },
+        };
+        var retained = JsonSerializer.Deserialize<ChessPlayOperation>(JsonSerializer.Serialize(game))!;
+        Assert.True(retained.CanRetryRecording);
+        Assert.Throws<InvalidOperationException>(() => retained.Restore());
+        var restored = retained.Restore(resumeRecording: true);
+        Assert.Equal(game.Requester, restored.Requester);
+        Assert.Equal(game.Moves, restored.Moves);
+        Assert.Equal(game.Result, restored.Operation!.Result);
+        Assert.True(restored.Operation.Adjudicated);
+        Assert.Equal(84, restored.Operation.Analysis[1].Nodes);
+        Assert.Equal(state, restored.Operation.State);
+    }
+
+    [Fact]
+    public void RecordingRecoveryRequiresAnUnambiguousRetainedResult()
+    {
+        var game = Game("e2e4") with { State = "recording", Result = "1-0", Adjudicated = false };
+        foreach (var invalid in new[]
+        {
+            game with { Adjudicated = null }, game with { Result = null }, game with { Result = "*" },
+            game with { RecordToSubstrate = false }, game with { State = "completed" },
+        })
+        {
+            Assert.False(invalid.CanRetryRecording);
+            Assert.Throws<InvalidOperationException>(() => invalid.Restore(resumeRecording: true));
+        }
+    }
 }

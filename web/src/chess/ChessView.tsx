@@ -47,7 +47,10 @@ import styles from './ChessView.module.css';
 
 
 interface PlayStart { sessionId: string; fen: string; status?: string; ply?: number; }
-interface RetainedPlay { sessionId: string; state: string; recordToSubstrate: boolean; moves: string[]; positionFens: string[]; }
+interface RetainedPlay {
+  sessionId: string; state: string; recordToSubstrate: boolean; moves: string[]; positionFens: string[];
+  result?: string; canRetryRecording: boolean;
+}
 
 interface PlayMoveResult { fen: string; terminal: boolean; status: string; legal: boolean; ply: number; motifs?: string[]; }
 
@@ -403,16 +406,23 @@ export function ChessView() {
     let active = true;
     sessionReady.current = (async () => {
       try {
-          const retained = await apiGet<RetainedPlay>('/chess/play/' + savedBoot.sessionId);
-          if (retained.state !== 'ongoing') throw new Error(`Saved game is ${retained.state}; start a new game explicitly.`);
+          let retained = await apiGet<RetainedPlay>('/chess/play/' + savedBoot.sessionId);
+          if (retained.canRetryRecording) {
+            await apiPost('/chess/play/' + retained.sessionId + '/recording/retry', {});
+            retained = await apiGet<RetainedPlay>('/chess/play/' + savedBoot.sessionId);
+          }
+          if (retained.state !== 'ongoing' && retained.state !== 'completed')
+            throw new Error(`Saved game recording is ${retained.state}; the game remains retained.`);
+          const finalStatus = retained.state === 'ongoing' ? 'ongoing'
+            : retained.result === '1-0' ? 'white wins' : retained.result === '0-1' ? 'black wins' : 'draw';
           const restored = retained.positionFens.map((fen, ply) => ply === 0
-            ? { fen, status: 'ongoing', lastMove: null }
-            : snapshotFromMove(fen, 'ongoing', retained.moves[ply - 1]));
+            ? { fen, status: retained.moves.length === 0 ? finalStatus : 'ongoing', lastMove: null }
+            : snapshotFromMove(fen, ply === retained.moves.length ? finalStatus : 'ongoing', retained.moves[ply - 1]));
           if (active) {
             setPositions(restored);
             setViewPly(restored.length - 1);
             setPlaySessionId(retained.sessionId);
-            setResumeNote(`Resumed saved game · ${retained.moves.length} plies`);
+            setResumeNote(`${retained.state === 'completed' ? 'Recorded game' : 'Resumed saved game'} · ${retained.moves.length} plies`);
           }
           return retained.sessionId;
       } catch (e) {
@@ -654,10 +664,19 @@ export function ChessView() {
 
 
   const newGame = async () => {
-    if (playSessionId && status !== 'ongoing') {
+    if (playSessionId) {
       try {
-        await apiPost('/chess/play/finish', { sessionId: playSessionId, status });
-      } catch { /* best effort */ }
+        const retained = await apiGet<RetainedPlay>('/chess/play/' + playSessionId);
+        if (retained.canRetryRecording)
+          await apiPost('/chess/play/' + playSessionId + '/recording/retry', {});
+        else if (retained.state === 'ongoing' && status !== 'ongoing')
+          await apiPost('/chess/play/finish', { sessionId: playSessionId, status });
+        else if (retained.state !== 'ongoing' && retained.state !== 'completed')
+          throw new Error(`Game recording is ${retained.state}; the game remains retained.`);
+      } catch (e) {
+        setErr(`Cannot finish saved game: ${msg(e)}`);
+        return;
+      }
     }
 
     clearSavedPlayGame();

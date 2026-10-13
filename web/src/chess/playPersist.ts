@@ -50,7 +50,7 @@ export function clearSavedPlayGame(): void {
 export function savedGameIsResumable(game: SavedPlayGame | null): boolean {
   if (!game) return false;
   const last = game.positions[game.positions.length - 1];
-  return !!last && last.status === 'ongoing' && game.positions.length > 1;
+  return !!last && (!!game.sessionId || (last.status === 'ongoing' && game.positions.length > 1));
 }
 
 export function movesFromSaved(game: SavedPlayGame): string[] {

@@ -93,7 +93,20 @@ internal static class ChessEndpoints
             {
                 await svc.FinishPlaySessionAsync(req.SessionId, req.Status ?? "draw", req.Adjudicated ?? false, ct);
                 return Results.Json(new { finished = true });
-            }, ct);
+            }, ct, finish: true);
+        }).WithTags("chess");
+
+        app.MapPost("/chess/play/{sessionId:guid}/recording/retry", async (HttpContext ctx, Guid sessionId,
+            ChessRuntimeService runtime, Auth.ITenantResolver resolver, CancellationToken ct) =>
+        {
+            return await WithPlaySession(ctx, sessionId, runtime, resolver, async () =>
+            {
+                var live = await runtime.GetAsync(ct);
+                if (ChessPlayOperation.Read(sessionId)?.CanRetryRecording != true)
+                    return Results.Conflict(new { error = "play_has_no_pending_recording" });
+                await live.RetryPlayRecordingAsync(sessionId, ct);
+                return Results.Json(new { finished = true, operation = ChessPlayOperation.Read(sessionId) });
+            }, ct, finish: true);
         }).WithTags("chess");
 
         app.MapGet("/chess/lichess/games/{gameId}/chat", async (string gameId, ILichessStatusClient lichess, CancellationToken ct) =>
@@ -349,21 +362,28 @@ internal static class ChessEndpoints
 
     private static async Task<IResult> WithPlaySession(HttpContext context, Guid sessionId,
         ChessRuntimeService runtime, ITenantResolver resolver, Func<Task<IResult>> action, CancellationToken ct,
-        string? expectedFen = null)
+        string? expectedFen = null, bool finish = false)
     {
         var requester = RequestPrincipal(await resolver.ResolveAsync(context, ct));
         if (requester is null) return Results.Unauthorized();
         var operation = ChessPlayOperation.Read(sessionId);
         if (operation?.Requester != requester) return Results.NotFound();
-        if (operation.State != "ongoing")
+        if (finish && operation.State == "completed")
+            return Results.Json(new { finished = true, operation });
+        if (operation.State != "ongoing" && !(finish && operation.CanRetryRecording))
             return Results.Conflict(new { error = "play_not_ongoing", operation });
         var live = await runtime.GetAsync(ct);
-        var session = live.GetPlaySession(sessionId);
+        var session = live.GetPlaySession(sessionId, resumeRecording: finish);
         if (!OwnsPlaySession(session, requester)) return Results.NotFound();
         await session!.Gate.WaitAsync(ct);
         try
         {
-            if (!ReferenceEquals(live.GetPlaySession(sessionId), session)) return Results.NotFound();
+            operation = ChessPlayOperation.Read(sessionId);
+            if (finish && operation?.State == "completed")
+                return Results.Json(new { finished = true, operation });
+            if (operation?.State != "ongoing" && !(finish && operation?.CanRetryRecording == true))
+                return Results.Conflict(new { error = "play_not_ongoing", operation });
+            if (!ReferenceEquals(live.GetPlaySession(sessionId, resumeRecording: finish), session)) return Results.NotFound();
             if (expectedFen is not null && session.State?.Board.ToFen() != expectedFen)
                 return Results.Conflict(new { error = "play_position_changed", operation = ChessPlayOperation.Read(sessionId) });
             return await action();

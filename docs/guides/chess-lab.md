@@ -19,8 +19,14 @@ and retained engine analysis. Refreshing the browser resumes that operation inst
 of creating another game. The retained trajectory supplies the board history when a
 response was lost. A stale move request returns HTTP 409 and the current operation.
 Completed operations include `recordedPlayingId`, the canonical playing produced by
-recording. A process interrupted during final recording remains explicitly unresolved;
-it is not silently reopened or reported as recorded. These are operation records, not
+recording. If the API stops during final recording, the retained operation includes the
+result and adjudication decision. Reloading the browser retries that recording through
+`POST /chess/play/{sessionId}/recording/retry`, using the same authenticated requester,
+participants, moves and analysis. The shared writer retains its replay and convergence
+rules; a completed retry leaves the game unchanged. The retry cannot reopen play or
+choose a different result. A failed retry remains visible and retained when starting a
+new game. Older interrupted operations without a retained adjudication decision cannot
+be recovered by guessing that decision. These are operation records, not
 canonical player identities. An account ID is never converted into a player name hash.
 
 The HTTP lab uses the authenticated workspace and requester resolved by the existing
@@ -44,7 +50,7 @@ The in-process guided-versus-classical experiment measures the effect of the
 selected substrate providers at matched search depth:
 
 ```sh
-laplace chess substrate-test --mode transition --openings --games 200 --depth 4
+laplace-mono chess substrate-test --mode transition --openings --games 200 --depth 4
 ```
 
 - `transition` selects transition and position evidence; legacy `fold` and
@@ -329,7 +335,7 @@ laplace-uci match --engine1 laplace:nodes=2000 --engine2 stockfish:nodes=256 --g
 laplace-uci ladder calibrate|gauntlet|rate|stockfish-receipt ...   # the ladder (below)
 laplace-uci check [--require-ladder] [--require-data] [--check-latest] [--cutechess-gui]
 laplace-uci review games.pgn --depth 4         # centipawn loss, blunders, wins from a lost position
-laplace-uci lichess --engine stockfish         # the Lichess connector (laplace chess lichess runs this)
+laplace-uci lichess --engine stockfish         # the Lichess connector (laplace-mono chess lichess runs this)
 laplace-uci inspect games.pgn --where Variant=Chess960   # what the monorepo would store for a game
 ```
 
