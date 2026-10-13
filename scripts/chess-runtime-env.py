@@ -15,12 +15,12 @@ RUNTIME_KEYS = frozenset({
 # explicit environment, then the service's installed env, then the chess-lab files. Last assignment within a file wins.
 KEYS = {"LAPLACE_STOCKFISH", "LAPLACE_CUTECHESS", "LAPLACE_CUTECHESS_GUI",
         "LAPLACE_CUTECHESS_GUI_RECEIPT", "LAPLACE_SYZYGY",
-        "LAPLACE_CHESS_OPENINGS", "LAPLACE_DATA_ROOT", "LAPLACE_EXTERNAL",
+        "LAPLACE_CHESS_OPENINGS", "LAPLACE_DATA", "LAPLACE_DATA_ROOT", "LAPLACE_EXTERNAL",
         "LAPLACE_STOCKFISH_SOURCE", "LAPLACE_CUTECHESS_BUILD", "LAPLACE_QT_BIN",
         "LAPLACE_CHESS_LAB_DIR", "LAPLACE_ZSTD_LIBRARY", "LAPLACE_ZSTD_WINDOW_LOG_MAX",
         "LAPLACE_ZSTD_SOURCE", "LAPLACE_ZSTD_BUILD",
         "LAPLACE_FASTCHESS", "LAPLACE_ORDO", "LAPLACE_LC0", "LAPLACE_LC0_NET", "LAPLACE_LC0_BACKEND",
-        "LAPLACE_CHESS_BOOKS"}
+        "LAPLACE_CHESS_BOOKS", "LAPLACE_UCI"}
 KEYS.update("LAPLACE_STOCKFISH_EVAL_" + suffix for suffix in
             ("THREADS", "HASH_MB", "NUMA_POLICY", "SYZYGY_PATH", "FILE", "TIMEOUT_SECONDS", "PROCESSES"))
 
@@ -28,10 +28,17 @@ KEYS.update("LAPLACE_STOCKFISH_EVAL_" + suffix for suffix in
 def configuration(prefix, keys=None, api_environment=None, include_environment=True):
     allowed = KEYS if keys is None else keys
     result = {}
-    for path in (prefix / "app/laplace-api.env", prefix / "app/chess-lab.env",
-                 prefix / "chess-lab.env", prefix / "secrets/chess-lab.env",
-                 ROOT / "deploy/secrets/chess-lab.env"):
-        supplied = api_environment if path == prefix / "app/laplace-api.env" else None
+    application = Path(os.environ.get("LAPLACE_APP_DIR", str(prefix / "app"))) if include_environment else prefix / "app"
+    files = [application / "laplace-api.env", application / "chess-lab.env",
+             prefix / "chess-lab.env", prefix / "secrets/chess-lab.env",
+             ROOT / "deploy/secrets/chess-lab.env"]
+    if include_environment and os.environ.get("LAPLACE_CHESS_ENV"):
+        declared = Path(os.environ["LAPLACE_CHESS_ENV"])
+        if not declared.is_absolute() or not declared.is_file():
+            raise ValueError("LAPLACE_CHESS_ENV must name an existing absolute configuration file")
+        files.insert(0, declared)
+    for path in files:
+        supplied = api_environment if path == application / "laplace-api.env" else None
         if supplied is not None or path.is_file():
             selected = {}
             for line in (supplied if supplied is not None else path.read_text(encoding="utf-8")).splitlines():
@@ -64,7 +71,7 @@ def main(argv=None):
     if not command:
         parser.error("provide an executable after --")
     environment = dict(os.environ)
-    environment.update(configuration(arguments.prefix, keys=RUNTIME_KEYS))
+    environment.update(configuration(arguments.prefix, keys=RUNTIME_KEYS | KEYS))
     environment["LAPLACE_INSTALL_PREFIX"] = str(arguments.prefix)
     # Connection settings may contain credentials. Keep values out of Actions
     # environment files, logs and measurement artifacts; replace this process so
