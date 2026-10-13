@@ -21,12 +21,30 @@ qualification_suite() {
   return "$rc"
 }
 
+qualification_dependencies() {
+  local source="$LAPLACE_EXTERNAL/googletest" revision=063de7e9578f82b369302001269680b4b1553359
+  [[ ! -f "$source/CMakeLists.txt" ]] || return 0
+  [[ ! -e "$source" ]] || fail "incomplete declared GoogleTest source: $source"
+  local pending
+  pending=$(mktemp -d "$LAPLACE_EXTERNAL/.googletest-XXXXXXXX")
+  if git -C "$pending" init -q &&
+     git -C "$pending" fetch --depth=1 https://github.com/google/googletest.git "$revision" &&
+     git -C "$pending" checkout --detach FETCH_HEAD &&
+     [[ "$(git -C "$pending" rev-parse HEAD)" == "$revision" ]]; then
+    mv -T "$pending" "$source"
+  else
+    rm -rf -- "$pending"
+    fail "could not prepare pinned GoogleTest v1.18.0 in $source"
+  fi
+}
+
 phase_qualification() {
   qualification_environment
   : > "$LAPLACE_QUALIFICATION_RESULTS/results.tsv"
   git -C "$ROOT" rev-parse HEAD > "$LAPLACE_QUALIFICATION_RESULTS/source-revision"
   phase_status > "$LAPLACE_QUALIFICATION_RESULTS/installed-before.json"
   phase_externals
+  qualification_dependencies
   if [[ "${LAPLACE_FULL_CLEAN:-0}" == 1 && -f "$SITE_BUILD/build.ninja" ]]; then
     cmake --build "$SITE_BUILD" --target clean
     dotnet_app clean "$ROOT/app/Laplace.slnx" -c Release --nologo

@@ -254,10 +254,9 @@ include(CTest)
 
 if(BUILD_TESTING)
     if(NOT EXISTS "${LAPLACE_EXTERNAL}/googletest/CMakeLists.txt")
-        message(WARNING
-            "external/googletest submodule not initialized — tests will be skipped. "
-            "Run: git submodule update --init external/googletest")
-        set(BUILD_TESTING OFF)
+        message(FATAL_ERROR
+            "BUILD_TESTING requires ${LAPLACE_EXTERNAL}/googletest/CMakeLists.txt. "
+            "Run the configured qualification setup or declare a complete LAPLACE_EXTERNAL directory.")
     else()
         set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
         set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)

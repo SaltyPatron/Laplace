@@ -130,10 +130,10 @@ class EarlyModelPrerequisites(unittest.TestCase):
         for disabled in ("0", "other"):
             with self.subTest(value=disabled):
                 result, events, report = self.run_proof(LAPLACE_MODEL_PROOF_CODE_CORPORA=disabled)
-                self.assertEqual(events, ["LLAMA_HELP", "DB_CHECK"])
+                self.assertEqual(events, ["LLAMA_HELP"])
                 self.assertTrue(report["preliminary_prerequisites_passed"])
                 self.assertEqual(report["corpora"], [])
-                self.assertIn("laplace DB unreachable", result.stderr)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_malformed_success_report_cannot_supply_a_runtime(self):
         probe = self.repo / "scripts" / "check-model-proof-prerequisites.py"
