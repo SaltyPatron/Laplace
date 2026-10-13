@@ -9,8 +9,9 @@ import subprocess
 import sys
 
 
-def run(arguments):
-    result = subprocess.run([str(arg) for arg in arguments], stdout=sys.stderr, stderr=sys.stderr, timeout=1800)
+def run(arguments, cwd=None):
+    result = subprocess.run([str(arg) for arg in arguments], cwd=cwd,
+                            stdout=sys.stderr, stderr=sys.stderr, timeout=1800)
     if result.returncode:
         raise RuntimeError(f"{arguments[0]} exited with code {result.returncode}")
 
@@ -45,7 +46,7 @@ def main():
             run([python, '-m', 'pip', 'install', '--disable-pip-version-check', requirement])
             run([python, '-m', 'aqt', 'install-qt', 'windows' if windows else 'linux', 'desktop',
                  lock['qt_version'], 'win64_msvc2022_64' if windows else 'linux_gcc_64',
-                 '-O', args.root, '-m', *lock['qt_modules']])
+                 '-O', args.root.resolve(), '-m', *lock['qt_modules']], cwd=args.work)
         if not all((sdk / f'lib/cmake/{module}/{module}Config.cmake').is_file() for module in required):
             raise RuntimeError(f'Qt {lock["qt_version"]} SDK incomplete: {sdk}')
         # qmake loads the SDK's real Qt runtime, detecting incompatible libc or
