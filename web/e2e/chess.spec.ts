@@ -19,7 +19,7 @@ test.describe('chess UI', () => {
       }
       let body: unknown = [];
       if (url.pathname.endsWith('/catalog')) {
-        body = { engines: Object.fromEntries(['cutechess', 'stockfish', 'qt', 'laplaceUci']
+        body = { engines: Object.fromEntries(['fastchess', 'cutechess', 'stockfish', 'qt', 'laplaceUci']
           .map((key) => [key, { path: `/test/${key}`, found: true, source: 'config' }])) };
       } else if (url.pathname.endsWith('/preview')) {
         previews.push(url);

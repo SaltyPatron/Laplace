@@ -54,6 +54,10 @@ Main delivery uses the configured site lifecycle. Explicit qualification builds 
 
 Run source qualification as a normal installed-host user with `bash deploy/linux/site.sh qualification`, or dispatch **Audit — full product qualification**. Run `bash deploy/linux/site.sh competitive` only when full model/corpus admission and live product qualification are intended. Neither command creates a PostgreSQL instance.
 
+The full-qualification workflow accepts `model_hub` for an existing model corpus directory. Without that input it uses the host's `HF_HUB_CACHE`; it does not download a replacement corpus or assume a particular drive layout.
+
+For installed chess tools, run **Product — maintenance**, operation `chess-lab`, on the selected environment, or run `bash deploy/linux/site.sh chess-lab` there. Linux setup uses an explicit `LAPLACE_FASTCHESS` executable when declared. Otherwise it verifies the pinned release under `LAPLACE_DEPS` (or `LAPLACE_DEPS_PREFIX`, then the installation's `tools` directory), downloading it only when missing. The API and CLI receive the same selected executable. Declare `LAPLACE_CHESS_LAB_DIR` to choose job storage; its default follows `LAPLACE_API_STATE_DIR`, so the API's service identity owns its recorded games and transcripts. Compiler scratch and game storage are separate settings.
+
 ## What is deliberately not in the Actions operator surface
 
 The site lifecycle owns build, install, database, publication and verification. `scripts/test-parallel.sh` retains the native/managed/browser/database/live suite definitions used by explicit qualification.

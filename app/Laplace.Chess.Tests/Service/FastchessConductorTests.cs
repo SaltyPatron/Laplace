@@ -48,7 +48,7 @@ public sealed class FastchessConductorTests
     [Fact]
     public void EngineLogLinesBecomeCutechessTrafficWithOneInstancePerProcess()
     {
-        var instances = new Dictionary<(int Thread, string Engine), int>();
+        var instances = new Dictionary<(string Thread, string Engine), int>();
         Assert.Equal("0 >Laplace(0): uci",
             CutechessRunner.FastchessTrafficAsCutechess("[Engine] [18:47:06.894761] <  2>  Laplace <--- uci", instances));
         Assert.Equal("0 <Laplace(0): id name Laplace",
@@ -61,9 +61,23 @@ public sealed class FastchessConductorTests
     }
 
     [Fact]
+    public void EngineLogThreadTokensRetainFullWidthAndDistinctInstances()
+    {
+        var instances = new Dictionary<(string Thread, string Engine), int>();
+        Assert.Equal("0 >Laplace(0): uci", CutechessRunner.FastchessTrafficAsCutechess(
+            "[Engine] [t] <18446744073709551615> Laplace <--- uci", instances));
+        Assert.Equal("0 <Laplace(0): uciok", CutechessRunner.FastchessTrafficAsCutechess(
+            "[Engine] [t] <18446744073709551615> Laplace ---> uciok", instances));
+        Assert.Equal("0 >Laplace(1): uci", CutechessRunner.FastchessTrafficAsCutechess(
+            "[Engine] [t] <4294967295> Laplace <--- uci", instances));
+        Assert.Equal("0 >Stockfish(2): uci", CutechessRunner.FastchessTrafficAsCutechess(
+            "[Engine] [t] <18446744073709551615> Stockfish <--- uci", instances));
+    }
+
+    [Fact]
     public void TranslatedTrafficVerifiesEngineIdentity()
     {
-        var instances = new Dictionary<(int Thread, string Engine), int>();
+        var instances = new Dictionary<(string Thread, string Engine), int>();
         var lines = new[]
         {
             "[Engine] [t] <  1>  Laplace ---> id name Laplace",
