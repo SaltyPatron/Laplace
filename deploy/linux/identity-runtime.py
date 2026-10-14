@@ -122,9 +122,11 @@ def verify_application(config, record):
     opener = urllib.request.build_opener(NoRedirect)
     for attempt in range(30):
         try:
-            with urllib.request.urlopen(config['api_url'] + '/health/ready', timeout=3) as response:
+            # Identity activation is independent of substrate ingestion. Verify
+            # the serving process here and each provider's client ID below.
+            with urllib.request.urlopen(config['api_url'] + '/health', timeout=3) as response:
                 if response.status != 200:
-                    raise RuntimeError('Application readiness failed')
+                    raise RuntimeError('Application health failed')
             for provider in ('google', 'microsoft'):
                 origin = urllib.parse.urlsplit(config['origin'])
                 req = urllib.request.Request(config['api_url'] + '/v1/auth/login/' + provider,
@@ -141,7 +143,7 @@ def verify_application(config, record):
             return
         except (OSError, RuntimeError):
             if attempt == 29:
-                raise RuntimeError('Application readiness or provider activation failed') from None
+                raise RuntimeError('Application health or provider activation failed') from None
             time.sleep(1)
 
 
