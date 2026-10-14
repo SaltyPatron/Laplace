@@ -1,0 +1,59 @@
+@startuml
+' Evidence: Laplace-Engine/src/main.c SHA256 2137b4afd61e6f1bcaccd4ec07bf0c99705f41b507cfb29bae6d064f297dac10
+' Evidence: Laplace-Engine/src/read.c SHA256 04624c325413693445c84f343a52f98e1097e03cc0f56471e8363d1c86cad6c3
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — shared read snapshot
+
+participant "Read handler" as Caller
+participant "db_read / main.c" as Read
+database "Primary connection" as Primary
+participant "pool_open / read.c" as Pool
+database "Pooled connections" as Workers
+Caller -> Read : db_read(conninfo)
+Read -> Primary : connect
+Read -> Primary : BEGIN REPEATABLE READ, READ ONLY
+alt begin fails
+ Read --> Caller : exit(1), process terminates
+else begin succeeds
+ Read -> Primary : SELECT pg_export_snapshot()
+ alt export fails or no row
+  Read --> Caller : exit(1), process terminates
+ else export succeeds
+  Read -> Read : retain snapshot ID in process-static buffer
+  Read --> Caller : primary connection with transaction open
+  Caller -> Pool : a read requires pooled leaf queries
+  alt pool already exists
+   Pool --> Caller : reuse pool; no new import
+  else pool not open
+   Pool -> Workers : open max(1, omp_get_max_threads()) connections
+   alt snapshot ID exists
+    loop every pool connection
+     Pool -> Workers : BEGIN REPEATABLE READ, READ ONLY
+     Pool -> Workers : SET TRANSACTION SNAPSHOT retained ID
+     alt import fails
+      Pool --> Caller : exit(1), process terminates
+     end
+    end
+   else no snapshot ID
+    note over Pool,Workers : No snapshot import in this branch.
+   end
+  end
+ end
+end
+note over Caller,Workers
+Observed in source: pull, hop, translate, degrees, fills, turn and pgn call db_read.
+Scope is this primary transaction and pools importing its snapshot.
+Persistent replay evidence is a separate question.
+end note
+
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The pool imports only when first opened. This diagram does not claim every
+connection or write path uses the snapshot, nor that a snapshot ID is a durable replay
+receipt. Connection failures terminate the command. No database connection was opened for
+this review.
+end footer
+
+@enduml

@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/observation_read.c SHA256 167f5aceaf70b69740fe723189615098ff99a12dd4406bb4a75f92c2c5094060
+' Evidence: Laplace/extension/laplace_substrate/src/observation_read.h SHA256 acf1c4fe5df26e25808da0bf7b06751d9f710b0f4a35d42ed5262763d3023562
+' Evidence: Laplace/engine/core/src/sql_catalog.def SHA256 065ad0ce0f1aa89793cedf3ed1ee1ff198651b3d2db1650a0ca2d819d6267176
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — attributable witness read and occurrence roles
+start
+:Validate one-dimensional bytea identity filters and 16-byte IDs;
+:Require operands and callback; roles 0..3;
+if (No roles or any supplied set empty?) then (yes)
+ :Return no rows;
+ stop
+endif
+:Connect nested SPI; create temporary memory context;
+:Deduplicate operand probes while retaining linked lists of every original ordinal;
+if (Exact cells supplied?) then (yes)
+ :Deduplicate subject/type/object triples;
+ :Query only exact attestation cells, with optional source filter;
+else (endpoint query)
+ :Query selected subject/object roles with optional source/type filters;
+endif
+:Stream each row through typed DestReceiver; require identity/outcome/count;
+:Preserve nullable object/source/context and 32-byte qualifier mask;
+:For matching subject call visitor for every operand occurrence with role 1;
+:For matching object call visitor for every operand occurrence with role 2;
+:Reject a fetched row outside supplied operand roles;
+:Release temporary memory and nested SPI;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete implementation and static SQL reviewed. No result limit, rank or source
+standing is introduced by this reader. Duplicate operands share a query probe but preserve
+occurrence callbacks; self-reference can appear in both endpoint roles without reversing
+the stored claim. NULL filters are unrestricted; explicitly empty filters yield no
+witnesses. The SQL-facing materialized wrapper returns ten columns and omits the qualifier
+mask carried by native callbacks.
+end footer
+
+@enduml

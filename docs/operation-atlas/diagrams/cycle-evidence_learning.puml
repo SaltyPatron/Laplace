@@ -1,0 +1,19 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Evidence Learning — specified cycle
+start
+repeat
+:close testimony boundary;
+:calculate dependence and standing;
+:publish immutable evidence epoch;
+:observe later evidence without rewriting history;
+repeat while (Further authorized work / evidence?) is (yes) not (no)
+stop
+@enduml

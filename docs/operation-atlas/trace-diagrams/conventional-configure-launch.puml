@@ -1,0 +1,36 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/scripts/configure.sh SHA256 ad931ae043db3855d2ff3487ad362f455ec4c656526efecc9a296b5e43ac0eb2
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — configuration pipeline and retained partial state
+start
+:Resolve corpus/state/project config; create state directory;
+:Inventory physical files; select corpus and write decisions;
+if (Full coverage required and unsupported or inaccessible selected bytes nonzero?) then (yes)
+ :Exit before preparation; inventory and selection outputs remain;
+ stop
+endif
+:Train/select tokenizer; prepare token shards; derive model config;
+:Measure hardware once and write hardware receipt;
+:Plan text execution with require-fit;
+if (Text plan does not fit?) then (yes)
+ :Fail after execution plan has been written;
+ stop
+endif
+:Plan modalities with require-fit;
+if (Any required modality does not fit?) then (yes)
+ :Fail before writing new combined modality plan;
+ stop
+endif
+:Print configuration complete;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete configuration shell reviewed alongside the CLI subcommands. It executes
+stages sequentially with set -euo pipefail; there is no whole-pipeline transaction or
+cleanup of earlier/stale state. Selected-byte counts drive full-coverage gating.
+end footer
+
+@enduml

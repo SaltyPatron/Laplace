@@ -1,0 +1,36 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/src/laplace_conventional/execution.py SHA256 38d8e1f785c2500af2e7496e3ee51f41283090ce5efb824dc58f4e0e1ec5f00f
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — model-preserving execution fit decision
+start
+:Read model configuration, hardware and execution policy;
+:Validate backend, precision, microbatch and memory fractions;
+:Compute parameter-state estimate and activation reserve;
+:Compute native GPU estimate and largest-layer ZeRO-3 GPU/CPU estimates;
+:Compare estimates with configured GPU and RAM budgets;
+if (Explicit backend policy?) then (yes)
+ :Retain requested backend, even if its fit flag is false;
+elseif (Native fits?) then (yes)
+ :Select native training backend;
+elseif (ZeRO-3 CPU offload fits?) then (yes)
+ :Select offload backend;
+else (none)
+ :Select unavailable;
+endif
+:Write execution plan with scope_preserved=true; print;
+if (CLI require-fit?) then (yes)
+ :Reject unsupported/nonfitting backend or false scope_preserved;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete execution planner reviewed. CLI writes the plan before optional fit
+rejection. Both modeled backends require detected GPU memory; native here means
+Conventional training backend, not the Laplace-Native semantic library. Estimates and
+stored fit flags are not live allocation proof.
+end footer
+
+@enduml

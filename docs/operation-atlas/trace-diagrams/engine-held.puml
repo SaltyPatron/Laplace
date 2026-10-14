@@ -1,0 +1,48 @@
+@startuml
+' Evidence: Laplace-Engine/src/provenance.c SHA256 122d05cc086af76714f85bfe9b36b110d61815641e6e7f69ae8cffd1f1052b16
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — held
+start
+
+:Parse parts, --id, files, voices and TSV;
+if (No parts?) then (yes)
+ :Return 2;
+ stop
+endif
+:Map tier0; connect;
+:Resolve explicit IDs or strands_named;
+if (Malformed explicit ID?) then (yes)
+ :Return 2;
+ stop
+endif
+:Sort claims by ID;
+:Open optional TSV;
+if (TSV open fails?) then (yes)
+ :Return 1;
+ stop
+endif
+:walk_up from claims through containment;
+:Identify parentless trunks and metadata-bearing file nodes;
+:roots_known distinguishes witness trunks from other roots;
+while (More trunks?) is (yes)
+ :rows_under computes claim/voice tallies and optional TSV;
+ if (Small claim set?) then (yes)
+  :down_from and tally_under; print detailed claim and voice counts;
+ endif
+endwhile (no)
+if (--files?) then (yes)
+ :Compute and print per-file rows/tallies;
+endif
+:Print walk counts and games/tokens; close TSV and database;
+:Free DAG, readers, holds and maps; return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Games and tokens remain separate tallies; a parentless trunk is not automatically
+a registered witness. Walker, record classification and tally semantics remain nested and
+inspectable in source. Source review only; no Engine command executed.
+end footer
+
+@enduml

@@ -1,0 +1,25 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 16. Authority — Wiki specified order
+start
+:16.1 Separate the three axes;
+:16.2 Declare knowledge packages;
+:16.3 Declare the capabilities;
+:16.4 Resolve the effective scope;
+:16.5 Enforce before coupling, and again at the act;
+:16.6 Dispose explicitly;
+:16.7 Separate belief, risk, and action;
+:16.8 Run Red Spear, Blue Shield, White Judge over the same model;
+:16.9 Bind entitlement as an external witness;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Authority.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

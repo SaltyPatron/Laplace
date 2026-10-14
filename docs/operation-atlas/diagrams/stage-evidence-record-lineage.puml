@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title evidence.record-lineage — declared input/output contract
+component "evidence.record-lineage" as operation
+rectangle "typed AST occurrences" as in0
+in0 --> operation
+rectangle "source authority release and context" as in1
+in1 --> operation
+rectangle "claims calculations mappings transformations and unknowns" as in2
+in2 --> operation
+rectangle "dependence declarations" as in3
+in3 --> operation
+rectangle "immutable testimony" as out0
+operation --> out0
+rectangle "derivation DAG" as out1
+operation --> out1
+rectangle "dependence graph" as out2
+operation --> out2
+rectangle "explicit epistemic kinds and unknown boundaries" as out3
+operation --> out3
+@enduml

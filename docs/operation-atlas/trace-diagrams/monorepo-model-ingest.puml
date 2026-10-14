@@ -1,0 +1,48 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Decomposers/Model/ModelDecomposer.cs SHA256 0a71dcdb90132bb55fdf30a1f3079f51fe5ac1fefebbe9eda16a223ba3238fcf
+' Evidence: Laplace/app/Laplace.Decomposers/Model/ModelTokenEdgeETL.cs SHA256 da0df6373f5b8fefdaaf8eb04be4fe9af34741882bc4bfde87f565a636f1cdc4
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — model source and decomposition orchestration
+start
+:SourceForModel uses ModelContentSourceId\nor canonical-string hash fallback from derived directory name;
+:Initialize registers ModelRuntimeManifest;
+:Read config, tokenizer ID space and safetensors headers;
+note right
+Tokenizer ID-space errors log a warning.
+Header exceptions become an empty header list.
+Recognition / container parsing remain nested.
+end note
+:Recognize manifest; report ambiguity, unrecognized tensors and conflicts;
+:ResolvePlanesMode accepts only structure\nany other configured mode throws;
+if (Headers available?) then (yes)
+ :Stage checkpoint header composition\nand six declared integer configuration facts;
+ :Yield change to shared ingestion executor;
+endif
+if (Unsupported manifest or no tokenizer.json?) then (yes)
+ :Log disposition and end iterator;
+ stop
+endif
+:Parse tokenizer; run vocabulary and merges through common compose phases;
+if (Token IDs dense?) then (yes)
+ :Stage ordered vocabulary and yield change;
+else (no)
+ :Warn model-local ordinals are not retained;
+endif
+:Run ModelTokenEdgeETL.EmitAsync with commitEpoch = 1;
+:Yield each circuit / evidence change\ncancellation checked between emitted changes;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete ModelDecomposer and ModelTokenEdgeETL read. This iterator emits changes;
+it does not prove a whole-checkpoint transaction. Source identity fallback hashes a
+constructed name rather than the target source trunk. Unsupported/no-tokenizer branches
+may follow already-yielded header changes. The analyzer-mode branch in ModelDecomposer is
+unreachable under the current ResolvePlanesMode contract. DescribeInput reports
+safetensors only and estimated matchups; it is not a complete source artifact census.
+Token parser, manifest recognition, snapshot identity and common phase internals remain
+separate.
+end footer
+
+@enduml

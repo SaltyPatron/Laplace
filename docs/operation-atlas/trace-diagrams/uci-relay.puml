@@ -1,0 +1,47 @@
+@startuml
+' Evidence: Laplace-UCI/src/Laplace.Uci/Connections.cs SHA256 804a8785d1e69fd88ab4d3e519c50754ad2408b1767a2c3b12975bb32d30cbd4
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title UCI connector — two-way relay and process shutdown
+start
+
+:Create linked lifetime token;
+fork
+ :Receive left; send right, repeatedly;
+ :Stop pump on EOF, forwarded quit, cancellation or exception;
+fork again
+ :Receive right; send left, repeatedly;
+ :Stop pump on EOF, forwarded quit, cancellation or exception;
+end merge
+:Task.WhenAny observes first completed pump;
+:Cancel linked lifetime; await first pump;
+:Finally await both pumps; suppress lifetime cancellation there;
+:Relay caller disposes owned engine connection;
+if (Owned connection is process?) then (yes)
+ if (Process still running?) then (yes)
+  :Try writing quit and close stdin; suppress IOException from that attempt;
+  :Wait up to three seconds;
+  if (Timeout?) then (yes)
+   :Kill entire process tree; await exit;
+  endif
+ endif
+ :Await stderr pump; finally dispose process;
+else (WebSocket)
+ :Abort and dispose socket;
+endif
+legend
+Process receive throws when EOF is observed after a nonzero exit.
+WebSocket disposal aborts and disposes the socket, without a close handshake here.
+TextConnection disposal itself is a no-op; stream ownership stays with its caller.
+endlegend
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The merge bar denotes the first-completion race, not waiting for both pumps
+before cancellation. Other exceptions propagate; disposal can itself fail. The diagram
+combines relay with the owning caller’s subsequent disposal. No engine process or
+connector endpoint was started.
+end footer
+
+@enduml

@@ -1,0 +1,31 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Core/Core/PostgresResourcePlan.cs SHA256 db7cc2969a454465817c041fc810836449e3e6dd56027bf551b15cafe52362c3
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — PostgreSQL resource ownership equation
+start
+:Read physical RAM, performance cores, logical processors and maintenance width;
+:Require RAM > 0; floor core/maintenance widths at one;
+:p = performance cores; logical = max(p, logical processors);
+:Ingest owners = control 1 + COPY p + fold p + slack 2 + observability 3;
+:Serving owners = logical; maintenance owners = maintenance width;
+:Reserve one operator connection; max connections = sum of owners;
+:Parallel workers = p; I/O workers = logical;
+:Worker processes = parallel + I/O; autovacuum workers = maintenance;
+:Divide RAM into shared/backend/client quarters and OS remainder;
+:Backend population = max connections + parallel + autovacuum workers;
+:Per-backend share = max(1, backend bytes / population);
+:Work memory = max(1, per-backend / 2); temp buffers = remainder;
+:Maintenance/autovacuum work memory = per-backend share;
+:Return immutable resource plan;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete resource-equation source reviewed. It returns configuration values; it
+does not reserve memory or enforce every executor allocation. Topology detection and
+settings application remain nested. Effective cache size is shared plus OS cache, not an
+extra allocation. The equation alone does not prove a hard memory ceiling.
+end footer
+
+@enduml

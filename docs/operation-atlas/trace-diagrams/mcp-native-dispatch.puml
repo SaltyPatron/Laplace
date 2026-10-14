@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace-MCP/native/api.c SHA256 51ff00d86b27e74206f04c97974b8cc433e9c6d3184d88665411d55d6f17eefc
+' Evidence: Laplace-MCP/native/main.c SHA256 a07e2ce55bb69c94bc3b85f7fbe89258f40797a7ec1de6d3af2cde11b6fc206f
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular MCP — native HTTP and RPC dispatch
+start
+:Resolve Engine executable; map tier zero; allocate text decomposer;
+:Bind configured IPv4 host/port; listen backlog 64;
+while (Accept loop?) is (yes)
+ :Accept one connection; read into 1 MiB request buffer;
+ :Use Content-Length or content-length if present;
+ :Parse method/path; remove query string;
+ if (/mcp body contains jsonrpc marker?) then (yes)
+  :Dispatch notification, initialize, ping, tools/list or tools/call;
+  :For tool call, capture handler HTTP body and code;
+  :Wrap body as text; isError when captured code is not 200;
+  :Send outer HTTP 200 for tool results;
+ else (REST or op alias)
+  :Map /mcp op aliases to REST route;
+  :GET health returns ok; GET surface returns static description;
+  :POST routes dispatch ten handlers; unknown route returns 404;
+ endif
+ :Close connection;
+endwhile (repeat)
+stop
+legend bottom
+Native tools: search, embeddings, shape, forward, ingest, hop, text, translate, degrees, pull.
+Server handles connections serially. No authentication check appears in this dispatcher.
+Header/body parsing uses substring scans and fixed buffers; this is not a general JSON parser.
+Health response does not probe the database or Engine.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Native listener, dispatch, MCP wrapper, scalar parsers and Engine wrappers
+reviewed. Deployment access controls and protocol conformance are separate. Static
+/v1/surface text is not treated as the actual tools registry where they differ.
+end footer
+
+@enduml

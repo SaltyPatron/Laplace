@@ -1,0 +1,55 @@
+@startuml
+' Evidence: Laplace-UCI/src/Laplace.Uci/Program.cs SHA256 c75d540aac8af80dcdb95b020a41680eba2587cec64b2e48a260a6a091681072
+' Evidence: Laplace-UCI/src/Laplace.Uci/Connections.cs SHA256 804a8785d1e69fd88ab4d3e519c50754ad2408b1767a2c3b12975bb32d30cbd4
+' Evidence: Laplace-UCI/src/Laplace.Uci/Configuration.cs SHA256 dfeae8c31a84cff881907434d1cba900c45d12f74141171c6c50daffe214ecca
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title UCI connector — authenticated WebSocket session
+start
+
+:Validate token file; require loopback listen URI;
+:Start service; create MaxSessions semaphore;
+if (Request is health/live?) then (yes)
+ :Return service name and live=true;
+ stop
+endif
+:For /uci/profile, hash presented bearer and current token with SHA256;
+if (Fixed-time hash comparison fails?) then (yes)
+ :HTTP 401;
+ stop
+endif
+if (Not WebSocket upgrade?) then (yes)
+ :HTTP 400;
+ stop
+endif
+if (Unknown profile or transport is not process?) then (yes)
+ :HTTP 404;
+ stop
+endif
+if (No session slot immediately available?) then (yes)
+ :HTTP 429;
+ stop
+endif
+:Open configured local process;
+:Accept WebSocket; relay both directions with request cancellation;
+:Dispose peer/socket and engine on scope exit;
+if (Caught IO/cancellation/WebSocket exception?) then (yes)
+ :Log exception type; abort HTTP context;
+endif
+:Finally release session slot;
+legend
+Other exceptions propagate through ASP.NET while finally still releases the slot.
+Token read and slot acquisition occur before this try/finally boundary.
+The health route does not start or verify an engine.
+endlegend
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Authentication is at the connector boundary. Serve permits only configured
+process profiles, while CLI connect also supports SSH and WebSocket. HTTPS ingress is
+external to this loopback service; its implementation is not established by this diagram.
+No engine process or connector endpoint was started.
+end footer
+
+@enduml

@@ -1,0 +1,44 @@
+@startuml
+' Evidence: Laplace-MCP/laplace_mcp.py SHA256 24cfe3607f90cebff592f85f7c813a8f48ff10cfb0c70c9bcf329ee3ad0489f0
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular MCP — independent Python stdio admit/fetch surface
+start
+:Load configured liblpm; create process-local index;
+if (Index unavailable?) then (yes)
+ :Print tier-zero error; exit one;
+ stop
+endif
+while (Read Content-Length framed message?) is (yes)
+ :Parse JSON;
+ if (Notification?) then (yes)
+  :Ignore;
+ elseif (initialize or tools/list?) then (yes)
+  :Return protocol/server metadata or exactly admit and fetch schemas;
+ elseif (tools/call?) then (yes)
+  if (admit?) then (yes)
+   :Index filesystem path; get last hit; fetch record summary;
+   :Return ID, tier, child count, coordinate, Hilbert and path;
+  elseif (fetch?) then (yes)
+   :Decode exact 16-byte ID; fetch record and up to eight child IDs;
+   :Return total child count plus shown child IDs;
+  else (unknown)
+   :Raise tool error;
+  endif
+  :Return content text with isError false, or catch Exception as isError true;
+ else (unknown method)
+  :Return method-not-found only when request ID supplied;
+ endif
+ :Write Content-Length response and flush;
+endwhile (EOF)
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire Python adapter reviewed. It exposes two tools and a process-local liblpm
+index, separate from the native ten-tool HTTP server. Admit does not check its final
+lpm_fetch return code. Framing/JSON errors outside the tool-call try can terminate
+serving; liblpm storage and recipe internals remain nested.
+end footer
+
+@enduml

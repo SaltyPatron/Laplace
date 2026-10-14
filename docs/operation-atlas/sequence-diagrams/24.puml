@@ -1,0 +1,27 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 24. Models — Wiki specified order
+start
+:24.1 Stage the checkpoint as a source generation;
+:24.2 Read the container natively;
+:24.3 Decompose the tokenizer as one ordered composition;
+:24.4 Admit the configuration as facts;
+:24.5 Recognize operators by shape;
+:24.6 Derive each circuit&#x27,s physicality;
+:24.7 Write only the significant claims;
+:24.8 Optionally, witness an execution as a calculation;
+:24.9 Read the model as a witness;
+:24.10 Seat every model at the round table;
+:24.11 Receipt the ingest;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Models.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

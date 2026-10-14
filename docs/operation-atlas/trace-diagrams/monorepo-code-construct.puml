@@ -1,0 +1,45 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/CodePlayerService.cs SHA256 3d6349330f50e27328650f0d21b0e32da6526e04d4f35b8e0ac43beb25af6aa0
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/CodeToolchain.cs SHA256 08a12fbc7ebe3255f38e7cd05cc88b76089f6c9ce7fc1395270c0d711fffc97c
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — shared forward, candidate admission and tool testimony
+start
+:Normalize grammar modality; clamp attempts to 1..8;
+:Create consensus writer; apply CodePlayer and ToolchainWitness bootstraps;
+while (Attempt remains?) is (yes)
+ :Call shared generation.forward_text with original prompt and prior candidate root feedback;
+ if (No nonblank candidate?) then (yes)
+  :Return unresolved or exhausted with earlier attempt receipts;
+  stop
+ endif
+ :Require candidate UTF-8 <= 2 MiB;
+ :Parse native source AST for diagnostics;
+ :Compose candidate again under grammar recipe; add structural witnesses;
+ :Collect DEFINES subjects contextualized by candidate root;
+ :Persist candidate change before tool verification;
+ :Run configured toolchain verifier;
+ :Compose canonical tool receipt and tool identity content;
+ :Attest HAS_RESULT for candidate and each definition,
+confirming only when tool.Verified;
+ :Persist tool-witness change; append attempt receipt;
+ if (Tool unavailable or verified?) then (yes)
+  :Return corresponding failure or success;
+  stop
+ endif
+ :Clear feedback; retain this candidate root for next shared-forward attempt;
+endwhile (exhausted)
+:Return toolchain_rejected_all_candidates;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete service reviewed. Bootstrap, candidate apply and tool-witness apply are
+separate writes; later failure retains earlier effects. Retry feedback contains only the
+latest candidate root, whose persisted result testimony can be discovered by the shared
+program. Syntax parsing, grammar composition internals and source-prior law remain
+separately inspected boundaries. No code generation or toolchain execution was performed
+for the atlas.
+end footer
+
+@enduml

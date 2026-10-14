@@ -1,0 +1,51 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Refactor ISA — reference_topology_resolve_batch
+start
+:Entry after whole-program validation;
+
+:Use existing aligned contiguous buffers where available;
+if (Input requires a copy?) then (yes)
+ :Calculate temporary input bytes; allocate input buffer;
+ if (Allocation fails?) then (yes)
+  :Return RESOURCE_INSUFFICIENT;
+  stop
+ endif
+ :Copy strided input;
+endif
+if (Output requires a copy?) then (yes)
+ if (Temporary-byte addition overflows?) then (yes)
+  :Free temporary input; return RESOURCE_INSUFFICIENT;
+  stop
+ endif
+ :Account temporary output; allocate contiguous output;
+ if (Allocation fails?) then (yes)
+  :Free temporary buffers; return RESOURCE_INSUFFICIENT;
+  stop
+ endif
+endif
+if (Temporary bytes exceed memory grant?) then (yes)
+ :Free temporary buffers; return RESOURCE_INSUFFICIENT;
+ stop
+endif
+:Clear native receipt/error; call laplace_reference_topology_resolve_batch;
+if (Native status not OK?) then (yes)
+ :Free temporary buffers;
+ :Map typed native error; otherwise EXECUTION_FAILED;
+ stop
+endif
+if (Temporary output used?) then (yes)
+ :Scatter output records back to strided storage;
+endif
+:Free temporary buffers;
+:Set output.count = input.count;
+:Return ISA_OK;
+stop
+legend
+Execute-wrapper source trace.
+Validation and native semantic callees are separate boundaries.
+No runtime acceptance asserted.
+endlegend
+@enduml

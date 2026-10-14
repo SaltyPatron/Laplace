@@ -1,0 +1,84 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace Refactor — complete declared capability dependency graph
+component "foundation.acquire-build\n[partial]" as s0
+component "framework.execution\n[partial]" as s1
+component "machine.handle-exceptions\n[unimplemented]" as s2
+component "bootstrap.dependencies\n[partial]" as s3
+component "bootstrap.unicode-root\n[partial]" as s4
+component "substrate.compose-physicality\n[partial]" as s5
+component "substrate.bulk-deposit\n[partial]" as s6
+component "substrate.highway\n[partial]" as s7
+component "evidence.record-lineage\n[partial]" as s8
+component "world.discover-qualify-sources\n[partial]" as s9
+component "world.infer-source-templates\n[unimplemented]" as s10
+component "world.admit-witnesses\n[partial]" as s11
+component "evidence.adjudicate\n[partial]" as s12
+component "query.guidance-search\n[unimplemented]" as s13
+component "cognition.realize-effect\n[unimplemented]" as s14
+component "learning.discovery-ooda\n[unimplemented]" as s15
+component "world.configure-foundational-seed\n[unimplemented]" as s16
+component "model.ingest-generate\n[unimplemented]" as s17
+component "product.materialize-entity-world\n[unimplemented]" as s18
+component "runtime.federate-nodes\n[unimplemented]" as s19
+component "delivery.activate-product\n[partial]" as s20
+component "delivery.accept-seeded-inference\n[unimplemented]" as s21
+component "delivery.release-product\n[unimplemented]" as s22
+s1 ..> s0 : requires
+s2 ..> s1 : requires
+s3 ..> s0 : requires
+s3 ..> s1 : requires
+s3 ..> s2 : requires
+s4 ..> s3 : requires
+s4 ..> s5 : requires
+s5 ..> s3 : requires
+s6 ..> s5 : requires
+s7 ..> s4 : requires
+s7 ..> s6 : requires
+s8 ..> s7 : requires
+s8 ..> s6 : requires
+s9 ..> s0 : requires
+s9 ..> s1 : requires
+s10 ..> s1 : requires
+s10 ..> s9 : requires
+s11 ..> s7 : requires
+s11 ..> s6 : requires
+s11 ..> s8 : requires
+s12 ..> s8 : requires
+s13 ..> s12 : requires
+s14 ..> s13 : requires
+s15 ..> s14 : requires
+s16 ..> s11 : requires
+s16 ..> s10 : requires
+s16 ..> s12 : requires
+s17 ..> s11 : requires
+s17 ..> s12 : requires
+s17 ..> s13 : requires
+s18 ..> s11 : requires
+s18 ..> s12 : requires
+s18 ..> s13 : requires
+s18 ..> s14 : requires
+s19 ..> s3 : requires
+s19 ..> s6 : requires
+s19 ..> s18 : requires
+s20 ..> s3 : requires
+s20 ..> s11 : requires
+s20 ..> s14 : requires
+s20 ..> s15 : requires
+s20 ..> s17 : requires
+s20 ..> s18 : requires
+s20 ..> s19 : requires
+s21 ..> s20 : requires
+s21 ..> s16 : requires
+s21 ..> s14 : requires
+s22 ..> s20 : requires
+s22 ..> s21 : requires
+note "Capability dependencies and ownership.\nNOT runtime execution order or acceptance proof." as warning
+@enduml

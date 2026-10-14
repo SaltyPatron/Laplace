@@ -1,0 +1,60 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/trajectory_generate.c SHA256 c6cdd7266c80070d27e0d836f2316637591cff6b5f1d45e42473957ef7b1f4ff
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo native — proposal, exact evidence and candidate retention
+start
+
+:Loop only while emission steps remain and intent is not blocked;
+:Reset round scratch; check PostgreSQL interrupts; read remaining obligations;
+:Create candidate index;
+if (Stride positive and context tail nonempty?) then (yes)
+ :Read scoped trajectory continuations;
+ :First prompt step uses full context; later steps cap tail at stride;
+ :Nominate IDs with occurrence counts/stride and inherited sequence origins;
+endif
+:Nominate geometry responders not yet promoted through routing;
+:Read bounded semantic proposal summaries;
+if (Prompt input and relation intent or routing budget?) then (yes)
+ :Nominate positive traversal IDs not already routed;
+endif
+if (Output query state exists?) then (yes)
+ :Nominate positive projected results;
+ :Skip new nominations already in ordered context;
+endif
+:Re-add carried candidates absent from ordered context;
+:Emit propose stage when tracing;
+if (No candidates?) then (yes)
+ :Mark exhausted; leave election loop;
+ stop
+endif
+:SCAN exact typed cells between candidates and active query operands;
+:Keep both positive and refuting evidence in summaries;
+:Mark eligible bound-operation results from exact channels;
+:Read exact projection channels if output state exists;
+:Emit scan stage;
+:Record semantic completion provenance before structural ancestry merge;
+:Propagate candidate origins; attach query/traversal/projection/geometry summaries;
+:Keep candidates with sequence occurrence, positive typed evidence or geometry;
+:Emit compose stage;
+if (No candidates remain?) then (yes)
+ :Mark exhausted; leave election loop;
+ stop
+endif
+if (Explicit observation scope has unopposed sequence candidates?) then (yes)
+ :Retain only those unopposed scoped continuations;
+endif
+:Sort by candidate_compare tuple; count output-eligible candidates;
+:Emit steer stage; pass candidates to route/select decision;
+
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Evidence nomination is bounded, but candidate adjudication requests exact typed
+cells through a separate helper. This diagram does not certify those SQL/native helper
+implementations. Completion provenance is recorded before structural origins are merged,
+so structural ancestry is not itself a semantic completion certificate.
+end footer
+
+@enduml

@@ -1,0 +1,37 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/Program.cs SHA256 97454cdfa33b2c0bdd7eef44de4d6ee79c82732207d2f655b573d2ba1f2f816b
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/RefactorProxyMiddleware.cs SHA256 15d0270bb3e760900da8438f459419db045ed4db457963c9f839bdfc05175664
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — request routing before local authorization
+start
+:Apply forwarded headers from configured loopback proxies;
+:When request is HTTPS and public origin configured, rewrite scheme/host;
+if (Exact /refactor path?) then (yes)
+ :308 redirect to slash form;
+ stop
+elseif (/refactor/ prefix?) then (yes)
+ :Run fixed-origin proxy; upstream owns authentication;
+ stop
+endif
+:Response compression; default files and static files;
+if (Static file handled?) then (yes)
+ stop
+endif
+:Rate limiter; correlation ID; exception envelope;
+:Browser authentication;
+:API-key / platform / workspace enforcement;
+:Billing account boundary;
+:Code-model chat middleware;
+:Matched local endpoint or fallback;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Ordering is taken from Program.cs. Proxy requests finish before the local rate
+limiter, exception envelope and authentication middleware. This does not establish the
+upstream authorization configuration. Endpoint routing/framework internals, browser login
+provider and code-model interception remain separately inspectable boundaries.
+end footer
+
+@enduml

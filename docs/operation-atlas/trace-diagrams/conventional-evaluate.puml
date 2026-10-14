@@ -1,0 +1,40 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/src/laplace_conventional/evaluate.py SHA256 df826e58641675d3408b9948a25a9dd07ea2aff94ffaaa40d594f53f7858e2ff
+' Evidence: Laplace-Conventional/src/laplace_conventional/train.py SHA256 0a85540fdb36e1714147e33443afe7908eaadc3279185200051e4e38af7661d9
+' Evidence: Laplace-Conventional/src/laplace_conventional/host_policy.py SHA256 98303050d61460bb9c5b28ebc66827151f4ae3d8df8d0f77a5d5b0763ecfb8fc
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — validation counting and inactive module entry
+start
+if (Executed as python -m ...evaluate?) then (yes)
+ :Imports run and main is defined; no main guard calls it;
+ stop
+endif
+:Explicit caller invokes main(); parse arguments;
+:Load pretrained causal LM; choose eligible CUDA or CPU; set eval mode;
+:Read dataset dtype; make validation TokenShardDataset and batch-size-one loader;
+:Initialize loss sum and token counter to zero; disable gradients;
+while (Batch available and index below max batches?) is (yes)
+ :Move tensors to device; evaluate model;
+ :Count all label elements, including padded ignored labels;
+ :Accumulate model loss times this count;
+endwhile (done)
+:NLL = sum / max(token count, 1);
+:Print count, NLL and exp(min(NLL, 50));
+note right
+ Empty stream or nonpositive batch cap yields
+ zero tokens, NLL zero, perplexity one.
+ The count is not valid prediction tokens.
+end note
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete evaluation wrapper reviewed, without running model inference. It uses
+label.numel() rather than the nonignored, shifted prediction count. Reported NLL is a
+weighted mean of provider batch losses using that count. There is no empty-validation
+rejection or __main__ entry guard.
+end footer
+
+@enduml

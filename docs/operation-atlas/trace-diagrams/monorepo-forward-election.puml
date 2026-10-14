@@ -1,0 +1,61 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/trajectory_generate.c SHA256 c6cdd7266c80070d27e0d836f2316637591cff6b5f1d45e42473957ef7b1f4ff
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo native — route or select and update working state
+start
+
+:Determine whether an open-turn candidate covers all remaining obligations;
+:Compute remaining routing budget independently of emission steps;
+if (No output candidate and no routing budget?) then (yes)
+ :Mark exhausted; leave election loop;
+ stop
+endif
+if (No output candidate, or incomplete meeting with routing budget?) then (route)
+ :Increment routing hop; notify cognition program;
+ :Emit route trace for candidates;
+ :For incomplete meeting, retain outputtable candidates for later rounds;
+ :Mark routed IDs and promoted geometry responders;
+ :Extend query and output states in batches;
+ :Repeat proposal/SCAN at same emission step;
+ stop
+endif
+:Keep output-eligible candidates;
+if (Open turn?) then (yes)
+ :Reorder leading candidates by sharing specificity;
+endif
+:Limit election to min(candidate count, topK);
+if (Spread zero?) then (yes)
+ :Select first candidate;
+else (seeded ordinal draw)
+ :For each retained rank i, draw u and compute -i/spread - log(-log(u));
+ :Select largest key;
+endif
+if (No selection?) then (yes)
+ :Mark exhausted; leave election loop;
+ stop
+endif
+:Emit select stage;
+:Append selected ID to ordered context and route_seen;
+:Add occurrence provenance; fail on ordinal overflow;
+:Extend query/output state with selected ID;
+:Update selected trajectory scope, distinguishing ordered continuation;
+:Notify cognition program of emitted ID and typed semantic support;
+:Emit result after state transition; increment emission step;
+if (Receipt complete and no explicit output-relation projection?) then (yes)
+ :Leave election loop;
+else (no)
+ :Repeat while steps remain and intent permits;
+endif
+
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The draw acts on ordinal rank after typed election; it is not a probability
+distribution over the evidence fields. candidate_can_output excludes geometry-only
+evidence, naming-only channels and contract metadata from direct semantic output. Full
+obligation closure and sharing/summary comparators remain nested helpers.
+end footer
+
+@enduml

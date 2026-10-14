@@ -1,0 +1,165 @@
+{
+  "kind": "Source observations attached to existing conflicts; not new inventor decisions or runtime acceptance",
+  "observations": {
+    "P1": [
+      {
+        "traces": [
+          "engine-tier0"
+        ],
+        "finding": "The modular tier0 handler builds a fixed population, sorts its points by Hilbert value, and assigns by codepoint rank. This supports the Wiki side for this implementation only; it does not settle the open choice across families."
+      }
+    ],
+    "C1": [
+      {
+        "traces": [
+          "engine-turn",
+          "engine-pull"
+        ],
+        "finding": "The reviewed turn path loads prompt content and can write conversation bookkeeping claims and witnesses. The pull path reads and prints without that persistence step. The classification of bookkeeping versus semantic testimony remains the existing open conflict."
+      },
+      {
+        "traces": [
+          "monorepo-chat",
+          "monorepo-forward-proof",
+          "monorepo-witness-queue",
+          "monorepo-turn-content",
+          "monorepo-turn-atomic",
+          "monorepo-working-set"
+        ],
+        "finding": "Monorepo prompt and response phases carry distinct source priors and occurrence identities; the response depends on its exact input occurrence. Novel admitted attestations reach the consensus participant. Empty replies skip RecordResponseAsync deposit, although proof assembly can append a synthetic witness event after the call returns. This distinguishes bookkeeping, testimony and response-proof labeling without deciding the existing self-witness law."
+      }
+    ],
+    "C2": [
+      {
+        "traces": [
+          "engine-pull",
+          "engine-turn"
+        ],
+        "finding": "Reviewed paths include seeded near-top choices. Pull defaults its seed from time when none is supplied. A seeded choice alone does not establish receipt completeness or a stable database snapshot; the recorded inventor decision distinguishes a deterministic method from an unchanging answer."
+      },
+      {
+        "traces": [
+          "monorepo-forward-input"
+        ],
+        "finding": "Monorepo forward_prompt preserves explicit seeds and derives an omitted seed from the first eight BLAKE3 digest bytes of the exact UTF8 prompt in network order. Modular pull defaults to a time-derived seed. These are separate implementation laws; neither by itself proves durable replay."
+      }
+    ],
+    "C4": [
+      {
+        "traces": [
+          "native-series",
+          "engine-standings-write"
+        ],
+        "finding": "Native code contains both scalar lp_attest and trust-bounded lp_attest_series. Their treatment of trust differs. An observation about one function must not be generalized to every caller or the complete deployed system."
+      }
+    ],
+    "C8": [
+      {
+        "traces": [
+          "engine-model"
+        ],
+        "finding": "The reviewed modular model handler measures and reports weight-derived circuit signatures. It does not persist model admission, and deeper layers use original embeddings rather than a realized residual trajectory. The optional execution/admission question is not resolved by this prototype."
+      }
+    ],
+    "I1": [
+      {
+        "traces": [
+          "native-identity"
+        ],
+        "finding": "Native composition identity hashes ordered child IDs without an added domain byte; a single child preserves identity. Empty lp_id_compose and empty lp_ref_compose have different behavior. This is evidence for these functions, not proof that every family's identity path matches."
+      }
+    ],
+    "I6": [
+      {
+        "traces": [
+          "native-series",
+          "engine-fills",
+          "engine-replay"
+        ],
+        "finding": "The series solver consumes games and score, while fills counts structural path occurrences. These are distinct quantities. Dependence grouping and source repetition folding are caller responsibilities outside the series solver; structural repetition must not be represented as independent testimony."
+      }
+    ],
+    "S4": [
+      {
+        "traces": [
+          "engine-pull",
+          "engine-turn",
+          "engine-hop",
+          "engine-translate"
+        ],
+        "finding": "The reviewed handlers implement stage and branch control in C while firmware supplies choices, relation routes and parameters. This does not establish the content-addressed programmable ISA architecture described in other families."
+      }
+    ],
+    "R2": [
+      {
+        "traces": [
+          "engine-read-snapshot"
+        ],
+        "finding": "Current db_read begins a repeatable-read, read-only transaction and exports its snapshot. A newly opened read pool imports that snapshot on every connection. This supports the snapshot portion of the recorded under-review work; ordering, fan behavior, existing-pool reuse and durable replay remain separate boundaries."
+      }
+    ],
+    "T3": [
+      {
+        "traces": [
+          "engine-standings-write",
+          "native-series"
+        ],
+        "finding": "Current fold_events accumulates source claim games and carried scores, and standings_write calls lp_attest_series once per folded claim. The register’s historical Built description naming only a first-lineage lp_attest call does not describe this reviewed path. Independent dependence-root treatment is not established by this finding."
+      }
+    ],
+    "S2": [
+      {
+        "traces": [
+          "engine-standings-write"
+        ],
+        "finding": "Current stand_get initializes new claims with lp_rating_stock, independent of the bringing witness. This differs from the register’s older Built description of recipe/witness-dependent entry deviation. Other families and admission paths remain separate."
+      }
+    ],
+    "R1": [
+      {
+        "traces": [
+          "monorepo-forward-comparator",
+          "monorepo-forward-election",
+          "engine-degrees"
+        ],
+        "finding": "The monorepo candidate comparator orders typed evidence summaries, structural stride, recurrence, opposition, geometry and ID lexicographically. Its later seeded draw operates on ordinal rank. Modular degrees instead traverses its own frontier/cost path. These implementations must remain distinct; deeper summary/cost semantics are still open."
+      }
+    ],
+    "R3": [
+      {
+        "traces": [
+          "monorepo-forward-terminal",
+          "monorepo-forward-proof",
+          "engine-read-snapshot"
+        ],
+        "finding": "Monorepo native and managed layers return terminal receipt/proof fields. The modular read path retains a transaction snapshot during the command. Neither observation alone establishes durable storage of every consumed evidence cell sufficient for later replay. The register’s modular storage question remains open."
+      },
+      {
+        "traces": [
+          "monorepo-witness-queue",
+          "monorepo-working-set"
+        ],
+        "finding": "Caller cancellation after enqueue does not cancel consumer processing. Working-set journal replay skips the fold and conversation callback. In parallel applies, entity and physicality lanes can commit before the control transaction; attestations for a token-bearing apply remain with the fold and journal. A post-COMMIT epoch read can fail after writes committed. No crash/replay execution was performed."
+      }
+    ]
+  },
+  "additional_operation_links": {
+    "engine-tier0": [
+      "4.1",
+      "4.2",
+      "4.3",
+      "4.4",
+      "4.5",
+      "4.6",
+      "4.7"
+    ],
+    "engine-model": [
+      "24.2",
+      "24.6",
+      "24.7",
+      "24.8",
+      "24.11"
+    ]
+  },
+  "link_meaning": "Related source path for comparison. A link is not proof of implementation, equivalence, conformance or completion. In particular, absent model persistence and receipts are comparison gaps."
+}

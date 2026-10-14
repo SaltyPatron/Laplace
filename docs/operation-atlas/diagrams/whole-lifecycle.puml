@@ -1,0 +1,51 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — construction prerequisites and recurring operation lanes
+
+top to bottom direction
+package "Construction / admission prerequisites (Wiki numbered order)" {
+ component "1 Unicode → 2 Toolchain → 3 Builds\n4 Projection → 5 Tier 0" as foundation
+ component "6 Registries → 7 Perfcaches → 8 Database" as storage
+ component "9 Sources → 10 Recipes → 11 Content\n12 Attestations → 13 Consensus → 14 Indexes" as admission
+ component "15 Web → 16 Authority → 17 Envelope\n18 Firmware → 19 Pull" as execution
+ foundation --> storage : compatible artifacts / fingerprint
+ storage --> admission : canonical store + derived read maps
+ admission --> execution : indexed content + attributable standing
+}
+package "Recurring operation" {
+ component "20 Forward\nRESOLVE → COUPLE → ORIENT → ROUTE\nSCAN → COMPOSE → PROPOSE → STEER\nSELECT → REALIZE → WITNESS" as forward
+ component "21 Sessions / 22 Users\nprincipal · exact observation · discourse\nturns · effects · receipts" as session
+ component "23 Learning\nconsequence / evidence / procedure\nphysical acceleration / candidate discovery" as learning
+execution --> forward : operators / firmware\nscope / envelope
+ session --> forward : current observation + retained state
+ forward --> session : selected act / realization / governed witness
+ session --> learning : attributable consequence
+ learning --> admission : new observations / independent testimony
+ learning --> forward : changed state / explicitly activated version
+}
+package "Lanes using the same machine — not successive stages" {
+ component "24 Models\n25 Export\n26 Code\n27 Chess\n28 Games\n29 Maintenance" as lanes
+}
+lanes --> forward : lane-specific contract / grammar / act
+lanes --> learning : consequences under\nthe same evidence law
+lanes ..> foundation : Unicode upgrade repeats 1–5\nnew fingerprint (29)
+note bottom of learning
+Fast frontier changes, claim standing, firmware standing,
+physical acceleration and activated extensions are different state.
+Read replay and transport retry do not manufacture testimony.
+end note
+legend
+Specification synthesis, not a deployment or call graph.
+Wiki's prerequisite order is distinct from runtime feedback arrows.
+Monorepo, Refactor and modular implementations require separate evidence.
+Conflicts remain in Sequence/Conflicts.md; arrows do not resolve them.
+endlegend
+
+@enduml

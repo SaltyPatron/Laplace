@@ -1,0 +1,31 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/prompt_intent.h SHA256 f2d85b0c48eab2623c04dac27f646c781668dc586e22868cde3cd75bb3c5ebfe
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — merge ordered structural continuations
+start
+:Read scoped continuations of exact ordered input context;
+if (No continuations?) then (yes)
+ :Return zero;
+ stop
+endif
+:Check count/allocation capacity; index existing structural routes
+by source, target and relation mask;
+:Reject duplicate existing structural route keys;
+while (Next continuation?) is (yes)
+ :Find/create key = root, continuation identity, CONTINUATION;
+ :Require continuation relation; reject negative count or int64 overflow;
+ :Add occurrence count; nearest gap at most one;
+endwhile (done)
+:Release temporary index; return native continuation count;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire merge helper reviewed. Counts remain structural occurrence counts, not
+source trust or attestations. Underlying scoped trajectory matching and order expansion
+remain separately reviewed boundaries. Route identity includes source and relation, so an
+equal target on another structural plane is not silently merged.
+end footer
+
+@enduml

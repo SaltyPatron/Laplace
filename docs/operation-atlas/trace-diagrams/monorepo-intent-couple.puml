@@ -1,0 +1,33 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/prompt_intent.h SHA256 f2d85b0c48eab2623c04dac27f646c781668dc586e22868cde3cd75bb3c5ebfe
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — one naming hop and exact occurrence origins
+start
+:Create pending binding table;
+if (Supported parse alternatives and structure budget not exhausted?) then (yes)
+ :For each aligned token with valid origin, stage lemma ID and exact origin;
+endif
+while (Next supplied channel?) is (yes)
+ if (Positive edge weight and governed naming/interpretation relation?) then (yes)
+  :Permit HAS_NAME/HAS_SENSE/IS_LEMMA_OF/EVOKES_FRAME families;
+  :Permit only root CORRESPONDS_TO, not argument-role descendants;
+  if (Anchor has existing current-observation origins?) then (yes)
+   :Stage candidate with anchor origins;
+  endif
+ endif
+endwhile (done)
+:After reading all channels, merge staged origin sets into intent bindings;
+:Return identities whose origin set grew;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete naming-coupling helper reviewed. Pending additions are merged only after
+channel traversal, so one call is one witnessed naming hop; it cannot cascade through
+freshly created origins in the same pass. Supported lemma projection does not itself
+establish a speech act. Hard relation filtering and channel orientation are caller/read
+boundaries, not newly enforced in this helper.
+end footer
+
+@enduml

@@ -1,0 +1,33 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 18. Firmware — Wiki specified order
+start
+:18.1 Separate control from knowledge;
+:18.2 Declare the image;
+:18.3 Give it a content identity;
+:18.4 Decide which operation runs;
+:18.5 Decide the segment and the combination;
+:18.6 Set the work: *k*, λ, hops, fanout, steps, stride;
+:18.7 Set the refusals and the exploration;
+:18.8 Set the role weights;
+:18.9 Set the election order and the sufficiency bound;
+:18.10 Set the choice, the temperature, and the seed;
+:18.11 Set the shape measure;
+:18.12 Set the fact branch and the dispositions;
+:18.13 Set the voice;
+:18.14 Record what it can never do;
+:18.15 Register the default first;
+:18.16 Load it once per pass;
+:18.17 Lock it;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Firmware.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

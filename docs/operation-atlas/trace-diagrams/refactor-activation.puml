@@ -1,0 +1,46 @@
+@startuml
+' Evidence: Laplace-Refactor/engine/src/framework.c SHA256 f5f90ced035976592e9dd149785964ab5bf57ec391f741b0f77009f30707ecf2
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Refactor — admit, commit or abort staged effects
+state "Staged inert artifact + receipt" as Staged
+state "Admission checks" as Check
+state "Provider preparation" as Prepare
+state "ACTIVATION_ADMITTED\nOK receipt" as Admitted
+state "Provider commit" as Commit
+state "ACTIVATED\nOK receipt" as Activated
+state "STAGED_INERT\nOK aborted receipt" as Aborted
+state "STAGED_INERT\nadmission failed receipt" as AdmissionFailed
+state "Commit failed receipt\nprovider abort called" as CommitFailed
+state "Rejected request / context / authority / provider\nhashed failure receipt" as Rejected
+[*] --> Staged
+Staged --> Check : admit_staged_stream
+Check --> Rejected : invalid context, staged receipt binding, request,\nread-only flag, expected epoch or provider ABI
+Check --> Prepare : valid request; expected epoch differs from next
+Prepare --> AdmissionFailed : prepare fails / call provider.abort
+Prepare --> Admitted : prepare succeeds / retain preparation fingerprint
+Admitted --> Commit : commit after validation
+Commit --> CommitFailed : commit fails / call provider.abort
+Commit --> Activated : commit succeeds / fingerprint and rehash receipt
+Admitted --> Aborted : abort after validation
+note bottom of Admitted
+Normal admission does not commit.
+activate_staged_stream is convenience admit then commit.
+Commit/abort validate receipt, context and epoch request before provider calls.
+Abort clears the activation fingerprint; validation failure returns unchanged.
+end note
+note bottom of Activated
+Framework receipt records provider return and fingerprints.
+External effects, atomicity, compensation and durable epoch publication
+depend on the concrete provider; the framework cannot infer them.
+end note
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Admission, commit, abort, admitted-receipt validation and committed-receipt
+identity validation bodies reviewed. Context binding and expected-epoch checks apply in
+normal builds. Explicit named test mutations can remove checks or commit during admission
+and are not represented as production behavior.
+end footer
+
+@enduml

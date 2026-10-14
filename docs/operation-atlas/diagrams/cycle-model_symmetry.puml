@@ -1,0 +1,20 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Model Symmetry — specified cycle
+start
+repeat
+:admit model as witnessed AST and behavior;
+:compare induced operators;
+:calculate target-neutral program;
+:compile optional target artifact;
+:validate target runtime behavior;
+repeat while (Further authorized work / evidence?) is (yes) not (no)
+stop
+@enduml

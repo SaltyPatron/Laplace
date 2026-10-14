@@ -1,0 +1,79 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — conceptual identity and evidence model
+
+class Entity {
+ content_id : 128-bit
+}
+class Trajectory
+class Occurrence {
+ ordinal
+ repeat_count
+}
+class Recipe
+class SourceTrunk <<content>>
+class FileTrunk <<content>>
+class Testimony {
+ outcome / games / score
+ qualifiers / context
+}
+class Claim <<n-ary composition>>
+class Standing {
+ rating / deviation / volatility
+ witness breadth / dependence
+}
+class Physicality <<realization>>
+class Coordinate4D
+class PackedCarrier {
+ identity + ordinal + run + metadata
+}
+class RealizedCurve
+Entity -- Trajectory : ordered constituent structure
+Trajectory "1" *-- "0..*" Occurrence : owns positions
+Occurrence "0..*" --> "1" Entity : shared child
+Recipe ..> Trajectory : chooses decomposition
+Entity <|-- Claim
+Entity <|-- SourceTrunk
+Entity <|-- FileTrunk
+SourceTrunk --> FileTrunk : file trunks in path order
+SourceTrunk --> Entity : source record
+FileTrunk --> Entity : metadata and content roots
+Testimony --> SourceTrunk : attributable witness
+Testimony --> Claim : confirmation / draw / refutation
+Claim --> Entity : ordered arguments
+Standing --> Claim : keyed by claim
+Standing ..> Testimony : fold attributable evidence
+Entity -- Physicality : typed realization
+Physicality --> Coordinate4D : placement
+Physicality --> Trajectory : constituent manifest
+Occurrence --> PackedCarrier : packed representation
+PackedCarrier --> Entity : unpack complete child identity
+RealizedCurve ..> PackedCarrier : unpack and order
+RealizedCurve --> Coordinate4D : resolve child placements
+note bottom of Entity
+Identity depends on content / ordered child IDs.
+Recipe, tier, source and authority are not hash salt.
+Shared children are not exclusively owned by parents.
+end note
+note bottom of SourceTrunk
+The source trunk is the witness, not each file or annotator.
+Containment provenance is the target; attestation rows remain
+until a real-data prototype preserves their answers.
+end note
+note bottom of Testimony
+Observation alone does not assert a semantic claim.
+Repetition and shared lineage do not establish independence.
+end note
+note bottom of PackedCarrier
+Packed binary64 fields are not geometric positions.
+Geometry does not establish meaning or truth.
+end note
+
+@enduml

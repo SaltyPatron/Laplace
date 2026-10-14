@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/CodeToolchain.cs SHA256 08a12fbc7ebe3255f38e7cd05cc88b76089f6c9ce7fc1395270c0d711fffc97c
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — verification definition and configured tools
+start
+:Require nonblank source and modality;
+if (JSON?) then (yes)
+ :Use System.Text.Json parsing; no subprocess;
+else (other)
+ :Resolve finite configured compiler/syntax-check invocation;
+ if (No configured verifier?) then (yes)
+  :Return unavailable, exit 127;
+  stop
+ endif
+ :Create unique temporary directory; write candidate source;
+ :When needed write bootstrap project and run preparation;
+ if (Bootstrap unavailable, timed out or nonzero exit?) then (yes)
+  :Return failed bootstrap receipt;
+ else (ready)
+  :Run verifier invocation;
+ endif
+ :Finally attempt recursive temporary-directory cleanup; swallow cleanup error;
+endif
+:Verified = tool available AND Tree-sitter syntax complete
+AND no timeout AND exit code zero;
+:Include AST diagnostics; normalize and truncate diagnostic strings;
+:Serialize laplace.code-toolchain/v2 receipt;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete verifier and finite tool map reviewed: Python, C/C++,
+JavaScript/TypeScript, Rust, Go, Bash, Ruby, PHP, Java, C#, CUDA, Fortran, Swift, Zig,
+LLVM, ISPC, NASM and assembly, plus in-process JSON. Julia/Kotlin aliases can have a
+grammar but no verifier here. C# restore and build are separate process calls; Java
+disables annotation processing. Verified means these syntax/compile checks, not behavioral
+test success.
+end footer
+
+@enduml

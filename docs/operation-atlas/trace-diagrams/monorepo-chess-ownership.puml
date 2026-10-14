@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Chess.cs SHA256 d86eead36cf95b90252f6e228a9831f943e4518a6307e46476fad986bf25e674
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/ChessRuntimeService.cs SHA256 81b2e15ffc1aedb376286b751ce63634e0c31e27b73e3a6ad5b84aa29f43554c
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessEngineService.cs SHA256 f1612cc77fb73d442be573c8d483c077d4f6ab1a1d95e1a61b9657c20c4869ce
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — play-session and lab ownership
+start
+:Resolve request tenant;
+if (Play action?) then (yes)
+ :Require browser user ID or API-key prefix principal;
+ :Read retained operation; require exact requester equality;
+ :Completed finish returns its retained operation;
+ :Require ongoing, or finish with retryable recording;
+ :Get live runtime and session; require exact requester equality;
+ :Acquire session gate;
+ :Reread retained operation; recheck completed/ongoing/retry eligibility;
+ :Recheck same live session instance still registered;
+ if (Expected FEN supplied and differs from live session board?) then (yes)
+  :Return 409 play_position_changed;
+ else (current)
+  :Run move/bestmove/finish or explicit recording retry;
+ endif
+ :Finally release session gate;
+else (lab access)
+ :Require nonblank tenant equals job requester tenant;
+ :Allow same-workspace job listing, reads, stop, artifacts or ingest;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Endpoint recovery change 6cbd9cc63 reviewed. Play uses exact OperationPrincipal
+equality; lab access uses tenant equality. Browser principals retain provider, API-key
+principals use display prefix, and header/dev tenants produce no RequestPrincipal.
+Retained state is now reread inside the session gate; completed finish is idempotent at
+HTTP level. POST /chess/play/{sessionId}/recording/retry requires a retryable retained
+recording. Shared-writer retry semantics remain a separate boundary.
+end footer
+
+@enduml

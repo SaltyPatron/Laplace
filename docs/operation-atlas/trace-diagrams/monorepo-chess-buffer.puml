@@ -1,0 +1,36 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessLiveGameHost.cs SHA256 c21e41170effafece6bef980d63426f707df9a7de34a0992bd5a7544704fcdce
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — live game observations before deposit
+start
+:Create ingest datasource, synchronous writer and consensus accumulator;
+:Bootstrap chess sources; register canonical names;
+:OpenGame stores an ephemeral session under supplied event handle;
+while (Ply/clock/analysis arrives?) is (yes)
+ :Find open session; acquire shared write gate;
+ if (Ply?) then (yes)
+  :Resolve legal UCI/SAN from pre-move board;
+  :If unresolved, search unique legal move producing supplied post-board;
+  :Append move, resolved ply, move identity and position identities;
+ elseif (Nonnegative clock?) then (yes)
+  :Store remaining milliseconds by ply;
+ else (analysis)
+  :Store supplied analysis by ply;
+ endif
+ :Release gate; no database apply in these methods;
+endwhile (done)
+:CompleteGame performs later deposition;
+:Abandoning captured scope removes only its exact session, without result write;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Reviewed live-host creation, open/capture/abandon and record methods.
+RecordPlyAsync accepts a ply argument but appends rather than indexing/deduplicating by
+it. When a supplied UCI/SAN resolves, ResolveMove does not additionally verify that
+supplied toKey equals that move result. Caller paths generate their own toKey, while
+lower-level direct callers remain a separate validation boundary.
+end footer
+
+@enduml

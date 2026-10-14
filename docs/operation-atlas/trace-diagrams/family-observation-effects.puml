@@ -1,0 +1,61 @@
+@startuml
+' Evidence: Laplace-Refactor/contracts/authority-stack.json SHA256 c5a12497cba2686564a0ac514755dc1d8d8f60a0c9cfe7507f9aee61624835f9
+' Evidence: Laplace-Refactor/engine/src/framework.c SHA256 f5f90ced035976592e9dd149785964ab5bf57ec391f741b0f77009f30707ecf2
+' Evidence: Laplace-Refactor/engine/src/isa.c SHA256 39c5301c21e30a2182ab6ebbb856588d413f1a0eaa20d5b1515955e72b2ca0ab
+' Evidence: Laplace/app/Laplace.Substrate/Abstractions/ConversationContent.cs SHA256 29d2756e02967b64afc125b499f1ca5a08044dbb6423d9e895ba5fef7d388b88
+' Evidence: Laplace/app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs SHA256 1becc7b1658d0c37274a6ea4f2872e3bf2f09d864a1285895b1c1e99cc8a0312
+' Evidence: Laplace/extension/laplace_substrate/src/cognition_program.c SHA256 3bf41a2be32a7712b9b74d54b3911dd4fa7a924defb57b3d6dcf48d0799117a4
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/TurnWitness.cs SHA256 ec6e5077fc24e3f20cfc6b93df8b244693dd0ea323be7e6d3f86fbe21f595744
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Across families — observation, testimony, completion and effects
+left to right direction
+package "Monorepo / reviewed source" {
+ rectangle "HTTP prompt admission\nInput occurrence + prompt source prior" as MIn
+ rectangle "Native forward\nTyped candidate selection\nObligation closure" as MForward
+ rectangle "Response occurrence\nResponse source prior\nDEPENDS_ON exact input" as MOut
+ rectangle "Novel admitted attestations\nConsensus participant\nSession Projection append" as MWrite
+ MIn --> MForward : prompt record returns first
+ MForward --> MOut : nonempty reply
+ MIn --> MWrite
+ MOut --> MWrite
+}
+package "Modular / reviewed source" {
+ rectangle "Engine turn\nPrompt decomposition + scan + chain\nConversation bookkeeping" as ETurn
+ rectangle "Engine pull\nRead and print\nTime seed when omitted" as EPull
+ rectangle "Native library\nContent identity, text composition\nScalar / series standing calculus" as N
+ ETurn --> N
+ EPull --> N
+}
+package "Refactor / declared law" {
+ rectangle "Ordinary observation and generated output\nExact content / occurrence / trajectory\nZero semantic testimony merely from observation" as RObserve
+ rectangle "Explicit seeded testimony or independently\nobserved/adjudicated outcomes\nTyped standing updates" as RTestify
+}
+package "Refactor / reviewed framework source" {
+ rectangle "Supplied context\nEpochs + authority fingerprint + resource grant" as Context
+ rectangle "ISA preflight and instruction execution\nInput / output / execution receipt" as ISA
+ rectangle "Provider lifecycle\nSTAGED_INERT -> ACTIVATION_ADMITTED -> ACTIVATED" as Effects
+ Context --> ISA
+ Context --> Effects
+}
+note bottom of RObserve
+Authority-stack product law is not a claim that all public routes already conform.
+end note
+note bottom of MWrite
+Prompt/response attestations and synthetic HTTP witness events must be
+classified against the governing law; method names do not settle that conflict.
+end note
+note bottom of Effects
+ISA execution, cognition completion, evidence admission and effect activation
+are different events. Their receipts must not be substituted for one another.
+end note
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Cross-family comparison of explicit law and previously reviewed paths, not a
+merged execution pipeline. Modular details link to their own source-backed traces. No
+family is promoted to the definition of the invention, and no code observation overrides
+inventor authority.
+end footer
+
+@enduml

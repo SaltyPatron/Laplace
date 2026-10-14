@@ -1,0 +1,52 @@
+@startuml
+' Evidence: Laplace-Engine/src/provenance.c SHA256 122d05cc086af76714f85bfe9b36b110d61815641e6e7f69ae8cffd1f1052b16
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — replay standings from containment
+
+start
+:Parse --write / --tsv / --voices / --files;
+:Map tier0; connect; create reader;
+:SELECT witness IDs and trust;
+:Calculate source rank; sort witnesses by rank and ID;
+if (TSV requested and open fails?) then (yes)
+ :Return 1;
+ stop
+endif
+while (More witness trunks?) is (yes)
+ :walk_down; propagate occurrence counts; tally_under;
+ while (More positive-game claim tallies?) is (yes)
+  :Initialize stock standing if absent;
+  :lp_attest_series(trust, games, mean score, floor);
+  :Accumulate matches / print optional TSV;
+ endwhile (no)
+ :Optionally output voice and file tallies;
+ :Free witness DAG and tallies;
+endwhile (no)
+:Read existing consensus in sets of up to 50000;
+:Compare rating / deviation / volatility bitwise and match count;
+:Count same, different and missing BEFORE writing;
+if (--write and replayed set nonempty?) then (yes)
+ :BEGIN; create temporary replayed table;
+ :Binary COPY replayed standings;
+ :UPDATE existing consensus; INSERT missing consensus;
+ :COMMIT;
+endif
+:Print comparison; close TSV, maps, reader and connection;
+:Return 1 if pre-write different or missing, otherwise 0;
+stop
+legend
+--write is a mutation; default compares only.
+A return of 1 after --write can report the pre-write mismatch.
+This function does not delete extra consensus rows outside the replayed set.
+endlegend
+
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. cmd_replay and stands_compare reviewed, including write transaction and return
+condition. walk_down/tally_under/rank_of and the native series solver remain nested. The
+diagram describes source behavior, not successful runtime reconstruction.
+end footer
+
+@enduml

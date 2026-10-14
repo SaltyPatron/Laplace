@@ -1,0 +1,23 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 25. Export — Wiki specified order
+start
+:25.1 Resolve authority and export scope;
+:25.2 Deposit the recipe as content;
+:25.3 Choose each slot&#x27,s operator;
+:25.4 Resolve the witnesses and build the circuits;
+:25.5 Materialize every weight, in bulk;
+:25.6 Emit the artifact and its receipts;
+:25.7 Validate by loading and by ablation;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Export.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

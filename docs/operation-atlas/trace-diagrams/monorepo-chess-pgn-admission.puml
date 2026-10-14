@@ -1,0 +1,51 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessPgnIngestor.cs SHA256 9775995dd88b88edc591f4794d36bd9286fa19f82e85992470867d952e857cca
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessPgnChunk.cs SHA256 73cf2180278730534e0c936601c8461375e946af1fc0c1d40c59efeebd2d3426
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — PGN source, shared admission, repair and exact readback
+start
+:Owned ingestor creates synchronous writer, or attached ingestor borrows live-host writer;
+:Bootstrap source owners and canonical names;
+:Parse optional experiment; acquire process-wide ingestion semaphore;
+:Read/validate/parse to next full parse window or final remainder;
+:Skip parser-rejected games; count rejections when measured;
+while (Nonempty parsed window available?) is (yes)
+ :Probe recording-witness novelty once for this window;
+ while (Window games remain?) is (yes)
+  :Compose complete games into Record/Analyze/Repair/RepairAnalyze builders;
+  :Close after staged/modelled bytes cross share, or exact replay game count;
+  :Materialize novel record and calculated changes;
+  :For existing games probe exact testimony and persisted move trajectory;
+  :Suppress existing testimony; retain structural repair when trajectory differs;
+  :Add missing experiment testimony;
+  if (No-writer verification and changes present?) then (yes)
+   :Throw before ApplyMany; finally dispose owned stages/builders and release gate;
+   stop
+  endif
+  :ApplyMany when changes present;
+  :Read back exact start position and ordered move IDs unless no-writer mode;
+  :Update observed cache; perform measurement-specific exact readback/scope checks;
+  :Flush corpus evidence if enabled; only then remove committed novelty;
+  :Dispose owned native stages and builders;
+ endwhile (done)
+ :When required, verify full window witness, rules, result and hydrated moves;
+ :Read/validate/parse next window or final remainder, skipping rejected games;
+endwhile (done)
+:Return parsed/novel/applied/repaired counts; release semaphore in finally;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete ChessPgnIngestor and ChessPgnChunk reviewed. Admission is per composed
+chunk, not one transaction for the whole file. Byte closure happens after an entire game;
+this estimate is not a hard peak-memory bound. Shared-host producers do not all hold this
+semaphore. Existing games still run composition and calculated owners before filtering
+missing testimony. Exact readback can fail after ApplyMany committed; retries depend on
+witness/structure repair. Applied equals novel count in this return path, not total
+changes or repaired games. Complete-source unmeasured mode additionally hydrates
+rules/result/moves after each parse window. Deep decomposer, measurement and common-writer
+operators remain separate evidence.
+end footer
+
+@enduml

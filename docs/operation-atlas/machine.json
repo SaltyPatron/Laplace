@@ -1,0 +1,1964 @@
+{
+  "source": "E:\\Repositories\\Laplace\\Laplace-Refactor\\contracts\\operation-model.json",
+  "sha256": "0146e3e2aee277dabc114d2eb3e3699fd8558edbaa25b53499afaa20a8d31a99",
+  "semantics": {
+    "stages": "implementation capability dependencies and operational ownership, not a source runtime order or a claim that product state is active",
+    "runtime": "runtime behavior is cyclic and recipe-planned over exact AST artifact reference epoch and authority dependencies",
+    "activation": "implementation integration product activation per-source-profile world admission configured foundational seed completion and release are separate states recorded by their own receipts",
+    "universality": "every stage consumes or produces typed universal AST Merkle-DAG state through one recipe compiler ISA framework and native semantic engine",
+    "application_symmetry": "people organizations accounts entitlements achievements activities interfaces personal webs nodes and federation use universal machine state and cannot create application-specific semantic engines",
+    "finite_execution": "every query cognition and effect operates under explicit evidence authority resource and search boundaries and returns a typed why-not disposition when completion is unavailable",
+    "exception_semantics": "hardware provider resource program authority epistemic and semantic conditions are distinct generated machine states with declared priority restart retry reroute replay durability and publication laws",
+    "deployment_symmetry": "hardware platform placement storage and network providers may change physical plans capacity and performance but not ISA meaning identity evidence or logical results",
+    "execution_cohesion": "a capability exists only when its complete public program traverses the shared registry context recipe ISA batch presence deposit receipt and exception lifecycle; component and historical success cannot promote a missing current whole route",
+    "model_behavior_boundary": "formal nonzero model support differs from measured effective support; behavior admission is experiment-scoped and filtering requires causal behavioral loss and receipt evidence",
+    "sparse_addressability": "absence unobserved unknown contradicted and present remain distinct states; justified sparse canonical and derived state plus workload-proven removable indexes and perfcaches replace unbounded all-pairs noise surfaces"
+  },
+  "stages": [
+    {
+      "id": "foundation.acquire-build",
+      "program_phases": [
+        0,
+        1
+      ],
+      "github_issues": [
+        3,
+        8,
+        12,
+        54
+      ],
+      "depends_on": [],
+      "owner": "minimal trusted source acquisition build and package bootstrap",
+      "consumes": [
+        "upstream source",
+        "release archives",
+        "standards data",
+        "models and corpora",
+        "licenses",
+        "declared build toolchains"
+      ],
+      "produces": [
+        "verified source generations",
+        "staged dependency packages",
+        "source data and model manifests",
+        "build receipts"
+      ],
+      "persistent_authority": [
+        "dependency and artifact locks",
+        "build graph",
+        "SBOM and package receipts"
+      ],
+      "acceleration": [
+        "verified external source cache",
+        "input-addressed out-of-tree build cache"
+      ],
+      "receipts": [
+        "source revisions",
+        "archive and expanded tree hashes",
+        "licenses",
+        "toolchain and build flags",
+        "staged object hashes"
+      ],
+      "product_requirements": [
+        "LP-PACKAGE-001",
+        "LP-CLEANROOM-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "evidence": [
+          "dependencies/intent.json",
+          "dependencies/lock.json",
+          "dependencies/release-lock.json",
+          "dependencies/installed-lock.json",
+          "tools/dependencies/verify-installed-lock.py",
+          "tests/installed_provider_lock_tests.py",
+          "contracts/postgresql-build.json",
+          "tools/postgresql/build-package.py",
+          "tests/postgresql_build_tests.py",
+          "docs/delivery/SELF_HOSTED_RUNNER.md"
+        ]
+      }
+    },
+    {
+      "id": "framework.execution",
+      "program_phases": [
+        2
+      ],
+      "github_issues": [
+        4,
+        5,
+        6,
+        10,
+        57,
+        58,
+        70
+      ],
+      "depends_on": [
+        "foundation.acquire-build"
+      ],
+      "owner": "native C/C++ engine with generated PostgreSQL SQL and C# orchestration bindings",
+      "consumes": [
+        "typed recipes and AST programs",
+        "immutable execution context",
+        "authority envelope",
+        "resource grant"
+      ],
+      "produces": [
+        "validated typed ISA and physical plan",
+        "typed AST and value outputs",
+        "effect disposition",
+        "execution receipt"
+      ],
+      "persistent_authority": [
+        "contract and epoch registries",
+        "execution receipts"
+      ],
+      "acceleration": [
+        "topology-aware vector batches",
+        "TBB arenas",
+        "MKL thread domains",
+        "PostgreSQL server plans"
+      ],
+      "receipts": [
+        "program",
+        "inputs",
+        "outputs",
+        "epochs",
+        "dependencies",
+        "resources",
+        "authority",
+        "effects"
+      ],
+      "product_requirements": [
+        "LP-PRODUCT-001",
+        "LP-UNIVERSAL-001",
+        "LP-EXECUTION-001",
+        "LP-ISA-001",
+        "LP-FRAMEWORK-001",
+        "LP-COHESION-001",
+        "LP-REUSE-001",
+        "LP-RECIPE-001",
+        "LP-BULK-001",
+        "LP-TOPOLOGY-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "published code proves selected typed context registry ISA batch resource activation and receipt lifecycle slices",
+        "missing_boundary": "the universal AST type system grammar registry general recipe compiler complete ISA vocabulary and cross-domain whole-route cohesion remain unimplemented",
+        "evidence": [
+          "contracts/framework.json",
+          "contracts/recipe-model.json",
+          "docs/architecture/ENGINEERING_STANDARDS.md",
+          "requirements/features/universal_ast_recipe.feature",
+          "engine/src/framework.c",
+          "tests/framework_tests.cpp",
+          "engine/src/isa.c",
+          "engine/src/execution.cpp",
+          "engine/src/execution_oneapi.cpp",
+          "engine/src/perfcache_registry.cpp",
+          "tests/perfcache_registry_tests.cpp",
+          "integrations/postgresql/extension/src/perfcache_pg.c",
+          "integrations/postgresql/extension/laplace--version.sql.in",
+          "tests/postgres/perfcache_epoch_contract.sql",
+          "managed/Laplace.Managed/Transport.cs",
+          "docs/audits/CLEAN_FRAMEWORK_GAP_AUDIT.md"
+        ]
+      }
+    },
+    {
+      "id": "machine.handle-exceptions",
+      "program_phases": [
+        2
+      ],
+      "github_issues": [
+        56
+      ],
+      "depends_on": [
+        "framework.execution"
+      ],
+      "owner": "generated native exception trap interrupt fault cancellation recovery and why-not registry with route-parity bindings",
+      "consumes": [
+        "validated logical program",
+        "current instruction and operands",
+        "execution context",
+        "physical plan and provider observations",
+        "authority resource and completion state",
+        "last durable receipt"
+      ],
+      "produces": [
+        "typed machine condition",
+        "priority and precision decision",
+        "restart retry reroute replay compensation or terminal plan",
+        "invalidated-output boundary",
+        "why-not and recovery receipt"
+      ],
+      "persistent_authority": [
+        "exception registry and ABI epoch",
+        "fault and recovery receipts",
+        "durable replay boundaries"
+      ],
+      "acceleration": [
+        "generated constant-time condition lookup",
+        "provider capability registry",
+        "accepted alternate physical plans"
+      ],
+      "receipts": [
+        "logical program and affected instruction",
+        "condition class and observed causes",
+        "node provider transaction and world scope",
+        "last durable receipt and replay origin",
+        "publication disposition"
+      ],
+      "product_requirements": [
+        "LP-EXCEPTION-001",
+        "LP-LIMITS-001",
+        "LP-ISA-001",
+        "LP-FRAMEWORK-001",
+        "LP-PLACEMENT-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "requirements and acceptance scenarios exist but no generated exception registry native dispatcher recovery planner route bindings or physical fault-injection acceptance is implemented",
+        "evidence": [
+          "requirements/features/machine_exceptions.feature",
+          "docs/architecture/ISA.md",
+          "docs/architecture/ACCEPTANCE.md"
+        ]
+      }
+    },
+    {
+      "id": "bootstrap.dependencies",
+      "program_phases": [
+        1,
+        2
+      ],
+      "github_issues": [
+        3,
+        12
+      ],
+      "depends_on": [
+        "foundation.acquire-build",
+        "framework.execution",
+        "machine.handle-exceptions"
+      ],
+      "owner": "framework-mediated package and dependency activation",
+      "consumes": [
+        "verified source generations",
+        "staged dependency packages",
+        "generated runtime configuration",
+        "activation authority"
+      ],
+      "produces": [
+        "activated package inputs",
+        "runtime dependency epoch",
+        "loaded object closure"
+      ],
+      "persistent_authority": [
+        "activation manifests",
+        "runtime configuration receipts",
+        "loaded object receipts"
+      ],
+      "acceleration": [
+        "versioned package prefix",
+        "atomic activation pointer"
+      ],
+      "receipts": [
+        "package identity",
+        "configuration identity",
+        "loaded object hashes",
+        "activation and rollback disposition"
+      ],
+      "product_requirements": [
+        "LP-PACKAGE-001",
+        "LP-ACTIVATION-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "evidence": [
+          "dependencies/installed-lock.json",
+          "tools/dependencies/verify-installed-lock.py",
+          "cmake/LaplaceOneApiProvider.cmake",
+          "docs/delivery/PRODUCT_INFRASTRUCTURE.md",
+          "docs/audits/CLEAN_FRAMEWORK_GAP_AUDIT.md"
+        ]
+      }
+    },
+    {
+      "id": "bootstrap.unicode-root",
+      "program_phases": [
+        3
+      ],
+      "github_issues": [
+        13,
+        14
+      ],
+      "depends_on": [
+        "bootstrap.dependencies",
+        "substrate.compose-physicality"
+      ],
+      "owner": "native Unicode grammar and recipe through the common typed-AST canonical-batch framework",
+      "consumes": [
+        "pinned UCD",
+        "complete DUCET",
+        "conformance inputs",
+        "identity grammar",
+        "Super Fibonacci Hopf Hilbert numeric recipe"
+      ],
+      "produces": [
+        "one canonical ordered Tier-0 AST record stream",
+        "bootstrap atom perfcache",
+        "canonical Tier-0 database rows",
+        "coherent root epoch"
+      ],
+      "persistent_authority": [
+        "content identities",
+        "atom physicalities",
+        "normalization and composition relations",
+        "root epoch manifest"
+      ],
+      "acceleration": [
+        "dense direct atom plane",
+        "reverse identity plane",
+        "normalization span indexes",
+        "4D Hilbert locality"
+      ],
+      "receipts": [
+        "Unicode version",
+        "source hashes",
+        "decomposer recipe",
+        "numeric provider",
+        "record stream and partition hashes",
+        "database cache parity"
+      ],
+      "product_requirements": [
+        "LP-IDENTITY-001",
+        "LP-IDENTITY-002",
+        "LP-UNICODE-001",
+        "LP-UNICODE-002",
+        "LP-GEOMETRY-001",
+        "LP-GEOMETRY-002",
+        "LP-PERFCACHE-001",
+        "LP-PERFCACHE-002",
+        "LP-PERFCACHE-003",
+        "LP-ACTIVATION-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "the canonical Unicode root calculation PostgreSQL sibling deposition coherent direct-reverse Tier0 activation public epoch-pinned access product activation controller restart proof and cold application-role readback paths execute in controlled integration",
+        "missing_boundary": "a successor package containing the current extension and native activation identity provider must be built installed and activated as the PostgreSQL 18.6 product cluster before the complete Unicode product-root receipt can be physically issued; product activation and routing through the future generic universal-AST recipe compiler are not proven",
+        "evidence": [
+          "contracts/unicode-source.json",
+          "contracts/unicode-atom-record.json",
+          "contracts/ducet-totalization.json",
+          "contracts/super-fibonacci-hopf.json",
+          "contracts/hilbert-numeric.json",
+          "contracts/unicode-root-stream.json",
+          "contracts/perfcache.json",
+          "contracts/unicode-postgresql.json",
+          "contracts/unicode-product-activation.json",
+          "tools/validate-unicode-root-contracts.py",
+          "tools/contracts/generate-unicode-source.py",
+          "tools/postgresql/unicodectl.py",
+          "tools/unicode_activation_identify.cpp",
+          "tests/unicode_root_contract_tests.py",
+          "tests/unicode_product_activation_tests.py",
+          "tests/unicode_root_tests.cpp",
+          "tests/unicode_root_builder_tests.cpp",
+          "tests/perfcache_performance_receipt_tests.py",
+          "tests/unicode_numeric_tests.cpp",
+          "tests/unicode_source_tests.cpp",
+          "engine/src/identity.c",
+          "engine/src/geometry.c",
+          "engine/src/unicode_root.c",
+          "engine/src/unicode_tier0_sink.cpp",
+          "engine/src/unicode_numeric_oneapi.cpp",
+          "engine/src/unicode_numeric_stub.c",
+          "engine/src/unicode_source.cpp",
+          "engine/src/persistence.c",
+          "engine/src/perfcache.c",
+          "engine/src/perfcache_file_posix.c",
+          "engine/src/perfcache_modules.c",
+          "engine/src/perfcache_registry.cpp",
+          "tests/perfcache_tests.cpp",
+          "tests/perfcache_file_tests.cpp",
+          "tests/perfcache_registry_tests.cpp",
+          "integrations/postgresql/extension/src/persistence_pg.c",
+          "integrations/postgresql/extension/src/unicode_root_pg.c",
+          "integrations/postgresql/extension/src/unicode_perfcache_pg.c",
+          "tests/postgres/unicode_root_contract.sql",
+          "requirements/features/geometry_glome.feature",
+          "requirements/features/perfcache_world_state.feature"
+        ]
+      }
+    },
+    {
+      "id": "substrate.compose-physicality",
+      "program_phases": [
+        3
+      ],
+      "github_issues": [
+        7,
+        13
+      ],
+      "depends_on": [
+        "bootstrap.dependencies"
+      ],
+      "owner": "native universal AST identity composition trajectory and physicality modules",
+      "consumes": [
+        "typed AST atoms",
+        "ordered and unordered constituents",
+        "roles and run spans",
+        "physicality recipe"
+      ],
+      "produces": [
+        "content identity",
+        "persistent AST Merkle DAG",
+        "immutable physicality",
+        "trajectory-derived structural facts"
+      ],
+      "persistent_authority": [
+        "entities",
+        "physicalities",
+        "composition occurrences",
+        "calculation receipts"
+      ],
+      "acceleration": [
+        "working-set identity tables",
+        "packed trajectories",
+        "B-tree GIN GiST BRIN and Hilbert candidate indexes"
+      ],
+      "receipts": [
+        "identity preimage grammar",
+        "constituents",
+        "multiplicity",
+        "geometry epoch",
+        "trajectory recipe"
+      ],
+      "product_requirements": [
+        "LP-AST-001",
+        "LP-INTERPRETATION-001",
+        "LP-PHYSICALITY-001",
+        "LP-RUN-001",
+        "LP-REPRESENTATION-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "merged pull request 73 proves generic whole-working-set Merkle-DAG composition identity physicality trajectory occurrence and provider-parity mechanisms in addition to the earlier identity trajectory geometry and persistence contracts",
+        "missing_boundary": "complete generic AST grammar recipe testimony and reference closure plus product activation remain absent",
+        "evidence": [
+          "contracts/composition.json",
+          "contracts/persistence.json",
+          "state/continuation.json",
+          "engine/src/composition.cpp",
+          "engine/src/identity.c",
+          "engine/src/trajectory.c",
+          "engine/src/geometry.c",
+          "engine/src/persistence.c",
+          "integrations/postgresql/extension/src/composition_pg.c",
+          "integrations/postgresql/extension/src/persistence_pg.c",
+          "integrations/postgresql/extension/laplace--version.sql.in",
+          "tests/composition_tests.cpp",
+          "tests/persistence_tests.cpp",
+          "tests/postgres/composition_contract.sql",
+          "tests/postgres/spi_contract.sql"
+        ]
+      }
+    },
+    {
+      "id": "substrate.bulk-deposit",
+      "program_phases": [
+        3,
+        4
+      ],
+      "github_issues": [
+        15,
+        72
+      ],
+      "depends_on": [
+        "substrate.compose-physicality"
+      ],
+      "owner": "native canonical-batch pipeline and PostgreSQL server persistence providers",
+      "consumes": [
+        "complete working-set AST Merkle DAG",
+        "source occurrences",
+        "typed claims",
+        "transaction boundary"
+      ],
+      "produces": [
+        "set-oriented novelty result",
+        "bulk canonical deposition",
+        "append testimony",
+        "durable progress"
+      ],
+      "persistent_authority": [
+        "canonical substrate",
+        "occurrences",
+        "testimony",
+        "lineage",
+        "transaction and replay receipts"
+      ],
+      "acceleration": [
+        "whole-working-set deduplication",
+        "O(tiers) membership rounds",
+        "COPY and native SPI vectors",
+        "workload-proven indexes and perfcaches that remain outside semantic authority"
+      ],
+      "receipts": [
+        "input and output counts",
+        "database calls",
+        "WAL",
+        "I/O",
+        "cancellation and replay state",
+        "cold and warm state",
+        "canonical testimony derived index perfcache temporary dead free and bloat byte census",
+        "paired with-and-without acceleration plan CPU I/O latency and semantic parity"
+      ],
+      "product_requirements": [
+        "LP-STATE-001",
+        "LP-PERF-001",
+        "LP-PERF-002",
+        "LP-STORAGE-001",
+        "LP-MATERIALIZATION-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "merged pull request 73 proves native whole-working-set composition set-oriented PostgreSQL presence filtered canonical persistence transactional deposition direct-native and PostgreSQL semantic parity provider-independent semantic receipts provider-specific execution receipts cancellation replay provider substitution exact readback rollback six provider mutants and a five-sample representative integration receipt",
+        "missing_boundary": "complete-ingest 500000-records-per-second and qualifying-real-corpus 30-seconds-per-GB gates issue 72 paired acceleration and storage economics and product activation remain incomplete",
+        "evidence": [
+          "state/continuation.json",
+          "contracts/composition.json",
+          "engine/src/composition.cpp",
+          "integrations/postgresql/extension/src/composition_pg.c",
+          "tests/composition_tests.cpp",
+          "tests/postgres/composition_contract.sql",
+          "tests/postgres/composition_measurement_client.cpp",
+          "tests/composition_performance_receipt_tests.py",
+          "tests/registry.json"
+        ]
+      }
+    },
+    {
+      "id": "substrate.highway",
+      "program_phases": [
+        3
+      ],
+      "github_issues": [
+        52
+      ],
+      "depends_on": [
+        "bootstrap.unicode-root",
+        "substrate.bulk-deposit"
+      ],
+      "owner": "native append-only typed numerical coordinate registry modules with generated bindings",
+      "consumes": [
+        "Unicode and canonical number recipes",
+        "typed registry authority",
+        "grammar recipe relation reference language script modality model trust operation and effect declarations"
+      ],
+      "produces": [
+        "stable scoped numerical coordinates",
+        "cross-language and cross-modality routes",
+        "generated native PostgreSQL SQL and C# mirrors",
+        "coherent highway epoch"
+      ],
+      "persistent_authority": [
+        "append-only registry generations",
+        "authority and release scoped external references",
+        "highway activation receipts"
+      ],
+      "acceleration": [
+        "relation and reference routing planes",
+        "canonical number plane",
+        "language and script lookup planes"
+      ],
+      "receipts": [
+        "registry source boundary",
+        "identifier introduction and retirement versions",
+        "generated mirror digests",
+        "cross-language parity",
+        "activation epoch"
+      ],
+      "product_requirements": [
+        "LP-HIGHWAY-001",
+        "LP-ACTIVATION-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "one generated append-only registry contract owns the declared machine coordinate kinds dispositions and aliases; the canonical native implementation calculates exact authority release namespace local-identifier and version scoped coordinates in scalar and batch form; ISA 1.7 executes coordinate calculation and registry materialization; generated native PostgreSQL SQL Csharp documentation diagnostics and perfcache mirrors preserve exact assignments; the registry compiles into a canonical universal AST using the active deposited Unicode root; PostgreSQL executes set-wise presence and the shared canonical composition persistence sink before framework numeric-epoch activation; and a read-only epoch-pinned native PostgreSQL operation resolves the active registry. Registry version 2 adds the typed source-profile kind while the exact canonical version-1 contract remains immutable predecessor authority; generation rejects removal renumbering reminting and backdating; and the product controller now distinguishes exact fresh-v2 exact-v1-to-v2-successor and exact-v2-replay states, pins the predecessor numerical epoch for compare-and-swap, requires sequence two for a successor, and binds both contract byte identities into its signed request and root-owned gateway bundle",
+        "missing_boundary": "the exact PostgreSQL 18.6 product package cluster Unicode root and Highway have not yet been activated by the protected product workflow; the installed deployment gateway on the DEV/BAT host predates the authenticated self-upgrade generation and requires the one-time host bootstrap before CI can activate the product; the v1-to-v2 successor controller has not yet executed against a durable product v1 generation; canonical whole-seed identifier and mapping topology witnessed bubble-up and bubble-down routes and heterogeneous foundational world admission remain incomplete",
+        "evidence": [
+          "contracts/highway.json",
+          "contracts/history/highway-v1.json",
+          "contracts/highway-product-activation.json",
+          "contracts/isa.json",
+          "contracts/product-activation-gateway.json",
+          "tools/contracts/generate-highway.py",
+          "tools/postgresql/highwayctl.py",
+          "tools/delivery/product_activation.py",
+          "tools/delivery/install_product_activation_gateway.py",
+          ".github/workflows/product-activation.yml",
+          "cmake/LaplaceHighwayContract.cmake",
+          "engine/include/laplace/highway.h",
+          "engine/src/highway.c",
+          "engine/src/highway_ast.cpp",
+          "engine/src/isa.c",
+          "managed/Laplace.Managed/Abi.cs",
+          "integrations/postgresql/extension/src/highway_registry_pg.c",
+          "integrations/postgresql/extension/src/composition_pg.c",
+          "integrations/postgresql/extension/laplace--version.sql.in",
+          "tests/highway_generation_tests.py",
+          "tests/highway_product_activation_tests.py",
+          "tests/highway_tests.cpp",
+          "tests/isa_tests.cpp",
+          "tests/dotnet/Program.cs",
+          "tests/postgres/spi_contract.sql",
+          "tests/postgres/unicode_root_contract.sql",
+          "tests/registry.json",
+          "requirements/features/numerical_highway.feature"
+        ]
+      }
+    },
+    {
+      "id": "evidence.record-lineage",
+      "program_phases": [
+        3,
+        4
+      ],
+      "github_issues": [
+        16
+      ],
+      "depends_on": [
+        "substrate.highway",
+        "substrate.bulk-deposit"
+      ],
+      "owner": "native testimony occurrence provenance dependence and lineage recording modules",
+      "consumes": [
+        "typed AST occurrences",
+        "source authority release and context",
+        "claims calculations mappings transformations and unknowns",
+        "dependence declarations"
+      ],
+      "produces": [
+        "immutable testimony",
+        "derivation DAG",
+        "dependence graph",
+        "explicit epistemic kinds and unknown boundaries"
+      ],
+      "persistent_authority": [
+        "occurrences",
+        "testimony",
+        "source and calculation receipts",
+        "root observations",
+        "derivation and dependence edges"
+      ],
+      "acceleration": [
+        "batch testimony deposition",
+        "lineage closure candidates",
+        "source and occurrence indexes"
+      ],
+      "receipts": [
+        "source and recipe boundary",
+        "epistemic kind",
+        "root observations",
+        "dependence inputs",
+        "negative uncertain malformed and unknown dispositions"
+      ],
+      "product_requirements": [
+        "LP-EVIDENCE-001",
+        "LP-EVIDENCE-002",
+        "LP-ADMISSION-001",
+        "LP-STORAGE-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "one versioned native lineage batch operation identifies epistemically typed evidence nodes from proposition occurrence source context ordinal kind and flags; validates an ordered direct dependence DAG; rejects cycles with the exact closed path before publication; and calculates unique terminal root closure and path depth without descendant amplification. A separate versioned native testimony batch operation binds each evidence node to an exact source profile recipe receipt trust input outcome detail source type outcome type disposition reduced rational uncertainty and nonzero sample count; enforces profile-homogeneous canonical batches; and calculates exact testimony sample uncertain and negative-disposition denominators. Both operations execute through the generated ISA, testimony has exact managed Csharp parity, PostgreSQL persists immutable lineage testimony semantic receipts exact ordered receipt membership and ISA receipts transactionally, and the world-admission operation proves testimony-to-lineage-to-composition-occurrence binding from those durable member sets",
+        "missing_boundary": "one real ISO 639-3 profile now produces profile-scoped lineage and testimony through the generic tabular recipe under controlled PostgreSQL integration, but unrelated source shapes, cross-profile dependence, negative and unresolved real-source dispositions, testimony-to-standing adjudication, referential identity, contradiction, and consensus epochs remain incomplete",
+        "evidence": [
+          "contracts/evidence-lineage.json",
+          "contracts/evidence-testimony.json",
+          "contracts/isa.json",
+          "contracts/sources/iso-639-3-20260415.json",
+          "cmake/LaplaceEvidenceLineageContract.cmake",
+          "cmake/LaplaceEvidenceTestimonyContract.cmake",
+          "engine/include/laplace/evidence_lineage.h",
+          "engine/include/laplace/evidence_testimony.h",
+          "engine/src/evidence_lineage.c",
+          "engine/src/evidence_testimony.c",
+          "engine/src/isa.c",
+          "managed/Laplace.Managed/Abi.cs",
+          "integrations/postgresql/extension/src/evidence_lineage_pg.c",
+          "integrations/postgresql/extension/src/evidence_testimony_pg.c",
+          "integrations/postgresql/extension/src/source_admission_pg.c",
+          "integrations/postgresql/extension/laplace--version.sql.in",
+          "tests/evidence_lineage_tests.cpp",
+          "tests/evidence_testimony_tests.cpp",
+          "tests/isa_tests.cpp",
+          "tests/dotnet/Program.cs",
+          "tests/postgres/spi_contract.sql",
+          "tests/postgres/evidence_root_replay_mutation.sql",
+          "tests/postgres/evidence_testimony_replay_mutation.sql",
+          "tests/postgres/iso_639_source_admission_contract.sql",
+          "tests/registry.json",
+          "requirements/features/world_admission.feature",
+          "requirements/features/epistemic_lineage.feature"
+        ]
+      }
+    },
+    {
+      "id": "world.discover-qualify-sources",
+      "program_phases": [
+        4
+      ],
+      "github_issues": [
+        112
+      ],
+      "depends_on": [
+        "foundation.acquire-build",
+        "framework.execution"
+      ],
+      "owner": "read-only source-estate discovery and replaceable grammar codec and standards-provider qualification programs",
+      "consumes": [
+        "authority-selected source coordinates",
+        "observed artifact roots",
+        "pinned provider estate",
+        "finite probe resources"
+      ],
+      "produces": [
+        "deterministic discovery catalog",
+        "artifact-family candidates",
+        "provider qualification receipts",
+        "explicit unsupported ambiguous corrupt and inaccessible dispositions"
+      ],
+      "persistent_authority": [
+        "catalog integrity artifact",
+        "provider identity and qualification receipts",
+        "discovery observations that are not source authority"
+      ],
+      "acceleration": [
+        "content-integrity duplicate grouping",
+        "bounded parallel provider probes",
+        "archive member inventory without extraction"
+      ],
+      "receipts": [
+        "selected coordinate and observed-path separation",
+        "bytes integrity and container observations",
+        "provider coverage error recovery determinism and reconstruction",
+        "resource and failure dispositions"
+      ],
+      "product_requirements": [
+        "LP-SEED-001",
+        "LP-TEMPLATE-001",
+        "LP-RECIPE-001",
+        "LP-CLEANROOM-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "the generic deterministic read-only discovery catalog and the exact repository-profile resolver execute on this preparation branch with positive and deliberate-defect tests; discovery integrity digests remain separate from Laplace content identity and exact profile resolution does not promote unprofiled or nonconforming artifacts",
+        "missing_boundary": "full physical-estate catalog receipts, provider qualification, source-family semantic qualification, and accepted per-source recipes are not complete",
+        "evidence": [
+          "contracts/source-discovery-catalog.json",
+          "contracts/source-recipe-preparation.json",
+          "contracts/source-profile-model.json",
+          "requirements/features/source_recipe_preparation.feature",
+          "tools/sources/catalog-source-root.py",
+          "tools/sources/catalog-source-estate.py",
+          "tests/source_discovery_catalog_tests.py",
+          "tests/source_estate_catalog_tests.py"
+        ]
+      }
+    },
+    {
+      "id": "world.infer-source-templates",
+      "program_phases": [
+        4
+      ],
+      "github_issues": [
+        115
+      ],
+      "depends_on": [
+        "framework.execution",
+        "world.discover-qualify-sources"
+      ],
+      "owner": "native whole-working-set structural matcher and recipe compiler with authority correction and immutable template version publication",
+      "consumes": [
+        "qualified provider trees and receipts",
+        "accepted generic recipes and source templates",
+        "source documentation schemas examples counterexamples and licenses",
+        "prior authority corrections"
+      ],
+      "produces": [
+        "candidate reusable structural mappings",
+        "source-specific academic semantic deltas",
+        "unresolved completion obligations",
+        "accepted immutable template versions after authority and conformance"
+      ],
+      "persistent_authority": [
+        "candidate ancestry and proposal evidence",
+        "corrections and counterexamples",
+        "accepted template recipe versions and conformance vectors"
+      ],
+      "acceleration": [
+        "structural motif indexes",
+        "accepted mapping reuse",
+        "whole-working-set candidate generation"
+      ],
+      "receipts": [
+        "reused and source-specific parts",
+        "proposal evidence",
+        "ambiguity loss and unmatched fields",
+        "authority decision and version succession"
+      ],
+      "product_requirements": [
+        "LP-TEMPLATE-001",
+        "LP-RECIPE-001",
+        "LP-GODEL-001",
+        "LP-REUSE-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "contracts and acceptance scenarios exist but no native ISA PostgreSQL correction publication or template-reuse engine exists",
+        "evidence": [
+          "contracts/source-recipe-preparation.json",
+          "contracts/recipe-model.json",
+          "requirements/features/source_recipe_preparation.feature"
+        ]
+      }
+    },
+    {
+      "id": "world.admit-witnesses",
+      "program_phases": [
+        4
+      ],
+      "github_issues": [
+        53,
+        59
+      ],
+      "depends_on": [
+        "substrate.highway",
+        "substrate.bulk-deposit",
+        "evidence.record-lineage"
+      ],
+      "owner": "native shared grammar recipe AST admission composition witnessing and deposition modules with replaceable syntax and physical providers",
+      "consumes": [
+        "selected heterogeneous digital source boundary",
+        "exact conforming source profiles with artifact grammar codec recipe AST witness denominator and completion declarations",
+        "active highway and evidence recording capabilities",
+        "canonical working-set and persistence providers"
+      ],
+      "produces": [
+        "SQL-addressable universal world AST",
+        "exact source occurrences and competing testimony",
+        "calculation realization and counterexample inputs",
+        "source fidelity and read reachability receipts"
+      ],
+      "persistent_authority": [
+        "source artifact grammar recipe and run manifests",
+        "canonical AST Merkle DAG",
+        "immutable occurrences testimony provenance and dependence",
+        "world admission receipt"
+      ],
+      "acceleration": [
+        "source-block and AST batching",
+        "cross-source whole-working-set deduplication",
+        "bulk PostgreSQL deposition",
+        "post-boundary derived indexes and perfcaches"
+      ],
+      "receipts": [
+        "input bytes records fields and syntax nodes",
+        "loss ambiguity error and denominator closure",
+        "AST entity physicality occurrence testimony relation and reference counts",
+        "database calls WAL I/O memory and time",
+        "exact and semantic reconstruction reachability and recovery"
+      ],
+      "product_requirements": [
+        "LP-AST-001",
+        "LP-RECIPE-001",
+        "LP-ADMISSION-001",
+        "LP-BULK-001",
+        "LP-STORAGE-001",
+        "LP-MATERIALIZATION-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "a versioned native source-profile operation binds typed source-profile highway identity to authority release license artifact graph syntax authority recipe universal-AST mapping highway references epistemic witnessing denominators conformance completion and selected-boundary fingerprints; validates required source denominators exact disposition closure reconstruction class and one selected boundary across multiple ordered profiles. One canonical stock-recipe catalog operation content-identifies and canonically closes source release collection digital-object structural-region and semantic-construction recipe hierarchies across unrelated source profiles; binds grammar codec lowering recomposition conformance loss correction and one shared modality-agnostic semantic-segmentation law; binds recipe-owned perfcache planes to exact key value dependency generation semantic-verification invalidation and rebuild laws; and rejects orphan cross-source duplicate drifted or unowned declarations with a deliberate parent-validation mutant. Generated ISA 1.13 and Csharp bindings preserve exact native catalog identity and receipt semantics independent of caller item order. The PostgreSQL route decodes the same typed catalog items, executes the ISA operation, persists append-only recipes perfcache planes catalog receipts and ordered membership transactionally, verifies exact durable replay, and rejects conflicting prior state. A separate native world-admission operation closes exact source-profile recipe composition-working-set presence producer stream lineage testimony reconstruction readback and denominator state through generated ISA 1.9 and exact managed parity. One declarative generic tabular-source compiler verifies a parent-linked artifact graph, parses raw or single-byte-delimited Unicode syntax into typed universal AST requests, preserves selected exact content independently of curated-distribution reconstruction, executes the shared whole-working-set composer, and emits typed reference occurrences that keep row field and exact value identities distinct. The real locked ISO 639-3 2026-04-15 profile compiles through that mechanism: its ZIP remains hash-attributed provenance while four selected tables recompose bit-for-bit. One canonical native and ISA reference-topology operation resolves all 18805 marked join-key occurrences under exact authority release namespace local-identifier and version scope into 9339 coordinates with 18404 present 401 retired and zero unresolved dispositions without asserting cross-namespace mappings. The public PostgreSQL source-admission operation resolves the active Unicode atom floor, composes and deposits canonical AST state, persists the typed reference topology plus 17110 profile-scoped lineage and testimony claims, closes the world-admission receipt, and proves exact content readback deterministic replay and mutation rollback in controlled integration",
+        "missing_boundary": "no authority-selected recursive manifest yet supplies exact stock declarations for Unicode ISO CILI WordNet Britannica 1911 Gutenberg Webster dictionaries thesauri academic documents or the remaining configured source objects, and the durable catalog is not yet authority-selected or activated with coherent perfcache generations in the installed product. The ISO 639-3 result and durable catalog route are controlled integration rather than admission and activation receipts in the installed PostgreSQL 18.6 product; fixed-width and unrelated grammars, non-tabular codecs and modalities, explicit cross-namespace mappings, cross-profile reference and dependence closure, foundational heterogeneous seed, performance gates, product activation, adjudication, cognition, and release remain incomplete",
+        "evidence": [
+          "contracts/recipe-model.json",
+          "contracts/stock-recipe.json",
+          "contracts/source-profile-model.json",
+          "contracts/source-admission.json",
+          "contracts/source-profile-execution.json",
+          "contracts/tabular-source.json",
+          "contracts/sources/iso-639-3-20260415.json",
+          "contracts/world-admission-execution.json",
+          "contracts/highway.json",
+          "contracts/isa.json",
+          "cmake/LaplaceStockRecipeContract.cmake",
+          "cmake/LaplaceSourceProfileContract.cmake",
+          "cmake/LaplaceTabularSourceContract.cmake",
+          "cmake/LaplaceTabularSourceProfile.cmake",
+          "cmake/LaplaceWorldAdmissionContract.cmake",
+          "engine/include/laplace/stock_recipe.h",
+          "engine/include/laplace/source_profile.h",
+          "engine/include/laplace/tabular_source.h",
+          "engine/include/laplace/world_admission.h",
+          "engine/src/stock_recipe.c",
+          "engine/src/source_profile.c",
+          "engine/src/tabular_source.cpp",
+          "engine/src/world_admission.c",
+          "engine/src/isa.c",
+          "managed/Laplace.Managed/Abi.cs",
+          "integrations/postgresql/extension/src/stock_recipe_pg.c",
+          "integrations/postgresql/extension/src/source_profile_pg.c",
+          "integrations/postgresql/extension/src/source_admission_pg.c",
+          "integrations/postgresql/extension/src/world_admission_pg.c",
+          "integrations/postgresql/extension/src/composition_pg.c",
+          "integrations/postgresql/extension/laplace--version.sql.in",
+          "tools/contracts/generate-tabular-source-profile.py",
+          "tests/stock_recipe_tests.cpp",
+          "tests/source_profile_tests.cpp",
+          "tests/tabular_source_tests.cpp",
+          "tests/iso_639_source_tests.cpp",
+          "tests/iso_639_source_profile_tests.py",
+          "tests/world_admission_tests.cpp",
+          "tests/isa_tests.cpp",
+          "tests/dotnet/Program.cs",
+          "tests/postgres/stock_recipe_probe.cpp",
+          "tests/postgres/stock_recipe_contract.sql",
+          "tests/postgres/spi_contract.sql",
+          "tests/postgres/world_admission_contract.sql",
+          "tests/postgres/source_admission_contract.sql",
+          "tests/postgres/iso_639_source_admission_contract.sql",
+          "tests/postgres/source_profile_replay_mutation.sql",
+          "tests/registry.json",
+          "requirements/features/universal_ast_recipe.feature",
+          "requirements/features/world_admission.feature"
+        ]
+      }
+    },
+    {
+      "id": "evidence.adjudicate",
+      "program_phases": [
+        3
+      ],
+      "github_issues": [
+        16,
+        110
+      ],
+      "depends_on": [
+        "evidence.record-lineage"
+      ],
+      "owner": "native evidence lineage dependence trust and adjudication modules",
+      "consumes": [
+        "immutable testimony",
+        "root observations",
+        "dependence graph",
+        "time context and trust recipe"
+      ],
+      "produces": [
+        "immutable consensus epoch",
+        "standing",
+        "contradiction evidence",
+        "referential candidates and adjudication"
+      ],
+      "persistent_authority": [
+        "testimony",
+        "derivation DAG",
+        "dependence graph",
+        "consensus and referential epochs"
+      ],
+      "acceleration": [
+        "batch Glicko-2 calculation",
+        "lineage closure",
+        "epoch indexes",
+        "derived materializations"
+      ],
+      "receipts": [
+        "testimony boundary",
+        "independent roots",
+        "dependence recipe",
+        "trust inputs",
+        "adjudication version"
+      ],
+      "product_requirements": [
+        "LP-IDENTITY-003",
+        "LP-EVIDENCE-001",
+        "LP-EVIDENCE-002",
+        "LP-EVIDENCE-003",
+        "LP-EVIDENCE-004"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "a versioned native typed standing operation implements the corrected March 22 2022 Glicko-2 calculation over an exact participant prior state and real outcome-bearing opponent prior states in one witnessed arena; canonicalizes event order; distinguishes non-rateable absent unknown denied exhausted and invalid outcomes from losses; rejects duplicate dependence roots identity drift self-match and arena drift; and emits an immutable successor state plus content-addressed period receipt. A content-identified standing recipe binds its authority receipt, arena axes, one-time defaults, numerical policy, admitted outcome kinds, and exact rational score mappings; onboarding consumes only those defaults and calculation rejects caller-invented mapping identifiers or scores. The generated ISA 1.12 opcode preserves the same recipe, result, and full receipt across caller event order, generated Csharp bindings execute it with exact native ABI result and receipt parity, and PostgreSQL consumes only a separately deposited durable recipe admission matching the active authority fingerprint and evidence epoch before transactionally publishing initial and earned state history, match events, period receipts, ordered membership, and ISA receipts with exact replay verification, single-successor continuity, and dependence-root non-amplification across every published period for the participant coordinate. Deliberate prior-reset, neutral-opponent, caller-mapping, caller-order-receipt, durable-replay-verification, and recipe-admission-bypass mutants are detected.",
+        "missing_boundary": "the protected authority lifecycle does not yet manufacture the inventor-authorized per-source stock recipe catalog or deposit its selected admissions; admitted testimony is not yet lowered into standing events through those recipes; source-type priors, earned override, independent return legs, cross-profile dependence reduction, contradiction propagation, immutable consensus epochs, as-of readback, and referential adjudication remain unimplemented; controlled temporary PostgreSQL integration is not activated-product adjudication",
+        "evidence": [
+          "contracts/standing-calculation.json",
+          "contracts/trust-matchup-realization.json",
+          "contracts/isa.json",
+          "requirements/features/trust_matchup_realization.feature",
+          "requirements/features/epistemic_lineage.feature",
+          "requirements/features/referential_identity.feature",
+          "cmake/LaplaceStandingCalculationContract.cmake",
+          "engine/include/laplace/standing_calculation.h",
+          "engine/src/standing_calculation.c",
+          "engine/src/isa.c",
+          "managed/Laplace.Managed/Abi.cs",
+          "integrations/postgresql/extension/src/standing_calculation_pg.c",
+          "integrations/postgresql/extension/laplace--version.sql.in",
+          "tests/standing_calculation_tests.cpp",
+          "tests/isa_tests.cpp",
+          "tests/dotnet/Program.cs",
+          "tests/dotnet/native_expectations.cpp",
+          "tests/postgres/standing_contract.sql",
+          "tests/postgres/standing_admission_mutation.sql",
+          "tests/postgres/standing_replay_mutation.sql",
+          "tests/registry.d/standing.json"
+        ]
+      }
+    },
+    {
+      "id": "query.guidance-search",
+      "program_phases": [
+        5
+      ],
+      "github_issues": [
+        17,
+        60
+      ],
+      "depends_on": [
+        "evidence.adjudicate"
+      ],
+      "owner": "native guidance compiler typed operator and indexed search modules",
+      "consumes": [
+        "goal",
+        "operands and bindings",
+        "world evidence and firmware scopes",
+        "completion obligations",
+        "typed knowledge deficits"
+      ],
+      "produces": [
+        "logical cognition program",
+        "query-relative geometry and transitions",
+        "physical plan",
+        "completion certificate"
+      ],
+      "persistent_authority": [
+        "discourse and working state when explicitly committed",
+        "program and result receipts"
+      ],
+      "acceleration": [
+        "indexed frontier batches",
+        "metric candidate generators",
+        "A-star or declared best-first search",
+        "matrix-free operators"
+      ],
+      "receipts": [
+        "goal",
+        "typed state",
+        "cost and heuristic laws",
+        "reopen and tie rules",
+        "selected evidence and epochs"
+      ],
+      "product_requirements": [
+        "LP-CONVERSATION-001",
+        "LP-COGNITION-001",
+        "LP-QUERY-001",
+        "LP-SEARCH-001",
+        "LP-CONNECTION-001",
+        "LP-LIMITS-001",
+        "LP-EXCEPTION-001",
+        "LP-COGNITION-002",
+        "LP-COGNITION-003",
+        "LP-COGNITION-004",
+        "LP-GOVERNANCE-001",
+        "LP-FIRMWARE-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "evidence": [
+          "contracts/trust-matchup-realization.json",
+          "docs/architecture/NATIVE_COGNITION_MATHEMATICS.md",
+          "requirements/features/trust_matchup_realization.feature",
+          "requirements/features/conversation_cognition.feature",
+          "requirements/features/query_neighborhood.feature",
+          "requirements/features/firmware_governance.feature"
+        ]
+      }
+    },
+    {
+      "id": "cognition.realize-effect",
+      "program_phases": [
+        5
+      ],
+      "github_issues": [
+        18
+      ],
+      "depends_on": [
+        "query.guidance-search"
+      ],
+      "owner": "native semantic-act selection effect admission and modality realization modules",
+      "consumes": [
+        "completed cognition state",
+        "candidate semantic acts",
+        "authority envelope",
+        "realization recipe"
+      ],
+      "produces": [
+        "typed semantic act",
+        "exact modality content or effect",
+        "observed consequence"
+      ],
+      "persistent_authority": [
+        "semantic acts",
+        "effect envelopes",
+        "result content identities",
+        "consequence occurrences"
+      ],
+      "acceleration": [
+        "trajectory statistics",
+        "language and modality perfcaches",
+        "bulk codecs and effect providers"
+      ],
+      "receipts": [
+        "completion obligations",
+        "selected act",
+        "realizer",
+        "exact output",
+        "effect authorization",
+        "world result"
+      ],
+      "product_requirements": [
+        "LP-REALIZATION-001",
+        "LP-LANGUAGE-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "evidence": [
+          "contracts/trust-matchup-realization.json",
+          "requirements/features/trust_matchup_realization.feature",
+          "requirements/features/modality_realization.feature",
+          "requirements/features/unicode_realization.feature"
+        ]
+      }
+    },
+    {
+      "id": "learning.discovery-ooda",
+      "program_phases": [
+        5
+      ],
+      "github_issues": [
+        19
+      ],
+      "depends_on": [
+        "cognition.realize-effect"
+      ],
+      "owner": "native learning defect Goedel experiment and calculus activation modules",
+      "consumes": [
+        "observed consequence",
+        "typed frays",
+        "current calculus",
+        "disjoint fit evaluation and counterexample boundaries"
+      ],
+      "produces": [
+        "new testimony",
+        "new adjudication epoch",
+        "falsifiable extension candidates",
+        "versioned accepted calculus"
+      ],
+      "persistent_authority": [
+        "observations",
+        "hypotheses",
+        "experiments",
+        "counterexamples",
+        "calculus and firmware versions"
+      ],
+      "acceleration": [
+        "motif indexes",
+        "counterexample search",
+        "experiment scheduling",
+        "replay"
+      ],
+      "receipts": [
+        "fray type",
+        "vacancy signature",
+        "fit boundary",
+        "held-out evaluation",
+        "external support",
+        "activation authority"
+      ],
+      "product_requirements": [
+        "LP-OODA-001",
+        "LP-GODEL-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "evidence": [
+          "requirements/features/godel_ooda.feature",
+          "requirements/features/firmware_governance.feature"
+        ]
+      }
+    },
+    {
+      "id": "world.configure-foundational-seed",
+      "program_phases": [
+        4,
+        5
+      ],
+      "github_issues": [
+        53,
+        115
+      ],
+      "depends_on": [
+        "world.admit-witnesses",
+        "world.infer-source-templates",
+        "evidence.adjudicate"
+      ],
+      "owner": "native configured-seed closure and cross-profile evidence reference and recipe publication program",
+      "consumes": [
+        "authority-selected seed manifest",
+        "conforming admitted source profiles",
+        "accepted template and recipe versions",
+        "cross-profile references dependence and evidence epochs"
+      ],
+      "produces": [
+        "configured foundational heterogeneous seed epoch",
+        "closed selected denominators",
+        "query and realization eligible seed boundary",
+        "exact incomplete or why-not disposition"
+      ],
+      "persistent_authority": [
+        "selected seed manifest",
+        "profile and artifact membership",
+        "cross-profile closure epoch",
+        "configured-seed completion receipt"
+      ],
+      "acceleration": [
+        "cross-profile reference indexes",
+        "dependence-root closure",
+        "selected-boundary presence batches"
+      ],
+      "receipts": [
+        "selected versus observed artifacts",
+        "profile world-admission identities",
+        "reference dependence and contradiction closure",
+        "required derived publications and unresolved obligations"
+      ],
+      "product_requirements": [
+        "LP-SEED-001",
+        "LP-ADMISSION-001",
+        "LP-EVIDENCE-003",
+        "LP-ACTIVATION-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "no configured selected-seed manifest complete source-profile estate cross-profile closure or activated configured-seed receipt exists",
+        "evidence": [
+          "contracts/source-recipe-preparation.json",
+          "contracts/source-admission.json",
+          "requirements/features/source_recipe_preparation.feature",
+          "requirements/features/world_admission.feature"
+        ]
+      }
+    },
+    {
+      "id": "model.ingest-generate",
+      "program_phases": [
+        6
+      ],
+      "github_issues": [
+        20,
+        61,
+        71
+      ],
+      "depends_on": [
+        "world.admit-witnesses",
+        "evidence.adjudicate",
+        "query.guidance-search"
+      ],
+      "owner": "native model decomposition induced-operator comparison and target compiler modules",
+      "consumes": [
+        "model artifacts and typed behavior experiments as witnesses",
+        "substrate relation operators",
+        "effective-support recipes and loss bounds",
+        "target architecture and runtime contract"
+      ],
+      "produces": [
+        "exact model DAG",
+        "typed behavioral testimony",
+        "measured effective-support boundary",
+        "AImap",
+        "target tensors",
+        "GGUF or other runtime artifact"
+      ],
+      "persistent_authority": [
+        "model content and occurrences",
+        "behavioral testimony",
+        "compiler recipes and acceptance receipts"
+      ],
+      "acceleration": [
+        "Eigen Spectra MKL and TBB plans",
+        "AImap perfcaches",
+        "factorizations and target-runtime execution"
+      ],
+      "receipts": [
+        "model bytes",
+        "behavior experiment and intervention",
+        "retained and discarded support with loss",
+        "operator and gauge",
+        "numeric certification",
+        "target tensor closure",
+        "runtime behavior"
+      ],
+      "product_requirements": [
+        "LP-AIMAP-001",
+        "LP-AIMAP-002",
+        "LP-MODEL-001",
+        "LP-MODEL-002",
+        "LP-MODEL-003",
+        "LP-MODEL-004",
+        "LP-MODEL-005",
+        "LP-MODEL-006"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "evidence": [
+          "requirements/features/aimap.feature",
+          "requirements/features/model_compilation.feature"
+        ]
+      }
+    },
+    {
+      "id": "product.materialize-entity-world",
+      "program_phases": [
+        7
+      ],
+      "github_issues": [
+        21,
+        62,
+        63,
+        64,
+        68
+      ],
+      "depends_on": [
+        "world.admit-witnesses",
+        "evidence.adjudicate",
+        "query.guidance-search",
+        "cognition.realize-effect"
+      ],
+      "owner": "native referential world projection entitlement visibility and modality-materialization modules exposed through generated product bindings",
+      "consumes": [
+        "person and organization referential epochs",
+        "authored activity relationship entitlement achievement and professional-history testimony",
+        "audience authority and visibility policy",
+        "entity-world materialization recipe"
+      ],
+      "produces": [
+        "authorized query-relative personal and organization webs",
+        "profile feed resume portfolio entitlement and achievement views",
+        "web mobile API document and future modality realizations",
+        "withholding and unknown dispositions"
+      ],
+      "persistent_authority": [
+        "referential and evidence epochs",
+        "versioned visibility governance and materialization recipes",
+        "materialization and disclosure receipts",
+        "historical entitlement and achievement testimony"
+      ],
+      "acceleration": [
+        "audience-scoped query plans",
+        "typed entity-world projection perfcaches",
+        "set-oriented evidence and activity indexes",
+        "shared cross-surface realization preparation"
+      ],
+      "receipts": [
+        "subject and referential epoch",
+        "selected and withheld world scopes",
+        "audience authority and visibility policy",
+        "evidence roots dependence contradictions and unknowns",
+        "recipe semantic result and output modality"
+      ],
+      "product_requirements": [
+        "LP-APPLICATION-001",
+        "LP-ENTITY-WEB-001",
+        "LP-ENTITLEMENT-001",
+        "LP-IDENTITY-003",
+        "LP-GOVERNANCE-001",
+        "LP-RECIPE-001",
+        "LP-REALIZATION-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "the clean product has no universal entity-world projection entitlement achievement or personal-web mechanism; historical UI behavior is counterexample evidence only",
+        "evidence": [
+          "requirements/features/entity_web_federation.feature",
+          "docs/product/INVENTION_MODEL.md",
+          "docs/architecture/ACCEPTANCE.md"
+        ]
+      }
+    },
+    {
+      "id": "runtime.federate-nodes",
+      "program_phases": [
+        7
+      ],
+      "github_issues": [
+        21,
+        65,
+        66,
+        67
+      ],
+      "depends_on": [
+        "bootstrap.dependencies",
+        "substrate.bulk-deposit",
+        "product.materialize-entity-world"
+      ],
+      "owner": "native authenticated content-addressed federation and placement planning with PostgreSQL durability and generated orchestration providers",
+      "consumes": [
+        "authorized private shared and public world scopes",
+        "content-addressed structures testimony recipes and receipts",
+        "node capability and resource observations",
+        "execution database storage cache source and peer placement declarations"
+      ],
+      "produces": [
+        "convergent authenticated federation exchanges",
+        "validated node support disposition",
+        "same-semantics physical execution plans",
+        "exact execution storage network and durability receipts"
+      ],
+      "persistent_authority": [
+        "node package and ABI identities",
+        "world-scope and federation receipts",
+        "placement and durability contracts",
+        "exchange replay and convergence history"
+      ],
+      "acceleration": [
+        "local hot perfcaches",
+        "content-addressed transfer reuse",
+        "set-oriented synchronization",
+        "topology-derived execution and storage plans"
+      ],
+      "receipts": [
+        "node CPU OS package and loaded-object identity",
+        "logical and physical plan parity",
+        "world scope audience and authority",
+        "remote PostgreSQL execution boundary",
+        "storage locking atomicity fsync crash and recovery proof"
+      ],
+      "product_requirements": [
+        "LP-NODE-001",
+        "LP-FEDERATION-001",
+        "LP-PLACEMENT-001",
+        "LP-TOPOLOGY-001",
+        "LP-PACKAGE-001",
+        "LP-EXCEPTION-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "no clean-product federation protocol personal-node support contract ARM or Raspberry Pi acceptance or distributed placement mechanism is implemented",
+        "evidence": [
+          "requirements/features/entity_web_federation.feature",
+          "docs/product/INVENTION_MODEL.md",
+          "docs/architecture/ACCEPTANCE.md"
+        ]
+      }
+    },
+    {
+      "id": "delivery.activate-product",
+      "program_phases": [
+        7
+      ],
+      "github_issues": [
+        21,
+        50,
+        69
+      ],
+      "depends_on": [
+        "bootstrap.dependencies",
+        "world.admit-witnesses",
+        "cognition.realize-effect",
+        "learning.discovery-ooda",
+        "model.ingest-generate",
+        "product.materialize-entity-world",
+        "runtime.federate-nodes"
+      ],
+      "owner": "package installer service manager database migrator and product activation verifier",
+      "consumes": [
+        "verified native engine",
+        "PostgreSQL stack",
+        "schemas and migrations",
+        "orchestrators",
+        "artifacts and acceptance evidence"
+      ],
+      "produces": [
+        "one activated Linux and Windows Laplace product",
+        "diagnostics",
+        "repair rollback and support state"
+      ],
+      "persistent_authority": [
+        "activation manifest",
+        "installed package receipts",
+        "service and database version state"
+      ],
+      "acceleration": [
+        "out-of-tree builds",
+        "hosted and self-hosted CI",
+        "incremental package and database activation"
+      ],
+      "receipts": [
+        "source to package provenance",
+        "loaded objects",
+        "database schema",
+        "active cache epochs",
+        "product activation state"
+      ],
+      "product_requirements": [
+        "LP-PRODUCT-001",
+        "LP-PACKAGE-001",
+        "LP-DOC-001",
+        "LP-ACTIVATION-001",
+        "LP-NODE-001",
+        "LP-FEDERATION-001",
+        "LP-PLACEMENT-001"
+      ],
+      "implementation": {
+        "state": "partial",
+        "proven_boundary": "published code provides package cluster Unicode and Highway activation controllers; workflow dispatch composes or revalidates the exact current-main content-addressed product package from the accepted PostgreSQL receipt and observes resources against those staged bytes. Recurring installation and activation execute as laplace-runner using the packaged pg_ctl provider with optional static bootstrap service integration. Host bootstrap is physically installed; controller fixtures do not prove persistent product activation",
+        "missing_boundary": "no selected PostgreSQL 18.6 product cluster is active, no Unicode or Highway product receipt exists, and no whole-product deployment or release state exists; runner-owned persistent installation restart readback and successor deployment remain to be proved",
+        "evidence": [
+          "docs/delivery/PRODUCT_INFRASTRUCTURE.md",
+          "docs/delivery/POSTGRESQL_CLUSTER.md",
+          "docs/delivery/HOST_BOOTSTRAP.md",
+          "scripts/setup-host.sh",
+          "contracts/postgresql-cluster.json",
+          "contracts/product-activation-gateway.json",
+          "tools/postgresql/clusterctl.py",
+          "tools/postgresql/unicodectl.py",
+          "tools/delivery/product_activation.py",
+          "tools/delivery/install_product_activation_gateway.py",
+          "tests/postgresql_cluster_tests.py",
+          "tests/product_activation_gateway_tests.py",
+          ".github/workflows/custom-stack.yml",
+          ".github/workflows/product-activation.yml"
+        ]
+      }
+    },
+    {
+      "id": "delivery.accept-seeded-inference",
+      "program_phases": [
+        8
+      ],
+      "github_issues": [
+        116
+      ],
+      "depends_on": [
+        "delivery.activate-product",
+        "world.configure-foundational-seed",
+        "cognition.realize-effect"
+      ],
+      "owner": "installed-product clean-seed public cognition derivation trust realization restart and replay acceptance program",
+      "consumes": [
+        "activated installed product",
+        "configured foundational seed epoch",
+        "zero-production-user observation boundary",
+        "indirect inference question and deliberate defects"
+      ],
+      "produces": [
+        "typed derivation and trust disposition",
+        "exact language realization",
+        "restart and replay proof",
+        "acceptance or exact why-not receipt"
+      ],
+      "persistent_authority": [
+        "public cognition program",
+        "participating seed and evidence boundary",
+        "derivation semantic act realization and replay receipts"
+      ],
+      "acceleration": [
+        "none may substitute for public-route semantic parity",
+        "accepted indexes and perfcaches remain removable physical providers"
+      ],
+      "receipts": [
+        "no direct target attestation",
+        "zero production-user observations",
+        "native ISA PostgreSQL operation lineage",
+        "scope negative controls and restart parity"
+      ],
+      "product_requirements": [
+        "LP-INFERENCE-001",
+        "LP-SEED-001",
+        "LP-COHESION-001",
+        "LP-ACTIVATION-001",
+        "LP-REALIZATION-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "the configured seed cognition adjudication realization activated product and complete public-route acceptance do not exist",
+        "evidence": [
+          "contracts/source-recipe-preparation.json",
+          "requirements/features/source_recipe_preparation.feature",
+          "docs/architecture/ACCEPTANCE.md"
+        ]
+      }
+    },
+    {
+      "id": "delivery.release-product",
+      "program_phases": [
+        8
+      ],
+      "github_issues": [
+        22
+      ],
+      "depends_on": [
+        "delivery.activate-product",
+        "delivery.accept-seeded-inference"
+      ],
+      "owner": "complete-product acceptance evidence and release publication verifier",
+      "consumes": [
+        "activated product receipts",
+        "configured seed and indirect-inference acceptance",
+        "all required complete-product acceptance evidence"
+      ],
+      "produces": [
+        "released package generation or exact blocked disposition",
+        "release provenance and publication receipt"
+      ],
+      "persistent_authority": [
+        "complete acceptance manifest",
+        "release identity",
+        "publication and rollback receipts"
+      ],
+      "acceleration": [
+        "verified artifact reuse",
+        "deterministic evidence aggregation"
+      ],
+      "receipts": [
+        "all required product states",
+        "complete acceptance results",
+        "published package and source identities",
+        "release or why-not disposition"
+      ],
+      "product_requirements": [
+        "LP-PRODUCT-001",
+        "LP-INFERENCE-001",
+        "LP-PACKAGE-001",
+        "LP-DOC-001",
+        "LP-ACTIVATION-001"
+      ],
+      "implementation": {
+        "state": "unimplemented",
+        "missing_boundary": "no complete-product acceptance release package or publication exists",
+        "evidence": [
+          "contracts/source-recipe-preparation.json",
+          "docs/architecture/ACCEPTANCE.md",
+          "requirements/features/source_recipe_preparation.feature"
+        ]
+      }
+    }
+  ],
+  "diagrams": {
+    "machine": {
+      "title": "Laplace \u2014 whole-machine responsibilities",
+      "evidence": [
+        "Laplace/docs/specs/37_Substrate_Operation_ISA.md",
+        "Laplace/docs/CAPABILITIES.md",
+        "Laplace-Refactor/contracts/operation-model.json"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "identity": {
+      "title": "Laplace \u2014 conceptual identity and evidence model",
+      "evidence": [
+        "Laplace/docs/INVENTION.md",
+        "Laplace/docs/INVENTIONS.md",
+        "Laplace/docs/specs/08_Record_vs_Calculate_Spec.txt",
+        "Laplace/docs/specs/37_Substrate_Operation_ISA.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "request-cycle": {
+      "title": "Laplace \u2014 scoped request and consequence cycle",
+      "evidence": [
+        "Laplace/docs/specs/37_Substrate_Operation_ISA.md",
+        "Laplace/docs/CAPABILITIES.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "families": {
+      "title": "Laplace \u2014 three independently owned implementation families",
+      "evidence": [
+        "workspace README",
+        "Laplace/engine/core/src/hash128.c",
+        "Laplace-Refactor/contracts/operation-model.json",
+        "Laplace-Engine/src",
+        "Laplace-MCP/native/api.c"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "cycle-observe_calculate_realize": {
+      "title": "Observe Calculate Realize \u2014 specified cycle",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/runtime_cycles/observe_calculate_realize"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "cycle-evidence_learning": {
+      "title": "Evidence Learning \u2014 specified cycle",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/runtime_cycles/evidence_learning"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "cycle-calculus_extension": {
+      "title": "Calculus Extension \u2014 specified cycle",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/runtime_cycles/calculus_extension"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "cycle-model_symmetry": {
+      "title": "Model Symmetry \u2014 specified cycle",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/runtime_cycles/model_symmetry"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "capability-dependencies": {
+      "title": "Laplace Refactor \u2014 complete declared capability dependency graph",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-foundation-acquire-build": {
+      "title": "foundation.acquire-build \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/foundation.acquire-build"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-framework-execution": {
+      "title": "framework.execution \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/framework.execution"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-machine-handle-exceptions": {
+      "title": "machine.handle-exceptions \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/machine.handle-exceptions"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-bootstrap-dependencies": {
+      "title": "bootstrap.dependencies \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/bootstrap.dependencies"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-bootstrap-unicode-root": {
+      "title": "bootstrap.unicode-root \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/bootstrap.unicode-root"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-substrate-compose-physicality": {
+      "title": "substrate.compose-physicality \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/substrate.compose-physicality"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-substrate-bulk-deposit": {
+      "title": "substrate.bulk-deposit \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/substrate.bulk-deposit"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-substrate-highway": {
+      "title": "substrate.highway \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/substrate.highway"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-evidence-record-lineage": {
+      "title": "evidence.record-lineage \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/evidence.record-lineage"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-world-discover-qualify-sources": {
+      "title": "world.discover-qualify-sources \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/world.discover-qualify-sources"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-world-infer-source-templates": {
+      "title": "world.infer-source-templates \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/world.infer-source-templates"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-world-admit-witnesses": {
+      "title": "world.admit-witnesses \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/world.admit-witnesses"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-evidence-adjudicate": {
+      "title": "evidence.adjudicate \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/evidence.adjudicate"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-query-guidance-search": {
+      "title": "query.guidance-search \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/query.guidance-search"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-cognition-realize-effect": {
+      "title": "cognition.realize-effect \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/cognition.realize-effect"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-learning-discovery-ooda": {
+      "title": "learning.discovery-ooda \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/learning.discovery-ooda"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-world-configure-foundational-seed": {
+      "title": "world.configure-foundational-seed \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/world.configure-foundational-seed"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-model-ingest-generate": {
+      "title": "model.ingest-generate \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/model.ingest-generate"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-product-materialize-entity-world": {
+      "title": "product.materialize-entity-world \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/product.materialize-entity-world"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-runtime-federate-nodes": {
+      "title": "runtime.federate-nodes \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/runtime.federate-nodes"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-delivery-activate-product": {
+      "title": "delivery.activate-product \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/delivery.activate-product"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-delivery-accept-seeded-inference": {
+      "title": "delivery.accept-seeded-inference \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/delivery.accept-seeded-inference"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stage-delivery-release-product": {
+      "title": "delivery.release-product \u2014 declared input/output contract",
+      "evidence": [
+        "Laplace-Refactor/contracts/operation-model.json#/stages/delivery.release-product"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "whole-lifecycle": {
+      "title": "Laplace \u2014 construction prerequisites and recurring operation lanes",
+      "evidence": [
+        "Laplace-Wiki/Sequence/README.md",
+        "Laplace-Wiki/Sequence/Content.md",
+        "Laplace-Wiki/Sequence/Forward.md",
+        "Laplace-Wiki/Sequence/Learning.md",
+        "Laplace/AGENTS.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "shared-admission": {
+      "title": "Laplace \u2014 shared source admission, reuse and completion",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Content.md",
+        "Laplace/AGENTS.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "stateful-forward": {
+      "title": "Laplace \u2014 request admission, stateful cognition and consequence",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Authority.md",
+        "Laplace-Wiki/Sequence/Envelope.md",
+        "Laplace-Wiki/Sequence/Forward.md",
+        "Laplace-Wiki/Sequence/Learning.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "feedback-state": {
+      "title": "Laplace \u2014 what each feedback lane may change",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Learning.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "model-admission-export": {
+      "title": "Laplace \u2014 checkpoint evidence and constructed model export",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Models.md",
+        "Laplace-Wiki/Sequence/Export.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "code-root-transition": {
+      "title": "Laplace \u2014 software construction, repair and governed deployment",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Code.md",
+        "Laplace-Wiki/Sequence/Forward.md",
+        "Laplace-Wiki/Sequence/Learning.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "frozen-game-learning": {
+      "title": "Laplace \u2014 chess and Knowledge Arena: play, compare, then learn",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Chess.md",
+        "Laplace-Wiki/Sequence/Games.md",
+        "Laplace-Wiki/Sequence/Forward.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    },
+    "maintenance-lifecycle": {
+      "title": "Laplace \u2014 correction, generations and install verification",
+      "evidence": [
+        "Laplace-Wiki/Sequence/Maintenance.md",
+        "Laplace-Wiki/Sequence/Content.md"
+      ],
+      "status": "Specification model; arrows do not establish runtime acceptance."
+    }
+  }
+}

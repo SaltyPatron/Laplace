@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title delivery.activate-product — declared input/output contract
+component "delivery.activate-product" as operation
+rectangle "verified native engine" as in0
+in0 --> operation
+rectangle "PostgreSQL stack" as in1
+in1 --> operation
+rectangle "schemas and migrations" as in2
+in2 --> operation
+rectangle "orchestrators" as in3
+in3 --> operation
+rectangle "artifacts and acceptance evidence" as in4
+in4 --> operation
+rectangle "one activated Linux and Windows Laplace product" as out0
+operation --> out0
+rectangle "diagnostics" as out1
+operation --> out1
+rectangle "repair rollback and support state" as out2
+operation --> out2
+@enduml

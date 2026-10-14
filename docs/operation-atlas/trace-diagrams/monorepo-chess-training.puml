@@ -1,0 +1,40 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Chess.cs SHA256 d86eead36cf95b90252f6e228a9831f943e4518a6307e46476fad986bf25e674
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessEngineService.cs SHA256 f1612cc77fb73d442be573c8d483c077d4f6ab1a1d95e1a61b9657c20c4869ce
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — self-play loops and learning boundary
+start
+if (StartTraining?) then (yes)
+ :Under statistics lock reject already-running task;
+ :Set temperature/weight/max plies; start background task with own token;
+endif
+:Initialize read engine and write host;
+while (Not canceled and game target remains?) is (yes)
+ if (Strong self-play?) then (yes)
+  :Random legal opening; then depth-limited Search;
+  :Record from/to state keys and mover;
+  :Max plies yields adjudicated draw;
+  :Project final outcome to each mover edge;
+ else (ordinary)
+  :PlayGameAsync with random generator, temperature and max plies;
+ endif
+ :Await LearnGameAsync(edges, adjudicated);
+ :Only afterward update game/win/draw statistics and progress callback;
+ :Background loop logs noncancellation failures and retries;
+endwhile (done)
+:StopTraining requests cancellation without awaiting completion;
+:Dispose awaits background training then disposes initialization gates;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete service training methods reviewed. Strong self-play checks cancellation
+between games but does not pass it into its per-move Think calls. Background
+noncancellation failures have no backoff in this loop. maxGames <= 0 means unbounded
+background training. Existing cached write host is reused even when StartTraining changes
+_trainWeight. LearnGameAsync semantics remain nested; game count is incremented only after
+that call returns.
+end footer
+
+@enduml

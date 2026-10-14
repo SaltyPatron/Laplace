@@ -1,0 +1,52 @@
+@startuml
+' Evidence: Laplace-Engine/src/model.c SHA256 e92be8505d6076fe6c6f3b219edaead6829eae385d77fe30d8636d5054389722
+' Evidence: Laplace-Engine/src/model_none.c SHA256 c0df39798f3a71a732398c241cbcb8c8da306f6b93c3fda03e2f519e97a92dc6
+' Evidence: Laplace-Engine/CMakeLists.txt SHA256 17035278f8124ab8b0989f3166e326487639203b2d83ecd3782ed62a05d41ded
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — model build variants
+start
+if (Build provides laplace_model target?) then (no)
+ :Compile model_none.c handler;
+ :Print MKL/OpenMP requirement; return 1;
+ stop
+else (yes)
+ :Compile model.c handler;
+endif
+if (No model directory?) then (yes)
+ :Return 2;
+ stop
+endif
+:Parse layer count, z threshold, cap and sample words;
+if (MKL reproducible mode refused?) then (yes)
+ :Return 1;
+ stop
+endif
+:Map tier0; parse model config and vocabulary;
+:Load model.safetensors embedding, unembedding and final norm;
+:Fold norm gain into unembedding;
+:Measure normalized embedding similarity and direct output signatures;
+while (More selected layers?) is (yes)
+ :Normalize original embeddings using layer input norm;
+ :Project Q, K and V;
+ while (More attention heads?) is (yes)
+  :Measure QK row signatures;
+  :Measure low-rank OV row signatures;
+ endwhile (no)
+ :Transpose down-projection directions;
+ :Measure FFN neuron-to-token output signatures;
+ :Report layer statistics;
+endwhile (no)
+:Report timing and FLOPs; return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The normal handler reports candidate circuit signatures; it contains no database
+persistence/admission step. Deeper layers use original embeddings rather than an actual
+residual trajectory. Parsing, tensor validation and lp_rowsig remain nested. Numeric
+option reads do not consistently check that a following argument exists. Build branch is
+source evidence, not a claim about an installed binary.
+end footer
+
+@enduml

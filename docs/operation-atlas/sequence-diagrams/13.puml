@@ -1,0 +1,21 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 13. Consensus — Wiki specified order
+start
+:13.1 Find the claim&#x27,s standing;
+:13.2 Bound the vote by the witness&#x27,s trust;
+:13.3 Check the lineage;
+:13.4 Play the matchup;
+:13.5 Write the standing in place;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Consensus.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

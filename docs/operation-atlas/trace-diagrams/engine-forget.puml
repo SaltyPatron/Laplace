@@ -1,0 +1,50 @@
+@startuml
+' Evidence: Laplace-Engine/src/forget.c SHA256 a38bd17960c904cd1d00158a684b48a7a993b5e1b617cb51439c09b6a483ca78
+' Evidence: Laplace-Engine/src/provenance.c SHA256 122d05cc086af76714f85bfe9b36b110d61815641e6e7f69ae8cffd1f1052b16
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — remove witnesses and replay affected standing
+
+start
+:Parse witness selectors, --trunk and --except;
+if (No selectors and not --except?) then (yes)
+ :Return 2;
+ stop
+endif
+:Map tier0; connect worker connections;
+:Parse trunk IDs or decompose source names;
+if (Invalid explicit ID?) then (yes)
+ :Return 2;
+ stop
+endif
+:Read witnesses; compare trunk ID or first source-record constituent;
+:Apply --except inversion to selected set;
+if (No matching witnesses?) then (yes)
+ :Return 1;
+ stop
+endif
+:Collect distinct claims under selected source trunks;
+:DELETE selected witness rows;
+:sweep seeded with removed trunks;
+:standings_replay on touched claims;
+:Read remaining testimony in sets; order by claim / source rank / trunk ID;
+:Play surviving positive-game witness series;
+:Compare and write rebuilt standings through stands_compare;
+:DELETE consensus for touched claims with no surviving witness;
+:Close connections and free touched set; return 0;
+stop
+legend
+Destructive operation; diagram generation does not execute it.
+Witness deletion, sweep and replay are not enclosed in one transaction here.
+Shared content eligibility is decided by sweep's reference counts and roots.
+endlegend
+
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. cmd_forget and standings_replay reviewed. SQL transport failures can terminate
+inside helpers; no automatic rollback/retry is invented. sweep is detailed separately;
+low-level path decoding and SQL transport remain nested.
+end footer
+
+@enduml

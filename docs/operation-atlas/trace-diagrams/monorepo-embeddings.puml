@@ -1,0 +1,45 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs SHA256 da65d421f5a62d2dc147b5c0cb783b94157e1227f093908ea63b4393f9c6fd30
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — embedding response construction
+start
+:Validate JSON and served embedding model; resolve includeMeaning flag;
+:Read string or string-array input;
+:Drop nonstring/whitespace-only elements; trim retained strings;
+if (No retained inputs or validation fails?) then (yes)
+ :Return corresponding request error;
+ stop
+endif
+:Require quote;
+if (Gate disallows?) then (yes)
+ :Return 402;
+ stop
+endif
+:Consume quote if present;
+while (More input groups?) is (yes)
+ :Launch at most eight EmbeddingAsync tasks with meaningLimit 10;
+ :Await tasks in input order and retain result order;
+endwhile (no)
+while (More results?) is (yes)
+ if (Form resolved?) then (yes)
+  :Emit five-value vector X, Y, Z, M, Radius and form provenance;
+ else (no)
+  :Emit empty vector and resolved=false;
+ endif
+ :Attach entity ID and optional meaning neighbors;
+endwhile (no)
+:Compute usage as whitespace-separated word counts, minimum one per retained input;
+:Return embedding list;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The response vector here is five form values, not evidence that a conventional
+learned embedding model was run. Input trimming/filtering and usage counting belong to
+this HTTP contract. Concurrency eight is a literal wrapper limit. Exceptions from
+embedding tasks propagate; other tasks in the same group may already be running. Native
+form and meaning retrieval remain nested.
+end footer
+
+@enduml

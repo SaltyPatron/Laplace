@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title world.configure-foundational-seed — declared input/output contract
+component "world.configure-foundational-seed" as operation
+rectangle "authority-selected seed manifest" as in0
+in0 --> operation
+rectangle "conforming admitted source profiles" as in1
+in1 --> operation
+rectangle "accepted template and recipe versions" as in2
+in2 --> operation
+rectangle "cross-profile references dependence and evidence epochs" as in3
+in3 --> operation
+rectangle "configured foundational heterogeneous seed epoch" as out0
+operation --> out0
+rectangle "closed selected denominators" as out1
+operation --> out1
+rectangle "query and realization eligible seed boundary" as out2
+operation --> out2
+rectangle "exact incomplete or why-not disposition" as out3
+operation --> out3
+@enduml

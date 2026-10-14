@@ -1,0 +1,47 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/Auth/TenantResolution.cs SHA256 05560546a61b594d7a4c86f45048481ae5938a24eea60ee87e50cf5a3daf7ce4
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/AppComposition.cs SHA256 a8329c4e240e42aa3f2bc588de557743e704c4a977b635139227830f99cfff8e
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — resolve request tenant and workspace
+start
+if (Tenant cached in HttpContext.Items?) then (yes)
+ :Return cached resolution;
+ stop
+endif
+:Recognize sk-laplace- Bearer key; otherwise X-Api-Key with that prefix;
+if (Recognized key presented?) then (yes)
+ :Validate key through key service;
+ :Return key tenant or invalid_key;
+else (no)
+ if (Authorization or X-Api-Key header exists?) then (yes)
+  :Return invalid_key; do not fall through to browser/dev;
+ elseif (Authenticated browser has tenant claim and GUID user claim?) then (yes)
+  if (Workspace cookie is nonempty and at most 160 characters?) then (yes)
+   :Query current membership of selected workspace;
+   if (Membership exists?) then (yes)
+    :Clone request principal; replace tenant claims;
+    :Store selected workspace role in request items;
+   else (no)
+    :Delete selection cookie; retain original ticket tenant;
+   endif
+  endif
+  :Return browser tenant with user/provider claims;
+ elseif (Dev principal configured?) then (yes)
+  :Return configured dev tenant;
+ else (no)
+  :Return trimmed X-Laplace-Tenant or local-dev as header tenant;
+ endif
+endif
+:Cache resolution for this request;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Tenant resolution is not authorization. ApiKeyTenantResolver is registered in all
+modes; non-header modes enforce identity in separate middleware. Workspace selection is
+checked against membership and mutates only the request principal, not the immutable login
+ticket. SQL membership function and browser ticket validation remain nested.
+end footer
+
+@enduml

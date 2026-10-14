@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace-Engine/src/deploy.c SHA256 20bf1358963aa85db31ca32fcf81f9cfb64aa537c5bbef16542ceb278f261fe9
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — deploy
+start
+
+:database_made; connect; map tier0;
+while (More declared extensions?) is (yes)
+ :CREATE EXTENSION IF NOT EXISTS;
+ if (run reports failure?) then (yes)
+  :Return 1;
+  stop
+ endif
+endwhile (no)
+:ALTER EXTENSION laplace UPDATE;
+:Set database tier0, flags and highway paths;
+if (Any checked run fails?) then (yes)
+ :Return 1;
+ stop
+endif
+:Find existing public entity / physicality / witness / consensus tables;
+:Attempt to adopt tables into extension;
+:SELECT laplace_schema_indexes();
+if (Index run fails?) then (yes)
+ :Return 1;
+ stop
+endif
+:Close and reconnect; enable_parallel_append = on for database;
+:Close; return cmd_status result;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. database_made and run are nested helpers. Not every PQexec status is checked:
+table-adoption and parallel-append statements do not independently change the handler
+return. Earlier DDL can remain after later failure. Source review only; no Engine command
+executed.
+end footer
+
+@enduml

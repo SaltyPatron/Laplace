@@ -1,0 +1,101 @@
+@startuml
+' Evidence: Laplace-Engine/src/ingest.c SHA256 b4bb11beed6e5ccb3b1224e40f4a1cbfb9aaf888c3c8d1beb376cab0fd8f96fd
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — ingest dispatch, batches and publication
+
+start
+:Parse ingest options;
+if (Highway mode?) then (yes)
+ if (Incompatible arguments?) then (yes)
+  :Return 2;
+  stop
+ endif
+ :ingest_highway;
+ :Return nested result;
+ stop
+endif
+:Validate claims/entities files and source selection;
+if (Invalid selection?) then (yes)
+ :Return 2 or missing source 1;
+ stop
+endif
+:Load recipes and source order;
+if (All arguments are source names, or no selected files?) then (yes)
+ :ingest_every with dependency closure / recipe order;
+ :Return nested result;
+ stop
+endif
+:Enumerate files; resolve recipe and source;
+:Report uncovered files; order by trust and reference dependency;
+if (Plan only?) then (yes)
+ :Print mapping; return 0;
+ stop
+endif
+:Open contexts; initialize source-wide fold;
+if (Loading?) then (yes)
+ :Check files_recorded using stored OS metadata;
+endif
+while (More file batches?) is (yes)
+ :Respect dependency-depth barrier and batch byte budget;
+ if (Oversized streamable file?) then (yes)
+  :Two-pass stretch path: calculate trunk then record stretches;
+  :Check known trunk / missing descendants; collect source fold;
+ else (ordinary batch)
+  :Decompose unskipped unknown files with OpenMP tasks;
+  :Recompose bytes and compare; curated recipe skips byte comparison;
+  :Accumulate mismatch count / show claims or entities if requested;
+  if (Loading?) then (yes)
+   :Mark staging; ingest_known; fold_events;
+   :Wait prior loader before writing next batch;
+   if (Windows or final batch?) then (yes)
+    :load synchronously;
+   else (non-Windows with next batch)
+    :Fork loader; parent proceeds to next decomposition;
+   endif
+  endif
+ endif
+ if (Loader / pipe / fork reports failure?) then (yes)
+  :Return 1; prior commits may remain;
+  stop
+ endif
+ :Free batch events and reset working node table;
+endwhile (no)
+:Wait final loader; report recomposition and incomplete parts;
+if (No-load / claims / entities?) then (yes)
+ :Return mismatch ? 1 : 0;
+ stop
+endif
+if (No mismatch and fold nonempty?) then (yes)
+ :standings_write once per source claim series;
+endif
+:Report conflicting records / claims without provenance;
+if (One whole source, no mismatch, source record exists?) then (yes)
+ :Compose and load source trunk; retain witness ID / trust / lineage;
+else (no)
+ :Report absence of source witness trunk;
+endif
+if (No mismatch?) then (yes)
+ :merge staged state;
+ if (Source witness trunk available?) then (yes)
+  :INSERT witness if absent;
+ endif
+endif
+:Return mismatch ? 1 : 0;
+stop
+legend
+load / standings_write / source_trunk / merge remain nested operations.
+Failures in those operations return 1. This is not one atomic source transaction.
+Metadata precheck conflicts with Wiki 11.2 trunk-first deduplication.
+endlegend
+
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. cmd_ingest top-level path reviewed. Oversized-file internals and shared
+load/merge/fold/native operations are summarized calls, not independently verified traces.
+Recomposition mismatch is detected after earlier batches may have staged state. No
+ingestion executed.
+end footer
+
+@enduml

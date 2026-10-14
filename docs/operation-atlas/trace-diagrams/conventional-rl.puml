@@ -1,0 +1,36 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/src/laplace_conventional/rl.py SHA256 bbf6d03b24d8a61a92767001ca9f4f69164b63d36972e3720f1fac5d009ea890
+' Evidence: Laplace-Conventional/src/laplace_conventional/host_policy.py SHA256 98303050d61460bb9c5b28ebc66827151f4ae3d8df8d0f77a5d5b0763ecfb8fc
+' Evidence: Laplace-Conventional/README.md SHA256 9d7617f23147e8c5e32a5c79f56cb8d1b7f7e0e23eaeac2973047753841e649f
+' Evidence: Laplace-Conventional/pyproject.toml SHA256 1f7fe005249bb18bd43f55d71dc6d0d81dadd17eb791a71a36c2235e927b7fb4
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — external reward and GRPO entry boundary
+start
+if (Invoked using documented python -m ...rl?) then (yes)
+ :Module defines helpers and main; no main guard calls it;
+ :End module without invoking training;
+ stop
+endif
+:Explicit caller invokes main(); parse required model/dataset/reward/output;
+:Import datasets and TRL; import reward module and resolve callable;
+if (Reward callable and JSON/JSONL/NDJSON dataset has prompt column?) then (yes)
+ :Create GRPOTrainer with supplied reward, model, dataset and max steps;
+ :Use CPU unless host policy allows GPU;
+ :Call trainer.train(); then save_model(output);
+else (no)
+ :Raise error; no trainer call;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete local RL wrapper reviewed. README documents python -m invocation, but
+this module has no __main__ guard and the only pyproject console entry is cli:main. The
+callable main body is shown separately from the documented inactive entry. Reward import
+can execute arbitrary module initialization. External reward semantics, GRPO internals and
+runtime success are not established.
+end footer
+
+@enduml

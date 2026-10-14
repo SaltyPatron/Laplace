@@ -1,0 +1,45 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs SHA256 1becc7b1658d0c37274a6ea4f2872e3bf2f09d864a1285895b1c1e99cc8a0312
+' Evidence: Laplace/app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateWriter.cs SHA256 0eebe19d7ffb21af3adc0a214394e62266be0cb68bf2b50a9802d5bd02f7cef0
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — conversation apply and atomic participant boundary
+start
+:Require nonzero session and nonempty ordered turn IDs;
+:Enter concurrency retry loop;
+:ApplyCoreAsync with conversation callback;
+:Reject disposal; increment inflight count;
+:Observe prior fold failure; forward changes;
+if (Persistent evidence and NpgsqlSubstrateWriter?) then (yes)
+ :Call ApplyWorkingSetAtomicAsync with participant callback;
+ :Inside supplied connection and transaction, build delta from accepted evidence;
+ if (Accepted delta nonempty?) then (yes)
+  :UpsertDeltaInTransactionAsync;
+ endif
+ :Execute conversation.append_turns with same connection and transaction;
+ :Bind session, ordered IDs, built time, intent and physicality budgets;
+ :Return through inner writer;
+ :Update fold statistics only if not JournalReplayHit;
+else (no)
+ :Throw: conversation history requires atomic writer;
+ stop
+endif
+:Decrement inflight in finally;
+:Return result;
+stop
+legend bottom
+Transient exceptions may retry according to ConcurrencyRetry policy and delay.
+Callback and outer transaction ownership are separate: callback has no COMMIT.
+Native append_turns, accepted-evidence selection and actual commit remain boundaries.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Reviewed callback ordering: accepted-evidence fold, then session append, on one
+supplied transaction. The partial writer dispatches through
+NpgsqlPhysicalityStaging.ApplyStagesCoreAsync to
+NpgsqlWorkingSetApply.ApplyPreparedStagesCoreAsync; those nested branches require separate
+review. No build or runtime success is inferred from the intended atomic API.
+end footer
+
+@enduml

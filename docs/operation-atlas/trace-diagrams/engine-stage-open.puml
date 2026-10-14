@@ -1,0 +1,38 @@
+@startuml
+' Evidence: Laplace-Engine/src/db.c SHA256 bba138c55e319e63598cd8c6640d0de5428975c5b37991e8439823efea5d17c7
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — staging initialization
+start
+
+if (Process-static stage_ready already true?) then (yes)
+ :Return true; preserve current stage rows;
+ stop
+endif
+:Compare count of staged entity/physicality/consensus tables with public partitions;
+if (Counts match?) then (yes)
+ :Skip table creation;
+else (no)
+ :Create stage schema if absent;
+ :Create missing unlogged tables from public leaf defaults;
+ :Create missing consensus claim indexes;
+ if (DDL fails?) then (yes)
+  :Return false;
+  stop
+ endif
+endif
+:stage_emptied enumerates every ordinary table in stage schema;
+:TRUNCATE every stage table found to contain rows;
+:Record success in stage_ready; return status;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. This first-use behavior is significant for a fresh standalone merge command:
+merge calls stage_open before counting pending rows and before resolve_parts. Within an
+ingest process that already initialized staging, the cached flag skips clearing. The count
+comparison is not a schema-equivalence check. Source behavior is shown without executing
+any stage mutation.
+end footer
+
+@enduml
