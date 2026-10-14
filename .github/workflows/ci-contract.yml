@@ -28,6 +28,25 @@ jobs:
         shell: pwsh
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP
 
+  api-client:
+    name: Authenticated CLI transport (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      LAPLACE_BUILD_ROOT: ${{ runner.temp }}/laplace-api-client
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and test the actual CLI service transport
+        run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo
+
   contract:
     name: Static CI/CD contract
     runs-on: ubuntu-24.04
@@ -52,7 +71,9 @@ jobs:
         run: |
           python3 -W error::SyntaxWarning -m py_compile \
             .github/scripts/cleanup-actions-history.py \
-            .github/scripts/archive-actions-evidence.py
+            .github/scripts/archive-actions-evidence.py \
+            deploy/client/laplace-mono.py \
+            deploy/client/install-client.py
 
       - name: Validate historical Actions evidence archive policy
         shell: bash
