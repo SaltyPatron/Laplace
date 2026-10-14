@@ -131,4 +131,4 @@ Operational constraints
 - After an engine rebuild, rebuild and install extensions before verification.
 - `pg_regress` validates the installed extension, not an edited template.
 - Do not edit an executing Windows batch file.
-- Preserve unrelated worktree changes; use isolated worktrees and explicit staging.
+- Preserve unrelated changes and use explicit staging. Use isolated worktrees for concurrent tasks, with identified ownership and integration destinations. Clean status or merged patches do not establish abandonment; verify task completion or handoff, active uses, dependent paths, and preservation before removing a checkout.

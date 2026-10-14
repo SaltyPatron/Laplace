@@ -16,7 +16,7 @@
 #define POSTGIS_MINOR_VERSION   "@POSTGIS_MINOR_VERSION@"
 #define POSTGIS_MICRO_VERSION   "@POSTGIS_MICRO_VERSION@"
 #define POSTGIS_VERSION         "@POSTGIS_MAJOR_VERSION@.@POSTGIS_MINOR_VERSION@"
-/* Packed major*10000+minor*100+patch — matches PostGIS configure.ac / external/geos 3.12.2 + proj 9.4.1 */
+/* Packed major*10000+minor*100+patch from the selected dependency headers. */
 #define POSTGIS_GEOS_VERSION    @POSTGIS_GEOS_VERSION@
 #define POSTGIS_PROJ_VERSION    @POSTGIS_PROJ_VERSION@
 #define POSTGIS_PGSQL_VERSION   @POSTGIS_PGSQL_VERSION@
