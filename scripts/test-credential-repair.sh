@@ -62,15 +62,15 @@ for scenario in fresh activation_failure stale_receipt dependent_failure symlink
     fresh)
       [[ $result == 0 ]]
       cmp "$case_root/new" "$LAPLACE_IDENTITY_DIRECTORY/identity-runtime.py"
-      rg -q 'laplace-database-refresh.service: passed' "$case_root/output" ;;
+      grep -Fq 'laplace-database-refresh.service: passed' "$case_root/output" ;;
     dependent_failure)
       [[ $result != 0 ]]
       cmp "$case_root/new" "$LAPLACE_IDENTITY_DIRECTORY/identity-runtime.py"
-      rg -q 'identity repair retained' "$case_root/output" ;;
+      grep -Fq 'identity repair retained' "$case_root/output" ;;
     activation_failure|stale_receipt)
       [[ $result != 0 ]]
       cmp "$case_root/old" "$LAPLACE_IDENTITY_DIRECTORY/identity-runtime.py"
-      rg -q 'restoring the preceding helper' "$case_root/output" ;;
+      grep -Fq 'restoring the preceding helper' "$case_root/output" ;;
     symlink)
       [[ $result != 0 && ! -s $case_root/commands ]]
       [[ $(cat "$case_root/old") == 'old helper' ]] ;;
