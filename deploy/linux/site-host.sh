@@ -21,6 +21,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Focused publication of an existing enrollment; avoid unrelated setup stages.
+if [[ $# == 1 && $1 == --repair-credentials ]]; then
+  exec bash "$HERE/repair-credentials.sh"
+fi
 host_args=("$@")
 as_is=false; routing_only=false; browser_setup=false; identity_enrollment=''
 chess_setup=false; chess_configuration=''; chess_enrollment=''; chess_routing=''

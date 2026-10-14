@@ -8,6 +8,23 @@ provider callback registrations and consumers are migrated together.
 [Browser credentials and OpenBao enrollment](identity.md) describes persistent
 per-environment credentials, unattended refresh, verification and repair.
 
+For an already enrolled Linux installation whose credential agent still runs an
+older identity helper, deploy the current helper through the existing installer:
+
+```sh
+sudo bash deploy/linux/site-host.sh --repair-credentials
+```
+
+This focused operation uses Bash and existing service units. It preserves the
+enrollment, retains the preceding helper, publishes the current helper atomically,
+and requires a fresh agent-authenticated provider verification receipt plus 60
+seconds without an agent restart. Failed activation restores the preceding helper.
+After identity verification it retries the installed database refresh and desktop
+certificate publication jobs; either job failing returns a failure while retaining
+the verified identity fix. The root-private backup directory records the outcome.
+It does not unseal OpenBao or establish unattended vault recovery, backup restore,
+or complete application readiness.
+
 ## hart-server
 
 `private-origins.json` declares the staging hostname, listen addresses, allowed

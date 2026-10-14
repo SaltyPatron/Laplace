@@ -43,6 +43,10 @@ jobs:
         shell: bash
         run: bash scripts/product-ci.sh check
 
+      - name: Verify credential helper publication and rollback
+        shell: bash
+        run: bash scripts/test-credential-repair.sh
+
       - name: Validate evidence-safe Actions history cleanup policy
         shell: bash
         run: python3 .github/scripts/test-actions-history-cleanup.py
