@@ -76,8 +76,9 @@ database, checks the serving API agrees, then calls the existing audited role AP
 with `onlyIfNeverAssigned: true`. The server checks current role and all prior role
 events atomically. Existing or revoked roles are not initial enrollment candidates.
 A private journal under the persistent declared work root is written before each
-request. Reruns only verify recorded assignments; a lost response is reconciled
-through audit readback, never by blindly sending the grant again. Preserve this
+request. Reruns verify recorded assignments and may continue selections that were
+never attempted. A lost response is reconciled through audit readback; pending
+transmissions are never repeated. Preserve this
 journal across application database recovery. Failed partial requests report failure
 and retain the journal; they do not undo already committed, authorized grants.
 Only reduced provider/result receipts are public. Browser sessions remain a separate
