@@ -1,5 +1,5 @@
 name: Product — maintenance
-run-name: "Product maintenance — ${{ github.event_name == 'push' && 'access-audit / staging + production' || format('{0} / {1}', inputs.operation, inputs.target) }} @ ${{ github.sha }}"
+run-name: "Product maintenance — ${{ github.event_name == 'push' && 'reviewed access maintenance' || format('{0} / {1}', inputs.operation, inputs.target) }} @ ${{ github.sha }}"
 
 on:
   push:
@@ -8,6 +8,9 @@ on:
       - .github/workflows/product-operator.yml
       - scripts/platform-access-audit.py
       - scripts/test-platform-access-audit.py
+      - scripts/platform-access-enroll.py
+      - scripts/test-platform-access-enroll.py
+      - .github/access-requests/*.json
   workflow_dispatch:
     inputs:
       operation:
@@ -15,13 +18,17 @@ on:
         type: choice
         required: true
         default: verify
-        options: [status, access-audit, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
+        options: [status, access-audit, access-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
       target:
         description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the database host"
         type: choice
         required: true
         default: staging
         options: [staging, production, cloud]
+      access_request:
+        description: "Reviewed .github/access-requests/staging-*.json file for initial access enrollment"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -29,22 +36,115 @@ permissions:
 
 jobs:
   access-contract:
-    name: Validate the platform access observer
-    if: github.event_name == 'push' || inputs.operation == 'access-audit'
+    name: Validate platform access maintenance
+    if: github.event_name == 'push' || inputs.operation == 'access-audit' || inputs.operation == 'access-enroll'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      request: ${{ steps.request.outputs.request }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          fetch-depth: 0
       - run: python3 scripts/test-platform-access-audit.py
+      - run: python3 scripts/test-platform-access-enroll.py
+      - name: Select only an explicitly reviewed enrollment request
+        id: request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          OPERATION: ${{ inputs.operation }}
+          TARGET: ${{ inputs.target }}
+          REQUEST_PATH: ${{ inputs.access_request }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, pathlib, re, subprocess
+          if os.environ['EVENT_NAME'] == 'push':
+              for key in ('BEFORE_SHA', 'AFTER_SHA'):
+                  assert re.fullmatch('[0-9a-f]{40}', os.environ[key]), 'Invalid revision'
+              changed = subprocess.check_output(['git','diff','--name-only','--diff-filter=AM',os.environ['BEFORE_SHA'],os.environ['AFTER_SHA'],'--','.github/access-requests/'], text=True).splitlines()
+          elif os.environ['OPERATION'] == 'access-enroll':
+              assert os.environ['TARGET'] == 'staging', 'Initial enrollment supports staging only'
+              changed = [os.environ['REQUEST_PATH']]
+          else:
+              changed = []
+          assert len(changed) <= 1, 'Review one enrollment request per operation'
+          if changed:
+              name = changed[0]
+              assert re.fullmatch(r'\.github/access-requests/staging-[a-z0-9-]+\.json', name), 'Invalid enrollment request path'
+              path = pathlib.Path(name)
+              assert path.is_file() and not path.is_symlink() and path.stat().st_size <= 65536, 'Invalid enrollment request file'
+              spec = importlib.util.spec_from_file_location('enrollment', 'scripts/platform-access-enroll.py')
+              module = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(module)
+              module.validate_request(json.loads(path.read_text()))
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  output.write('request=' + name + '\n')
+          PY
+
+  access-enroll:
+    name: Apply the reviewed initial staging access request
+    needs: access-contract
+    if: needs.access-contract.outputs.request != ''
+    runs-on: [self-hosted, laplace, staging]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    concurrency:
+      group: laplace-site-hart-server
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Enroll selected existing bindings under the host reservation
+        env:
+          REQUEST_PATH: ${{ needs.access-contract.outputs.request }}
+        run: |
+          set -euo pipefail
+          machine_values=$(python3 scripts/machine-env.py --paths --database)
+          eval "$machine_values"
+          unset machine_values
+          export LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+          export LAPLACE_APP_DBNAME="${LAPLACE_APP_DBNAME:?Declare the application database}"
+          export PGDATABASE="$LAPLACE_APP_DBNAME"
+          export PGHOST="${LAPLACE_APP_PGHOST:-$PGHOST}"
+          export PGPORT="${LAPLACE_APP_PGPORT:-$PGPORT}"
+          export PGUSER="${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-$PGUSER}}"
+          export LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          request = json.loads(Path(os.environ['REQUEST_PATH']).read_text())
+          assert request['origin'].rstrip('/') == os.environ['LAPLACE_API_URL'].rstrip('/'), 'Request must select the declared API listener'
+          PY
+          lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
+          exec 8>>"$lock"
+          flock -x -w 120 8
+          umask 077
+          journal="${LAPLACE_WORK_ROOT:?Declare persistent host work}/platform-access-enrollment"
+          mkdir -p -m 700 "$journal"
+          python3 scripts/platform-access-enroll.py --request "$REQUEST_PATH" \
+            --journal-directory "$journal" \
+            --state-file "$RUNNER_TEMP/platform-enrollment-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+      - name: Retain only the reduced enrollment receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: platform-enrollment-staging-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/platform-enrollment-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 14
 
   access-audit:
     name: Read installed platform access on ${{ matrix.target }}
-    needs: access-contract
-    if: github.event_name == 'push' || (inputs.operation == 'access-audit' && inputs.target != 'cloud')
+    needs: [access-contract, access-enroll]
+    if: always() && needs.access-contract.result == 'success' && (github.event_name == 'push' || (inputs.operation == 'access-audit' && inputs.target != 'cloud') || inputs.operation == 'access-enroll')
     strategy:
       fail-fast: false
       matrix:
