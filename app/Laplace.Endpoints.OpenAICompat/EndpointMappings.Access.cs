@@ -28,7 +28,7 @@ internal static class AccessEndpoints
             });
         }).WithTags("access");
 
-        app.MapGet("/v1/admin/access/capabilities", () => Results.Ok(new { initialRoleAssignment = true }))
+        app.MapGet("/v1/admin/access/capabilities", () => Results.Ok(new { initialRoleAssignment = true, persistentInstallationOwners = true }))
             .WithTags("access");
         app.MapGet("/v1/admin/access/people", async (string? search, IPlatformAccessStore access, CancellationToken ct) =>
         {

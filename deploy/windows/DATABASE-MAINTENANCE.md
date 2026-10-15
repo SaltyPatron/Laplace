@@ -4,6 +4,30 @@ Use the installed IIS package and the existing Windows operator login. The comma
 reads the IIS installation selected by `LAPLACE_IIS_INSTALLATION` and the desktop
 access declaration in `Laplace-Operations/development/installation.json`.
 
+Installation owners survive application database recreation through the private
+`state/platform-owners/policy.json` file. Update the installed runtime with
+`Install-IisRuntime.ps1` once to install its narrow directory ACL and permanent
+`LAPLACE_PLATFORM_OWNER_POLICY_FILE` setting. That installation step requires the
+existing administrator setup context; later owner enrollment uses the declared
+ordinary Windows operator and existing DPAPI/SSPI credentials:
+
+```powershell
+./deploy/windows/Set-IisPlatformOwners.ps1 `
+  -Installation "$env:LAPLACE_IIS_INSTALLATION" `
+  -OwnerDeclaration "E:/Repositories/Laplace/Laplace-Operations/installation/hart-desktop-operator.json" `
+  -AccessConfiguration "E:/Repositories/Laplace/Laplace-Operations/development/installation.json"
+```
+
+Enrollment records exact previously authenticated provider bindings and the current
+OAuth client context. It does not seed passwords, tokens, or sessions, require a
+personal Bao login, or write to OpenBao. Publish/restart the owner-aware application
+after enrollment. Application `repair`, `migrate`, `remigrate`, and `recreate` load
+the same declaration before database mutation and verify administrator restoration.
+Administrator includes operator permissions. Startup and validated sign-in also
+reconcile the policy. Changing a configured owner's authority requires changing
+the installation policy; ordinary account roles remain editable. Preserve the
+private policy file with installation backups, outside database reset operations.
+
 ```powershell
 ./deploy/windows/Invoke-IisDatabase.ps1 -Database application -Operation status
 ./deploy/windows/Invoke-IisDatabase.ps1 -Database application -Operation repair

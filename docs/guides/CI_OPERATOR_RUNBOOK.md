@@ -85,6 +85,35 @@ Only reduced provider/result receipts are public. Browser sessions remain a sepa
 acceptance check. This operation neither promotes application packages nor starts
 hart-cloud and is not a cross-environment authority synchronization policy.
 
+Persistent installation owners are an explicit, separate policy. `owner-enroll`
+accepts reviewed `.github/owner-requests/{staging,production}-*.json` requests with
+`kind: persistent-installation-owners` and the same exact provider selectors, plus
+`client_id_sha256` for each independently reviewed current OAuth registration.
+Deploy the `persistentInstallationOwners` API capability before submitting a request.
+The helper requires existing authenticated bindings, audited administrator grants,
+and matching serving OAuth client registrations. It writes the literal bindings,
+client IDs and recorded authentication times only to the private host file
+`LAPLACE_WORK_ROOT/platform-owners/policy.json`. It then uses the existing configure
+and restart lifecycle and verifies that the serving API identifies both accounts
+as installation owners. Public receipts contain only provider names and results.
+
+Application migration, repair, recreation, startup and validated sign-in reconcile
+that policy. A recreated database gets new local relational handles for those exact
+provider bindings, administrator grants and audit events; it gets no passwords,
+tokens or browser sessions. Administrator includes operator permissions. Existing
+accounts retain their profiles, workspace membership and history. Policy-owned
+accounts cannot be demoted in the role UI/API; removing owner authority requires an
+explicit change to the private installation policy. Other users keep normal role
+assignment and revocation behavior. Reconciliation never matches email addresses.
+
+Preserve the private owner file across database recreation and machine backup.
+`LAPLACE_PLATFORM_OWNER_POLICY_FILE` can explicitly select another absolute private
+file. A mismatched OAuth client or malformed policy fails before database replacement.
+No policy means no automatic owner grant; the migration command reports that state.
+CI runs the real `app-up`, `app-check` and `app-nuke` commands against an isolated
+PostgreSQL fixture to verify restoration, historical login timestamps, idempotent
+audit events, and the absence of restored sessions.
+
 A product-affecting push is intentionally boring:
 
 ```text

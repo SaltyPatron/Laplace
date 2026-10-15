@@ -37,6 +37,64 @@ function Write-IisAtomic([string]$Path,[string]$Content) {
     [IO.File]::Move($temp,$Path,$true)
 }
 function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
+function Get-IisOwnerPolicyPath($c){Join-Path $c.directory 'state/platform-owners/policy.json'}
+function Get-IisInstallationIdentityEnvironment($c,$Identity,[switch]$IncludeSecrets){
+    $path=Get-IisOwnerPolicyPath $c
+    if($c.PSObject.Properties['platform_owner_policy_file']){
+        if($c.platform_owner_policy_file -cne $path -or -not(Test-Path -LiteralPath $path -PathType Leaf -ErrorAction Stop)){
+            throw 'The declared installed owner policy file is missing or selects another location.'
+        }
+    }
+    if(Test-Path -LiteralPath $path -ErrorAction Stop){
+        try{
+            $file=Get-Item -LiteralPath $path -ErrorAction Stop
+            if($file.PSIsContainer -or $file.Length -gt 65536 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'invalid file'}
+            $policy=Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -DateKind String -ErrorAction Stop
+        }catch{throw 'The installed owner policy cannot be read as bounded private JSON.'}
+        if($Identity.PSObject.Properties['platform_owner_policy'] -and $null -ne $Identity.platform_owner_policy -and
+            (Iis-Json $Identity.platform_owner_policy) -cne (Iis-Json $policy)){throw 'Installed and credential-record owner policies disagree.'}
+        $Identity=Iis-Json $Identity | ConvertFrom-Json -DateKind String
+        $Identity | Add-Member platform_owner_policy $policy -Force
+        $values=Get-IisIdentityEnvironment $Identity -IncludeSecrets:$IncludeSecrets
+        $values.LAPLACE_PLATFORM_OWNER_POLICY_FILE=$path
+        return $values
+    }
+    Get-IisIdentityEnvironment $Identity -IncludeSecrets:$IncludeSecrets
+}
+function Get-IisIdentityEnvironment($Identity,[switch]$IncludeSecrets) {
+    $values=[ordered]@{}
+    foreach($provider in 'google','microsoft'){
+        $id=$Identity.("${provider}_client_id")
+        if(-not ($id -is [string]) -or -not $id -or $id -match '[\x00-\x1f]'){throw 'Invalid provider client configuration.'}
+        $values["LAPLACE_AUTH_$($provider.ToUpperInvariant())_CLIENT_ID"]=$id
+        if($IncludeSecrets){
+            $secret=$Identity.("${provider}_client_secret")
+            if(-not ($secret -is [string]) -or -not $secret -or $secret -match '[\x00-\x1f]'){throw 'Invalid provider secret configuration.'}
+            $values["LAPLACE_AUTH_$($provider.ToUpperInvariant())_CLIENT_SECRET"]=$secret
+        }
+    }
+    if($Identity.PSObject.Properties['platform_owner_policy'] -and $null -ne $Identity.platform_owner_policy){
+        $policy=$Identity.platform_owner_policy
+        if($policy.version -cne 1 -or -not ($policy.owners -is [array]) -or $policy.owners.Count -gt 16){throw 'Invalid owner policy contract.'}
+        $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach($owner in $policy.owners){
+            if($owner.provider -cnotin @('google','microsoft')){throw 'Invalid owner policy provider.'}
+            foreach($field in 'issuer','subject','client_id','verified_at'){
+                $value=$owner.$field
+                if(-not ($value -is [string]) -or [string]::IsNullOrWhiteSpace($value) -or $value.Length -gt 4096 -or $value -match '[\x00-\x1f]'){throw 'Invalid owner policy binding.'}
+            }
+            if($owner.client_id -cne $Identity.("$($owner.provider)_client_id")){throw 'Owner policy belongs to a different provider client.'}
+            $verified=[DateTimeOffset]::MinValue
+            if($owner.verified_at -notmatch '(Z|[+-]\d\d:\d\d)$' -or -not [DateTimeOffset]::TryParse($owner.verified_at,[ref]$verified) -or $verified -gt [DateTimeOffset]::UtcNow){throw 'Invalid owner policy verification timestamp.'}
+            $binding=Iis-Json @($owner.provider,$owner.issuer,$owner.subject)
+            if(-not $seen.Add($binding)){throw 'Duplicate owner policy binding.'}
+        }
+        $json=Iis-Json $policy
+        if([Text.Encoding]::UTF8.GetByteCount($json) -gt 65536){throw 'Owner policy exceeds its size limit.'}
+        $values.LAPLACE_PLATFORM_OWNER_POLICY=$json
+    }
+    return $values
+}
 function Get-IisChessAccess($c) {
     if($c.chess.match_engines){
         $connector=$c.chess.match_engines.connector
@@ -122,7 +180,7 @@ function Get-IisEnvironment($c,$records) {
     $state=Join-Path $c.directory 'state'
     $values=[ordered]@{}
     foreach($item in $c.environment.PSObject.Properties){
-        if($item.Name -notmatch '^(LAPLACE_|ASPNETCORE_|DOTNET_|OMP_|MKL_)' -or $item.Name -match 'TOKEN|SECRET|PASSWORD|AUTH_DEV_PRINCIPAL|API_KEY'){throw 'Public environment must contain only non-secret runtime configuration.'}
+        if($item.Name -notmatch '^(LAPLACE_|ASPNETCORE_|DOTNET_|OMP_|MKL_)' -or $item.Name -match 'TOKEN|SECRET|PASSWORD|AUTH_DEV_PRINCIPAL|API_KEY|PLATFORM_OWNER_POLICY'){throw 'Public environment must contain only non-secret runtime configuration.'}
         $values[$item.Name]=[string]$item.Value
     }
     foreach($item in @(@('substrate','substrate_database','substrate_role','LAPLACE_DB'),@('appdb','application_database','application_role','LAPLACE_APP_DB'))) {
@@ -134,12 +192,11 @@ function Get-IisEnvironment($c,$records) {
     }
     if($records.api.operator_token -notmatch '^[a-f0-9]{64}$'){throw 'Missing runtime operator credential.'}
     $values.LAPLACE_OPERATOR_TOKEN=$records.api.operator_token
-    foreach($provider in 'google','microsoft') {
-        $id=$records.identity.("${provider}_client_id");$secret=$records.identity.("${provider}_client_secret")
-        if(-not $id -or -not $secret){throw "Missing $provider provider configuration."}
-        $values["LAPLACE_AUTH_$($provider.ToUpperInvariant())_CLIENT_ID"]=$id
-        $values["LAPLACE_AUTH_$($provider.ToUpperInvariant())_CLIENT_SECRET"]=$secret
-    }
+    $identityValues=Get-IisInstallationIdentityEnvironment $c $records.identity -IncludeSecrets
+    # The API reads the canonical file at each startup; do not retain an older
+    # JSON value in its pool environment after an ordinary operator update.
+    if($identityValues.Contains('LAPLACE_PLATFORM_OWNER_POLICY_FILE')){$identityValues.Remove('LAPLACE_PLATFORM_OWNER_POLICY')}
+    foreach($key in $identityValues.Keys){$values[$key]=$identityValues[$key]}
     $values.LAPLACE_PUBLIC_BASE_URL=$c.origin.TrimEnd('/')
     $values.LAPLACE_AUTH_MODE='identity';$values.LAPLACE_BILLING_STORE='postgres'
     $values.LAPLACE_DATA_PROTECTION_KEYS=Join-Path $state 'keys'

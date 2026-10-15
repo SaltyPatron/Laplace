@@ -2,6 +2,7 @@ using System.Linq;
 using DbUp;
 using DbUp.Engine;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Spectre.Console.Cli;
@@ -123,6 +124,7 @@ internal static class Program
 
     private static int RunAppCheck(string connectionString)
     {
+        var owners = PlatformOwnerPolicy.Load();
         if (BuildEngine(connectionString, IsAppScript).GetScriptsToExecute().Count != 0)
             throw new InvalidOperationException("Application migrations are pending; run app-up.");
         using var connection = new NpgsqlConnection(connectionString);
@@ -134,7 +136,10 @@ internal static class Program
             """, connection);
         if (command.ExecuteScalar() is not true)
             throw new InvalidOperationException("The application database is missing required identity or billing tables.");
+        using var database = NpgsqlDataSource.Create(connectionString);
+        new PlatformOwnerReconciler(database, owners).VerifyAsync().GetAwaiter().GetResult();
         Console.WriteLine("Application migrations and identity/billing tables verified.");
+        ReportOwners(owners);
         return 0;
     }
 
@@ -196,6 +201,8 @@ internal static class Program
 
     private static int RunUpTargets(IEnumerable<(string target, Func<string, bool> filter, string label)> targets)
     {
+        var selected = targets.ToArray();
+        var owners = selected.Any(item => IncludesApplication(item.filter)) ? PlatformOwnerPolicy.Load() : null;
         // File sink only: the human-facing report goes to stdout below; this is the
         // queryable record of which migration applied when, read through ops.app_log.
         using var loggerFactory = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
@@ -205,7 +212,7 @@ internal static class Program
 
         // The app schema (accounts, sessions, keys, billing) has a database of its own when LAPLACE_APP_DB is set:
         // its scripts go there and nowhere else; the substrate database takes the rest. One database takes all.
-        foreach (var (target, filter, label) in targets)
+        foreach (var (target, filter, label) in selected)
         {
             EnsureDatabase.For.PostgresqlDatabase(target);
             var engine = BuildEngine(target, filter);
@@ -217,6 +224,14 @@ internal static class Program
                 return 1;
             }
             applied.AddRange(result.Scripts);
+            if (IncludesApplication(filter))
+            {
+                using var database = NpgsqlDataSource.Create(target);
+                var reconciler = new PlatformOwnerReconciler(database, owners!);
+                reconciler.ReconcileAsync().GetAwaiter().GetResult();
+                reconciler.VerifyAsync().GetAwaiter().GetResult();
+                ReportOwners(owners!);
+            }
         }
 
         if (applied.Count == 0)
@@ -234,6 +249,14 @@ internal static class Program
         }
         return 0;
     }
+
+    private static bool IncludesApplication(Func<string, bool> filter)
+        => filter("20261012000000_app_platform_access.sql");
+
+    private static void ReportOwners(PlatformOwnerPolicy owners)
+        => Console.WriteLine(owners.Owners.Count == 0
+            ? "Installation owner policy is not configured."
+            : $"Installation owner administrator access verified: {owners.Owners.Count} provider binding(s).");
 
     private static int RunStatus(string connectionString)
         => RunStatusTargets(Targets(connectionString));
@@ -325,6 +348,8 @@ internal static class Program
         var app = LaplaceInstall.HasSeparateAppDatabase
             ? new NpgsqlConnectionStringBuilder(LaplaceInstall.AppConnectionString()) : b;
         bool includesApp = app.Database == b.Database && app.Host == b.Host && app.Port == b.Port;
+        // Validate durable authority before creating a replacement or disconnecting serving clients.
+        if (applicationOnly || includesApp) PlatformOwnerPolicy.Load();
         DatabaseRecreation.Run(connectionString, replacement => RunUpTargets(new[]
         {
             (replacement, (Func<string, bool>)(path => applicationOnly ? IsAppScript(path) : includesApp || !IsAppScript(path)), "replacement database")

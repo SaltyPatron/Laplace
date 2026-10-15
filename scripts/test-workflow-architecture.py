@@ -42,7 +42,7 @@ class WorkflowArchitecture(unittest.TestCase):
         observer = maintenance.split("\n  access-audit:\n", 1)[1].split("\n  unsupported-deployment:\n", 1)[0]
         self.assertIn("runs-on: ubuntu-24.04", validation)
         self.assertIn("python3 scripts/test-platform-access-audit.py", validation)
-        self.assertIn("needs: [access-contract, access-enroll]", observer)
+        self.assertIn("needs: [access-contract, access-enroll, owner-enroll]", observer)
         self.assertIn("inputs.target != 'cloud'", observer)
         self.assertIn('flock -s -w 120 8', observer)
         self.assertIn('contents: read', observer)

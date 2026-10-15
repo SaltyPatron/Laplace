@@ -6,7 +6,7 @@ import { roleName, type PlatformRole } from '../auth/access';
 import { useAppStore } from '../store';
 import styles from './Admin.module.css';
 
-interface Person { userId: string; displayName: string | null; email: string | null; role: string | null; providers: string[] }
+interface Person { userId: string; displayName: string | null; email: string | null; role: string | null; providers: string[]; installationOwner?: boolean }
 interface RoleEvent { eventId: number; userId: string; actor: string; actorName: string | null; person: string | null; previousRole: string | null; role: string | null; occurredAt: string }
 const permissionNames: Record<string, string> = { 'platform.read': 'View ingestion and system activity', 'ingestion.manage': 'Start and stop ingestion',
   'services.manage': 'Manage host services', 'platform.maintain': 'Run maintenance and writable operations', 'platform.access.manage': 'Assign platform access' };
@@ -49,7 +49,9 @@ export function AccessManagement({ roles, onChanged }: { roles: PlatformRole[]; 
       {people.data?.people.length === 0 && <p>No matching accounts. Check the email or ask the person to sign in first.</p>}
       <div className={styles.directory}>{people.data?.people.map((person) => <div className={styles.directoryRow} key={person.userId}>
         <div><strong>{person.email || person.displayName || 'Account without an email'}</strong><Muted>{person.displayName} · {person.providers.join(', ') || 'Provider not recorded'}{person.userId === authUser?.id ? ' · You' : ''}</Muted></div>
-        <span>{roleName(person.role)}</span><Button variant="ghost" onClick={() => { setEditing(person); setRole(person.role ?? ''); setError(''); }}>Change role</Button>
+        <span>{roleName(person.role)}{person.installationOwner && <Muted>Installation owner</Muted>}</span>
+        {person.installationOwner ? <Muted>Access is managed by the installation owner policy.</Muted>
+          : <Button variant="ghost" onClick={() => { setEditing(person); setRole(person.role ?? ''); setError(''); }}>Change role</Button>}
       </div>)}</div>
       {people.data && <Muted>Up to {people.data.limit} accounts per search. Workspace membership is managed separately.</Muted>}
     </Panel>

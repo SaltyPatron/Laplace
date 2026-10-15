@@ -88,7 +88,7 @@ SET LOCAL statement_timeout = '10s';
 SET LOCAL lock_timeout = '2s';
 SELECT coalesce(json_agg(binding), '[]'::json) FROM (
  SELECT i.user_id::text, i.provider, i.issuer, i.subject,
-        i.last_login_at IS NOT NULL AS signed_in, r.role,
+        i.last_login_at IS NOT NULL AS signed_in, i.last_login_at AS verified_at, r.role,
         (SELECT count(*) FROM app.platform_role_events e WHERE e.user_id=i.user_id) AS event_count,
         (SELECT json_build_object('event_id',e.event_id,'actor',e.actor,
                 'previous_role',e.previous_role,'role',e.role)

@@ -11,6 +11,9 @@ on:
       - scripts/platform-access-enroll.py
       - scripts/test-platform-access-enroll.py
       - .github/access-requests/*.json
+      - scripts/platform-owner-enroll.py
+      - scripts/test-platform-owner-enroll.py
+      - .github/owner-requests/*.json
   workflow_dispatch:
     inputs:
       operation:
@@ -18,7 +21,7 @@ on:
         type: choice
         required: true
         default: verify
-        options: [status, access-audit, access-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
+        options: [status, access-audit, access-enroll, owner-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
       target:
         description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the database host"
         type: choice
@@ -26,7 +29,7 @@ on:
         default: staging
         options: [staging, production, cloud]
       access_request:
-        description: "Reviewed .github/access-requests/staging-*.json file for initial access enrollment"
+        description: "Reviewed initial access or persistent installation owner request file"
         type: string
         required: false
 
@@ -37,13 +40,14 @@ permissions:
 jobs:
   access-contract:
     name: Validate platform access maintenance
-    if: github.event_name == 'push' || inputs.operation == 'access-audit' || inputs.operation == 'access-enroll'
+    if: github.event_name == 'push' || inputs.operation == 'access-audit' || inputs.operation == 'access-enroll' || inputs.operation == 'owner-enroll'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
       request: ${{ steps.request.outputs.request }}
+      owners: ${{ steps.owners.outputs.requests }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -51,6 +55,43 @@ jobs:
           fetch-depth: 0
       - run: python3 scripts/test-platform-access-audit.py
       - run: python3 scripts/test-platform-access-enroll.py
+      - run: python3 scripts/test-platform-owner-enroll.py
+      - name: Select explicitly reviewed persistent owner declarations
+        id: owners
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          OPERATION: ${{ inputs.operation }}
+          TARGET: ${{ inputs.target }}
+          REQUEST_PATH: ${{ inputs.access_request }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, pathlib, re, subprocess
+          spec = importlib.util.spec_from_file_location('owner_enrollment', 'scripts/platform-owner-enroll.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          if os.environ['EVENT_NAME'] == 'push':
+              assert all(re.fullmatch('[0-9a-f]{40}', os.environ[k]) for k in ('BEFORE_SHA','AFTER_SHA')), 'Invalid revision'
+              changed = subprocess.check_output(['git','diff','--name-only','--diff-filter=AM',os.environ['BEFORE_SHA'],os.environ['AFTER_SHA'],'--','.github/owner-requests/'], text=True).splitlines()
+          elif os.environ['OPERATION'] == 'owner-enroll':
+              changed = [os.environ['REQUEST_PATH']]
+          else:
+              changed = []
+          assert len(changed) <= 2, 'Review at most one owner declaration per application host'
+          selected, targets = [], set()
+          for name in changed:
+              assert re.fullmatch(r'\.github/owner-requests/(staging|production)-[a-z0-9-]+\.json', name), 'Invalid owner request path'
+              path = pathlib.Path(name)
+              assert path.is_file() and not path.is_symlink() and path.stat().st_size <= 65536, 'Invalid owner request file'
+              request = module.validate_request(json.loads(path.read_text()))
+              assert path.name.startswith(request['target'] + '-') and request['target'] not in targets, 'Duplicate or mismatched owner target'
+              assert os.environ['EVENT_NAME'] == 'push' or request['target'] == os.environ['TARGET'], 'Selected target differs from owner request'
+              targets.add(request['target'])
+              selected.append(dict(target=request['target'],host=request['host'],request=name))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('requests=' + json.dumps(selected, separators=(',',':')) + '\n')
+          PY
       - name: Select only an explicitly reviewed enrollment request
         id: request
         env:
@@ -143,8 +184,8 @@ jobs:
 
   access-audit:
     name: Read installed platform access on ${{ matrix.target }}
-    needs: [access-contract, access-enroll]
-    if: always() && needs.access-contract.result == 'success' && (github.event_name == 'push' || (inputs.operation == 'access-audit' && inputs.target != 'cloud') || inputs.operation == 'access-enroll')
+    needs: [access-contract, access-enroll, owner-enroll]
+    if: always() && needs.access-contract.result == 'success' && (github.event_name == 'push' || (inputs.operation == 'access-audit' && inputs.target != 'cloud') || inputs.operation == 'access-enroll' || inputs.operation == 'owner-enroll')
     strategy:
       fail-fast: false
       matrix:
@@ -357,3 +398,66 @@ jobs:
           path: artifacts/forward-chat-lifecycle/
           if-no-files-found: error
           retention-days: 90
+
+  owner-enroll:
+    name: Persist installation owners on ${{ matrix.target }}
+    needs: [access-contract, access-enroll]
+    if: always() && needs.access-contract.result == 'success' && (needs.access-enroll.result == 'success' || needs.access-enroll.result == 'skipped') && needs.access-contract.outputs.owners != '' && needs.access-contract.outputs.owners != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.access-contract.outputs.owners) }}
+    runs-on: [self-hosted, laplace, '${{ matrix.target }}']
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    concurrency:
+      group: laplace-site-${{ matrix.host }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Persist verified bindings, activate owner policy and verify serving authority
+        env:
+          REQUEST_PATH: ${{ matrix.request }}
+        run: |
+          set -euo pipefail
+          machine_values=$(python3 scripts/machine-env.py --paths --database)
+          eval "$machine_values"
+          unset machine_values
+          export LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+          export LAPLACE_APP_DBNAME="${LAPLACE_APP_DBNAME:?Declare the application database}"
+          export PGDATABASE="$LAPLACE_APP_DBNAME"
+          export PGHOST="${LAPLACE_APP_PGHOST:-$PGHOST}"
+          export PGPORT="${LAPLACE_APP_PGPORT:-$PGPORT}"
+          export PGUSER="${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-$PGUSER}}"
+          export LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          request = json.loads(Path(os.environ['REQUEST_PATH']).read_text())
+          assert request['origin'].rstrip('/') == os.environ['LAPLACE_API_URL'].rstrip('/'), 'Owner request must select the declared API listener'
+          PY
+          lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
+          exec 8>>"$lock"
+          flock -x -w 120 8
+          umask 077
+          directory="${LAPLACE_WORK_ROOT:?Declare persistent host work}/platform-owners"
+          mkdir -p -m 700 "$directory"
+          export LAPLACE_PLATFORM_OWNER_POLICY_FILE="$directory/policy.json"
+          receipt="$RUNNER_TEMP/platform-owners-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          python3 scripts/platform-owner-enroll.py --request "$REQUEST_PATH" \
+            --policy "$LAPLACE_PLATFORM_OWNER_POLICY_FILE" --state-file "$receipt"
+          env -u GITHUB_SHA bash deploy/linux/site.sh configure restart
+          python3 scripts/platform-owner-enroll.py --request "$REQUEST_PATH" \
+            --policy "$LAPLACE_PLATFORM_OWNER_POLICY_FILE" --state-file "$receipt" --verify
+      - name: Retain only the reduced owner authority receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: platform-owners-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/platform-owners-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 14

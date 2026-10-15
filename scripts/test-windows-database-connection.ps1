@@ -46,6 +46,36 @@ $records=[pscustomobject]@{
 $references=@(Get-IisCredentialReferences $iis)
 if($references.Count -ne 4 -or @($references | Where-Object Name -In @('substrate','appdb')).Count){throw 'IIS SSPI still requires database password records.'}
 $environment=Get-IisEnvironment $iis $records
+if($environment.Contains('LAPLACE_PLATFORM_OWNER_POLICY')){throw 'An absent policy must remain absent.'}
+$policy=[pscustomobject]@{version=1;owners=@([pscustomobject]@{provider='google';issuer='https://accounts.google.com';subject='fixture-private-subject';client_id='fixture';verified_at='2025-01-01T00:00:00Z'})}
+$records.identity | Add-Member platform_owner_policy $policy
+$environment=Get-IisEnvironment $iis $records
+if(($environment.LAPLACE_PLATFORM_OWNER_POLICY | ConvertFrom-Json).owners[0].subject -cne 'fixture-private-subject'){throw 'The private owner policy was not transported exactly.'}
+$migrationIdentity=Get-IisIdentityEnvironment $records.identity
+if(@($migrationIdentity.Keys | Where-Object {$_ -match 'SECRET'}).Count){throw 'Migration owner policy transport included OAuth secrets.'}
+$policy.owners[0].client_id='different-client'
+Denied {Get-IisEnvironment $iis $records} 'different provider client'
+$policy.owners[0].client_id='fixture'
+$iis.environment | Add-Member LAPLACE_PLATFORM_OWNER_POLICY 'must-not-be-public'
+Denied {Get-IisEnvironment $iis $records} 'Public environment'
+$iis.environment.PSObject.Properties.Remove('LAPLACE_PLATFORM_OWNER_POLICY')
+$policy.owners=@()
+if(($environment=(Get-IisEnvironment $iis $records)).LAPLACE_PLATFORM_OWNER_POLICY -cne '{"version":1,"owners":[]}'){throw 'Explicit empty owner policy was not retained.'}
+$records.identity.PSObject.Properties.Remove('platform_owner_policy')
+$environment=Get-IisEnvironment $iis $records
+$ownerFile=Get-IisOwnerPolicyPath $iis
+$null=New-Item -ItemType Directory -Path (Split-Path -Parent $ownerFile)
+$policy.owners=@([pscustomobject]@{provider='google';issuer='https://accounts.google.com';subject='file-private-subject';client_id='fixture';verified_at='2025-01-01T00:00:00Z'})
+Iis-Json $policy | Set-Content -LiteralPath $ownerFile
+$iis | Add-Member platform_owner_policy_file $ownerFile
+$environment=Get-IisEnvironment $iis $records
+if($environment.LAPLACE_PLATFORM_OWNER_POLICY_FILE -cne $ownerFile -or $environment.Contains('LAPLACE_PLATFORM_OWNER_POLICY')){throw 'Runtime must read the canonical file without stale inline policy.'}
+$privateValues=Get-IisInstallationIdentityEnvironment $iis $records.identity
+if(($privateValues.LAPLACE_PLATFORM_OWNER_POLICY | ConvertFrom-Json).owners[0].subject -cne 'file-private-subject'){throw 'Migration policy did not come from the canonical file.'}
+Remove-Item -LiteralPath $ownerFile
+Denied {Get-IisEnvironment $iis $records} 'owner policy file is missing'
+$iis.PSObject.Properties.Remove('platform_owner_policy_file')
+$environment=Get-IisEnvironment $iis $records
 foreach($name in 'LAPLACE_DB','LAPLACE_APP_DB'){
     $parsed=Parsed $environment[$name]
     if($parsed.ContainsKey('Password') -or $parsed['Host'] -ne $env:COMPUTERNAME -or $parsed['SSL Mode'] -ne 'VerifyFull'){throw 'IIS did not render local password-free connections.'}

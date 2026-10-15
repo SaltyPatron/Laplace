@@ -47,4 +47,7 @@ case "$command" in
   app-*|substrate-*) supports "$command" || exit ;;
 esac
 
-exec dotnet "$runtime" "$command" "$@"
+case "$command" in
+  app-*) exec python3 "$ROOT/deploy/linux/platform-owner-policy.py" -- dotnet "$runtime" "$command" "$@" ;;
+  *) exec dotnet "$runtime" "$command" "$@" ;;
+esac
