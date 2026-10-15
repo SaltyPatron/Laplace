@@ -135,6 +135,36 @@ function Invoke-DevelopmentBao($Config,$Method,$Path,$Token,$Body){
     $events=Get-Content $env:TEST_EVENTS
     Assert ($events.IndexOf('identity:revoked') -lt $events.IndexOf('migration:app-nuke')) 'Credential read/revocation did not finish before destructive maintenance.'
     Write-Host 'PASS authoritative owner policy reaches recreation before writes and ambient environment is restored'
+    $null=New-Item -ItemType Directory -Path "$work/site/agent","$work/site/state/platform-owners" -Force
+    'role-fixture' | Set-Content "$work/site/agent/role-id"
+    'secret-fixture' | Set-Content "$work/site/agent/secret-id"
+    $workloadIdentity=& { . "$work/credentials.ps1"; (Invoke-DevelopmentBao $access GET 'kv/data/identity' 'fixture').data.data }
+    $workloadIdentity.platform_owner_policy | ConvertTo-Json -Depth 8 | Set-Content "$work/site/state/platform-owners/policy.json"
+    $ownerDeclaration=@{platform_access=@{browser_origin=$declaration.origin;administrators=@(@{provider='google';issuer='https://accounts.google.com';subject='private-owner-fixture'})}}
+    $ownerDeclaration | ConvertTo-Json -Depth 8 | Set-Content "$work/site/state/platform-owners/declaration.json"
+    $declaration.platform_owner_declaration_file="$work/site/state/platform-owners/declaration.json"
+    $declaration.platform_owner_policy_file=Join-Path $declaration.directory 'state/platform-owners/policy.json'
+    $declaration | ConvertTo-Json -Depth 8 | Set-Content "$work/installation.json"
+    function Invoke-RestMethod {
+        param($Uri,$Method,$ContentType,$Body,$TimeoutSec,$Headers)
+        if($Uri.EndsWith('/auth/approle/login')){return @{auth=@{client_token='workload-fixture'}}}
+        if($Uri.EndsWith('/auth/token/revoke-self')){Add-Content $env:TEST_EVENTS 'workload:revoked';return}
+        return @{data=@{data=$workloadIdentity}}
+    }
+    $env:TEST_IDENTITY_FAIL='1'
+    $policyHash=(Get-FileHash $declaration.platform_owner_policy_file).Hash
+    foreach($operation in 'repair','recreate','repair'){
+        '' | Set-Content $env:TEST_EVENTS
+        & $command @invoke -Database application -Operation $operation -InstalledCredentials
+        $events=Get-Content $env:TEST_EVENTS
+        $verb=if($operation -eq 'recreate'){'app-nuke'}else{'app-up'}
+        Assert ($events.IndexOf('workload:revoked') -lt $events.IndexOf('migration:'+$verb)) 'Workload identity was not loaded before migration.'
+        Assert ((Get-FileHash $declaration.platform_owner_policy_file).Hash -ceq $policyHash) 'Maintenance rewrote the persistent policy.'
+    }
+    Write-Host 'PASS installed workload repair/recreate/repair preserves owner policy without personal enrollment'
+    Remove-Item Function:Invoke-RestMethod
+    $declaration.Remove('platform_owner_policy_file');$declaration.Remove('platform_owner_declaration_file')
+    $declaration | ConvertTo-Json -Depth 8 | Set-Content "$work/installation.json"
     '' | Set-Content $env:TEST_EVENTS
     $env:TEST_IDENTITY_FAIL='1';$failed=$false
     try { & $command @invoke -Database application -Operation recreate }catch{$failed=$true}

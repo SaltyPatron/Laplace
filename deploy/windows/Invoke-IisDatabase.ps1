@@ -7,15 +7,17 @@ param(
     [string]$AccessConfiguration,
     [string]$MigrationRuntime,
     [string]$ReceiptDirectory,
+    [switch]$InstalledCredentials,
     [switch]$Yes
 )
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 . "$PSScriptRoot/iis-runtime.ps1"
+. "$PSScriptRoot/iis-owner-lifecycle.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
 if(-not $Installation){throw 'Declare the IIS installation with LAPLACE_IIS_INSTALLATION or -Installation.'}
-if(-not $AccessConfiguration){$AccessConfiguration=Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
 $c=Read-IisInstallation $Installation
+if(-not $AccessConfiguration){$AccessConfiguration=if($c.database_access_file){$c.database_access_file}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}}
 $access=Get-Content -LiteralPath $AccessConfiguration -Raw | ConvertFrom-Json
 if($access.authentication -ne 'sspi' -or (Get-IisDatabaseAuthentication $c) -ne 'sspi' -or
     $access.database_host -ine $env:COMPUTERNAME -or $c.database.host -ine $access.database_host -or
@@ -93,8 +95,11 @@ try {
     $env:LAPLACE_APP_DB=Connection $access.application_database
     $env:LAPLACE_OPS_LOG_DIR=Join-Path $receiptRoot 'logs'
     if($Database -eq 'application'){
+        $identityRecord=$null
         $receipt.platform_owner_policy='no-owner-config'
-        if($access.PSObject.Properties['identity_reference']){
+        if($InstalledCredentials){
+            $identityRecord=Read-IisWorkloadIdentity $c (Join-Path $c.directory 'agent') $null
+        }elseif($access.PSObject.Properties['identity_reference']){
             if(($access.identity_reference -replace '^kv/','kv/data/') -cne $c.records.identity -or
                 $access.client -ine $c.host -or $access.bao_address.TrimEnd('/') -cne $c.address.TrimEnd('/')){
                 throw 'The development identity record differs from the IIS installation.'
@@ -106,14 +111,22 @@ try {
             try {
                 $token=New-DevelopmentBaoSession $access
                 $identityRecord=(Invoke-DevelopmentBao $access GET $c.records.identity $token).data.data
-                $identityValues=Get-IisInstallationIdentityEnvironment $c $identityRecord
-                foreach($name in $identityValues.Keys){[Environment]::SetEnvironmentVariable($name,$identityValues[$name])}
-                if($identityValues.Contains('LAPLACE_PLATFORM_OWNER_POLICY')){$receipt.platform_owner_policy='configured'}
             }finally{
                 try{if($token){$null=Invoke-DevelopmentBao $access POST 'auth/token/revoke-self' $token @{}}}
-                finally{$token=$null;$identityRecord=$null;$identityValues=$null}
+                finally{$token=$null}
             }
         }
+        if($identityRecord){
+            if($c.platform_owner_declaration_file -and $Operation -ne 'status'){
+                $ownerDeclaration=Read-IisOwnerJson $c.platform_owner_declaration_file
+                $ownerEnrollment=Sync-IisPlatformOwnerPolicy $c $identityRecord $ownerDeclaration {Read-IisOwnerBindings $c $access}
+                $receipt.owner_count=$ownerEnrollment.owner_count;$receipt.owner_policy_changed=$ownerEnrollment.changed
+            }
+            $identityValues=Get-IisInstallationIdentityEnvironment $c $identityRecord
+            foreach($name in $identityValues.Keys){[Environment]::SetEnvironmentVariable($name,$identityValues[$name])}
+            if($identityValues.Contains('LAPLACE_PLATFORM_OWNER_POLICY')){$receipt.platform_owner_policy='configured'}
+            $identityRecord=$null;$identityValues=$null
+        }elseif($c.platform_owner_policy_file -or $c.platform_owner_declaration_file){throw 'The declared owner policy requires installation identity configuration before database maintenance.'}
         Write-Host "Platform owner policy: $($receipt.platform_owner_policy)"
     }
     # Only installed-runtime selection depends on the active IIS publication.

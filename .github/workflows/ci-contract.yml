@@ -146,6 +146,7 @@ jobs:
           $runtime = Join-Path $build 'app/bin/Laplace.Migrations/Release/net10.0'
           ./tests/migration-command-routing.ps1 -Runtime "$runtime/Laplace.Migrations.dll"
           ./tests/iis-database-maintenance.ps1 -NpgsqlAssembly "$runtime/Npgsql.dll"
+          ./tests/iis-owner-lifecycle.ps1
           ./tests/iis-application-restart.ps1
           ./tests/iis-chess-cache-package.ps1
 
