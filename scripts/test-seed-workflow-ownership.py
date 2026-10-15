@@ -36,9 +36,10 @@ class WorkflowOwnership(unittest.TestCase):
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
         text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("name: Product — maintenance"))
-        self.assertIn("options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]", text)
+        self.assertIn("options: [status, access-audit, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]", text)
+        operation = text.split("      operation:\n", 1)[1].split("      target:\n", 1)[0]
         for internal in ("test-dev", "test-db", "test-live", "applications", "install", "check", "provision"):
-            self.assertNotIn(f", {internal}", text)
+            self.assertNotIn(f", {internal}", operation)
 
     def test_expensive_competitive_proof_is_dispatch_only(self):
         text = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
