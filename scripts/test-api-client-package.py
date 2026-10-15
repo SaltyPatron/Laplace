@@ -65,6 +65,16 @@ class ClientPackageTests(unittest.TestCase):
                 PACKAGE.package(root, root / 'output', 'win-x64', 'a' * 40)
             self.assertFalse((root / 'output').exists())
 
+    def test_database_dependency_is_rejected_from_the_api_distribution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ('Laplace.Cli.exe', 'coreclr.dll', 'Laplace.Cli.dll',
+                         'Laplace.Cli.runtimeconfig.json', 'Npgsql.dll'):
+                (root / name).write_bytes(b'fixture')
+            with self.assertRaisesRegex(ValueError, 'local substrate dependency: Npgsql.dll'):
+                PACKAGE.package(root, root / 'output', 'win-x64', 'a' * 40)
+            self.assertFalse((root / 'output').exists())
+
     def test_setup_passes_key_path_and_removes_temporary_configuration_on_failure(self):
         with tempfile.TemporaryDirectory(prefix='client setup ') as temporary:
             root = Path(temporary).resolve()
