@@ -156,7 +156,7 @@ jobs:
           export PGDATABASE="$LAPLACE_APP_DBNAME"
           export PGHOST="${LAPLACE_APP_PGHOST:-$PGHOST}"
           export PGPORT="${LAPLACE_APP_PGPORT:-$PGPORT}"
-          export PGUSER="${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-$PGUSER}}"
+          export PGUSER="${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-laplace}}"
           export LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
           python3 - <<'PY'
           import json, os
@@ -432,7 +432,7 @@ jobs:
           export PGDATABASE="$LAPLACE_APP_DBNAME"
           export PGHOST="${LAPLACE_APP_PGHOST:-$PGHOST}"
           export PGPORT="${LAPLACE_APP_PGPORT:-$PGPORT}"
-          export PGUSER="${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-$PGUSER}}"
+          export PGUSER="${LAPLACE_APP_ROLE:-${LAPLACE_ROLE:-laplace}}"
           export LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
           python3 - <<'PY'
           import json, os
