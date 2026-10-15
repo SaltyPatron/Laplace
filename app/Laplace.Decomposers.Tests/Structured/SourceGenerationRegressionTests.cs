@@ -99,6 +99,30 @@ public sealed class SourceGenerationRegressionTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Theory]
+    [InlineData(false, ".landed")]
+    [InlineData(true, ".landed")]
+    [InlineData(true, "ucd/.laplace-archive-sha256")]
+    public async Task Acquisition_receipts_are_control_artifacts_without_hiding_unknown_files(bool unicode, string receipt)
+    {
+        CodepointPerfcache.LoadDefault();
+        string root = TemporaryDirectory();
+        try
+        {
+            Write(root, receipt, "acquisition metadata");
+            Write(root, "unrecognized-source.txt", "source content");
+            var graph = unicode
+                ? await new Unicode.UnicodeDecomposer().DescribeArtifactsAsync(root, DecomposerOptions.Default)
+                : await new ISO.ISODecomposer().DescribeArtifactsAsync(root, DecomposerOptions.Default);
+            Assert.NotNull(graph);
+            Assert.Equal(IngestArtifactDisposition.ExcludedWithReason,
+                Assert.Single(graph.Artifacts, a => a.RelativePath == receipt).Disposition);
+            Assert.Equal(IngestArtifactDisposition.Unsupported,
+                Assert.Single(graph.Artifacts, a => a.RelativePath == "unrecognized-source.txt").Disposition);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private static void CreateCiliFiles(string root, string prefix)
     {
         foreach (string relative in new[] { "ili.ttl", "ili-map-pwn30.tab", "ili-map-pwn31.tab",

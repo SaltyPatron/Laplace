@@ -286,7 +286,8 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
     private static bool IsIsoControlArtifact(string relative)
     {
         string name = Path.GetFileName(relative);
-        return name.Equals("checkpoint.bin", StringComparison.OrdinalIgnoreCase)
+        return relative.Equals(".landed", StringComparison.Ordinal)
+            || name.Equals("checkpoint.bin", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
             || name.Contains("readme", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)

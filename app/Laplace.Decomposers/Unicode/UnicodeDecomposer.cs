@@ -538,7 +538,9 @@ public sealed class UnicodeDecomposer
     private static bool IsUnicodeControlArtifact(string relative)
     {
         string name = Path.GetFileName(relative);
-        return relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)
+        return relative.Equals(".landed", StringComparison.Ordinal)
+            || relative.Equals("ucd/.laplace-archive-sha256", StringComparison.Ordinal)
+            || relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)
             || name.Equals("ReadMe.txt", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
             || name.Contains("readme", StringComparison.OrdinalIgnoreCase)
