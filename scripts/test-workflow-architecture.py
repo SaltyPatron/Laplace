@@ -42,7 +42,7 @@ class WorkflowArchitecture(unittest.TestCase):
         observer = maintenance.split("\n  access-audit:\n", 1)[1].split("\n  unsupported-deployment:\n", 1)[0]
         self.assertIn("runs-on: ubuntu-24.04", validation)
         self.assertIn("python3 scripts/test-platform-access-audit.py", validation)
-        self.assertIn("needs: access-contract", observer)
+        self.assertIn("needs: [access-contract, access-enroll]", observer)
         self.assertIn("inputs.target != 'cloud'", observer)
         self.assertIn('flock -s -w 120 8', observer)
         self.assertIn('contents: read', observer)
@@ -60,6 +60,27 @@ class WorkflowArchitecture(unittest.TestCase):
         scope_spec.loader.exec_module(scope)
         self.assertTrue(scope.ignored('scripts/platform-access-audit.py'))
         self.assertIn('- "scripts/platform-access-audit.py"', (WORKFLOWS / 'laplace.yml').read_text())
+
+    def test_initial_access_enrollment_selects_a_reviewed_request_and_reserves_the_host(self):
+        maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
+        enrollment = maintenance.split("\n  access-enroll:\n", 1)[1].split("\n  access-audit:\n", 1)[0]
+        self.assertIn("needs.access-contract.outputs.request != ''", enrollment)
+        self.assertIn("runs-on: [self-hosted, laplace, staging]", enrollment)
+        self.assertIn("group: laplace-site-hart-server", enrollment)
+        self.assertIn("flock -x -w 120 8", enrollment)
+        self.assertLess(enrollment.index("flock -x"), enrollment.index("python3 scripts/platform-access-enroll.py"))
+        self.assertIn('PGDATABASE="$LAPLACE_APP_DBNAME"', enrollment)
+        self.assertIn("LAPLACE_WORK_ROOT:?Declare persistent host work", enrollment)
+        self.assertIn("Request must select the declared API listener", enrollment)
+        self.assertIn("contents: read", enrollment)
+        self.assertNotIn("id-token:", enrollment)
+        self.assertNotIn("site.sh", enrollment)
+        self.assertNotIn("sudo", enrollment)
+        self.assertIn("'--diff-filter=AM'", maintenance)
+        self.assertIn("Review one enrollment request per operation", maintenance)
+        self.assertIn("Initial enrollment supports staging only", maintenance)
+        self.assertIn('scripts/platform-access-enroll.py', (ROOT / 'scripts/ci_product_scope.py').read_text())
+        self.assertIn('- "scripts/platform-access-enroll.py"', (WORKFLOWS / 'laplace.yml').read_text())
 
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}

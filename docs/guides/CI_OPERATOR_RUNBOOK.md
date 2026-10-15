@@ -56,6 +56,34 @@ then read both installed application environments under their shared host locks.
 This validates the observer against deployed APIs without rebuilding or activating
 application packages. Cloud is not an application-audit target.
 
+Initial administrator enrollment uses `access-enroll`, target `staging`, and a
+reviewed `.github/access-requests/staging-*.json` request. Merging one new or changed
+request also executes it. Changes to maintenance code alone only run the access
+audits. Deploy the API's `initialRoleAssignment` capability before adding a request;
+workflow concurrency alone does not order separate deployment and enrollment runs.
+
+The request selects existing, previously signed-in Google/Microsoft bindings with
+a SHA-256 verification fingerprint over six UTF-8 fields, each preceded by its
+unsigned 8-byte big-endian byte length: target, role, random 64-hex nonce, provider,
+issuer, subject. This fingerprint verifies the selected request; it is not a new
+identity, a Laplace content identity, or a source of authority. The explicit operator
+request authorizes the assignment. Raw subjects, local account IDs and credentials
+must not be committed to the public repository. The helper never matches by email
+and never creates or merges accounts.
+
+Under the exclusive installed host lock, the helper reads the declared application
+database, checks the serving API agrees, then calls the existing audited role API
+with `onlyIfNeverAssigned: true`. The server checks current role and all prior role
+events atomically. Existing or revoked roles are not initial enrollment candidates.
+A private journal under the persistent declared work root is written before each
+request. Reruns only verify recorded assignments; a lost response is reconciled
+through audit readback, never by blindly sending the grant again. Preserve this
+journal across application database recovery. Failed partial requests report failure
+and retain the journal; they do not undo already committed, authorized grants.
+Only reduced provider/result receipts are public. Browser sessions remain a separate
+acceptance check. This operation neither promotes application packages nor starts
+hart-cloud and is not a cross-environment authority synchronization policy.
+
 A product-affecting push is intentionally boring:
 
 ```text
