@@ -50,9 +50,10 @@ class InstalledClientChecks(unittest.TestCase):
         command = arguments[2:]
         self.calls.append(command)
         if command == ['ops']:
-            value = [{'name': 'ops.substrate_counts'}]
+            value = {'object': 'op.catalog', 'operations': [{'name': 'ops.substrate_counts'}]}
         elif command[0] == 'op':
-            value = {'object': 'op.result', 'name': 'ops.substrate_counts'}
+            value = {'object': 'op.result', 'name': 'ops.substrate_counts',
+                     'rows': [{'metric': 'entities(ESTIMATE)', 'value': 17}]}
         elif command[0] == 'ingest':
             self.assertEqual(['ingest', 'document', 'laplace-client-verification.txt', '--verify'], command)
             source = Path(options['cwd']) / command[2]
@@ -89,6 +90,17 @@ class InstalledClientChecks(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'ingest failed with exit code 1'):
                 self.verify()
         self.assertEqual(3, len(self.calls))
+        self.assertTrue(all(not key.exists() for key in self.key_paths))
+
+    def test_empty_catalog_is_rejected_before_any_write(self):
+        def empty_catalog(arguments, **options):
+            result = self.execute(arguments, **options)
+            result.stdout = json.dumps({'object': 'op.catalog', 'operations': []})
+            return result
+        with patch.object(CHECK.subprocess, 'run', side_effect=empty_catalog):
+            with self.assertRaisesRegex(ValueError, 'empty or invalid operation catalog'):
+                self.verify()
+        self.assertEqual([['ops']], self.calls)
         self.assertTrue(all(not key.exists() for key in self.key_paths))
 
     def test_successful_process_with_wrong_export_is_rejected(self):
