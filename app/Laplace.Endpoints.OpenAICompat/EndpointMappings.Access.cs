@@ -28,6 +28,8 @@ internal static class AccessEndpoints
             });
         }).WithTags("access");
 
+        app.MapGet("/v1/admin/access/capabilities", () => Results.Ok(new { initialRoleAssignment = true }))
+            .WithTags("access");
         app.MapGet("/v1/admin/access/people", async (string? search, IPlatformAccessStore access, CancellationToken ct) =>
         {
             var term = (search ?? "").Trim();
@@ -42,7 +44,8 @@ internal static class AccessEndpoints
             try
             {
                 await access.SetRoleAsync(userId, request.Role,
-                    OperatorAuth.HasCredential(http.Request, options.Value) ? null : PlatformPolicy.UserId(http), ct);
+                    OperatorAuth.HasCredential(http.Request, options.Value) ? null : PlatformPolicy.UserId(http), ct,
+                    request.OnlyIfNeverAssigned);
                 return Results.NoContent();
             }
             catch (AccessChangeException ex)
@@ -70,5 +73,5 @@ internal static class AccessEndpoints
                 clientId = p.ClientId, authority = p.Authority, callbackPath = p.CallbackPath })
         })).WithTags("access");
     }
-    internal sealed record PlatformRoleRequest(string? Role);
+    internal sealed record PlatformRoleRequest(string? Role, bool OnlyIfNeverAssigned = false);
 }

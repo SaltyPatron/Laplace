@@ -50,7 +50,7 @@ internal interface IPlatformAccessStore
     Task<string?> RoleAsync(Guid user, CancellationToken ct);
     Task<IReadOnlyList<PlatformPerson>> PeopleAsync(string search, CancellationToken ct);
     Task<IReadOnlyList<PlatformRoleEvent>> EventsAsync(CancellationToken ct);
-    Task SetRoleAsync(Guid user, string? role, Guid? actor, CancellationToken ct);
+    Task SetRoleAsync(Guid user, string? role, Guid? actor, CancellationToken ct, bool onlyIfNeverAssigned = false);
 }
 
 internal sealed class PlatformAuthorization(IPlatformAccessStore store, IOptions<LaplaceAuthOptions> options)
@@ -106,7 +106,7 @@ internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database) : I
         return result;
     }
 
-    public async Task SetRoleAsync(Guid user, string? role, Guid? actor, CancellationToken ct)
+    public async Task SetRoleAsync(Guid user, string? role, Guid? actor, CancellationToken ct, bool onlyIfNeverAssigned = false)
     {
         if (role is not null && !PlatformPolicy.Roles.Any(r => r.Id == role)) throw new AccessChangeException("Choose a listed platform role.");
         await using var connection = await database.OpenConnectionAsync(ct);
@@ -130,6 +130,13 @@ internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database) : I
         {
             current.Parameters.AddWithValue(user);
             previous = await current.ExecuteScalarAsync(ct) as string;
+        }
+        if (onlyIfNeverAssigned)
+        {
+            await using var history = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM app.platform_role_events WHERE user_id = $1)", connection, transaction);
+            history.Parameters.AddWithValue(user);
+            if (previous is not null || (bool)(await history.ExecuteScalarAsync(ct))!)
+                throw new AccessChangeException("Initial access assignment requires a person with no current role or previous role changes.");
         }
         if (previous == role) { await transaction.CommitAsync(ct); return; }
         if (previous == "administrator" && role != "administrator")

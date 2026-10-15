@@ -24,10 +24,18 @@ public sealed class PlatformAccessTests
     {
         public string? Role = role;
         public int Changes;
+        public bool InitialAssignmentRequested;
+        public bool RefuseInitialAssignment;
         public Task<string?> RoleAsync(Guid user, CancellationToken ct) => Task.FromResult(Role);
         public Task<IReadOnlyList<PlatformPerson>> PeopleAsync(string search, CancellationToken ct) => Task.FromResult<IReadOnlyList<PlatformPerson>>([]);
         public Task<IReadOnlyList<PlatformRoleEvent>> EventsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<PlatformRoleEvent>>([]);
-        public Task SetRoleAsync(Guid user, string? role, Guid? actor, CancellationToken ct) { Changes++; return Task.CompletedTask; }
+        public Task SetRoleAsync(Guid user, string? role, Guid? actor, CancellationToken ct, bool onlyIfNeverAssigned = false)
+        {
+            InitialAssignmentRequested = onlyIfNeverAssigned;
+            if (onlyIfNeverAssigned && RefuseInitialAssignment) throw new AccessChangeException("Previous role change exists.");
+            Changes++;
+            return Task.CompletedTask;
+        }
     }
     private sealed class IdentityHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
@@ -95,9 +103,32 @@ public sealed class PlatformAccessTests
         Assert.Equal(read ? HttpStatusCode.OK : HttpStatusCode.Forbidden, (await client.GetAsync("/v1/admin/services/mcp")).StatusCode);
         Assert.Equal(services ? HttpStatusCode.Accepted : HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/v1/admin/services/mcp/start", new { })).StatusCode);
         Assert.Equal(access ? HttpStatusCode.OK : HttpStatusCode.Forbidden, (await client.GetAsync("/v1/admin/access/people")).StatusCode);
+        Assert.Equal(access ? HttpStatusCode.OK : HttpStatusCode.Forbidden, (await client.GetAsync("/v1/admin/access/capabilities")).StatusCode);
         Assert.Equal(access ? HttpStatusCode.NoContent : HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/v1/admin/access/people/{User}/role", new { role = "administrator" })).StatusCode);
         Assert.Equal((read ? 1 : 0) + (services ? 1 : 0), factory.Control.Calls);
         Assert.Equal(access ? 1 : 0, factory.Access.Changes);
+        Assert.False(factory.Access.InitialAssignmentRequested);
+    }
+
+    [Fact]
+    public async Task InitialAssignmentCapabilityAndConditionUseTheProtectedAccessRoute()
+    {
+        await using var factory = new Factory(null);
+        using var client = factory.Client(signedIn: false);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/v1/admin/access/capabilities")).StatusCode);
+        client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "test-installation");
+        using var capabilities = await client.GetAsync("/v1/admin/access/capabilities");
+        Assert.Equal(HttpStatusCode.OK, capabilities.StatusCode);
+        using var document = System.Text.Json.JsonDocument.Parse(await capabilities.Content.ReadAsStringAsync());
+        Assert.True(document.RootElement.GetProperty("initialRoleAssignment").GetBoolean());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/v1/admin/access/people/{User}/role",
+            new { role = "administrator", onlyIfNeverAssigned = true })).StatusCode);
+        Assert.True(factory.Access.InitialAssignmentRequested);
+        Assert.Equal(1, factory.Access.Changes);
+        factory.Access.RefuseInitialAssignment = true;
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"/v1/admin/access/people/{User}/role",
+            new { role = "administrator", onlyIfNeverAssigned = true })).StatusCode);
+        Assert.Equal(1, factory.Access.Changes);
     }
 
     [Theory]

@@ -13,6 +13,66 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
+  platform-initial-assignment:
+    name: PostgreSQL initial platform assignment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: fixture-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGDATABASE: postgres
+      PGPASSWORD: fixture-only-password
+      LAPLACE_TEST_APP_DB: Host=127.0.0.1;Port=5432;Username=postgres;Password=fixture-only-password;Database=postgres
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Provide pinned grammar queries for managed build
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - name: Create isolated application tables with the real authority migration
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE SCHEMA app;
+          CREATE TABLE app.users(user_id uuid PRIMARY KEY, email text, display_name text);
+          CREATE TABLE app.tenants(tenant_id text PRIMARY KEY);
+          SQL
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/20261012000000_app_platform_access.sql
+      - name: Verify atomic initial assignment and revocation protection
+        run: |
+          set -euo pipefail
+          export LAPLACE_EXTERNAL="$GITHUB_WORKSPACE/.ci-dependencies"
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+            -c Release -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" -p:OpenApiGenerateDocuments=false \
+            --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests' \
+            --logger 'trx;LogFileName=platform-initial-assignment.trx' --results-directory "$RUNNER_TEMP/platform-access-results"
+          python3 - "$RUNNER_TEMP/platform-access-results/platform-initial-assignment.trx" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          counters = root.find('.//{*}Counters')
+          assert counters is not None and counters.get('total') == '4' and counters.get('passed') == '4', 'All four database tests must run and pass'
+          PY
+
   substrate-runtime-grants:
     name: PostgreSQL runtime grant recovery
     runs-on: ubuntu-24.04
