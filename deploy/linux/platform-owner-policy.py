@@ -35,6 +35,25 @@ def valid_issuer(provider, value):
         return False
 
 
+def verified_timestamp(value):
+    # PostgreSQL JSON retains 0-6 fractional digits. Python 3.10 fromisoformat
+    # accepts only 0, 3 or 6, whereas strptime's %f preserves every supported width.
+    if not isinstance(value, str) or len(value) > 64 or not re.fullmatch(
+            r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
+            r'(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})', value):
+        raise ValueError('Invalid owner policy verification timestamp')
+    try:
+        pattern = '%Y-%m-%dT%H:%M:%S' + ('.%f' if '.' in value else '') + '%z'
+        verified = datetime.strptime(value, pattern)
+        if (abs(verified.utcoffset().total_seconds()) > 14 * 3600
+                or verified <= datetime(1970, 1, 1, tzinfo=timezone.utc)
+                or verified > datetime.now(timezone.utc)):
+            raise ValueError()
+        return verified
+    except ValueError:
+        raise ValueError('Invalid owner policy verification timestamp') from None
+
+
 def environment(record):
     result = {}
     for provider, key in CLIENT_ENV.items():
@@ -63,12 +82,7 @@ def environment(record):
             raise ValueError('Invalid owner policy issuer')
         if owner['client_id'] != result[CLIENT_ENV[owner['provider']]]:
             raise ValueError('Owner policy belongs to a different provider client')
-        try:
-            verified = datetime.fromisoformat(owner['verified_at'].replace('Z', '+00:00'))
-            if verified.tzinfo is None or verified <= datetime(1970, 1, 1, tzinfo=timezone.utc) or verified > datetime.now(timezone.utc):
-                raise ValueError()
-        except ValueError:
-            raise ValueError('Invalid owner policy verification timestamp') from None
+        verified_timestamp(owner['verified_at'])
         binding = tuple(owner[k] for k in ('provider', 'issuer', 'subject'))
         if binding in seen:
             raise ValueError('Duplicate owner policy binding')

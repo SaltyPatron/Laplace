@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise private owner policy transport without database or service access."""
 import contextlib
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import io
 import json
@@ -39,6 +40,35 @@ class OwnerTransportTests(unittest.TestCase):
         self.assertEqual(json.loads(values[owner.POLICY_ENV]), self.policy)
         self.assertEqual(values['LAPLACE_AUTH_GOOGLE_CLIENT_ID'], 'client-test')
         self.assertNotIn('CLIENT_SECRET', ''.join(values))
+
+    def test_postgresql_fractional_seconds_are_exact_at_every_precision(self):
+        for fraction in ('', '1', '12', '123', '1234', '12345', '123456'):
+            for offset, minutes in (('Z', 0), ('+00:00', 0), ('-05:00', -300), ('+05:30', 330)):
+                with self.subTest(fraction=fraction, offset=offset):
+                    value = '2025-01-02T03:04:05' + ('.' + fraction if fraction else '') + offset
+                    expected = datetime(2025, 1, 2, 3, 4, 5, int(fraction.ljust(6, '0')),
+                                        timezone(timedelta(minutes=minutes)))
+                    actual = owner.verified_timestamp(value)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual.utcoffset(), expected.utcoffset())
+                    self.policy['owners'][0]['verified_at'] = value
+                    self.write()
+                    projected = json.loads(owner.load_policy(self.path)[owner.POLICY_ENV])
+                    self.assertEqual(projected['owners'][0]['verified_at'], value)
+
+    def test_invalid_timestamp_fails_before_child_and_without_timestamp_output(self):
+        for value in (None, 'invalid', '2025-01-02T03:04:05', '2025-01-02T03:04:05.1234567Z',
+                      '2025-02-30T03:04:05Z', '2025-01-02T03:04:05+15:00',
+                      '2999-01-01T00:00:00Z', '1970-01-01T00:00:00Z'):
+            with self.subTest(value=value):
+                self.policy['owners'][0]['verified_at'] = value
+                self.write()
+                with patch.object(owner.subprocess, 'run') as child:
+                    with self.assertRaises(ValueError) as failure:
+                        owner.run(self.path, ['never-run'])
+                    child.assert_not_called()
+                    if isinstance(value, str):
+                        self.assertNotIn(value, str(failure.exception))
 
     def test_absent_and_explicit_empty_are_distinct(self):
         self.assertEqual(owner.load_policy(self.path.with_name('absent'), missing_ok=True), {})

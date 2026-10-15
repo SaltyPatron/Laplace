@@ -105,14 +105,44 @@ COMMIT;
                "-U", os.environ["PGUSER"], "-d", os.environ["PGDATABASE"], "-f", "-"]
     try:
         result = subprocess.run(command, input=sql, text=True, capture_output=True, timeout=20, check=False)
-        if result.returncode or len(result.stdout.encode("utf-8")) > MAX_BODY:
-            raise ValueError()
+        if result.returncode:
+            # Classify fixed libpq diagnostics without publishing server messages,
+            # connection strings, query results, or provider identifiers.
+            reason = "client-command-failed"
+            for marker, category in (
+                ("no password supplied", "password-unavailable"),
+                ("password authentication failed", "password-rejected"),
+                ("no pg_hba.conf entry", "connection-policy-rejected"),
+                ("Connection refused", "connection-refused"),
+                ("could not translate host name", "host-resolution-failed"),
+                ("error while loading shared libraries", "client-library-unavailable"),
+                ("symbol lookup error", "client-library-incompatible"),
+                ("certificate verify failed", "certificate-verification-failed"),
+                ("Permission denied", "client-access-denied"),
+            ):
+                if marker in result.stderr:
+                    reason = category
+                    break
+            state = re.search(r"(?:ERROR|FATAL):\s+([0-9A-Z]{5})\b", result.stderr)
+            if state:
+                reason += "; sqlstate=" + state.group(1)
+            raise EnrollmentError("The application identity lookup failed: " + reason + ".")
+        if len(result.stdout.encode("utf-8")) > MAX_BODY:
+            raise EnrollmentError("The application identity lookup exceeded its response limit.")
         rows = json.loads(result.stdout)
         if not isinstance(rows, list) or len(rows) > MAX_ROWS or any(not isinstance(row, dict) for row in rows):
             raise ValueError()
         return rows
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        raise EnrollmentError("The bounded application identity lookup did not complete.") from None
+    except EnrollmentError:
+        raise
+    except FileNotFoundError:
+        raise EnrollmentError("The declared PostgreSQL client executable is missing.") from None
+    except PermissionError:
+        raise EnrollmentError("The declared PostgreSQL client executable is not accessible.") from None
+    except subprocess.TimeoutExpired:
+        raise EnrollmentError("The bounded application identity lookup timed out.") from None
+    except (OSError, ValueError):
+        raise EnrollmentError("The application identity lookup returned no valid bounded response.") from None
 
 
 def selected_bindings(request, rows):
