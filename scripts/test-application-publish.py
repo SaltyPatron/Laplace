@@ -469,6 +469,21 @@ class DeploymentReadinessTests(unittest.TestCase):
             self.assertEqual("owned-key", os.environ["LAPLACE_API_KEY"])
         request.assert_not_called()
 
+    def test_credential_failure_reports_only_a_safe_typed_code(self):
+        for body, suffix in (
+            (b'{"error":{"code":"tenant_not_found","message":"private detail"}}', " (tenant_not_found)"),
+            (b'{"error":{"code":"secret=value"}}', ""),
+            (b'{"error":null}', ""),
+            (b'not JSON', ""),
+        ):
+            with self.subTest(body=body), \
+                    patch.dict(os.environ, {"LAPLACE_OPERATOR_TOKEN": "unit-operator"}, clear=True), \
+                    patch.object(self.verify, "request", return_value=(404, "application/json", body)):
+                with self.assertRaises(ValueError) as failure:
+                    with self.verify.verification_credential("http://unit"):
+                        self.fail("failed credential issuance must not execute the operation")
+                self.assertEqual("deployment credential issuance returned HTTP 404" + suffix, str(failure.exception))
+
     def test_typed_operation_without_api_key_fails_before_request(self):
         environment = {k: v for k, v in os.environ.items() if k != "LAPLACE_API_KEY"}
         with patch.object(self.verify, "request") as request, \

@@ -7,6 +7,6 @@ internal interface IConversationWitness
     bool IsAvailable { get; }
     Task<string> RecordPromptAsync(string tenant, string? userKey, Hash128 sessionId,
         string prompt, CancellationToken ct);
-    Task RecordResponseAsync(string tenant, string? userKey, Hash128 sessionId,
+    Task<bool> RecordResponseAsync(string tenant, string? userKey, Hash128 sessionId,
         string prompt, string? reply, string occurrenceKey, CancellationToken ct);
 }

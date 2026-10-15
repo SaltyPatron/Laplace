@@ -347,6 +347,25 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
+    public async Task EmptyStreamDoesNotReportAnUnwrittenResponseWitness()
+    {
+        var quoteId = await ApproveQuoteAsync("chat.completions", "empty-stream-tenant", "evt_empty_stream");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001", stream = true,
+            messages = new[] { new { role = "user", content = "tell me about unknown-topic" } }
+        }, quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var events = await ReadSseAsync(response);
+        var proof = Assert.Single(events.OfType<JsonObject>()
+            .Select(e => e["laplace"]?["forward_proof"]).OfType<JsonObject>());
+        Assert.False((bool)proof["response_witnessed"]!);
+        Assert.False((bool)proof["completion"]!);
+        Assert.Equal("unresolved", (string?)proof["disposition"]);
+        Assert.DoesNotContain(proof["events"]!.AsArray(), e => (string?)e?["event"] == "witness");
+    }
+
+    [Fact]
     public async Task Chat_SessionKey_RoundTripsOnHeaderAndMetadata()
     {
         var quoteId = await ApproveQuoteAsync("chat.completions", "golden-sess-tenant", "evt_golden_sess");

@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -145,6 +146,10 @@ SELECT json_build_object(
 """
     result = psql(database, sql, timeout)
     require(isinstance(result, dict), "native trace is not an object")
+    return result
+
+
+def validate_native_trace(result: dict) -> None:
     terminals = [r for r in result["execution"] if r["event"] in ("complete", "unresolved")]
     require(len(terminals) == 1, "native program did not return exactly one terminal receipt")
     terminal = terminals[0]
@@ -154,11 +159,13 @@ SELECT json_build_object(
             "completed native program lacks semantic-act/output fingerprint")
     require(len(result["realized"]) == terminal["output_count"],
             "realization count differs from native output receipt")
-    return result
 
 
 def validate_http(turn: dict, session: str) -> None:
-    require(turn["status"] == 200, f"ordinary chat returned HTTP {turn['status']}")
+    error = turn["response"].get("error")
+    code = error.get("code") if isinstance(error, dict) else None
+    suffix = f" ({code})" if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,80}", code) else ""
+    require(turn["status"] == 200, f"ordinary chat returned HTTP {turn['status']}{suffix}")
     require(turn["session_header"] == session, "ordinary response changed session key")
     body = turn["response"]
     require(body.get("object") == "chat.completion" and body.get("model") == MODEL,
@@ -185,16 +192,27 @@ def main() -> int:
         # The ordinary endpoint is the writer. No proof-only insert or alternate chat path.
         first = http_turn(args.base, args.tenant, args.session, args.first, args.timeout_seconds)
         validate_http(first, args.session)
+        report["http_turns"] = [first]
         sid = session_id(args.database, args.tenant, args.session, args.timeout_seconds)
+        report["session_id"] = sid
         after_first = snapshot(args.database, sid, args.timeout_seconds)
-        require(len(after_first["turns"]) >= 2, "first HTTP turn did not persist prompt+response")
+        report["after_first"] = after_first
+        require(after_first["turns"], "first HTTP turn did not persist its prompt")
         require(after_first["discourse_ids"], "first HTTP turn produced no reusable discourse identities")
 
         # Inspect exactly what turn two will consume before sending turn two.
         second_native = native_trace(args.database, args.second, after_first["discourse_ids"], args.timeout_seconds)
+        report["turn_two_native_receipt"] = second_native
         second = http_turn(args.base, args.tenant, args.session, args.second, args.timeout_seconds)
         validate_http(second, args.session)
+        report["http_turns"].append(second)
         after_second = snapshot(args.database, sid, args.timeout_seconds)
+        report["after_second"] = after_second
+        # Collect both ordinary turns and the actual native terminal receipt even
+        # when the substrate cannot answer yet. Acceptance still requires a
+        # completed semantic act and both persisted prompt/response pairs.
+        validate_native_trace(second_native)
+        require(len(after_first["turns"]) >= 2, "first HTTP turn did not persist prompt+response")
         require(len(after_second["turns"]) >= len(after_first["turns"]) + 2,
                 "second HTTP turn did not append prompt+response to the substrate session")
         require(after_second["discourse_ids"][:len(after_first["discourse_ids"])] == after_first["discourse_ids"],
