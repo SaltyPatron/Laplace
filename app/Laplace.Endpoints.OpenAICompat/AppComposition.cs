@@ -46,14 +46,8 @@ internal static class AppComposition
         var browserAuth = BuildBrowserAuthSettings();
         var authMode = ResolveAuthMode(browserAuth);
         services.AddSingleton(browserAuth);
-        var dataProtectionPath = IdentityConfig("LAPLACE_DATA_PROTECTION_KEYS");
-        if (!string.IsNullOrWhiteSpace(dataProtectionPath))
-        {
-            if (!IsOpenApiDocumentGeneration) Directory.CreateDirectory(dataProtectionPath);
-            services.AddDataProtection()
-                .SetApplicationName("Laplace")
-                .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
-        }
+        services.AddBrowserDataProtection(
+            IdentityConfig("LAPLACE_DATA_PROTECTION_KEYS"), IsOpenApiDocumentGeneration);
         services.AddSingleton<IIdentityStore>(sp =>
             new PostgresIdentityStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey)));
         services.AddSingleton<BrowserTicketStore>();
