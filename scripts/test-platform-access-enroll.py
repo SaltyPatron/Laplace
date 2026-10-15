@@ -318,6 +318,7 @@ class TransportAndDatabaseTests(unittest.TestCase):
         env = {"PGHOST": "/tmp", "PGPORT": "5432", "PGUSER": "migration-owner", "PGDATABASE": "application-db",
                "LAPLACE_APP_DBNAME": "application-db", "LAPLACE_PG_PREFIX": str(Path.cwd())}
         with patch.dict(os.environ, env, clear=True), \
+                patch.object(enroll.shutil, "which", return_value=str(Path.cwd() / 'bin/psql')), \
                 patch.object(enroll.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "[]", "")) as run:
             self.assertEqual(enroll.binding_rows(), [])
             args = run.call_args.args[0]
@@ -336,7 +337,8 @@ class TransportAndDatabaseTests(unittest.TestCase):
         for result in (subprocess.CompletedProcess([], 1, PRIVATE, TOKEN),
                        subprocess.CompletedProcess([], 0, PRIVATE, ""),
                        subprocess.CompletedProcess([], 0, json.dumps([{}] * 1001), "")):
-            with patch.dict(os.environ, env, clear=True), patch.object(enroll.subprocess, "run", return_value=result), \
+            with patch.dict(os.environ, env, clear=True), patch.object(enroll.shutil, "which", return_value=str(Path.cwd() / 'bin/psql')), \
+                    patch.object(enroll.subprocess, "run", return_value=result), \
                     self.assertRaises(enroll.EnrollmentError) as failure:
                 enroll.binding_rows()
             self.assertNotIn(PRIVATE, str(failure.exception))
@@ -351,13 +353,32 @@ class TransportAndDatabaseTests(unittest.TestCase):
             ("error while loading shared libraries: " + TOKEN, "client-library-unavailable"),
         )
         for stderr, expected in failures:
-            with patch.dict(os.environ, env, clear=True), patch.object(enroll.subprocess, "run",
+            with patch.dict(os.environ, env, clear=True), patch.object(enroll.shutil, "which", return_value=str(Path.cwd() / 'bin/psql')), \
+                    patch.object(enroll.subprocess, "run",
                     return_value=subprocess.CompletedProcess([], 1, PRIVATE, stderr)), \
                     self.assertRaises(enroll.EnrollmentError) as failure:
                 enroll.binding_rows()
             self.assertIn(expected, str(failure.exception))
             self.assertNotIn(PRIVATE, str(failure.exception))
             self.assertNotIn(TOKEN, str(failure.exception))
+
+    def test_application_host_client_selection_preserves_database_target(self):
+        prefix = str(Path.cwd() / 'build-host-prefix')
+        installed = str(Path.cwd() / 'system-client/psql')
+        env = {"PGHOST": "127.0.0.1", "PGPORT": "5432", "PGUSER": "migration-owner", "PGDATABASE": "application-db",
+               "LAPLACE_APP_DBNAME": "application-db", "LAPLACE_PG_PREFIX": prefix, "PATH": str(Path(installed).parent)}
+        with patch.dict(os.environ, env, clear=True), patch.object(enroll.shutil, "which", return_value=installed) as which, \
+                patch.object(enroll.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "[]", "")) as run:
+            self.assertEqual(enroll.binding_rows(), [])
+            self.assertEqual(which.call_args.kwargs['path'], os.pathsep.join((str(Path(prefix) / 'bin'), env['PATH'])))
+            command = run.call_args.args[0]
+            self.assertEqual(command[0], installed)
+            for flag, value in (('-h', '127.0.0.1'), ('-U', 'migration-owner'), ('-d', 'application-db')):
+                self.assertEqual(command[command.index(flag) + 1], value)
+        with patch.dict(os.environ, env, clear=True), patch.object(enroll.shutil, "which", return_value=None), \
+                patch.object(enroll.subprocess, "run") as run, self.assertRaises(enroll.EnrollmentError):
+            enroll.binding_rows()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

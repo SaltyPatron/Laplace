@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import stat
 import subprocess
@@ -100,7 +101,12 @@ SELECT coalesce(json_agg(binding), '[]'::json) FROM (
 ) binding;
 COMMIT;
 """
-    command = [str(prefix / "bin/psql"), "-X", "-w", "-qAt", "-v", "ON_ERROR_STOP=1",
+    # Match site.sh: prefer the declared prefix, then the host's installed client.
+    # Application hosts need a client but need not carry the build-host prefix.
+    client = shutil.which("psql", path=os.pathsep.join((str(prefix / "bin"), os.environ.get("PATH", ""))))
+    if not client or not Path(client).is_absolute():
+        raise EnrollmentError("No installed PostgreSQL client is available in the declared host environment.")
+    command = [client, "-X", "-w", "-qAt", "-v", "ON_ERROR_STOP=1",
                "-v", "VERBOSITY=sqlstate", "-h", os.environ["PGHOST"], "-p", os.environ["PGPORT"],
                "-U", os.environ["PGUSER"], "-d", os.environ["PGDATABASE"], "-f", "-"]
     try:
