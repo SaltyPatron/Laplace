@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Xunit;
@@ -7,6 +8,35 @@ namespace Laplace.Cli.Tests;
 
 public sealed class ApiClientCommandsTests
 {
+    [Theory]
+    [InlineData("cpu-topology", "cpu-topology")]
+    [InlineData("--api-client", "laplace-mono ops")]
+    public async Task ExecutableUsesExplicitModeDespiteHostApiEnvironment(string command, string expectedHelp)
+    {
+        var start = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add(typeof(Program).Assembly.Location);
+        start.ArgumentList.Add(command);
+        start.ArgumentList.Add("--help");
+        start.Environment["LAPLACE_API_URL"] = "http://127.0.0.1:5187";
+        start.Environment["LAPLACE_API_KEY_FILE"] = "not-an-api-profile";
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
+        var stdout = await output;
+        var stderr = await error;
+        Assert.True(process.ExitCode == 0, $"CLI exited {process.ExitCode}: {stderr}");
+        Assert.Contains(expectedHelp, stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("HTTPS origin", stderr, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("http://example.com")]
     [InlineData("https://user:secret@example.com")]
