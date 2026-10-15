@@ -54,11 +54,13 @@ def verify(cli: Path, base: str, work: Path) -> None:
             return json.loads(result.stdout) if read_json else None
 
         catalog = invoke('ops')
-        if not isinstance(catalog, (list, dict)) or not catalog:
+        if (not isinstance(catalog, dict) or catalog.get('object') != 'op.catalog'
+                or not isinstance(catalog.get('operations'), list) or not catalog['operations']):
             raise ValueError('Installed client returned an empty or invalid operation catalog')
         counts = invoke('op', 'ops.substrate_counts', '--max-rows', '20')
         if counts.get('object') != 'op.result' or counts.get('name') != 'ops.substrate_counts':
             raise ValueError('Installed client returned the wrong typed operation result')
+        print('Installed client substrate inventory: ' + json.dumps(counts.get('rows'), ensure_ascii=True))
         source = root / 'laplace-client-verification.txt'
         source.write_bytes(DOCUMENT)
         # Stable content, relative path and modification time keep the admitted fixture reusable.
