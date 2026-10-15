@@ -18,7 +18,7 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
 
     find_program(LAPLACE_PG_CONFIG pg_config
-        HINTS "C:/Program Files/PostgreSQL/18/bin")
+        HINTS "$ENV{LAPLACE_PG_DIR}/bin" "$ENV{PGBIN}")
     if(NOT LAPLACE_PG_CONFIG)
         message(FATAL_ERROR "pg_config not found")
     endif()
@@ -34,6 +34,14 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         OUTPUT_VARIABLE LAPLACE_PG_SHAREDIR OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND "${LAPLACE_PG_CONFIG}" --bindir
         OUTPUT_VARIABLE LAPLACE_PG_BINDIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND "${LAPLACE_PG_CONFIG}" --version
+        OUTPUT_VARIABLE LAPLACE_PG_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY)
+    string(REGEX MATCH "PostgreSQL +([0-9]+)" _pg_major_match "${LAPLACE_PG_VERSION}")
+    set(LAPLACE_PG_MAJOR "${CMAKE_MATCH_1}")
+    if(NOT LAPLACE_PG_MAJOR)
+        message(FATAL_ERROR "Could not parse PostgreSQL version: ${LAPLACE_PG_VERSION}")
+    endif()
     message(STATUS "PG server includes: ${LAPLACE_PG_INCLUDEDIR_SERVER}")
     message(STATUS "PG pkglibdir:       ${LAPLACE_PG_PKGLIBDIR}")
 

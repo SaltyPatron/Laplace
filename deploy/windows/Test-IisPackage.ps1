@@ -12,7 +12,7 @@ $headers=@{'X-Vault-Token'=$login.auth.client_token}
 $process=$null
 try {
     $records=[ordered]@{}
-    foreach($entry in $c.records.PSObject.Properties){$records[$entry.Name]=(Invoke-RestMethod ($c.address+'/v1/'+$entry.Value) -Headers $headers -NoProxy -TimeoutSec 20).data.data}
+    foreach($entry in Get-IisCredentialReferences $c){$records[$entry.Name]=(Invoke-RestMethod ($c.address+'/v1/'+$entry.Value) -Headers $headers -NoProxy -TimeoutSec 20).data.data}
     if($DeniedRecord -notmatch '^kv/data/[a-zA-Z0-9_/-]+$'){throw 'Invalid denied record probe.'}
     $denied=Invoke-WebRequest ($c.address+'/v1/'+$DeniedRecord) -Headers $headers -NoProxy -TimeoutSec 20 -SkipHttpErrorCheck
     if($denied.StatusCode -ne 403){throw 'Desktop workload unexpectedly has access to production identity.'}

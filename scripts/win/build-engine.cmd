@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
+pwsh -NoProfile -File "%~dp0assert-build-source.ps1" -SourceDirectory "%LAPLACE_ROOT%\engine" -BuildDirectory "%LAPLACE_ENGINE_BUILD%" || exit /b 1
 set "LAPLACE_RESOURCE_FLAGS="
 if defined LAPLACE_RC set LAPLACE_RESOURCE_FLAGS="-DCMAKE_RC_COMPILER=%LAPLACE_RC%"
 if defined LAPLACE_MT set LAPLACE_RESOURCE_FLAGS=%LAPLACE_RESOURCE_FLAGS% "-DCMAKE_MT=%LAPLACE_MT%"
