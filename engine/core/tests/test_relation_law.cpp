@@ -260,6 +260,16 @@ TEST(LaplacePosLaw, UposCanonicalRoundTrip) {
     EXPECT_TRUE(hash128_equals(&id, &expected));
 }
 
+TEST(LaplacePosLaw, CanonicalLabelSurvivesInputBufferReuse) {
+    char input[] = "NOUN";
+    const char* canonical = nullptr;
+    int index = -1;
+    ASSERT_EQ(0, laplace_pos_resolve_canonical(input, LAPLACE_POS_TAGSET_UPOS, &canonical, &index));
+    ASSERT_GE(index, 0);
+    std::memset(input, 'X', sizeof(input) - 1);
+    EXPECT_STREQ("NOUN", canonical);
+}
+
 TEST(LaplacePosLaw, SourceTagsetsConvergeOnUpos) {
     const char* canonical = nullptr;
     int index = -1;
