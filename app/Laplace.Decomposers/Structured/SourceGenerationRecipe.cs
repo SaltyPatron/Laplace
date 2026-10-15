@@ -29,13 +29,14 @@ public class SourceGenerationRecipe
     public IReadOnlyList<string> Aliases { get; }
     public string? Root { get; }
     public bool Selected { get; }
+    public IReadOnlyList<string> ArtifactPrefixes { get; }
     public IReadOnlyList<SourceGenerationArtifactRule> Rules { get; }
     public string CanonicalForm { get; }
 
     protected SourceGenerationRecipe(string manifestPath, string authority, string release,
         string sourceName, Hash128 sourceId, double trust, string trustClass, int layerOrder,
         IReadOnlyList<SourceGenerationArtifactRule> rules, IReadOnlyList<string>? aliases = null,
-        string? root = null, bool selected = false)
+        string? root = null, bool selected = false, IReadOnlyList<string>? artifactPrefixes = null)
     {
         ManifestPath = manifestPath;
         Authority = authority;
@@ -48,11 +49,12 @@ public class SourceGenerationRecipe
         Aliases = aliases ?? [];
         Root = root;
         Selected = selected;
+        ArtifactPrefixes = artifactPrefixes ?? [""];
         Rules = rules;
         JsonElement configuration = JsonSerializer.SerializeToElement(new
         {
             authority, release, sourceName, sourceId = Convert.ToHexStringLower(sourceId.ToBytes()),
-            trust, trustClass, layerOrder,
+            trust, trustClass, layerOrder, artifactPrefixes = ArtifactPrefixes,
             artifacts = rules.OrderBy(static r => r.Artifact.Selector, StringComparer.Ordinal).Select(r => new
             {
                 selector = r.Artifact.Selector, provider = r.Artifact.Provider, syntax = r.Artifact.Syntax,
@@ -73,7 +75,7 @@ public class SourceGenerationRecipe
         using var stream = File.OpenRead(manifest);
         using JsonDocument document = JsonDocument.Parse(stream);
         JsonElement root = document.RootElement;
-        CheckProperties(root, ["authority", "release", "sourceName", "sourceId", "trustClass", "layerOrder", "artifacts", "aliases", "root", "selected"]);
+        CheckProperties(root, ["authority", "release", "sourceName", "sourceId", "trustClass", "layerOrder", "artifacts", "aliases", "root", "selected", "artifactPrefixes"]);
         string authority = Required(root, "authority"), release = Required(root, "release");
         string sourceName = Required(root, "sourceName");
         string? sourceHex = Optional(root, "sourceId");
@@ -103,6 +105,13 @@ public class SourceGenerationRecipe
                 : Path.GetFullPath(sourceRoot, LaplaceInstall.ResolveIngestRoot());
         }
         bool selected = root.TryGetProperty("selected", out var selectedValue) && selectedValue.GetBoolean();
+        string[] prefixes = root.TryGetProperty("artifactPrefixes", out var prefixValues)
+            ? prefixValues.EnumerateArray().Select(item => item.GetString() is { } value
+                ? value.Length == 0 ? "" : ValidateRelative(value, allowGlob: false)
+                : throw new InvalidDataException("Artifact prefixes must be relative paths.")).ToArray()
+            : [""];
+        if (prefixes.Length == 0 || prefixes.Distinct(StringComparer.Ordinal).Count() != prefixes.Length)
+            throw new InvalidDataException("Artifact prefixes must be nonempty and distinct.");
         var rules = new List<SourceGenerationArtifactRule>();
         var selectors = new HashSet<string>(StringComparer.Ordinal);
         foreach (JsonElement item in root.GetProperty("artifacts").EnumerateArray())
@@ -146,7 +155,7 @@ public class SourceGenerationRecipe
             foreach (string dependency in rule.Artifact.DependsOn ?? [])
                 if (!selectors.Contains(dependency)) throw new InvalidDataException($"Unknown dependency selector '{dependency}'.");
         return new SourceGenerationRecipe(manifest, authority, release, sourceName, sourceId,
-            trust, trustClass, layer, rules.AsReadOnly(), aliases, sourceRoot, selected);
+            trust, trustClass, layer, rules.AsReadOnly(), aliases, sourceRoot, selected, prefixes);
     }
 
     internal static string ValidateRelative(string value, bool allowGlob)

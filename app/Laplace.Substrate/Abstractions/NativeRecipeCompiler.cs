@@ -19,6 +19,7 @@ public static class NativeRecipeCompiler
     // Rcp7: Rcp6 plus the source's identity tables and the fields/subjects resolved through them.
     private const uint Rcp7 = 0x37504352u;
     private const uint Rcp8 = 0x38504352u;
+    private const uint Rcp9 = 0x39504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -78,7 +79,11 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static f => f.Disposition.HasFlag(SourceFieldDisposition.Testimony)
                 && f.PairMode == SourcePairMode.None && f.RelationField is null
                 && RelationTypeRegistry.Resolve(f.RelationName ?? f.PropertyName).Flip);
-        uint version = childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
+        bool composedReferences = recipe.IdentityTables.Any(static t => t.MemberPath is not null || t.ValueParts is { Count: > 0 })
+            || recipe.ProviderRoutes.Any(static r => (r.ChildSubjects ?? []).Any(static c => c.IdentityTable is not null || c.LinkContextField is not null))
+            || recipe.Fields.Any(static f => f.TestimonyUnlessField is not null)
+            || recipe.DelimitedSyntax is { LinesPerRecord: > 1 } or { InlineComments: false } or { MarkedSpanColumn: not null };
+        uint version = composedReferences ? Rcp9 : childSubjects ? Rcp8 : identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
@@ -171,6 +176,14 @@ public static class NativeRecipeCompiler
                     foreach (string value in syntax.EmptyValues ?? []) WriteText(writer, value);
                 }
             }
+        }
+        if (version >= Rcp9 && recipe.DelimitedSyntax is { } lineSyntax)
+        {
+            writer.Write(checked((uint)lineSyntax.LinesPerRecord));
+            writer.Write(lineSyntax.InlineComments ? 1u : 0u);
+            WriteText(writer, lineSyntax.MarkedSpanColumn);
+            WriteText(writer, lineSyntax.SpanStartMarker);
+            WriteText(writer, lineSyntax.SpanEndMarker);
         }
         writer.Write(checked((uint)recipe.Fields.Count));
         foreach (SourceRecipeField field in recipe.Fields)
@@ -463,6 +476,42 @@ public static class NativeRecipeCompiler
                 WriteText(writer, pair.Key[..separator]);
                 WriteText(writer, pair.Key[(separator + 1)..]);
                 WriteText(writer, pair.Value);
+            }
+        }
+
+        if (version >= Rcp9)
+        {
+            writer.Write(checked((uint)recipe.IdentityTables.Count));
+            foreach (var table in recipe.IdentityTables)
+            {
+                WriteText(writer, table.Name);
+                WriteText(writer, table.MemberPath);
+                writer.Write(checked((uint)(table.ValueParts?.Count ?? 0)));
+                foreach (var part in table.ValueParts ?? [])
+                {
+                    WriteText(writer, part.Path);
+                    WriteText(writer, part.IdentityTable);
+                    writer.Write(part.FromRecord ? 1u : 0u);
+                }
+            }
+            var children = recipe.ProviderRoutes.SelectMany(r => (r.ChildSubjects ?? [])
+                .Where(c => c.IdentityTable is not null || c.LinkContextField is not null).Select(c => (Route: r.RecordName, Child: c))).ToArray();
+            writer.Write(checked((uint)children.Length));
+            foreach (var item in children)
+            {
+                WriteText(writer, item.Route);
+                WriteText(writer, item.Child.ChildPath);
+                WriteText(writer, item.Child.IdentityTable);
+                WriteText(writer, item.Child.LinkContextField);
+            }
+            var conditionalTestimony = recipe.Fields.Where(static f => f.TestimonyUnlessField is not null).ToArray();
+            writer.Write(checked((uint)conditionalTestimony.Length));
+            foreach (var field in conditionalTestimony)
+            {
+                if (field.SubjectMode != SourceSubjectMode.Record || field.PairMode != SourcePairMode.None || field.RelationField is not null)
+                    throw new InvalidDataException("Conditional testimony requires an ordinary record field.");
+                WriteText(writer, field.SyntaxPath);
+                WriteText(writer, field.TestimonyUnlessField);
             }
         }
 

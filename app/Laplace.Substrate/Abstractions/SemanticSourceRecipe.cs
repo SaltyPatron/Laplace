@@ -141,7 +141,9 @@ public sealed record SourceRecipeField(
     bool RequireContext = false,
     // No claim while this field has a value (UTS 46's IdnaTestV2: a result is a mapping
     // only when its operation's status set is empty).
-    string? UnlessField = null);
+    string? UnlessField = null,
+    // An attributed copy remains content without adding an independent testimony.
+    string? TestimonyUnlessField = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -219,8 +221,8 @@ public sealed record SourceRecipeSubjectBinding(
 /// A source's own identifier table, collected from the artifact before lowering. A
 /// source that names things by packaging ids (a WN-LMF synset "oewn-02084071-n", a
 /// sense "oewn-dog__1.05.00..") also states what those ids denote (the synset's ILI,
-/// the sense's word). References resolve through that statement so every lexicon
-/// converges on the same concepts and words; an id whose value is absent stands for
+/// the sense's word and concept). References resolve through that statement so every lexicon
+/// converges on the same content; an id whose scalar value is absent stands for
 /// itself. KeyPath/ValuePath are record-relative ("@id", "Sense/@id", "Lemma/@writtenForm").
 /// </summary>
 public sealed record SourceIdentityTable(
@@ -228,7 +230,16 @@ public sealed record SourceIdentityTable(
     string RecordName,
     string KeyPath,
     string ValuePath,
-    IReadOnlyList<string>? AbsentValues = null);
+    IReadOnlyList<string>? AbsentValues = null,
+    string? MemberPath = null,
+    IReadOnlyList<SourceIdentityValuePart>? ValueParts = null);
+
+/// <summary>
+/// A constituent denoted by an identifier. Paths are relative to the selected member,
+/// or to its containing record when FromRecord is true. References can point forward:
+/// they resolve after the complete identity prescan.
+/// </summary>
+public sealed record SourceIdentityValuePart(string Path, string? IdentityTable = null, bool FromRecord = false);
 
 public sealed record SourceRecipeProviderRoute(
     string RecordName,
@@ -289,7 +300,9 @@ public sealed record SourceChildSubject(
     string? RefuteValue = null,
     // A child-relative count ("sentenceCount/@annotated") is how often the source observed
     // the link: its games, at least one (FrameNet's annotated sentences of a lexical unit).
-    string? ObservationPath = null);
+    string? ObservationPath = null,
+    string? IdentityTable = null,
+    string? LinkContextField = null);
 
 /// <summary>
 /// One part of a composed child identity: a child-relative path ("lexeme/@name", "@POS")
@@ -443,7 +456,14 @@ public sealed record SourceDelimitedSyntax(
     // (IdnaTestV2: a blank toASCII means the toUnicode value).
     IReadOnlyDictionary<string, string>? BlankDefaults = null,
     // Values that spell an empty value where a blank means something else ("" and []).
-    IReadOnlyList<string>? EmptyValues = null)
+    IReadOnlyList<string>? EmptyValues = null,
+    // Consecutive data lines are the columns of one record; comments/blank lines do
+    // not interrupt a pair (UTS 58's escaped input and expected readable output).
+    int LinesPerRecord = 1,
+    bool InlineComments = true,
+    string? MarkedSpanColumn = null,
+    string? SpanStartMarker = null,
+    string? SpanEndMarker = null)
 {
     public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
 }
@@ -513,6 +533,15 @@ public sealed class SemanticSourceRecipe
             if (delimited.RangeColumn.Length != 0 && (delimited.RangeSeparator.Length == 0
                 || delimited.RangeFirstField.Length == 0 || delimited.RangeLastField.Length == 0))
                 throw new ArgumentException("Range syntax requires separator and endpoint fields.", nameof(delimitedSyntax));
+            if (delimited.LinesPerRecord < 1 || (delimited.LinesPerRecord > 1
+                && (delimited.LinesPerRecord != delimited.Columns.Count || delimited.GroupBlankLines
+                    || delimited.MarkedSpanColumn is not null || delimited.DirectivePrefix.Length != 0
+                    || delimited.KeyedColumns is { Count: > 0 })))
+                throw new ArgumentException("Multiline records require one declared column per data line.", nameof(delimitedSyntax));
+            if (delimited.MarkedSpanColumn is not null && (!delimited.Columns.Contains(delimited.MarkedSpanColumn)
+                || string.IsNullOrEmpty(delimited.SpanStartMarker) || string.IsNullOrEmpty(delimited.SpanEndMarker)
+                || delimited.SpanStartMarker == delimited.SpanEndMarker))
+                throw new ArgumentException("Marked spans require a declared column and distinct nonempty markers.", nameof(delimitedSyntax));
         }
 
         SourceRecipeField[] fieldArray = fields?.ToArray()
@@ -591,11 +620,25 @@ public sealed class SemanticSourceRecipe
             Required(table.Name, nameof(identityTables));
             Required(table.RecordName, nameof(identityTables));
             Required(table.KeyPath, nameof(identityTables));
-            Required(table.ValuePath, nameof(identityTables));
-            tableNames.Add(table.Name);
+            if (table.ValueParts is not { Count: > 0 })
+            {
+                Required(table.ValuePath, nameof(identityTables));
+                if (table.MemberPath is not null)
+                    throw new ArgumentException("Member paths require composed identity constituents.", nameof(identityTables));
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(table.ValuePath))
+                    throw new ArgumentException("Identity tables declare either ValuePath or ValueParts.", nameof(identityTables));
+                foreach (var part in table.ValueParts) Required(part.Path, nameof(identityTables));
+            }
+            if (!tableNames.Add(table.Name))
+                throw new ArgumentException($"Duplicate identity table '{table.Name}'.", nameof(identityTables));
         }
         foreach (string? used in fieldArray.Select(static f => f.IdentityTable)
-                     .Concat(ProviderRoutes.Select(static r => r.Subject.IdentityTable)))
+                     .Concat(ProviderRoutes.Select(static r => r.Subject.IdentityTable))
+                     .Concat(ProviderRoutes.SelectMany(static r => r.ChildSubjects ?? []).Select(static c => c.IdentityTable))
+                     .Concat(IdentityTables.SelectMany(static t => t.ValueParts ?? []).Select(static p => p.IdentityTable)))
             if (used is not null && !tableNames.Contains(used))
                 throw new ArgumentException($"Recipe references undeclared identity table '{used}'.",
                     nameof(identityTables));

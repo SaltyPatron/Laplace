@@ -1,5 +1,4 @@
 #include "laplace/core/xml_stream.h"
-#include "laplace/core/grammar_registry.h"
 #include <libxml/parser.h>
 #include <libxml/entities.h>
 #include <limits.h>
@@ -115,7 +114,7 @@ static void xml_error(void* ctx, LAPLACE_XML_ERROR_CONST xmlError* error) {
 }
 
 int laplace_xml_stream_new(laplace_xml_stream_t** out) {
-    if (!out || !laplace_grammar_lookup_by_id("xml")) return -1;
+    if (!out) return -1;
     *out = NULL;
     laplace_xml_stream_t* s = calloc(1, sizeof(*s));
     if (!s) return -3;

@@ -877,6 +877,9 @@ public sealed class UnicodeDecomposer
         AddIfPresent(legacy, ArtifactKind.LinkTerm,
             Path.Combine(baseDir, "linkification", "LinkTerm.txt"), "linkification/LinkTerm.txt");
         AddUnihanFiles(legacy, baseDir);
+        // The complete XML owns repertoire facts on every entry path. Auxiliary
+        // files can add distinct observations, but cannot re-attest its projections.
+        legacy.RemoveAll(static job => IsRepertoireCompensation(job.Kind));
         legacy.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return legacy;
     }

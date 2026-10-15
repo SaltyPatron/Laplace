@@ -76,7 +76,9 @@
       "syntaxPath": "record/@Comment",
       "propertyName": "comment",
       "valueKind": "Text",
-      "disposition": "Excluded"
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Comment"
     }
   ],
   "providerRoutes": [

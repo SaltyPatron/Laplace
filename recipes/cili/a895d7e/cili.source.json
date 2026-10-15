@@ -5,13 +5,13 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 1,
   "selected": true,
-  "root": ".refresh-20260903/CILI",
+  "root": "CILI",
   "aliases": [
     "cili"
   ],
   "artifacts": [
     {
-      "selector": "extracted/ili.ttl",
+      "selector": "ili.ttl",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-turtle-recipe/v1",
@@ -19,7 +19,7 @@
       "recipePath": "ili.recipe.json"
     },
     {
-      "selector": "extracted/ili-map-pwn30.tab",
+      "selector": "ili-map-pwn30.tab",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-delimited-recipe/v1",
@@ -34,7 +34,7 @@
       }
     },
     {
-      "selector": "extracted/ili-map-pwn31.tab",
+      "selector": "ili-map-pwn31.tab",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-delimited-recipe/v1",
@@ -49,7 +49,7 @@
       }
     },
     {
-      "selector": "extracted/older-wn-mappings/ili-map-pwn*.tab",
+      "selector": "older-wn-mappings/ili-map-pwn*.tab",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-delimited-recipe/v1",
@@ -64,7 +64,7 @@
       }
     },
     {
-      "selector": "extracted/ili-map-odwn13.ttl",
+      "selector": "ili-map-odwn13.ttl",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-turtle-recipe/v1",
@@ -72,19 +72,19 @@
       "recipePath": "ili-map-odwn13.recipe.json"
     },
     {
-      "selector": "extracted/ili-map.ttl",
+      "selector": "ili-map.ttl",
       "disposition": "equivalent-packaging",
       "required": false,
       "reason": "RDF serialization of ili-map-pwn30.tab."
     },
     {
-      "selector": "extracted/ili-map-wn30.ttl",
+      "selector": "ili-map-wn30.ttl",
       "disposition": "equivalent-packaging",
       "required": false,
       "reason": "RDF serialization of ili-map-pwn30.tab."
     },
     {
-      "selector": "extracted/ili-map-wn31.ttl",
+      "selector": "ili-map-wn31.ttl",
       "disposition": "equivalent-packaging",
       "required": false,
       "reason": "RDF serialization of ili-map-pwn31.tab under wordnet-rdf 3.1 synset ids."
@@ -114,13 +114,13 @@
       "reason": "Archive digest; integrity metadata, not claims."
     },
     {
-      "selector": "extracted/changes-in-wn31.csv",
+      "selector": "changes-in-wn31.csv",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Summary of the 3.0 to 3.1 differences that the pwn30 and pwn31 maps state as bindings."
     },
     {
-      "selector": "extracted/sense-mappings/*.tab",
+      "selector": "sense-mappings/*.tab",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-delimited-recipe/v1",
@@ -135,76 +135,104 @@
       }
     },
     {
-      "selector": "extracted/sense-mappings/Makefile",
+      "selector": "sense-mappings/Makefile",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Build scripts and notes for the sense-key tables."
     },
     {
-      "selector": "extracted/sense-mappings/*.py",
+      "selector": "sense-mappings/*.py",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Build scripts and notes for the sense-key tables."
     },
     {
-      "selector": "extracted/sense-mappings/Readme.md",
+      "selector": "sense-mappings/Readme.md",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Build scripts and notes for the sense-key tables."
     },
     {
-      "selector": "extracted/older-wn-mappings/LICENSE",
+      "selector": "older-wn-mappings/LICENSE",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "License of the TALP mappings."
     },
     {
-      "selector": "extracted/older-wn-mappings/README.md",
+      "selector": "older-wn-mappings/README.md",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Documentation of the TALP mapping format."
     },
     {
-      "selector": "extracted/ontology.xml",
+      "selector": "ontology.xml",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "OWL definition of the ILI status vocabulary, whose statements ili.ttl carries."
     },
     {
-      "selector": "extracted/*.md",
+      "selector": "*.md",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Repository documentation."
     },
     {
-      "selector": "extracted/LICENSE",
+      "selector": "LICENSE",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "License (CC BY 4.0)."
     },
     {
-      "selector": "extracted/*.py",
+      "selector": "*.py",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Repository tooling."
     },
     {
-      "selector": "extracted/requirements.txt",
+      "selector": "requirements.txt",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Repository tooling."
     },
     {
-      "selector": "extracted/.gitignore",
+      "selector": ".gitignore",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Repository tooling."
     },
     {
-      "selector": "extracted/.github/**",
+      "selector": ".github/**",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Repository CI configuration."
+    },
+    {
+      "selector": ".landed",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local acquisition completion marker, not source content."
+    },
+    {
+      "selector": ".git/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local Git administration, not released corpus content."
+    },
+    {
+      "selector": ".archive/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Retained acquisition archives and integrity receipts; the selected working copy supplies the source content."
+    },
+    {
+      "selector": ".superseded-*/**",
+      "disposition": "superseded",
+      "required": false,
+      "reason": "Retained earlier acquisition; not part of this selected release."
     }
+  ],
+  "artifactPrefixes": [
+    "",
+    "extracted"
   ]
 }

@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "laplace/core/utf8.h"
 
 // Adapted from Laplace-Refactor's decomposition_delimited.cpp separator/record
 // recovery. Streaming retains an unfinished record across feeds. This provider
@@ -35,10 +36,15 @@ inline constexpr char recipe_pair_value_separator = '\x1f';
 struct recipe_delimited_structure {
     std::vector<std::string> cells;
     std::shared_ptr<const std::vector<std::vector<std::string>>> group;
+    struct span { std::string text; size_t start, end; };
+    std::vector<span> spans;
 };
 
 struct recipe_delimited_config {
     std::string record_name, namespace_uri, separator, comment_prefix;
+    uint32_t lines_per_record = 1;
+    bool inline_comments = true;
+    std::string marked_span_column, span_start_marker, span_end_marker;
     // Grouped records (blank-line blocks such as CoNLL-U sentences).
     bool group_blank_lines = false;
     std::string group_attribute_separator;
@@ -75,6 +81,7 @@ struct recipe_delimited_config {
 
 class recipe_delimited_stream {
     std::string pending_;
+    std::vector<std::string> paired_lines_;
     uint64_t line_ = 0;
     bool final_ = false;
     std::map<std::string, std::string> group_attributes_;
@@ -126,7 +133,7 @@ class recipe_delimited_stream {
         if (line_ <= config.header_lines) return;
         if (!text.empty() && text.back() == '\r') text.remove_suffix(1);
         auto nonspace = trim(text);
-        if (nonspace.empty()) {
+        if (config.trim_fields ? nonspace.empty() : text.empty()) {
             if (config.group_blank_lines) flush_group(emit);
             return;
         }
@@ -144,8 +151,9 @@ class recipe_delimited_stream {
                     }
             }
         }
-        if (!config.comment_prefix.empty() && nonspace.find(config.comment_prefix) == 0) {
-            auto body = trim(nonspace.substr(config.comment_prefix.size()));
+        const auto comment_candidate = config.inline_comments ? nonspace : text;
+        if (!config.comment_prefix.empty() && comment_candidate.find(config.comment_prefix) == 0) {
+            auto body = trim(comment_candidate.substr(config.comment_prefix.size()));
             if (config.group_blank_lines && !config.group_attribute_separator.empty()) {
                 const auto split_at = body.find(config.group_attribute_separator);
                 if (split_at != std::string_view::npos) {
@@ -186,12 +194,16 @@ class recipe_delimited_stream {
             text = nonspace.substr(config.directive_prefix.size());
         }
         std::string comment_text;
-        if (!config.comment_prefix.empty() && !config.group_blank_lines) {
+        if (!config.comment_prefix.empty() && !config.group_blank_lines && config.inline_comments) {
             auto comment = text.find(config.comment_prefix);
             if (comment != std::string_view::npos) {
                 comment_text = std::string(trim(text.substr(comment + config.comment_prefix.size())));
                 text = text.substr(0, comment);
             }
+        }
+        if (config.lines_per_record > 1 && !directive) {
+            paired_lines_.emplace_back(config.trim_fields ? trim(text) : text);
+            if (paired_lines_.size() < config.lines_per_record) return;
         }
         const std::vector<std::string>* layout = directive ? &config.directive_columns : &config.columns;
         const std::string* record_name = directive ? &config.directive_record_name : &config.record_name;
@@ -206,7 +218,11 @@ class recipe_delimited_stream {
         std::map<std::string, std::string> values;
         std::vector<std::string> cells;
         size_t start = 0, column = 0;
-        for (;;) {
+        if (config.lines_per_record > 1) {
+            for (const auto& line : paired_lines_) values.emplace(columns[column++], line);
+            cells = std::move(paired_lines_);
+            paired_lines_.clear();
+        } else for (;;) {
             auto end = text.find(config.separator, start);
             auto value = text.substr(start, end == std::string_view::npos ? end : end - start);
             if (config.trim_fields) value = trim(value);
@@ -310,9 +326,33 @@ class recipe_delimited_stream {
             group_row_cells_.push_back(std::move(cells));
             return;
         }
-        emit(*record_name,
-             config.namespace_uri, std::move(values),
-             recipe_delimited_structure{std::move(cells), nullptr});
+        recipe_delimited_structure structure{std::move(cells), nullptr, {}};
+        if (!config.marked_span_column.empty()) {
+            auto found = values.find(config.marked_span_column);
+            if (found == values.end()) fail("marked span column is absent");
+            const std::string& marked = found->second;
+            std::string plain;
+            bool open = false; size_t start = 0, start_byte = 0, ordinal = 0;
+            for (size_t k = 0; k < marked.size();) {
+                if (marked.compare(k, config.span_start_marker.size(), config.span_start_marker) == 0) {
+                    if (open) fail("nested marked span");
+                    open = true; start = ordinal; start_byte = plain.size(); k += config.span_start_marker.size();
+                } else if (marked.compare(k, config.span_end_marker.size(), config.span_end_marker) == 0) {
+                    if (!open || ordinal == start) fail("unmatched or empty marked span");
+                    structure.spans.push_back({plain.substr(start_byte), start, ordinal - 1});
+                    open = false; k += config.span_end_marker.size();
+                } else {
+                    uint32_t cp = 0; size_t used = 0;
+                    if (laplace_utf8_decode(reinterpret_cast<const uint8_t*>(marked.data()) + k, marked.size() - k, &cp, &used) != 0)
+                        fail("invalid UTF-8 in marked text");
+                    plain.append(marked, k, used); k += used; ++ordinal;
+                }
+            }
+            if (open) fail("unclosed marked span");
+            found->second = std::move(plain);
+            values.emplace("spanCount", std::to_string(structure.spans.size()));
+        }
+        emit(*record_name, config.namespace_uri, std::move(values), std::move(structure));
     }
 
     std::string resolve_reference(const recipe_delimited_reference& ref,
@@ -399,6 +439,13 @@ public:
             || config.separator.find_first_of("\r\n") != std::string::npos
             || config.minimum_columns > config.columns.size())
             throw std::runtime_error("invalid delimited syntax declaration");
+        if (config.lines_per_record == 0 || (config.lines_per_record > 1
+            && (config.lines_per_record != config.columns.size() || config.group_blank_lines
+                || !config.marked_span_column.empty() || !config.directive_prefix.empty() || !config.keyed_columns.empty())))
+            throw std::runtime_error("invalid multiline record declaration");
+        if (!config.marked_span_column.empty() && (config.span_start_marker.empty() || config.span_end_marker.empty()
+            || config.span_start_marker == config.span_end_marker))
+            throw std::runtime_error("marked spans require distinct nonempty markers");
         if (!config.directive_prefix.empty() && (config.directive_record_name.empty() || config.directive_columns.empty()))
             throw std::runtime_error("directive requires its own record route and columns");
         if (!config.range_column.empty() && (config.range_separator.empty()
@@ -420,6 +467,7 @@ public:
         if (final) {
             if (!pending_.empty()) record(pending_, emit);
             pending_.clear();
+            if (!paired_lines_.empty()) fail("incomplete multiline record");
             if (config.group_blank_lines) flush_group(emit);
             final_ = true;
         }
