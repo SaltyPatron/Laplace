@@ -3,10 +3,13 @@
 import base64
 import importlib.util
 import json
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +18,37 @@ SPEC = importlib.util.spec_from_file_location('installed_client', Path(__file__)
 CHECK = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECK)
 IDENTITY = '12' * 16
+ORIGIN_SPEC = importlib.util.spec_from_file_location('client_origin', Path(__file__).resolve().parents[1] / 'deploy/linux/configure-nginx.py')
+ORIGIN = importlib.util.module_from_spec(ORIGIN_SPEC)
+ORIGIN_SPEC.loader.exec_module(ORIGIN)
+
+
+class DeclaredOriginChecks(unittest.TestCase):
+    def test_selected_host_origin_is_read_without_certificate_access_or_installation(self):
+        output = io.StringIO()
+        with patch.object(sys, 'argv', ['configure-nginx.py', '--print-origin']), \
+                patch.object(ORIGIN.socket, 'gethostname', return_value='hart-server.example.test'), \
+                patch.object(ORIGIN.subprocess, 'run') as execute, contextlib.redirect_stdout(output):
+            ORIGIN.main()
+        self.assertEqual('https://staging.hartonomous.com', output.getvalue().strip())
+        execute.assert_not_called()
+
+    def test_undeclared_host_fails_instead_of_selecting_another_hosts_origin(self):
+        with patch.object(sys, 'argv', ['configure-nginx.py', '--print-origin']), \
+                patch.object(ORIGIN.socket, 'gethostname', return_value='undeclared-host'):
+            with self.assertRaisesRegex(SystemExit, 'No private nginx browser route declared'):
+                ORIGIN.main()
+
+    def test_multiple_matching_declarations_are_rejected(self):
+        declaration = json.loads((Path(ORIGIN.__file__).parent.parent / 'private-origins.json').read_text())
+        declaration['environments'] *= 2
+        with tempfile.TemporaryDirectory() as directory:
+            configuration = Path(directory) / 'origins.json'
+            configuration.write_text(json.dumps(declaration))
+            with patch.object(sys, 'argv', ['configure-nginx.py', '--configuration', str(configuration), '--print-origin']), \
+                    patch.object(ORIGIN.socket, 'gethostname', return_value='hart-server'):
+                with self.assertRaisesRegex(SystemExit, 'Select exactly one'):
+                    ORIGIN.main()
 
 
 class InstalledClientChecks(unittest.TestCase):
