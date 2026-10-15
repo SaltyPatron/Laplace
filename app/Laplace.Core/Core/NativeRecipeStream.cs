@@ -84,8 +84,8 @@ public sealed class NativeRecipeStream : SafeHandle
     }
 
     /// <summary>The metadata tree of the file this stream reads. After its last record the
-    /// stream composes the file's trunk: the metadata tree, then every distinct content the
-    /// file states, so each content is a child of the file that witnessed it.</summary>
+    /// stream composes [metadata, content]. Content retains source record and child-element
+    /// order and repeated occurrences while sharing equal entities.</summary>
     public unsafe void SetFile(OrderedCompositionComponent head)
     {
         var native = new NativeInterop.OrderedCompositionComponentNative

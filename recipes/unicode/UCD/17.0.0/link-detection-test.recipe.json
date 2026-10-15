@@ -1,0 +1,85 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS58/LinkDetectionTest",
+  "fields": [
+    {
+      "syntaxPath": "record/@text",
+      "propertyName": "text",
+      "valueKind": "Text",
+      "disposition": "Identity"
+    },
+    {
+      "syntaxPath": "record/@spanCount",
+      "propertyName": "spanCount",
+      "valueKind": "Integer",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Link_Count"
+    },
+    {
+      "syntaxPath": "span/@start",
+      "propertyName": "start",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "span/@end",
+      "propertyName": "end",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "span/@text",
+      "propertyName": "text",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_ATTRIBUTE",
+      "contextLiteral": "Link_Text"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "text"
+      },
+      "structurePaths": [],
+      "childFieldPrefixes": {
+        "span": "span"
+      },
+      "childSubjects": [
+        {
+          "childPath": "span",
+          "identityField": "",
+          "identityParts": [
+            {
+              "path": "@start"
+            },
+            {
+              "path": "@end"
+            }
+          ],
+          "parentRelation": "HAS_PARSE"
+        }
+      ]
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "text"
+    ],
+    "separator": "\u001f",
+    "commentPrefix": "#",
+    "trimFields": false,
+    "inlineComments": false,
+    "markedSpanColumn": "text",
+    "spanStartMarker": "⸠",
+    "spanEndMarker": "⸡"
+  }
+}

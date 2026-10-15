@@ -179,6 +179,12 @@ public:
             n.attributes = std::move(attributes);
             n.cells = std::move(structure.cells);
             n.group = std::move(structure.group);
+            for (auto& span : structure.spans) {
+                recipe_node child = recipe_node::named("span", ns);
+                child.attributes = {{"text", std::move(span.text)}, {"start", std::to_string(span.start)},
+                    {"end", std::to_string(span.end)}};
+                n.children.push_back(std::move(child));
+            }
             sink.record(std::move(n));
         });
     }

@@ -1,0 +1,125 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS58/LinkBracket",
+  "fields": [
+    {
+      "syntaxPath": "record/@codepoints",
+      "propertyName": "codepoints",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@first",
+      "propertyName": "first",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@last",
+      "propertyName": "last",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "record/@pair",
+      "propertyName": "pair",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Link_Bracket"
+        },
+        {
+          "path": "value()",
+          "codepoints": true
+        }
+      ]
+    },
+    {
+      "syntaxPath": "missing/@value",
+      "propertyName": "default",
+      "valueKind": "Text",
+      "disposition": "Testimony",
+      "relationName": "HAS_CHARACTER_PROPERTY",
+      "qualifiers": [
+        "character_property/default"
+      ],
+      "objectEntityType": "Property_Value",
+      "objectParts": [
+        {
+          "path": "",
+          "literal": "Link_Bracket"
+        },
+        {
+          "path": "value()"
+        }
+      ]
+    },
+    {
+      "syntaxPath": "missing/@codepoints",
+      "propertyName": "codepoints",
+      "valueKind": "Text",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "missing/@first",
+      "propertyName": "first",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    },
+    {
+      "syntaxPath": "missing/@last",
+      "propertyName": "last",
+      "valueKind": "Codepoint",
+      "disposition": "Packaging"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "CodepointInterval",
+        "identityField": "codepoints",
+        "rangeStartField": "first",
+        "lastField": "last"
+      },
+      "structurePaths": []
+    },
+    {
+      "recordName": "missing",
+      "namespaceUri": "",
+      "fieldPrefix": "missing",
+      "structurePaths": [],
+      "subject": {
+        "kind": "CodepointInterval",
+        "identityField": "codepoints",
+        "rangeStartField": "first",
+        "lastField": "last"
+      }
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "codepoints",
+      "pair"
+    ],
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
+    "rangeColumn": "codepoints",
+    "directivePrefix": "@missing:",
+    "directiveRecordName": "missing",
+    "directiveColumns": [
+      "codepoints",
+      "value"
+    ]
+  }
+}

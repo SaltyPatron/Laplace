@@ -549,6 +549,11 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
                 _executionErrors.Add($"Artifact '{binding.Artifact.RelativePath}': {ex.Message}");
             }
         }
+        string[] fatal = _executionErrors
+            .Where(static error => !error.StartsWith("Unresolved artifact ", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if (fatal.Length > 0)
+            throw new InvalidDataException(string.Join(Environment.NewLine, fatal));
         SemanticSourceRecipe[] recipes = resolved.Bindings.Where(static b => b.Recipe is not null)
             .Select(static b => b.Recipe!).DistinctBy(static r => r.RecipeId).ToArray();
         _relations = recipes.SelectMany(SingleArtifactRecipeDecomposer.RelationsFor)

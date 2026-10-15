@@ -48,8 +48,8 @@ public sealed class NativeSourceRecipe
         {
             if (native.RequiresPrescan)
             {
-                // The source's own id tables (synset -> ILI, sense -> word) precede
-                // lowering, so every reference resolves to what it denotes.
+                // The source's id tables precede lowering: a synset resolves to
+                // its ILI and a sense to its ordered word/concept composition.
                 if (openPrescan is null)
                     throw new InvalidDataException(
                         $"Recipe {Recipe.Authority}/{Recipe.Release} declares identity tables; '{artifactLabel}' must be readable twice.");

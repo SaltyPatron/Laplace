@@ -18,8 +18,9 @@ int laplace_recipe_stream_new(const uint8_t* program, size_t program_bytes,
 int laplace_recipe_stream_feed(laplace_recipe_stream_t*, const uint8_t*, size_t, int final);
 /* A recipe that declares identity tables (Rcp7) reads the artifact once through
  * prescan before feed: the source's own statements of what its ids denote (a
- * synset id's ILI, a sense id's word) are collected so references resolve to
- * the denoted content. Returns 1 when the recipe declares tables, else 0. */
+ * synset id's ILI, a sense id's ordered word/concept composition) are collected
+ * so references resolve to the denoted content. Returns 1 when the recipe
+ * declares tables, else 0. */
 int laplace_recipe_stream_requires_prescan(const laplace_recipe_stream_t*);
 int laplace_recipe_stream_prescan(laplace_recipe_stream_t*, const uint8_t*, size_t, int final);
 /* 1: batch produced, 0: needs input/end, negative: failure. Output stage ownership
@@ -33,8 +34,8 @@ int laplace_recipe_stream_drain(laplace_recipe_stream_t*, size_t maximum_rows,
     size_t maximum_bytes, intent_stage_t** out, uint64_t* records_completed);
 /* The metadata tree of the file this stream reads (its path and digest, composed by
  * the caller). Set before feed. After the last record the stream composes the file's
- * trunk: [metadata tree, every distinct content the file states in first-seen order],
- * so each content is a direct child of the file that witnessed it. */
+ * trunk: [metadata tree, content tree]. The content tree retains record and nested
+ * element order and repeated occurrences, sharing equal content identities. */
 int laplace_recipe_stream_set_file(laplace_recipe_stream_t*, const laplace_ordered_component_t* head);
 /* 1 and the file trunk (id, coord, tier) once the final drain composed it, 0 before,
  * -1 on bad input. */

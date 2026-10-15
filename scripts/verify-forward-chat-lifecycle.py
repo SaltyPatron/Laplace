@@ -53,8 +53,9 @@ def session_id(database: str, tenant: str, key: str, timeout: int) -> str:
     # Same canonical key law used by ConversationContent.SessionId:
     # substrate/conversation/session/{tenant}/{sessionKey}/v1. Resolve it through the
     # installed native canonical-id function; do not hand-hash it in the proof harness.
+    canonical_key = ("substrate/conversation/session/" + tenant + "/" + key + "/v1").replace("'", "''")
     sql = f"""
-SELECT to_json(encode(realize.canonical_id({json.dumps("substrate/conversation/session/"+tenant+"/"+key+"/v1")}::text),'hex'));
+SELECT to_json(encode(realize.canonical_id('{canonical_key}'::text),'hex'));
 """
     result = psql(database, sql, timeout)
     require(isinstance(result, str) and len(result) == 32, "installed canonical-id resolver did not return a 128-bit session id")

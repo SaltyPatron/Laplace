@@ -90,6 +90,7 @@ public static class SourceGenerationResolver
 
         var artifacts = new List<IngestArtifact>();
         var executionErrors = new List<string>();
+        var admittedPrefixes = new HashSet<string>(StringComparer.Ordinal);
         var matches = rules.ToDictionary(static rule => rule.Artifact.Selector,
             static _ => new List<IngestArtifact>(), StringComparer.Ordinal);
         foreach (string path in EnumerateFiles(root, ct).Order(StringComparer.Ordinal))
@@ -101,18 +102,27 @@ public static class SourceGenerationResolver
             // excluded by name). Two patterns, or two names, never share a file.
             SourceGenerationArtifactRule? match = null;
             bool matchNamesFile = false;
-            foreach (var rule in rules)
+            string matchedPrefix = "";
+            foreach (string prefix in recipe.ArtifactPrefixes)
             {
-                if (!matchers[rule.Artifact.Selector].IsMatch(relative)) continue;
-                bool namesFile = rule.Artifact.Selector.IndexOfAny(['*', '?']) < 0;
-                if (match is not null && namesFile == matchNamesFile)
-                    throw new InvalidDataException($"Artifact '{relative}' matches both '{match.Artifact.Selector}' and '{rule.Artifact.Selector}'.");
-                if (match is null || namesFile)
+                if (prefix.Length > 0 && !relative.StartsWith(prefix + "/", StringComparison.Ordinal)) continue;
+                string logicalPath = prefix.Length == 0 ? relative : relative[(prefix.Length + 1)..];
+                foreach (var rule in rules)
                 {
-                    match = rule;
-                    matchNamesFile = namesFile;
+                    if (!matchers[rule.Artifact.Selector].IsMatch(logicalPath)) continue;
+                    bool namesFile = rule.Artifact.Selector.IndexOfAny(['*', '?']) < 0;
+                    if (match is not null && namesFile == matchNamesFile)
+                        throw new InvalidDataException($"Artifact '{relative}' matches both '{match.Artifact.Selector}' and '{rule.Artifact.Selector}'.");
+                    if (match is null || namesFile)
+                    {
+                        match = rule;
+                        matchNamesFile = namesFile;
+                        matchedPrefix = prefix;
+                    }
                 }
             }
+            if (match?.Artifact.Disposition == SourceArtifactDisposition.Admitted)
+                admittedPrefixes.Add(matchedPrefix);
             if (match?.Artifact.Disposition == SourceArtifactDisposition.Absent)
                 throw new InvalidDataException($"Artifact '{relative}' exists but its rule declares it absent.");
             // Hash the physical file once at the cold source boundary. The executor
@@ -155,6 +165,9 @@ public static class SourceGenerationResolver
                 rule.Artifact.Reason ?? $"Required selector '{rule.Artifact.Selector}' matched no physical file.", null));
             if (rule.Artifact.Required) executionErrors.Add($"Required selector '{rule.Artifact.Selector}' matched no physical file.");
         }
+
+        if (admittedPrefixes.Count > 1)
+            throw new InvalidDataException("Source files occupy multiple declared artifact layouts; select one release copy as the ingest root.");
 
         var bindings = new List<ResolvedSourceArtifact>();
         foreach (var rule in rules)

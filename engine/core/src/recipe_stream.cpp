@@ -104,10 +104,14 @@ struct field_rule {
     bool signed_values = false;
     bool require_context = false;   // claim only in the context field's context
     std::string unless_field;       // no claim while this attribute has a value
+    std::string testimony_unless;   // retain copied content without independent testimony
 };
 struct identity_table_rule {
     std::string name, record, key_path, value_path;
     std::unordered_set<std::string> absent;
+    std::string member_path;
+    struct value_part { std::string path, table; bool from_record = false; };
+    std::vector<value_part> parts;
 };
 struct structure_rule {
     std::string path, semantic_type;
@@ -171,6 +175,8 @@ struct route_rule {
     std::unordered_map<std::string, std::vector<conditional_prefix>> conditional_prefixes;
     struct child_subject_rule {
         std::string identity;
+        std::string identity_table;
+        std::string link_context;
         hash128_t relation{}, entity_type{};
         bool child_is_subject = false;   // child -rel-> parent (an LU EVOKES_FRAME its frame)
         bool standalone = false;         // identity without the record subject (a lemma's lexeme)
@@ -399,6 +405,9 @@ struct laplace_recipe_stream {
     hash128_t current_witness{};   // the witness of the record being lowered
     std::vector<identity_table_rule> table_rules;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> tables;
+    // Ordered constituents, retained as references until the whole source is scanned.
+    using identity_value = std::vector<std::pair<std::string, std::string>>;
+    std::unordered_map<std::string, std::unordered_map<std::string, identity_value>> composed_tables;
     bool prescanned = false;
     hash128_t witness{};
     double trust = 0;
@@ -449,22 +458,27 @@ struct laplace_recipe_stream {
     content_form subject_form{};     // the current subject's form, when it is content
     content_form record_subject_form{};  // the record's own subject (child subjects scope to it)
     bool subject_form_known = false;
-    // A file is a trunk: its metadata tree, then every distinct content it states in
-    // first-seen order. Content is a direct child of the file that witnessed it; a
-    // source record is packaging and never becomes a node.
+    // Repeated lookups within one lowering scope do not create occurrences. Distinct
+    // source records and child elements do: each scope contributes its denoted content
+    // in source order, even when another scope has the same content identity.
     bool observing = false, file_trunk_done = false, file_root_known = false, file_head_known = false;
     laplace_ordered_component_t file_head{};
     laplace_ordered_component_t file_root{};
     std::vector<laplace_ordered_component_t> file_parts;
-    std::unordered_set<std::string> file_seen;
+    struct observation_scope {
+        std::vector<laplace_ordered_component_t> parts;
+        std::unordered_set<std::string> seen;
+    };
+    std::vector<observation_scope> observation_scopes;
     void observe(const content_form& c) {
-        if (!observing) return;
+        if (!observing || !file_head_known || observation_scopes.empty()) return;
+        auto& scope = observation_scopes.back();
         const std::string key(reinterpret_cast<const char*>(&c.id), sizeof(c.id));
-        if (!file_seen.insert(key).second) return;
+        if (!scope.seen.insert(key).second) return;
         laplace_ordered_component_t part{};
         part.id = c.id; std::memcpy(part.coord, c.coord, sizeof(part.coord));
         part.tier = c.tier; part.atom = c.atom; part.has_atom = c.tier == 0;
-        file_parts.push_back(part);
+        scope.parts.push_back(part);
     }
     laplace_ordered_component_t compose_trunk(intent_stage_t* stage,
         const std::vector<laplace_ordered_component_t>& parts, const char* type_name) {
@@ -480,6 +494,14 @@ struct laplace_recipe_stream {
         part.id = result.id; std::memcpy(part.coord, result.coord, sizeof(part.coord));
         part.tier = result.tier;
         return part;
+    }
+    void close_observation(intent_stage_t* stage) {
+        auto parts = std::move(observation_scopes.back().parts);
+        observation_scopes.pop_back();
+        if (parts.empty()) return;
+        const auto part = parts.size() == 1 ? parts.front() : compose_trunk(stage, parts, "Document");
+        auto& parent = observation_scopes.empty() ? file_parts : observation_scopes.back().parts;
+        parent.push_back(part);
     }
     std::vector<fact> facts;
     std::unordered_map<std::string, content_form> content_cache;
@@ -501,6 +523,8 @@ struct laplace_recipe_stream {
     // dangling source reference, never silently kept as packaging.
     const std::string& identify(const std::string& table, const std::string& key) const {
         if (table.empty()) return key;
+        if (composed_tables.count(table))
+            throw std::runtime_error("composed identity cannot be used as scalar text: " + table);
         const auto t = tables.find(table);
         if (t == tables.end()) throw std::runtime_error("identity table " + table + " is not declared");
         const auto i = t->second.find(key);
@@ -510,6 +534,37 @@ struct laplace_recipe_stream {
     void harvest(const node& record) {
         for (const auto& rule : table_rules) {
             if (rule.record != record.name) continue;
+            if (!rule.parts.empty()) {
+                std::vector<const node*> members{&record};
+                if (!rule.member_path.empty()) {
+                    for (const auto& name : split(rule.member_path, "/")) {
+                        std::vector<const node*> next;
+                        for (const node* parent : members)
+                            for (const auto& child : parent->children)
+                                if (child.name == name) next.push_back(&child);
+                        members = std::move(next);
+                    }
+                }
+                auto& table = composed_tables[rule.name];
+                for (const node* member : members) {
+                    std::vector<std::string> keys;
+                    collect(*member, rule.key_path, keys);
+                    identity_value denoted;
+                    for (const auto& part : rule.parts) {
+                        std::vector<std::string> values;
+                        collect(part.from_record ? record : *member, part.path, values);
+                        if (values.size() != 1 || values.front().empty())
+                            throw std::runtime_error("identity table " + rule.name + " requires one constituent at " + part.path);
+                        denoted.emplace_back(part.table, values.front());
+                    }
+                    for (const auto& key : keys) {
+                        const auto placed = table.emplace(key, denoted);
+                        if (!placed.second && placed.first->second != denoted)
+                            throw std::runtime_error("identity table " + rule.name + " states two values for " + key);
+                    }
+                }
+                continue;
+            }
             std::vector<std::string> keys, values;
             collect(record, rule.key_path, keys);
             collect(record, rule.value_path, values);
@@ -604,6 +659,33 @@ struct laplace_recipe_stream {
     }
     hash128_t content(intent_stage_t* stage, const std::string& text) {
         return compose_content(stage, text).id;
+    }
+    content_form identity_form(intent_stage_t* stage, const std::string& table,
+        const std::string& key, size_t depth = 0) {
+        const auto composed = composed_tables.find(table);
+        if (composed == composed_tables.end()) return compose_content(stage, identify(table, key));
+        if (depth >= table_rules.size()) throw std::runtime_error("cyclic composed identity reference: " + table);
+        const auto found = composed->second.find(key);
+        if (found == composed->second.end()) throw std::runtime_error("unresolved " + table + " reference: " + key);
+        std::vector<laplace_ordered_component_t> parts;
+        for (const auto& ref : found->second) {
+            const content_form value = identity_form(stage, ref.first, ref.second, depth + 1);
+            laplace_ordered_component_t part{};
+            part.id = value.id; std::memcpy(part.coord, value.coord, sizeof(part.coord));
+            part.tier = value.tier; part.atom = value.atom; part.has_atom = value.tier == 0;
+            parts.push_back(part);
+        }
+        if (parts.size() == 1) return identity_form(stage, found->second.front().first, found->second.front().second, depth + 1);
+        laplace_ordered_composition_request_t request{};
+        request.components = parts.data(); request.component_count = parts.size();
+        request.source_id = current_witness; request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "identity reference composition");
+        content_form form{};
+        form.id = result.id; std::memcpy(form.coord, result.coord, sizeof(form.coord));
+        form.hilbert = result.hilbert; form.tier = result.tier;
+        observe(form);
+        return form;
     }
     // The content of trunk_field's text between two inclusive codepoint offsets; zero
     // when the offsets are absent or do not address the text (a null instantiation).
@@ -1130,9 +1212,11 @@ struct laplace_recipe_stream {
         const bool testimony = (rule.disposition & (1u << 6)) != 0;
         const bool ordinary_content = (rule.disposition & (1u << 1)) != 0;
         const bool default_value = rule.has_default && raw == rule.default_value;
-        const bool emitted_testimony = testimony && !(default_value && rule.omit_default_testimony);
+        const auto origin = attributes.find(rule.testimony_unless);
+        const bool attributed_copy = !rule.testimony_unless.empty() && origin != attributes.end() && !origin->second.empty();
+        const bool emitted_testimony = testimony && !(default_value && rule.omit_default_testimony) && !attributed_copy;
         if (!emitted_testimony && !ordinary_content) {
-            if (testimony && default_value && rule.omit_default_testimony) return;
+            if (testimony && ((default_value && rule.omit_default_testimony) || attributed_copy)) return;
             if ((rule.disposition & (1u << 9)) || ((rule.disposition & 1u) && subject_binding)) return;
             throw std::runtime_error("field disposition has no executable lowering");
         }
@@ -1198,7 +1282,7 @@ struct laplace_recipe_stream {
         if (rule.codec == 4) {
             const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
             for (const auto& value : values) {
-                f.object = content(stage, identify(rule.identity_table, value));
+                f.object = identity_form(stage, rule.identity_table, value).id;
                 emit_fact(f);
             }
             return;
@@ -1248,8 +1332,14 @@ struct laplace_recipe_stream {
                     g.object = object_from_parts(stage, rule, attributes, item);
                     if (!nonzero(g.object)) continue;
                 } else {
-                    const std::string value = governed(rule, identify(rule.identity_table, item));
-                    g.object = rule.object_record_scoped ? scoped_to_record(stage, rule, value) : content(stage, value);
+                    if (composed_tables.count(rule.identity_table)) {
+                        if (rule.object_record_scoped || rule.vocabulary.kind != 0)
+                            throw std::runtime_error("composed references cannot be transformed as scalar text: " + rule.path);
+                        g.object = identity_form(stage, rule.identity_table, item).id;
+                    } else {
+                        const std::string value = governed(rule, identify(rule.identity_table, item));
+                        g.object = rule.object_record_scoped ? scoped_to_record(stage, rule, value) : content(stage, value);
+                    }
                 }
                 emit_fact(g);
             }
@@ -1294,7 +1384,7 @@ struct laplace_recipe_stream {
     hash128_t endpoint(intent_stage_t* stage, const field_rule& rule, const std::string& value,
                        const std::map<std::string, std::string>& attributes) {
         if (value == recipe_group_trunk_value) return trunk(stage, rule, attributes);
-        return content(stage, identify(rule.identity_table, value));
+        return identity_form(stage, rule.identity_table, value).id;
     }
     hash128_t trunk(intent_stage_t* stage, const field_rule& rule,
                     const std::map<std::string, std::string>& attributes) {
@@ -1470,6 +1560,7 @@ struct laplace_recipe_stream {
         range = route.kind == 0;
         membership = false; record_facts_done = false; fact_offset = 0; subject_form_known = false;
         observing = true;
+        if (file_head_known) observation_scopes.emplace_back();
         if (range) {
             std::string single = record.get(route.identity);
             cursor = point(single.empty() ? record.get(route.first) : single);
@@ -1484,7 +1575,7 @@ struct laplace_recipe_stream {
         } else if (route.kind == 1) {
             const std::string value = record.get(route.identity);
             if (route.subject_codec == 0) {
-                subject_form = compose_content(stage, identify(route.identity_table, value));
+                subject_form = identity_form(stage, route.identity_table, value);
                 subject = subject_form.id;
                 subject_form_known = true;
                 record_subject_form = subject_form;
@@ -1558,6 +1649,7 @@ struct laplace_recipe_stream {
         for (const auto& child : record.children) lower_child(stage, route, child, child.name, &record_seen);
         if (route.parse.on) lower_parse(stage, route, record);
         scope_attributes = nullptr;
+        if (file_head_known) close_observation(stage);
         observing = false;
         active = true;
     }
@@ -1792,7 +1884,7 @@ struct laplace_recipe_stream {
         if (rule.parts.empty()) {
             const std::string key = child.get(rule.identity);
             if (key.empty()) throw std::runtime_error("child subject has no identity value: " + path);
-            add_part(compose_content(stage, key));
+            add_part(identity_form(stage, rule.identity_table, key));
         } else {
             compose_parts(stage, route, &child, path, rule.parts, parts);
         }
@@ -1808,6 +1900,13 @@ struct laplace_recipe_stream {
             f.relation = rule.relation; f.has_object = true;
             if (rule.child_is_subject) { f.subject = child_id; f.has_subject = true; f.object = subject; }
             else f.object = child_id;
+            if (!rule.link_context.empty()) {
+                const auto seen = with_ancestors(child, ancestors);
+                const auto context = seen.find(rule.link_context);
+                if (context == seen.end() || context->second.empty())
+                    throw std::runtime_error("child link context is absent: " + rule.link_context);
+                f.context = content(stage, context->second); f.has_context = true;
+            }
             if (rule.link_qualifier >= 0) {
                 f.qualifiers[static_cast<size_t>(rule.link_qualifier) / 8] |=
                     static_cast<uint8_t>(1u << (rule.link_qualifier % 8));
@@ -1866,6 +1965,12 @@ struct laplace_recipe_stream {
     }
     void lower_child(intent_stage_t* stage, const route_rule& route, const node& child, const std::string& path,
         const std::map<std::string, std::string>* ancestors = nullptr) {
+        if (file_head_known) observation_scopes.emplace_back();
+        lower_child_content(stage, route, child, path, ancestors);
+        if (file_head_known) close_observation(stage);
+    }
+    void lower_child_content(intent_stage_t* stage, const route_rule& route, const node& child, const std::string& path,
+        const std::map<std::string, std::string>* ancestors) {
         auto prefix = route.children.find(path);
         if (prefix == route.children.end()) throw std::runtime_error("recipe has no child disposition: " + path);
         if (child.ns != route.ns) throw std::runtime_error("unaccounted nested structure: " + path);
@@ -1926,7 +2031,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         const uint32_t version = r.number();
         // "RCPn": the generation digit is the high byte; each generation extends the last.
         const int generation = int(version >> 24) - '0';
-        if ((version & 0x00ffffffu) != 0x00504352u || generation < 1 || generation > 8)
+        if ((version & 0x00ffffffu) != 0x00504352u || generation < 1 || generation > 9)
             throw std::runtime_error("unsupported recipe instruction version");
         const bool rcp6 = generation >= 6, rcp7 = generation >= 7, rcp8 = generation >= 8;
         const bool rcp2_or_later = generation >= 2;
@@ -2028,6 +2133,14 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                             throw std::runtime_error("invalid comment-data instruction");
                         if (!config.comment_pattern.empty()) (void)std::regex(config.comment_pattern);
                     }
+                }
+                if (generation >= 9) {
+                    config.lines_per_record = r.number();
+                    const uint32_t inline_comments = r.number();
+                    if (inline_comments > 1) throw std::runtime_error("invalid inline-comment instruction");
+                    config.inline_comments = inline_comments != 0;
+                    config.marked_span_column = r.text();
+                    config.span_start_marker = r.text(); config.span_end_marker = r.text();
                 }
                 s->delimited = true;
                 s->delimited_columns = config.columns;
@@ -2231,7 +2344,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     rule.link_qualifier = static_cast<int>(link_qualifier) - 1;
                     rule.outcome_field = r.text(); rule.refute_value = r.text();
                     rule.observation_path = r.text();
-                    if (path.empty() || rule.identity.empty() || !route.children.count(path))
+                    if (path.empty() || (rule.identity.empty() && rule.parts.empty()) || !route.children.count(path))
                         throw std::runtime_error("child subject names no declared child path");
                     if (!route.child_subjects.emplace(std::move(path), std::move(rule)).second)
                         throw std::runtime_error("duplicate child subject instruction");
@@ -2266,7 +2379,8 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 table.key_path = r.text(); table.value_path = r.text();
                 const uint32_t absent = r.number();
                 for (uint32_t k = 0; k < absent; ++k) table.absent.insert(r.text());
-                if (table.name.empty() || table.record.empty() || table.key_path.empty() || table.value_path.empty())
+                if (table.name.empty() || table.record.empty() || table.key_path.empty()
+                    || (generation < 9 && table.value_path.empty()))
                     throw std::runtime_error("invalid identity table instruction");
                 s->tables[table.name];
                 s->table_rules.push_back(std::move(table));
@@ -2288,6 +2402,54 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             for (uint32_t k = 0; k < aliases; ++k) {
                 auto property = r.text(); auto value = r.text(); auto canonical = r.text();
                 s->property_aliases[alias_key(property) + '\0' + alias_key(value)] = std::move(canonical);
+            }
+        }
+        if (generation >= 9) {
+            const uint32_t count = r.number();
+            if (count != s->table_rules.size()) throw std::runtime_error("incomplete identity table extension");
+            std::unordered_set<std::string> extended;
+            for (uint32_t k = 0; k < count; ++k) {
+                const std::string name = r.text();
+                auto table = std::find_if(s->table_rules.begin(), s->table_rules.end(),
+                    [&](const identity_table_rule& value) { return value.name == name; });
+                if (table == s->table_rules.end() || !extended.insert(name).second)
+                    throw std::runtime_error("invalid identity table extension: " + name);
+                table->member_path = r.text();
+                const uint32_t parts = r.number();
+                for (uint32_t j = 0; j < parts; ++j) {
+                    identity_table_rule::value_part part;
+                    part.path = r.text(); part.table = r.text();
+                    const uint32_t from_record = r.number();
+                    if (part.path.empty() || from_record > 1 || (!part.table.empty() && !s->tables.count(part.table)))
+                        throw std::runtime_error("invalid identity constituent in " + name);
+                    part.from_record = from_record != 0;
+                    table->parts.push_back(std::move(part));
+                }
+                if (table->parts.empty() == table->value_path.empty()
+                    || (table->parts.empty() && !table->member_path.empty()))
+                    throw std::runtime_error("identity table requires scalar content or composed constituents: " + name);
+                if (!table->parts.empty()) s->composed_tables[name];
+            }
+            const uint32_t children = r.number();
+            for (uint32_t k = 0; k < children; ++k) {
+                const std::string route_name = r.text(), path = r.text(), table = r.text(), context = r.text();
+                const auto route = s->routes.find(route_name);
+                if (route == s->routes.end() || !route->second.child_subjects.count(path)
+                    || (!table.empty() && !s->tables.count(table)))
+                    throw std::runtime_error("invalid child identity reference: " + path);
+                auto& child = route->second.child_subjects.at(path);
+                if (!table.empty() && !child.parts.empty()) throw std::runtime_error("child declares both identity parts and an identity table: " + path);
+                child.identity_table = table;
+                child.link_context = context;
+            }
+            const uint32_t conditional_testimony = r.number();
+            for (uint32_t k = 0; k < conditional_testimony; ++k) {
+                const std::string path = r.text(), origin = r.text();
+                const auto field = s->fields.find(path);
+                if (field == s->fields.end() || origin.empty() || field->second.subject_mode != 0
+                    || field->second.pair_mode != 0 || !field->second.relation_field.empty())
+                    throw std::runtime_error("invalid conditional testimony: " + path);
+                field->second.testimony_unless = origin;
             }
         }
         if (r.remaining) throw std::runtime_error("trailing recipe instructions");
@@ -2549,12 +2711,14 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
             stage_ptr stage(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
             if (!stage) throw std::bad_alloc();
             s->file_trunk_done = true;
-            s->file_parts.insert(s->file_parts.begin(), s->file_head);
-            s->file_root = s->file_parts.size() == 1 ? s->file_head
-                : s->compose_trunk(stage.get(), s->file_parts, "SourceFile");
+            if (s->file_parts.empty()) s->file_root = s->file_head;
+            else {
+                const auto content = s->file_parts.size() == 1 ? s->file_parts.front()
+                    : s->compose_trunk(stage.get(), s->file_parts, "Document");
+                s->file_root = s->compose_trunk(stage.get(), {s->file_head, content}, "SourceFile");
+            }
             s->file_root_known = true;
             s->file_parts.clear(); s->file_parts.shrink_to_fit();
-            s->file_seen.clear();
             *out = stage.release();
             return 1;
         } catch (const std::exception& e) { return fail_stream(s, e.what()); }

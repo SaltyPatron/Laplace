@@ -313,6 +313,11 @@ pg_laplace_prompt_tree(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) return (Datum) 0;
     input = PG_GETARG_TEXT_PP(0);
     if (VARSIZE_ANY_EXHDR(input) == 0) return (Datum) 0;
+    if (!laplace_perfcache_ready())
+        ereport(ERROR,
+                (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                 errmsg("prompt_tree requires the T0 perfcache"),
+                 errhint("Configure laplace_substrate.perfcache_path with the installed Unicode cache.")));
     rc = laplace_content_tree_build_public(
         (const uint8_t *) VARDATA_ANY(input), VARSIZE_ANY_EXHDR(input), &tree);
     if (rc != 0)

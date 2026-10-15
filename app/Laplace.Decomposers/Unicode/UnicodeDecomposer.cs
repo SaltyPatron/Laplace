@@ -538,7 +538,9 @@ public sealed class UnicodeDecomposer
     private static bool IsUnicodeControlArtifact(string relative)
     {
         string name = Path.GetFileName(relative);
-        return relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)
+        return relative.Equals(".landed", StringComparison.Ordinal)
+            || relative.Equals("ucd/.laplace-archive-sha256", StringComparison.Ordinal)
+            || relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)
             || name.Equals("ReadMe.txt", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
             || name.Contains("readme", StringComparison.OrdinalIgnoreCase)
@@ -877,6 +879,9 @@ public sealed class UnicodeDecomposer
         AddIfPresent(legacy, ArtifactKind.LinkTerm,
             Path.Combine(baseDir, "linkification", "LinkTerm.txt"), "linkification/LinkTerm.txt");
         AddUnihanFiles(legacy, baseDir);
+        // The complete XML owns repertoire facts on every entry path. Auxiliary
+        // files can add distinct observations, but cannot re-attest its projections.
+        legacy.RemoveAll(static job => IsRepertoireCompensation(job.Kind));
         legacy.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return legacy;
     }

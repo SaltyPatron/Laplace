@@ -801,7 +801,8 @@ def emit_pos_law() -> None:
         "} laplace_pos_tagset_t;\n"
         "\n"
         "/* 0: tag resolves to canonical UPOS *out_canonical at stable index *out_index\n"
-        " * (the POS mask bit); 1: unmapped (the source's own value); -1: invalid. */\n"
+        " * (the POS mask bit); 1: unmapped (the source's own value); -1: invalid.\n"
+        " * A resolved label is native-owned and remains valid for the library lifetime. */\n"
         "int laplace_pos_resolve_canonical(const char* tag, laplace_pos_tagset_t tagset,\n"
         "                                  const char** out_canonical, int* out_index);\n"
         "/* A declared tagset by name (\"upos\", \"wordnet\", ...); -1 when undeclared. */\n"
@@ -866,7 +867,11 @@ def emit_pos_law() -> None:
     lines.append("    if (!tag || !out_canonical) return -1;")
     lines.append("    const char* canon = NULL;")
     lines.append("    switch (tagset) {")
-    lines.append("        case LAPLACE_POS_TAGSET_UPOS: canon = upos_index(tag) >= 0 ? tag : NULL; break;")
+    lines.append("        case LAPLACE_POS_TAGSET_UPOS: {")
+    lines.append("            const int index = upos_index(tag);")
+    lines.append("            canon = index >= 0 ? k_upos[index] : NULL;")
+    lines.append("            break;")
+    lines.append("        }")
     for name in tagsets:
         lines.append(f"        case LAPLACE_POS_TAGSET_{name.upper()}: canon = resolve_{name}(tag); break;")
     lines.append("        default: return -1;")

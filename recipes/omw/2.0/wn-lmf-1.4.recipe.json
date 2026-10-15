@@ -14,10 +14,21 @@
       ]
     },
     {
-      "name": "lexeme",
+      "name": "sense",
       "recordName": "LexicalEntry",
-      "keyPath": "Sense/@id",
-      "valuePath": "Lemma/@writtenForm"
+      "keyPath": "@id",
+      "valuePath": "",
+      "memberPath": "Sense",
+      "valueParts": [
+        {
+          "path": "Lemma/@writtenForm",
+          "fromRecord": true
+        },
+        {
+          "path": "@synset",
+          "identityTable": "concept"
+        }
+      ]
     },
     {
       "name": "frame",
@@ -232,7 +243,7 @@
       "propertyName": "sense",
       "valueKind": "Identity",
       "disposition": "Testimony",
-      "relationName": "HAS_SENSE",
+      "relationName": "CORRESPONDS_TO",
       "identityTable": "concept",
       "contextField": "language"
     },
@@ -285,7 +296,7 @@
       "disposition": "Testimony",
       "relationField": "relType>dc:type",
       "relationResolver": "Surface",
-      "identityTable": "lexeme",
+      "identityTable": "sense",
       "contextField": "language"
     },
     {
@@ -440,7 +451,7 @@
       "relationName": "HAS_VERB_FRAME",
       "subjectMode": "Value",
       "sequenceSeparator": " ",
-      "identityTable": "lexeme"
+      "identityTable": "sense"
     },
     {
       "syntaxPath": "LexicalEntry/@label",
@@ -575,7 +586,17 @@
         "Sense/Example": "Example",
         "Sense/Count": "Count"
       },
-      "inheritParentAttributes": true
+      "inheritParentAttributes": true,
+      "childSubjects": [
+        {
+          "childPath": "Sense",
+          "identityField": "id",
+          "identityTable": "sense",
+          "standalone": true,
+          "parentRelation": "HAS_SENSE",
+          "linkContextField": "language"
+        }
+      ]
     },
     {
       "recordName": "Synset",

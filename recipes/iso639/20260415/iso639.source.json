@@ -119,6 +119,12 @@
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "ISO 639-5 feed; language families belong to a 639-5 witness."
+    },
+    {
+      "selector": ".landed",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local acquisition completion marker, not source content."
     }
   ]
 }

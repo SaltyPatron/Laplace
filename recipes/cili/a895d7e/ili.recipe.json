@@ -24,7 +24,10 @@
       "syntaxPath": "record/@a",
       "propertyName": "kind",
       "valueKind": "Enumerated",
-      "disposition": "Excluded"
+      "disposition": "Content, Testimony",
+      "relationName": "IS_TYPED_AS",
+      "sequenceSeparator": "\u001e",
+      "contextField": "a#ns"
     },
     {
       "syntaxPath": "record/@a#ns",
@@ -38,7 +41,8 @@
       "valueKind": "Text",
       "disposition": "Content, Testimony",
       "relationName": "HAS_DEFINITION",
-      "contextField": "skos:definition#lang"
+      "contextField": "skos:definition#lang",
+      "testimonyUnlessField": "dc:source"
     },
     {
       "syntaxPath": "record/@skos:definition#lang",
@@ -50,13 +54,15 @@
       "syntaxPath": "record/@dc:source",
       "propertyName": "pwn30",
       "valueKind": "Identity",
-      "disposition": "Excluded"
+      "disposition": "Packaging"
     },
     {
       "syntaxPath": "record/@dc:source#ns",
       "propertyName": "pwn30Namespace",
       "valueKind": "Text",
-      "disposition": "Excluded"
+      "disposition": "Content, Testimony",
+      "relationName": "HAS_ATTRIBUTION",
+      "sequenceSeparator": "\u001e"
     },
     {
       "syntaxPath": "record/@ili:status",
