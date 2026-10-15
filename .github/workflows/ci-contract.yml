@@ -13,6 +13,105 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
+  owner-transport-python310:
+    name: Owner policy transport on Python 3.10
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify PostgreSQL timestamps on the older installed Python runtime
+        run: |
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 10), sys.version'
+          python3 tests/identity-owner-policy.py
+          python3 scripts/test-platform-owner-enroll.py
+          python3 scripts/test-platform-access-enroll.py
+
+  platform-initial-assignment:
+    name: PostgreSQL owner recovery and platform assignment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: fixture-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGDATABASE: postgres
+      PGPASSWORD: fixture-only-password
+      LAPLACE_TEST_APP_DB: Host=127.0.0.1;Port=5432;Username=postgres;Password=fixture-only-password;Database=platform_owner_fixture
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Provide pinned grammar queries for managed build
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - name: Recreate application database with persistent owner authority
+        run: |
+          set -euo pipefail
+          export LAPLACE_EXTERNAL="$GITHUB_WORKSPACE/.ci-dependencies"
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release \
+            -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" -p:OpenApiGenerateDocuments=false
+          bash tests/platform-owner-recreation.sh "$RUNNER_TEMP/platform-access-build/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
+      - name: Verify owner reconciliation, atomic initial assignment and revocation protection
+        run: |
+          set -euo pipefail
+          export LAPLACE_EXTERNAL="$GITHUB_WORKSPACE/.ci-dependencies"
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+            -c Release -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" -p:OpenApiGenerateDocuments=false \
+            --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests|FullyQualifiedName~PlatformOwner' \
+            --logger 'trx;LogFileName=platform-initial-assignment.trx' --results-directory "$RUNNER_TEMP/platform-access-results"
+          python3 - "$RUNNER_TEMP/platform-access-results/platform-initial-assignment.trx" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          counters = root.find('.//{*}Counters')
+          assert counters is not None and counters.get('total') == '28' and counters.get('passed') == '28', 'All 28 authority tests must run and pass without skips'
+          PY
+
+  substrate-runtime-grants:
+    name: PostgreSQL runtime grant recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: fixture-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: fixture-only-password
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: bash tests/substrate-runtime-grants.sh
+
   windows-native-package:
     name: Windows native package integrity
     runs-on: windows-2025
@@ -24,9 +123,37 @@ jobs:
       - name: Reject stale native SQL before packaging
         shell: pwsh
         run: ./tests/windows-native-package.ps1
+      - name: Build packages without installed IIS authority
+        shell: pwsh
+        run: |
+          ./tests/iis-package-build-access.ps1
+          ./tests/windows-tree-lock.ps1
       - name: Exercise publication permissions on NTFS
         shell: pwsh
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Provide pinned grammar queries for the managed maintenance build
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - name: Verify database maintenance and IIS recovery boundaries
+        shell: pwsh
+        run: |
+          $env:LAPLACE_EXTERNAL = Join-Path $env:GITHUB_WORKSPACE '.ci-dependencies'
+          $build = Join-Path $env:RUNNER_TEMP 'database-maintenance-build'
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release "-p:LAPLACE_BUILD_ROOT=$build"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $runtime = Join-Path $build 'app/bin/Laplace.Migrations/Release/net10.0'
+          ./tests/migration-command-routing.ps1 -Runtime "$runtime/Laplace.Migrations.dll"
+          ./tests/iis-database-maintenance.ps1 -NpgsqlAssembly "$runtime/Npgsql.dll"
+          ./tests/iis-owner-lifecycle.ps1
+          ./tests/iis-application-restart.ps1
+          ./tests/iis-chess-cache-package.ps1
 
   api-client:
     name: Authenticated CLI transport (${{ matrix.os }})
@@ -37,6 +164,7 @@ jobs:
         os: [ubuntu-24.04, windows-2025]
     env:
       LAPLACE_BUILD_ROOT: ${{ runner.temp }}/laplace-api-client
+      LAPLACE_EXTERNAL: ${{ github.workspace }}/.ci-dependencies
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -44,8 +172,22 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.x'
-      - name: Build and test the actual CLI service transport
+      - name: Provide pinned grammar queries for managed build
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - name: Build and test the CLI service transport
         run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo
+      - name: Verify Linux client installation and launch
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s deploy/client -p 'test_*.py'
+      - name: Verify Windows client launch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
 
   contract:
     name: Static CI/CD contract
@@ -62,6 +204,10 @@ jobs:
         shell: bash
         run: bash scripts/product-ci.sh check
 
+      - name: Verify credential helper publication and rollback
+        shell: bash
+        run: bash scripts/test-credential-repair.sh
+
       - name: Validate evidence-safe Actions history cleanup policy
         shell: bash
         run: python3 .github/scripts/test-actions-history-cleanup.py
@@ -71,9 +217,7 @@ jobs:
         run: |
           python3 -W error::SyntaxWarning -m py_compile \
             .github/scripts/cleanup-actions-history.py \
-            .github/scripts/archive-actions-evidence.py \
-            deploy/client/laplace-mono.py \
-            deploy/client/install-client.py
+            .github/scripts/archive-actions-evidence.py
 
       - name: Validate historical Actions evidence archive policy
         shell: bash

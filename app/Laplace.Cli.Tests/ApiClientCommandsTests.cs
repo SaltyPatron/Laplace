@@ -116,6 +116,43 @@ public sealed class ApiClientCommandsTests
         Assert.Equal(1, handler.Calls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChatUsesPublishedModelAndSelectedConversation(bool resume)
+    {
+        using var handler = new Handler(async request =>
+        {
+            Assert.Equal("/v1/chat/completions", request.RequestUri!.AbsolutePath);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal("laplace-converse-001", body.RootElement.GetProperty("model").GetString());
+            Assert.Equal(resume ? "selected-session" : null, body.RootElement.GetProperty("session").GetString());
+            Assert.Equal("What about its senses?", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+            return Json("""{"metadata":{"session":"selected-session"}}""");
+        });
+        using var client = Client(handler);
+        using var output = new StringWriter();
+        var args = resume
+            ? new[] { "chat", "--session", "selected-session", "What about its senses?" }
+            : new[] { "chat", "What about its senses?" };
+        Assert.Equal(0, await ApiClientCommands.RunAsync(args, client, output, TextWriter.Null));
+        Assert.Contains("selected-session", output.ToString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("chat")]
+    [InlineData("chat", "")]
+    [InlineData("chat", "--session")]
+    [InlineData("chat", "--session", "selected-session")]
+    public async Task IncompleteChatDoesNotSendARequest(params string[] args)
+    {
+        using var handler = new Handler(_ => Task.FromResult(Json("{}")));
+        using var client = Client(handler);
+        Assert.Equal(1, await ApiClientCommands.RunAsync(args, client, TextWriter.Null, TextWriter.Null));
+        Assert.Equal(0, handler.Calls);
+    }
+
 
     [Fact]
     public async Task DocumentAdmissionVerifiesPersistedBytesAndExcludesDependencyFiles()

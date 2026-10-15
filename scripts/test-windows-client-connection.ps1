@@ -12,6 +12,16 @@ $reference=[Security.SecurityElement]::Escape($NpgsqlAssembly)
 [IO.File]::WriteAllText((Join-Path $root 'Program.cs'),@'
 using System;
 using Npgsql;
+if (args.Length > 0 && args[0] == "--api-client") {
+    if (args.Length != 3 || args[1] != "connection-probe" || args[2] != "argument with spaces") return 21;
+    if (Environment.GetEnvironmentVariable("LAPLACE_API_URL") != "https://example.test/") return 22;
+    if (!System.IO.File.Exists(Environment.GetEnvironmentVariable("LAPLACE_API_KEY_FILE"))) return 23;
+    foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        if (((string)entry.Key).StartsWith("PG", StringComparison.OrdinalIgnoreCase)
+            || (string)entry.Key is "LAPLACE_DB" or "LAPLACE_APP_DB" or "LAPLACE_BUILD_ROOT") return 24;
+    Console.WriteLine("api-client-process-contract-passed");
+    return 0;
+}
 var connection = new NpgsqlConnectionStringBuilder();
 connection.ConnectionString = Environment.GetEnvironmentVariable("LAPLACE_DB");
 if (!String.IsNullOrEmpty(connection.Password)) return 11;
@@ -59,4 +69,34 @@ if($result.Code -eq 0 -or $result.Error -notmatch 'requires this machine'){throw
 $profile.database.host=$env:COMPUTERNAME;$profile.database.authentication='trust'
 $result=Invoke-Client
 if($result.Code -eq 0 -or $result.Error -notmatch 'Unsupported PostgreSQL authentication'){throw 'The launcher did not reject unsupported authentication before credential access.'}
+$keyFile=Join-Path $root 'api-key'
+[IO.File]::WriteAllText($keyFile,'fixture-api-key')
+$config.version=2
+$profile=@{runtime=@{kind='directory';directory=$runtime};api=@{origin='https://example.test';key_file=$keyFile}}
+$config.profiles.development=$profile
+$result=Invoke-Client
+if($result.Code -ne 0 -or $result.Output.Trim() -ne 'api-client-process-contract-passed'){throw "API launcher probe failed: $($result.Code) $($result.Error)"}
+$profile.environment=@{LAPLACE_DB='profile-tripwire';PGPASSWORD='profile-tripwire';PGHOST='profile-tripwire'}
+$result=Invoke-Client
+if($result.Code -ne 0 -or $result.Output.Trim() -ne 'api-client-process-contract-passed'){throw 'API profile environment leaked database access into the child.'}
+$profile.database=@{}
+$result=Invoke-Client
+if($result.Code -eq 0 -or $result.Error -notmatch 'must not include database'){throw 'API profile accepted database targets.'}
+$profile.Remove('database')
+$profile.api.origin='https://example.test/other'
+$result=Invoke-Client
+if($result.Code -eq 0 -or $result.Error -notmatch 'HTTPS origin'){throw 'API profile accepted a non-origin credential destination.'}
+$installed=Join-Path $root 'installed'
+$commands=Join-Path $root 'commands'
+$null=New-Item -ItemType Directory -Path $installed,$commands
+$installedLauncher=Join-Path $installed 'laplace-mono.ps1'
+$installedConfiguration=Join-Path $installed 'client.json'
+$command=Join-Path $commands 'laplace-mono.cmd'
+[IO.File]::WriteAllText($installedLauncher,'original launcher')
+[IO.File]::WriteAllText($installedConfiguration,'original configuration')
+[IO.File]::WriteAllText($command,'another command')
+$rejected=$false
+try { & "$PSScriptRoot/../deploy/client/Install-LaplaceClient.ps1" -Configuration $configFile -Destination $installed -CommandDirectory $commands }
+catch { if($_.Exception.Message -notmatch 'Another command already owns'){throw}; $rejected=$true }
+if(-not $rejected -or [IO.File]::ReadAllText($installedLauncher) -cne 'original launcher' -or [IO.File]::ReadAllText($installedConfiguration) -cne 'original configuration' -or [IO.File]::ReadAllText($command) -cne 'another command'){throw 'Installer command conflict did not preserve the existing installation before preflight.'}
 'Installed launcher process checks passed: Windows authentication needs no credential enrollment, clears ambient credentials/build paths, preserves arguments, and rejects remote or unsupported selections before credential access. No live database was contacted.'

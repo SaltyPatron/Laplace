@@ -21,6 +21,11 @@ def main():
     config = json.loads(args.configuration.read_text())
     if config['version'] not in (1, 2) or config['default_profile'] not in config['profiles']:
         raise ValueError('Invalid client declaration/default profile')
+    launcher = args.destination / 'laplace-mono.py'
+    command = args.command_directory / 'laplace-mono'
+    if command.exists() or command.is_symlink():
+        if not command.is_symlink() or command.resolve() != launcher.resolve():
+            raise ValueError(f'Another command already owns {command}; preserved')
     source_launcher = Path(__file__).with_name('laplace-mono.py')
     check = ['ops'] if config['version'] == 2 else ['decompose', 'Laplace']
     verify_env = dict(os.environ, LAPLACE_MONO_CLIENT_CONFIG=str(args.configuration))
@@ -29,19 +34,15 @@ def main():
                        env=verify_env, check=True)
     args.destination.mkdir(parents=True, exist_ok=True)
     args.command_directory.mkdir(parents=True, exist_ok=True)
-    launcher = args.destination / 'laplace-mono.py'
     shutil.copy2(source_launcher, launcher)
     launcher.chmod(0o755)
     (args.destination / 'client.json').write_text(json.dumps(config, indent=2) + '\n')
-    command = args.command_directory / 'laplace-mono'
-    if command.exists() or command.is_symlink():
-        if not command.is_symlink() or command.resolve() != launcher.resolve():
-            raise ValueError(f'Another command already owns {command}; preserved')
-    else:
+    if not command.is_symlink():
         command.symlink_to(launcher)
-    subprocess.run([str(command), '--where'], check=True)
-    check = ['ops'] if config['version'] == 2 else ['decompose', 'Laplace']
-    subprocess.run([str(command), *check], check=True)
+    installed_env = dict(os.environ, LAPLACE_MONO_CLIENT_CONFIG=str(args.destination / 'client.json'))
+    selected_command = [str(command), '--profile', config['default_profile']]
+    subprocess.run([*selected_command, '--where'], env=installed_env, check=True)
+    subprocess.run([*selected_command, *check], env=installed_env, check=True)
     print(f'Installed laplace-mono: {command}')
     if str(args.command_directory) not in os.environ.get('PATH', '').split(os.pathsep):
         print(f'Command directory is not in this shell PATH: {args.command_directory}')

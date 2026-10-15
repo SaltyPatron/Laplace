@@ -16,7 +16,7 @@ internal static class ApiClientCommands
         laplace-mono content put <file> [--code]
         laplace-mono content get <file-id>
         laplace-mono content export <file-id> <destination>
-        laplace-mono chat <prompt>
+        laplace-mono chat [--session <session>] <prompt>
         """;
 
     public static async Task<int> RunAsync(string[] args)
@@ -94,11 +94,7 @@ internal static class ApiClientCommands
                     await ContentAsync(args, client, output, ct);
                     return 0;
                 case "chat":
-                    if (args.Length < 2) throw new ArgumentException("Usage: laplace-mono chat <prompt>");
-                    await PrintAsync(client, HttpMethod.Post, "/v1/chat/completions",
-                        JsonContent.Create(new { model = "laplace", messages = new[] {
-                            new { role = "user", content = string.Join(" ", args.Skip(1)) } }, stream = false }),
-                        output, ct);
+                    await ChatAsync(args, client, output, ct);
                     return 0;
                 default:
                     throw new ArgumentException(
@@ -142,6 +138,26 @@ internal static class ApiClientCommands
         }
         await PrintAsync(client, HttpMethod.Post, "/v1/op",
             JsonContent.Create(new { name = args[1], args = arguments, max_rows = maxRows, timeout_seconds = timeoutSeconds }),
+            output, ct);
+    }
+
+    private static async Task ChatAsync(string[] args, HttpClient client, TextWriter output, CancellationToken ct)
+    {
+        string? session = null;
+        var promptStart = 1;
+        if (args.Length > 1 && args[1] == "--session")
+        {
+            if (args.Length < 4 || string.IsNullOrWhiteSpace(args[2]))
+                throw new ArgumentException("Usage: laplace-mono chat [--session <session>] <prompt>");
+            session = args[2];
+            promptStart = 3;
+        }
+        var prompt = string.Join(" ", args.Skip(promptStart));
+        if (string.IsNullOrWhiteSpace(prompt))
+            throw new ArgumentException("Usage: laplace-mono chat [--session <session>] <prompt>");
+        await PrintAsync(client, HttpMethod.Post, "/v1/chat/completions",
+            JsonContent.Create(new { model = "laplace-converse-001", session,
+                messages = new[] { new { role = "user", content = prompt } }, stream = false }),
             output, ct);
     }
 

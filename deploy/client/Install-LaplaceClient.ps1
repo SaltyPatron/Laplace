@@ -12,6 +12,14 @@ foreach ($path in @($Configuration,$Destination,$CommandDirectory)) {
 $config=Get-Content -LiteralPath $Configuration -Raw | ConvertFrom-Json -AsHashtable
 if ($config.version -notin @(1,2) -or -not $config.profiles.ContainsKey($config.default_profile)) { throw 'Invalid client declaration/default profile.' }
 $pwsh=(Get-Command pwsh -CommandType Application).Source
+$launcher=Join-Path $Destination 'laplace-mono.ps1'
+$command=Join-Path $CommandDirectory 'laplace-mono.cmd'
+$body='@echo off'+"`r`n"+'setlocal DisableDelayedExpansion'+"`r`n"+'"'+$pwsh.Replace('%','%%')+'" -NoLogo -NoProfile -File "'+$launcher.Replace('%','%%')+'" %*'+"`r`n"+'exit /b %errorlevel%'+"`r`n"
+if (Test-Path -LiteralPath $command) {
+    if (-not (Test-Path -LiteralPath $command -PathType Leaf) -or [IO.File]::ReadAllText($command) -cne $body) {
+        throw "Another command already owns $command; preserved."
+    }
+}
 function Invoke-ClientCheck([string]$Launcher,[string]$ConfigurationPath,[string[]]$CommandArguments) {
     $start=[Diagnostics.ProcessStartInfo]::new($pwsh)
     $start.UseShellExecute=$false
@@ -28,9 +36,6 @@ if ($config.version -eq 2) { Invoke-ClientCheck "$PSScriptRoot/laplace-mono.ps1"
 Copy-Item -LiteralPath "$PSScriptRoot/laplace-mono.ps1" -Destination (Join-Path $Destination 'laplace-mono.ps1') -Force
 Copy-Item -LiteralPath "$PSScriptRoot/../windows/database-connection.ps1" -Destination (Join-Path $Destination 'database-connection.ps1') -Force
 [IO.File]::WriteAllText((Join-Path $Destination 'client.json'),($config | ConvertTo-Json -Depth 16))
-$launcher=Join-Path $Destination 'laplace-mono.ps1'
-$command=Join-Path $CommandDirectory 'laplace-mono.cmd'
-$body='@echo off'+"`r`n"+'setlocal DisableDelayedExpansion'+"`r`n"+'"'+$pwsh.Replace('%','%%')+'" -NoLogo -NoProfile -File "'+$launcher.Replace('%','%%')+'" %*'+"`r`n"+'exit /b %errorlevel%'+"`r`n"
 [IO.File]::WriteAllText($command,$body)
 Invoke-ClientCheck $launcher (Join-Path $Destination 'client.json') @('--where')
 if ($config.version -eq 2) { Invoke-ClientCheck $launcher (Join-Path $Destination 'client.json') @('ops') }

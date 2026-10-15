@@ -51,6 +51,7 @@ laplace-mono content put "E:\Documents\source.cs" --code
 laplace-mono content get <file-id>
 laplace-mono content export <file-id> "E:\Documents\restored.md"
 laplace-mono chat "Explain this relationship"
+laplace-mono chat --session <session-from-response> "What supports that?"
 ```
 
 `op` passes typed JSON arguments to a named installed operation; the service
@@ -58,6 +59,10 @@ enforces its catalog and permissions. `--timeout-seconds` selects the service
 operation timeout, with zero retaining its documented unbounded behavior.
 Service errors return a nonzero exit status. The client neither retries writes
 automatically nor follows redirects carrying credentials.
+
+Chat selects the published `laplace-converse-001` model. Use the returned
+`metadata.session` with `--session` to continue the same witnessed conversation.
+The response retains the native completion receipt, including unresolved results.
 
 Document admission sends UTF-8 text files through the workspace content API,
 retaining relative paths and observed modification times. Directory selection uses
