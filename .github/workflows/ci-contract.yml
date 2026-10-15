@@ -180,6 +180,8 @@ jobs:
           persist-credentials: false
       - name: Build and test the CLI service transport
         run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/laplace-api-client"
+      - name: Verify installed-client acceptance and credential cleanup
+        run: python scripts/test-installed-api-client.py
       - name: Verify Linux client installation and launch
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s deploy/client -p 'test_*.py'

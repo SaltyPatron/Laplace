@@ -596,6 +596,14 @@ phase_smoke() {
     echo '| Authenticated installed runtime | FAILED |' >> "$SUMMARY"
     rc=1
   fi
+  if python3 "$ROOT/scripts/run-authenticated-verification.py" --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" -- \
+      python3 "$ROOT/scripts/verify-installed-api-client.py" --cli "$LAPLACE_APP_DIR/cli/Laplace.Cli" \
+      --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" --work "$SITE_WORK"; then
+    echo '| Installed authenticated CLI admission and byte-exact export | passed |' >> "$SUMMARY"
+  else
+    echo '| Installed authenticated CLI admission and byte-exact export | FAILED |' >> "$SUMMARY"
+    rc=1
+  fi
   {
     echo
     echo "- revision: \`$installed_revision\`"
