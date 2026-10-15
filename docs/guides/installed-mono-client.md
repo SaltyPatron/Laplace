@@ -5,6 +5,21 @@ Laplace-Refactor or the modular Laplace-Engine executable. The command is usable
 from any directory after installation; relative input paths resolve from the
 caller's directory.
 
+## Downloaded API client
+
+The authenticated CLI jobs in the
+[CI workflow](https://github.com/SaltyPatron/Laplace/actions/workflows/ci-contract.yml)
+publish Windows x64 and Linux x64 client artifacts after their transport and
+installer checks pass. Each artifact contains an archive, its SHA-256, a
+revision-stamped file manifest, and the included .NET runtime. Extract the inner
+archive into a permanent directory and follow its `README.txt` to install with an
+existing workspace API-key file. The package needs no source checkout or local
+substrate/database installation. Package retention is 30 days.
+
+Windows setup uses PowerShell 7; Linux setup uses Python 3.10 or newer. Both
+installers select the runtime beside the package, build a version 2 profile, and
+verify the authenticated service catalog before changing the command.
+
 ## Authenticated service profiles
 
 Version 2 profiles select an HTTPS API and a private API-key file. The client uses

@@ -1,0 +1,27 @@
+<Project>
+  <Import Project="../../scripts/win/machine-env.props" Condition="'$(OS)' == 'Windows_NT'" />
+  <PropertyGroup>
+    <BaseOutputPath>$(LAPLACE_BUILD_ROOT)/api-client/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(LAPLACE_BUILD_ROOT)/api-client/obj/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Laplace.Cli</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The installed monorepo CLI and downloadable client execute the same
+         transport and source-selection implementation. -->
+    <Compile Include="../../app/Laplace.Cli/ApiClientCommands.cs" Link="ApiClientCommands.cs" />
+    <Compile Include="../../app/Laplace.Core/Core/VendoredPathFilter.cs" Link="VendoredPathFilter.cs" />
+    <Compile Include="ApiClientProgram.cs" />
+  </ItemGroup>
+  <Target Name="RequireClientBuildDirectory" BeforeTargets="Restore;PrepareForBuild">
+    <Error Condition="'$(LAPLACE_BUILD_ROOT)' == ''" Text="Select LAPLACE_BUILD_ROOT for client build artifacts." />
+  </Target>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

@@ -182,13 +182,29 @@ jobs:
         run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/laplace-api-client"
       - name: Verify installed-client acceptance and credential cleanup
         run: python scripts/test-installed-api-client.py
+      - name: Verify client archive integrity and setup handoff
+        run: python scripts/test-api-client-package.py
       - name: Verify Linux client installation and launch
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s deploy/client -p 'test_*.py'
       - name: Verify Windows client launch
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:RUNNER_TEMP/laplace-api-client/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
+        run: |
+          ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:RUNNER_TEMP/laplace-api-client/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
+          ./scripts/test-api-client-package.ps1 -Work $env:RUNNER_TEMP
+      - name: Publish a self-contained authenticated client
+        run: dotnet publish deploy/client/Laplace.ApiClient.csproj -c Release --self-contained true -r ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }} -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/laplace-api-client" -o "${{ runner.temp }}/api-client-published" --nologo
+      - name: Package and execute the downloadable client
+        run: python scripts/package-api-client.py --published "${{ runner.temp }}/api-client-published" --output "${{ runner.temp }}/api-client-packages" --platform ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }} --revision ${{ github.sha }}
+      - name: Retain the verified client package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-api-client-${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}-${{ github.sha }}
+          path: ${{ runner.temp }}/api-client-packages/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
 
   contract:
     name: Static CI/CD contract
