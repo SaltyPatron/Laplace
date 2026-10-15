@@ -46,7 +46,7 @@ echo ERROR: unknown argument %~1 (flags: --reconfigure, --configure-only)
 exit /b 1
 :parsed
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-pg || exit /b 1
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-pg || exit /b 1
 
 rem ---- PG's perl codegen (generate-lwlocknames.pl et al) requires an LF checkout —
 rem upstream's documented Windows guidance is core.autocrlf=false. A global
@@ -123,9 +123,9 @@ if errorlevel 1 ( echo ERROR: meson install failed & goto fail )
 "%LAPLACE_PG_PREFIX%\bin\pg_config.exe" --version || goto fail
 
 :done
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-pg
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-pg
 exit /b 0
 
 :fail
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-pg
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-pg
 exit /b 1

@@ -49,3 +49,4 @@ try {
     if(-not $resolved.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase)){throw 'Unexpected test directory outside temporary storage.'}
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
+exit 0

@@ -27,7 +27,7 @@ if "%SKIP_CODEGEN%"=="0" (
   echo build-extensions: codegen skipped (--skip-codegen^)
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-ext || exit /b 1
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-ext || exit /b 1
 
 set "GEOS_PREFIX=%LAPLACE_DEPENDENCY_GEOS_PREFIX%"
 if not defined GEOS_PREFIX set "GEOS_PREFIX=%LAPLACE_DEPS_PREFIX%\geos"
@@ -71,9 +71,9 @@ if defined TARGETS (
 )
 if errorlevel 1 goto fail
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
 exit /b 0
 
 :fail
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
 exit /b 1

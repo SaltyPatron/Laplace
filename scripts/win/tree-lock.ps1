@@ -1,3 +1,4 @@
+#Requires -Version 7
 param(
     [Parameter(Mandatory = $true)][ValidateSet('acquire', 'release')][string]$Action,
     [Parameter(Mandatory = $true)][string]$Tree
@@ -14,9 +15,9 @@ if ($Action -eq 'release') {
     exit 0
 }
 
-$me = Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
-$ownerPid = [int]$me.ParentProcessId
-$ownerProc = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+$ownerProc = (Get-Process -Id $PID).Parent
+if (-not $ownerProc) { throw 'Cannot identify the calling build process.' }
+$ownerPid = $ownerProc.Id
 $ownerStart = ''
 $ownerName = 'unknown'
 if ($ownerProc) {
@@ -44,9 +45,13 @@ while ($true) {
             if ($cur.pid -eq $ownerPid) { exit 0 }
             $p = Get-Process -Id $cur.pid -ErrorAction SilentlyContinue
             if ($p) {
-                $curStart = ''
-                try { $curStart = $p.StartTime.ToString('o') } catch {}
-                if (-not $cur.start -or $curStart -eq $cur.start) { $alive = $true }
+                $curStart = $null
+                $recordedStart = $null
+                try { $curStart = $p.StartTime.ToUniversalTime() } catch {}
+                try { if ($cur.start) { $recordedStart = ([DateTimeOffset]$cur.start).UtcDateTime } } catch {}
+                # JSON readers can return either a string or a DateTime. Compare
+                # instants, and retain a live process's lock when its start is unreadable.
+                if (-not $recordedStart -or -not $curStart -or $curStart -eq $recordedStart) { $alive = $true }
             }
         }
         if (-not $alive) {
