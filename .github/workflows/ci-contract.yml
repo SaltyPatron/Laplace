@@ -163,7 +163,6 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2025]
     env:
-      LAPLACE_BUILD_ROOT: ${{ runner.temp }}/laplace-api-client
       LAPLACE_EXTERNAL: ${{ github.workspace }}/.ci-dependencies
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -180,14 +179,14 @@ jobs:
           path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
           persist-credentials: false
       - name: Build and test the CLI service transport
-        run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo
+        run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/laplace-api-client"
       - name: Verify Linux client installation and launch
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s deploy/client -p 'test_*.py'
       - name: Verify Windows client launch
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
+        run: ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:RUNNER_TEMP/laplace-api-client/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
 
   contract:
     name: Static CI/CD contract
