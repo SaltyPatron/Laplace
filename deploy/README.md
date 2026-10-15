@@ -57,6 +57,10 @@ route used by the deployed production MCP proxy during the routing migration.
 
 ## Windows IIS
 
+For database creation, repair and clearing, see
+[IIS database maintenance](windows/DATABASE-MAINTENANCE.md). Application and
+substrate databases are selected explicitly; a missing database uses `repair`.
+
 Declare `LAPLACE_PUBLIC_BASE_URL`, the installation path (`LAPLACE_IIS_API`),
 site/pool names (`LAPLACE_IIS_SITE`, `LAPLACE_IIS_POOL`) and the thumbprint of a
 valid TLS certificate with its private key in LocalMachine/My

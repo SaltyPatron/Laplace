@@ -31,14 +31,14 @@ $revision=(& git -C $repo rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
 # Native SQL and managed callers belong to the same publication. The native
 # builder owns configuration and the shared build-tree lock.
-& (Join-Path $repo 'scripts/win/build-engine.cmd') laplace_core laplace_syzygy laplace_dynamics laplace_synthesis laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache
+& (Join-Path $repo 'scripts/win/build-engine.cmd') laplace_core laplace_syzygy laplace_dynamics laplace_synthesis laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_chess_transition_perfcache
 if($LASTEXITCODE){throw 'Native runtime build failed; no application package was created.'}
 $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid().ToString('N'))
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'
 $null=New-Item -ItemType Directory -Path $published -Force
 if(-not $ManagedBuild){$ManagedBuild=Join-Path $env:LAPLACE_BUILD_ROOT 'iis-publish'}
 $ManagedBuild=[IO.Path]::GetFullPath($ManagedBuild)
-foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplace.Cli',(Join-Path $published 'cli')),@('Laplace.Chess.Uci',(Join-Path $published 'uci')))){
+foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplace.Cli',(Join-Path $published 'cli')),@('Laplace.Chess.Uci',(Join-Path $published 'uci')),@('Laplace.Migrations',(Join-Path $published 'migrations')))){
     & dotnet publish (Join-Path $repo ('app/'+$component[0]+'/'+$component[0]+'.csproj')) -c Release --no-self-contained -o $component[1] --nologo "-p:LAPLACE_BUILD_ROOT=$ManagedBuild" "-p:LAPLACE_ENGINE_BUILD=$env:LAPLACE_ENGINE_BUILD"
     if($LASTEXITCODE){throw "Publish failed: $($component[0])"}
 }

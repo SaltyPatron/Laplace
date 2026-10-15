@@ -18,6 +18,7 @@ exit /b 2
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"
 set "HW_SRC=%LAPLACE_HIGHWAY_PERFCACHE_BIN%"
 set "CHESS_SRC=%LAPLACE_CHESS_POSITION_PERFCACHE_BIN%"
+set "TRANSITION_SRC=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_chess_transition_perfcache.bin"
 set "T0_DST=%DEPLOY%\share\laplace_t0_perfcache.bin"
 set "HW_DST=%DEPLOY%\share\laplace_highway_perfcache.bin"
 set "CHESS_DST=%DEPLOY%\share\laplace_chess_position_perfcache.bin"
@@ -46,6 +47,11 @@ if not exist "%HW_SRC%" (
 if not exist "%CHESS_SRC%" (
   echo ERROR: chess position perfcache missing at %CHESS_SRC%
   echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_chess_position_perfcache
+  exit /b 1
+)
+if not exist "%TRANSITION_SRC%" (
+  echo ERROR: chess transition perfcache missing at %TRANSITION_SRC%
+  echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_chess_transition_perfcache
   exit /b 1
 )
 
@@ -89,6 +95,7 @@ rem Perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewa
 call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%CHESS_SRC%" "%DEPLOY%\share" || exit /b 1
+call :swapcopy "%TRANSITION_SRC%" "%DEPLOY%\share" || exit /b 1
 rem laplace_core's own run-time dependencies, the one list (engine-runtime.cmd): beside postgres.exe, where a backend
 rem module's dependencies are searched (LOAD_WITH_ALTERED_SEARCH_PATH), not on the service's PATH.
 call "%~dp0engine-runtime.cmd" "%PGRT%" || exit /b 1

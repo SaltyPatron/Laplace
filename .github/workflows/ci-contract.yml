@@ -27,6 +27,28 @@ jobs:
       - name: Exercise publication permissions on NTFS
         shell: pwsh
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Provide pinned grammar queries for the managed maintenance build
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - name: Verify database maintenance and IIS recovery boundaries
+        shell: pwsh
+        run: |
+          $env:LAPLACE_EXTERNAL = Join-Path $env:GITHUB_WORKSPACE '.ci-dependencies'
+          $build = Join-Path $env:RUNNER_TEMP 'database-maintenance-build'
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release "-p:LAPLACE_BUILD_ROOT=$build"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $runtime = Join-Path $build 'app/bin/Laplace.Migrations/Release/net10.0'
+          ./tests/migration-command-routing.ps1 -Runtime "$runtime/Laplace.Migrations.dll"
+          ./tests/iis-database-maintenance.ps1 -NpgsqlAssembly "$runtime/Npgsql.dll"
+          ./tests/iis-application-restart.ps1
+          ./tests/iis-chess-cache-package.ps1
 
   contract:
     name: Static CI/CD contract

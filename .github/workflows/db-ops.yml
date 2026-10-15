@@ -15,17 +15,24 @@ on:
         required: true
         default: status
         options: [status, migrate, repair, reindex, remigrate, recreate]
+      database:
+        description: "substrate uses the existing database controls; application selects accounts, sessions, keys and billing only"
+        type: choice
+        required: true
+        default: substrate
+        options: [substrate, application]
 
 permissions:
   contents: read
 
 jobs:
   db:
-    name: DB — ${{ inputs.operation }}
+    name: DB — ${{ inputs.database }} / ${{ inputs.operation }}
     runs-on: [self-hosted, laplace, '${{ inputs.target }}']
     timeout-minutes: 420
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
+      LAPLACE_DB_SCOPE: ${{ inputs.database }}
     steps:
       - name: Run ${{ inputs.operation }} against the installed database runtime
         env:
@@ -106,6 +113,27 @@ jobs:
             echo "invalid indexes remaining: $remaining"
             [[ "$rc" -eq 0 && "$remaining" == "0" ]]
           }
+
+          case "${LAPLACE_DB_SCOPE:-substrate}" in
+            substrate) ;;
+            application)
+              [[ -n "${LAPLACE_APP_DB:-}" ]] || { echo 'Application maintenance requires the installed LAPLACE_APP_DB declaration.' >&2; exit 2; }
+              bash scripts/db-migrations.sh supports app-up app-status app-check app-reset app-nuke
+              case "$LAPLACE_DB_OPERATION" in
+                status) bash scripts/db-migrations.sh app-status ;;
+                migrate|repair) bash scripts/db-migrations.sh app-up ;;
+                remigrate)
+                  bash scripts/db-migrations.sh app-reset --yes
+                  bash scripts/db-migrations.sh app-up
+                  ;;
+                recreate) bash scripts/db-migrations.sh app-nuke --yes ;;
+                *) echo "Unsupported application database operation: $LAPLACE_DB_OPERATION" >&2; exit 2 ;;
+              esac
+              bash scripts/db-migrations.sh app-check
+              exit 0
+              ;;
+            *) echo 'Choose substrate or application.' >&2; exit 2 ;;
+          esac
 
           case "$LAPLACE_DB_OPERATION" in
             status)
