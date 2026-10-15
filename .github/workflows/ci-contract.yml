@@ -85,6 +85,8 @@ jobs:
           counters = root.find('.//{*}Counters')
           assert counters is not None and counters.get('total') == '28' and counters.get('passed') == '28', 'All 28 authority tests must run and pass without skips'
           PY
+      - name: Verify document generation and persistent browser key lifecycles
+        run: dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --no-restore -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/platform-access-build" -p:OpenApiGenerateDocuments=false --filter FullyQualifiedName~BrowserDataProtectionTests
 
   substrate-runtime-grants:
     name: PostgreSQL runtime grant recovery
