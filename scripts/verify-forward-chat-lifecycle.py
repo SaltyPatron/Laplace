@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -158,7 +159,10 @@ SELECT json_build_object(
 
 
 def validate_http(turn: dict, session: str) -> None:
-    require(turn["status"] == 200, f"ordinary chat returned HTTP {turn['status']}")
+    error = turn["response"].get("error")
+    code = error.get("code") if isinstance(error, dict) else None
+    suffix = f" ({code})" if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,80}", code) else ""
+    require(turn["status"] == 200, f"ordinary chat returned HTTP {turn['status']}{suffix}")
     require(turn["session_header"] == session, "ordinary response changed session key")
     body = turn["response"]
     require(body.get("object") == "chat.completion" and body.get("model") == MODEL,
@@ -185,16 +189,22 @@ def main() -> int:
         # The ordinary endpoint is the writer. No proof-only insert or alternate chat path.
         first = http_turn(args.base, args.tenant, args.session, args.first, args.timeout_seconds)
         validate_http(first, args.session)
+        report["http_turns"] = [first]
         sid = session_id(args.database, args.tenant, args.session, args.timeout_seconds)
+        report["session_id"] = sid
         after_first = snapshot(args.database, sid, args.timeout_seconds)
+        report["after_first"] = after_first
         require(len(after_first["turns"]) >= 2, "first HTTP turn did not persist prompt+response")
         require(after_first["discourse_ids"], "first HTTP turn produced no reusable discourse identities")
 
         # Inspect exactly what turn two will consume before sending turn two.
         second_native = native_trace(args.database, args.second, after_first["discourse_ids"], args.timeout_seconds)
+        report["turn_two_native_receipt"] = second_native
         second = http_turn(args.base, args.tenant, args.session, args.second, args.timeout_seconds)
         validate_http(second, args.session)
+        report["http_turns"].append(second)
         after_second = snapshot(args.database, sid, args.timeout_seconds)
+        report["after_second"] = after_second
         require(len(after_second["turns"]) >= len(after_first["turns"]) + 2,
                 "second HTTP turn did not append prompt+response to the substrate session")
         require(after_second["discourse_ids"][:len(after_first["discourse_ids"])] == after_first["discourse_ids"],

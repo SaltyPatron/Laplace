@@ -168,7 +168,13 @@ def verification_credential(base: str):
                     "label": "installed-runtime-check"}).encode(),
         {"Content-Type": "application/json", "X-Laplace-Operator-Token": operator})
     if status != 200:
-        raise ValueError(f"deployment credential issuance returned HTTP {status}")
+        # Retain the typed failure without publishing arbitrary server text or credentials.
+        try:
+            code = json.loads(response).get("error", {}).get("code")
+        except (ValueError, AttributeError):
+            code = None
+        suffix = f" ({code})" if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,80}", code) else ""
+        raise ValueError(f"deployment credential issuance returned HTTP {status}{suffix}")
     issued = json_object(response, "credential issuance")
     key, key_prefix = issued.get("api_key"), issued.get("key_prefix")
     if not isinstance(key, str) or not key.startswith("sk-laplace-") or not key_prefix:

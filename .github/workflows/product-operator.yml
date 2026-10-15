@@ -357,7 +357,7 @@ jobs:
     permissions:
       contents: read
     env:
-      LAPLACE_PROOF_TENANT: ci
+      LAPLACE_PROOF_TENANT: deployment-verification
       LAPLACE_API_KEY: ${{ secrets.LAPLACE_API_KEY }}
       LAPLACE_QUOTE_ID: ${{ secrets.LAPLACE_QUOTE_ID }}
       LAPLACE_BILLING_BYPASS: ${{ vars.LAPLACE_BILLING_BYPASS }}
