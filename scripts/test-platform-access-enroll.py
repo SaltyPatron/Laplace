@@ -7,8 +7,10 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import urllib.error
@@ -211,6 +213,25 @@ class EnrollmentTests(unittest.TestCase):
             with self.assertRaises(enroll.EnrollmentError):
                 self.run_enrollment()
 
+    @unittest.skipUnless(os.name == "posix", "POSIX inherited directory permissions")
+    def test_setgid_private_directory_enrolls_and_keeps_journal_private(self):
+        self.directory.chmod(0o2700)
+        self.assertTrue(self.run_enrollment()["passed"])
+        self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o2700)
+        path = self.directory / (self.request["nonce"] + ".json")
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.calls.clear()
+        self.assertTrue(self.run_enrollment()["passed"])
+        self.assertEqual(self.grants(), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX inherited directory permissions")
+    def test_group_readable_directory_is_rejected_before_requests(self):
+        self.directory.chmod(0o2740)
+        with self.assertRaisesRegex(enroll.EnrollmentError, "mode 2740"):
+            self.run_enrollment()
+        self.assertEqual(self.calls, [])
+        self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o2740)
+
     def test_private_failed_input_never_enters_cli_receipt(self):
         request_path = self.directory / "request.json"
         receipt = self.directory / "receipt.json"
@@ -237,6 +258,24 @@ class TransportAndDatabaseTests(unittest.TestCase):
     def api(self):
         with patch.object(enroll.access, "credential", return_value=TOKEN):
             return enroll.Api("http://127.0.0.1:5187")
+
+    def test_private_path_distinguishes_ownership_and_modes_without_disclosure(self):
+        value = SimpleNamespace(st_mode=stat.S_IFDIR | 0o2700, st_uid=42)
+        path = SimpleNamespace(is_symlink=lambda: False, is_absolute=lambda: True, stat=lambda: value)
+        with patch.object(enroll.os, "name", "posix"), patch.object(enroll.os, "getuid", return_value=42, create=True):
+            enroll.private_path(path, directory=True)
+            for mode in (0o2740, 0o2701, 0o3700, 0o4700):
+                value.st_mode = stat.S_IFDIR | mode
+                with self.assertRaisesRegex(enroll.EnrollmentError, f"mode {mode:04o}"):
+                    enroll.private_path(path, directory=True)
+            value.st_mode = stat.S_IFREG | 0o2600
+            with self.assertRaisesRegex(enroll.EnrollmentError, "mode 2600"):
+                enroll.private_path(path)
+            value.st_mode = stat.S_IFREG | 0o600
+            enroll.private_path(path)
+            value.st_uid = 43
+            with self.assertRaisesRegex(enroll.EnrollmentError, "not owned by this operator"):
+                enroll.private_path(path)
 
     def test_api_grant_is_atomic_initial_assignment_and_route_bounded(self):
         api = self.api()

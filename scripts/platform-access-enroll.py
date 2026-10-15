@@ -208,8 +208,14 @@ def private_path(path, directory=False):
         raise EnrollmentError("The private enrollment journal path is unavailable.") from None
     if (directory and not stat.S_ISDIR(value.st_mode)) or (not directory and not stat.S_ISREG(value.st_mode)):
         raise EnrollmentError("The enrollment journal path has the wrong file type.")
-    if os.name == "posix" and (value.st_uid != os.getuid() or stat.S_IMODE(value.st_mode) != (0o700 if directory else 0o600)):
-        raise EnrollmentError("The enrollment journal must be owned by this operator and private.")
+    if os.name == "posix":
+        if value.st_uid != os.getuid():
+            raise EnrollmentError("The enrollment journal is not owned by this operator.")
+        mode = stat.S_IMODE(value.st_mode)
+        # An inherited setgid directory selects the group of new files without
+        # granting that group access. Journal files themselves remain mode 0600.
+        if mode not in ((0o700, 0o2700) if directory else (0o600,)):
+            raise EnrollmentError(f"The enrollment journal has non-private mode {mode:04o}.")
 
 
 class Journal:
