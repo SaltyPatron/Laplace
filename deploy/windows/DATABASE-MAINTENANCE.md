@@ -4,25 +4,40 @@ Use the installed IIS package and the existing Windows operator login. The comma
 reads the IIS installation selected by `LAPLACE_IIS_INSTALLATION` and the desktop
 access declaration in `Laplace-Operations/development/installation.json`.
 
-Installation owners survive application database recreation through the private
-`state/platform-owners/policy.json` file. Update the installed runtime with
-`Install-IisRuntime.ps1` once to install its narrow directory ACL and permanent
-`LAPLACE_PLATFORM_OWNER_POLICY_FILE` setting. That installation step requires the
-existing administrator setup context; later owner enrollment uses the declared
-ordinary Windows operator and existing DPAPI/SSPI credentials:
+Installation owners are part of `Install-IisRuntime.ps1 -Operation Install` and
+`-Operation Repair`. Setup discovers the host's existing private operator declaration
+under `LAPLACE_SRC/Laplace-Operations/installation/<host>-operator.json`, or accepts
+`-OwnerDeclaration`. It persists that declaration and the verified owner policy
+under `state/platform-owners/`, outside the application database. Subsequent setup
+uses the installed declaration. Repeating setup preserves the policy bytes and
+verification timestamps when the declared bindings have not changed.
 
 ```powershell
-./deploy/windows/Set-IisPlatformOwners.ps1 `
+./deploy/windows/Install-IisRuntime.ps1 `
   -Installation "$env:LAPLACE_IIS_INSTALLATION" `
-  -OwnerDeclaration "E:/Repositories/Laplace/Laplace-Operations/installation/hart-desktop-operator.json" `
-  -AccessConfiguration "E:/Repositories/Laplace/Laplace-Operations/development/installation.json"
+  -Operation Repair
 ```
 
-Enrollment records exact previously authenticated provider bindings and the current
-OAuth client context. It does not seed passwords, tokens, or sessions, require a
-personal Bao login, or write to OpenBao. Publish/restart the owner-aware application
-after enrollment. Application `repair`, `migrate`, `remigrate`, and `recreate` load
-the same declaration before database mutation and verify administrator restoration.
+Setup authenticates with the installed workload AppRole and revokes its temporary
+token after reading the identity record. It does not require personal development
+DPAPI enrollment or a particular Windows SID. Initial workload enrollment retains
+its existing provisioning contract. IIS setup requires administrator elevation;
+local database maintenance separately requires the database-authorized SSPI
+principal in the access declaration. Setup does not add a Windows or PostgreSQL
+principal or change authentication rules.
+
+Initial enrollment records exact previously authenticated provider bindings and
+the current OAuth client context, or reuses a verified policy from the workload
+identity record. Existing persisted bindings are sufficient after the database is
+dropped. An unknown binding fails before policy replacement or database recreation.
+No passwords, tokens, or sessions are seeded. Local SSPI setup repairs and checks
+the application database before accepting the serving application; the owner
+policy is already persisted at that point. Application `repair`, `migrate`,
+`remigrate`, and `recreate` use that same policy before database mutation and verify
+administrator restoration. `-InstalledCredentials` selects the protected installed
+workload enrollment during setup; ordinary database maintenance retains its existing
+development enrollment. `Set-IisPlatformOwners.ps1` remains a compatible explicit
+policy-management entry point and shares setup's idempotent policy implementation.
 Administrator includes operator permissions. Startup and validated sign-in also
 reconcile the policy. Changing a configured owner's authority requires changing
 the installation policy; ordinary account roles remain editable. Preserve the

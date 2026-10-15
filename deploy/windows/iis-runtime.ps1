@@ -38,6 +38,12 @@ function Write-IisAtomic([string]$Path,[string]$Content) {
 }
 function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
 function Get-IisOwnerPolicyPath($c){Join-Path $c.directory 'state/platform-owners/policy.json'}
+function ConvertTo-IisCanonicalOwnerPolicy($Policy){
+    $owners=@($Policy.owners | Sort-Object -Property provider,issuer,subject -CaseSensitive | ForEach-Object {
+        [ordered]@{provider=$_.provider;issuer=$_.issuer;subject=$_.subject;client_id=$_.client_id;verified_at=$_.verified_at}
+    })
+    Iis-Json ([ordered]@{version=$Policy.version;owners=$owners})
+}
 function Get-IisInstallationIdentityEnvironment($c,$Identity,[switch]$IncludeSecrets){
     $path=Get-IisOwnerPolicyPath $c
     if($c.PSObject.Properties['platform_owner_policy_file']){
@@ -52,7 +58,7 @@ function Get-IisInstallationIdentityEnvironment($c,$Identity,[switch]$IncludeSec
             $policy=Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -DateKind String -ErrorAction Stop
         }catch{throw 'The installed owner policy cannot be read as bounded private JSON.'}
         if($Identity.PSObject.Properties['platform_owner_policy'] -and $null -ne $Identity.platform_owner_policy -and
-            (Iis-Json $Identity.platform_owner_policy) -cne (Iis-Json $policy)){throw 'Installed and credential-record owner policies disagree.'}
+            (ConvertTo-IisCanonicalOwnerPolicy $Identity.platform_owner_policy) -cne (ConvertTo-IisCanonicalOwnerPolicy $policy)){throw 'Installed and credential-record owner policies disagree.'}
         $Identity=Iis-Json $Identity | ConvertFrom-Json -DateKind String
         $Identity | Add-Member platform_owner_policy $policy -Force
         $values=Get-IisIdentityEnvironment $Identity -IncludeSecrets:$IncludeSecrets

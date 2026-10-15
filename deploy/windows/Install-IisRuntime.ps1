@@ -1,16 +1,18 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[string]$Package,[ValidateSet('Install','Render','Verify')][string]$Operation='Install',[switch]$Plan)
+param([Parameter(Mandatory)][string]$Installation,[string]$Enrollment,[string]$Package,[ValidateSet('Install','Repair','Render','Verify')][string]$Operation='Install',[string]$OwnerDeclaration,[string]$AccessConfiguration,[switch]$Plan)
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
+. "$PSScriptRoot/iis-owner-lifecycle.ps1"
 $c=Read-IisInstallation $Installation
+$setup=$Operation -in @('Install','Repair')
 $root=$c.directory;$private=Join-Path $root 'agent';$state=Join-Path $root 'state';$web=Join-Path $root 'web'
 $selection=Join-Path $web 'active.json'
 if($Package){
-    if($Operation -ne 'Install'){throw '-Package applies only to installation or upgrade.'}
+    if(-not $setup){throw '-Package applies only to installation or repair.'}
     $manifest=Test-IisPackage $Package
     $c.revision=$manifest.revision;$c.publish=[IO.Path]::GetFullPath($Package)
-}elseif($Operation -eq 'Install' -and (Test-Path -LiteralPath $selection)){
+}elseif($setup -and (Test-Path -LiteralPath $selection)){
     $active=Get-Content -LiteralPath $selection -Raw|ConvertFrom-Json
     if($active.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'The installed release selection is invalid.'}
     $c.revision=$active.revision;$c.publish=Join-Path $web ('releases/'+$c.revision)
@@ -18,7 +20,24 @@ if($Package){
 if($Plan){$c | ConvertTo-Json -Depth 12;return}
 $chessAccess=@(Get-IisChessAccess $c)
 if($Operation -eq 'Verify'){Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY | ConvertTo-Json;return}
-if($Operation -eq 'Install'){
+if($setup){
+    . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+    if(-not $OwnerDeclaration){
+        if($c.platform_owner_declaration_file){$OwnerDeclaration=$c.platform_owner_declaration_file}
+        else{
+            $candidate=Join-Path $env:LAPLACE_SRC ('Laplace-Operations/installation/'+$c.host+'-operator.json')
+            if(Test-Path -LiteralPath $candidate){$OwnerDeclaration=$candidate}
+        }
+    }
+    $declaredOwners=if($OwnerDeclaration){Read-IisOwnerJson $OwnerDeclaration}else{$null}
+    if($declaredOwners){Assert-IisOwnerSelection $c $declaredOwners}
+    $databaseAccess=$null
+    if((Get-IisDatabaseAuthentication $c) -eq 'sspi'){
+        if(-not $AccessConfiguration){$AccessConfiguration=if($c.database_access_file){$c.database_access_file}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}}
+        $databaseAccess=Get-Content -LiteralPath $AccessConfiguration -Raw | ConvertFrom-Json
+        if($databaseAccess.authentication -cne 'sspi' -or $databaseAccess.database_host -ine $c.database.host -or $databaseAccess.port -ne $c.database.port -or
+            $databaseAccess.application_database -cne $c.database.application_database){throw 'Setup database access selects another installation.'}
+    }
     $baoVersion=(& $c.bao version | Out-String).Trim()
     if($LASTEXITCODE -or $baoVersion -notmatch '^OpenBao v(\d+\.\d+\.\d+)\s' -or [version]$Matches[1] -lt [version]'2.7.1'){
         throw 'Declare an OpenBao 2.7.1-or-newer executable before installing the credential service.'
@@ -104,12 +123,13 @@ if($Operation -eq 'Render') {
 $manifest=Test-IisPackage $c.publish
 if($manifest.revision -ne $c.revision){throw 'Package revision differs from the installation declaration.'}
 if(-not(Test-Path -LiteralPath $c.bao -PathType Leaf)){throw 'Declared OpenBao executable is missing.'}
+$e=$null
 if($Enrollment){
     $secure=ConvertTo-SecureString (Get-Content -LiteralPath $Enrollment -Raw).Trim()
     try{$e=([Net.NetworkCredential]::new('', $secure)).Password | ConvertFrom-Json}finally{$secure.Dispose()}
     if($e.role -ne $c.role -or $e.address -ne $c.address -or $e.host -ne $c.host -or -not $e.role_id -or -not $e.secret_id){throw 'Workload enrollment differs from the declared installation.'}
 }elseif(-not(Test-Path (Join-Path $private 'secret-id'))){throw 'Initial setup requires the scoped workload enrollment.'}
-foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','database-connection.ps1','Publish-IisRuntime.ps1'){
+foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','iis-owner-lifecycle.ps1','database-connection.ps1','Publish-IisRuntime.ps1'){
     if(-not(Test-Path (Join-Path $PSScriptRoot $file))){throw "Missing installation script: $file"}
 }
 if($c.environment.LAPLACE_DATA -and -not(Test-Path -LiteralPath $c.environment.LAPLACE_DATA -PathType Container)){throw 'Declared source data directory is missing.'}
@@ -135,7 +155,18 @@ Protect-IisDirectory $private
 Protect-IisDirectory $state 'ReadAndExecute'
 Protect-IisDirectory (Join-Path $state 'platform-owners') 'ReadAndExecute' 'Modify'
 $ownerPolicyPath=Get-IisOwnerPolicyPath $c
-if(-not(Test-Path -LiteralPath $ownerPolicyPath)){Write-IisAtomic $ownerPolicyPath '{"version":1,"owners":[]}'}
+$ownerIdentity=Read-IisWorkloadIdentity $c $private $e
+$ownerEnrollment=Sync-IisPlatformOwnerPolicy $c $ownerIdentity $declaredOwners {
+    if(-not $databaseAccess){throw 'Initial owner enrollment requires a verified policy in the installation identity record.'}
+    Read-IisOwnerBindings $c $databaseAccess
+}
+if($declaredOwners){
+    $installedDeclaration=Join-Path $state 'platform-owners/declaration.json'
+    $declarationJson=Iis-Json $declaredOwners
+    if(-not(Test-Path -LiteralPath $installedDeclaration) -or [IO.File]::ReadAllText($installedDeclaration) -cne $declarationJson){Write-IisAtomic $installedDeclaration $declarationJson}
+    $c | Add-Member -NotePropertyName platform_owner_declaration_file -NotePropertyValue $installedDeclaration -Force
+}
+if($databaseAccess){$c | Add-Member -NotePropertyName database_access_file -NotePropertyValue ([IO.Path]::GetFullPath($AccessConfiguration)) -Force}
 $c | Add-Member -NotePropertyName platform_owner_policy_file -NotePropertyValue $ownerPolicyPath -Force
 foreach($leaf in 'keys','logs','output'){Protect-IisDirectory (Join-Path $state $leaf) 'Modify'}
 Protect-IisDirectory $web 'ReadAndExecute' 'Modify'
@@ -164,7 +195,7 @@ if(Test-Path -LiteralPath $release){$null=Test-IisPackage $release}else{
 $webConfig=Join-Path $web 'web.config'
 $oldConfig=if(Test-Path $webConfig){Get-Content $webConfig -Raw}else{$null}
 Write-IisPublicAtomic $webConfig (Get-IisWebConfig $c.revision (Join-Path $state 'logs')) $runtimeReaders
-foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','database-connection.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
+foreach($file in 'Install-IisRuntime.ps1','iis-runtime.ps1','iis-access.ps1','iis-owner-lifecycle.ps1','database-connection.ps1','Publish-IisRuntime.ps1'){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $private $file) -Force}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-access.ps1') -Destination (Join-Path $root 'iis-access.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'iis-runtime.ps1') -Destination (Join-Path $root 'iis-runtime.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'database-connection.ps1') -Destination (Join-Path $root 'database-connection.ps1') -Force
@@ -236,6 +267,9 @@ do {
     Start-Sleep -Seconds 1
 } while((Get-Date) -lt $deadline)
 if(-not $rendered){throw 'The installed workload agent did not render current credentials; inspect agent/openbao.log.'}
+if($databaseAccess){
+    & "$PSScriptRoot/Invoke-IisDatabase.ps1" -Installation (Join-Path $root 'installation.json') -AccessConfiguration $AccessConfiguration -MigrationRuntime (Join-Path $release 'migrations/Laplace.Migrations.dll') -Database application -Operation repair -InstalledCredentials
+}
 $manager=[Microsoft.Web.Administration.ServerManager]::new()
 try{if($manager.ApplicationPools[$c.pool].State -ne 'Started'){$null=$manager.ApplicationPools[$c.pool].Start()};$manager.Sites[$c.site].ServerAutoStart=$true;$manager.CommitChanges();if($manager.Sites[$c.site].State -ne 'Started'){$null=$manager.Sites[$c.site].Start()}}finally{$manager.Dispose()}
 try {
@@ -262,6 +296,8 @@ $settings=@{LAPLACE_IIS_SITE=$c.site;LAPLACE_IIS_POOL=$c.pool;LAPLACE_IIS_API=$w
 foreach($key in $settings.Keys){$machine+=$key+'='+$settings[$key]}
 Write-IisAtomic $c.machine_env (($machine -join "`r`n")+"`r`n")
 $verified.revision=$c.revision;$verified.credential_source='openbao-agent';$verified.legacy_site_retired=$c.legacy_site
+$verified.owner_count=$ownerEnrollment.owner_count;$verified.owner_policy_changed=$ownerEnrollment.changed
+$verified.owner_authority=if($databaseAccess){'application-repair-and-check-passed'}else{'policy-persisted'}
 $receiptPath=Join-Path $root ('receipts/setup-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')+'.json')
 Write-IisAtomic $receiptPath (Iis-Json $verified)
 Write-IisPublicAtomic $selection (Iis-Json @{revision=$c.revision}) $runtimeReaders
