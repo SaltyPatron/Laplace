@@ -42,6 +42,20 @@ all committed substrate content.
 
 ## Normal source-to-product story
 
+Platform access inspection uses **Product — maintenance**, operation `access-audit`,
+target `staging` or `production`. The existing installation credential reads the
+people, role-event and provider-client endpoints. The report contains aggregate
+roles, providers and transitions, anonymous-denial results, response limits, and
+the collector and installed revisions. Account names, email addresses, provider
+subjects, client IDs and credentials are excluded from public logs and artifacts.
+These aggregates do not establish an owner's exact identity binding or exercise
+a browser session. The operation does not assign roles or change service accounts.
+
+Changes to this observer or its maintenance workflow run the observer tests first,
+then read both installed application environments under their shared host locks.
+This validates the observer against deployed APIs without rebuilding or activating
+application packages. Cloud is not an application-audit target.
+
 A product-affecting push is intentionally boring:
 
 ```text
