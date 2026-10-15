@@ -58,6 +58,7 @@ run_ci_contract_checks() {
   python3 scripts/test-ingest-source-exit.py
   ruby tests/site-workflow.rb
   python3 tests/site-status.py
+  python3 scripts/test-platform-access-audit.py
   bash tests/site-revision-receipts.sh
   bash tests/site-application-migrations.sh
   bash tests/database-application-maintenance.sh

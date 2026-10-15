@@ -36,6 +36,31 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("promote:\n", delivery)
         self.assertIn("type: boolean\n        default: true", delivery)
 
+    def test_access_observer_runs_reviewed_reads_without_deployment_or_cloud(self):
+        maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
+        validation = maintenance.split("\n  access-contract:\n", 1)[1].split("\n  access-audit:\n", 1)[0]
+        observer = maintenance.split("\n  access-audit:\n", 1)[1].split("\n  unsupported-deployment:\n", 1)[0]
+        self.assertIn("runs-on: ubuntu-24.04", validation)
+        self.assertIn("python3 scripts/test-platform-access-audit.py", validation)
+        self.assertIn("needs: access-contract", observer)
+        self.assertIn("inputs.target != 'cloud'", observer)
+        self.assertIn('flock -s -w 120 8', observer)
+        self.assertIn('contents: read', observer)
+        self.assertNotIn('id-token:', observer)
+        self.assertNotIn('site.sh', observer)
+        self.assertIn('collector_revision=', observer)
+        self.assertIn('installed_revision=', observer)
+        self.assertIn("inputs.operation == 'access-audit' && inputs.target == 'cloud'", maintenance)
+        trigger = maintenance.split("\n  push:\n", 1)[1].split("\n  workflow_dispatch:\n", 1)[0]
+        self.assertIn('branches: [main]', trigger)
+        self.assertIn('scripts/platform-access-audit.py', trigger)
+        import importlib.util
+        scope_spec = importlib.util.spec_from_file_location('access_audit_scope', ROOT / 'scripts/ci_product_scope.py')
+        scope = importlib.util.module_from_spec(scope_spec)
+        scope_spec.loader.exec_module(scope)
+        self.assertTrue(scope.ignored('scripts/platform-access-audit.py'))
+        self.assertIn('- "scripts/platform-access-audit.py"', (WORKFLOWS / 'laplace.yml').read_text())
+
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
         repairs = sorted(name for name in names if "repair" in name)

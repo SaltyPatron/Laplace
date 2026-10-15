@@ -1,7 +1,13 @@
 name: Product — maintenance
-run-name: "Product maintenance — ${{ inputs.operation }} / ${{ inputs.target }} @ ${{ github.sha }}"
+run-name: "Product maintenance — ${{ github.event_name == 'push' && 'access-audit / staging + production' || format('{0} / {1}', inputs.operation, inputs.target) }} @ ${{ github.sha }}"
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/product-operator.yml
+      - scripts/platform-access-audit.py
+      - scripts/test-platform-access-audit.py
   workflow_dispatch:
     inputs:
       operation:
@@ -9,7 +15,7 @@ on:
         type: choice
         required: true
         default: verify
-        options: [status, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
+        options: [status, access-audit, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
       target:
         description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the database host"
         type: choice
@@ -22,6 +28,83 @@ permissions:
   id-token: write
 
 jobs:
+  access-contract:
+    name: Validate the platform access observer
+    if: github.event_name == 'push' || inputs.operation == 'access-audit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 scripts/test-platform-access-audit.py
+
+  access-audit:
+    name: Read installed platform access on ${{ matrix.target }}
+    needs: access-contract
+    if: github.event_name == 'push' || (inputs.operation == 'access-audit' && inputs.target != 'cloud')
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(github.event_name == 'push' && '["staging","production"]' || format('["{0}"]', inputs.target)) }}
+    runs-on: [self-hosted, laplace, '${{ matrix.target }}']
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    concurrency:
+      group: laplace-maintenance-${{ matrix.target }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Read role state under the installed host reservation
+        shell: bash
+        env:
+          AUDIT_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          machine_values=$(python3 scripts/machine-env.py)
+          eval "$machine_values"
+          unset machine_values
+          export LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+          lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
+          exec 8>>"$lock"
+          flock -s -w 120 8
+          result=0
+          python3 scripts/platform-access-audit.py \
+            --base "${LAPLACE_API_URL:-http://127.0.0.1:5187}" \
+            --state-file "$RUNNER_TEMP/platform-access-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json" >/dev/null || result=$?
+          export LAPLACE_APP_DIR="${LAPLACE_APP_DIR:-$LAPLACE_INSTALL_PREFIX/app}"
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / ('platform-access-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'] + '.json')
+          report = json.loads(path.read_text())
+          revision = Path(os.environ['LAPLACE_APP_DIR']) / '.laplace-source-revision'
+          try:
+              installed = revision.read_text().strip()
+          except OSError:
+              installed = ''
+          report.update(target=os.environ['AUDIT_TARGET'], collector_revision=os.environ['GITHUB_SHA'],
+                        installed_revision=installed if re.fullmatch('[0-9a-f]{40}', installed) else None)
+          raw = json.dumps(report, indent=2, sort_keys=True) + '\n'
+          path.write_text(raw)
+          print(raw, end='')
+          PY
+          exit "$result"
+      - name: Retain only the reduced access report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: platform-access-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/platform-access-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 14
+
   unsupported-deployment:
     name: Reject a database host as an application deployment target
     if: inputs.operation == 'deploy' && inputs.target == 'cloud'
@@ -29,6 +112,15 @@ jobs:
     steps:
       - run: |
           echo 'Application deployment supports staging or production. Select qualify-cloud for isolated cloud-host qualification.' >&2
+          exit 2
+
+  unsupported-access-target:
+    name: Reject a database host as a browser access audit target
+    if: inputs.operation == 'access-audit' && inputs.target == 'cloud'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo 'Browser access audit supports staging or production; hart-cloud is a database host.' >&2
           exit 2
 
   deploy:
