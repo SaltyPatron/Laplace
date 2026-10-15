@@ -21,12 +21,12 @@ internal sealed class RecordingConversationWitness : IConversationWitness
         return Task.FromResult(occurrence);
     }
 
-    public Task RecordResponseAsync(string tenant,string? userKey,Hash128 sessionId,
+    public Task<bool> RecordResponseAsync(string tenant,string? userKey,Hash128 sessionId,
         string prompt,string? reply,string occurrenceKey,CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Assert.True(_prompts.TryRemove(occurrenceKey,out var input));
         Assert.Equal((tenant,sessionId,prompt),input);
-        return Task.CompletedTask;
+        return Task.FromResult(!string.IsNullOrEmpty(reply));
     }
 }

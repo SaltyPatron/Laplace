@@ -146,6 +146,10 @@ SELECT json_build_object(
 """
     result = psql(database, sql, timeout)
     require(isinstance(result, dict), "native trace is not an object")
+    return result
+
+
+def validate_native_trace(result: dict) -> None:
     terminals = [r for r in result["execution"] if r["event"] in ("complete", "unresolved")]
     require(len(terminals) == 1, "native program did not return exactly one terminal receipt")
     terminal = terminals[0]
@@ -155,7 +159,6 @@ SELECT json_build_object(
             "completed native program lacks semantic-act/output fingerprint")
     require(len(result["realized"]) == terminal["output_count"],
             "realization count differs from native output receipt")
-    return result
 
 
 def validate_http(turn: dict, session: str) -> None:
@@ -194,7 +197,7 @@ def main() -> int:
         report["session_id"] = sid
         after_first = snapshot(args.database, sid, args.timeout_seconds)
         report["after_first"] = after_first
-        require(len(after_first["turns"]) >= 2, "first HTTP turn did not persist prompt+response")
+        require(after_first["turns"], "first HTTP turn did not persist its prompt")
         require(after_first["discourse_ids"], "first HTTP turn produced no reusable discourse identities")
 
         # Inspect exactly what turn two will consume before sending turn two.
@@ -205,6 +208,11 @@ def main() -> int:
         report["http_turns"].append(second)
         after_second = snapshot(args.database, sid, args.timeout_seconds)
         report["after_second"] = after_second
+        # Collect both ordinary turns and the actual native terminal receipt even
+        # when the substrate cannot answer yet. Acceptance still requires a
+        # completed semantic act and both persisted prompt/response pairs.
+        validate_native_trace(second_native)
+        require(len(after_first["turns"]) >= 2, "first HTTP turn did not persist prompt+response")
         require(len(after_second["turns"]) >= len(after_first["turns"]) + 2,
                 "second HTTP turn did not append prompt+response to the substrate session")
         require(after_second["discourse_ids"][:len(after_first["discourse_ids"])] == after_first["discourse_ids"],

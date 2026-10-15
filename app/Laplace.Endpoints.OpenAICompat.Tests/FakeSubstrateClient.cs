@@ -212,8 +212,8 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                 (int)token.Mu, string.Empty);
         }
         yield return new ForwardObservedEvent(
-            count, "complete", 0, string.Empty, string.Empty, null, 0, string.Empty,
-            Completion: true, Disposition: "complete", OutputCount: count,
+            count, count == 0 ? "unresolved" : "complete", 0, string.Empty, string.Empty, null, 0, string.Empty,
+            Completion: count != 0, Disposition: count == 0 ? "unresolved" : "complete", OutputCount: count,
             PriorDiscourseIds: Array.Empty<string>());
     }
 

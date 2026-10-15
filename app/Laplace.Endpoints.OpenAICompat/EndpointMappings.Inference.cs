@@ -163,10 +163,10 @@ internal static class InferenceEndpoints
                                 Laplace: new ChunkProvenance(OrdUsed: observed.StrideUsed)), ct);
                         }
                     }
-                    await turnWitness.RecordResponseAsync(scope.Tenant, scope.UserKey, scope.SessionId,
+                    bool responseWitnessed = await turnWitness.RecordResponseAsync(scope.Tenant, scope.UserKey, scope.SessionId,
                         prompt, text.ToString(), occurrenceKey, ct);
                     var forwardProof = BuildForwardProof(
-                        forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed: true);
+                        forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed);
                     await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                         completionId, "chat.completion.chunk", created, payload.Model,
                         [new ChatChunkChoice(0, new ChatDelta(), "stop")],
@@ -216,12 +216,12 @@ internal static class InferenceEndpoints
                 }
 
                 var observedContent = text.ToString();
-                await turnWitness.RecordResponseAsync(
+                bool responseWitnessed = await turnWitness.RecordResponseAsync(
                     scope.Tenant, scope.UserKey, scope.SessionId,
                     prompt, observedContent.Length == 0 ? null : observedContent, occurrenceKey, ct);
 
                 var forwardProof = BuildForwardProof(
-                    forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed: true);
+                    forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed);
                 var performance = BuildPerformance(
                     observedContent, substrateClock, totalClock, firstResultMs, emitted);
 

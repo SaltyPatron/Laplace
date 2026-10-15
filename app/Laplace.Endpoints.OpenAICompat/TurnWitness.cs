@@ -74,12 +74,16 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         return occurrence;
     }
 
-    public Task RecordResponseAsync(
+    public async Task<bool> RecordResponseAsync(
         string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply,
-        string occurrenceKey, CancellationToken ct) =>
-        string.IsNullOrEmpty(reply) ? Task.CompletedTask :
-            RecordTurnAsync(tenant, userKey, sessionId, prompt, reply, ct,
-                occurrenceKey, ConversationContent.TurnPhase.Output);
+        string occurrenceKey, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrEmpty(reply)) return false;
+        await RecordTurnAsync(tenant, userKey, sessionId, prompt, reply, ct,
+            occurrenceKey, ConversationContent.TurnPhase.Output).ConfigureAwait(false);
+        return true;
+    }
 
     public void EnqueueTurn(string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply)
     {
