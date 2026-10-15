@@ -357,7 +357,7 @@ jobs:
     permissions:
       contents: read
     env:
-      LAPLACE_API_BASE: ${{ vars.LAPLACE_DEPLOYED_API_BASE || 'http://127.0.0.1:5187' }}
+      LAPLACE_API_BASE: ${{ vars.LAPLACE_DEPLOYED_API_BASE }}
       LAPLACE_PROOF_TENANT: ci
       LAPLACE_API_KEY: ${{ secrets.LAPLACE_API_KEY }}
       LAPLACE_QUOTE_ID: ${{ secrets.LAPLACE_QUOTE_ID }}
@@ -373,6 +373,7 @@ jobs:
         run: |
           set -euo pipefail
           source scripts/lib/database.sh
+          export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_PUBLIC_BASE_URL:-${LAPLACE_API_URL:-http://127.0.0.1:5187}}}"
           exec 9>>"${LAPLACE_HOST_LOCK:-$LAPLACE_LOCK_ROOT/host-resource.lock}"
           flock 9
           mkdir -p artifacts/forward-chat-lifecycle
