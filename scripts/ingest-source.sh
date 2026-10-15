@@ -41,6 +41,14 @@ else
     # publication yet. New installs never overwrite this legacy flat payload.
     INGEST_RUNTIME="$INGEST_ROOT"
 fi
+if [[ "$INGEST_RUNTIME" == "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" ]]; then
+    # Site publication replaces this package under the host deployment lock.
+    ingest_host_lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
+    if ! [[ /proc/self/fd/8 -ef "$ingest_host_lock" ]]; then
+        exec {ingest_host_lease}>>"$ingest_host_lock"
+        flock -s "$ingest_host_lease"
+    fi
+fi
 if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" || -d "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" || -f "$INGEST_RUNTIME/Laplace.Cli.dll" ]]; then
     DLL="$INGEST_RUNTIME/Laplace.Cli.dll"
     CLI_NATIVE="$INGEST_RUNTIME/liblaplace_core.so"

@@ -59,6 +59,7 @@ exit "$CLI_RC"
                         INGEST_LOGDIR=str(self.root / "logs"), PROOF=str(self.root / "proof"),
                         LAPLACE_INSTALL_PREFIX=str(self.root / "prefix"),
                         LAPLACE_APP_DIR="", LAPLACE_INGEST_RUNTIME="",
+                        LAPLACE_HOST_LOCK=str(self.root / "host-resource.lock"),
                         LAPLACE_WORK=str(self.root / "work"),
                         LAPLACE_WORK_ROOT=str(self.root / "work"),
                         LAPLACE_SCRATCH_ROOT=str(self.root / "scratch"),
@@ -106,6 +107,19 @@ exit "$CLI_RC"
         result = self.run_ingest()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("native closure differs", result.stderr)
+
+    def test_site_runtime_remains_locked_while_cli_runs(self):
+        self.install_site_cli()
+        (self.root / "bin/dotnet").write_text('''#!/bin/bash
+if flock -xn "$LAPLACE_HOST_LOCK" true; then
+    echo "site package was not protected during ingestion" >&2
+    exit 99
+fi
+''')
+        result = self.run_ingest()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run(["flock", "-xn", self.env["LAPLACE_HOST_LOCK"], "true"])
+        self.assertEqual(result.returncode, 0, "site lock outlived ingestion")
 
     def test_decomposer_failure_remains_failure(self):
         result = self.run_ingest(CLI_RC="23", CLI_MESSAGE="NullReferenceException")
