@@ -21,7 +21,7 @@ shift /1
 goto parse
 :parsed
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-asan || exit /b 1
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-asan || exit /b 1
 
 if "%RECONF%"=="1" goto configure
 if not exist "%LAPLACE_ENGINE_BUILD_ASAN%\build.ninja" goto configure
@@ -66,9 +66,9 @@ if defined TARGETS (
 if errorlevel 1 goto fail
 
 :done
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-asan
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-asan
 exit /b 0
 
 :fail
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-asan
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-asan
 exit /b 1

@@ -123,6 +123,11 @@ jobs:
       - name: Reject stale native SQL before packaging
         shell: pwsh
         run: ./tests/windows-native-package.ps1
+      - name: Build packages without installed IIS authority
+        shell: pwsh
+        run: |
+          ./tests/iis-package-build-access.ps1
+          ./tests/windows-tree-lock.ps1
       - name: Exercise publication permissions on NTFS
         shell: pwsh
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP

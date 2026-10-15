@@ -4,7 +4,12 @@ param([string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
-if(-not $Installation){throw 'No IIS installation is configured. Use -Installation for initial setup.'}
+if($Publish){
+    if(-not $Installation){throw 'Publication requires an IIS installation. Use -Installation or LAPLACE_IIS_INSTALLATION.'}
+    if(-not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}
+    . "$PSScriptRoot/iis-runtime.ps1"
+    $null=Read-IisInstallation $Installation
+}
 if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED)) {
     $developerShell = if($env:LAPLACE_DEVSHELL){$env:LAPLACE_DEVSHELL}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/toolchain/windows/devshell.ps1'}
     if(-not(Test-Path -LiteralPath $developerShell -PathType Leaf)){throw "The configured developer shell is missing: $developerShell"}
@@ -13,9 +18,6 @@ if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED)) {
 if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED -and (Get-Command icx.exe -ErrorAction SilentlyContinue))){throw 'The native build requires the configured MSVC and oneAPI developer environment.'}
 . "$PSScriptRoot/../../scripts/win/laplace-paths.ps1"
 Import-LaplaceEnv
-. "$PSScriptRoot/iis-runtime.ps1"
-$c=Read-IisInstallation $Installation
-if($Publish -and -not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}
 if($EngineBuild){$env:LAPLACE_ENGINE_BUILD=[IO.Path]::GetFullPath($EngineBuild)}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $env:LAPLACE_ROOT=$repo
