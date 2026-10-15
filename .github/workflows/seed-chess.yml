@@ -24,8 +24,8 @@ on:
       database:
         description: "Target database"
         type: choice
-        options: [laplace]
-        default: laplace
+        options: [laplace-mono]
+        default: laplace-mono
       derive_after_games:
         description: "Game presets only: also derive move outcomes and transitions"
         type: boolean
@@ -59,7 +59,7 @@ on:
       database:
         type: string
         required: false
-        default: laplace
+        default: laplace-mono
       derive_after_games:
         type: boolean
         required: false

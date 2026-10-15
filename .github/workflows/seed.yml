@@ -23,7 +23,7 @@ on:
       database:
         type: string
         required: false
-        default: laplace
+        default: laplace-mono
       force:
         type: boolean
         required: false
@@ -127,8 +127,20 @@ jobs:
           # never invalidate a usable runtime or force another full product build.
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
-          export LAPLACE_CLI_BIN=/opt/laplace/bin/laplace
           source scripts/ci-environment.sh
+          host_lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
+          if [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
+            exec 8>&9
+          else
+            exec 8>>"$host_lock"
+            flock 8
+          fi
+          export LAPLACE_INGEST_RUNTIME="${LAPLACE_APP_DIR:-$LAPLACE_INSTALL_PREFIX/app}/cli"
+          export LAPLACE_CLI_BIN="$LAPLACE_INGEST_RUNTIME/Laplace.Cli"
+          [[ -x "$LAPLACE_CLI_BIN" && -f "$LAPLACE_INGEST_RUNTIME/Laplace.Cli.dll" ]] || {
+            echo "::error::installed site CLI is incomplete: $LAPLACE_INGEST_RUNTIME" >&2
+            exit 1
+          }
           export INGEST_LOGDIR="${INGEST_LOGDIR:-$LAPLACE_WORK_ROOT/ingest-logs}"
           export GGUF_OUT="${GGUF_OUT:-$LAPLACE_WORK_ROOT/model-outputs/laplace-model-substrate.gguf}"
 

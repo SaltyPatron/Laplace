@@ -55,6 +55,7 @@ run_ci_contract_checks() {
   python3 scripts/test-service-units.py
   python3 scripts/test-product-ci-artifact-ownership.py
   python3 scripts/test-seed-workflow-ownership.py
+  python3 scripts/test-ingest-source-exit.py
   ruby tests/site-workflow.rb
   python3 tests/site-status.py
   bash tests/site-revision-receipts.sh

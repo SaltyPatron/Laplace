@@ -18,8 +18,8 @@ on:
       database:
         description: "Target database"
         type: choice
-        options: [laplace]
-        default: laplace
+        options: [laplace-mono]
+        default: laplace-mono
       synthesize_model:
         description: "Ingest/verify the model and synthesize the substrate GGUF"
         type: boolean

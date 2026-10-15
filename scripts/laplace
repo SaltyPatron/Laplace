@@ -9,12 +9,13 @@ SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 # one merely to invoke the deployed ingestion surface.
 native_candidates=(
   "${LAPLACE_CLI_BIN:-}"
-  "/opt/laplace/bin/laplace"
+  "${LAPLACE_APP_DIR:-${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/app}/cli/Laplace.Cli"
+  "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/laplace"
 )
 for candidate in "${native_candidates[@]}"; do
   [[ -n "$candidate" && -x "$candidate" ]] || continue
   [[ "$(readlink -f "$candidate")" != "$SELF" ]] || continue
-  export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}"
+  export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace-mono}}"
   exec "$candidate" "$@"
 done
 
@@ -43,5 +44,5 @@ done
   exit 1
 }
 
-export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}"
+export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace-mono}}"
 exec dotnet "$DLL" "$@"

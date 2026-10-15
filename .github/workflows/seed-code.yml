@@ -18,8 +18,8 @@ on:
       database:
         description: "Target database"
         type: choice
-        options: [laplace]
-        default: laplace
+        options: [laplace-mono]
+        default: laplace-mono
       run_idempotency:
         description: "Re-ingest the selected corpus and prove evidence does not double-count"
         type: boolean

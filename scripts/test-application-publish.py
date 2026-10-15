@@ -343,6 +343,14 @@ class DeploymentReadinessTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.verify.classify_readiness(value)
 
+    def test_substrate_failure_preserves_sqlstate_without_exception_secrets(self):
+        with self.assertRaisesRegex(ValueError, r"SQLSTATE 3D000") as caught:
+            self.verify.classify_readiness(self.readiness(
+                substrate_reachable=False,
+                detail='substrate unreachable: 3D000: database missing; Password=do-not-print'))
+        self.assertNotIn("do-not-print", str(caught.exception))
+        self.assertNotIn("Password", str(caught.exception))
+
     def test_negative_boolean_and_untyped_fields_do_not_pass_as_health(self):
         cases = (
             ("entities", False),
