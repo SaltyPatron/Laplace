@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           export LAPLACE_EXTERNAL="$GITHUB_WORKSPACE/.ci-dependencies"
           dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
-            -c Release -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" \
+            -c Release -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" -p:OpenApiGenerateDocuments=false \
             --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests' \
             --logger 'trx;LogFileName=platform-initial-assignment.trx' --results-directory "$RUNNER_TEMP/platform-access-results"
           python3 - "$RUNNER_TEMP/platform-access-results/platform-initial-assignment.trx" <<'PY'
