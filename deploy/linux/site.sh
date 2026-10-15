@@ -551,7 +551,7 @@ phase_receive() {
 # ------------------------------------------------------------------------------------------------ smoke
 phase_smoke() {
   say smoke
-  local rc=0 url code installed_revision
+  local rc=0 url code installed_revision client_origin
   if ! installed_revision=$(revision "$LAPLACE_APP_DIR"); then installed_revision=unknown; rc=1; fi
   if verify_cli_package "$LAPLACE_APP_DIR/cli"; then
     echo '| Installed monorepo CLI caches and native decomposition | passed |' >> "$SUMMARY"
@@ -596,9 +596,17 @@ phase_smoke() {
     echo '| Authenticated installed runtime | FAILED |' >> "$SUMMARY"
     rc=1
   fi
-  if python3 "$ROOT/scripts/run-authenticated-verification.py" --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" -- \
+  client_origin="${LAPLACE_PUBLIC_BASE_URL:-}"
+  if [[ -z "$client_origin" && "$LAPLACE_SITE_URL" == https://* ]]; then
+    client_origin="$LAPLACE_SITE_URL"
+  fi
+  if [[ -z "$client_origin" ]]; then
+    client_origin=$(python3 "$ROOT/deploy/linux/configure-nginx.py" \
+      --configuration "${LAPLACE_PRIVATE_ORIGINS:-$ROOT/deploy/private-origins.json}" --print-origin) || return 1
+  fi
+  if python3 "$ROOT/scripts/run-authenticated-verification.py" --base "$client_origin" -- \
       python3 "$ROOT/scripts/verify-installed-api-client.py" --cli "$LAPLACE_APP_DIR/cli/Laplace.Cli" \
-      --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" --work "$SITE_WORK"; then
+      --base "$client_origin" --work "$SITE_WORK"; then
     echo '| Installed authenticated CLI admission and byte-exact export | passed |' >> "$SUMMARY"
   else
     echo '| Installed authenticated CLI admission and byte-exact export | FAILED |' >> "$SUMMARY"
