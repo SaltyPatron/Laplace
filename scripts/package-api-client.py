@@ -23,6 +23,10 @@ def package(published: Path, output: Path, platform: str, revision: str) -> Path
     for name in (executable, core_runtime, 'Laplace.Cli.dll', 'Laplace.Cli.runtimeconfig.json'):
         if not (published / name).is_file():
             raise ValueError(f'Self-contained publication is missing {name}')
+    for path in published.rglob('*'):
+        if path.is_file() and (path.name.startswith(('Npgsql', 'laplace_', 'liblaplace_'))
+                or path.name in ('Laplace.Substrate.dll', 'Laplace.Core.dll', 'Laplace.Chess.dll')):
+            raise ValueError(f'API client publication contains a local substrate dependency: {path.name}')
     name = f'laplace-api-client-{platform}-{revision[:12]}'
     suffix = '.zip' if platform == 'win-x64' else '.tar.gz'
     output.mkdir(parents=True, exist_ok=True)

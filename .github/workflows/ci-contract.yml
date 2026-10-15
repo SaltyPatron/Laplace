@@ -194,7 +194,7 @@ jobs:
           ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:RUNNER_TEMP/laplace-api-client/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
           ./scripts/test-api-client-package.ps1 -Work $env:RUNNER_TEMP
       - name: Publish a self-contained authenticated client
-        run: dotnet publish app/Laplace.Cli/Laplace.Cli.csproj -c Release --self-contained true -r ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }} -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/laplace-api-client" -o "${{ runner.temp }}/api-client-published" --nologo
+        run: dotnet publish deploy/client/Laplace.ApiClient.csproj -c Release --self-contained true -r ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }} -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/laplace-api-client" -o "${{ runner.temp }}/api-client-published" --nologo
       - name: Package and execute the downloadable client
         run: python scripts/package-api-client.py --published "${{ runner.temp }}/api-client-published" --output "${{ runner.temp }}/api-client-packages" --platform ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }} --revision ${{ github.sha }}
       - name: Retain the verified client package
