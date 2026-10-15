@@ -155,6 +155,40 @@ jobs:
           ./tests/iis-application-restart.ps1
           ./tests/iis-chess-cache-package.ps1
 
+  api-client:
+    name: Authenticated CLI transport (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      LAPLACE_BUILD_ROOT: ${{ runner.temp }}/laplace-api-client
+      LAPLACE_EXTERNAL: ${{ github.workspace }}/.ci-dependencies
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Provide pinned grammar queries for managed build
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - name: Build and test the CLI service transport
+        run: dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --filter FullyQualifiedName~ApiClientCommandsTests --nologo
+      - name: Verify Linux client installation and launch
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s deploy/client -p 'test_*.py'
+      - name: Verify Windows client launch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-windows-client-connection.ps1 -Work $env:RUNNER_TEMP -NpgsqlAssembly "$env:LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli.Tests/Debug/net10.0/Npgsql.dll"
+
   contract:
     name: Static CI/CD contract
     runs-on: ubuntu-24.04

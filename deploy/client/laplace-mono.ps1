@@ -64,10 +64,14 @@ function Read-DatabaseCredential($Credential) {
 
 try {
     $config = Get-Content -LiteralPath (Absolute-Path $configPath 'client configuration') -Raw | ConvertFrom-Json -AsHashtable
-    if ($config.version -ne 1) { throw 'Unsupported monorepo client configuration version.' }
+    if ($config.version -notin @(1,2)) { throw 'Unsupported monorepo client configuration version.' }
     $selection = if ($env:LAPLACE_MONO_PROFILE) { $env:LAPLACE_MONO_PROFILE } else { $config.default_profile }
     if ($arguments.Count -gt 0 -and $arguments[0] -eq '--profiles') {
-        foreach ($name in $config.profiles.Keys) { $p=$config.profiles[$name]; [pscustomobject]@{Profile=$name;Host=$p.database.host;Database=$p.database.database;Runtime=$p.runtime.directory} }
+        foreach ($name in $config.profiles.Keys) {
+            $p=$config.profiles[$name]
+            if ($config.version -eq 2) { [pscustomobject]@{Profile=$name;Api=$p.api.origin;Runtime=$p.runtime.directory} }
+            else { [pscustomobject]@{Profile=$name;Host=$p.database.host;Database=$p.database.database;Runtime=$p.runtime.directory} }
+        }
         exit 0
     }
     if ($arguments.Count -gt 0 -and $arguments[0] -eq '--profile') {
@@ -76,16 +80,25 @@ try {
     }
     if (-not $selection -or -not $config.profiles.ContainsKey($selection)) { throw 'Unknown profile. Run laplace-mono --profiles.' }
     $profile=$config.profiles[$selection]
+    $remote = $config.version -eq 2
+    if ($remote) {
+        if ($profile.ContainsKey('database') -or $profile.ContainsKey('credential')) { throw 'API profiles must not include database credentials or targets.' }
+        $origin=[Uri]$profile.api.origin
+        if (-not $origin.IsAbsoluteUri -or $origin.Scheme -ne 'https' -or $origin.UserInfo -or $origin.Query -or $origin.Fragment -or $origin.AbsolutePath -ne '/') { throw 'API address must be an HTTPS origin.' }
+        $keyFile=Absolute-Path $profile.api.key_file 'API credential file'
+    }
     $executable=Read-ProfileRuntime $profile
     if ($arguments.Count -gt 0 -and $arguments[0] -eq '--where') {
-        [ordered]@{implementation='laplace-mono';profile=$selection;configuration=$configPath;executable=$executable;database_host=$profile.database.host;database_name=$profile.database.database;database_role=$profile.database.role} | ConvertTo-Json
+        if ($remote) { [ordered]@{implementation='laplace-mono';profile=$selection;configuration=$configPath;executable=$executable;api_origin=$origin.AbsoluteUri} | ConvertTo-Json }
+        else { [ordered]@{implementation='laplace-mono';profile=$selection;configuration=$configPath;executable=$executable;database_host=$profile.database.host;database_name=$profile.database.database;database_role=$profile.database.role} | ConvertTo-Json }
         exit 0
     }
     $start=[Diagnostics.ProcessStartInfo]::new($executable)
     $start.UseShellExecute=$false
     $start.WorkingDirectory=(Get-Location).ProviderPath
+    if ($remote) { $start.ArgumentList.Add('--api-client') }
     foreach ($argument in $arguments) { $start.ArgumentList.Add($argument) }
-    foreach ($name in @('LAPLACE_DB','LAPLACE_APP_DB','PGPASSWORD','PGPASSFILE','LAPLACE_ENGINE_BUILD','LAPLACE_EXT_BUILD','LAPLACE_BUILD_ROOT','LAPLACE_PERFCACHE_BIN','LAPLACE_NATIVE_DIR')) {
+    foreach ($name in @('LAPLACE_API_URL','LAPLACE_API_KEY_FILE','LAPLACE_DB','LAPLACE_APP_DB','PGPASSWORD','PGPASSFILE','LAPLACE_ENGINE_BUILD','LAPLACE_EXT_BUILD','LAPLACE_BUILD_ROOT','LAPLACE_PERFCACHE_BIN','LAPLACE_NATIVE_DIR')) {
         [void]$start.Environment.Remove($name)
     }
     # This profile supplies the complete connection. libpq/Npgsql environment
@@ -93,9 +106,18 @@ try {
     foreach($name in @($start.Environment.Keys|Where-Object { $_.StartsWith('PG',[StringComparison]::OrdinalIgnoreCase) })){
         [void]$start.Environment.Remove($name)
     }
-    foreach ($name in $profile.environment.Keys) { $start.Environment[$name]=[string]$profile.environment[$name] }
+    if ($profile.ContainsKey('environment')) {
+        foreach ($name in $profile.environment.Keys) { $start.Environment[$name]=[string]$profile.environment[$name] }
+    }
+    if ($remote) {
+        foreach ($name in @($start.Environment.Keys)) {
+            if ($name.StartsWith('PG',[StringComparison]::OrdinalIgnoreCase) -or $name -in @('LAPLACE_DB','LAPLACE_APP_DB')) { [void]$start.Environment.Remove($name) }
+        }
+        $start.Environment['LAPLACE_API_URL']=$origin.AbsoluteUri
+        $start.Environment['LAPLACE_API_KEY_FILE']=$keyFile
+    }
     $offline = $arguments.Count -eq 0 -or $arguments.Contains('--help') -or $arguments.Contains('-h') -or $arguments[0] -in @('decompose','cpu-topology')
-    if (-not $offline) {
+    if (-not $remote -and -not $offline) {
         $database=$profile.database
         $authentication=Get-LaplaceWindowsDatabaseAuthentication $database
         $record=if($authentication -eq 'sspi'){$null}else{Read-DatabaseCredential $profile.credential}
