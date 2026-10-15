@@ -38,7 +38,7 @@ $published=Join-Path $work 'published';$package=Join-Path $work 'package'
 $null=New-Item -ItemType Directory -Path $published -Force
 if(-not $ManagedBuild){$ManagedBuild=Join-Path $env:LAPLACE_BUILD_ROOT 'iis-publish'}
 $ManagedBuild=[IO.Path]::GetFullPath($ManagedBuild)
-foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplace.Cli',(Join-Path $published 'cli')),@('Laplace.Chess.Uci',(Join-Path $published 'uci')))){
+foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplace.Cli',(Join-Path $published 'cli')),@('Laplace.Chess.Uci',(Join-Path $published 'uci')),@('Laplace.Migrations',(Join-Path $published 'migrations')))){
     & dotnet publish (Join-Path $repo ('app/'+$component[0]+'/'+$component[0]+'.csproj')) -c Release --no-self-contained -o $component[1] --nologo "-p:LAPLACE_BUILD_ROOT=$ManagedBuild" "-p:LAPLACE_ENGINE_BUILD=$env:LAPLACE_ENGINE_BUILD"
     if($LASTEXITCODE){throw "Publish failed: $($component[0])"}
 }

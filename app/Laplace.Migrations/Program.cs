@@ -15,12 +15,23 @@ internal static class Program
     // command takes constructor dependencies.
     public static int Main(string[] args)
     {
+        if (args.Length > 0 && !args[0].StartsWith('-') && !Verbs.Contains(args[0].ToLowerInvariant()))
+        {
+            Console.Error.WriteLine($"Unknown migration command: {args[0]}");
+            return 2;
+        }
         var app = new CommandApp<UpCommand>();
         app.Configure(config =>
         {
             config.SetApplicationName("laplace-migrate");
             config.AddCommand<UpCommand>("up");
             config.AddCommand<AppUpCommand>("app-up");
+            config.AddCommand<AppStatusCommand>("app-status");
+            config.AddCommand<AppCheckCommand>("app-check");
+            config.AddCommand<AppResetCommand>("app-reset");
+            config.AddCommand<AppNukeCommand>("app-nuke");
+            config.AddCommand<SubstrateUpCommand>("substrate-up");
+            config.AddCommand<SubstrateStatusCommand>("substrate-status");
             config.AddCommand<StatusCommand>("status");
             config.AddCommand<ResetCommand>("reset");
             config.AddCommand<NukeCommand>("nuke");
@@ -41,7 +52,7 @@ internal static class Program
     // Route on the verb and hand the raw arguments to the resolver untouched. A leading flag
     // (no verb) means the default 'up', which Spectre needs as an explicit token. `--` keeps
     // Spectre from binding --database/--connection-string, which it does not model.
-    private static readonly string[] Verbs = { "up", "app-up", "status", "reset", "nuke" };
+    private static readonly string[] Verbs = { "up", "app-up", "app-status", "app-check", "app-reset", "app-nuke", "substrate-up", "substrate-status", "status", "reset", "nuke" };
     private static string[] Rewrite(string[] args)
     {
         if (args.Length == 0) return new[] { "up" };
@@ -57,7 +68,12 @@ internal static class Program
     private static int Dispatch(string command, Func<string, int> run)
     {
         var raw = Environment.GetCommandLineArgs().Skip(1).ToArray();
-        var connectionString = command == "app-up" ? LaplaceInstall.AppConnectionString() : ResolveConnectionString(raw);
+        bool application = command.StartsWith("app-", StringComparison.Ordinal);
+        if (application && !LaplaceInstall.HasSeparateAppDatabase)
+            throw new InvalidOperationException($"{command} requires LAPLACE_APP_DB; no database was changed.");
+        if (application && raw.Any(arg => arg is "--database" or "--connection-string"))
+            throw new InvalidOperationException("Application commands select LAPLACE_APP_DB; remove the conflicting target override.");
+        var connectionString = application ? LaplaceInstall.AppConnectionString() : ResolveConnectionString(raw);
         Console.WriteLine($"Laplace.Migrations: command={command}");
         Console.WriteLine($"Target database connection: {LaplaceInstall.RedactConnectionString(connectionString)}");
         return run(connectionString);
@@ -91,6 +107,51 @@ internal static class Program
             => Dispatch("app-up", _ => RunAppUp());
     }
 
+    [System.ComponentModel.Description("Show pending and applied application migrations only.")]
+    internal sealed class AppStatusCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("app-status", connection => RunStatusTargets(new[] { (connection, (Func<string, bool>)IsAppScript, "application database") }));
+    }
+
+    [System.ComponentModel.Description("Verify application tables and pending migrations without changing data.")]
+    internal sealed class AppCheckCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("app-check", RunAppCheck);
+    }
+
+    private static int RunAppCheck(string connectionString)
+    {
+        if (BuildEngine(connectionString, IsAppScript).GetScriptsToExecute().Count != 0)
+            throw new InvalidOperationException("Application migrations are pending; run app-up.");
+        using var connection = new NpgsqlConnection(connectionString);
+        connection.Open();
+        using var command = new NpgsqlCommand("""
+            SELECT bool_and(to_regclass(name) IS NOT NULL)
+            FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',
+                'app.api_keys','app.billing_quotes']) AS required(name)
+            """, connection);
+        if (command.ExecuteScalar() is not true)
+            throw new InvalidOperationException("The application database is missing required identity or billing tables.");
+        Console.WriteLine("Application migrations and identity/billing tables verified.");
+        return 0;
+    }
+
+    [System.ComponentModel.Description("Clear the application migration journal; preserves application data.")]
+    internal sealed class AppResetCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("app-reset", connection => { RequireSeparateApplication(connection); return RunReset(connection); });
+    }
+
+    [System.ComponentModel.Description("Recreate the selected application database; deletes its accounts, sessions, keys and billing data.")]
+    internal sealed class AppNukeCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("app-nuke", connection => RunNuke(connection, applicationOnly: true));
+    }
+
     [System.ComponentModel.Description("Show applied vs pending migrations.")]
     internal sealed class StatusCommand : Command<MigrateSettings>
     {
@@ -111,6 +172,20 @@ internal static class Program
 
     private static int RunUp(string connectionString)
         => RunUpTargets(Targets(connectionString));
+
+    [System.ComponentModel.Description("Create and migrate only the selected substrate database.")]
+    internal sealed class SubstrateUpCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("substrate-up", connection => RunUpTargets(new[] { (connection, (Func<string, bool>)(path => !IsAppScript(path)), "substrate database") }));
+    }
+
+    [System.ComponentModel.Description("Show pending and applied substrate migrations only.")]
+    internal sealed class SubstrateStatusCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
+            => Dispatch("substrate-status", connection => RunStatusTargets(new[] { (connection, (Func<string, bool>)(path => !IsAppScript(path)), "substrate database") }));
+    }
 
     private static int RunAppUp()
     {
@@ -161,10 +236,13 @@ internal static class Program
     }
 
     private static int RunStatus(string connectionString)
+        => RunStatusTargets(Targets(connectionString));
+
+    private static int RunStatusTargets(IEnumerable<(string target, Func<string, bool> filter, string label)> targets)
     {
         var pending = new List<DbUp.Engine.SqlScript>();
         var applied = new List<string>();
-        foreach (var (target, filter, _) in Targets(connectionString))
+        foreach (var (target, filter, _) in targets)
         {
             var engine = BuildEngine(target, filter);
             pending.AddRange(engine.GetScriptsToExecute());
@@ -198,9 +276,8 @@ internal static class Program
 
     private static int RunReset(string connectionString)
     {
-        Console.WriteLine("[migrate reset] DROPs the SchemaVersions table — DbUp will re-apply ALL migrations on next 'up'.");
-        Console.WriteLine("This does NOT drop the database, extensions, or substrate data.");
-        Console.WriteLine("For a full Layer-1 wipe, use 'nuke' instead.");
+        Console.WriteLine("Clears the selected database's migration journal while preserving its data and extensions.");
+        Console.WriteLine("Run the matching up command to reapply migrations.");
         if (!Confirmed("RESET"))
         {
             Console.WriteLine("Aborted.");
@@ -216,13 +293,28 @@ internal static class Program
     }
 
     private static int RunNuke(string connectionString)
+        => RunNuke(connectionString, applicationOnly: false);
+
+    private static void RequireSeparateApplication(string connectionString)
     {
+        var app = new NpgsqlConnectionStringBuilder(connectionString);
+        var substrate = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString());
+        if (app.Database == substrate.Database && app.Port == substrate.Port &&
+            string.Equals(app.Host, substrate.Host, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Application-only reset requires distinct application and substrate databases.");
+    }
+
+    private static int RunNuke(string connectionString, bool applicationOnly)
+    {
+        if (applicationOnly) RequireSeparateApplication(connectionString);
         var b = new NpgsqlConnectionStringBuilder(connectionString);
         var targetDb = b.Database
             ?? throw new InvalidOperationException("Target database name missing from connection string.");
 
         Console.WriteLine($"[migrate nuke] Re-create \"{targetDb}\" using its installed configuration and migrations.");
-        Console.WriteLine("Loses ALL substrate data: entities, physicalities, attestations.");
+        Console.WriteLine(applicationOnly
+            ? "Deletes application accounts, sessions, API keys and billing data."
+            : "Loses ALL substrate data: entities, physicalities, attestations.");
         Console.WriteLine("Rebuilds extensions from installed migrations; preserves database configuration and access.");
         if (!Confirmed("NUKE"))
         {
@@ -235,7 +327,7 @@ internal static class Program
         bool includesApp = app.Database == b.Database && app.Host == b.Host && app.Port == b.Port;
         DatabaseRecreation.Run(connectionString, replacement => RunUpTargets(new[]
         {
-            (replacement, (Func<string, bool>)(path => includesApp || !IsAppScript(path)), "replacement database")
+            (replacement, (Func<string, bool>)(path => applicationOnly ? IsAppScript(path) : includesApp || !IsAppScript(path)), "replacement database")
         }));
         Console.WriteLine("[migrate nuke] Re-created with migrations, database settings and existing access grants.");
         return 0;

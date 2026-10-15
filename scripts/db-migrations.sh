@@ -6,8 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 command="${1:-}"
 shift || true
 case "$command" in
-  status|up|reset|nuke) ;;
-  *) echo "usage: db-migrations.sh status|up|reset|nuke [migration args...]" >&2; exit 2 ;;
+  status|up|reset|nuke|app-up|app-status|app-check|app-reset|app-nuke|substrate-up|substrate-status|supports) ;;
+  *) echo "usage: db-migrations.sh status|up|reset|nuke|app-up|app-status|app-check|app-reset|app-nuke|substrate-up|substrate-status [migration args...]" >&2; exit 2 ;;
 esac
 
 candidates=()
@@ -30,5 +30,21 @@ done
   echo "::error::build/deploy owns compilation; database operations never compile" >&2
   exit 1
 }
+
+supports() {
+  local help requested
+  [[ $# -gt 0 ]] || return 2
+  help=$(dotnet "$runtime" --help) || return
+  for requested in "$@"; do
+    if [[ ! "$requested" =~ ^[a-z-]+$ ]] || ! grep -Eq "^[[:space:]]*$requested([[:space:]]|$)" <<< "$help"; then
+      echo "Installed migration runtime does not support $requested; publish the matching migration runtime first." >&2
+      return 2
+    fi
+  done
+}
+case "$command" in
+  supports) supports "$@"; exit ;;
+  app-*|substrate-*) supports "$command" || exit ;;
+esac
 
 exec dotnet "$runtime" "$command" "$@"

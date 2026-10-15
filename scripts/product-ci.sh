@@ -59,6 +59,7 @@ run_ci_contract_checks() {
   python3 tests/site-status.py
   bash tests/site-revision-receipts.sh
   bash tests/site-application-migrations.sh
+  bash tests/database-application-maintenance.sh
   bash tests/site-host-lock.sh
   bash tests/machine-config.sh
   python3 tests/linux-configuration.py
