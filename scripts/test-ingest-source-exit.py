@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real shell wrapper with a fake CLI; no corpus or database access."""
 import os
+import grp
 from pathlib import Path
 import re
 import shutil
@@ -18,7 +19,7 @@ class IngestExitTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         scripts = self.root / "scripts"
         (scripts / "lib").mkdir(parents=True)
-        for name in ("ingest-source.sh", "classify-ingest-exit.sh", "lib/storage.sh"):
+        for name in ("ingest-source.sh", "classify-ingest-exit.sh", "machine-env.py", "lib/storage.sh", "lib/installation.sh"):
             shutil.copy2(ROOT / "scripts" / name, scripts / name)
         (scripts / "lib/fp.sh").write_text("fp_compute() { echo fixture; }\nfp_check() { return 1; }\nfp_record() { :; }\n")
         (scripts / "decomposer-gates.json").write_text('{"sources":{"wordnet":{"decomposer":"fixture"}}}')
@@ -57,6 +58,11 @@ exit "$CLI_RC"
                         GITHUB_ACTIONS="true", GITHUB_OUTPUT=str(self.root / "outputs"),
                         INGEST_LOGDIR=str(self.root / "logs"), PROOF=str(self.root / "proof"),
                         LAPLACE_INSTALL_PREFIX=str(self.root / "prefix"),
+                        LAPLACE_APP_DIR="", LAPLACE_INGEST_RUNTIME="",
+                        LAPLACE_WORK=str(self.root / "work"),
+                        LAPLACE_WORK_ROOT=str(self.root / "work"),
+                        LAPLACE_SCRATCH_ROOT=str(self.root / "scratch"),
+                        LAPLACE_BUILD_GROUP=grp.getgrgid(os.getgid()).gr_name,
                         LAPLACE_BUILD_ROOT="",
                         LAPLACE_INGEST_RUNTIME_PREPARED="1",
                         CLI_RC="0", CLI_MESSAGE="completed")
@@ -70,6 +76,36 @@ exit "$CLI_RC"
         self.assertEqual(result.returncode, 57, result.stderr)
         self.assertIn("preempted=true", (self.root / "outputs").read_text())
         self.assertFalse((self.root / "proof").exists())
+
+    def install_site_cli(self):
+        cli = self.root / "prefix/app/cli"
+        shutil.copytree(self.root / "prefix/ingest/runtimes/fixture", cli)
+        return cli
+
+    def test_site_published_cli_precedes_legacy_ingest_runtime(self):
+        cli = self.install_site_cli()
+        result = self.run_ingest()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"ingest runtime {cli}", result.stdout)
+
+    def test_incomplete_site_publication_does_not_fall_back_to_stale_build(self):
+        cli = self.install_site_cli()
+        (cli / "liblaplace_core.so").unlink()
+        result = self.run_ingest()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("native runtime is incomplete", result.stderr)
+
+    def test_explicit_missing_runtime_does_not_fall_back(self):
+        result = self.run_ingest(LAPLACE_INGEST_RUNTIME=str(self.root / "missing"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ingest runtime is not installed", result.stderr)
+
+    def test_site_native_mismatch_fails_before_ingest(self):
+        cli = self.install_site_cli()
+        (cli / "liblaplace_core.so").write_bytes(b"another-revision")
+        result = self.run_ingest()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("native closure differs", result.stderr)
 
     def test_decomposer_failure_remains_failure(self):
         result = self.run_ingest(CLI_RC="23", CLI_MESSAGE="NullReferenceException")

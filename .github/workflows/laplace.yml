@@ -109,6 +109,10 @@ jobs:
       - name: Read back
         run: deploy/linux/site.sh smoke
 
+      - name: Retain installed target after failed readback
+        if: failure()
+        run: deploy/linux/site.sh status
+
       - name: Exercise installed database recreation and failure recovery
         run: bash tests/database-recreation.sh
 
@@ -274,3 +278,7 @@ jobs:
 
       - name: Read back
         run: deploy/linux/site.sh smoke
+
+      - name: Retain installed target after failed readback
+        if: failure()
+        run: deploy/linux/site.sh status

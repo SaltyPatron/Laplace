@@ -32,6 +32,8 @@ PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 INGEST_ROOT="$PREFIX/ingest"
 if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" ]]; then
     INGEST_RUNTIME="$LAPLACE_INGEST_RUNTIME"
+elif [[ -d "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" ]]; then
+    INGEST_RUNTIME="${LAPLACE_APP_DIR:-$PREFIX/app}/cli"
 elif [[ -f "$INGEST_ROOT/current/Laplace.Cli.dll" && -f "$INGEST_ROOT/current/liblaplace_core.so" ]]; then
     INGEST_RUNTIME="$INGEST_ROOT/current"
 else
@@ -39,7 +41,7 @@ else
     # publication yet. New installs never overwrite this legacy flat payload.
     INGEST_RUNTIME="$INGEST_ROOT"
 fi
-if [[ -f "$INGEST_RUNTIME/Laplace.Cli.dll" && -f "$INGEST_RUNTIME/liblaplace_core.so" ]]; then
+if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" || -d "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" || -f "$INGEST_RUNTIME/Laplace.Cli.dll" ]]; then
     DLL="$INGEST_RUNTIME/Laplace.Cli.dll"
     CLI_NATIVE="$INGEST_RUNTIME/liblaplace_core.so"
     ENGINE_NATIVE="$PREFIX/lib/liblaplace_core.so"
@@ -87,7 +89,7 @@ fi
 require_cli() {
     [[ -f "$DLL" ]] || {
         echo "::error::ingest runtime is not installed: $DLL" >&2
-        echo "::error::product install must publish $PREFIX/ingest/current/Laplace.Cli.dll; ingest does not compile" >&2
+        echo "::error::product install must publish a complete CLI at $INGEST_RUNTIME; ingest does not compile" >&2
         return 1
     }
     [[ -f "$ENGINE_NATIVE" && -f "$CLI_NATIVE" ]] || {

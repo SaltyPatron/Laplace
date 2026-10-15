@@ -84,6 +84,20 @@ class WorkflowOwnership(unittest.TestCase):
 
 
 class SeedHostOwnership(unittest.TestCase):
+    def test_ingest_database_matches_the_monorepo_site(self):
+        for path in WORKFLOWS.glob("seed*.yml"):
+            for block in re.findall(r"(?m)^      database:\n(?:        .*\n)*", path.read_text(encoding="utf-8")):
+                with self.subTest(workflow=path.name):
+                    self.assertIn("default: laplace-mono", block)
+                    self.assertNotIn("options: [laplace]", block)
+
+    def test_ingest_and_maintenance_use_the_site_published_cli(self):
+        block = run_block(SEED_STEP)
+        self.assertIn('LAPLACE_INGEST_RUNTIME="${LAPLACE_APP_DIR:-$LAPLACE_INSTALL_PREFIX/app}/cli"', block)
+        self.assertIn('LAPLACE_CLI_BIN="$LAPLACE_INGEST_RUNTIME/Laplace.Cli"', block)
+        self.assertLess(block.index("source scripts/ci-environment.sh"), block.index("export LAPLACE_INGEST_RUNTIME="))
+        self.assertNotIn("LAPLACE_CLI_BIN=/opt/laplace/bin/laplace", block)
+
     def test_seed_does_not_add_a_second_actions_queue(self):
         self.assertNotIn("group: laplace-host-lifecycle", SEED)
         self.assertNotIn("queue: max", SEED)

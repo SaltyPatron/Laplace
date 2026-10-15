@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import importlib.util
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 import sys
@@ -74,7 +75,12 @@ def classify_readiness(value: dict[str, Any]) -> tuple[bool, bool]:
         if type(value.get(name)) is not bool:
             raise ValueError(f"readiness {name} must be boolean")
     if value["substrate_reachable"] is not True:
-        raise ValueError("deployed API cannot reach the substrate")
+        # The API detail may contain arbitrary exception text. Publish only the
+        # PostgreSQL error code, never a connection string or credential.
+        detail = value.get("detail")
+        code = re.search(r"\b([0-9A-Z]{5}):", detail) if isinstance(detail, str) else None
+        suffix = f" (SQLSTATE {code[1]})" if code else ""
+        raise ValueError("deployed API cannot reach the substrate" + suffix)
     if value["perfcache_ready"] is not True:
         raise ValueError("deployed API has not loaded the installed perfcache")
 
