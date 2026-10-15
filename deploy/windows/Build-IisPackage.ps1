@@ -31,7 +31,7 @@ $revision=(& git -C $repo rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
 # Native SQL and managed callers belong to the same publication. The native
 # builder owns configuration and the shared build-tree lock.
-& (Join-Path $repo 'scripts/win/build-engine.cmd') laplace_core laplace_syzygy laplace_dynamics laplace_synthesis laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache
+& (Join-Path $repo 'scripts/win/build-engine.cmd') laplace_core laplace_syzygy laplace_dynamics laplace_synthesis laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_chess_transition_perfcache
 if($LASTEXITCODE){throw 'Native runtime build failed; no application package was created.'}
 $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid().ToString('N'))
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'

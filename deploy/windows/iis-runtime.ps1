@@ -72,7 +72,20 @@ function Get-IisChessAccess($c) {
 function Get-IisPageAssets([string]$Html) {
     @([regex]::Matches($Html,'(?:src|href)="(/assets/[^"]+)"') | ForEach-Object {$_.Groups[1].Value} | Select-Object -Unique)
 }
+function Test-IisChessCacheClosure([string]$Path) {
+    foreach($name in 'laplace_chess_position_perfcache.bin','laplace_chess_transition_perfcache.bin') {
+        $expected=$null
+        foreach($component in @('','cli','uci')) {
+            $file=Join-Path (Join-Path $Path $component) ('share/laplace/'+$name)
+            if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw "Incomplete IIS chess cache: $file"}
+            $digest=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+            if($expected -and $digest -ne $expected){throw "IIS chess cache differs between application components: $name ($component)"}
+            $expected=$digest
+        }
+    }
+}
 function Test-IisPackage([string]$Path) {
+    Test-IisChessCacheClosure $Path
     foreach($file in 'migrations/Laplace.Migrations.dll','migrations/Laplace.Migrations.deps.json','migrations/Laplace.Migrations.runtimeconfig.json') {
         if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS migration runtime: $file"}
     }

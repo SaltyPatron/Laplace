@@ -48,6 +48,7 @@ jobs:
           ./tests/migration-command-routing.ps1 -Runtime "$runtime/Laplace.Migrations.dll"
           ./tests/iis-database-maintenance.ps1 -NpgsqlAssembly "$runtime/Npgsql.dll"
           ./tests/iis-application-restart.ps1
+          ./tests/iis-chess-cache-package.ps1
 
   contract:
     name: Static CI/CD contract

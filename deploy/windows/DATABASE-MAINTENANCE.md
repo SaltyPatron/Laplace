@@ -60,6 +60,14 @@ can serve the website with working database and cache access while reporting
 `product_ready: false`; content is not ingested by database repair. An unreachable
 substrate or unavailable native cache still fails recovery.
 
+`Build-IisPackage.ps1` builds both chess position and transition caches. Windows
+publication includes both files, and package validation requires identical copies
+for the API, CLI and UCI runtimes. Extension installation also copies the transition
+file beside the shared position cache. This repairs an omitted delivery artifact;
+it does not ingest a chess corpus or establish gameplay acceptance. Use the
+`chess_perfcache` fields in the running application's readiness response to verify
+activation after publication.
+
 The GitHub **Database — maintenance** workflow has a `database` choice:
 `application` runs application-only maintenance; `substrate` retains the existing
 substrate workflow. The existing workflow targets remain staging and cloud; it does
@@ -75,6 +83,7 @@ Validation:
 pwsh -File tests/iis-database-maintenance.ps1
 pwsh -File tests/iis-database-maintenance.ps1 -NpgsqlAssembly <built-Npgsql.dll>
 pwsh -File tests/migration-command-routing.ps1 -Runtime <built-Laplace.Migrations.dll>
+pwsh -File tests/iis-chess-cache-package.ps1
 ```
 
 ```sh
