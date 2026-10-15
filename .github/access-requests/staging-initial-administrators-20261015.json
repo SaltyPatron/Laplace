@@ -1,18 +1,18 @@
 {
-  "version": 1,
-  "target": "staging",
-  "host": "hart-server",
-  "origin": "http://127.0.0.1:5187",
-  "nonce": "d725365598530898d7848d76e70550fc355614bf72c8a647f643d8bd50e5b074",
-  "role": "administrator",
-  "selectors": [
-    {
-      "provider": "google",
-      "fingerprint_sha256": "c3311784afa7b94f871ec966a1c81f90d469022de622714e60842a2f26f15cfe"
-    },
-    {
-      "provider": "microsoft",
-      "fingerprint_sha256": "760dd7882cbdf4f12ef47d13b579cb655fd0151e1b9c138f41aa8d782081f42c"
-    }
-  ]
+    "version": 1,
+    "target": "staging",
+    "host": "hart-server",
+    "origin": "http://127.0.0.1:5187",
+    "nonce": "d725365598530898d7848d76e70550fc355614bf72c8a647f643d8bd50e5b074",
+    "role": "administrator",
+    "selectors": [
+        {
+            "provider": "google",
+            "fingerprint_sha256": "c3311784afa7b94f871ec966a1c81f90d469022de622714e60842a2f26f15cfe"
+        },
+        {
+            "provider": "microsoft",
+            "fingerprint_sha256": "760dd7882cbdf4f12ef47d13b579cb655fd0151e1b9c138f41aa8d782081f42c"
+        }
+    ]
 }
