@@ -13,6 +13,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
+  substrate-runtime-grants:
+    name: PostgreSQL runtime grant recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: fixture-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: fixture-only-password
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: bash tests/substrate-runtime-grants.sh
+
   windows-native-package:
     name: Windows native package integrity
     runs-on: windows-2025
