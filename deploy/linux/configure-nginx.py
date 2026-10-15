@@ -128,11 +128,14 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--apply', action='store_true')
     mode.add_argument('--check-certificate', action='store_true', help='Verify the declared certificate without changing the installation')
+    mode.add_argument('--print-origin', action='store_true', help='Print the selected declared HTTPS origin without changing the installation')
     args = parser.parse_args()
     environments = json.loads(args.configuration.read_text(encoding='utf-8'))['environments']
     matches = [e for e in environments if (e['name'] == args.environment if args.environment else
                e['host'].lower() == socket.gethostname().split('.')[0].lower() and e['hosting'] == 'nginx')]
     if not matches and not args.environment:
+        if args.print_origin:
+            raise SystemExit('No private nginx browser route declared for this host.')
         print('No private nginx browser route declared for this host.')
         return
     if len(matches) != 1:
@@ -141,6 +144,9 @@ def main():
     if config['hosting'] != 'nginx':
         raise SystemExit('This installation operation is for a declared nginx environment.')
     content = render(config)
+    if args.print_origin:
+        print(config['browser_origin'])
+        return
     if args.check_certificate:
         verify_certificate(config)
         print('Certificate verified for ' + config['browser_origin'])
