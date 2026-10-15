@@ -342,6 +342,23 @@ class TransportAndDatabaseTests(unittest.TestCase):
             self.assertNotIn(PRIVATE, str(failure.exception))
             self.assertNotIn(TOKEN, str(failure.exception))
 
+    def test_database_failures_report_only_fixed_categories_and_sqlstate(self):
+        env = {"PGHOST": "/tmp", "PGPORT": "5432", "PGUSER": "migration-owner", "PGDATABASE": "application-db",
+               "LAPLACE_APP_DBNAME": "application-db", "LAPLACE_PG_PREFIX": str(Path.cwd())}
+        failures = (
+            ("fe_sendauth: no password supplied " + TOKEN, "password-unavailable"),
+            ("psql:<stdin>: FATAL: 42501 " + PRIVATE, "sqlstate=42501"),
+            ("error while loading shared libraries: " + TOKEN, "client-library-unavailable"),
+        )
+        for stderr, expected in failures:
+            with patch.dict(os.environ, env, clear=True), patch.object(enroll.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 1, PRIVATE, stderr)), \
+                    self.assertRaises(enroll.EnrollmentError) as failure:
+                enroll.binding_rows()
+            self.assertIn(expected, str(failure.exception))
+            self.assertNotIn(PRIVATE, str(failure.exception))
+            self.assertNotIn(TOKEN, str(failure.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

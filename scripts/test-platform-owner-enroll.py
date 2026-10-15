@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import json
@@ -57,6 +58,24 @@ class OwnerEnrollmentTests(unittest.TestCase):
             self.binding['verified_at'] = value
             with self.assertRaises(owners.OwnerError):
                 self.policy()
+
+    def test_postgresql_timestamp_precisions_preserve_recorded_instant_and_offset(self):
+        for fraction in ('', '1', '12', '123', '1234', '12345', '123456'):
+            for offset, minutes in (('Z', 0), ('+00:00', 0), ('-05:00', -300), ('+05:30', 330)):
+                with self.subTest(fraction=fraction, offset=offset):
+                    self.binding['verified_at'] = '2025-01-02T03:04:05' + ('.' + fraction if fraction else '') + offset
+                    expected = datetime(2025, 1, 2, 3, 4, 5, int(fraction.ljust(6, '0')),
+                                        timezone(timedelta(minutes=minutes)))
+                    self.assertEqual(self.policy()['owners'][0]['verified_at'], expected.isoformat())
+
+    def test_invalid_timestamp_does_not_become_owner_authority(self):
+        for value in ('2025-01-02T03:04:05.1234567Z', '2025-02-30T03:04:05Z',
+                      '2025-01-02 03:04:05+00:00', '2025-01-02T03:04:05+15:00',
+                      '2025-01-02T03:04:05+00:00:01', '1970-01-01T00:00:00Z'):
+            with self.subTest(value=value):
+                self.binding['verified_at'] = value
+                with self.assertRaises(owners.OwnerError):
+                    self.policy()
 
     def test_ambiguous_or_absent_live_client_rejected(self):
         for clients in ([], [self.clients[0], self.clients[0]], [{'provider': 'google', 'clientId': ''}]):

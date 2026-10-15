@@ -58,10 +58,8 @@ def policy_from(request, bindings, clients):
             raise OwnerError('The selected owner must have an existing audited administrator grant.')
         verified = row.get('verified_at')
         try:
-            stamp = datetime.fromisoformat(verified.replace('Z', '+00:00'))
-            if stamp.tzinfo is None or stamp > datetime.now(timezone.utc):
-                raise ValueError()
-        except (AttributeError, TypeError, ValueError):
+            stamp = transport.verified_timestamp(verified)
+        except ValueError:
             raise OwnerError('The selected binding lacks a recorded authentication time.') from None
         owners.append({'provider': provider, 'issuer': row['issuer'], 'subject': row['subject'],
                        'client_id': matches[0]['clientId'], 'verified_at': stamp.isoformat()})
