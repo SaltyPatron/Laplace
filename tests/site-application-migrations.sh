@@ -3,6 +3,9 @@ set -euo pipefail
 : "${TMPDIR:?set TMPDIR to build scratch}"
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "$TMPDIR/app-migration-check.XXXXXX")
+export ROOT="$root"
+unset LAPLACE_PLATFORM_OWNER_POLICY_FILE
+export LAPLACE_WORK_ROOT="$work/no-owner-policy"
 trap 'rm -rf "$work"' EXIT
 sed -n '/^revision() {/,/^}/p; /^phase_migrate_app() {/,/^}/p' "$root/deploy/linux/site.sh" > "$work/functions.sh"
 mkdir -p "$work/stage/app/wwwroot" "$work/stage/app/migrations/db/migrations"
@@ -13,11 +16,15 @@ cat > "$work/run.sh" <<'SCRIPT'
 set -euo pipefail
 fail() { echo "$*" >&2; exit 1; }
 source "$SITE_WORK/functions.sh"
-dotnet() {
+mkdir -p "$SITE_WORK/bin"
+cat > "$SITE_WORK/bin/dotnet" <<'DOTNET'
+#!/usr/bin/env bash
   [[ "$1" == "$SITE_WORK/stage/app/migrations/Laplace.Migrations.dll" && "$2" == app-up ]]
   printf 'migrate\n' >> "$SITE_WORK/order"
-  return "${MIGRATION_EXIT:-0}"
-}
+  exit "${MIGRATION_EXIT:-0}"
+DOTNET
+chmod +x "$SITE_WORK/bin/dotnet"
+export PATH="$SITE_WORK/bin:$PATH"
 phase_migrate_app
 printf 'publish\n' >> "$SITE_WORK/order"
 SCRIPT

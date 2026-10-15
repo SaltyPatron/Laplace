@@ -56,6 +56,12 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
                 if($parser.Invoke($null,@($auth)).ToString() -cne 'SSPI'){throw 'Migration authentication must require SSPI.'}
             }elseif($auth -cne 'SSPI'){throw 'The migration connection must use the Npgsql authentication spelling.'}
         }
+        if($env:TEST_EXPECT_POLICY -eq '1'){
+            $policy=$env:LAPLACE_PLATFORM_OWNER_POLICY | ConvertFrom-Json
+            if($policy.owners[0].subject -cne 'private-owner-fixture' -or $env:LAPLACE_AUTH_GOOGLE_CLIENT_ID -cne 'client-fixture'){
+                throw 'Authoritative owner policy was not loaded before migration.'
+            }
+        }
         Add-Content -LiteralPath $env:TEST_EVENTS -Value ('migration:'+$verb)
         $global:LASTEXITCODE=if($verb -eq $env:TEST_FAIL_VERB){23}else{0}
     }
@@ -102,6 +108,42 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
     $events=Get-Content $env:TEST_EVENTS
     Assert (@($events | Where-Object {$_ -match '^sql:(GRANT|REVOKE|ALTER)' }).Count -eq 0) 'Status modified access.'
     Write-Host 'PASS status leaves database access unchanged'
+    $access.identity_reference='kv/identity';$access.client=$env:COMPUTERNAME.ToLowerInvariant();$access.bao_address='https://fixture.invalid'
+    $access | ConvertTo-Json | Set-Content "$work/access.json"
+    @'
+function New-DevelopmentBaoSession($Config){
+    if($env:TEST_IDENTITY_FAIL -eq '1'){throw 'Fixture enrollment unavailable.'}
+    'private-token-fixture'
+}
+function Invoke-DevelopmentBao($Config,$Method,$Path,$Token,$Body){
+    if($Method -eq 'POST'){Add-Content $env:TEST_EVENTS 'identity:revoked';return}
+    if($Path -cne 'kv/data/identity'){throw 'Wrong identity record selected.'}
+    [pscustomobject]@{data=[pscustomobject]@{data=[pscustomobject]@{
+        google_client_id='client-fixture';microsoft_client_id='microsoft-fixture'
+        platform_owner_policy=[pscustomobject]@{version=1;owners=@([pscustomobject]@{
+            provider='google';issuer='https://accounts.google.com';subject='private-owner-fixture'
+            client_id='client-fixture';verified_at='2025-01-01T00:00:00Z'
+        })}
+    }}}
+}
+'@ | Set-Content "$work/credentials.ps1"
+    $env:TEST_EXPECT_POLICY='1'
+    $env:LAPLACE_PLATFORM_OWNER_POLICY='ambient-owner-policy';$env:LAPLACE_AUTH_GOOGLE_CLIENT_ID='ambient-client'
+    '' | Set-Content $env:TEST_EVENTS
+    & $command @invoke -Database application -Operation recreate
+    Assert ($env:LAPLACE_PLATFORM_OWNER_POLICY -ceq 'ambient-owner-policy' -and $env:LAPLACE_AUTH_GOOGLE_CLIENT_ID -ceq 'ambient-client') 'Private process environment was not restored.'
+    $events=Get-Content $env:TEST_EVENTS
+    Assert ($events.IndexOf('identity:revoked') -lt $events.IndexOf('migration:app-nuke')) 'Credential read/revocation did not finish before destructive maintenance.'
+    Write-Host 'PASS authoritative owner policy reaches recreation before writes and ambient environment is restored'
+    '' | Set-Content $env:TEST_EVENTS
+    $env:TEST_IDENTITY_FAIL='1';$failed=$false
+    try { & $command @invoke -Database application -Operation recreate }catch{$failed=$true}
+    Assert $failed 'Unavailable private enrollment was ignored.'
+    Assert ([string]::IsNullOrWhiteSpace((Get-Content $env:TEST_EVENTS -Raw))) 'Unavailable enrollment reached a database command.'
+    Remove-Item Env:TEST_IDENTITY_FAIL,Env:TEST_EXPECT_POLICY
+    $access.Remove('identity_reference');$access.Remove('client');$access.Remove('bao_address')
+    $access | ConvertTo-Json | Set-Content "$work/access.json"
+    Write-Host 'PASS unavailable private policy stops before destructive database work'
     '' | Set-Content $env:TEST_EVENTS
     $env:TEST_EXTENSION_MISSING='1';$failed=$false
     try { & $command @invoke -Database substrate -Operation repair }catch{$failed=$true}

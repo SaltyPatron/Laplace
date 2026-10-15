@@ -42,6 +42,7 @@ on:
       - "scripts/site-status.py"
       - "scripts/platform-access-audit.py"
       - "scripts/platform-access-enroll.py"
+      - "scripts/platform-owner-enroll.py"
       - "scripts/test-parallel.sh"
       - "scripts/product-ci.sh"
       - "deploy/linux/deploy.sh"

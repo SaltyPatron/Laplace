@@ -61,7 +61,8 @@ if(-not $ReceiptDirectory){$ReceiptDirectory=Join-Path $env:LAPLACE_WORK 'operat
 $receiptRoot=Join-Path $ReceiptDirectory ('iis-database-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ'))
 $null=New-Item -ItemType Directory -Path $receiptRoot
 $saved=@{}
-foreach($name in @('LAPLACE_DB','LAPLACE_APP_DB','LAPLACE_OPS_LOG_DIR','DATABASE_URL')+@(Get-ChildItem Env: | Where-Object Name -Like 'PG*' | ForEach-Object Name)){
+$identityNames=@('LAPLACE_PLATFORM_OWNER_POLICY','LAPLACE_PLATFORM_OWNER_POLICY_FILE','LAPLACE_AUTH_GOOGLE_CLIENT_ID','LAPLACE_AUTH_MICROSOFT_CLIENT_ID')
+foreach($name in @('LAPLACE_DB','LAPLACE_APP_DB','LAPLACE_OPS_LOG_DIR','DATABASE_URL')+$identityNames+@(Get-ChildItem Env: | Where-Object Name -Like 'PG*' | ForEach-Object Name)){
     $saved[$name]=[Environment]::GetEnvironmentVariable($name)
     Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue
 }
@@ -91,6 +92,30 @@ try {
     $env:LAPLACE_DB=Connection $access.substrate_database
     $env:LAPLACE_APP_DB=Connection $access.application_database
     $env:LAPLACE_OPS_LOG_DIR=Join-Path $receiptRoot 'logs'
+    if($Database -eq 'application'){
+        $receipt.platform_owner_policy='no-owner-config'
+        if($access.PSObject.Properties['identity_reference']){
+            if(($access.identity_reference -replace '^kv/','kv/data/') -cne $c.records.identity -or
+                $access.client -ine $c.host -or $access.bao_address.TrimEnd('/') -cne $c.address.TrimEnd('/')){
+                throw 'The development identity record differs from the IIS installation.'
+            }
+            $credentialHelper=Join-Path (Split-Path -Parent $AccessConfiguration) 'credentials.ps1'
+            if(-not(Test-Path -LiteralPath $credentialHelper -PathType Leaf)){throw 'The declared development credential helper is missing.'}
+            . $credentialHelper
+            $token=$null
+            try {
+                $token=New-DevelopmentBaoSession $access
+                $identityRecord=(Invoke-DevelopmentBao $access GET $c.records.identity $token).data.data
+                $identityValues=Get-IisInstallationIdentityEnvironment $c $identityRecord
+                foreach($name in $identityValues.Keys){[Environment]::SetEnvironmentVariable($name,$identityValues[$name])}
+                if($identityValues.Contains('LAPLACE_PLATFORM_OWNER_POLICY')){$receipt.platform_owner_policy='configured'}
+            }finally{
+                try{if($token){$null=Invoke-DevelopmentBao $access POST 'auth/token/revoke-self' $token @{}}}
+                finally{$token=$null;$identityRecord=$null;$identityValues=$null}
+            }
+        }
+        Write-Host "Platform owner policy: $($receipt.platform_owner_policy)"
+    }
     # Only installed-runtime selection depends on the active IIS publication.
     if($usesInstalledRuntime){
         $lock=[IO.File]::Open((Join-Path $web '.publication.lock'),'OpenOrCreate','ReadWrite','None')
@@ -159,7 +184,7 @@ try {
     if($lock){$lock.Dispose()}
     $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
     $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $receiptRoot 'receipt.json') -Encoding utf8
-    foreach($name in @('LAPLACE_DB','LAPLACE_APP_DB','LAPLACE_OPS_LOG_DIR','DATABASE_URL')+@(Get-ChildItem Env: | Where-Object Name -Like 'PG*' | ForEach-Object Name)){Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue}
+    foreach($name in @('LAPLACE_DB','LAPLACE_APP_DB','LAPLACE_OPS_LOG_DIR','DATABASE_URL')+$identityNames+@(Get-ChildItem Env: | Where-Object Name -Like 'PG*' | ForEach-Object Name)){Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue}
     foreach($name in $saved.Keys){[Environment]::SetEnvironmentVariable($name,$saved[$name])}
     Write-Host "Receipt: $(Join-Path $receiptRoot 'receipt.json')"
 }

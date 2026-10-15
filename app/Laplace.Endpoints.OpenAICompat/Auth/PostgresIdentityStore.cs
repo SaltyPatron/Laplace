@@ -6,7 +6,12 @@ namespace Laplace.Endpoints.OpenAICompat.Auth;
 internal sealed class PostgresIdentityStore : IIdentityStore
 {
     private readonly NpgsqlDataSource _dataSource;
-    public PostgresIdentityStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
+    private readonly PlatformOwnerReconciler? _owners;
+    public PostgresIdentityStore(NpgsqlDataSource dataSource, PlatformOwnerReconciler? owners = null)
+    {
+        _dataSource = dataSource;
+        _owners = owners;
+    }
 
     public async Task<IdentityAccount> UpsertExternalIdentityAsync(ExternalIdentityProfile profile, CancellationToken ct)
     {
@@ -15,6 +20,7 @@ internal sealed class PostgresIdentityStore : IIdentityStore
         if (existing is not null)
         {
             await UpdateProfileAsync(connection, existing.UserId, profile, ct);
+            if (_owners is not null) await _owners.ReconcileUserAsync(connection, existing.UserId, ct);
             return WithProfile(existing, profile);
         }
 
@@ -38,8 +44,11 @@ internal sealed class PostgresIdentityStore : IIdentityStore
             var winner = await ReadAccountAsync(connection, profile, ct);
             if (winner is null) throw;
             await UpdateProfileAsync(connection, winner.UserId, profile, ct);
+            if (_owners is not null) await _owners.ReconcileUserAsync(connection, winner.UserId, ct);
             return WithProfile(winner, profile);
         }
+        // Account creation commits before the role lock: restore and concurrent login share the same binding.
+        if (_owners is not null) await _owners.ReconcileUserAsync(connection, userId, ct);
         return new IdentityAccount(userId, tenantId, "owner", profile.Provider,
             profile.Email, profile.DisplayName, profile.AvatarUrl);
     }

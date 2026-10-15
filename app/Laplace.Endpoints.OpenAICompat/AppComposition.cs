@@ -44,8 +44,10 @@ internal static class AppComposition
     {
         services.AddRefactorProxy();
         var browserAuth = BuildBrowserAuthSettings();
+        var ownerPolicy = PlatformOwnerPolicy.Load();
         var authMode = ResolveAuthMode(browserAuth);
         services.AddSingleton(browserAuth);
+        services.AddSingleton(ownerPolicy);
         var dataProtectionPath = IdentityConfig("LAPLACE_DATA_PROTECTION_KEYS");
         if (!string.IsNullOrWhiteSpace(dataProtectionPath))
         {
@@ -55,11 +57,17 @@ internal static class AppComposition
                 .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
         }
         services.AddSingleton<IIdentityStore>(sp =>
-            new PostgresIdentityStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey)));
+            new PostgresIdentityStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey),
+                sp.GetRequiredService<PlatformOwnerReconciler>()));
+        services.AddSingleton(sp => new PlatformOwnerReconciler(
+            sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey), ownerPolicy));
         services.AddSingleton<BrowserTicketStore>();
         services.AddSingleton<IPlatformAccessStore>(sp =>
-            new PostgresPlatformAccessStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey)));
+            new PostgresPlatformAccessStore(sp.GetRequiredKeyedService<Npgsql.NpgsqlDataSource>(ApplicationDatabaseKey),
+                sp.GetRequiredService<PlatformOwnerReconciler>()));
         services.AddSingleton<PlatformAuthorization>();
+        if (ownerPolicy.Owners.Count > 0)
+            services.AddServerHostedService<PlatformOwnerBootstrapService>();
 
         var authentication = services.AddAuthentication(options =>
         {
@@ -335,4 +343,14 @@ internal static class AppComposition
         }
         return null;
     }
+}
+
+internal sealed class PlatformOwnerBootstrapService(PlatformOwnerReconciler owners) : IHostedService
+{
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        await owners.ReconcileAsync(cancellationToken);
+        await owners.VerifyAsync(cancellationToken);
+    }
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

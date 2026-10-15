@@ -383,6 +383,7 @@ ${LAPLACE_API_STATE_DIR:+LAPLACE_AGENTS_CONFIG=$LAPLACE_API_STATE_DIR/agents.jso
 ${LAPLACE_API_STATE_DIR:+LAPLACE_OUT=$LAPLACE_API_STATE_DIR/out}
 ${LAPLACE_PUBLIC_BASE_URL:+LAPLACE_PUBLIC_BASE_URL=$LAPLACE_PUBLIC_BASE_URL}
 EOF
+  python3 "$ROOT/deploy/linux/platform-owner-policy.py" --apply-api-env "$env_file"
 }
 
 # The MCP server's non-secret environment, beside the API's: the same database and perf-cache, its own port and
@@ -657,7 +658,7 @@ phase_migrate_app() {
   local app="$SITE_WORK/stage/app"
   revision "$app" >/dev/null
   [[ -d "$app/migrations/db/migrations" ]] || fail "staged migration scripts are missing"
-  LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" dotnet "$app/migrations/Laplace.Migrations.dll" app-up
+  LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" python3 "$ROOT/deploy/linux/platform-owner-policy.py" -- dotnet "$app/migrations/Laplace.Migrations.dll" app-up
 }
 
 source "$ROOT/deploy/linux/qualification.sh"

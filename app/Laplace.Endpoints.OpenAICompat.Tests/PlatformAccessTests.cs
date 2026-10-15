@@ -121,6 +121,7 @@ public sealed class PlatformAccessTests
         Assert.Equal(HttpStatusCode.OK, capabilities.StatusCode);
         using var document = System.Text.Json.JsonDocument.Parse(await capabilities.Content.ReadAsStringAsync());
         Assert.True(document.RootElement.GetProperty("initialRoleAssignment").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("persistentInstallationOwners").GetBoolean());
         Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/v1/admin/access/people/{User}/role",
             new { role = "administrator", onlyIfNeverAssigned = true })).StatusCode);
         Assert.True(factory.Access.InitialAssignmentRequested);

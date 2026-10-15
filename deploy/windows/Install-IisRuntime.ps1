@@ -98,7 +98,7 @@ if($Operation -eq 'Render') {
         if($changed -or $certChanged){$manager.CommitChanges()}
         if($changed -and $pool.State -eq 'Started'){$null=$pool.Recycle()}
     } finally {$manager.Dispose()}
-    Write-IisAtomic $receiptPath (Iis-Json @{rendered_utc=[DateTime]::UtcNow.ToString('o');source='openbao-agent';pool=$c.pool;environment_changed=$changed;certificate=$certificate.Thumbprint;certificate_digest=$certDigest})
+    Write-IisAtomic $receiptPath (Iis-Json @{rendered_utc=[DateTime]::UtcNow.ToString('o');source='openbao-agent';pool=$c.pool;environment_changed=$changed;certificate=$certificate.Thumbprint;certificate_digest=$certDigest;platform_owner_policy=$(if($values.Contains('LAPLACE_PLATFORM_OWNER_POLICY_FILE')){'installed-file'}elseif($values.Contains('LAPLACE_PLATFORM_OWNER_POLICY')){'credential-record'}else{'no-owner-config'})})
     return
 }
 $manifest=Test-IisPackage $c.publish
@@ -133,6 +133,10 @@ $runtimeReaders=@(Get-IisRuntimeReaders $c)
 Protect-IisDirectory $root 'ReadAndExecute' 'ReadAndExecute'
 Protect-IisDirectory $private
 Protect-IisDirectory $state 'ReadAndExecute'
+Protect-IisDirectory (Join-Path $state 'platform-owners') 'ReadAndExecute' 'Modify'
+$ownerPolicyPath=Get-IisOwnerPolicyPath $c
+if(-not(Test-Path -LiteralPath $ownerPolicyPath)){Write-IisAtomic $ownerPolicyPath '{"version":1,"owners":[]}'}
+$c | Add-Member -NotePropertyName platform_owner_policy_file -NotePropertyValue $ownerPolicyPath -Force
 foreach($leaf in 'keys','logs','output'){Protect-IisDirectory (Join-Path $state $leaf) 'Modify'}
 Protect-IisDirectory $web 'ReadAndExecute' 'Modify'
 Grant-IisRuntimeReaders $web $runtimeReaders

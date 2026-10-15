@@ -1,11 +1,12 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;
 
 internal sealed record PlatformRoleDefinition(string Id, string Name, string Description, string[] Permissions);
-internal sealed record PlatformPerson(Guid UserId, string? DisplayName, string? Email, string? Role, string[] Providers);
+internal sealed record PlatformPerson(Guid UserId, string? DisplayName, string? Email, string? Role, string[] Providers, bool InstallationOwner = false);
 internal sealed record PlatformRoleEvent(long EventId, Guid UserId, string Actor, string? PreviousRole, string? Role, DateTimeOffset OccurredAt, string? Person, string? ActorName);
 internal sealed class AccessChangeException(string message) : Exception(message);
 
@@ -65,9 +66,20 @@ internal sealed class PlatformAuthorization(IPlatformAccessStore store, IOptions
     }
 }
 
-internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database) : IPlatformAccessStore
+internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database, PlatformOwnerReconciler? owners = null) : IPlatformAccessStore
 {
     public async Task<string?> RoleAsync(Guid user, CancellationToken ct)
+    {
+        var role = await StoredRoleAsync(user, ct);
+        if (role != "administrator" && owners is not null && await owners.IsOwnerAsync(user, ct))
+        {
+            await owners.ReconcileUserAsync(user, ct);
+            role = await StoredRoleAsync(user, ct);
+        }
+        return role;
+    }
+
+    private async Task<string?> StoredRoleAsync(Guid user, CancellationToken ct)
     {
         await using var command = database.CreateCommand("SELECT role FROM app.platform_roles WHERE user_id = $1");
         command.Parameters.AddWithValue(user);
@@ -76,6 +88,7 @@ internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database) : I
 
     public async Task<IReadOnlyList<PlatformPerson>> PeopleAsync(string search, CancellationToken ct)
     {
+        var managed = owners is null ? new HashSet<Guid>() : await owners.OwnerUsersAsync(ct);
         await using var command = database.CreateCommand("""
             SELECT u.user_id, u.display_name, u.email, r.role,
                 ARRAY(SELECT DISTINCT e.provider FROM app.external_identities e WHERE e.user_id = u.user_id ORDER BY e.provider)
@@ -86,7 +99,7 @@ internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database) : I
         command.Parameters.AddWithValue(search);
         var result = new List<PlatformPerson>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(new(reader.GetGuid(0), Text(reader, 1), Text(reader, 2), Text(reader, 3), reader.GetFieldValue<string[]>(4)));
+        while (await reader.ReadAsync(ct)) result.Add(new(reader.GetGuid(0), Text(reader, 1), Text(reader, 2), Text(reader, 3), reader.GetFieldValue<string[]>(4), managed.Contains(reader.GetGuid(0))));
         return result;
     }
 
@@ -125,6 +138,8 @@ internal sealed class PostgresPlatformAccessStore(NpgsqlDataSource database) : I
             exists.Parameters.AddWithValue(user);
             if (await exists.ExecuteScalarAsync(ct) is null) throw new AccessChangeException("That person must sign in to Laplace before access can be assigned.");
         }
+        if (role != "administrator" && owners is not null && await owners.IsOwnerAsync(connection, transaction, user, ct))
+            throw new AccessChangeException("This administrator is managed by the installation owner policy. Change that policy before removing owner access.");
         string? previous;
         await using (var current = new NpgsqlCommand("SELECT role FROM app.platform_roles WHERE user_id = $1", connection, transaction))
         {

@@ -3,7 +3,9 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/laplace-app-maintenance.XXXXXX")
 mkdir -p "$work/scripts/lib" "$work/runtime/migrations" "$work/bin"
+mkdir -p "$work/deploy/linux"
 cp "$root/scripts/db-migrations.sh" "$work/scripts/db-migrations.sh"
+cp "$root/deploy/linux/platform-owner-policy.py" "$work/deploy/linux/"
 : > "$work/scripts/lib/database.sh"
 : > "$work/runtime/migrations/Laplace.Migrations.dll"
 printf 'set -euo pipefail\n' > "$work/dispatch.sh"
@@ -11,6 +13,8 @@ sed -n '/^          case "${LAPLACE_DB_SCOPE/,/^          case "$LAPLACE_DB_OPER
   sed '$d; s/^          //' >> "$work/dispatch.sh"
 [[ -s "$work/dispatch.sh" ]]
 export TEST_EVENTS="$work/events" LAPLACE_APP_DIR="$work/runtime"
+unset LAPLACE_PLATFORM_OWNER_POLICY_FILE
+export LAPLACE_WORK_ROOT="$work/no-owner-policy"
 cat > "$work/bin/dotnet" <<'STUB'
 #!/usr/bin/env bash
 shift

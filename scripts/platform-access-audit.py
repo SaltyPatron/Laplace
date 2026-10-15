@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read installed platform access without publishing account or credential data."""
 import argparse
+import hashlib
 from collections import Counter
 from datetime import datetime, timezone
 import ipaddress
@@ -156,12 +157,15 @@ def summarize(people_document, events_document, clients_document):
             raise AuditError("Platform event response lacks role transition data.")
         transitions[role(event["previousRole"]) + "->" + role(event["role"])] += 1
     configured = Counter()
+    client_fingerprints = {}
     missing_client_id = 0
     for client in clients:
         if not isinstance(client.get("clientId"), str) or not client["clientId"].strip():
             missing_client_id += 1
         else:
             configured[provider(client.get("provider"))] += 1
+            if client.get('provider') in PROVIDERS:
+                client_fingerprints.setdefault(client['provider'], []).append(hashlib.sha256(client['clientId'].encode()).hexdigest())
     people_report.update(role_counts=dict(sorted(people_roles.items())),
                          provider_account_counts=dict(sorted(people_providers.items())),
                          role_counts_by_provider={name: dict(sorted(counts.items()))
@@ -170,6 +174,7 @@ def summarize(people_document, events_document, clients_document):
     return {"people": people_report, "events": events_report,
             "clients": {"observed_count": len(clients),
                         "configured_provider_counts": dict(sorted(configured.items())),
+                        "client_id_sha256": {name: sorted(values) for name, values in sorted(client_fingerprints.items())},
                         "missing_client_id_count": missing_client_id},
             "exact_provider_bindings": "unavailable-from-these-endpoints",
             "owner_administrator_verification": "not-established",
