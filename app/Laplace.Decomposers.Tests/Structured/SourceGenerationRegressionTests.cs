@@ -39,6 +39,38 @@ public sealed class SourceGenerationRegressionTests
     internal static string RepositoryFile(string relative, [CallerFilePath] string file = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, "../../..", relative));
 
+    [Fact]
+    public async Task Unicode_chart_presentations_are_retained_without_hiding_unrecognized_chart_data()
+    {
+        CodepointPerfcache.LoadDefault();
+        string root = TemporaryDirectory();
+        try
+        {
+            var recipe = SourceGenerationRecipe.Load(RepositoryFile("recipes/unicode/UCD/17.0.0/unicode.source.json"));
+            foreach (var rule in recipe.Rules.Where(r => r.Artifact.Required))
+                Write(root, rule.Artifact.Selector, "source artifact");
+            string[] presentations = ["charts/About.html", "charts/PDF/U0000.pdf", "charts/PDF/U1FA70.pdf"];
+            foreach (string relative in presentations) Write(root, relative, "published chart presentation");
+
+            var resolved = await SourceGenerationResolver.ResolveAsync(recipe, root);
+            Assert.Empty(resolved.ExecutionErrors);
+            foreach (string relative in presentations)
+            {
+                var artifact = Assert.Single(resolved.Graph.Artifacts, a => a.RelativePath == relative);
+                Assert.Equal(IngestArtifactDisposition.ExcludedWithReason, artifact.Disposition);
+                Assert.False(string.IsNullOrWhiteSpace(artifact.Notes));
+                Assert.Equal(64, artifact.Sha256.Length);
+                Assert.DoesNotContain(resolved.Bindings, b => b.Artifact.RelativePath == relative);
+            }
+            Assert.Contains(resolved.Bindings, b => b.Artifact.RelativePath == "charts/RSIndex.txt");
+
+            Write(root, "charts/new-properties.txt", "unrecognized semantic data");
+            resolved = await SourceGenerationResolver.ResolveAsync(recipe, root);
+            Assert.Contains(resolved.ExecutionErrors, e => e.Contains("charts/new-properties.txt"));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("extracted")]
