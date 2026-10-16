@@ -17,6 +17,18 @@
       "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
     },
     {
+      "selector": "charts/About.html",
+      "required": false,
+      "disposition": "Excluded",
+      "reason": "Code-chart presentation documentation retained with its exact bytes in the physical source graph; character-property testimony is admitted from the selected UCD data."
+    },
+    {
+      "selector": "charts/PDF/U*.pdf",
+      "required": false,
+      "disposition": "Excluded",
+      "reason": "Per-block code-chart presentations retained with their exact bytes in the physical source graph, like the combined CodeCharts.pdf; character-property testimony is admitted from the selected UCD data."
+    },
+    {
       "selector": "charts/CodeCharts.pdf",
       "required": false,
       "disposition": "Excluded",
