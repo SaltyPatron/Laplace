@@ -42,14 +42,12 @@ public sealed class PlatformOwnerReconciler(NpgsqlDataSource database, PlatformO
     /// <summary>Called after a validated login has committed its account, before issuing its ticket.</summary>
     public async Task ReconcileUserAsync(Guid user, CancellationToken ct = default)
     {
-        if (policy.Owners.Count == 0) return;
         await using var connection = await database.OpenConnectionAsync(ct);
         await ReconcileUserAsync(connection, user, ct);
     }
 
     public async Task ReconcileUserAsync(NpgsqlConnection connection, Guid user, CancellationToken ct = default)
     {
-        if (policy.Owners.Count == 0) return;
         await using var transaction = await connection.BeginTransactionAsync(ct);
         await LockAsync(connection, transaction, ct);
         if (await IsOwnerAsync(connection, transaction, user, ct))
@@ -59,7 +57,6 @@ public sealed class PlatformOwnerReconciler(NpgsqlDataSource database, PlatformO
 
     public async Task<bool> IsOwnerAsync(Guid user, CancellationToken ct = default)
     {
-        if (policy.Owners.Count == 0) return false;
         await using var connection = await database.OpenConnectionAsync(ct);
         return await IsOwnerAsync(connection, null, user, ct);
     }
@@ -67,22 +64,36 @@ public sealed class PlatformOwnerReconciler(NpgsqlDataSource database, PlatformO
     public async Task<bool> IsOwnerAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction,
         Guid user, CancellationToken ct = default)
     {
-        if (policy.Owners.Count == 0) return false;
-        await using var command = OwnerQuery(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM app.external_identities WHERE user_id = $1 AND (", "))");
-        command.Parameters.Insert(0, new NpgsqlParameter<Guid> { TypedValue = user });
-        return (bool)(await command.ExecuteScalarAsync(ct))!;
+        if (policy.Owners.Count > 0)
+        {
+            await using var command = OwnerQuery(connection, transaction,
+                "SELECT EXISTS(SELECT 1 FROM app.external_identities WHERE user_id = $1 AND (", "))");
+            command.Parameters.Insert(0, new NpgsqlParameter<Guid> { TypedValue = user });
+            if ((bool)(await command.ExecuteScalarAsync(ct))!) return true;
+        }
+        await using var fallback = new NpgsqlCommand(
+            "SELECT EXISTS(SELECT 1 FROM app.platform_role_events WHERE user_id = $1 AND actor = 'installation-owner' AND role = 'administrator')",
+            connection, transaction);
+        fallback.Parameters.Add(new NpgsqlParameter<Guid> { TypedValue = user });
+        return (bool)(await fallback.ExecuteScalarAsync(ct))!;
     }
 
     public async Task<IReadOnlySet<Guid>> OwnerUsersAsync(CancellationToken ct = default)
     {
         var result = new HashSet<Guid>();
-        if (policy.Owners.Count == 0) return result;
         await using var connection = await database.OpenConnectionAsync(ct);
-        await using var command = OwnerQuery(connection, null,
-            "SELECT DISTINCT user_id FROM app.external_identities WHERE ", "", offset: 0);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) result.Add(reader.GetGuid(0));
+        if (policy.Owners.Count > 0)
+        {
+            await using var command = OwnerQuery(connection, null,
+                "SELECT DISTINCT user_id FROM app.external_identities WHERE ", "", offset: 0);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) result.Add(reader.GetGuid(0));
+        }
+        await using var fallback = new NpgsqlCommand(
+            "SELECT DISTINCT user_id FROM app.platform_role_events WHERE actor = 'installation-owner' AND role = 'administrator'",
+            connection);
+        await using var fallbackReader = await fallback.ExecuteReaderAsync(ct);
+        while (await fallbackReader.ReadAsync(ct)) result.Add(fallbackReader.GetGuid(0));
         return result;
     }
 

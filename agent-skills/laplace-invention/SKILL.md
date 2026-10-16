@@ -143,6 +143,13 @@ are attributable witnesses/providers and export targets, never hidden authority.
   is extra headroom. One content world serves all tiers; tiers vary compute envelopes.
 - Product surfaces share browse/rank/entity/evidence/trajectory/neighborhood semantics.
   Domains specialize grammar/presentation, never identity or cognition.
+- **Execution Boundaries & Infrastructure**:
+  - `HART-DESKTOP` (Windows 11 dev & optional GPU host, `https://dev.hartonomous.com`, local PostgreSQL 18.6 `laplace-postgres` with `laplace-mono`, `laplace-desktop-app`, and `laplace`). Non-elevated shells lack `BUILTIN\Administrators` (`S-1-5-32-544`), so elevated scripts must always grant `$declared.windows_sid` (`HART-DESKTOP\ahart`) `FullControl`.
+  - `hart-server` (Ubuntu 22.04 staging host `https://staging.hartonomous.com`, OpenBao, Vaultwarden, and default/BCP failover substrate DB for `hart-prod`; damaged GPU disabled).
+  - `hart-prod` (always-on GCP production web/API host `https://api.hartonomous.com`, local `laplace-app` DB for accounts/sessions/billing).
+  - `hart-cloud` (on-demand GCP `c3-standard-8` AVX-512 DB/qualification host, kept `TERMINATED` when idle).
+  - Default platform administrators (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) are seeded by migration `20261016000000_app_default_platform_administrators.sql` across all application databases.
+  - `Laplace-Refactor` is a frozen read-only historical reference for recipe-driven ingestion; never build or deploy it.
 Stable authority: `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, binding specs
 05/06/08/09/11/33/34/36/37. Stable implementation anchors: native hash/composer/math/
 Super-Fibonacci/Hilbert/mantissa/trajectory; `ContentTierSpine.cs`;

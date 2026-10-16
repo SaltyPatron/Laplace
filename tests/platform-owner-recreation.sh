@@ -11,16 +11,16 @@ export LAPLACE_PLATFORM_OWNER_POLICY='{"version":1,"owners":[{"provider":"google
 query() { psql -X -v ON_ERROR_STOP=1 -d platform_owner_fixture -Atc "$1"; }
 owners() {
   query "SELECT count(*)=2 AND bool_and(r.role='administrator') AND bool_and(e.last_login_at=CASE e.provider WHEN 'google' THEN timestamptz '2026-01-01T00:00:00Z' ELSE timestamptz '2026-01-02T00:00:00Z' END) FROM app.external_identities e JOIN app.platform_roles r USING(user_id) WHERE e.subject IN ('fixture-owner-google','fixture-owner-microsoft')" | grep -qx t
-  query "SELECT count(*)=2 FROM app.platform_role_events WHERE actor='installation-owner' AND role='administrator'" | grep -qx t
+  query "SELECT count(*)=2 FROM app.platform_role_events e JOIN app.external_identities i USING(user_id) WHERE i.subject IN ('fixture-owner-google','fixture-owner-microsoft') AND e.actor='installation-owner' AND e.role='administrator'" | grep -qx t
   query 'SELECT count(*)=0 FROM app.web_sessions' | grep -qx t
 }
 dotnet "$runtime" app-up
 dotnet "$runtime" app-check
 owners
-before=$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities")
+before=$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")
 dotnet "$runtime" app-up
 owners
-[[ $before == "$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities")" ]]
+[[ $before == "$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")" ]]
 
 # Invalid authority must be rejected before recreation can erase any application data.
 query 'CREATE TABLE public.owner_recreation_sentinel(value integer); INSERT INTO public.owner_recreation_sentinel VALUES(1)' >/dev/null
@@ -35,7 +35,7 @@ query "INSERT INTO app.web_sessions(session_id,user_id,tenant_id,ticket,expires_
 dotnet "$runtime" app-nuke --yes
 dotnet "$runtime" app-check
 owners
-[[ $before != "$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities")" ]]
+[[ $before != "$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")" ]]
 query "SELECT to_regclass('public.owner_recreation_sentinel') IS NULL" | grep -qx t
 dotnet "$runtime" app-up
 owners

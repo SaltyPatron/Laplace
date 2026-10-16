@@ -45,13 +45,13 @@ if($setup){
 }
 if(-not ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'IIS, machine certificates and workload service installation require Administrator PowerShell.'}
 Add-Type -Path "$env:windir/System32/inetsrv/Microsoft.Web.Administration.dll"
-function Protect-IisDirectory([string]$Path,[string]$PoolRights='',[string]$DeployerRights='') {
+function Protect-IisDirectory([string]$Path,[string]$PoolRights='',[string]$DeployerRights='FullControl') {
     $null=New-Item -ItemType Directory -Path $Path -Force
     $acl=Get-Acl -LiteralPath $Path;$acl.SetAccessRuleProtection($true,$false)
     foreach($rule in @($acl.Access)){$null=$acl.RemoveAccessRuleSpecific($rule)}
     foreach($sid in 'S-1-5-18','S-1-5-32-544'){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
     if($PoolRights){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(('IIS APPPOOL\'+$c.pool),$PoolRights,'ContainerInherit,ObjectInherit','None','Allow'))}
-    if($DeployerRights){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($c.deployer_sid),$DeployerRights,'ContainerInherit,ObjectInherit','None','Allow'))}
+    if($DeployerRights -and $c.deployer_sid){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($c.deployer_sid),$DeployerRights,'ContainerInherit,ObjectInherit','None','Allow'))}
     [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new($Path),$acl)
 }
 if($Operation -eq 'Render') {

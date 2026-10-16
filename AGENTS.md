@@ -22,15 +22,17 @@ This file says how that machine is implemented here. The invention itself is `do
 
 When a lower document disagrees with a higher one, correct the lower document and implement the higher one.
 
-`SaltyPatron/Laplace-Refactor` is a separate repository. It does not own this invention, this host, or this deployment.
+`SaltyPatron/Laplace-Refactor` is a frozen historical reference repository (retained for recipe-driven ingestion design context only). Do not build, deploy, or run CI workflows in `Laplace-Refactor`.
 
-## Task execution
+## Execution & Engineering Boundaries
 
-The user's corrections steer active work; they are not completion or cancellation. Answer the correction, change the behavior, and continue the authorized task. A request register, audit, comment, or previous agent summary is evidence, not a new instruction or a smaller completion boundary. Implementation requests require the actual implementation and applicable verification and delivery; another inventory or report does not satisfy them.
-
-Use isolated worktrees for concurrent agents or tasks, with an identified owner, task, branch, and integration destination. Reuse an appropriate existing worktree when its ownership permits; do not force concurrent work into one shared dirty checkout. Clean status, merged commits, and patch equivalence do not establish abandonment. Retire a checkout only after verified task completion or handoff, resolution of active uses and dependent paths, and preservation of commits and required tracked, untracked, and ignored files. Leave it intact when ownership or active use is unresolved. Generated artifacts belong in configured build/work paths with an explicit retention or cleanup lifecycle.
-
-Report observable system behavior and work results. Do not assign the user personal traits, diagnoses, emotions, intentions, or motives, or use personal characterizations to justify withholding authorized engineering work. Avoid simulated personal emotion and unsupported assurances about intent. Apply communication corrections instead of repeating self-explanations.
+1. **Four Execution Planes**:
+   - **One-Time Host Provisioning (Admin / `sudo`)**: `deploy/linux/site-host.sh` (Linux) and `deploy/windows/Install-IisRuntime.ps1` (Windows). On `HART-DESKTOP`, Windows UAC filters `BUILTIN\Administrators` (`S-1-5-32-544`) out of non-elevated tokens, so every elevated script that configures ACLs on `E:\Data\Laplace`, `D:\Libraries\build\Laplace`, `D:\Data\Laplace`, or `C:\ProgramData\Laplace` must explicitly grant `$declared.windows_sid` (`HART-DESKTOP\ahart`, `S-1-5-21-1955383224-1799969050-1119319971-1001`) `FullControl`.
+   - **Automated CI/CD Delivery**: Merging to `main` triggers `.github/workflows/laplace.yml` (`Product — main delivery`), which builds, tests, deploys to `hart-server` (staging), verifies runtime health, and promotes to `hart-prod` (production). Push/merge workflows never automatically drop or reseed databases.
+   - **Normal Operator CLI (Non-Elevated Shell)**: `laplace-mono` (`%LOCALAPPDATA%\Laplace\bin\laplace-mono.cmd`) and `Laplace-Operations/laplace.ps1` operate from any normal user shell without elevation or developer environment variables.
+   - **Web UI & HTTP API**: `https://dev.hartonomous.com` (`HART-DESKTOP`), `https://staging.hartonomous.com` (`hart-server`), and `https://api.hartonomous.com` (`hart-prod`). Default platform administrators (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) are seeded automatically by database migration `20261016000000_app_default_platform_administrators.sql` whenever an application database is created, migrated, or recreated (`nuke` / `app-nuke`).
+2. **No Worktree or Script Sprawl**: Work directly on `main` (or clean up any temporary branch/worktree immediately after merge). Keep generated artifacts inside the configured `LAPLACE_BUILD` and `LAPLACE_WORK` directories.
+3. **Verification**: Complete implementation requests with build and test verification before reporting completion. Keep communication direct, technical, and concise.
 
 ## The machine
 
