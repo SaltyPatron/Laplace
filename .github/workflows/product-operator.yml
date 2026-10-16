@@ -1,19 +1,7 @@
 name: Product — maintenance
-run-name: "Product maintenance — ${{ github.event_name == 'push' && 'reviewed access maintenance' || format('{0} / {1}', inputs.operation, inputs.target) }} @ ${{ github.sha }}"
+run-name: "Product maintenance — ${{ format('{0} / {1}', inputs.operation, inputs.target) }} @ ${{ github.sha }}"
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/product-operator.yml
-      - scripts/platform-access-audit.py
-      - scripts/test-platform-access-audit.py
-      - scripts/platform-access-enroll.py
-      - scripts/test-platform-access-enroll.py
-      - .github/access-requests/*.json
-      - scripts/platform-owner-enroll.py
-      - scripts/test-platform-owner-enroll.py
-      - .github/owner-requests/*.json
   workflow_dispatch:
     inputs:
       operation:
@@ -29,7 +17,7 @@ on:
         default: staging
         options: [staging, production, cloud]
       access_request:
-        description: "Reviewed initial access or persistent installation owner request file"
+        description: "Optional access or persistent installation owner request file (default owners are seeded by SQL migration)"
         type: string
         required: false
 

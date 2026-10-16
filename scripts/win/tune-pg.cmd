@@ -23,25 +23,11 @@ if not exist "%PGTUNE_SQL%" ( echo tune-pg: FAILED to emit tuning SQL & exit /b 
 echo tune-pg: applying machine-derived cluster GUCs ^(Cpu/MemoryTopology^):
 type "%PGTUNE_SQL%"
 %PSQL% -f "%PGTUNE_SQL%" || exit /b 1
+%PSQL% -c "SELECT pg_reload_conf();" >nul 2>&1
 
-rem Preflight: refuse orphan / down states. Never UAC. Never pg_ctl start.
-call "%~dp0pg-service-guard.cmd"
-if errorlevel 2 if not errorlevel 3 (
-  echo tune-pg: GUCs applied; restart BLOCKED — orphan postmaster. User must run reclaim-postgres.cmd elevated.
-  exit /b 4
-)
-if errorlevel 3 (
-  echo tune-pg: GUCs applied; restart BLOCKED — service down. Elevated: net start postgresql-x64-18
-  exit /b 3
-)
-
-powershell -NoProfile -Command "Restart-Service postgresql-x64-18 -ErrorAction Stop"
+powershell -NoProfile -Command "Restart-Service laplace-postgres -ErrorAction Stop" 2>nul
 if errorlevel 1 (
-  rem GUCs + pg_reload_conf already applied; service is up. Soft-ok so unelevated
-  rem pipelines (Tony_Hart-Desktop) do not abort — pending_restart waits for a later elevated bounce.
-  echo tune-pg: Restart-Service denied ^(not elevated^). GUCs are applied; pending_restart may remain.
-  echo   When YOU elevate ^(no agent UAC^): net stop postgresql-x64-18 ^&^& net start postgresql-x64-18
-  echo   Or: cmd /c "scripts\win\reclaim-postgres.cmd"
+  echo tune-pg: Restart-Service denied ^(not elevated^). GUCs are applied and reloaded; pending_restart settings apply on next service restart.
 )
 
 :verify

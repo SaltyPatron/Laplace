@@ -106,25 +106,18 @@ $stale = Get-ChildItem (Join-Path $deployLib '*.stale~*') 2>$null
 if ($stale) { Write-Host ("{0} hot-swap leftover(s) pending cleanup (next install-extensions run)" -f $stale.Count) }
 
 Section 'POSTGRES'
-$svc = Get-Service postgresql-x64-18
-Write-Host "service postgresql-x64-18: $($svc.Status)"
+$svcName = if ($env:LAPLACE_PGSERVICE) { $env:LAPLACE_PGSERVICE } else { 'laplace-postgres' }
+$svc = Get-Service $svcName -ErrorAction SilentlyContinue
+if ($svc) {
+    Write-Host "service ${svcName}: $($svc.Status)"
+}
 $port5432 = Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue
-$pgdata = if ($env:LAPLACE_PGDATA) { $env:LAPLACE_PGDATA } else { 'D:\Data\Postgres' }
-$pidFile = Join-Path $pgdata 'postmaster.pid'
-$orphanPid = $null
-if (Test-Path $pidFile) {
-    $orphanPid = (Get-Content $pidFile -TotalCount 1).Trim()
-}
-if ($svc.Status -ne 'Running' -and $port5432) {
+$pgdata = if ($env:LAPLACE_PGDATA) { $env:LAPLACE_PGDATA } else { 'E:\Data\Laplace\pgdata' }
+if ($svc -and $svc.Status -ne 'Running' -and $port5432) {
     $owner = $port5432[0].OwningProcess
-    Write-Host "BROKEN DX: service STOPPED but port 5432 owned by PID $owner (orphan postmaster)." -ForegroundColor Red
-    Write-Host "  Services.msc Start will show 'started and then stopped' until the orphan is reclaimed." -ForegroundColor Red
-    Write-Host "  Elevated fix: cmd /c `"scripts\win\reclaim-postgres.cmd`"" -ForegroundColor Yellow
-} elseif ($svc.Status -ne 'Running' -and (Test-Path $pidFile)) {
-    Write-Host "BROKEN DX: service STOPPED but postmaster.pid exists (PID $orphanPid)." -ForegroundColor Red
-    Write-Host "  Elevated fix: cmd /c `"scripts\win\reclaim-postgres.cmd`"" -ForegroundColor Yellow
+    Write-Host "WARNING: service STOPPED but port 5432 owned by PID $owner." -ForegroundColor Yellow
 }
-if ($svc.Status -eq 'Running' -or $port5432) {
+if (($svc -and $svc.Status -eq 'Running') -or $port5432) {
     $gucT0 = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.perfcache_path;" 2>&1 | Where-Object { $_ })
     $gucHw = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.highway_perfcache_path;" 2>&1 | Where-Object { $_ })
     $wantT0 = "$deployPg/share/laplace_t0_perfcache.bin"

@@ -51,9 +51,8 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('collector_revision=', observer)
         self.assertIn('installed_revision=', observer)
         self.assertIn("inputs.operation == 'access-audit' && inputs.target == 'cloud'", maintenance)
-        trigger = maintenance.split("\n  push:\n", 1)[1].split("\n  workflow_dispatch:\n", 1)[0]
-        self.assertIn('branches: [main]', trigger)
-        self.assertIn('scripts/platform-access-audit.py', trigger)
+        self.assertIn("workflow_dispatch:", maintenance)
+        self.assertNotIn("\n  push:\n", maintenance)
         import importlib.util
         scope_spec = importlib.util.spec_from_file_location('access_audit_scope', ROOT / 'scripts/ci_product_scope.py')
         scope = importlib.util.module_from_spec(scope_spec)
@@ -108,7 +107,6 @@ class WorkflowArchitecture(unittest.TestCase):
             "laplace.yml": "name: Product — main delivery",
             "product-operator.yml": "name: Product — maintenance",
             "product-stage.yml": "name: Internal — product stage",
-            "runner-environment.yml": "name: Host — runner environment",
             "seed.yml": "name: Internal — substrate ingest",
             "seed-foundation.yml": "name: Data — foundation ingest",
             "seed-relations.yml": "name: Data — relations ingest",

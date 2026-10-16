@@ -15,7 +15,7 @@ rem (The no-DB unit signal is test-fast.cmd, ~40s.)
 if errorlevel 1 (
   echo test-all: local Postgres is DOWN -- this gate is DB-integration by design and cannot run.
   echo   unit signal instead:  scripts\win\test-fast.cmd  ^(no DB, ~40s^)
-  echo   recover local PG:     scripts\win\fix-postgres.cmd / pg-auto-recover.cmd
+  echo   verify local PG:      pwsh -File ..\Laplace-Operations\installation\Verify-DesktopDatabases.ps1
   >> "%LOG%" echo test-all aborted: local Postgres down ^(pg_isready failed^)
   exit /b 3
 )
