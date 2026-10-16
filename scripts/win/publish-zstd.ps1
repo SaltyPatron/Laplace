@@ -6,8 +6,11 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $probe = Join-Path $repo 'scripts\check-zstd-runtime.py'
 $version = (Get-Content -Raw (Join-Path $repo 'deploy\zstd-release.json') | ConvertFrom-Json).version
-$builtLibrary = & py -3 (Join-Path $repo 'scripts\install-zstd.py') --print-path
-if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the Zstandard library and license closure built from the locked source' }
+$builtLibrary = & py -3 (Join-Path $repo 'scripts\install-zstd.py') --print-path 2>$null
+if ($LASTEXITCODE -ne 0 -or -not "$builtLibrary".Trim()) {
+    $builtLibrary = & py -3 (Join-Path $repo 'scripts\install-zstd.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot verify or build the Zstandard library and license closure from the locked source' }
+}
 $builtLibrary = "$builtLibrary".Trim()
 $library = $env:LAPLACE_ZSTD_LIBRARY
 if (-not $library) {

@@ -1,97 +1,84 @@
-# Laplace
+# Laplace Workspace Engineering & Operations Guide
 
-Laplace is one deterministic, content-addressed, recursively compositional content and cognition substrate. It is the machine that replaces opaque learned-tensor authority for every operation those tensors are asked to perform: language, code, games, images, audio, models, and the rest of finite digital structure. The OpenAI-compatible endpoint, MCP, SQL, CLI, and web surface are that machine's interfaces. They are not adapters around a hidden model, and they are not a separate product from the substrate.
+This guide governs engineering and operational work across the Laplace multi-repository workspace (`E:\Repositories\Laplace`).
 
-This file says how that machine is implemented here. The invention itself is `docs/INVENTION.md`, `docs/INVENTIONS.md`, `docs/CAPABILITIES.md`, and the binding specs. Code implements those documents. A comment, issue, plan, audit, or commit message does not define a smaller machine.
+---
 
-## Authority
+## 1. Repository Architecture & Ownership
 
-1. The inventor's current instructions.
-2. `docs/INVENTION.md` and `docs/INVENTIONS.md`.
-3. `docs/CAPABILITIES.md`, for what those laws compose into.
-4. Binding specifications:
-   - `docs/specs/05_Substrate_Invariants.txt`
-   - `docs/specs/06_Engineering_Ruleset.txt`
-   - `docs/specs/08_Record_vs_Calculate_Spec.txt`
-   - `docs/specs/09_Substrate_LM_Synthesis.txt`
-   - `docs/specs/11_Chess_Provenance_Consensus_Spec.txt`
-   - `docs/specs/33_Perfcache_Blob_Law.md`
-   - `docs/specs/34_Conversational_Provenance.md`
-   - `docs/specs/36_Laplace_Forward_Pass.md`
-   - `docs/specs/37_Substrate_Operation_ISA.md`
+The workspace contains two active implementation stacks, supporting documentation/research repositories, and one frozen historical reference repository:
 
-When a lower document disagrees with a higher one, correct the lower document and implement the higher one.
+| Repository / Stack | Role & Ownership | Status |
+|---|---|---|
+| **[Laplace](Laplace/README.md)** (`laplace-mono`) | Full-stack monorepo: ASP.NET Core / C# API & OpenAI-compatible endpoints (`app/`), React/Vite web UI (`web/`), native C/C++ substrate & PostgreSQL extension (`engine/`, `extension/`), SQL migrations (`db/`), and deployment (`deploy/`). | **Active** |
+| **[Laplace-Native](Laplace-Native/README.md)** | Modular native C/C++ SIMD/ISA substrate library (`laplace_native`). | **Active** |
+| **[Laplace-postgres](Laplace-postgres/README.md)** | Modular PostgreSQL C extension (`laplace` 1.12) integrating `Laplace-Native` with PostgreSQL 18.6. | **Active** |
+| **[Laplace-Engine](Laplace-Engine/README.md)** | Modular C++ engine CLI (`laplace`), recipe compiler/ingester, and firmware executor. | **Active** |
+| **[Laplace-MCP](Laplace-MCP/README.md)** | Modular Model Context Protocol server (`laplace-modular-mcp`). | **Active** |
+| **[Laplace-UCI](Laplace-UCI/README.md)** | Universal Chess Interface (UCI) adapter and tournament/engine bridge. | **Active** |
+| **[Laplace-Operations](Laplace-Operations/README.md)** | Host provisioning (`setup.sh` / `setup.ps1`), PostgreSQL tuning (`tune-pg.*`), client packaging, cross-host deployment (`laplace.ps1`), and operational verification. | **Active** |
+| **[Laplace-Wiki](Laplace-Wiki/README.md)** | Canonical documentation and specification wiki published to GitHub Pages. | **Active** |
+| **[Laplace-Conventional](Laplace-Conventional/README.md)** | Python/GPU tooling for conventional model comparison, probing, and reference evaluation. | **Active** |
+| **[Laplace-Refactor](Laplace-Refactor/README.md)** | Historical cleanroom prototype containing reference specifications and contracts for **recipe-driven ingestion**, typed recipe compilation, and source admission. | **FROZEN (Read-Only Reference)** |
 
-`SaltyPatron/Laplace-Refactor` is a frozen historical reference repository (retained for recipe-driven ingestion design context only). Do not build, deploy, or run CI workflows in `Laplace-Refactor`.
+> **Important (`Laplace-Refactor`)**: Do **not** build, deploy, or run CI workflows in `Laplace-Refactor`. Consult it strictly as a read-only architectural reference when implementing or porting recipe-driven ingestion into `Laplace` or `Laplace-Engine`.
 
-## Execution & Engineering Boundaries
+---
 
-1. **Four Execution Planes**:
-   - **One-Time Host Provisioning (Admin / `sudo`)**: `deploy/linux/site-host.sh` (Linux) and `deploy/windows/Install-IisRuntime.ps1` (Windows). On `HART-DESKTOP`, Windows UAC filters `BUILTIN\Administrators` (`S-1-5-32-544`) out of non-elevated tokens, so every elevated script that configures ACLs on `E:\Data\Laplace`, `D:\Libraries\build\Laplace`, `D:\Data\Laplace`, or `C:\ProgramData\Laplace` must explicitly grant `$declared.windows_sid` (`HART-DESKTOP\ahart`, `S-1-5-21-1955383224-1799969050-1119319971-1001`) `FullControl`.
-   - **Automated CI/CD Delivery & Environment Isolation**: Merging to `main` triggers `.github/workflows/laplace.yml` (`Product — main delivery`), which builds, tests, deploys to `hart-server` (`100.76.181.27`, staging), verifies runtime health, and promotes the verified bundle to `hart-prod` (`100.124.95.17`, locked enterprise production). Staging and production application deployments are **strictly CI/CD-driven** (`hart-prod` is never manually SSH-patched or built on; `hart-server` remains accessible for `/vault` storage, OpenBao, Vaultwarden, and DB hosting). Push/merge workflows never automatically drop or reseed databases.
-   - **Normal Operator CLI (Non-Elevated Shell)**: `laplace-mono` (`%LOCALAPPDATA%\Laplace\bin\laplace-mono.cmd`) and `Laplace-Operations/laplace.ps1` operate from any normal user shell on `HART-DESKTOP` (`100.70.222.78`) without elevation, developer environment variables, or ceremony. Bulk corpus ingestion, recipe compilation, and database reseeds belong in the CLI and CI/CD `Data — *` workflows.
-   - **Web UI & HTTP API**: `https://dev.hartonomous.com` (`HART-DESKTOP`), `https://staging.hartonomous.com` (`hart-server`), and `https://api.hartonomous.com` (`hart-prod`). Focuses on interactive user and administrator workflows (Chat, Substrate exploration, Data artifact upload, Chess, and Admin role/health management). Default platform administrators (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) are seeded automatically by database migration `20261016000000_app_default_platform_administrators.sql` whenever an application database is created, migrated, or recreated (`nuke` / `app-nuke`).
-2. **No Worktree or Script Sprawl**: Work directly on `main` (or clean up any temporary branch/worktree immediately after merge). Keep generated artifacts inside the configured `LAPLACE_BUILD` and `LAPLACE_WORK` directories.
-3. **Verification**: Complete implementation requests with build and test verification before reporting completion. Keep communication direct, technical, and concise.
+## 2. Host Topology, Tailscale Mesh & Environment Isolation Contract
 
-## The machine
+Laplace runs across a single-owner, multi-host topology connected over LAN (`192.168.1.0/24`) and Tailscale (`100.64.0.0/10`), fronted by Cloudflare and `hart-router` (OpenWrt split-horizon DNS):
 
-Identity is content. Equal content is one BLAKE3-128 entity wherever it occurs. A codepoint's id is BLAKE3 of its UTF-8 bytes from the Tier-0 ROM; a composition's id is BLAKE3 over its children's 16-byte ids in order, repeats included, truncated to 16 bytes. Tier, source, modality, role, position, recipe, version, coordinate, and standing are not mixed into that hash, and there is no domain byte. A recipe decides how content decomposes into a tree; it never salts the hash. One Merkle DAG runs from codepoint to the source trunk: a file is `[metadata, content]`, a source is `[source record, its files' trunks in path order]`, and any client computes any id from the ROM with no database. A string made up to name something is never hashed into an id; it is decomposed content, a referenced trunk, or a recorded attestation. A source's highway nodes (an ILI, a PropBank roleset, a VerbNet class, a FrameNet frame, a language code) are content, one entity in every source that cites them; its internal pointers (a WordNet offset, a synset or sense id, a token number or `sent_id`, a row or line number) resolve to the id of what they point at and are not recorded, and the facts their notation carries (a part of speech, a lexicographer file) are attested. A one-child composition is the child. Tier is altitude in a modality grammar, not a second identity.
+| Host | Tailscale / LAN IP | OS & Environment Isolation Role | Public / Local Origin | Databases & Services |
+|---|---|---|---|---|
+| **`HART-DESKTOP`** (`hart-desktop-1`) | `100.70.222.78`<br>`192.168.1.x` | **Local Interactive Dev**: Windows 11 workstation & optional local GPU host. **Zero gatekeeping, no background GitHub Actions runners.** Full direct CLI/DB/UI control. | `https://dev.hartonomous.com` (IIS `laplace-mono`) and `http://localhost:5187` (dev source run) | Single custom PostgreSQL 18.6 service (`laplace-postgres`, port 5432, SSPI + TLS):<br>- `laplace-mono` (monorepo substrate DB)<br>- `laplace-desktop-app` (monorepo app/auth/billing DB)<br>- `laplace` (modular substrate DB) |
+| **`hart-server`** | `100.76.181.27`<br>`192.168.1.2` | **Staging (CI/CD App Deployment) + Shared Storage/Infra Host**: Ubuntu 22.04 server (**damaged GPU disabled**). App & modular services are deployed **via CI/CD only**; the host itself remains accessible for `/vault` SMB storage, OpenBao, Vaultwarden, backups, and DB hosting. | `https://staging.hartonomous.com` (`laplace-api` on `:5187`, `laplace-mcp` on `:8080`, `laplace-modular-mcp` on `:5188`) | PostgreSQL 18.6 cluster:<br>- `laplace-mono` (staging substrate + app DB, and BCP failover substrate DB for `hart-prod`)<br>- `laplace` (modular substrate DB)<br>Also hosts **OpenBao** (`https://openbao.hartonomous.com`), **Vaultwarden**, SMB shares (`/vault`), and Linux GitHub Actions runners. |
+| **`hart-prod`** | `100.124.95.17` | **Locked Enterprise Production (CI/CD Promotion Only)**: Low-cost always-on GCP VM (`project-f5812b96-f924-41a4-94c`, `us-east1-b`). Treated as an isolated appliance: **never manually SSH-patched or built on**. Receives only verified packages promoted from `hart-server` by CI/CD. | `https://api.hartonomous.com`, `https://mcp.hartonomous.com` | Local PostgreSQL 18.6 (`laplace-app` for accounts, sessions, keys, billing). Connects to `hart-server` (or `hart-cloud` when active) over Tailscale for read-heavy substrate queries. |
+| **`hart-cloud`** | `100.103.255.122` | **On-Demand AVX-512 DB & Qualification Host**: High-spec GCP `c3-standard-8` VM. | Internal / Tailscale | **Kept `TERMINATED` (powered off) when idle** to preserve GCP trial credit. Started on demand via CI lease (`qualify_cloud` / `cloud`) and auto-stopped when idle. |
+| **`hart-router`** | `192.168.1.1` | OpenWrt router | LAN gateway | Split-horizon DNS and LAN routing. |
 
-A physicality is a typed realization of an entity: coordinate, Hilbert locality, trajectory, and the other declared physical forms. A trajectory says which constituents, in what order and roles, make the structure. The GeometryZM carrier packs that manifest into four binary64 values, 212 reversible bits: the 128-bit child id, a packed ordinal, a run length, and flags. Those packed values are not the child's position. A realized curve unpacks the child ids and reads each child's coordinate in ordinal order. Contains, precedes, and co-occurrence are facts of that trajectory.
+---
 
-Children placed in the closed unit 4-ball stay in that ball under the native Euclidean centroid, and so do their parents and the segments of the realized curve. The address law for Tier-0 is open. Unicode's finite generation is one admitted window, not the capacity of the tier. Finite scalars are compositions of existing atoms (`255` is `2,5,5`; `0.34567` is `0 . 3 4 5 6 7`), reused wherever the same number occurs. Machine widths are windows, not limits on the invention.
+## 3. Execution Boundaries: What Is Automated vs. How the User Executes
 
-The same entity sits in composition, trajectory, occurrence, attestation, consensus, geometry, and source context at once. An attestation is attributable testimony: a witness asserting a claim, with its outcome, games, score, qualifiers, and context. The witness is the source trunk, `[source record, its files' trunks in path order]`: a corpus is one trunk and one witness, its treebanks, lexicons and datasets are files under it, and the annotators, workers, speakers and members it names are content whose relations the corpus attests. The current schema keeps a per-(claim, witness) attestation row, with games, score, position and qualifier mask, whose witness is `SourceWitness.Id(authority, release)`; that witness identity violates the identity law. Provenance by containment, a source's record a path over the claims it asserts inside its file's content tree, many trunks containing one claim and a walk up finding them all, is the target, and the attestation row stays until a working prototype on real data shows containment answering everything the row answers today with nothing lost. A claim is an n-ary composition of content ids with referential integrity, of any arity and tier; `(subject, relation, object)` is one shape among many. Consensus is the folded standing of one claim composition: rating, deviation, volatility, witness count, stored for every claim in one table keyed by the claim, beside the path and never on it. A witness that asserts one claim n times gives one attestation of n games with a score, a series solved on the client as one update (the rating where the claim's prior standing and the series' score agree), never by Glicko-2's single linearized period step; the client folds a source's repeats so the database takes one update per claim per witness. Run length is content structure only, identical consecutive children in a path: a prompt pasted n times is a run in its content, an observation that attests nothing. Packaging (a cross-product layout, a tagger's per-token output) is not the source asserting again; a number a source states is an observation. Confirmation, draw, and refutation are distinct. Absence is not false. A recorded observation and a versioned calculation are different witnesses. Coordination of a point is not identity.
+A critical architectural rule across Laplace is keeping the four execution planes distinct and friction-free:
 
-A request is one admitted observation. The program over it is:
+### A. One-Time Host Provisioning (Elevated Admin / `sudo`)
+- **Linux**: `sudo ./setup.sh` (in `Laplace-Operations`) and `sudo bash deploy/linux/site-host.sh` (in `Laplace`).
+- **Windows (`HART-DESKTOP`)**: `pwsh -File setup.ps1` or `Laplace/deploy/windows/Install-IisRuntime.ps1` in an elevated Administrator PowerShell.
+- **Windows UAC / ACL Invariant**: On `HART-DESKTOP`, the developer (`HART-DESKTOP\ahart`, SID `S-1-5-21-1955383224-1799969050-1119319971-1001`) works day-to-day in a **non-elevated** shell where Windows UAC filters out `BUILTIN\Administrators` (`S-1-5-32-544`). Every elevated script that configures ACLs on `E:\Data\Laplace`, `D:\Libraries\build\Laplace`, `D:\Data\Laplace`, or `C:\ProgramData\Laplace` **must** explicitly grant `$declared.windows_sid` (`HART-DESKTOP\ahart`) `FullControl` alongside `SYSTEM`, `BUILTIN\Administrators`, and any IIS AppPool/service SID. If permissions ever drift, run `pwsh -File E:\Repositories\Laplace\Laplace-Operations\installation\Repair-DesktopPermissions.ps1` once from an elevated prompt.
 
-```text
-RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
-        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
-```
+### B. Automated CI/CD Delivery (GitHub Actions on Linux Runners)
+- Merging to `main` in `Laplace` runs `.github/workflows/laplace.yml` (`Product — main delivery`), which builds, tests, deploys to `hart-server` (staging), verifies runtime health, and promotes the verified bundle to `hart-prod` (production).
+- Merging to `main` in `Laplace-Native`, `Laplace-postgres`, `Laplace-Engine`, or `Laplace-MCP` triggers modular build/test and dispatches `main-merged` to `Laplace-Operations` to deploy and verify on `hart-server`.
+- **Database Reseed Policy**: Push/merge workflows **never** automatically drop or reseed databases. Destructive resets (`drop` / `reseed` / `nuke`) require explicit manual dispatch or CLI confirmation.
 
-COUPLE is the typed response of every eligible plane to that observation. It is not one relevance score, and a caller mask does not substitute for it unless the caller asked for that constraint. ORIENT keeps a real ambiguity when the observation supports more than one reading. After that, expansion is a sparse indexed star. Hops and fanout are how far and how wide that star runs. A*, walks, geometry, chess search, and other domain procedures are operators inside the program.
+### C. Normal Operator & Developer CLI (Non-Elevated Shell on `HART-DESKTOP` or `hart-server`)
+- From any normal terminal directory without needing developer environment variables (`%LOCALAPPDATA%\Laplace\bin`):
+  - `laplace-mono --where` / `laplace-mono status` / `laplace-mono ingest document <path>` — Monorepo CLI (`laplace-mono.cmd`).
+  - `laplace --where` / `laplace status` / `laplace ingest ...` — Modular Engine CLI (`laplace.cmd`).
+  - `laplace-ops runs` — View recent CI/CD runs across all 6 Laplace repositories in one screen (`laplace-ops.cmd`).
+  - `laplace-ops deploy -Target desktop` — One-command update for `HART-DESKTOP` (builds native + managed + web + UCI/chess, publishes to `https://dev.hartonomous.com` and `laplace-mono`, runs local DB migrations on `laplace-desktop-app` and `laplace-mono`, and verifies health using the enrolled OpenBao identity).
+  - `laplace-ops components -Target desktop` — Rebuilds and packages `Laplace-Native` + `Laplace-Engine` into `laplace.cmd`.
+  - `laplace-ops prepare | build | test | start | stop | status | verify -Target desktop` — Local desktop development lifecycle.
+  - `laplace-ops status | verify | deploy -Target staging|production -Wait` — Remote environment control and verification.
+- From `E:\Repositories\Laplace\Laplace-Operations`:
+  - `./installation/Verify-DesktopDatabases.ps1` and `./installation/Verify-PlatformAccess.ps1` — Verify local PostgreSQL, SSPI/TLS, CLIs, and platform admin access.
 
-Perfcaches are a lattice of derived read-only maps over structure that is already canonical: a dense tier can be a direct-address ROM; a huge tier caches the admitted estate. Video reuses image and audio maps. A cache is not a second authority and not a smaller content world.
+### D. Browser Web UI & HTTP API (`https://dev.hartonomous.com`, `https://staging.hartonomous.com`, `https://api.hartonomous.com`)
+- End-user and operator browser interface for chat, substrate exploration, chess, and platform administration.
+- **Default Platform Administrators**: The database migration `20261016000000_app_default_platform_administrators.sql` seeds the 3 owner OAuth bindings (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) as audited `installation-owner` administrators whenever any application database is created, migrated (`up` / `app-up`), or recreated (`nuke` / `app-nuke`). No commit-file ceremony or manual SQL is needed after recreating a database.
 
-Content, authority, and compute are separate. The admitted world is one world. Grants say who may discover, couple, traverse, derive, realize, export, or execute which of it. Hops, fanout, and measured resources say how much work one operation may spend. Governance can refuse an operation. It does not delete the fact.
+---
 
-PostgreSQL stores and indexes that world. Native C and C++ run the repeated work: parse, compose, search, fold, encode. SPI moves sets between them. C# and SQL orchestrate sessions, contracts, and transport. They do not become the inner loop. A batch whose body calls a scalar operation per element is still one-at-a-time work.
+## 4. Workspace & Engineering Rules
 
-Ingest enumerates the selected artifacts, recovers source structure with a provider, and admits it through the shared recipe: compose, converge, persist in bulk, fold in sets, receipt. Source code does not own a private identity or a private commit loop.
+- **Build & Scratch Directories**: Configured via `C:\ProgramData\Laplace\machine.env` (Windows) and `/etc/laplace/machine.env` (Linux). On `HART-DESKTOP`:
+  - Source root: `E:\Repositories\Laplace`
+  - Build root: `D:\Libraries\build\Laplace`
+  - Data / corpora root: `E:\Data\Ingest`
+  - Work / runtime state: `E:\Data\Laplace\work` and `E:\Data\Laplace\services`
+  - PostgreSQL data / WAL: `E:\Data\Laplace\pgdata` and `D:\Data\Laplace\pg_wal`
+- **No Worktree or Script Sprawl**: Work directly on `main` (or a short-lived feature branch cleaned up immediately upon merge). Do not leave orphaned `wt-*` git worktrees, duplicate build directories under `D:\Libraries\build\Laplace`, or one-off repair scripts in the repositories.
+- **Communication & Verification**: Keep communication direct, technical, and concise. Describe concrete code changes, verification results, and any remaining blockers. Complete implementation tasks with build and test verification before reporting completion.
 
-The product is the same web, navigable: browse, rank, entity, evidence, trajectory, neighborhood. Chess, code, and conversation specialize presentation and grammar. They do not specialize identity or cognition. Constructed code is grammar-constrained composition with reuse, not token generation. A repository root is one application object. Export of a model is a recipe over current standing and structure, not a copy of an ingested checkpoint.
-
-## Operating it
-
-Hart-desktop is development, hart-server is staging, and hart-prod is the inexpensive always-on production web host.
-Hart-cloud is an on-demand AVX-512 database VM, kept off when unused to preserve trial credit. Production can fail over
-from hart-cloud to hart-server; hart-prod also has local PostgreSQL for fallback and application accounts/billing.
-Preserve those environment boundaries and the intentional failover. Inspect the selected target and the Operations
-operating guide before resetting a database; a current production connection to hart-server is not a placement error.
-
-Use the installed machine while building it. MCP (`laplace-substrate` on the host), the OpenAI-compatible endpoint, SQL, and the CLI call the same operations. A read through those surfaces is evidence of what the running process does. It does not revise the invention.
-
-## Comments
-
-A comment states a non-obvious fact about what the construct does in this machine: identity, physicality, trajectory, occurrence, testimony, consensus, calculation, an ISA operation, or execution grain. It does not report a campaign, a date, a reduced temporary behavior, or an instruction to skip work.
-
-## Where the bytes go
-
-Inspect the host before allocating builds, databases, or install copies. A path under `/opt/laplace` is not proof of which volume backs it.
-
-| Purpose | Place |
-| --- | --- |
-| Installed runtime | `LAPLACE_INSTALL_PREFIX` |
-| PostgreSQL data | `LAPLACE_PGDATA` in the selected cluster declaration |
-| PostgreSQL WAL | `LAPLACE_PGWAL` in the selected cluster declaration |
-| Build and tool scratch | `LAPLACE_BUILD`, `LAPLACE_WORK`, and their resolved per-worktree directories |
-| PostgreSQL spill | `LAPLACE_PGTEMP` in the selected cluster declaration |
-| Admitted source estate | `LAPLACE_DATA` |
-
-Read the selected machine declaration through `scripts/machine-env.py`; a directory does not have to be a mount point. Prepare replacements in the configured build/work directories. Copy them into place only after they are complete. Do not delete a serving file, a library symlink, or a PostgreSQL module a database still has loaded. Do not create a second PostgreSQL server for an ordinary repair. `TMPDIR` belongs in the resolved scratch directory, separate from serving files, databases and source data.
-
-Implementation lands on `main`. One install is one revision: application, native prefix, PostgreSQL execution module, perfcache, and extension catalog identify the same build.
-
-A test proves the claim it names. The capability is the running operation, not the test.

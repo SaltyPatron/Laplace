@@ -6,7 +6,6 @@ $ErrorActionPreference='Stop'
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
 if($Publish){
     if(-not $Installation){throw 'Publication requires an IIS installation. Use -Installation or LAPLACE_IIS_INSTALLATION.'}
-    if(-not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}
     . "$PSScriptRoot/iis-runtime.ps1"
     $null=Read-IisInstallation $Installation
 }

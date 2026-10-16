@@ -14,7 +14,24 @@ if(-not $Installation){throw 'No IIS installation is configured. Use -Installati
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
-if(-not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY to a workload key for authenticated publication verification.'}
+$operatorToken=if($env:LAPLACE_OPERATOR_TOKEN){$env:LAPLACE_OPERATOR_TOKEN}else{''}
+$apiKey=if($env:LAPLACE_API_KEY){$env:LAPLACE_API_KEY}else{''}
+if(-not $apiKey -and -not $operatorToken){
+    $devInstallation=if($env:LAPLACE_DEVELOPMENT_INSTALLATION){$env:LAPLACE_DEVELOPMENT_INSTALLATION}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
+    $credHelper=Join-Path (Split-Path -Parent $devInstallation) 'credentials.ps1'
+    if((Test-Path -LiteralPath $devInstallation -PathType Leaf) -and (Test-Path -LiteralPath $credHelper -PathType Leaf)){
+        . $credHelper
+        $devConfig=Get-Content -LiteralPath $devInstallation -Raw | ConvertFrom-Json
+        $token=New-DevelopmentBaoSession $devConfig
+        try {
+            $path=(Get-DevelopmentSecretPaths $devConfig)['laplace-api'] -replace '^kv/', 'kv/data/'
+            $operatorToken=(Invoke-DevelopmentBao $devConfig GET $path $token).data.data.operator_token
+        } finally {
+            try { if($token){ $null=Invoke-DevelopmentBao $devConfig POST 'auth/token/revoke-self' $token @{} } } catch {}
+        }
+    }
+}
+if(-not $apiKey -and -not $operatorToken){throw 'Authenticated publication verification requires an enrolled desktop identity, LAPLACE_OPERATOR_TOKEN, or LAPLACE_API_KEY.'}
 $manifest=Test-IisPackage $Package
 if($manifest.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Invalid package revision.'}
 foreach($component in @('','cli','uci')) {
@@ -37,7 +54,7 @@ try {
     try {
         Write-IisPublicAtomic $config (Get-IisWebConfig $manifest.revision (Join-Path $c.directory 'state/logs')) $readers
         for($i=0;$i -lt 12;$i++){
-            try{$result=Test-IisEndpoint $c -ApiKey $env:LAPLACE_API_KEY;break}catch{if($i -eq 11){throw};Start-Sleep -Seconds 2}
+            try{$result=Test-IisEndpoint $c -OperatorToken $operatorToken -ApiKey $apiKey;break}catch{if($i -eq 11){throw};Start-Sleep -Seconds 2}
         }
     } catch {
         Write-IisPublicAtomic $config $previous $readers

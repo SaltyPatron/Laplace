@@ -3,7 +3,6 @@
 param([Parameter(Mandatory)][string]$Installation,[Parameter(Mandatory)][string]$Published)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
-if(-not $env:LAPLACE_API_KEY){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $revision=(& git -C $repo rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
