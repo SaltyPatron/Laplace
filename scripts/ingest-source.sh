@@ -3,7 +3,7 @@ set -euo pipefail
 
 source="${1:-}"
 path="${2:-}"
-DATA_ROOT="${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"
+corpus(){ printf '%s' "${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"; }    # asked only where a path under the corpus is needed
 
 FLOOR=(unicode uca iso639 operational cili)
 DOCUMENT=(document project-gutenberg)
@@ -203,7 +203,7 @@ case "$source" in
             echo ">>> stage $src — start $(date -u +%H:%M:%S)"
             t0=$SECONDS
             if [[ "$src" == document ]]; then
-                doc_path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
+                doc_path="${INGEST_DOCUMENT_PATH:-$(corpus)/test-data/text}"
                 ingest "$src" "$doc_path" 2>&1 | tee "$LOGDIR/laplace-ingest-$src.log"
             else
                 ingest "$src" 2>&1 | tee "$LOGDIR/laplace-ingest-$src.log"
@@ -227,7 +227,7 @@ case "$source" in
     unicode|uca|iso639|operational|cili|document|project-gutenberg|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         require_cli
         if [[ "$source" == document && -z "$path" ]]; then
-            path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
+            path="${INGEST_DOCUMENT_PATH:-$(corpus)/test-data/text}"
         fi
         if [[ -n "$path" ]]; then ingest "$source" "$path"; else ingest "$source"; fi
         ;;
