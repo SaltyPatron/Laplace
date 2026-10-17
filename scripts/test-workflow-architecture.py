@@ -133,6 +133,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-24.04", text)
         self.assertNotIn("self-hosted", text)
         self.assertIn("bash scripts/product-ci.sh check", text)
+        self.assertIn("bash tests/identity-law.sh", text)   # the identity law gates every pull request
         self.assertIn("laplace-actions-history-{0}", text)
         self.assertIn("[actions-history-cleanup]", text)
         self.assertIn("[actions-evidence-archive]", text)
