@@ -101,4 +101,15 @@ public sealed class ChessLabIngestRunTests
             FileErrors[fileLabel] = error;
         }
     }
+
+    [Fact]
+    public void EveryLabIngestorAttachIsJournaled()
+    {
+        Assert.True(LaplaceInstall.TryRepoRoot(out string root), "Laplace repository root not found");
+        string runners = File.ReadAllText(Path.Combine(root, "app", "Laplace.Chess", "Service", "ChessLabRunners.cs"));
+        int attaches = System.Text.RegularExpressions.Regex.Matches(runners, @"ChessPgnIngestor\.AttachAsync\(").Count;
+        int journals = System.Text.RegularExpressions.Regex.Matches(runners, @"ChessLabIngestRun\.StartAsync\(").Count;
+        Assert.True(attaches > 0);
+        Assert.Equal(attaches, journals);
+    }
 }

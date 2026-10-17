@@ -680,8 +680,30 @@ public static class ChessLabRunners
         }
 
         var liveHost = await lab.GetLiveHostAsync(ct);
-        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-        var result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
+        // A profile import is an ingest run like every other Lab import: one ingest_run_journal
+        // row and exactly one terminal ok|failed|cancelled status (with its error).
+        var journal = await ChessLabIngestRun.StartAsync(liveHost.DataSource, lab.Log, slot.Job.Id,
+            $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(user)}/profile", ct);
+        lab.Publish(slot, new ChessLabLogEvent("info",
+            $"ingest run {journal.RunId} ({ChessLabIngestRun.SourceName}) journaled"));
+        ChessPgnIngestor.ProfileResult result;
+        try
+        {
+            await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+            journal.Attach(ingestor);
+            result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
+            journal.Complete();
+        }
+        catch (OperationCanceledException)
+        {
+            journal.Cancel();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            journal.Fail(ex);
+            throw;
+        }
         lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
         lab.Publish(slot, new ChessLabMetricEvent("identity_links", result.Links));
         lab.UpdateSummary(slot, new ChessLabJobSummary(result.Profiles, profiles.Count,
