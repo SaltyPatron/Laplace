@@ -139,43 +139,6 @@ jobs:
       - name: IdentityLawVectorTests' vectors on hash128.c compiled with lp_id_compose
         run: bash tests/identity-law.sh .ci-dependencies/laplace-native .ci-dependencies/blake3/c
 
-  dev-tests:
-    # The dev test profile (scripts/test-parallel.sh dev) on a hosted runner: native ctest without the regress label,
-    # every managed test project's Tier!=db/live/perf tests on the candidate native build and its perf caches, the
-    # UCI handshake, and the browser suites. Dependencies, corpora and toolchain are pinned in scripts/ci.
-    name: Dev test profile (native, managed, UCI, browser)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env:
-      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
-        with:
-          dotnet-version: '10.0.x'
-      - name: oneAPI compiler 2026.1, MKL 2026.1 and TBB 2023.1, as hart-server builds with
-        run: bash scripts/ci/install-oneapi.sh
-      - name: Dependency sources, grammars and public corpora at the build host's revisions
-        run: bash scripts/ci/hosted-dev-tests.sh deps
-      - name: Native build and ctest (dev profile)
-        run: bash scripts/ci/hosted-dev-tests.sh native
-      - name: Managed dev tier on the candidate native build
-        run: bash scripts/ci/hosted-dev-tests.sh managed
-      - name: UCI handshake
-        run: bash scripts/ci/hosted-dev-tests.sh uci
-      - name: Browser suites
-        run: bash scripts/ci/hosted-dev-tests.sh browser
-      - name: Keep managed test results
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: dev-tests-managed-results
-          path: ${{ runner.temp }}/laplace-ci/managed-results
-          if-no-files-found: ignore
-          retention-days: 7
-
   windows-native-package:
     name: Windows native package integrity
     runs-on: windows-2025

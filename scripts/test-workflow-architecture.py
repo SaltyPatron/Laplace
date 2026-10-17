@@ -103,6 +103,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "competitive-proof.yml": "name: Product — competitive proof",
             "db-ops.yml": "name: Database — maintenance",
             "ci-contract.yml": "name: Policy — CI contract",
+            "dev-tests.yml": "name: Policy — dev tests",
             "full-qualification.yml": "name: Audit — full product qualification",
             "laplace.yml": "name: Product — main delivery",
             "product-operator.yml": "name: Product — maintenance",
@@ -134,13 +135,24 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("self-hosted", text)
         self.assertIn("bash scripts/product-ci.sh check", text)
         self.assertIn("bash tests/identity-law.sh", text)   # the identity law gates every pull request
-        # The dev test profile (native, every managed test project, UCI, browser) gates every pull request.
-        for phase in ("deps", "native", "managed", "uci", "browser"):
-            self.assertIn(f"bash scripts/ci/hosted-dev-tests.sh {phase}", text)
         self.assertIn("laplace-actions-history-{0}", text)
         self.assertIn("[actions-history-cleanup]", text)
         self.assertIn("[actions-evidence-archive]", text)
         self.assertIn("cancel-in-progress:", text)
+
+    def test_dev_tests_run_every_pull_request_on_the_pinned_intel_host(self):
+        # The build pins MKL's CNR branch (MKL_CBWR_AVX2), which MKL takes only on Intel CPUs; the hosted runners are
+        # AMD, so the dev profile runs on hart-server's runner, and never for a fork's pull request.
+        text = (WORKFLOWS / "dev-tests.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request:\n    branches: [main]", text)
+        self.assertIn("runs-on: [self-hosted, laplace, staging]", text)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
+        self.assertIn("GenuineIntel", text)
+        for phase in ("deps", "native", "managed", "uci", "browser"):
+            self.assertIn(f"bash scripts/ci/hosted-dev-tests.sh {phase}", text)
+        hosted = (ROOT / "scripts/ci/hosted-dev-tests.sh").read_text(encoding="utf-8")
+        self.assertNotIn("FullyQualifiedName!=", hosted)   # every test runs: none is excluded by name
+        self.assertNotIn(" -E ", hosted)
 
     def test_ci_policy_scripts_do_not_trigger_or_invalidate_product_delivery(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
