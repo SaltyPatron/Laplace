@@ -112,7 +112,7 @@ public sealed class SourceGenerationCatalog
                         if (emitted.Add(full))
                             yield return full;
                     }
-                    break;
+                    yield break;
                 }
                 cursor = cursor.Parent;
             }
