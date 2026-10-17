@@ -79,4 +79,12 @@ public sealed class SourceGenerationGateTests
     {
         public object? GetService(Type serviceType) => null;
     }
+
+    [Fact]
+    public void Ingest_paths_declare_one_location_and_probe_no_fallback()
+    {
+        string paths = File.ReadAllText(SourceGenerationRegressionTests.RepositoryFile("app/Laplace.Cli/IngestDataPaths.cs"));
+        Assert.DoesNotContain("Directory.Exists", paths, StringComparison.Ordinal);
+        Assert.DoesNotContain("File.Exists", paths, StringComparison.Ordinal);
+    }
 }
