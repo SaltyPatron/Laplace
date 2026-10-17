@@ -58,8 +58,11 @@ class HostLockWait(unittest.TestCase):
     def test_site_sh_waits_then_refuses(self):
         site = (ROOT / "deploy" / "linux" / "site.sh").read_text(encoding="utf-8")
         self.assertIn('wait="${LAPLACE_HOST_LOCK_WAIT_SECONDS:-0}"', site)
-        self.assertIn('flock "$flag" -w "$wait" 8', site)
+        self.assertIn('host_lock_hold "$mode" 8 "$path" "$wait"', site)   # through the turnstile (deploy/linux/host-lock.sh, #1899)
         self.assertIn("host lock deadline expired", site)
+        hold = (ROOT / "deploy" / "linux" / "host-lock.sh").read_text(encoding="utf-8")
+        self.assertIn('flock -x -w "$wait" 7', hold)                      # the turnstile waits no longer than the deadline
+        self.assertIn('flock "$flag" -w "$left" "$fd"', hold)              # nor the lock, with what of it is left
 
 
 if __name__ == "__main__":
