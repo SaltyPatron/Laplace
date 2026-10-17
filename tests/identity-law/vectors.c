@@ -2,7 +2,7 @@
  * Laplace-Native's lp_id_compose as the build links it. Reads "text<TAB>expected-hex" lines on stdin (tests/identity-law.sh
  * takes them from app/Laplace.Core.Tests/Core/IdentityLawVectorTests.cs, one list) and checks, for each text:
  *   hash128_merkle over its codepoints' hash128_blake3  (the monorepo's composition, managed callers' path)
- *   hash128_merkle_runs over the same children           (the streaming path trajectories take)
+ *   hash128_merkle_runs over the same children           (the run-length path trajectories take)
  *   hash128_label_content_id, for word-character labels  (the label path)
  *   lp_id_codepoints_utf8                                 (Laplace-Native, the one implementation)
  * and that run-length encoded children stream to the same ID as their expansion. Exit 1 on any difference. */
@@ -67,6 +67,13 @@ static int runs(void) {
     char ha[33], hb[33]; hex(&a, ha); hex(&b, hb);
     if (strcmp(ha, hb) != 0) { fprintf(stderr, "FAIL runs: streamed %s, lp_id_compose %s\n", ha, hb); return 1; }
     printf("ok   runs       %s (74 children in 3 runs)\n", ha);
+    /* A reader that says more or fewer children than declared is refused, on the stack and the heap path. */
+    size_t short_r[3] = { 3, 1, 69 }, long_r[3] = { 3, 1, 71 };
+    reader_t s1 = { k, short_r, 3, 0 }, s2 = { k, long_r, 3, 0 }, s3 = { k, r, 2, 0 };
+    if (hash128_merkle_runs(m, next_run, &s1, &a) == 0 || hash128_merkle_runs(m, next_run, &s2, &a) == 0 ||
+        hash128_merkle_runs(5, next_run, &s3, &a) == 0 || hash128_merkle_runs(1, next_run, &rd, &a) == 0) {
+        fprintf(stderr, "FAIL runs: a reader that does not end at child_count was accepted\n"); return 1; }
+    printf("ok   runs       short, long and one-child readers refused\n");
     return 0;
 }
 
