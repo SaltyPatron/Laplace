@@ -81,6 +81,9 @@ std::vector<std::vector<std::string>> read_table(const std::string& text) {
     std::string line;
     bool header = true;
     while (std::getline(in, line)) {
+        // A Windows checkout (core.autocrlf) ends each row with CR; the code and label are the
+        // bytes before it, the same on every host.
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
         if (header) { header = false; continue; }
         std::vector<std::string> cols;
