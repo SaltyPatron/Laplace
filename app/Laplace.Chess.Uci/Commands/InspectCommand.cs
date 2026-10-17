@@ -252,7 +252,7 @@ public static class InspectCommand
         var id = ChessCompose.LineId(p0, moveIds.ToArray());
         return new IdentityView("LINE", Hex(id),
             moveIds.Count == 0 ? "no moves: a one-child composition is its child, so the line IS its start position P0"
-                : $"Merkle over [P0, M1..M{moveIds.Count}] ({moveIds.Count + 1} children) = BLAKE3(0x01 ‖ child ids)",
+                : $"Merkle over [P0, M1..M{moveIds.Count}] ({moveIds.Count + 1} children) = BLAKE3(child ids)",
             null, recorded is null ? null : recorded == id, LawId(children),
             "content: the start position and the ordered moves; identical play is one line whoever played it");
     }
@@ -472,7 +472,7 @@ public static class InspectCommand
     {
         var f = new List<string>
         {
-            $"#46.3 composition hashing: LINE {line.Id} = BLAKE3(0x01 ‖ children); without the domain byte (the law) it would be {line.LawId}.",
+            $"#46.3 composition hashing: LINE {line.Id} = BLAKE3(children), the law (law {line.LawId}).",
             "#46.4 floor: every position and move atom is a run of private bytes over ByteAtoms (0x80+domain, then 0xA0|high and 0xB0|low nibbles), not codepoints and digit compositions.",
         };
         var p0 = Position(replay.Start);

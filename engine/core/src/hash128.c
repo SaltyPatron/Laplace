@@ -6,8 +6,6 @@
 
 #include "blake3.h"
 
-static const uint8_t MERKLE_DOMAIN = 0x01;
-
 void hash128_blake3(const uint8_t* data, size_t len, hash128_t* out) {
     blake3_hasher h;
     blake3_hasher_init(&h);
@@ -28,7 +26,6 @@ void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t
     (void)tier;
     blake3_hasher h;
     blake3_hasher_init(&h);
-    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));
     if (children && n > 0) {
         blake3_hasher_update(&h, children, n * sizeof(hash128_t));
     }
@@ -41,7 +38,6 @@ int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,
 
     blake3_hasher h;
     blake3_hasher_init(&h);
-    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));
 
     size_t seen = 0;
     while (seen < child_count) {

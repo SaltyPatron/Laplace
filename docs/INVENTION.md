@@ -194,7 +194,7 @@ They do not create another content identity.
 
 The same law applies recursively to every modality. A 2x2 pixel composition occurring inside an 8x8 region is the same canonical 2x2 entity when it appears in another region, another image, a video frame, or as a standalone selected structure. Higher structures reference it through their physicality/trajectory/occurrence structure.
 
-`hash128_merkle` ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton collapses to its child. The current `hash128_merkle` prepends a `0x01` domain byte to that sequence; that violates the law above and disagrees with Laplace-Native and the Engine for every composition, and the byte must be removed.
+`hash128_merkle` ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton collapses to its child. It hashes nothing else, no domain byte, so its IDs are Laplace-Native's and the Engine's.
 
 This is the fundamental deduplication law:
 

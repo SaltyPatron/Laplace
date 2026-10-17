@@ -52,7 +52,7 @@ n == 1 -> child identity is preserved
 n > 1  -> hash128_merkle(tier, ordered child ids, n)
 ```
 
-The function signature carries `tier`, and `hash128_merkle` discards it. The law is that a composite id is BLAKE3 over the ordered 16-byte child ids, repeats included, truncated to 16 bytes, with nothing else in the input: no domain byte, tier, type, recipe, version, source, ordinal or container identity. A codepoint id is BLAKE3 of its UTF-8 bytes, from the Tier-0 ROM; a leaf hashes one to four bytes and a node at least thirty-two, so a node can never collide with a leaf. The current `hash128_merkle` prepends a `0x01` domain byte to the child-id sequence. That violates the law, disagrees with Laplace-Native and the Engine for every composition, and must be removed; do not implement from it.
+The function signature carries `tier`, and `hash128_merkle` discards it. The law is that a composite id is BLAKE3 over the ordered 16-byte child ids, repeats included, truncated to 16 bytes, with nothing else in the input: no domain byte, tier, type, recipe, version, source, ordinal or container identity. A codepoint id is BLAKE3 of its UTF-8 bytes, from the Tier-0 ROM; a leaf hashes one to four bytes and a node at least thirty-two, so a node can never collide with a leaf. `hash128_merkle` hashes exactly that sequence, the same bytes as Laplace-Native's `lp_id_compose`; `IdentityLawVectorTests` holds it to IDs Laplace-Native and the Engine produce.
 
 So the identity law is:
 
