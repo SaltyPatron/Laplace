@@ -6,9 +6,12 @@ database. The guard: env.cmd names no default, db-reset.cmd fails fast unless LA
 is set, prints the target, and requires the same name as --confirm before any psql call. On
 Windows the script is also executed (no PostgreSQL is reached: it must stop first).
 """
+import json
 import os
+import shutil
 import re
 import subprocess
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -58,6 +61,51 @@ class DbResetGuard(unittest.TestCase):
             self.assertEqual(2, proc.returncode, out)
             self.assertIn(expect, out)
             self.assertNotIn("terminate laplace backends", out)
+
+
+class DeclaredAccess(unittest.TestCase):
+    """A reset leaves the database usable: the roles' declared access is applied after it is recreated."""
+
+    def test_reset_applies_declared_access_before_complete(self):
+        reset = text("db-reset.cmd")
+        apply = reset.index('apply-declared-access.ps1" -Database "%LAPLACE_DBNAME%" || exit /b 1')
+        self.assertLess(reset.index("CREATE EXTENSION IF NOT EXISTS laplace_substrate"), apply)
+        self.assertLess(apply, reset.index("DB-RESET COMPLETE"))
+
+    def test_access_goes_through_the_operations_step(self):
+        script = text("apply-declared-access.ps1")
+        self.assertIn("configure-windows.ps1", script)
+        self.assertIn("Laplace-Operations\\development\\installation.json", script)
+        self.assertIn("has_schema_privilege('$role', 'laplace', 'USAGE')", script)
+        self.assertNotRegex(script, r"(?i)\bGRANT\b", "grants are the Operations step's, not written here")
+
+    @unittest.skipUnless(os.name == "nt" and shutil.which("pwsh"), "executes the PowerShell script on Windows only")
+    def test_plan_names_the_declared_database_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            decl = Path(d) / "installation.json"
+            decl.write_text(json.dumps({"substrate_database": "plan-sub", "substrate_role": "plan_sub_role",
+                                        "application_database": "plan-app", "application_role": "plan_app_role"}))
+            (Path(d) / "configure-windows.ps1").write_text("throw 'not run in a plan'\n")
+            def run(db, path):
+                env = {**os.environ, "LAPLACE_ACCESS_DECLARATION": str(path)}
+                p = subprocess.run(["pwsh", "-NoProfile", "-File", str(WIN / "apply-declared-access.ps1"),
+                                    "-Database", db, "-Plan"], env=env, capture_output=True, text=True, timeout=120)
+                return p.returncode, p.stdout + p.stderr
+            rc, out = run("plan-sub", decl)
+            self.assertEqual(0, rc, out)
+            self.assertIn("substrate database", out)
+            self.assertIn("plan_sub_role", out)
+            self.assertIn("configure-windows.ps1 -Installation", out)
+            rc, out = run("plan-app", decl)
+            self.assertEqual(0, rc, out)
+            self.assertIn("application database", out)
+            rc, out = run("other-db", decl)
+            self.assertEqual(0, rc, out)
+            self.assertIn("names no database other-db", out)
+            self.assertNotIn("plan:", out)
+            rc, out = run("plan-sub", Path(d) / "absent.json")
+            self.assertEqual(0, rc, out)
+            self.assertIn("no declaration at", out)
 
 
 if __name__ == "__main__":
