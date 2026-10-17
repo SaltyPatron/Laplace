@@ -9,10 +9,13 @@ if($Publish){
     $hasDevIdentity = $false
     if(-not $env:LAPLACE_API_KEY -and -not $env:LAPLACE_OPERATOR_TOKEN){
         $devInstallation=if($env:LAPLACE_DEVELOPMENT_INSTALLATION){$env:LAPLACE_DEVELOPMENT_INSTALLATION}elseif($env:LAPLACE_SRC){Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}else{''}
-        if($devInstallation -and (Test-Path -LiteralPath $devInstallation -PathType Leaf)){
+        $credHelper=if($devInstallation){Join-Path (Split-Path -Parent $devInstallation) 'credentials.ps1'}else{''}
+        if($devInstallation -and (Test-Path -LiteralPath $devInstallation -PathType Leaf) -and (Test-Path -LiteralPath $credHelper -PathType Leaf)){
             try {
-                $devConfig=Get-Content -LiteralPath $devInstallation -Raw | ConvertFrom-Json
-                if($devConfig.secret -and (Test-Path -LiteralPath $devConfig.secret -PathType Leaf)){$hasDevIdentity=$true}
+                . $credHelper
+                $devConfig=Read-DevelopmentConfig $devInstallation
+                $credPath=Get-DevelopmentCredentialPath $devConfig
+                if($credPath -and (Test-Path -LiteralPath $credPath -PathType Leaf)){$hasDevIdentity=$true}
             } catch {}
         }
     }
