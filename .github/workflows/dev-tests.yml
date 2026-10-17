@@ -33,6 +33,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        env:
+          # The runner account cannot write the default /usr/share/dotnet; the SDK goes in the runner's tool cache.
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: '10.0.x'
       - name: The runner's CPU takes the pinned MKL CNR branch (Intel with AVX2)
