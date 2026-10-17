@@ -372,6 +372,119 @@ struct content_form {
     uint32_t atom = 0;
 };
 using stage_ptr = std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)>;
+struct tuple_span {
+    const uint8_t* bytes;
+    size_t size;
+};
+struct tuple_selection {
+    std::array<std::vector<tuple_span>, 3> spans;
+    std::array<size_t, 3> byte_counts{};
+    size_t row_count = 0;
+};
+struct tuple_batch {
+    std::array<std::vector<uint8_t>, 3> buffers;
+    // Keys contain the complete canonical tuple, not only its id; hash
+    // equality alone never establishes identity. Testimony is never indexed.
+    std::array<std::unordered_set<std::string>, 3> canonical_rows;
+    size_t row_count = 0, base_bytes = 0;
+    uint64_t completed_records = 0;
+    tuple_batch() = default;
+    explicit tuple_batch(size_t base) : base_bytes(base) {}
+    void reset(size_t base) {
+        for (auto& b : buffers) b.clear();
+        for (auto& c : canonical_rows) c.clear();
+        row_count = 0;
+        base_bytes = base;
+        completed_records = 0;
+    }
+    static const uint8_t* buffer(const intent_stage_t* stage, size_t index, size_t* size) {
+        return intent_stage_tuple_ptr(stage, static_cast<intent_stage_table_t>(index + 1), size);
+    }
+    static size_t tuple_size(const uint8_t* bytes, size_t available, uint16_t columns) {
+        if (available < 2 || (uint16_t(bytes[0]) << 8 | bytes[1]) != columns)
+            throw std::runtime_error("recipe canonical tuple has invalid columns");
+        size_t offset = 2;
+        for (uint16_t column = 0; column < columns; ++column) {
+            if (available - offset < 4)
+                throw std::runtime_error("recipe canonical tuple has truncated field length");
+            const uint32_t length = uint32_t(bytes[offset]) << 24 |
+                uint32_t(bytes[offset + 1]) << 16 | uint32_t(bytes[offset + 2]) << 8 |
+                uint32_t(bytes[offset + 3]);
+            offset += 4;
+            if (length == UINT32_MAX) continue;
+            if (length > INT32_MAX || length > available - offset)
+                throw std::runtime_error("recipe canonical tuple has truncated field body");
+            offset += length;
+        }
+        return offset;
+    }
+    tuple_selection select(const intent_stage_t* stage) const {
+        tuple_selection selected;
+        for (size_t i = 0; i < buffers.size(); ++i) {
+            size_t size = 0; const uint8_t* bytes = buffer(stage, i, &size);
+            if (!size) continue;
+            if (i == 2) {
+                // Every source observation, including repeated interval facts,
+                // retains its exact testimony cardinality and replay semantics.
+                selected.spans[i].push_back({bytes, size});
+                selected.byte_counts[i] = size;
+                selected.row_count += intent_stage_attestation_count(stage);
+                continue;
+            }
+            std::unordered_set<std::string> local;
+            size_t offset = 0;
+            while (offset < size) {
+                // Entity rows are (id, tier, type_id); physicality rows carry ten columns.
+                const size_t length = tuple_size(bytes + offset, size - offset, i == 1 ? 10 : 3);
+                std::string key(reinterpret_cast<const char*>(bytes + offset), length);
+                if (canonical_rows[i].find(key) == canonical_rows[i].end() &&
+                    local.emplace(std::move(key)).second) {
+                    selected.spans[i].push_back({bytes + offset, length});
+                    selected.byte_counts[i] += length;
+                    ++selected.row_count;
+                }
+                offset += length;
+            }
+        }
+        return selected;
+    }
+    bool fits(const tuple_selection& selected, size_t maximum_rows, size_t maximum_bytes) const {
+        if (selected.row_count > maximum_rows - row_count || base_bytes > maximum_bytes) return false;
+        size_t remaining = maximum_bytes - base_bytes;
+        for (size_t i = 0; i < buffers.size(); ++i) {
+            const size_t added = selected.byte_counts[i];
+            if (added > SIZE_MAX - buffers[i].size()) return false;
+            size_t needed = buffers[i].size() + added;
+            if (needed > remaining) return false;
+            if (!needed) continue;
+            size_t capacity = 256;
+            while (capacity < needed) {
+                if (capacity > SIZE_MAX / 2) { capacity = needed; break; }
+                capacity *= 2;
+            }
+            // Match the bounded stage allocator's exact-fit fallback.
+            remaining -= capacity > remaining ? needed : capacity;
+        }
+        return true;
+    }
+    void append(const tuple_selection& selected) {
+        for (size_t i = 0; i < buffers.size(); ++i)
+            for (const auto& span : selected.spans[i]) {
+                buffers[i].insert(buffers[i].end(), span.bytes, span.bytes + span.size);
+                if (i != 2)
+                    canonical_rows[i].emplace(reinterpret_cast<const char*>(span.bytes), span.size);
+            }
+        row_count += selected.row_count;
+    }
+    stage_ptr finish(size_t maximum_bytes) {
+        intent_stage_t* raw = nullptr;
+        int result = intent_stage_from_tuple_bytes(buffers[0].data(), buffers[0].size(),
+            buffers[1].data(), buffers[1].size(), buffers[2].data(), buffers[2].size(), maximum_bytes, &raw);
+        stage_ptr stage(raw, intent_stage_free);
+        if (result != 0 || !stage) throw std::runtime_error("recipe tuple batch exceeds the admitted byte envelope");
+        return stage;
+    }
+};
 static bool nonzero(const hash128_t& h) { return h.hi != 0 || h.lo != 0; }
 static std::string alias_key(const std::string& s) {
     std::string r;
@@ -432,6 +545,8 @@ struct laplace_recipe_stream {
     hash128_t membership_member{};
     stage_ptr ready{nullptr, intent_stage_free};
     uint64_t ready_completed = 0;
+    tuple_batch batch{};
+    bool batch_active = false;
     hash128_t subject{};
     // RCP8 per-field object parts: the object is the composition of these parts read
     // from the lowering attributes (a full-text target's LU [frameName, lemma, UPOS]).
@@ -2589,112 +2704,6 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
     catch (...) { s->failed = true; return -3; }
 }
 namespace {
-// Coalesce entity, physicality and testimony tuples across records; the final
-// import is one set operation, independent of semantic row count.
-struct tuple_span {
-    const uint8_t* bytes;
-    size_t size;
-};
-struct tuple_selection {
-    std::array<std::vector<tuple_span>, 3> spans;
-    std::array<size_t, 3> byte_counts{};
-    size_t row_count = 0;
-};
-struct tuple_batch {
-    std::array<std::vector<uint8_t>, 3> buffers;
-    // Keys contain the complete canonical tuple, not only its id; hash
-    // equality alone never establishes identity. Testimony is never indexed.
-    std::array<std::unordered_set<std::string>, 3> canonical_rows;
-    size_t row_count = 0, base_bytes;
-    explicit tuple_batch(size_t base) : base_bytes(base) {}
-    static const uint8_t* buffer(const intent_stage_t* stage, size_t index, size_t* size) {
-        return intent_stage_tuple_ptr(stage, static_cast<intent_stage_table_t>(index + 1), size);
-    }
-    static size_t tuple_size(const uint8_t* bytes, size_t available, uint16_t columns) {
-        if (available < 2 || (uint16_t(bytes[0]) << 8 | bytes[1]) != columns)
-            throw std::runtime_error("recipe canonical tuple has invalid columns");
-        size_t offset = 2;
-        for (uint16_t column = 0; column < columns; ++column) {
-            if (available - offset < 4)
-                throw std::runtime_error("recipe canonical tuple has truncated field length");
-            const uint32_t length = uint32_t(bytes[offset]) << 24 |
-                uint32_t(bytes[offset + 1]) << 16 | uint32_t(bytes[offset + 2]) << 8 |
-                uint32_t(bytes[offset + 3]);
-            offset += 4;
-            if (length == UINT32_MAX) continue;
-            if (length > INT32_MAX || length > available - offset)
-                throw std::runtime_error("recipe canonical tuple has truncated field body");
-            offset += length;
-        }
-        return offset;
-    }
-    tuple_selection select(const intent_stage_t* stage) const {
-        tuple_selection selected;
-        for (size_t i = 0; i < buffers.size(); ++i) {
-            size_t size = 0; const uint8_t* bytes = buffer(stage, i, &size);
-            if (!size) continue;
-            if (i == 2) {
-                // Every source observation, including repeated interval facts,
-                // retains its exact testimony cardinality and replay semantics.
-                selected.spans[i].push_back({bytes, size});
-                selected.byte_counts[i] = size;
-                selected.row_count += intent_stage_attestation_count(stage);
-                continue;
-            }
-            std::unordered_set<std::string> local;
-            size_t offset = 0;
-            while (offset < size) {
-                // Entity rows are (id, tier, type_id); physicality rows carry ten columns.
-                const size_t length = tuple_size(bytes + offset, size - offset, i == 1 ? 10 : 3);
-                std::string key(reinterpret_cast<const char*>(bytes + offset), length);
-                if (canonical_rows[i].find(key) == canonical_rows[i].end() &&
-                    local.emplace(std::move(key)).second) {
-                    selected.spans[i].push_back({bytes + offset, length});
-                    selected.byte_counts[i] += length;
-                    ++selected.row_count;
-                }
-                offset += length;
-            }
-        }
-        return selected;
-    }
-    bool fits(const tuple_selection& selected, size_t maximum_rows, size_t maximum_bytes) const {
-        if (selected.row_count > maximum_rows - row_count || base_bytes > maximum_bytes) return false;
-        size_t remaining = maximum_bytes - base_bytes;
-        for (size_t i = 0; i < buffers.size(); ++i) {
-            const size_t added = selected.byte_counts[i];
-            if (added > SIZE_MAX - buffers[i].size()) return false;
-            size_t needed = buffers[i].size() + added;
-            if (needed > remaining) return false;
-            if (!needed) continue;
-            size_t capacity = 256;
-            while (capacity < needed) {
-                if (capacity > SIZE_MAX / 2) { capacity = needed; break; }
-                capacity *= 2;
-            }
-            // Match the bounded stage allocator's exact-fit fallback.
-            remaining -= capacity > remaining ? needed : capacity;
-        }
-        return true;
-    }
-    void append(const tuple_selection& selected) {
-        for (size_t i = 0; i < buffers.size(); ++i)
-            for (const auto& span : selected.spans[i]) {
-                buffers[i].insert(buffers[i].end(), span.bytes, span.bytes + span.size);
-                if (i != 2)
-                    canonical_rows[i].emplace(reinterpret_cast<const char*>(span.bytes), span.size);
-            }
-        row_count += selected.row_count;
-    }
-    stage_ptr finish(size_t maximum_bytes) {
-        intent_stage_t* raw = nullptr;
-        int result = intent_stage_from_tuple_bytes(buffers[0].data(), buffers[0].size(),
-            buffers[1].data(), buffers[1].size(), buffers[2].data(), buffers[2].size(), maximum_bytes, &raw);
-        stage_ptr stage(raw, intent_stage_free);
-        if (result != 0 || !stage) throw std::runtime_error("recipe tuple batch exceeds the admitted byte envelope");
-        return stage;
-    }
-};
 static int fail_stream(laplace_recipe_stream_t* s, const char* message) noexcept {
     s->failed = true;
     try { s->error = message; } catch (...) {}
@@ -2705,7 +2714,7 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
     size_t maximum_bytes, intent_stage_t** out, uint64_t* completed) {
     if (!s || s->failed || !out || !completed || !maximum_rows || !maximum_bytes) return -1;
     *out = nullptr; *completed = 0;
-    if (s->pending.empty() && !s->ready && !s->active && s->final && !s->file_trunk_done
+    if (s->pending.empty() && !s->ready && !s->active && !s->batch_active && s->final && !s->file_trunk_done
         && s->file_head_known) {
         try {
             stage_ptr stage(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
@@ -2724,7 +2733,7 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
         } catch (const std::exception& e) { return fail_stream(s, e.what()); }
         catch (...) { return fail_stream(s, "unknown native recipe failure"); }
     }
-    if (s->pending.empty() && !s->ready && !s->active && s->final && !s->aggregates.empty()) {
+    if (s->pending.empty() && !s->ready && !s->active && !s->batch_active && s->final && !s->aggregates.empty()) {
         try {
             stage_ptr stage(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
             if (!stage) throw std::bad_alloc();
@@ -2743,20 +2752,24 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
         } catch (const std::exception& e) { return fail_stream(s, e.what()); }
         catch (...) { return fail_stream(s, "unknown native recipe failure"); }
     }
-    if (s->pending.empty() && !s->ready) return 0;
+    if (s->pending.empty() && !s->ready && !(s->batch_active && s->final)) return 0;
     try {
-        stage_ptr empty(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
-        if (!empty) throw std::runtime_error("recipe byte envelope cannot hold an output stage");
-        const size_t base = intent_stage_memory_bytes(empty.get());
-        empty.reset();
-        tuple_batch batch(base);
-        // Reuse exact value composition across physical records in this output
-        // working set. Cache eviction/rebatching changes work, never identities
-        // or field testimony. A deferred stage owns every row it has prepared.
-        s->content_cache.clear(); s->content_cache_bytes = 0;
-        s->content_cache_limit = maximum_bytes / 4;
-        s->content_cache_entries = maximum_rows;
-        uint64_t finished = 0;
+        size_t base = s->batch.base_bytes;
+        if (!s->batch_active) {
+            stage_ptr empty(intent_stage_new_bounded(0, maximum_bytes), intent_stage_free);
+            if (!empty) throw std::runtime_error("recipe byte envelope cannot hold an output stage");
+            base = intent_stage_memory_bytes(empty.get());
+            empty.reset();
+            s->batch.reset(base);
+            // Reuse exact value composition across physical records in this output
+            // working set. Cache eviction/rebatching changes work, never identities
+            // or field testimony. A deferred stage owns every row it has prepared.
+            s->content_cache.clear(); s->content_cache_bytes = 0;
+            s->content_cache_limit = maximum_bytes / 4;
+            s->content_cache_entries = maximum_rows;
+            s->batch_active = true;
+        }
+        bool flush = false;
         while (!s->pending.empty() || s->ready) {
             if (!s->ready) {
                 s->ready.reset(intent_stage_new_bounded(0, maximum_bytes));
@@ -2823,17 +2836,26 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
                     }
                 }
             }
-            const tuple_selection selected = batch.select(s->ready.get());
-            if (!batch.fits(selected, maximum_rows, maximum_bytes)) {
-                if (batch.row_count || finished) break;
+            const tuple_selection selected = s->batch.select(s->ready.get());
+            if (!s->batch.fits(selected, maximum_rows, maximum_bytes)) {
+                if (s->batch.row_count || s->batch.completed_records) { flush = true; break; }
                 throw std::runtime_error("one record's structure exceeds the admitted output envelope");
             }
-            batch.append(selected); finished += s->ready_completed;
+            s->batch.append(selected); s->batch.completed_records += s->ready_completed;
             s->ready.reset(); s->ready_completed = 0;
-            if (batch.row_count == maximum_rows) break;
+            if (s->batch.row_count == maximum_rows) { flush = true; break; }
         }
-        stage_ptr result = batch.finish(maximum_bytes);
-        *completed = finished; *out = result.release(); return 1;
+        if (!flush && !s->final) return 0;
+        if (!s->batch.row_count && !s->batch.completed_records) {
+            s->batch_active = false;
+            return laplace_recipe_stream_drain(s, maximum_rows, maximum_bytes, out, completed);
+        }
+        stage_ptr result = s->batch.finish(maximum_bytes);
+        *completed = s->batch.completed_records;
+        s->batch.reset(base);
+        s->batch_active = false;
+        s->content_cache.clear(); s->content_cache_bytes = 0;
+        *out = result.release(); return 1;
     } catch (const std::exception& e) { return fail_stream(s, e.what()); }
     catch (...) { return fail_stream(s, "unknown native recipe failure"); }
 }

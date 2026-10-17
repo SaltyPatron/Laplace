@@ -1,4 +1,7 @@
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Laplace.Engine.Core;
 
@@ -18,11 +21,27 @@ public static class LaplaceInstall
 
     public static bool TryDefaultBuildRoot(out string buildRoot)
     {
-        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_BUILD_ROOT");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             buildRoot = Path.GetFullPath(fromEnv.Trim());
             return true;
+        }
+
+        var declaredBuild = TryGetProcessOrMachineSetting("LAPLACE_BUILD");
+        if (!string.IsNullOrWhiteSpace(declaredBuild) && TryRepoRoot(out var repoRoot))
+        {
+            var checkout = Path.GetFullPath(repoRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (OperatingSystem.IsWindows())
+                checkout = checkout.ToLowerInvariant();
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(checkout)))[..12].ToLowerInvariant();
+            var workspaceId = $"{Path.GetFileName(checkout)}-{hash}";
+            var candidate = Path.GetFullPath(Path.Combine(declaredBuild.Trim(), "worktrees", workspaceId));
+            if (Directory.Exists(candidate))
+            {
+                buildRoot = candidate;
+                return true;
+            }
         }
 
         buildRoot = "";
@@ -146,9 +165,19 @@ public static class LaplaceInstall
             var dbName = OperatingSystem.IsWindows()
                 ? database
                 : ResolveLinuxDatabaseName(database);
-            s = OperatingSystem.IsWindows()
-                ? $"Host=localhost;Username=postgres;Password=postgres;Database={dbName};Command Timeout=0"
-                : $"Host=/var/run/postgresql;Username=laplace_admin;Database={dbName}";
+            if (OperatingSystem.IsWindows())
+            {
+                var host = TryGetProcessOrMachineSetting("LAPLACE_PGHOST") ?? "localhost";
+                var port = TryGetProcessOrMachineSetting("LAPLACE_PGPORT") ?? "5432";
+                var user = TryGetProcessOrMachineSetting("LAPLACE_PGUSER")
+                           ?? TryGetProcessOrMachineSetting("LAPLACE_ROLE")
+                           ?? "laplace";
+                s = $"Host={host};Port={port};Username={user};Database={dbName};Command Timeout=0";
+            }
+            else
+            {
+                s = $"Host=/var/run/postgresql;Username=laplace_admin;Database={dbName}";
+            }
         }
 
         return EnsurePostgresConnectionDefaults(s);
@@ -211,7 +240,7 @@ public static class LaplaceInstall
 
     public static string ResolveT0Perfcache()
     {
-        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
+        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_PERFCACHE_BIN");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             var selected = Path.GetFullPath(fromEnv.Trim());
@@ -230,7 +259,7 @@ public static class LaplaceInstall
                 return hit;
         }
 
-        var installPrefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
+        var installPrefix = TryGetProcessOrMachineSetting("LAPLACE_INSTALL_PREFIX");
         var share = string.IsNullOrWhiteSpace(installPrefix) ? Path.Combine(InstallRoot, "share", "laplace")
             : Path.Combine(installPrefix.Trim(), "share", "laplace");
         if (Directory.Exists(share))
@@ -243,7 +272,7 @@ public static class LaplaceInstall
         // The error names exactly the locations this resolution probed.
         throw new InvalidOperationException(
             "T0 perfcache not found. Searched: "
-            + $"LAPLACE_PERFCACHE_BIN={Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN") ?? "(unset)"}; "
+            + $"LAPLACE_PERFCACHE_BIN={TryGetProcessOrMachineSetting("LAPLACE_PERFCACHE_BIN") ?? "(unset)"}; "
             + (TryResolveEngineBuildRoot(out var probed)
                 ? $"engine build root '{probed}' (core/perfcache/ and recursive)"
                 : "no engine build root resolved from AppContext.BaseDirectory or cwd")
@@ -252,7 +281,7 @@ public static class LaplaceInstall
 
     public static string ResolveIngestRoot()
     {
-        var configured = Environment.GetEnvironmentVariable("LAPLACE_DATA");
+        var configured = TryGetProcessOrMachineSetting("LAPLACE_DATA");
         if (string.IsNullOrWhiteSpace(configured))
             throw new InvalidOperationException("Declare LAPLACE_DATA as the ingest corpus directory in the installation configuration.");
         return ExistingDirectory(configured, "LAPLACE_DATA");
@@ -313,11 +342,11 @@ public static class LaplaceInstall
 
     public static string ResolveGgufOutputDir()
     {
-        var outRoot = Environment.GetEnvironmentVariable("LAPLACE_OUT");
+        var outRoot = TryGetProcessOrMachineSetting("LAPLACE_OUT");
         if (!string.IsNullOrWhiteSpace(outRoot))
             return Path.GetFullPath(Path.Combine(outRoot.Trim(), "models"));
 
-        var buildRoot = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        var buildRoot = TryGetProcessOrMachineSetting("LAPLACE_BUILD_ROOT");
         if (!string.IsNullOrWhiteSpace(buildRoot))
             return Path.GetFullPath(Path.Combine(buildRoot.Trim(), "out", "models"));
 
@@ -330,7 +359,7 @@ public static class LaplaceInstall
     /// <summary>Process environment first, then <c>deploy/secrets/{secretFile}</c>.</summary>
     public static string? TryReadConfig(string key, string? secretFile = null)
     {
-        var fromEnv = Environment.GetEnvironmentVariable(key);
+        var fromEnv = TryGetProcessOrMachineSetting(key);
         if (!string.IsNullOrWhiteSpace(fromEnv))
             return fromEnv.Trim();
 
@@ -357,6 +386,64 @@ public static class LaplaceInstall
         return null;
     }
 
+    /// <summary>
+    /// Reads a setting from the process environment first, falling back to the machine-level
+    /// installation declaration (<c>C:\ProgramData\Laplace\machine.env</c> on Windows,
+    /// <c>/etc/laplace/machine.env</c> on Linux, or the file named by <c>LAPLACE_MACHINE_ENV</c>).
+    /// </summary>
+    public static string? TryGetProcessOrMachineSetting(string key)
+    {
+        var fromEnv = Environment.GetEnvironmentVariable(key);
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+            return fromEnv.Trim();
+
+        var machineEnvPath = Environment.GetEnvironmentVariable("LAPLACE_MACHINE_ENV");
+        if (string.IsNullOrWhiteSpace(machineEnvPath))
+        {
+            machineEnvPath = OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Laplace", "machine.env")
+                : "/etc/laplace/machine.env";
+        }
+        else
+        {
+            machineEnvPath = machineEnvPath.Trim();
+            if (!File.Exists(machineEnvPath))
+                return null;
+        }
+
+        if (!File.Exists(machineEnvPath))
+            return null;
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawLine in File.ReadLines(machineEnvPath))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+                continue;
+            if (line.StartsWith("export ", StringComparison.Ordinal))
+                line = line["export ".Length..].TrimStart();
+            var eq = line.IndexOf('=');
+            if (eq <= 0)
+                continue;
+            var k = line[..eq].Trim();
+            var v = line[(eq + 1)..].Trim();
+            if (v.Length >= 2 && ((v[0] == '"' && v[^1] == '"') || (v[0] == '\'' && v[^1] == '\'')))
+                v = v[1..^1];
+            v = Environment.ExpandEnvironmentVariables(v);
+            v = Regex.Replace(v, @"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%", m =>
+            {
+                var refKey = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value;
+                return Environment.GetEnvironmentVariable(refKey)
+                       ?? (values.TryGetValue(refKey, out var refVal) ? refVal : m.Value);
+            });
+            values[k] = v;
+        }
+
+        return values.TryGetValue(key, out var result) && !string.IsNullOrWhiteSpace(result)
+            ? result.Trim()
+            : null;
+    }
+
     private static string? TryStampedRepoRoot()
         => typeof(LaplaceInstall).Assembly
             .GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -364,14 +451,14 @@ public static class LaplaceInstall
 
     private static bool TryResolveEngineBuildRoot(out string engineBuild)
     {
-        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_ENGINE_BUILD");
+        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_ENGINE_BUILD");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             engineBuild = Path.GetFullPath(fromEnv.Trim());
             if (Directory.Exists(engineBuild)) return true;
         }
 
-        fromEnv = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        fromEnv = TryGetProcessOrMachineSetting("LAPLACE_BUILD_ROOT");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             engineBuild = Path.GetFullPath(Path.Combine(fromEnv.Trim(), "build-win"));
@@ -380,8 +467,18 @@ public static class LaplaceInstall
 
         if (TryDefaultBuildRoot(out var buildRoot))
         {
-            engineBuild = Path.GetFullPath(Path.Combine(buildRoot, "build-win"));
-            if (Directory.Exists(engineBuild)) return true;
+            var candidate = Path.GetFullPath(Path.Combine(buildRoot, OperatingSystem.IsWindows() ? "build-win" : "engine"));
+            if (Directory.Exists(candidate))
+            {
+                engineBuild = candidate;
+                return true;
+            }
+            candidate = Path.GetFullPath(Path.Combine(buildRoot, "build-win"));
+            if (Directory.Exists(candidate))
+            {
+                engineBuild = candidate;
+                return true;
+            }
         }
 
         engineBuild = "";

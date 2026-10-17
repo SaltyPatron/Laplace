@@ -55,7 +55,7 @@ internal sealed class McpServer(IMcpTools tools)
                     ["serverInfo"] = new JsonObject
                     {
                         ["name"] = "laplace-substrate",
-                        ["version"] = "0.1.0",
+                        ["version"] = "0.2.0",
                     },
                 });
 

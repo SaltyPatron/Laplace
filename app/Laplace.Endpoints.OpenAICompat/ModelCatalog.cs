@@ -12,6 +12,7 @@ internal static class ModelCatalog
     public const string Converse = "laplace-converse-001";
     public const string Completions = "laplace-completions-001";
     public const string Code = "laplace-code-001";
+    public const string Rerank = "laplace-rerank-001";
     public const string EmbedForm = "laplace-embed-form-001";
     public const string EmbedMeaning = "laplace-embed-meaning-001";
 
@@ -31,6 +32,9 @@ internal static class ModelCatalog
 
     public static bool IsCode(string model) =>
         string.Equals(model, Code, StringComparison.Ordinal);
+
+    public static bool IsRerankModel(string model) =>
+        model is Rerank or EmbedForm or EmbedMeaning;
 
     public static bool IsCompletionsModel(string model) =>
         model is Completions;

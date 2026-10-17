@@ -93,6 +93,35 @@ public sealed class SourceGenerationRegressionTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Theory]
+    [InlineData("recipes/verbnet/3.4/verbnet.source.json", "verbnet3.4/give-13.1.xml")]
+    [InlineData("recipes/propbank/3.4/propbank.source.json", "frames/give.xml")]
+    [InlineData("recipes/oewn/2025-plus/oewn.source.json", "english-wordnet-2025-plus.xml.gz")]
+    [InlineData("recipes/omw/2.0/omw.source.json", "omw-2.0/omw-it/omw-it.xml")]
+    [InlineData("recipes/omw/2.0/omw.source.json", "extracted/omw-2.0/omw-it/omw-it.xml")]
+    [InlineData("recipes/ud/2.18/ud.source.json", "ud-treebanks-v2.18/UD_English-EWT/en_ewt-ud-train.conllu")]
+    [InlineData("recipes/ud/2.18/ud.source.json", "extracted/ud-treebanks-v2.18/UD_English-EWT/en_ewt-ud-train.conllu")]
+    public async Task Selected_generations_tolerate_git_and_archive_control_files(string manifest, string admittedFile)
+    {
+        CodepointPerfcache.LoadDefault();
+        string root = TemporaryDirectory();
+        try
+        {
+            Write(root, admittedFile, "source record");
+            foreach (string sidecar in new[] { ".landed", ".archive/release.tar.xz", ".superseded-20261010/old.xml" })
+                Write(root, sidecar, "acquisition metadata");
+            if (manifest.Contains("verbnet.source.json", StringComparison.Ordinal)
+                || manifest.Contains("propbank.source.json", StringComparison.Ordinal))
+                Write(root, ".git/HEAD", "ref: refs/heads/main");
+
+            var recipe = SourceGenerationRecipe.Load(RepositoryFile(manifest));
+            var resolved = await SourceGenerationResolver.ResolveAsync(recipe, root);
+            Assert.Empty(resolved.ExecutionErrors);
+            Assert.Single(resolved.Bindings);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public async Task Cili_rejects_two_release_copies_and_reports_unrecognized_content()
     {
@@ -153,6 +182,37 @@ public sealed class SourceGenerationRegressionTests
                 Assert.Single(graph.Artifacts, a => a.RelativePath == "unrecognized-source.txt").Disposition);
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData("recipes/unicode/UCD/17.0.0/unicode.source.json")]
+    [InlineData("recipes/iso639/20260415/iso639.source.json")]
+    [InlineData("recipes/cili/a895d7e/cili.source.json")]
+    [InlineData("recipes/oewn/2025-plus/oewn.source.json")]
+    [InlineData("recipes/omw/2.0/omw.source.json")]
+    [InlineData("recipes/verbnet/3.4/verbnet.source.json")]
+    [InlineData("recipes/verbnet/3.4/verbnet-gl.source.json")]
+    [InlineData("recipes/propbank/3.4/propbank.source.json")]
+    [InlineData("recipes/ud/2.18/ud.source.json")]
+    public void Live_estate_corpus_root_exists_and_resolves_parent_to_declared_root(string manifest)
+    {
+        CodepointPerfcache.LoadDefault();
+        var recipe = SourceGenerationRecipe.Load(RepositoryFile(manifest));
+        if (string.IsNullOrWhiteSpace(recipe.Root) || !Directory.Exists(recipe.Root))
+            return;
+
+        string? parentDir = Path.GetDirectoryName(recipe.Root);
+        Assert.NotNull(parentDir);
+        var resolver = new Composition.SeedDecomposerResolver(new NullServiceProvider(), []);
+        string key = recipe.Aliases.Count > 0 ? recipe.Aliases[0] : recipe.Authority;
+        Assert.True(resolver.TryResolveGeneration(
+            key, parentDir, out _, out var resolvedRoot));
+        Assert.Equal(Path.GetFullPath(recipe.Root), Path.GetFullPath(resolvedRoot));
+    }
+
+    private sealed class NullServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => null;
     }
 
     private static void CreateCiliFiles(string root, string prefix)

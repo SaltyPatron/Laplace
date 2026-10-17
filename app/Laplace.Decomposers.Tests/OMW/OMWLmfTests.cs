@@ -186,7 +186,7 @@ public sealed class OMWLmfTests
     [SkippableFact]
     public async Task Current_Vault_OMW2_Enumerates_32_Lexicons_And_Parses_A_Real_One()
     {
-        const string root = "/vault/Data/.refresh-20260903/OMW-2.0";
+        const string root = "/vault/Data/OMW-2.0";
         Skip.IfNot(Directory.Exists(root), "staged OMW 2.0 estate is not mounted");
 
         IngestArtifactGraph graph = Assert.IsType<IngestArtifactGraph>(

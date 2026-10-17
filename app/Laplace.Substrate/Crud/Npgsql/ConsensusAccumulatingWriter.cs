@@ -261,16 +261,20 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             precommitVerifier: null, ct);
 
     /// <summary>
-    /// One rating period within a cell: the opponent rating and opponent deviation
-    /// (phi), fixed-point 1e9. Ordered so a cell's periods serialize stably.
+    /// One rating period within a cell: the opponent rating, opponent deviation
+    /// (phi), and exact unit score, fixed-point 1e9. Ordered so a cell's periods
+    /// serialize stably and match the SQL evidence grouping in consensus.evidence_rows_typed.
     /// </summary>
-    private readonly record struct PeriodKey(long OpponentRatingFp1e9, long PhiFp1e9)
+    private readonly record struct PeriodKey(
+        long OpponentRatingFp1e9, long PhiFp1e9, long UnitScoreFp1e9)
         : IComparable<PeriodKey>
     {
         public int CompareTo(PeriodKey other)
         {
             int c = OpponentRatingFp1e9.CompareTo(other.OpponentRatingFp1e9);
-            return c != 0 ? c : PhiFp1e9.CompareTo(other.PhiFp1e9);
+            if (c != 0) return c;
+            c = PhiFp1e9.CompareTo(other.PhiFp1e9);
+            return c != 0 ? c : UnitScoreFp1e9.CompareTo(other.UnitScoreFp1e9);
         }
     }
 
@@ -334,6 +338,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
 
             var delta = atomicWorkingSet ? null : BuildDelta(changes);
             AtomicFoldStats atomicStats = default;
+            List<(Hash128 Entity, Hash128 Type)>? committedMaskPairs = null;
             ApplyResult result;
             if (atomicWorkingSet)
             {
@@ -354,7 +359,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                         var acceptedDelta = BuildDelta(
                             changes, acceptance.AttestationIds, acceptance.Rows);
                         if (acceptedDelta is { Count: > 0 })
-                            atomicStats = await UpsertDeltaInTransactionAsync(
+                            (atomicStats, committedMaskPairs) = await UpsertDeltaInTransactionAsync(
                                 acceptedDelta, connection, transaction, token).ConfigureAwait(false);
 
                         if (appendConversation is not null)
@@ -369,6 +374,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
 
                 if (!result.JournalReplayHit)
                 {
+                    RecordCommittedMaskPairs(committedMaskPairs);
                     Interlocked.Add(ref _cellsFolded, atomicStats.Cells);
                     Interlocked.Add(ref _consensusBackendTicks, atomicStats.ConsensusBackendTicks);
                     Interlocked.Add(ref _highwayMaskBackendTicks, atomicStats.MaskBackendTicks);
@@ -587,15 +593,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out bool existed);
                 if (!existed)
                 {
-                    d.FirstPeriod = new(a.OpponentRatingFp1e9, a.OpponentRdFp1e9);
-                    d.FirstAggregate = new()
-                    {
-                        Games = a.ObservationCount,
-                        SumScoreFp1e9 = score,
-                    };
-                    d.Games = d.FirstAggregate.Games;
-                    d.SumScoreFp1e9 = d.FirstAggregate.SumScoreFp1e9;
-                    d.MaxTsUnixUs = a.LastObservedAtUnixUs;
+                    InitObservationPeriods(
+                        ref d, a.OpponentRatingFp1e9, a.OpponentRdFp1e9,
+                        a.ObservationCount, score, a.LastObservedAtUnixUs);
                 }
                 else
                 {
@@ -610,9 +610,56 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         return obs;
     }
 
+    private static void InitObservationPeriods(
+        ref Delta d, long oppRating, long phi, long games, long score, long tsUnixUs)
+    {
+        long unitScore = games > 0 ? score / games : 0;
+        long rem = games > 0 ? score - (unitScore * games) : 0;
+        if (rem == 0)
+        {
+            d.FirstPeriod = new(oppRating, phi, unitScore);
+            d.FirstAggregate = new() { Games = games, SumScoreFp1e9 = score };
+        }
+        else
+        {
+            long step = rem > 0 ? 1L : -1L;
+            long remCount = Math.Abs(rem);
+            long baseCount = games - remCount;
+            long remUnit = unitScore + step;
+            d.FirstPeriod = new(oppRating, phi, remUnit);
+            d.FirstAggregate = new()
+            {
+                Games = remCount,
+                SumScoreFp1e9 = checked(remUnit * remCount),
+            };
+            if (baseCount > 0)
+                AddPeriod(
+                    ref d, new(oppRating, phi, unitScore),
+                    baseCount, checked(unitScore * baseCount));
+        }
+        d.Games = games;
+        d.SumScoreFp1e9 = score;
+        d.MaxTsUnixUs = tsUnixUs;
+    }
+
     private static void FoldInto(ref Delta d, long phi, long oppRating, long games, long score, long tsUnixUs)
     {
-        AddPeriod(ref d, new(oppRating, phi), games, score);
+        long unitScore = games > 0 ? score / games : 0;
+        long rem = games > 0 ? score - (unitScore * games) : 0;
+        if (rem == 0)
+        {
+            AddPeriod(ref d, new(oppRating, phi, unitScore), games, score);
+        }
+        else
+        {
+            long step = rem > 0 ? 1L : -1L;
+            long remCount = Math.Abs(rem);
+            long baseCount = games - remCount;
+            long remUnit = unitScore + step;
+            AddPeriod(ref d, new(oppRating, phi, remUnit), remCount, checked(remUnit * remCount));
+            if (baseCount > 0)
+                AddPeriod(ref d, new(oppRating, phi, unitScore), baseCount, checked(unitScore * baseCount));
+        }
         d.Games = AttestationMergeMath.SafeAddGames(d.Games, games);
         d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(d.SumScoreFp1e9, score);
         if (tsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = tsUnixUs;
@@ -724,7 +771,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     /// commit or roll back together. Cells are sorted (type, edge id, subject) and
     /// mask pairs (entity, type), the same lock order the lanes use.
     /// </summary>
-    private async Task<AtomicFoldStats> UpsertDeltaInTransactionAsync(
+    private async Task<(AtomicFoldStats Stats, List<(Hash128 Entity, Hash128 Type)> MaskPairs)> UpsertDeltaInTransactionAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta,
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -811,8 +858,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         var maskPairs = new HashSet<(Hash128 Entity, Hash128 Type)>(cells.Length * 2);
         foreach (var cell in cells)
         {
-            maskPairs.Add((cell.Key.S, cell.Key.T));
-            if (cell.Key.O is { } objectId) maskPairs.Add((objectId, cell.Key.T));
+            AddUnseenMaskPair(maskPairs, (cell.Key.S, cell.Key.T));
+            if (cell.Key.O is { } objectId) AddUnseenMaskPair(maskPairs, (objectId, cell.Key.T));
         }
         var orderedPairs = maskPairs.ToList();
         orderedPairs.Sort(static (x, y) =>
@@ -844,9 +891,39 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             maskCalls++;
         }
         long maskTicks = System.Diagnostics.Stopwatch.GetTimestamp() - maskStarted;
-        return new AtomicFoldStats(
-            folded, masks, foldTicks, maskTicks,
-            foldCalls, maskCalls, orderedPairs.Count);
+        return (
+            new AtomicFoldStats(
+                folded, masks, foldTicks, maskTicks,
+                foldCalls, maskCalls, orderedPairs.Count),
+            orderedPairs);
+    }
+
+    private void AddUnseenMaskPair(
+        HashSet<(Hash128 Entity, Hash128 Type)> target,
+        (Hash128 Entity, Hash128 Type) pair)
+    {
+        var deposited = _depositedMaskPairs[MaskShard(pair.Entity)];
+        lock (deposited)
+        {
+            if (deposited.Contains(pair)) return;
+        }
+        target.Add(pair);
+    }
+
+    private void RecordCommittedMaskPairs(List<(Hash128 Entity, Hash128 Type)>? pairs)
+    {
+        if (pairs is not { Count: > 0 }) return;
+        int capPerShard = DepositedMaskPairsCap / MaskShards;
+        foreach (var pair in pairs)
+        {
+            var deposited = _depositedMaskPairs[MaskShard(pair.Entity)];
+            lock (deposited)
+            {
+                if (deposited.Count + 1 > capPerShard)
+                    deposited.Clear();
+                deposited.Add(pair);
+            }
+        }
     }
 
     /// <summary>
@@ -1132,7 +1209,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             // index probes. This shard's FIFO is the synchronization; no pair in
             // another shard shares an entity.
             var deposited = _depositedMaskPairs[shard];
-            pairs.RemoveAll(deposited.Contains);
+            lock (deposited)
+            {
+                pairs.RemoveAll(deposited.Contains);
+            }
             if (pairs.Count == 0) return;
             var todo = pairs;
 
@@ -1206,9 +1286,12 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
 
             // Mark AFTER every chunk commits. A failed lane stays poisoned and its
             // pairs stay resendable on a new writer/run.
-            if (deposited.Count + todo.Count > DepositedMaskPairsCap / MaskShards)
-                deposited.Clear();
-            deposited.UnionWith(todo);
+            lock (deposited)
+            {
+                if (deposited.Count + todo.Count > DepositedMaskPairsCap / MaskShards)
+                    deposited.Clear();
+                deposited.UnionWith(todo);
+            }
         }
     }
 

@@ -17,8 +17,10 @@ void laplace_substrate_perfcache_init(void);
 
 int laplace_substrate_native_mkl_threads(void);
 
-
-
+const char *laplace_substrate_perfcache_path(void);
+const char *laplace_substrate_highway_perfcache_path(void);
+const char *laplace_substrate_vocabulary_perfcache_path(void);
+const char *laplace_substrate_chess_position_perfcache_path(void);
 
 bool laplace_perfcache_ready(void);
 

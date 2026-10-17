@@ -81,12 +81,17 @@ public sealed class SourceGenerationCatalog
     private static IEnumerable<string> BuiltInRecipeManifests()
     {
         var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        var starts = new List<string> { AppContext.BaseDirectory, Directory.GetCurrentDirectory() };
+        if (Laplace.Engine.Core.LaplaceInstall.TryRepoRoot(out string repoRoot))
+            starts.Add(repoRoot);
+        foreach (string start in starts)
         {
             var cursor = new DirectoryInfo(Path.GetFullPath(start));
             while (cursor is not null)
             {
                 string cookbook = Path.Combine(cursor.FullName, "recipes");
+                if (!Directory.Exists(cookbook))
+                    cookbook = Path.Combine(cursor.FullName, "Laplace", "recipes");
                 if (Directory.Exists(cookbook))
                 {
                     foreach (string path in Directory.EnumerateFiles(

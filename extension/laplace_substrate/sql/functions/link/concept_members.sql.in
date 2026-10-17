@@ -21,6 +21,14 @@ BEGIN ATOMIC
     FROM laplace.v_consensus_unrefuted hs
     WHERE hs.object_id = p_concept AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
     UNION ALL
+    SELECT hs.subject_id, 'sense'::text,
+           LEAST(consensus.eff_mu_display(hs.rating, hs.rd), consensus.eff_mu_display(ss.rating, ss.rd)),
+           hs.witness_count + ss.witness_count
+    FROM laplace.v_consensus_unrefuted ss
+    JOIN laplace.v_consensus_unrefuted hs
+      ON hs.object_id = ss.subject_id AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+    WHERE ss.object_id = p_concept AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+    UNION ALL
     -- A source-owned lexical member (for example VerbNet_Member) carries
     -- EVOKES_FRAME at its natural grain and exposes its surface through
     -- HAS_NAME. Preserve the public surface-member contract without

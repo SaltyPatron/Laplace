@@ -13,19 +13,23 @@ internal static class IngestDataPaths
     private static readonly Dictionary<string, string> RelativeByCli = new(StringComparer.OrdinalIgnoreCase)
     {
         ["unicode"] = "UCD/Public/UCD/latest",
+        ["uca"] = "UCD/Public/UCD/latest/uca",
         ["iso639"] = "ISO639",
         ["document"] = "test-data/text",
+        ["project-gutenberg"] = "ProjectGutenberg/text",
         ["cili"] = "CILI",
         ["wordnet"] = "Wordnet",
-        ["omw"] = "OMW",
-        ["verbnet"] = "VerbNet",
-        ["propbank"] = "PropBank",
+        ["oewn"] = "OpenEnglishWordNet-2025-plus",
+        ["omw"] = "OMW-2.0",
+        ["verbnet"] = "VerbNet/verbnet-cu-clear",
+        ["verbnet-gl"] = "VerbNet/verbnet-cu-clear/vn-gl",
+        ["propbank"] = "PropBank/propbank-frames",
         ["framenet"] = "FrameNet/framenet_v17",
         ["semlink"] = "SemLink",
         ["mapnet"] = "MapNet-0.1",
         ["wordframenet"] = "WordFrameNet",
         ["conceptnet"] = "ConceptNet",
-        ["atomic2020"] = "Atomic2020",
+        ["atomic2020"] = "Atomic/Atomic2020",
         ["ud"] = "UD-Treebanks",
         ["wiktionary"] = "Wiktionary",
         ["tatoeba"] = "Tatoeba",
@@ -52,6 +56,12 @@ internal static class IngestDataPaths
 
         string ingestRoot = LaplaceInstall.ResolveIngestRoot();
         string primary = Path.GetFullPath(Path.Combine(ingestRoot, relative));
+        if (cliSource.Equals("atomic2020", StringComparison.OrdinalIgnoreCase)
+            && !Directory.Exists(primary))
+        {
+            string flat = Path.GetFullPath(Path.Combine(ingestRoot, "Atomic2020"));
+            if (Directory.Exists(flat)) return flat;
+        }
         // Coding corpora may live in the sibling models directory; an explicit CLI path or
         // an existing ingest-root corpus takes priority.
         if ((cliSource.Equals("stack", StringComparison.OrdinalIgnoreCase)

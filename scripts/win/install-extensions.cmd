@@ -28,9 +28,10 @@ if not exist "%DEPLOY%\share" mkdir "%DEPLOY%\share"
 if not exist "%DEPLOY%\share\extension" mkdir "%DEPLOY%\share\extension"
 del /q "%DEPLOY%\lib\*.stale~*" 2>nul
 del /q "%DEPLOY%\share\*.stale~*" 2>nul
-rem Locked stale leftovers: move out of deploy (same law as hot-swap).
+rem Locked stale leftovers: move out of deploy\lib on the same volume (MoveFile across drives copies+deletes, failing on mapped DLLs).
 powershell -NoProfile -Command ^
-  "$d='%DEPLOY%\lib'; $t='%TEMP%\laplace-deploy-stale'; New-Item -ItemType Directory -Force -Path $t | Out-Null;" ^
+  "$d='%DEPLOY%\lib'; $t='%LAPLACE_WORK%\deploy-stale'; New-Item -ItemType Directory -Force -Path $t | Out-Null;" ^
+  "Get-ChildItem -LiteralPath $t -Filter '*.stale~*' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue;" ^
   "Get-ChildItem -LiteralPath $d -Filter '*.stale~*' -ErrorAction SilentlyContinue | ForEach-Object {" ^
   "  Move-Item -LiteralPath $_.FullName -Destination (Join-Path $t $_.Name) -Force -ErrorAction SilentlyContinue }"
 
@@ -191,8 +192,9 @@ rem Locked DLL: rename aside, then MOVE the stale image OUT of deploy (not next 
 rem live libs). Leaving *.stale~* under deploy\lib has crashed the postmaster
 rem (VCRUNTIME / fsync of hot-swap leftovers).
 set "STALE_NAME=%BASE%.stale~%RANDOM%"
-set "STALE_DIR=%TEMP%\laplace-deploy-stale"
+set "STALE_DIR=%DESTDIR%\..\.stale"
 if not exist "%STALE_DIR%" mkdir "%STALE_DIR%" >nul 2>&1
+del /q "%STALE_DIR%\*.stale~*" >nul 2>&1
 ren "%DESTDIR%\%BASE%" "%STALE_NAME%" 2>nul || goto sc_fail
 copy /y "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul || goto sc_fail
 move /y "%DESTDIR%\%STALE_NAME%" "%STALE_DIR%\%STALE_NAME%" >nul 2>nul

@@ -90,6 +90,13 @@ internal static class AppComposition
         services.AddSingleton<ITenantResolver, ApiKeyTenantResolver>();
         services.AddSingleton<SubstrateClient>();
         services.AddSingleton<ISubstrateClient>(sp => sp.GetRequiredService<SubstrateClient>());
+        services.AddSingleton(sp =>
+        {
+            var sc = sp.GetRequiredService<SubstrateClient>();
+            var options = Laplace.Endpoints.Mcp.McpHttpOptions.FromEnvironment();
+            return new Laplace.Endpoints.Mcp.McpSessions(options, () =>
+                new Laplace.Endpoints.Mcp.SubstrateTools(sc.DataSource, sc.ChessReadOnlyDataSource));
+        });
         services.AddSingleton<MachineCostWitnessService>();
         services.AddSingleton<ExploreDecomposeService>();
         services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());

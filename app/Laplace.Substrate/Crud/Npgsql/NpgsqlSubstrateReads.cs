@@ -551,14 +551,24 @@ public static partial class NpgsqlSubstrateReads
 
     /// <summary>
     /// <c>consensus.salient_facts(id, relation_type, limit)</c> — an entity's typed consensus
-    /// relations ranked by effective rating.
+    /// relations ranked by effective rating, with fallback to <c>ops.consensus_out_readable</c>
+    /// when no synset-band facts exist.
     /// </summary>
     public static Task<IReadOnlyList<SalientFactRow>> SalientFactsAsync(
         NpgsqlDataSource dataSource, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT f.type, f.fact, f.eff_mu, f.witnesses
-            FROM consensus.salient_facts(@id, NULL, @limit) f
+            WITH sf AS (
+                SELECT f.type, f.fact, f.eff_mu, f.witnesses
+                FROM consensus.salient_facts(@id, NULL, @limit) f
+            )
+            SELECT sf.type, sf.fact, sf.eff_mu, sf.witnesses
+            FROM sf
+            UNION ALL
+            SELECT c.type, c.object AS fact, c.eff_mu, c.witnesses
+            FROM ops.consensus_out_readable(@id, @limit) c
+            WHERE NOT EXISTS (SELECT 1 FROM sf)
+              AND c.object IS NOT NULL
             """,
             static r => new SalientFactRow(r.GetString(0), r.GetString(1), r.GetDecimal(2), r.GetInt64(3)),
             p =>
@@ -748,8 +758,17 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT f.type, f.fact, f.eff_mu, f.witnesses
-            FROM consensus.salient_facts(@id, NULL, @limit) f
+            WITH sf AS (
+                SELECT f.type, f.fact, f.eff_mu, f.witnesses
+                FROM consensus.salient_facts(@id, NULL, @limit) f
+            )
+            SELECT sf.type, sf.fact, sf.eff_mu, sf.witnesses
+            FROM sf
+            UNION ALL
+            SELECT c.type, c.object AS fact, c.eff_mu, c.witnesses
+            FROM ops.consensus_out_readable(@id, @limit) c
+            WHERE NOT EXISTS (SELECT 1 FROM sf)
+              AND c.object IS NOT NULL
             """,
             static r => new SalientFactRow(r.GetString(0), r.GetString(1), r.GetDecimal(2), r.GetInt64(3)),
             p =>
@@ -1347,6 +1366,24 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "concept_peers", onError: onError);
 
+    public readonly record struct WordPeerIdRow(byte[] WordId, byte[] PeerId, double Strength);
+
+    /// <summary>
+    /// Batch WordNet synset peers, morphological forms, and derivational relatives for an array of word entity IDs.
+    /// </summary>
+    public static Task<IReadOnlyList<WordPeerIdRow>> WordPeerIdsBatchAsync(
+        NpgsqlConnection conn, byte[][] wordIds, int limitPerWord, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn,
+            "SELECT word_id, peer_id, strength FROM lexical.word_peer_ids_batch(@ids, @limit)",
+            static r => new WordPeerIdRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
+            p =>
+            {
+                var param = p.AddWithValue("ids", wordIds);
+                param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                p.AddWithValue("limit", limitPerWord);
+            }, ct: ct, label: "word_peer_ids_batch", onError: onError);
+
     public readonly record struct ContainerRow(string IdHex, short Tier, string Type, int Hops, string Label);
 
     public static async Task<IReadOnlyList<ContainerRow>> ContainersAsync(
@@ -1637,13 +1674,55 @@ public static partial class NpgsqlSubstrateReads
     /// <summary>
     /// One round trip: the resolve CTE feeds both the physical form (kind=0 anchor row)
     /// and the meaning neighbors (kind=1 rows, gated by <paramref name="includeMeaning"/>).
+    /// Includes synset salient facts, concept peers, and constituent-word expansion for multi-word inputs.
     /// </summary>
     public static Task<IReadOnlyList<EmbeddingLookupRow>> EmbeddingLookupAsync(
         NpgsqlConnection conn, string target, int meaningLimit, bool includeMeaning, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ErrorTranslator? onError = null, string[]? constituentTerms = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             WITH resolved AS (
                 SELECT converse.resolve_ref(@target) AS id
+            ),
+            direct_meaning AS (
+                SELECT sf.type AS rel, sf.fact AS obj, sf.eff_mu, sf.witnesses, sf.ord
+                FROM resolved r
+                CROSS JOIN LATERAL consensus.salient_facts(r.id, NULL, @limit)
+                    WITH ORDINALITY AS sf(type, fact, eff_mu, witnesses, ord)
+                WHERE @include AND r.id IS NOT NULL
+                UNION ALL
+                SELECT 'PEER'::text AS rel, cp.peer AS obj, round(cp.strength::numeric, 1) AS eff_mu, 1::bigint AS witnesses, (100 + cp.ord) AS ord
+                FROM resolved r
+                CROSS JOIN LATERAL lexical.concept_peers(r.id, GREATEST(4, @limit / 2))
+                    WITH ORDINALITY AS cp(peer, kind, strength, ord)
+                WHERE @include AND r.id IS NOT NULL
+            ),
+            fallback_direct AS (
+                SELECT m.type AS rel, m.object AS obj, m.eff_mu, m.witnesses, (200 + m.ord) AS ord
+                FROM resolved r
+                CROSS JOIN LATERAL ops.consensus_out_readable(r.id, @limit)
+                    WITH ORDINALITY AS m(type, object, eff_mu, witnesses, ord)
+                WHERE @include AND r.id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM direct_meaning)
+            ),
+            constituent_meaning AS (
+                SELECT (u.term || ':' || sf.type) AS rel, sf.fact AS obj, sf.eff_mu, sf.witnesses, (u.tord * 100 + sf.sord) AS ord
+                FROM resolved r
+                CROSS JOIN LATERAL unnest(COALESCE(@terms, ARRAY[]::text[])) WITH ORDINALITY AS u(term, tord)
+                CROSS JOIN LATERAL (SELECT converse.resolve_ref(u.term) AS wid) w
+                CROSS JOIN LATERAL consensus.salient_facts(w.wid, NULL, GREATEST(2, @limit / GREATEST(1, COALESCE(array_length(@terms, 1), 1))))
+                    WITH ORDINALITY AS sf(type, fact, eff_mu, witnesses, sord)
+                WHERE @include AND r.id IS NULL AND w.wid IS NOT NULL
+            ),
+            all_meaning AS (
+                SELECT rel, obj, eff_mu, witnesses, ord FROM (
+                    SELECT rel, obj, eff_mu, witnesses, ord FROM direct_meaning
+                    UNION ALL
+                    SELECT rel, obj, eff_mu, witnesses, ord FROM fallback_direct
+                    UNION ALL
+                    SELECT rel, obj, eff_mu, witnesses, ord FROM constituent_meaning
+                ) combined
+                ORDER BY ord
+                LIMIT @limit
             )
             SELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,
                    f.x, f.y, f.z, f.m, f.radius, f.n_constituents,
@@ -1658,11 +1737,9 @@ public static partial class NpgsqlSubstrateReads
             UNION ALL
             SELECT 1 AS kind, m.ord, r.id,
                    NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::int,
-                   m.type, m.object, m.eff_mu, m.witnesses
+                   m.rel, m.obj, m.eff_mu, m.witnesses
             FROM resolved r
-            CROSS JOIN LATERAL ops.consensus_out_readable(r.id, @limit)
-                WITH ORDINALITY AS m(type, object, eff_mu, witnesses, ord)
-            WHERE @include
+            CROSS JOIN all_meaning m
             ORDER BY kind, ord
             """,
             static r => new EmbeddingLookupRow(
@@ -1682,6 +1759,8 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("target", target);
                 p.AddWithValue("limit", meaningLimit);
                 p.AddWithValue("include", includeMeaning);
+                var termsParam = p.Add("terms", NpgsqlDbType.Array | NpgsqlDbType.Text);
+                termsParam.Value = (object?)constituentTerms ?? DBNull.Value;
             }, ct: ct, label: "embedding_lookup", onError: onError);
 
     public readonly record struct TopRelationEdgeRow(

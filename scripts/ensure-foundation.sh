@@ -59,7 +59,7 @@ FOUNDATION=(
   "unicode:UnicodeDecomposer:0"
   "iso639:ISO639Decomposer:1"
   "operational:OperationalDecomposer:2"
-  "cili:CILIDecomposer:2"
+  "cili:CILIDecomposer:1"
   "wordnet:WordNetDecomposer:2"
   "verbnet:VerbNetDecomposer:2"
   "propbank:PropBank:2"

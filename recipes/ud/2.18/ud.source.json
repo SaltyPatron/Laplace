@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 2,
   "selected": true,
-  "root": ".refresh-20260903/UD-Treebanks",
+  "root": "UD-Treebanks",
   "aliases": [
     "ud"
   ],
@@ -13,11 +13,11 @@
     {
       "selector": "ud-treebanks-v2.18.tgz",
       "disposition": "equivalent-packaging",
-      "required": true,
-      "reason": "Compressed release of the same treebanks as extracted/ud-treebanks-v2.18/."
+      "required": false,
+      "reason": "Compressed release of the same treebanks as ud-treebanks-v2.18/."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/*.conllu",
+      "selector": "ud-treebanks-v2.18/*/*.conllu",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-delimited-recipe/v1",
@@ -36,46 +36,68 @@
       }
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/*-ud-*.txt",
+      "selector": "ud-treebanks-v2.18/*/*-ud-*.txt",
       "disposition": "equivalent-packaging",
       "required": false,
       "reason": "Raw text of the same sentences; every CoNLL-U block carries it as # text."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/stats.xml",
+      "selector": "ud-treebanks-v2.18/*/stats.xml",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Counts derived from the treebank itself; not testimony."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/LICENSE.txt",
+      "selector": "ud-treebanks-v2.18/*/LICENSE.txt",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Licence text; provenance, not linguistic testimony."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/README.*",
+      "selector": "ud-treebanks-v2.18/*/README.*",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Treebank documentation; not linguistic testimony."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/*.jar",
+      "selector": "ud-treebanks-v2.18/*/*.jar",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Build tooling shipped inside one treebank."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/*.py",
+      "selector": "ud-treebanks-v2.18/*/*.py",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Build tooling shipped inside one treebank."
     },
     {
-      "selector": "extracted/ud-treebanks-v2.18/*/merge/**",
+      "selector": "ud-treebanks-v2.18/*/merge/**",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Tooling that restores the BCCWJ word forms from the separately licensed BCCWJ core file, which the release does not ship; the pickles are its lookup tables."
+    },
+    {
+      "selector": ".landed",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local acquisition completion marker, not source content."
+    },
+    {
+      "selector": ".archive/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Retained acquisition archives and integrity receipts; the selected working copy supplies the source content."
+    },
+    {
+      "selector": ".superseded-*/**",
+      "disposition": "superseded",
+      "required": false,
+      "reason": "Retained earlier acquisition; not part of this selected release."
     }
+  ],
+  "artifactPrefixes": [
+    "",
+    "extracted"
   ]
 }

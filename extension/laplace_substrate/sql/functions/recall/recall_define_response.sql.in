@@ -6,6 +6,13 @@ CREATE OR REPLACE FUNCTION converse.recall_define_response(p_topic bytea, p_cont
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT d.definition, d.eff_mu, d.witnesses
-    FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[])) d;
+    WITH fast AS MATERIALIZED (
+        SELECT d.definition AS reply, d.eff_mu, d.witnesses
+        FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[])) d
+    )
+    SELECT f.reply, f.eff_mu, f.witnesses FROM fast f
+    UNION ALL
+    SELECT l.definition, l.eff_mu, l.witnesses
+    FROM lexical.define(p_topic, 5) l
+    WHERE NOT EXISTS (SELECT 1 FROM fast);
 END;

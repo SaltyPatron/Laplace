@@ -93,7 +93,6 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert'
     LANGUAGE C VOLATILE
-    SET plan_cache_mode = force_custom_plan
     SET enable_material = off
     SET enable_hashjoin = on
     SET enable_mergejoin = on
@@ -118,7 +117,6 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_type'
     LANGUAGE C VOLATILE
-    SET plan_cache_mode = force_custom_plan
     SET enable_material = off
     SET enable_hashjoin = on
     SET enable_mergejoin = on
@@ -141,7 +139,6 @@ CREATE OR REPLACE FUNCTION consensus.merge_evidence(
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_merge_evidence'
     LANGUAGE C VOLATILE
-    SET plan_cache_mode = force_custom_plan
     SET enable_material = off
     SET enable_hashjoin = on
     SET enable_mergejoin = on
