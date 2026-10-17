@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: ladder
-        options: [ladder, unicode, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink]
+        options: [ladder, unicode, uca, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink]
       advanced_path_override:
         description: "ADVANCED: local file/directory override for a single source; normally leave blank"
         type: string

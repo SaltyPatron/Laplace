@@ -578,6 +578,33 @@
         }
       ]
     },
+    "chess-tactic-outcomes": {
+      "decomposer": "ChessTacticOutcomes",
+      "layer": 24,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": []
+    },
+    "chess-position-outcomes": {
+      "decomposer": "ChessPositionOutcomes",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": []
+    },
+    "chess-player-context-outcomes": {
+      "decomposer": "ChessPlayerContextOutcomes",
+      "layer": 25,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": []
+    },
     "chess-transitions": {
       "decomposer": "ChessTransitions",
       "layer": 22,
@@ -688,7 +715,7 @@
     },
     "verbnet-gl": {
       "decomposer": "VerbNet-GL",
-      "layer": 2,
+      "layer": 3,
       "prerequisites": [
         "iso639"
       ],

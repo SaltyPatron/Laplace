@@ -102,7 +102,7 @@ public static class EtlManifest
 
 
 
-            ["omw"] = Row("omw", "OMWDecomposer", 3, "AcademicCurated",
+            ["omw"] = Row("omw", "OMWDecomposer", 1, "AcademicCurated",
                 "omw", new EtlModality("tsv", Glob: "*.tab", RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset, acceptCommentRows: false,
                 bootstrapRelations: OmwBootstrap, requireIliMap: true, hasDedicatedDecomposer: true),
@@ -118,7 +118,7 @@ public static class EtlManifest
                 languageScope: "eng"),
 
 
-            ["cili"] = Row("cili", "CILIDecomposer", 2, "AcademicCurated",
+            ["cili"] = Row("cili", "CILIDecomposer", 1, "AcademicCurated",
                 "cili", new EtlModality("turtle", Glob: "*.ttl", GrammarReady: false),
                 anchor: AnchorResolver.IliSynset),
 
@@ -146,6 +146,8 @@ public static class EtlManifest
             ["wordframenet"] = Row("wordframenet", "WordFrameNetDecomposer", 3, "AcademicCurated",
                 "wordframenet", new EtlModality("text", GrammarReady: false),
                 anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
+            // predicatematrix has no route of its own: semlink ingests it (IngestCommands
+            // receipts it under SemLinkDecomposer), so its layer is semlink's.
             ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated",
                 "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),

@@ -2,8 +2,8 @@
 """Exercise the real shell wrapper with a fake CLI; no corpus or database access."""
 import os
 import grp
+import json
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
@@ -19,7 +19,9 @@ class IngestExitTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         scripts = self.root / "scripts"
         (scripts / "lib").mkdir(parents=True)
-        for name in ("ingest-source.sh", "classify-ingest-exit.sh", "machine-env.py", "lib/storage.sh", "lib/installation.sh"):
+        (scripts / "win").mkdir()
+        for name in ("ingest-source.sh", "classify-ingest-exit.sh", "machine-env.py", "lib/storage.sh", "lib/installation.sh",
+                     "win/witness-manifest.json"):
             shutil.copy2(ROOT / "scripts" / name, scripts / name)
         (scripts / "lib/fp.sh").write_text("fp_compute() { echo fixture; }\nfp_check() { return 1; }\nfp_record() { :; }\n")
         (scripts / "decomposer-gates.json").write_text('{"sources":{"wordnet":{"decomposer":"fixture"}}}')
@@ -166,12 +168,10 @@ fi
         self.assertTrue((self.root / "prefix/ingest/current").is_symlink())
 
     def test_every_ladder_source_is_accepted_alone(self):
-        text = (ROOT / "scripts/ingest-source.sh").read_text(encoding="utf-8")
-        ladder = []
-        for name in ("FLOOR", "RELATIONS", "USAGE"):
-            match = re.search(rf"^{name}=\(([^)]*)\)", text, re.M)
-            self.assertIsNotNone(match, name)
-            ladder.extend(match.group(1).split())
+        # The ladder is the manifest's; ingest-source.sh reads its stages from it.
+        manifest = json.loads((ROOT / "scripts/win/witness-manifest.json").read_text(encoding="utf-8"))
+        ladder = [src["cli"] for stage in manifest["cadence"]
+                  if stage["stage"] in ("floor", "relations", "usage") for src in stage["sources"]]
         self.assertIn("uca", ladder)
         self.assertIn("verbnet-gl", ladder)
         for source in ladder:

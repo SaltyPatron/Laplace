@@ -30,21 +30,6 @@ def parse_seed_foundation_cmd(text: str) -> list[str] | None:
     return out or None
 
 
-def parse_ensure_foundation_sh(text: str) -> list[str] | None:
-    m = re.search(r'FOUNDATION=\(\s*([\s\S]*?)\s*\)', text)
-    if not m:
-        return None
-    out: list[str] = []
-    for line in m.group(1).splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        cli = line.strip('"').split(":")[0]
-        if cli:
-            out.append(cli)
-    return out or None
-
-
 def validate_retired_workflows() -> list[str]:
     errs: list[str] = []
     workflows = ROOT / ".github" / "workflows"
@@ -213,16 +198,6 @@ def extract_bash_array(text: str, var_name: str) -> list[str] | None:
     if quoted:
         return quoted
     return [t for t in inner.split() if t and not t.startswith("#")]
-
-
-def parse_ingest_source_all(text: str) -> list[str] | None:
-    floor = extract_bash_array(text, "FLOOR")
-    relations = extract_bash_array(text, "RELATIONS")
-    usage = extract_bash_array(text, "USAGE")
-    document = extract_bash_array(text, "DOCUMENT")
-    if not floor or not relations or not usage or not document:
-        return None
-    return floor + document + relations + usage
 
 
 def parse_seed_stage_relations(text: str) -> list[str] | None:
@@ -505,6 +480,106 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     return errs
 
 
+# EtlManifest rows that are a phase of another source rather than a route of their own.
+_ETL_PHASE_OF = {"predicatematrix": "semlink"}
+
+
+def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
+    """Order and layer are declared once (#1882).
+
+    Order: witness-manifest.json cadence (and foundation.sources for the foundation
+    batch); ensure-foundation.sh and ingest-source.sh read it, and the copies that
+    cannot read it are checked against it here.
+
+    Layer: the runtime layer of a recipe-owned source is its selected recipe's
+    layerOrder (the selected generation wins dispatch and owns its completion);
+    decomposer-gates.json is what completion checks read. The manifest's layer, the
+    gates and EtlManifest's descriptive rows must all agree with it.
+    """
+    errs: list[str] = []
+    sources = gates.get("sources", {})
+
+    def gate_layer(key: str):
+        return sources.get(key, {}).get("layer")
+
+    for stage in manifest.get("cadence", []):
+        if stage.get("stage") not in ("floor", "document", "relations", "usage"):
+            continue
+        for src in stage.get("sources", []):
+            cli, layer = src.get("cli"), src.get("layer")
+            if cli not in sources:
+                errs.append(f"decomposer-gates.json: no entry for ladder source '{cli}'")
+                continue
+            if layer is not None and layer != f"L{gate_layer(cli)}":
+                errs.append(
+                    f"layer drift: {cli} is {layer} in witness-manifest.json, "
+                    f"{gate_layer(cli)} in decomposer-gates.json"
+                )
+
+    for path in sorted((ROOT / "recipes").glob("**/*.source.json")):
+        recipe = json.loads(path.read_text(encoding="utf-8"))
+        if not recipe.get("selected"):
+            continue
+        layer = recipe.get("layerOrder", 0)
+        for alias in recipe.get("aliases") or []:
+            if alias in sources and gate_layer(alias) != layer:
+                errs.append(
+                    f"layer drift: {alias} runs at layerOrder {layer} "
+                    f"({path.relative_to(ROOT).as_posix()}), {gate_layer(alias)} in decomposer-gates.json"
+                )
+
+    etl = ROOT / "app" / "Laplace.Substrate" / "Abstractions" / "EtlManifest.cs"
+    if etl.is_file():
+        for name, layer in re.findall(r'\["([\w-]+)"\] = Row\("[\w-]+", "\w+", (\d+)', read_text(etl)):
+            key = _ETL_PHASE_OF.get(name, name)
+            if key in sources and gate_layer(key) != int(layer):
+                errs.append(
+                    f"layer drift: {name} is layer {layer} in EtlManifest.cs, "
+                    f"{gate_layer(key)} in decomposer-gates.json"
+                )
+
+    foundation = manifest.get("foundation", {}).get("sources", [])
+    for cli in foundation:
+        if cli not in sources:
+            errs.append(f"decomposer-gates.json: no entry for foundation source '{cli}'")
+
+    floor = [
+        src.get("cli")
+        for stage in manifest.get("cadence", [])
+        if stage.get("stage") == "floor"
+        for src in stage.get("sources", [])
+    ]
+    ladder = {
+        src.get("cli")
+        for stage in manifest.get("cadence", [])
+        if stage.get("stage") in ("floor", "relations")
+        for src in stage.get("sources", [])
+    }
+    workflow = read_text(ROOT / ".github" / "workflows" / "seed-foundation.yml")
+    m = re.search(r"^\s+source:\n(?:\s+[a-z_]+:.*\n)*?\s+options: \[([^\]]*)\]", workflow, re.M)
+    if not m:
+        errs.append("seed-foundation.yml: could not parse the source options")
+    else:
+        options = [o.strip() for o in m.group(1).split(",") if o.strip()]
+        unknown = [o for o in options if o != "ladder" and o not in ladder]
+        if unknown:
+            errs.append(f"seed-foundation.yml: source options outside the floor/relations ladder: {unknown}")
+        missing = [s for s in floor + [f for f in foundation if f not in floor] if s not in options]
+        if missing:
+            errs.append(f"seed-foundation.yml: source options lack {missing}")
+
+    ingest_text = read_text(ROOT / "scripts" / "ingest-source.sh")
+    other = re.search(r'^OTHER_SOURCES="([^"]*)"', ingest_text, re.M)
+    if not other:
+        errs.append("ingest-source.sh: could not parse OTHER_SOURCES")
+    else:
+        for key in other.group(1).split():
+            if key.startswith("chess") and key not in sources:
+                errs.append(f"decomposer-gates.json: no entry for ingest-source.sh source '{key}'")
+
+    return errs
+
+
 _LEGACY_TYPE_PATH = re.compile(r"substrate/type/[A-Z]")
 _TYPE_IDENTITY_CARVEOUTS = (
     "substrate/type/grammar/",
@@ -619,11 +694,11 @@ def main() -> int:
     if not ensure_foundation.is_file():
         errs.append("missing foundation helper: scripts/ensure-foundation.sh")
     else:
-        errs.extend(compare_order(
-            "ensure-foundation.sh",
-            foundation,
-            parse_ensure_foundation_sh(read_text(ensure_foundation)),
-        ))
+        ef_text = read_text(ensure_foundation)
+        if "win/witness-manifest.json" not in ef_text or '["foundation"]["sources"]' not in ef_text:
+            errs.append(
+                "ensure-foundation.sh: must read its batch from witness-manifest.json foundation.sources"
+            )
 
     if seed_foundation.is_file():
         errs.extend(compare_order(
@@ -634,11 +709,10 @@ def main() -> int:
     else:
         errs.append("missing foundation helper: scripts/win/seed-foundation.cmd")
 
-    errs.extend(compare_order(
-        "ingest-source.sh all",
-        ingest_all_expected,
-        parse_ingest_source_all(read_text(ingest_sh)),
-    ))
+    if "win/witness-manifest.json" not in ingest_text or not all(
+        f"stage_sources {stage})" in ingest_text for stage in ("floor", "document", "relations", "usage")
+    ):
+        errs.append("ingest-source.sh: must read its ladder stages from witness-manifest.json cadence")
     errs.extend(compare_order(
         "seed-stage.cmd relations",
         expected_seed_stage_relations(manifest),
@@ -676,6 +750,7 @@ def main() -> int:
         with gates_path.open(encoding="utf-8") as f:
             gates_spec = json.load(f)
         errs.extend(validate_decomposer_matrix(manifest, gates_spec))
+        errs.extend(validate_layer_order(manifest, gates_spec))
     else:
         errs.append("decomposer-gates.json: file missing")
 

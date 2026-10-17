@@ -222,8 +222,9 @@ class FoundationCompletion(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         scripts = self.root / "scripts"
-        scripts.mkdir()
-        for name in ("ensure-foundation.sh", "source-layer-complete.py", "decomposer-gates.json"):
+        (scripts / "win").mkdir(parents=True)
+        for name in ("ensure-foundation.sh", "source-layer-complete.py", "decomposer-gates.json",
+                     "win/witness-manifest.json"):
             shutil.copyfile(ROOT / "scripts" / name, scripts / name)
         self.state = self.root / "state.json"
         self.ingests = self.root / "ingests.jsonl"
