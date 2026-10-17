@@ -160,14 +160,10 @@ MUTATIONS = [
            "the same entity and no cross-source merge can ever occur again.",
     file="engine/core/src/hash128.c",
     before="    (void)tier;\n"
-           "    static const uint8_t MERKLE_DOMAIN = 0x01;\n"
            "    blake3_hasher h;\n"
-           "    blake3_hasher_init(&h);\n"
-           "    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));",
-    after="    static const uint8_t MERKLE_DOMAIN = 0x01;\n"
-          "    blake3_hasher h;\n"
+           "    blake3_hasher_init(&h);",
+    after="    blake3_hasher h;\n"
           "    blake3_hasher_init(&h);\n"
-          "    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));\n"
           "    blake3_hasher_update(&h, &tier, sizeof(tier));",
     project="Laplace.Core.Tests",
     filter="FullyQualifiedName~ContentAddressingLaw",

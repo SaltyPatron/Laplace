@@ -481,7 +481,7 @@ public sealed class LabCommandTests : IDisposable
         Assert.True(g.Playing!.Verified);
         Assert.True(g.Event!.Verified);
         Assert.Contains("|Hash128 { Hi = ", g.Playing.Preimage);
-        Assert.NotEqual(g.Line.Id, g.Line.LawId);
+        Assert.Equal(g.Line.Id, g.Line.LawId);   // the composition carries no domain byte (Laplace#1885)
         Assert.Equal(53, g.Plies.Count);
         Assert.Equal("d2d4", g.Plies[0].Uci);
         Assert.Equal(5, g.Plies[0].MoveAtoms.Count);
