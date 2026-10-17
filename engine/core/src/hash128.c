@@ -5,6 +5,9 @@
 #include <string.h>
 
 #include "blake3.h"
+#include "laplace/laplace.h"   /* Laplace-Native: lp_id_compose, the one implementation of a composition's ID */
+
+_Static_assert(sizeof(hash128_t) == sizeof(lp_id), "a hash128_t is an lp_id: 16 bytes");
 
 void hash128_blake3(const uint8_t* data, size_t len, hash128_t* out) {
     blake3_hasher h;
@@ -24,12 +27,13 @@ void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t
      * the child id for exactly this reason.
      */
     (void)tier;
-    blake3_hasher h;
-    blake3_hasher_init(&h);
-    if (children && n > 0) {
-        blake3_hasher_update(&h, children, n * sizeof(hash128_t));
+    if (children && n >= 2) {   /* Laplace-Native's composition: BLAKE3-128 of the children's IDs, nothing else */
+        lp_id_compose((const lp_id*)children, n, (lp_id*)out);
+        return;
     }
-    blake3_hasher_finalize(&h, (uint8_t*)out, sizeof(*out));
+    /* n < 2: callers collapse a one-child node to its child before they get here (hash_composer); what reaches this
+     * keeps the hash of the bytes it was given, as before */
+    hash128_blake3((const uint8_t*)children, children ? n * sizeof(hash128_t) : 0, out);
 }
 
 int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,

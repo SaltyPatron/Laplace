@@ -86,6 +86,22 @@ endif()
 set(LAPLACE_EXTERNAL "${LAPLACE_EXTERNAL}"
     CACHE PATH "Path to the shared external dependency tree")
 
+# Laplace-Native: the one implementation of identity (Laplace-Wiki Storage/Identity.md). A composition's ID is
+# Laplace-Native's lp_id_compose, compiled from its checkout into laplace_core, never a copy of it (Laplace#1885).
+# LAPLACE_NATIVE (laplace.env's, the desktop's machine environment) names the checkout; else the external tree's link.
+if(NOT DEFINED LAPLACE_NATIVE OR LAPLACE_NATIVE STREQUAL "")
+    if(DEFINED ENV{LAPLACE_NATIVE} AND NOT "$ENV{LAPLACE_NATIVE}" STREQUAL "")
+        file(TO_CMAKE_PATH "$ENV{LAPLACE_NATIVE}" LAPLACE_NATIVE)
+    else()
+        set(LAPLACE_NATIVE "${LAPLACE_EXTERNAL}/laplace-native")
+    endif()
+endif()
+set(LAPLACE_NATIVE "${LAPLACE_NATIVE}" CACHE PATH "Laplace-Native checkout: identity (lp_id_compose)")
+if(NOT EXISTS "${LAPLACE_NATIVE}/src/identity.c" OR NOT EXISTS "${LAPLACE_NATIVE}/include/laplace/laplace.h")
+    message(FATAL_ERROR "Laplace-Native not found at '${LAPLACE_NATIVE}' (src/identity.c, include/laplace/laplace.h). "
+                        "Set LAPLACE_NATIVE to a Laplace-Native checkout, or link it as \${LAPLACE_EXTERNAL}/laplace-native.")
+endif()
+
 set(LAPLACE_UNICODE_VERSION "17.0.0"
     CACHE STRING "Unicode version pinned for substrate determinism. MUST be a stable release; never alpha/beta.")
 if(NOT DEFINED LAPLACE_UCD_PATH)

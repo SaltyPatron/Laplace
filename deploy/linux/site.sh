@@ -130,6 +130,7 @@ phase_externals() {
     ln -sfnT "$target" "$e/$name"; printf '  %-22s %s\n' "$name" "$target"
   done <<EOF
 blake3                $LAPLACE_DEPSRC/blake3
+laplace-native        ${LAPLACE_NATIVE:-$LAPLACE_DEPSRC/Laplace-Native}
 tree-sitter           $LAPLACE_DEPSRC/tree-sitter
 fathom                $LAPLACE_DEPSRC/Fathom
 spectra               $LAPLACE_DEPSRC/spectra
