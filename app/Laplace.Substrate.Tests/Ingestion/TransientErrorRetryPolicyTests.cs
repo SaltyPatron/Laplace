@@ -113,6 +113,64 @@ public class TransientErrorRetryPolicyTests
 /// </summary>
 public class CancelledAsyncReadRetryTests
 {
+    [Fact]
+    public async Task ExecuteAsync_ReprobesAConcurrentLandingUntilItSucceeds()
+    {
+        var policy = TransientErrorRetryPolicy.ConcurrencyRetry with { InitialDelay = TimeSpan.Zero };
+        int calls = 0;
+        var retries = new List<int>();
+        int result = await policy.ExecuteAsync(_ =>
+        {
+            if (++calls < 3) throw Pg("23505", "duplicate key value violates unique constraint \"attestations_h09_pkey\"");
+            return Task.FromResult(42);
+        }, CancellationToken.None, (_, failed, _) => retries.Add(failed));
+        Assert.Equal(42, result);
+        Assert.Equal(3, calls);
+        Assert.Equal(new[] { 1, 2 }, retries);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotRetryAGenuineFailure()
+    {
+        int calls = 0;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            TransientErrorRetryPolicy.ConcurrencyRetry.ExecuteAsync<int>(_ =>
+            {
+                calls++;
+                throw new InvalidOperationException("not a race");
+            }, CancellationToken.None));
+        Assert.Equal("not a race", error.Message);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SurfacesAConflictThatOutlivesThePolicy()
+    {
+        var policy = TransientErrorRetryPolicy.ConcurrencyRetry with { MaxAttempts = 3, InitialDelay = TimeSpan.Zero };
+        int calls = 0;
+        var error = await Assert.ThrowsAsync<global::Npgsql.PostgresException>(() =>
+            policy.ExecuteAsync(_ =>
+            {
+                calls++;
+                throw Pg("23505", "duplicate key");
+            }, CancellationToken.None));
+        Assert.Equal("23505", error.SqlState);
+        Assert.Equal(3, calls);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NeverRetriesCancellation()
+    {
+        int calls = 0;
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            TransientErrorRetryPolicy.ConcurrencyRetry.ExecuteAsync<int>(_ =>
+            {
+                calls++;
+                throw new OperationCanceledException();
+            }, CancellationToken.None));
+        Assert.Equal(1, calls);
+    }
+
     private static Exception Pg(string sqlState, string messageText)
     {
         // PostgresException's public ctor takes the fields the classifier reads.

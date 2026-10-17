@@ -43,6 +43,8 @@ public sealed partial class ChessLabService
 
     internal Task<ChessLiveGameHost> GetLiveHostAsync(CancellationToken ct) => _getLiveHost(ct);
 
+    internal ILogger Log => _log;
+
     public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null,
         OperationPrincipal? requester = null)
     {

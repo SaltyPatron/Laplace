@@ -382,6 +382,7 @@ public static class ChessLabRunners
             }
             if (final == ChessLabJobState.Completed && ingest)
             {
+                ChessLabIngestRun? journal = null;
                 try
                 {
                     measurement.ValidateMatch(receipt);
@@ -389,19 +390,24 @@ public static class ChessLabRunners
                     await measurement.IdentifyPgnAsync(pgnOut, experimentJson, ct);
                     lab.Publish(slot, new ChessLabLogEvent("info", "ingesting temporary games.pgn into substrate…"));
                     var liveHost = await lab.GetLiveHostAsync(ct);
+                    journal = await ChessLabIngestRun.StartAsync(
+                        liveHost.DataSource, lab.Log, slot.Job.Id, $"cutechess/{slot.Job.Id}", ct);
                     await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-                    var r = await ingestor.IngestRecordedFileAsync(
+                    journal.Attach(ingestor);
+                    var r = await journal.IngestUnitAsync("games.pgn", options.Rounds, () => ingestor.IngestRecordedFileAsync(
                         pgnOut, measurement, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
-                        experimentReceiptJson: experimentJson);
+                        experimentReceiptJson: experimentJson));
                     if (r.Parsed != options.Rounds)
                         throw new InvalidDataException($"expected {options.Rounds} PGN games but parsed {r.Parsed}");
                     await measurement.VerifyPgnUnchangedAsync(pgnOut, ct);
                     lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
                     ingestSucceeded = true;
+                    journal.Complete();
                 }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException) { journal?.Cancel(); throw; }
                 catch (Exception ex)
                 {
+                    journal?.Fail(ex);
                     final = ChessLabJobState.Failed;
                     finalMessage = $"substrate ingest failed: {ex.Message}";
                     lab.Publish(slot, new ChessLabLogEvent("error",
@@ -484,6 +490,7 @@ public static class ChessLabRunners
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
 
         ChessPgnIngestor? ingestor = null;
+        ChessLabIngestRun? journal = null;
         ChessPgnIngestor.ProfileResult profileResult = default;
         string? spoolDir = null;
         string? outPath = null;
@@ -493,7 +500,14 @@ public static class ChessLabRunners
             if (ingest)
             {
                 var liveHost = await lab.GetLiveHostAsync(ct);
+                // A web import is an ingest run like `laplace-mono ingest chess`: the same
+                // run/file journal rows and one terminal status (with its error) per job.
+                journal = await ChessLabIngestRun.StartAsync(liveHost.DataSource, lab.Log, slot.Job.Id,
+                    $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(user)}", ct);
+                lab.Publish(slot, new ChessLabLogEvent("info",
+                    $"ingest run {journal.RunId} ({ChessLabIngestRun.SourceName}) journaled"));
                 ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+                journal.Attach(ingestor);
                 profileResult = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
                 lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", profileResult.Profiles));
                 lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
@@ -520,12 +534,12 @@ public static class ChessLabRunners
             int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
                 ingest && site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
-                    ? async (batch, token) =>
+                    ? async (archive, batch, token) =>
                     {
-                        var part = await ingestor!.IngestGamesAsync(
-                            batch, "Chess.com monthly archive",
+                        var part = await journal!.IngestUnitAsync(archive, batch.Count, () => ingestor!.IngestGamesAsync(
+                            batch, $"Chess.com monthly archive {archive}",
                             msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), token,
-                            requireCompleteSource: true);
+                            requireCompleteSource: true));
                         parsedWhileFetching += part.Parsed;
                         novelWhileFetching += part.Novel;
                         appliedWhileFetching += part.Applied;
@@ -545,9 +559,9 @@ public static class ChessLabRunners
                     ? new ChessPgnIngestor.Result(
                         parsedWhileFetching, novelWhileFetching, appliedWhileFetching,
                         repairedWhileFetching, verifiedWhileFetching, verifiedPliesWhileFetching)
-                    : await ingestor!.IngestFileAsync(outPath,
+                    : await journal!.IngestUnitAsync(fileName, games, () => ingestor!.IngestFileAsync(outPath,
                         msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
-                        requireCompleteSource: true);
+                        requireCompleteSource: true));
                 if (gameResult.Parsed != games)
                     throw new InvalidDataException(
                         $"provider returned {games} games but only {gameResult.Parsed} complete legal games validated");
@@ -607,10 +621,17 @@ public static class ChessLabRunners
 
             if (persistPgn)
                 lab.AddArtifact(slot, "games.pgn", outPath);
+            journal?.Complete();
             completed = true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
+            journal?.Cancel();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            journal?.Fail(ex);
             // Keep the exact downloaded input reachable from the failed job, including
             // the archive that did not finish admission. Successful prior commits remain.
             if (outPath is not null && File.Exists(outPath))

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -58,11 +59,22 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     private readonly ConsensusAccumulatingWriter _writer;
     private readonly NpgsqlSubstrateReader _reader;
     private readonly bool _ownsResources;
+    private long _entitiesInserted, _physicalitiesInserted, _attestationsInserted;
+    private int _concurrentLandingRetries;
 
     public readonly record struct Result(
         int Parsed, int Novel, int Applied,
         int Repaired = 0, int Verified = 0, long VerifiedPlies = 0);
     public readonly record struct ProfileResult(int Profiles, int Players, int Links);
+
+    /// <summary>Rows this ingestor's acknowledged applies inserted (run-journal counters).</summary>
+    internal (long Entities, long Physicalities, long Attestations) Inserted => (
+        Interlocked.Read(ref _entitiesInserted),
+        Interlocked.Read(ref _physicalitiesInserted),
+        Interlocked.Read(ref _attestationsInserted));
+
+    /// <summary>Concurrent-landing re-probes this ingestor's applies took.</summary>
+    internal int ConcurrentLandingRetries => Volatile.Read(ref _concurrentLandingRetries);
 
     private ChessPgnIngestor(
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, NpgsqlSubstrateReader reader,
@@ -220,7 +232,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         chunkGames: chunk.Count);
                     if (chunk.Count < parseWindow) continue;
                     measurement?.Checkpoint("SourceReadParseAndValidation", "chunk-parsed", chunkGames: chunk.Count);
-                    (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
+                    (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement, log);
                     novel += n; applied += a; repaired += r;
                     if (requireCompleteSource && measurement is null)
                     {
@@ -235,7 +247,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 measurement?.Checkpoint("SourceReadParseAndValidation", "source-enumeration-complete", chunkGames: chunk.Count);
                 if (chunk.Count > 0)
                 {
-                    (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
+                    (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement, log);
                     novel += n; applied += a; repaired += r;
                     if (requireCompleteSource && measurement is null)
                     {
@@ -453,7 +465,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 Attestations = change.Attestations.Where(row => !present.Contains(row.Id)).ToImmutableArray(),
                 CountsAsUnit = false,
             }).ToArray();
-            await _writer.ApplyManyAsync(changes, ct);
+            await ApplyAdmittedAsync(changes, log: null, ct);
             return new ProfileResult(profiles.Count, players, identityLinks.Count);
         }
         finally { Gate.Release(); }
@@ -484,7 +496,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
     private async Task<(int Novel, int Applied, int Repaired)> ApplyChunkAsync(
         List<ChessGameRecord> chunk, CancellationToken ct, ChessExperimentEvidence? experiment = null,
-        ChessRecordingMeasurement? measurement = null)
+        ChessRecordingMeasurement? measurement = null, Action<string>? log = null)
     {
         // Keep one set-sized novelty probe per parsed window. Admission is then split
         // using actual staged observations without parsing or composing a game twice.
@@ -501,7 +513,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 ChessRecordingMeasurement.WorkPhase.CompositionAndNoveltyProbe);
             using var composed = ChessPgnChunk.ComposeNext(chunk, novelIds, ref offset,
                 ChunkStagedBytes, measurement?.NextReplayChunkGames, measurement, ct);
-            var result = await ApplyComposedChunkAsync(composed, ct, experiment, measurement);
+            var result = await ApplyComposedChunkAsync(composed, ct, experiment, measurement, log);
             composed.ForgetCommittedNovelty(novelIds);
             totalNovel += result.Novel;
             totalApplied += result.Applied;
@@ -512,7 +524,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
     private async Task<(int Novel, int Applied, int Repaired)> ApplyComposedChunkAsync(
         ChessPgnChunk composed, CancellationToken ct, ChessExperimentEvidence? experiment,
-        ChessRecordingMeasurement? measurement)
+        ChessRecordingMeasurement? measurement, Action<string>? log = null)
     {
         var chunk = composed.Games;
         var record = composed.Record;
@@ -639,7 +651,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     : (ChessRecordingMeasurement.ConsensusBackendSnapshot?)null;
                 try
                 {
-                    var result = await _writer.ApplyManyAsync(changes, ct);
+                    var result = await ApplyAdmittedAsync(changes, log, ct);
                     measurement?.ObserveCommit(result);
                     measurement?.Checkpoint("WriterApply", "writer-acknowledged");
                 }
@@ -692,6 +704,41 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             foreach (var change in ownedChanges)
                 foreach (var stage in change.IntentStages) stage.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Every admission through the shared writer. Apply transactions overlap by design
+    /// (<c>laplace_apply_batch</c> takes no lock), and calculated chess testimony is shared
+    /// by content: a Syzygy or position-outcome claim composed for a game is the same
+    /// attestation id that a concurrent CLI material ingest, another Lab job, or a live
+    /// game can land between this working set's presence probe and its COPY. The loser of
+    /// that race sees 23505 on the attestation key. The CLI IngestRunner re-applies such a
+    /// working set under the ingest retry policy; this lane does the same, so the re-run
+    /// probes again, subtracts the row that won, and witnesses the claim once. A conflict
+    /// that persists past the policy is a real defect and still surfaces.
+    /// </summary>
+    private async Task<ApplyResult> ApplyAdmittedAsync(
+        IReadOnlyList<SubstrateChange> changes, Action<string>? log, CancellationToken ct)
+    {
+        var result = await TransientErrorRetryPolicy.ConcurrencyRetry.ExecuteAsync(
+            token => _writer.ApplyManyAsync(changes, token), ct,
+            (ex, failedAttempts, delay) =>
+            {
+                Interlocked.Increment(ref _concurrentLandingRetries);
+                log?.Invoke($"concurrent substrate landing ({ConcurrencyDetail(ex)}); re-probing and "
+                    + $"re-applying the working set (retry {failedAttempts}) after {delay.TotalMilliseconds:F0} ms");
+            }).ConfigureAwait(false);
+        Interlocked.Add(ref _entitiesInserted, result.EntitiesInserted);
+        Interlocked.Add(ref _physicalitiesInserted, result.PhysicalitiesInserted);
+        Interlocked.Add(ref _attestationsInserted, result.AttestationsInserted);
+        return result;
+    }
+
+    private static string ConcurrencyDetail(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+            if (e is PostgresException pg) return $"{pg.SqlState} {pg.ConstraintName ?? pg.TableName}";
+        return ex.GetType().Name;
     }
 
     internal static void RequireWritableAdmission(bool requireNoWriterWork, int changes)
