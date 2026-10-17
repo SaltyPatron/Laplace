@@ -631,9 +631,15 @@ internal static partial class IngestCommands
         // ingest added rows.
         long novelRows = result.EntitiesInserted + result.PhysicalitiesInserted
             + result.AttestationsInserted;
+        // The statistics are not optional: the site's counts are pg_class.reltuples and
+        // pg_stats, so an ANALYZE that skipped a table (the role lacks MAINTAIN on it or on a
+        // partition) leaves a seeded database reading as empty. That fails the run, naming the
+        // tables (Laplace#1879); the validation counts after it stay advisory.
+        AnalyzeIncompleteException? analyzeFailure = null;
         if (novelRows > 0)
         {
             try { await PrintIngestValidationAsync(ds, dec, exactSourceValidation: false); }
+            catch (AnalyzeIncompleteException ex) { analyzeFailure = ex; }
             catch (Exception ex)
             { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
         }
@@ -642,6 +648,11 @@ internal static partial class IngestCommands
                 accumulator.ObservationsAccumulated, accumulator.CellsFolded,
                 cli?.GitCorpusReceipt ?? throw new InvalidDataException("Missing corpus receipt path."),
                 corpusRuntime ?? throw new InvalidDataException("Missing loaded runtime identity."));
+        if (analyzeFailure is not null)
+        {
+            Console.Error.WriteLine($"error: post-ingest statistics not refreshed (the rows are committed): {analyzeFailure.Message}");
+            return 1;
+        }
         return 0;
     }
 

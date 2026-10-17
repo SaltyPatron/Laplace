@@ -113,6 +113,7 @@ jobs:
         with:
           persist-credentials: false
       - run: bash tests/substrate-runtime-grants.sh
+      - run: bash tests/substrate-analyze-substrate.sh
 
   identity-law:
     name: Identity law vectors (monorepo composition through Laplace-Native)

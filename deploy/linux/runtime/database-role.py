@@ -74,14 +74,16 @@ def main():
         quoted_schema = '"' + schema.replace('"', '""') + '"'
         statements.extend([
             "GRANT USAGE ON SCHEMA " + quoted_schema + " TO " + quoted_role,
-            "GRANT " + ("SELECT" if schema == "public" else "SELECT,INSERT,UPDATE,DELETE") + " ON ALL TABLES IN SCHEMA " + quoted_schema + " TO " + quoted_role,
+            # MAINTAIN: the runtime refreshes the statistics of what it writes (ANALYZE skips a
+            # table it may not maintain, every partition, with only a WARNING; Laplace#1879).
+            "GRANT " + ("SELECT" if schema == "public" else "SELECT,INSERT,UPDATE,DELETE,MAINTAIN") + " ON ALL TABLES IN SCHEMA " + quoted_schema + " TO " + quoted_role,
             "GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA " + quoted_schema + " TO " + quoted_role,
             "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA " + quoted_schema + " TO " + quoted_role,
         ])
         if schema != "public":
             statements.extend([
                 'ALTER DEFAULT PRIVILEGES FOR ROLE "' + schema_owner + '" IN SCHEMA ' + quoted_schema +
-                " GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO " + quoted_role,
+                " GRANT SELECT,INSERT,UPDATE,DELETE,MAINTAIN ON TABLES TO " + quoted_role,
                 'ALTER DEFAULT PRIVILEGES FOR ROLE "' + schema_owner + '" IN SCHEMA ' + quoted_schema +
                 " GRANT USAGE,SELECT ON SEQUENCES TO " + quoted_role,
             ])

@@ -67,6 +67,14 @@ COMMENT ON PROCEDURE ops.reindex_invalid(boolean) IS
 
 -- ANALYZE is legal inside a transaction and so inside a procedure; VACUUM is
 -- not, so a client issues it outside a transaction block.
+--
+-- No false success (Laplace#1879). ANALYZE by a role without MAINTAIN on a table,
+-- or on any leaf partition of it, does not fail: it skips that relation with only a
+-- WARNING, and a procedure cannot see a WARNING. So the privilege is checked up front
+-- over every relation the run would touch, leaves included, and the run refuses
+-- (42501, naming them) before analyzing anything. An ANALYZE that errors is recorded
+-- and the run continues to the next table; at the end the procedure raises, naming
+-- every table that failed, so a caller never reads a partial run as complete.
 
 CREATE OR REPLACE PROCEDURE ops.analyze_substrate(p_tables text[] DEFAULT NULL)
     LANGUAGE plpgsql AS $$
@@ -74,7 +82,25 @@ DECLARE
     t       record;
     n       int := 0;
     t0      timestamptz := clock_timestamp();
+    denied  text[];
+    failed  text[] := '{}';
 BEGIN
+    SELECT array_agg(DISTINCT p.relid::regclass::text ORDER BY p.relid::regclass::text)
+    INTO denied
+    FROM pg_class c
+    CROSS JOIN LATERAL pg_partition_tree(c.oid) p
+    WHERE c.relnamespace IN ('laplace'::regnamespace, 'realize'::regnamespace,
+                             'consensus'::regnamespace, 'generation'::regnamespace)
+      AND c.relkind IN ('r', 'p')
+      AND (p_tables IS NULL OR c.relname = ANY(p_tables))
+      AND NOT pg_catalog.has_table_privilege(p.relid, 'MAINTAIN');
+    IF denied IS NOT NULL THEN
+        RAISE EXCEPTION 'analyze_substrate: role % may not analyze % relation(s); nothing was analyzed: %',
+            current_user, cardinality(denied), array_to_string(denied, ', ')
+            USING ERRCODE = 'insufficient_privilege',
+                  HINT = 'GRANT MAINTAIN on the substrate tables (every partition) to this role, or run as their owner.';
+    END IF;
+
     FOR t IN
         SELECT c.oid::regclass AS rel
         FROM pg_class c
@@ -85,9 +111,22 @@ BEGIN
         ORDER BY c.relname
     LOOP
         n := n + 1;
-        EXECUTE format('ANALYZE %s', t.rel);
+        BEGIN
+            EXECUTE format('ANALYZE %s', t.rel);
+        EXCEPTION WHEN OTHERS THEN
+            failed := failed || format('%s (%s)', t.rel, SQLERRM);
+        END;
         COMMIT;
     END LOOP;
+
+    IF cardinality(failed) > 0 THEN
+        RAISE EXCEPTION 'analyze_substrate: % of % table(s) failed ANALYZE: %',
+            cardinality(failed), n, array_to_string(failed, '; ');
+    END IF;
+    IF p_tables IS NOT NULL AND n < cardinality(p_tables) THEN
+        RAISE EXCEPTION 'analyze_substrate: % table(s) named, % found in the substrate schemas',
+            cardinality(p_tables), n;
+    END IF;
 
     RAISE LOG 'analyze_substrate: % table(s) analyzed in %s',
         n, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
@@ -97,5 +136,6 @@ COMMENT ON PROCEDURE ops.analyze_substrate(text[]) IS
     'Refresh planner statistics across the substrate schemas, one COMMIT per table. '
     'p_tables NULL = every ordinary and partitioned table. Fixes the class of '
     'slowdown where a correct index is present and the planner will not choose it. '
+    'Raises, naming them, when the caller lacks MAINTAIN on any target or leaf partition '
+    '(nothing is analyzed then), or when any table fails ANALYZE. '
     'CALL ops.analyze_substrate();';
-
