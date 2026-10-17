@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # The dev test profile (native ctest without the regress label, every managed test project's Tier!=db/live/perf tests,
-# the UCI handshake, the browser suites) on a hosted runner. Everything it needs is public and pinned here or in
+# the UCI handshake, the browser suites) on a CI runner. Everything it needs is public and pinned here or in
 # scripts/ci/tree-sitter-grammars.tsv: the dependency sources at the build host's revisions, the UCD release the build
 # pins, and the oneAPI compiler/MKL/TBB versions hart-server builds with. The perf caches are build products of those
 # inputs, so the managed tests run on the exact candidate ROM rather than an installed one.
 #   scripts/ci/hosted-dev-tests.sh deps|native|managed|uci|browser|all
 # Work tree: $LAPLACE_CI_WORK (default $RUNNER_TEMP/laplace-ci or /tmp/laplace-ci).
 set -euo pipefail
+# Hermetic on any runner: a self-hosted machine's own declarations (the runner .env's LAPLACE_* roots, PG* defaults,
+# /etc/laplace/machine.env and /opt/laplace/secrets, read by LaplaceInstall) never reach the profile. Only this
+# script's inputs survive; the machine declaration and install prefix point at paths that do not exist, which is
+# what a GitHub-hosted runner presents.
+for name in $(compgen -e); do
+  case "$name" in
+    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
+    LAPLACE_*|PG*) unset "$name" ;;
+  esac
+done
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 WORK="${LAPLACE_CI_WORK:-${RUNNER_TEMP:-/tmp}/laplace-ci}"
@@ -25,6 +35,7 @@ export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 export LAPLACE_BUILD_GROUP="${LAPLACE_BUILD_GROUP:-$(id -gn)}"
 BUILD="$ROOT/build/engine"   # the layout scripts/sync-managed-native-artifacts.sh and the managed props read
 export LAPLACE_ENGINE_BUILD="$BUILD"
+export LAPLACE_MACHINE_ENV="$WORK/no-machine.env" LAPLACE_INSTALL_PREFIX="$WORK/no-install"
 mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess"
 
 say() { echo "::group::$*"; }
