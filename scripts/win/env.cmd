@@ -59,8 +59,9 @@ set "PATH=%PGBIN%;%PATH%"
 set "PATH=%LAPLACE_ENGINE_BUILD%\core;%LAPLACE_ENGINE_BUILD%\dynamics;%LAPLACE_ENGINE_BUILD%\synthesis;%PATH%"
 rem Runtime DLLs for laplace_geom (geos_c / proj / sqlite) — must precede system PATH.
 
-if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
-if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=%LAPLACE_DBNAME%"
+rem No default database: every target is named by the operator (LAPLACE_DBNAME). A default once
+rem sent db-reset.cmd's DROP to the wrong database; scripts that need a target call require-dbname.cmd.
+if defined LAPLACE_DBNAME if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=%LAPLACE_DBNAME%"
 if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 rem LAPLACE_PGHOST/LAPLACE_PGUSER feed BOTH the CLI connection string below AND
 rem every scripted psql verify/health check, so the writer and the verifier can
@@ -72,7 +73,7 @@ if not defined LAPLACE_PGUSER if defined LAPLACE_ROLE set "LAPLACE_PGUSER=%LAPLA
 if not defined LAPLACE_PGUSER set "LAPLACE_PGUSER=laplace"
 if not defined LAPLACE_PG_SERVICE_ACCOUNT set "LAPLACE_PG_SERVICE_ACCOUNT=NT AUTHORITY\NetworkService"
 rem Passwords come from the credential provider/pgpass or explicit process configuration.
-if not defined LAPLACE_DB set "LAPLACE_DB=Host=%LAPLACE_PGHOST%;Port=%LAPLACE_PGPORT%;Username=%LAPLACE_PGUSER%;Database=%LAPLACE_DBNAME%;Command Timeout=0"
+if defined LAPLACE_DBNAME if not defined LAPLACE_DB set "LAPLACE_DB=Host=%LAPLACE_PGHOST%;Port=%LAPLACE_PGPORT%;Username=%LAPLACE_PGUSER%;Database=%LAPLACE_DBNAME%;Command Timeout=0"
 if not defined LAPLACE_BILLING_BYPASS set "LAPLACE_BILLING_BYPASS=true"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"

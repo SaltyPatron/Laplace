@@ -3,8 +3,25 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
+rem db-reset.cmd [--recycle] --confirm <database>
+rem DROPs and recreates %LAPLACE_DBNAME%. Destructive, so the target is never defaulted:
+rem LAPLACE_DBNAME must be set, and the same name must be confirmed with --confirm <name>
+rem (or LAPLACE_DB_RESET_CONFIRM=<name>) before anything connects to PostgreSQL.
 set "RECYCLE=0"
-if /i "%~1"=="--recycle" set "RECYCLE=1"
+set "CONFIRM=%LAPLACE_DB_RESET_CONFIRM%"
+:parse_reset
+if "%~1"=="" goto parse_reset_done
+if /i "%~1"=="--recycle" ( set "RECYCLE=1" & shift /1 & goto parse_reset )
+if /i "%~1"=="--confirm" ( set "CONFIRM=%~2" & shift /1 & shift /1 & goto parse_reset )
+echo db-reset: unknown argument %~1
+exit /b 2
+:parse_reset_done
+call "%~dp0require-dbname.cmd" || exit /b 2
+echo ==== db-reset target: database "%LAPLACE_DBNAME%" on localhost ====
+if not "%CONFIRM%"=="%LAPLACE_DBNAME%" (
+  echo ERROR: db-reset drops "%LAPLACE_DBNAME%". Re-run with --confirm %LAPLACE_DBNAME% to proceed.
+  exit /b 2
+)
 
 echo ==== terminate laplace backends ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='%LAPLACE_DBNAME%' AND pid<>pg_backend_pid();" || exit /b 1
