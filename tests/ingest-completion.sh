@@ -4,8 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 source "$root/scripts/lib/database.sh"
 prefix="${LAPLACE_INSTALL_PREFIX:?}"
-exec 8>"${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
-flock -x -w "${LAPLACE_HOST_LOCK_WAIT_SECONDS:-600}" 8
+source "$root/deploy/linux/host-lock.sh"
+host_lock_hold exclusive 8 "${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}" "${LAPLACE_HOST_LOCK_WAIT_SECONDS:-600}"
 existing=$(psql -X -Atq -d postgres -c "SELECT count(*) FROM pg_database WHERE datname='laplace_substratecrud_test'")
 [[ "$existing" == 0 ]] || { echo 'Completion test database is already in use; refusing to replace it.' >&2; exit 1; }
 major=$(pg_config --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')

@@ -78,8 +78,8 @@ jobs:
           if [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
             exec 8>&9
           else
-            exec 8>>"$host_lock"
-            flock 8
+            source deploy/linux/host-lock.sh
+            host_lock_hold exclusive 8 "$host_lock"
           fi
 
           health() {

@@ -153,8 +153,8 @@ jobs:
           assert request['origin'].rstrip('/') == os.environ['LAPLACE_API_URL'].rstrip('/'), 'Request must select the declared API listener'
           PY
           lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
-          exec 8>>"$lock"
-          flock -x -w 120 8
+          source deploy/linux/host-lock.sh
+          host_lock_hold exclusive 8 "$lock" 120
           umask 077
           journal="${LAPLACE_WORK_ROOT:?Declare persistent host work}/platform-access-enrollment"
           mkdir -p -m 700 "$journal"
@@ -201,8 +201,8 @@ jobs:
           unset machine_values
           export LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
           lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
-          exec 8>>"$lock"
-          flock -s -w 120 8
+          source deploy/linux/host-lock.sh
+          host_lock_hold shared 8 "$lock" 120
           result=0
           python3 scripts/platform-access-audit.py \
             --base "${LAPLACE_API_URL:-http://127.0.0.1:5187}" \
@@ -361,8 +361,8 @@ jobs:
           set -euo pipefail
           source scripts/lib/database.sh
           export LAPLACE_API_BASE="${LAPLACE_PUBLIC_BASE_URL:-${LAPLACE_API_URL:-http://127.0.0.1:5187}}"
-          exec 9>>"${LAPLACE_HOST_LOCK:-$LAPLACE_LOCK_ROOT/host-resource.lock}"
-          flock 9
+          source deploy/linux/host-lock.sh
+          host_lock_hold exclusive 9 "${LAPLACE_HOST_LOCK:-$LAPLACE_LOCK_ROOT/host-resource.lock}"
           mkdir -p artifacts/forward-chat-lifecycle
           export LAPLACE_VERIFICATION_TENANT="$LAPLACE_PROOF_TENANT"
           python3 scripts/run-authenticated-verification.py --base "$LAPLACE_API_BASE" -- \
@@ -431,8 +431,8 @@ jobs:
           assert request['origin'].rstrip('/') == os.environ['LAPLACE_API_URL'].rstrip('/'), 'Owner request must select the declared API listener'
           PY
           lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
-          exec 8>>"$lock"
-          flock -x -w 120 8
+          source deploy/linux/host-lock.sh
+          host_lock_hold exclusive 8 "$lock" 120
           umask 077
           directory="${LAPLACE_WORK_ROOT:?Declare persistent host work}/platform-owners"
           mkdir -p -m 700 "$directory"
