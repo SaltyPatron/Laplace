@@ -32,7 +32,7 @@ internal static class CpuTopologyCommands
                     Console.WriteLine(string.Join(",", CpuTopology.EfficientCoreCpuIndices));
                     return 0;
                 case "--pg-tuning":
-                    EmitPgTuning();
+                    EmitPgTuning(Console.Out);
                     return 0;
                 case "--verify-pin":
 
@@ -82,7 +82,7 @@ internal static class CpuTopologyCommands
     // Emits the cluster GUC set as ALTER SYSTEM statements. Machine-derived values come
     // from PostgresResourcePlan (CPU/memory topology); workload policy is the literal
     // settings below. The output is piped to psql.
-    private static void EmitPgTuning()
+    internal static void EmitPgTuning(TextWriter w)
     {
         var pg = PostgresResourcePlan.Current;
 
@@ -108,7 +108,6 @@ internal static class CpuTopologyCommands
         // max_worker_processes is the shared pool drawn on by parallel query and the
         // io_worker pool: the compute pool plus the I/O workers.
         int workers = pg.MaxWorkerProcesses;
-        var w = Console.Out;
 
         // Machine-derived (RAM + P/E topology).
         w.WriteLine($"ALTER SYSTEM SET shared_buffers = '{sharedKb}kB';");

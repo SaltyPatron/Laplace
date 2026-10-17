@@ -205,9 +205,15 @@ public sealed class OpenSubtitlesDecomposerTests
         Assert.DoesNotContain(boot.Entities, e => e.Id == languageType);
     }
 
-    [Fact]
+    // The published pair total is read from the OPUS OpenSubtitles release itself (hundreds of
+    // GB of *.txt.zip moses pairs), so the estimate is checked only where that corpus is staged.
+    [SkippableFact]
     public async Task Estimate_Reports_Published_Pair_Total()
     {
+        Skip.IfNot(
+            Directory.Exists(TestIngestPaths.OpenSubtitles)
+                && Directory.EnumerateFiles(TestIngestPaths.OpenSubtitles, "*.txt.zip").Any(),
+            $"OpenSubtitles corpus not staged at {TestIngestPaths.OpenSubtitles}");
         var dec = new OpenSubtitlesDecomposer();
         Assert.Equal(600_995_230L, await dec.EstimateUnitCountAsync(new FakeContext(TestIngestPaths.OpenSubtitles, new NullWriter())));
     }
