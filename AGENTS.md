@@ -59,6 +59,8 @@ A critical architectural rule across Laplace is keeping the four execution plane
   - `laplace --where` / `laplace status` / `laplace ingest ...` — Modular Engine CLI (`laplace.cmd`).
   - `laplace-ops runs` — View recent CI/CD runs across all 6 Laplace repositories in one screen (`laplace-ops.cmd`).
   - `laplace-ops deploy -Target desktop` — One-command update for `HART-DESKTOP` (builds native + managed + web + UCI/chess, publishes to `https://dev.hartonomous.com` and `laplace-mono`, runs local DB migrations on `laplace-desktop-app` and `laplace-mono`, and verifies health using the enrolled OpenBao identity).
+  - `laplace-ops db -Database <substrate|application|both> -DatabaseOperation <status|migrate|repair|remigrate|recreate> [-Yes]` — Inspect, migrate, repair (recreate after drop), or reset databases without rebuilding the app.
+  - `laplace-ops restart-iis` — Cleanly recycle the local IIS site via `app_offline.htm` and verify `/health` and `/ready`.
   - `laplace-ops components -Target desktop` — Rebuilds and packages `Laplace-Native` + `Laplace-Engine` into `laplace.cmd`.
   - `laplace-ops prepare | build | test | start | stop | status | verify -Target desktop` — Local desktop development lifecycle.
   - `laplace-ops status | verify | deploy -Target staging|production -Wait` — Remote environment control and verification.
@@ -67,7 +69,7 @@ A critical architectural rule across Laplace is keeping the four execution plane
 
 ### D. Browser Web UI & HTTP API (`https://dev.hartonomous.com`, `https://staging.hartonomous.com`, `https://api.hartonomous.com`)
 - End-user and operator browser interface for chat, substrate exploration, chess, and platform administration.
-- **Default Platform Administrators**: The database migration `20261016000000_app_default_platform_administrators.sql` seeds the 3 owner OAuth bindings (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) as audited `installation-owner` administrators whenever any application database is created, migrated (`up` / `app-up`), or recreated (`nuke` / `app-nuke`). No commit-file ceremony or manual SQL is needed after recreating a database.
+- **Default Platform Administrators**: The canonical application migration `20260611000000_app_billing.sql` (part of the consolidated 3-migration schema alongside `20260606000000_layer1_database.sql` and `20261015000000_substrate_runtime_grants.sql`) seeds the 3 owner OAuth bindings (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) as audited `installation-owner` administrators whenever any application database is created, migrated (`up` / `app-up`), or recreated (`nuke` / `app-nuke`). No commit-file ceremony or manual SQL is needed after recreating a database.
 
 ---
 
@@ -81,4 +83,43 @@ A critical architectural rule across Laplace is keeping the four execution plane
   - PostgreSQL data / WAL: `E:\Data\Laplace\pgdata` and `D:\Data\Laplace\pg_wal`
 - **No Worktree or Script Sprawl**: Work directly on `main` (or a short-lived feature branch cleaned up immediately upon merge). Do not leave orphaned `wt-*` git worktrees, duplicate build directories under `D:\Libraries\build\Laplace`, or one-off repair scripts in the repositories.
 - **Communication & Verification**: Keep communication direct, technical, and concise. Describe concrete code changes, verification results, and any remaining blockers. Complete implementation tasks with build and test verification before reporting completion.
+
+---
+
+## 5. Canonical Substrate, Perf-Cache, Tier Traversal, ETL & Mold-A-Model Laws
+
+Every agent working in any Laplace repository must obey these non-negotiable architectural invariants:
+
+### A. Division of Ownership: Native C + Perf-Cache vs. Thin C# & SQL Orchestrators
+- **Client-Side Decomposition & Reduction (Native C + Perf-Cache)**: It is faster and vastly more efficient to break content down and deduplicate it on the client before talking to PostgreSQL. C# is a **thin orchestrator** over native C (`Laplace-Native` / `laplace_core`) and `Npgsql` binary `COPY` streams—never allocate per-node managed C# heap objects (`Intent`, `KeptRow`, per-row dictionaries) on the hot path, and never hand-roll C# math/BPE/SVD/attribution wheels that duplicate native C.
+- **Perf-Cache (`tier0.bin` + `highway.bin`)**:
+  - **Bit-Perfect Coordinates (`4 ULP`)**: Comes from compiler options (`-fp-model=precise` / `/fp:precise`, no FMA contraction), CORE-MATH (`cr_atan2`, `cr_hypot`, `cr_cbrt`, `cr_sin`, `cr_cos`), and $2^{53}$ / `fp1e9` fixed-point quantization on $S^3$.
+  - **Universal Content Determinism**: Guaranteed by the memory-mapped perf-cache (`tier0.bin` + `highway.bin`). Same content = same 16-byte `blake3` hash everywhere (Broadwell, Raptor Lake, Sapphire Rapids, T2 Mac, Raspberry Pi, or PlayStation), eliminating database round-trips and lookups for the entire Tier-0 Unicode floor and Linguistic Super Highway.
+- **Database-Side Set Merge & Consensus Fold (Thin SQL + `Laplace-postgres` C Extension)**: SQL is a thin set-based orchestrator over native C extension functions (`laplace_attest_series`, `laplace_attested`, `laplace_attribution`, `laplace_clean_pending_list`, etc.). In `Laplace` (`laplace-mono`), 100% of SQL statements across substrate, application (`app.*`), billing, auth, and chess live in `engine/core/src/sql_catalog.def` and are executed via `NpgsqlCatalog.Command(...)` (enforced by `ReadPathArchitectureGateTests` with zero hand-written SQL exemptions). The monorepo database schema is consolidated into three canonical migrations (`20260606000000_layer1_database.sql`, `20260611000000_app_billing.sql`, `20261015000000_substrate_runtime_grants.sql`). Never pull `consensus` rows back over the socket to fold on the client, and never maintain parallel drifting SQL stacks.
+
+### B. Bidirectional Tier Traversal Law (Leaf-to-Trunk Creation + Trunk-to-Leaf Deduplication)
+Tiers are recursive domain altitude (`codepoint` $\rightarrow$ `grapheme` $\rightarrow$ `word` $\rightarrow$ `phrase/sentence` $\rightarrow$ `section/record` $\rightarrow$ `file content tree` $\rightarrow$ `file trunk [metadata, content]` $\rightarrow$ `corpus witness trunk`), enabling two complementary directional optimizations:
+1. **Leaf $\rightarrow$ Trunk (Bottom-Up on the Client for Creation & In-RAM Deduplication)**:
+   - Always compose bottom-up from the perf-cache leaves (`tier0.bin` and `highway.bin`) through canonical tier boundaries (such as UAX #29 for text or grammar AST nodes for structured files).
+   - This guarantees bit-perfect BLAKE3 IDs and $S^3$ coordinates and prevents arbitrary BPE-style fragmentation (`"m iss iss ippi"` vs. `"miss ippi"`): `"mississippi"` is composed once at the word tier from its graphemes/codepoints, and every occurrence in the batch collapses in $O(1)$ into the client's in-RAM node table (`NODE[]` / `staged_set`).
+2. **Trunk $\rightarrow$ Leaf (Top-Down Against PostgreSQL for Self-Reducing Subtree Pruning)**:
+   - Deduplication against PostgreSQL always proceeds top-down from the highest logical roots (File Trunk $\rightarrow$ Section/Record Trunks $\rightarrow$ Sentences $\rightarrow$ Words), skipping synthetic binary-tree (`blocks_of`) spine nodes.
+   - By the Merkle/DAG containment invariant, if a node at tier $T$ already exists in PostgreSQL (or in the client's perf-cache / `staged_set`), **its entire descendant subtree is already recorded and is immediately amputated on the client** (`keep = recorded`). Only novel branches descend to the next frontier and are `COPY`ed to the database.
+
+### C. Grammar-Bounded Streaming $\rightarrow$ Whole-File Staging (`stage.*`) $\rightarrow$ Unified Set-Based Merge ETL
+1. **$O(1)$ Pre-Check**: Probe the file trunk / OS metadata identity before reading or decomposing file bytes; never run a 2-pass (`pass 0` / `pass 1`) full-file decomposition.
+2. **Grammar-Bounded Section Streaming**: Stream large files in a single pass, sectioning strictly on top-level grammar/record boundaries (XML element, Turtle statement block, JSONL object, CoNLL-U sentence block, PGN game, TSV row)—never split at arbitrary byte offsets.
+3. **Whole-File `UNLOGGED` Staging (`stage.*`) Without 2PC**: Stream novel nodes from each section via binary `COPY` into `UNLOGGED` `stage.*` tables using bounded connection concurrency (`min(cores, max_pool_size - headroom)`). Never use 16-connection `PREPARE TRANSACTION` / `COMMIT PREPARED` (2PC) on `UNLOGGED` staging tables, and never commit independent partial lane transactions directly to live `public.*` tables before the file/source is complete.
+4. **Unified Set-Based Merge**: Once the entire file (or source) and its trunk are staged in `stage.*`, execute one unified database merge (`stage.*` $\rightarrow$ `public.*` in Hilbert order, database-side `laplace_attest_series` fold into `consensus`, GIN pending-list cleanup, and atomic `witness` trunk registration).
+
+### D. The Three Proofs & Testing Discipline
+- **Proof 1 (`db-roundtrip`)**: Decompose real multi-domain inputs into `entity` + `physicality` and recompose 100% byte-for-byte from PostgreSQL alone while verifying all structural invariants.
+- **Proof 2 (`Linguistic Super Highway`)**: Fixed-width bit-banger masks (`upos`, `lexfile`, `deprel`, `vnrole`, `kind`) + cross-source identifier indexing, filtering, and hops (`ili`, `Synset`, `fnframe`, `fnfe`, `fnlu`, `vnclass`, `pbroleset`, `vaframe`). Every highway node is the canonical Tier-0 composition of its identifier string (`i46360`, `oewn-00001740-n`, `abandon.01`, `va:0001f`, `leave-51.2`, `NOUN`), with crosswalk edges baked into `highway.bin`. Generating or using `highway.bin` must **never** require the full raw corpus suite on disk or a `.nodes` sidecar dump; corpus definitions (`skos:definition`, roleset/frame glosses) are attested as claims about those highway identifier nodes during Proof 3.
+- **Proof 3 (`Full Corpus Ingestion`)**: Full multi-corpus ingestion on top of Proofs 1 and 2, where cross-source claims collide on the deterministic highway identifier nodes and fold via `laplace_attest_series`.
+- **No Fake Ceremony Gates in Dev CI**: `SaltyPatron/Laplace-Prototype` is the cleanroom test platform for proving core algorithms; active development CI must stay fast and must not block on multi-corpus ingestion gates or mocked/simulated ceremony tests.
+
+### E. BLAKE3-Addressed Multi-Tier Model Export & Mold-A-Model ("The BitTorrent of AI")
+- **BLAKE3 Hashes Replace Flat Integer Tokens (`laplace-blake3-v1`)**: Exported GGUF models (`laplace.tokenizer.scheme = "laplace-blake3-v1"`, `laplace.vocab.size`, `laplace.vocab.blake3_ids`) replace flat BPE/SentencePiece integer token IDs with **16-byte `blake3` entity IDs** across **all tiers** of the DAG (codepoint, grapheme, word, phrase, AST node, chess move, concept), locking exported cartridges to Laplace's decomposer + perf-cache. Commercial cartridges are encrypted with `FoundryCartridgeCrypto` (`LPCART01` AES-256-GCM envelope).
+- **Mold-A-Model & Royalty Attribution**: Every query receipt and **Mold-A-Model** synthesis computes exact per-witness attribution (`share_bp`, summing to `10000` basis points) from containment provenance (`laplace_attested` / `laplace_attribution` over `physicality` + `witness`) weighted by Glicko-2 Fisher information ($I_i = 1/\sigma_i^2$) inside PostgreSQL + native C, persisted in `app.billing_royalties` and exposed via `GET /v1/billing/royalties`.
+
 

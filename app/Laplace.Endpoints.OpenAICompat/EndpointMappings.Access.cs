@@ -1,5 +1,6 @@
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -56,11 +57,7 @@ internal static class AccessEndpoints
 
         app.MapGet("/v1/admin/access/workspaces", async ([FromKeyedServices(AppComposition.ApplicationDatabaseKey)] NpgsqlDataSource application, CancellationToken ct) =>
         {
-            await using var command = application.CreateCommand("""
-                SELECT t.tenant_id, t.display_name, t.kind, count(m.user_id) AS members
-                FROM app.tenants t LEFT JOIN app.tenant_memberships m USING(tenant_id)
-                GROUP BY t.tenant_id ORDER BY t.display_name, t.tenant_id LIMIT 200
-                """);
+            await using var command = NpgsqlCatalog.Command(application, "access.workspaces");
             var rows = new List<object>();
             await using var reader = await command.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct)) rows.Add(new { tenantId = reader.GetString(0), displayName = reader.GetString(1), kind = reader.GetString(2), members = reader.GetInt64(3) });

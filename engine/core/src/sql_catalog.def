@@ -703,6 +703,36 @@ SQL_QUERY("identity.update_profile", "uuid,text,text,text,text,text,text",
 SQL_QUERY("identity.upsert_client", "text,text,text",
     "INSERT INTO app.auth_clients(provider,client_id,authority,enabled,updated_at) VALUES($1,$2,$3,true,now()) "
     "ON CONFLICT(provider) DO UPDATE SET client_id=EXCLUDED.client_id,authority=EXCLUDED.authority,enabled=true,updated_at=now()")
+SQL_QUERY("consensus.create_scoped_temp", "bytea[]",
+    "CREATE TEMP TABLE consensus AS SELECT * FROM consensus.scoped_consensus($1)")
+SQL_QUERY("chess.db_identity", "",
+    "SELECT system_identifier::text, current_database() FROM pg_control_system()")
+SQL_QUERY("owner.set_read_only", "",
+    "SET TRANSACTION READ ONLY")
+SQL_QUERY("owner.lock_platform_roles", "",
+    "LOCK TABLE app.platform_roles IN SHARE ROW EXCLUSIVE MODE")
+SQL_QUERY("owner.find_binding", "text,text,text",
+    "SELECT user_id FROM app.external_identities WHERE provider=$1 AND issuer=$2 AND subject=$3")
+SQL_QUERY("owner.is_binding_for_user", "uuid,text,text,text",
+    "SELECT EXISTS(SELECT 1 FROM app.external_identities WHERE user_id=$1 AND provider=$2 AND issuer=$3 AND subject=$4)")
+SQL_QUERY("owner.is_event_owner", "uuid",
+    "SELECT EXISTS(SELECT 1 FROM app.platform_role_events WHERE user_id=$1 AND actor='installation-owner' AND role='administrator')")
+SQL_QUERY("owner.list_event_owners", "",
+    "SELECT DISTINCT user_id FROM app.platform_role_events WHERE actor='installation-owner' AND role='administrator'")
+SQL_QUERY("owner.provision", "uuid,text,text,text,text,uuid,text,text,text,timestamptz",
+    "WITH person AS (INSERT INTO app.users(user_id,display_name,email) VALUES($1,$2,$3) RETURNING user_id), "
+    "workspace AS (INSERT INTO app.tenants(tenant_id,display_name,kind) VALUES($4,$5,'personal') RETURNING tenant_id), "
+    "binding AS (INSERT INTO app.external_identities(identity_id,user_id,provider,issuer,subject,email,last_login_at) "
+    "SELECT $6,user_id,$7,$8,$9,$3,$10 FROM person RETURNING user_id) "
+    "INSERT INTO app.tenant_memberships(tenant_id,user_id,role) "
+    "SELECT workspace.tenant_id,binding.user_id,'owner' FROM workspace CROSS JOIN binding")
+SQL_QUERY("owner.get_role", "uuid",
+    "SELECT role FROM app.platform_roles WHERE user_id=$1")
+SQL_QUERY("owner.grant_administrator", "uuid,text",
+    "WITH granted AS (INSERT INTO app.platform_roles(user_id,role) VALUES($1,'administrator') "
+    "ON CONFLICT(user_id) DO UPDATE SET role=excluded.role,updated_at=now() RETURNING user_id) "
+    "INSERT INTO app.platform_role_events(user_id,actor,previous_role,role) "
+    "SELECT user_id,'installation-owner',$2,'administrator' FROM granted")
 SQL_QUERY("identity.put_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz",
     "INSERT INTO app.web_sessions(session_id,user_id,tenant_id,ticket,created_at,last_seen_at,expires_at,revoked_at) "
     "VALUES($1,$2,$3,$4,$5,$6,$7,NULL) ON CONFLICT(session_id) DO UPDATE SET ticket=EXCLUDED.ticket, "
@@ -738,6 +768,121 @@ SQL_QUERY("billing.entitlements", "text",
     "FROM app.billing_entitlements WHERE tenant=$1 ORDER BY plan_id")
 SQL_QUERY("billing.consume_credit", "text,text,int4",
     "SELECT plan_id,remaining,period_end FROM app.consume_credit($1,$2,$3)")
+SQL_QUERY("billing.probe_quotes", "",
+    "SELECT 1 FROM app.billing_quotes LIMIT 1")
+SQL_QUERY("billing.put_quote", "text,text,text,int4,int8,text,text,bool,text,text,timestamptz,timestamptz",
+    "INSERT INTO app.billing_quotes(quote_id,tenant,service_id,units,amount_cents,currency,status,consumed,"
+    "stripe_session_id,stripe_checkout_url,created_at,expires_at) "
+    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) "
+    "ON CONFLICT(quote_id) DO UPDATE SET "
+    "tenant=EXCLUDED.tenant,service_id=EXCLUDED.service_id,units=EXCLUDED.units,amount_cents=EXCLUDED.amount_cents,"
+    "currency=EXCLUDED.currency,status=EXCLUDED.status,consumed=EXCLUDED.consumed,"
+    "stripe_session_id=EXCLUDED.stripe_session_id,stripe_checkout_url=EXCLUDED.stripe_checkout_url,"
+    "created_at=EXCLUDED.created_at,expires_at=EXCLUDED.expires_at")
+SQL_QUERY("billing.get_quote", "text",
+    "SELECT quote_id,tenant,service_id,units,amount_cents,currency,status,consumed,"
+    "stripe_session_id,stripe_checkout_url,created_at,expires_at "
+    "FROM app.billing_quotes WHERE quote_id=$1")
+SQL_QUERY("billing.record_usage", "text,text,text,int4,int8,timestamptz",
+    "INSERT INTO app.billing_usage(quote_id,tenant,service_id,units,amount_cents,executed_at) "
+    "VALUES($1,$2,$3,$4,$5,$6)")
+SQL_QUERY("billing.usage_by_tenant", "text",
+    "SELECT quote_id,tenant,service_id,units,amount_cents,executed_at "
+    "FROM app.billing_usage WHERE tenant=$1 ORDER BY executed_at DESC,id DESC")
+SQL_QUERY("billing.record_royalty", "text,text,text,text,int4,int8,int8,timestamptz",
+    "INSERT INTO app.billing_royalties(quote_id,payer_tenant,source_id,service_id,share_bp,gross_amount_cents,royalty_cents,executed_at) "
+    "VALUES($1,$2,$3,$4,$5,$6,$7,$8) "
+    "ON CONFLICT(quote_id,source_id) DO UPDATE SET "
+    "share_bp=EXCLUDED.share_bp,gross_amount_cents=EXCLUDED.gross_amount_cents,royalty_cents=EXCLUDED.royalty_cents,executed_at=EXCLUDED.executed_at")
+SQL_QUERY("billing.royalties_by_tenant", "text",
+    "SELECT quote_id,payer_tenant,source_id,service_id,share_bp,gross_amount_cents,royalty_cents,executed_at "
+    "FROM app.billing_royalties WHERE payer_tenant=$1 ORDER BY executed_at DESC,id DESC")
+SQL_QUERY("billing.royalties_by_source", "text",
+    "SELECT quote_id,payer_tenant,source_id,service_id,share_bp,gross_amount_cents,royalty_cents,executed_at "
+    "FROM app.billing_royalties WHERE source_id=$1 ORDER BY executed_at DESC,id DESC")
+SQL_QUERY("billing.get_stripe_price", "text",
+    "SELECT stripe_price_id FROM app.stripe_price_map WHERE lookup_key=$1")
+SQL_QUERY("billing.set_stripe_price", "text,text",
+    "INSERT INTO app.stripe_price_map(lookup_key,stripe_price_id,updated_at) "
+    "VALUES($1,$2,now()) ON CONFLICT(lookup_key) DO UPDATE "
+    "SET stripe_price_id=EXCLUDED.stripe_price_id,updated_at=now()")
+SQL_QUERY("billing.get_config", "text",
+    "SELECT value FROM app.billing_config WHERE key=$1")
+SQL_QUERY("billing.set_config", "text,text",
+    "INSERT INTO app.billing_config(key,value,updated_at) VALUES($1,$2,now()) "
+    "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()")
+SQL_QUERY("apikey.put", "text,text,text,text,timestamptz,timestamptz,timestamptz",
+    "INSERT INTO app.api_keys(key_hash,key_prefix,tenant,label,created_at,revoked_at,last_used_at) "
+    "VALUES($1,$2,$3,$4,$5,$6,$7) "
+    "ON CONFLICT(key_hash) DO NOTHING")
+SQL_QUERY("apikey.get", "text",
+    "SELECT key_hash,key_prefix,tenant,label,created_at,revoked_at,last_used_at "
+    "FROM app.api_keys WHERE key_hash=$1")
+SQL_QUERY("apikey.by_tenant", "text",
+    "SELECT key_hash,key_prefix,tenant,label,created_at,revoked_at,last_used_at "
+    "FROM app.api_keys WHERE tenant=$1 ORDER BY created_at DESC,key_hash")
+SQL_QUERY("apikey.by_label", "text",
+    "SELECT key_hash,key_prefix,tenant,label,created_at,revoked_at,last_used_at "
+    "FROM app.api_keys WHERE label=$1 ORDER BY created_at DESC,key_hash")
+SQL_QUERY("apikey.revoke", "text",
+    "UPDATE app.api_keys SET revoked_at=now() WHERE key_hash=$1 AND revoked_at IS NULL")
+SQL_QUERY("apikey.touch", "text,timestamptz",
+    "UPDATE app.api_keys SET last_used_at=$2 WHERE key_hash=$1")
+SQL_QUERY("access.stored_role", "uuid",
+    "SELECT role FROM app.platform_roles WHERE user_id=$1")
+SQL_QUERY("access.people", "text",
+    "SELECT u.user_id,u.display_name,u.email,r.role,"
+    "ARRAY(SELECT DISTINCT e.provider FROM app.external_identities e WHERE e.user_id=u.user_id ORDER BY e.provider) "
+    "FROM app.users u LEFT JOIN app.platform_roles r USING(user_id) "
+    "WHERE $1='' OR strpos(lower(coalesce(u.display_name,'')||' '||coalesce(u.email,'')||' '||u.user_id::text),lower($1))>0 "
+    "ORDER BY r.role IS NULL,u.display_name NULLS LAST,u.user_id LIMIT 100")
+SQL_QUERY("access.events", "",
+    "SELECT e.event_id,e.user_id,e.actor,e.previous_role,e.role,e.occurred_at,"
+    "coalesce(person.email,person.display_name),coalesce(actor.email,actor.display_name) "
+    "FROM app.platform_role_events e "
+    "LEFT JOIN app.users person ON person.user_id=e.user_id "
+    "LEFT JOIN app.users actor ON actor.user_id::text=e.actor "
+    "ORDER BY e.event_id DESC LIMIT 50")
+SQL_QUERY("access.lock_roles", "",
+    "LOCK TABLE app.platform_roles IN SHARE ROW EXCLUSIVE MODE")
+SQL_QUERY("access.user_exists", "uuid",
+    "SELECT 1 FROM app.users WHERE user_id=$1")
+SQL_QUERY("access.has_role_events", "uuid",
+    "SELECT EXISTS(SELECT 1 FROM app.platform_role_events WHERE user_id=$1)")
+SQL_QUERY("access.admin_count", "",
+    "SELECT count(*) FROM app.platform_roles WHERE role='administrator'")
+SQL_QUERY("access.delete_role", "uuid",
+    "DELETE FROM app.platform_roles WHERE user_id=$1")
+SQL_QUERY("access.upsert_role", "uuid,text",
+    "INSERT INTO app.platform_roles(user_id,role,updated_at) VALUES($1,$2,now()) "
+    "ON CONFLICT(user_id) DO UPDATE SET role=EXCLUDED.role,updated_at=now()")
+SQL_QUERY("access.insert_role_event", "uuid,text,text,text",
+    "INSERT INTO app.platform_role_events(user_id,actor,previous_role,role) VALUES($1,$2,$3,$4)")
+SQL_QUERY("access.workspaces", "",
+    "SELECT t.tenant_id,t.display_name,t.kind,count(m.user_id) AS members "
+    "FROM app.tenants t LEFT JOIN app.tenant_memberships m USING(tenant_id) "
+    "GROUP BY t.tenant_id ORDER BY t.display_name,t.tenant_id LIMIT 200")
+SQL_QUERY("account.set_member_role", "text,text,uuid,uuid",
+    "WITH previous AS MATERIALIZED ("
+    "SELECT role FROM app.tenant_memberships WHERE tenant_id=$2 AND user_id=$3"
+    "), changed AS ("
+    "UPDATE app.tenant_memberships target SET role=$1 "
+    "WHERE target.tenant_id=$2 AND target.user_id=$3 "
+    "AND EXISTS(SELECT 1 FROM app.tenant_memberships actor WHERE actor.tenant_id=$2 AND actor.user_id=$4 AND actor.role='owner') "
+    "AND (target.role<>'owner' OR $1='owner' OR "
+    "(SELECT count(*) FROM app.tenant_memberships WHERE tenant_id=$2 AND role='owner')>1) "
+    "RETURNING target.user_id"
+    "), audit AS ("
+    "INSERT INTO app.workspace_role_events(tenant_id,user_id,actor_id,previous_role,role) "
+    "SELECT $2,changed.user_id,$4,previous.role,$1 FROM changed CROSS JOIN previous WHERE previous.role<>$1"
+    ") SELECT count(*) FROM changed")
+SQL_QUERY("account.role_events", "text",
+    "SELECT e.event_id,coalesce(person.email,person.display_name,e.user_id::text),"
+    "coalesce(actor.email,actor.display_name,e.actor_id::text),e.previous_role,e.role,e.occurred_at "
+    "FROM app.workspace_role_events e "
+    "LEFT JOIN app.users person ON person.user_id=e.user_id "
+    "LEFT JOIN app.users actor ON actor.user_id=e.actor_id "
+    "WHERE e.tenant_id=$1 ORDER BY e.event_id DESC LIMIT 50")
 SQL_QUERY("billing.begin_webhook", "text,text",
     "INSERT INTO app.billing_webhook_events(event_id,status,updated_at) VALUES($1,$2,now()) "
     "ON CONFLICT(event_id) DO UPDATE SET status=EXCLUDED.status,updated_at=now() "

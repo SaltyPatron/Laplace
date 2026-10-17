@@ -91,4 +91,11 @@ public readonly record struct Hash128(ulong Hi, ulong Lo)
             new ReadOnlySpan<byte>(&self, 16).CopyTo(dest);
         }
     }
+
+    public string ToHex()
+    {
+        Span<byte> b = stackalloc byte[16];
+        WriteBytes(b);
+        return Convert.ToHexStringLower(b);
+    }
 }

@@ -15,6 +15,15 @@ internal static class QuoteGate
         return await billing.EnsureExecutableAsync(quoteId, tenant, serviceId, ct);
     }
 
-    public static BillingReceipt MakeReceipt(BillingQuote quote) =>
-        new(quote.QuoteId, quote.AmountCents, quote.Currency, quote.Tenant, quote.ServiceId);
+    public static BillingReceipt MakeReceipt(BillingQuote quote, IReadOnlyList<BillingRoyaltyRecord>? royalties = null) =>
+        new(
+            quote.QuoteId,
+            quote.AmountCents,
+            quote.Currency,
+            quote.Tenant,
+            quote.ServiceId,
+            royalties is { Count: > 0 }
+                ? royalties.Select(r => new RoyaltyShareReceipt(
+                    r.SourceIdHex, r.SourceOwnerTenant, r.ShareBp, r.RoyaltyCents, r.HitCount)).ToArray()
+                : null);
 }

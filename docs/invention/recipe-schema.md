@@ -76,7 +76,7 @@ determines every weight value; the math turning content into weights is fixed.*
 **1. KNOBS (user chooses — no single correct value):**
 - Topology: `hidden_size`\*, `num_layers`, `num_heads`/layer, `kv_heads`, `intermediate_size`\*
 - Structure: `dense`/`moe`, `num_experts`, `experts_per_token` (routing), LoRA rank
-- Operator array: which operator each head is (the build-a-bear multi-select); per-layer schedule\*
+- Operator array: which operator each head is (the Mold-A-Model multi-select); per-layer schedule\*
 - Content/materialization: `vocab.source` (+ selected scope controls) — what the target artifact materializes from the already authorized substrate; this does not alter what Laplace knows
 - Flags/output: `rope`(+theta), `tie_embeddings`, `norm`, `embed` op, `lm_head` op, format, dtype
   (\* = has a substrate-derived default; overridable.)

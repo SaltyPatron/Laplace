@@ -150,30 +150,97 @@ Start with:
 - [`AGENTS.md`](AGENTS.md) — implementation rules for this repository
 - [`docs/README.md`](docs/README.md) — documentation map
 
-## Build and run
+## Build, Run, and Operate
 
-Linux uses the repository pipeline that CI executes:
+Laplace provides unified entry points for building from source, running the local development server, managing the substrate and application databases, and operating installed releases across Linux and Windows.
 
+### 1. Build and Test from Source
+
+**Linux (`Justfile` / `scripts/pipeline.sh`):**
 ```bash
-sudo bash scripts/setup-host.sh   # host bootstrap / reconciliation
-bash scripts/pipeline.sh build
-bash scripts/test-parallel.sh --engine
+sudo bash scripts/setup-host.sh          # One-time host bootstrap / toolchain setup
+bash scripts/pipeline.sh build           # Build native engine, PG extension, C# app, and web UI
+bash scripts/pipeline.sh install         # Install extension and runtime artifacts
+bash scripts/test-parallel.sh --engine   # Run engine and substrate verification suite
 ```
 
-The main delivery workflow builds, installs, manages the database lifecycle and publishes the application on the managed host. Windows entry points live under `scripts/win/`.
+**Windows (`laplace-ops` / `scripts/win/`):**
+```powershell
+laplace-ops prepare                      # Fetch pinned grammars and Unicode reference inputs
+laplace-ops build                        # Build native C++, managed .NET solution, CLI, and web UI
+laplace-ops test                         # Run native interop and decomposition test suites
+```
 
-For everyday use without a checkout or build shell, see the
-[installed monorepo CLI](docs/guides/installed-mono-client.md).
-For installed database status, migration, repair and recreation through the
-GitHub runner, see [database maintenance](docs/guides/database-maintenance.md).
+### 2. Run the Application
 
-For substrate introspection after installation:
+```powershell
+# Run in foreground (http://localhost:5187)
+laplace-ops run
 
+# Or manage as a background development instance
+laplace-ops start
+laplace-ops status
+laplace-ops logs
+laplace-ops stop
+laplace-ops verify
+```
+
+To build, publish, migrate databases, and verify a local IIS installation in one step:
+```powershell
+laplace-ops deploy -Target desktop
+```
+
+### 3. Database Lifecycle & Maintenance
+
+Laplace separates content/substrate state (`LAPLACE_DB`) from accounts, sessions, API keys, and billing (`LAPLACE_APP_DB`). You can inspect, migrate, repair (recreate after an external drop), or reset either database without rebuilding the application:
+
+**Via `laplace-ops` (Windows / cross-target operator CLI):**
+```powershell
+# Check migration status (substrate, application, or both)
+laplace-ops db -Database both -DatabaseOperation status
+
+# Apply pending migrations or recreate a missing (dropped) database
+laplace-ops db -Database substrate -DatabaseOperation repair
+laplace-ops db -Database application -DatabaseOperation repair
+
+# Reset (drop and recreate from migrations, preserving role grants)
+laplace-ops db -Database substrate -DatabaseOperation recreate -Yes
+laplace-ops db -Database application -DatabaseOperation recreate -Yes
+
+# Recycle the local IIS worker cleanly after database maintenance
+laplace-ops restart-iis
+```
+
+**Via `scripts/db-migrations.sh` or `Justfile` (Linux / direct migrator):**
+```bash
+scripts/db-migrations.sh status          # Combined or substrate migration status
+scripts/db-migrations.sh up              # Create missing DB(s) and apply pending migrations
+scripts/db-migrations.sh nuke --yes      # Recreate substrate DB from migrations
+scripts/db-migrations.sh app-up          # Apply application DB migrations only
+scripts/db-migrations.sh app-nuke --yes  # Recreate application DB from migrations
+just db-fresh                            # Nuke, migrate, sync extensions, tune PG, and check health
+```
+
+See [docs/guides/database-maintenance.md](docs/guides/database-maintenance.md) and [deploy/windows/DATABASE-MAINTENANCE.md](deploy/windows/DATABASE-MAINTENANCE.md) for full details.
+
+### 4. Ingestion & CLI Usage
+
+Once installed, `laplace-mono` runs from any working directory without requiring a build shell:
+
+```bash
+laplace-mono --where
+laplace-mono status
+laplace-mono ingest unicode
+laplace-mono ingest document /path/to/documents --verify
+laplace-mono chat "Explain this relationship"
+```
+
+For substrate introspection directly in PostgreSQL:
 ```sql
 SELECT * FROM ops.api('walk');
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the guides under [`docs/guides/`](docs/guides/) for the full operational surface.
+See [docs/guides/installed-mono-client.md](docs/guides/installed-mono-client.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the guides under [docs/guides/](docs/guides/) for the complete operational surface.
 
 ## License
 

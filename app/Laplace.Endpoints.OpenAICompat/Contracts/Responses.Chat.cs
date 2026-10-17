@@ -134,7 +134,15 @@ public sealed record BillingReceipt(
     [property: JsonPropertyName("amount_cents")] long AmountCents,
     [property: JsonPropertyName("currency")] string Currency,
     [property: JsonPropertyName("tenant")] string Tenant,
-    [property: JsonPropertyName("service_id")] string ServiceId);
+    [property: JsonPropertyName("service_id")] string ServiceId,
+    [property: JsonPropertyName("royalties"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<RoyaltyShareReceipt>? Royalties = null);
+
+public sealed record RoyaltyShareReceipt(
+    [property: JsonPropertyName("source_id")] string SourceId,
+    [property: JsonPropertyName("source_owner_tenant"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceOwnerTenant,
+    [property: JsonPropertyName("share_bp")] int ShareBp,
+    [property: JsonPropertyName("royalty_cents")] long RoyaltyCents,
+    [property: JsonPropertyName("hit_count")] long HitCount);
 
 
 public sealed record CompletionsReceipt(

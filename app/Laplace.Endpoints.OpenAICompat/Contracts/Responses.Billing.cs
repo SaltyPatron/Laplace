@@ -305,3 +305,21 @@ public sealed record WebhookProvisionView(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("endpoint_id")] string? EndpointId,
     [property: JsonPropertyName("url")] string? Url);
+
+public sealed record RoyaltiesResponse(
+    [property: JsonPropertyName("tenant")] string Tenant,
+    [property: JsonPropertyName("source_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceId,
+    [property: JsonPropertyName("total_royalty_cents")] long TotalRoyaltyCents,
+    [property: JsonPropertyName("entries")] IReadOnlyList<RoyaltyEntryView> Entries);
+
+public sealed record RoyaltyEntryView(
+    [property: JsonPropertyName("quote_id")] string QuoteId,
+    [property: JsonPropertyName("payer_tenant")] string PayerTenant,
+    [property: JsonPropertyName("service_id")] string ServiceId,
+    [property: JsonPropertyName("source_id")] string SourceId,
+    [property: JsonPropertyName("source_owner_tenant"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceOwnerTenant,
+    [property: JsonPropertyName("share_bp")] int ShareBp,
+    [property: JsonPropertyName("royalty_cents")] long RoyaltyCents,
+    [property: JsonPropertyName("hit_count")] long HitCount,
+    [property: JsonPropertyName("total_weight")] double TotalWeight,
+    [property: JsonPropertyName("executed_at")] DateTimeOffset ExecutedAt);

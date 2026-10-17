@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
@@ -9,9 +10,7 @@ public sealed record ChessDatabaseIdentity(string Cluster, string Database)
 
     public static ChessDatabaseIdentity Read(NpgsqlDataSource source)
     {
-        using var connection = source.OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT system_identifier::text, current_database() FROM pg_control_system()";
+        using var command = NpgsqlCatalog.Command(source, "chess.db_identity");
         using var reader = command.ExecuteReader();
         if (!reader.Read()) throw new InvalidOperationException("Content server returned no cluster identity.");
         return new(reader.GetString(0), reader.GetString(1));

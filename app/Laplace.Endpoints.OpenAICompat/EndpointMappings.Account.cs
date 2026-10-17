@@ -138,24 +138,9 @@ internal static class AccountEndpoints
             await using var transaction = await connection.BeginTransactionAsync(ct);
             await using (var locked = NpgsqlCatalog.Command(connection, transaction, "account.lock_workspace", account.Tenant))
                 await locked.ExecuteScalarAsync(ct);
-            await using var update = new Npgsql.NpgsqlCommand("""
-                WITH previous AS MATERIALIZED (
-                    SELECT role FROM app.tenant_memberships WHERE tenant_id = $2 AND user_id = $3
-                ), changed AS (
-                UPDATE app.tenant_memberships target SET role = $1
-                WHERE target.tenant_id = $2 AND target.user_id = $3
-                AND EXISTS (SELECT 1 FROM app.tenant_memberships actor WHERE actor.tenant_id = $2 AND actor.user_id = $4 AND actor.role = 'owner')
-                AND (target.role <> 'owner' OR $1 = 'owner' OR
-                    (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id = $2 AND role = 'owner') > 1)
-                RETURNING target.user_id
-                ), audit AS (
-                    INSERT INTO app.workspace_role_events(tenant_id, user_id, actor_id, previous_role, role)
-                    SELECT $2, changed.user_id, $4, previous.role, $1 FROM changed CROSS JOIN previous
-                    WHERE previous.role <> $1
-                ) SELECT count(*) FROM changed
-                """, connection, transaction);
-            update.Parameters.AddWithValue(request.Role); update.Parameters.AddWithValue(account.Tenant);
-            update.Parameters.AddWithValue(userId); update.Parameters.AddWithValue(account.User);
+            await using var update = NpgsqlCatalog.Command(
+                connection, transaction, "account.set_member_role",
+                request.Role, account.Tenant, userId, account.User);
             if ((long)(await update.ExecuteScalarAsync(ct))! != 1)
                 return Error(409, "role_change_refused", "The member or your permissions changed, or this is the last workspace owner. Keep at least one owner.");
             await transaction.CommitAsync(ct);
@@ -166,15 +151,7 @@ internal static class AccountEndpoints
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can view role history.");
-            await using var command = application.CreateCommand("""
-                SELECT e.event_id, coalesce(person.email, person.display_name, e.user_id::text),
-                    coalesce(actor.email, actor.display_name, e.actor_id::text), e.previous_role, e.role, e.occurred_at
-                FROM app.workspace_role_events e
-                LEFT JOIN app.users person ON person.user_id = e.user_id
-                LEFT JOIN app.users actor ON actor.user_id = e.actor_id
-                WHERE e.tenant_id = $1 ORDER BY e.event_id DESC LIMIT 50
-                """);
-            command.Parameters.AddWithValue(account.Tenant);
+            await using var command = NpgsqlCatalog.Command(application, "account.role_events", account.Tenant);
             await using var reader = await command.ExecuteReaderAsync(ct);
             var events = new List<object>();
             while (await reader.ReadAsync(ct)) events.Add(new { eventId = reader.GetInt64(0), person = reader.GetString(1), actor = reader.GetString(2),

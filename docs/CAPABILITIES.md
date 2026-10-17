@@ -331,3 +331,24 @@ shared Laplace world
 Content packages can therefore be purchased, assigned by a school, granted by an employer, delegated by role, or temporarily activated without copying opaque weights.
 
 “I know kung fu” is the product verb: grant or materialize an authorized, receipted portion of the existing witnessed world.
+
+## The BitTorrent of AI: Two-Sided Seeding, Mold-A-Model, and Native Attribution
+
+Because Laplace stores knowledge as content-addressed compositions, witness trunks (`[source record, file trunks]`), and Glicko-2 consensus cells rather than opaque dense weights, every user and organization can act as a **Seeder** of both **hardware** and **knowledge**, governed by a single canonical SQL + native C script:
+
+```text
+KNOWLEDGE SEEDING (Witness Trunks & Content Packages)
+  ingest domain corpus / codebase / telemetry as a witness trunk
+  -> set visibility (private | tenant | public | licensed)
+  -> authorized queries (COUPLE -> REALIZE) and Mold-A-Model exports touch claims under that trunk
+  -> native C + SQL attribution (walk_up / attested / share_bp) computes exact Fisher-weighted
+     basis-point contribution (0..10000 bp) per witness trunk
+  -> deterministic micro-royalty split settles to contributing witness owners in SQL
+
+HARDWARE / PERFCACHE SEEDING (Compute & ROM Swarm)
+  host content-addressed perfcache ROM shards or execute bounded native C/SQL work
+  -> serve verified Merkle/Hilbert lookups, COUPLE walks, or Mold-A-Model synthesis passes
+  -> earn Compute Allowance Credits from the receipted physical work
+```
+
+Crucially, **all** provenance, scoped consensus (`scoped_consensus`), source attribution (`share_bp`), and **Mold-A-Model** synthesis execute in the unified SQL + native C substrate (`Laplace-postgres` + `Laplace-Native` / `laplace_substrate` + `sql_catalog.def`), eliminating hand-rolled C#/SQL wheels across CLI, API, and MCP surfaces.

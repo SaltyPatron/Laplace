@@ -174,12 +174,8 @@ public sealed class ReadPathArchitectureGateTests
             if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
             // The sanctioned home — Npgsql is SUPPOSED to live here.
             if (file.Contains(sanctioned, StringComparison.OrdinalIgnoreCase)) continue;
-            // Not substrate catalog: Stripe/app ledger, API-key store, DbUp bootstrap.
-            if (file.Contains($"{sep}BillingPostgres{sep}", StringComparison.OrdinalIgnoreCase)) continue;
-            if (file.Contains($"{sep}Auth{sep}", StringComparison.OrdinalIgnoreCase)
-                && file.Contains("OpenAICompat", StringComparison.OrdinalIgnoreCase)) continue;
+            // DbUp bootstrap runs before the extension exists.
             if (file.Contains($"{sep}Laplace.Migrations{sep}", StringComparison.OrdinalIgnoreCase)) continue;
-            if (file.EndsWith($"{sep}BillingBootstrap.cs", StringComparison.OrdinalIgnoreCase)) continue;
             // Not substrate catalog: a THIRD-PARTY SQLite container the agents lane
             // unpacks (Cursor store.db, Zed threads.db, Crush crush.db, Goose/OpenCode
             // session dbs) is a FORMAT CODEC, the same class as Fathom for syzygy — it

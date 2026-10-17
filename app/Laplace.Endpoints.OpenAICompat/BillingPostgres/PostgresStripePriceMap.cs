@@ -9,26 +9,15 @@ internal sealed class PostgresStripePriceMap : IStripePriceMap
 
     public PostgresStripePriceMap(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
-    public Task<string?> TryGetAsync(string lookupKey, CancellationToken ct)
+    public async Task<string?> TryGetAsync(string lookupKey, CancellationToken ct)
     {
-        const string sql = "SELECT stripe_price_id FROM app.stripe_price_map WHERE lookup_key = @lookup_key;";
-        return NpgsqlRead.ExecuteScalarAsync<string>(_dataSource, sql,
-            p => p.AddWithValue("lookup_key", lookupKey), ct: ct);
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.get_stripe_price", lookupKey);
+        return (string?)await cmd.ExecuteScalarAsync(ct);
     }
 
-    public Task SetAsync(string lookupKey, string stripePriceId, CancellationToken ct)
+    public async Task SetAsync(string lookupKey, string stripePriceId, CancellationToken ct)
     {
-        const string sql = """
-            INSERT INTO app.stripe_price_map (lookup_key, stripe_price_id, updated_at)
-            VALUES (@lookup_key, @stripe_price_id, now())
-            ON CONFLICT (lookup_key) DO UPDATE SET
-                stripe_price_id = EXCLUDED.stripe_price_id,
-                updated_at = now();
-            """;
-        return NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
-        {
-            p.AddWithValue("lookup_key", lookupKey);
-            p.AddWithValue("stripe_price_id", stripePriceId);
-        }, ct: ct);
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.set_stripe_price", lookupKey, stripePriceId);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 }
