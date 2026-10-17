@@ -68,7 +68,9 @@ permissions:
 
 env:
   # Credential refresh and component installation use the same host lock.
-  LAPLACE_HOST_LOCK_WAIT_SECONDS: "600"
+  # How long a phase waits for another repository's host operation (an Engine CI parity ingest, the MCP deploy) to
+  # release the shared host lock before it refuses; the repository variable, as in Laplace-Operations' delivery (#131).
+  LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || '3600' }}
 
 concurrency:
   group: laplace-promotion
@@ -250,7 +252,7 @@ jobs:
     needs: deliver
     if: needs.deliver.result == 'success' && (github.event_name == 'push' || inputs.promote)
     runs-on: [self-hosted, laplace, Laplace, production]
-    timeout-minutes: 60
+    timeout-minutes: 120
     concurrency:
       group: laplace-site-hart-prod
       cancel-in-progress: false
