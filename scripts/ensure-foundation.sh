@@ -44,9 +44,9 @@ layer_predicate() {
 }
 
 layer_ok() {
-  local cli="$1" decomposer="$2" layer="$3" predicate
+  local cli="$1" predicate
   db_exists || return 1
-  predicate="$(layer_predicate "$cli" "$decomposer" "$layer" | cut -f1)" || return 1
+  predicate="$(layer_predicate "$cli" | cut -f1)" || return 1
   "${PSQL[@]}" -d "$DB" -tAc "SELECT ${predicate};" \
     | grep -qiE '^(t|true)$'
 }
@@ -55,24 +55,16 @@ layer_label() {
   layer_predicate "$@" | cut -f2
 }
 
-FOUNDATION=(
-  "unicode:UnicodeDecomposer:0"
-  "iso639:ISO639Decomposer:1"
-  "operational:OperationalDecomposer:2"
-  "cili:CILIDecomposer:1"
-  "wordnet:WordNetDecomposer:2"
-  "verbnet:VerbNetDecomposer:2"
-  "propbank:PropBank:2"
-  "framenet:FrameNet:3"
-  "mapnet:MapNetDecomposer:3"
-  "wordframenet:WordFrameNetDecomposer:3"
-  "semlink:SemLinkDecomposer:3"
-)
+# The foundation batch and its order are declared once, in scripts/win/witness-manifest.json
+# (foundation.sources); each source's witness or decomposer, and its layer, come from
+# scripts/decomposer-gates.json through source-layer-complete.py.
+mapfile -t FOUNDATION < <(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["foundation"]["sources"]))' "$SCRIPTS/win/witness-manifest.json")
+[[ ${#FOUNDATION[@]} -gt 0 ]] || { echo "no foundation.sources in $SCRIPTS/win/witness-manifest.json" >&2; exit 2; }
 
 if [[ "$REQUIRED_LEXICAL" -eq 1 ]]; then
   required=()
-  for entry in "${FOUNDATION[@]}"; do
-    case "${entry%%:*}" in unicode|iso639|cili|wordnet) required+=("$entry") ;; esac
+  for cli in "${FOUNDATION[@]}"; do
+    case "$cli" in unicode|iso639|cili|wordnet) required+=("$cli") ;; esac
   done
   FOUNDATION=("${required[@]}")
   export LAPLACE_INGEST_FORCE=0 LAPLACE_INGEST_MAX_UNITS=0
@@ -86,9 +78,8 @@ needs_work=0
 if [[ "$FORCE" -eq 1 || ( "$REQUIRED_LEXICAL" -eq 1 && "$CHECK_ONLY" -eq 0 ) ]]; then
   needs_work=1
 else
-  for entry in "${FOUNDATION[@]}"; do
-    IFS=':' read -r cli decomposer layer <<< "$entry"
-    if ! layer_ok "$cli" "$decomposer" "$layer"; then
+  for cli in "${FOUNDATION[@]}"; do
+    if ! layer_ok "$cli"; then
       needs_work=1
       break
     fi
@@ -102,10 +93,9 @@ fi
 
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
   echo "foundation incomplete on $DB" >&2
-  for entry in "${FOUNDATION[@]}"; do
-    IFS=':' read -r cli decomposer layer <<< "$entry"
-    layer_ok "$cli" "$decomposer" "$layer" \
-      || echo "  missing: ${cli} ($(layer_label "$cli" "$decomposer" "$layer"))" >&2
+  for cli in "${FOUNDATION[@]}"; do
+    layer_ok "$cli" \
+      || echo "  missing: ${cli} ($(layer_label "$cli"))" >&2
   done
   exit 1
 fi
@@ -115,9 +105,8 @@ if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; th
 fi
 
 CHAIN=()
-for entry in "${FOUNDATION[@]}"; do
-  IFS=':' read -r cli decomposer layer <<< "$entry"
-  if [[ "$FORCE" -eq 1 || "$REQUIRED_LEXICAL" -eq 1 ]] || ! layer_ok "$cli" "$decomposer" "$layer"; then
+for cli in "${FOUNDATION[@]}"; do
+  if [[ "$FORCE" -eq 1 || "$REQUIRED_LEXICAL" -eq 1 ]] || ! layer_ok "$cli"; then
     CHAIN+=("$cli")
   else
     echo "skip $cli (layer complete)"
@@ -137,13 +126,12 @@ psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
    ORDER BY source_name, started_at DESC;"
 
 remaining=0
-for entry in "${FOUNDATION[@]}"; do
-  IFS=':' read -r cli decomposer layer <<< "$entry"
-  if ! layer_ok "$cli" "$decomposer" "$layer"; then
+for cli in "${FOUNDATION[@]}"; do
+  if ! layer_ok "$cli"; then
     if [[ "$remaining" -eq 0 ]]; then
       echo "foundation incomplete after ingest on $DB" >&2
     fi
-    echo "  missing: ${cli} ($(layer_label "$cli" "$decomposer" "$layer"))" >&2
+    echo "  missing: ${cli} ($(layer_label "$cli"))" >&2
     remaining=1
   fi
 done

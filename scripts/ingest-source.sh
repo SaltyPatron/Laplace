@@ -5,15 +5,36 @@ source="${1:-}"
 path="${2:-}"
 corpus(){ printf '%s' "${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"; }    # asked only where a path under the corpus is needed
 
-FLOOR=(unicode uca iso639 operational cili)
-DOCUMENT=(document project-gutenberg)
-RELATIONS=(wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
-USAGE=(tatoeba opensubtitles)
+# The ladder stages and their order are declared once, in scripts/win/witness-manifest.json
+# (cadence[].sources, relations by their order); these arrays are read from it.
+MANIFEST="$(dirname "$0")/win/witness-manifest.json"
+stage_sources() {
+    python3 - "$MANIFEST" "$1" <<'PY'
+import json, sys
+stage = next(s for s in json.load(open(sys.argv[1], encoding="utf-8"))["cadence"] if s["stage"] == sys.argv[2])
+print("\n".join(s["cli"] for s in sorted(stage["sources"], key=lambda s: s.get("order", 0))))
+PY
+}
+mapfile -t FLOOR < <(stage_sources floor)
+mapfile -t DOCUMENT < <(stage_sources document)
+mapfile -t RELATIONS < <(stage_sources relations)
+mapfile -t USAGE < <(stage_sources usage)
+if [[ ${#FLOOR[@]} -eq 0 || ${#DOCUMENT[@]} -eq 0 || ${#RELATIONS[@]} -eq 0 || ${#USAGE[@]} -eq 0 ]]; then
+    echo "cannot read the ladder stages from $MANIFEST" >&2
+    exit 2
+fi
+LADDER=" ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]} "
+# Sources outside the ladder; each has its own route below.
+OTHER_SOURCES="chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy chess-opening-match chess-move-outcomes chess-tactic-outcomes chess-position-outcomes chess-player-context-outcomes code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"
+
+usage_sources() {
+    echo "Sources: ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]}" >&2
+    echo "         $OTHER_SOURCES" >&2
+}
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
-    echo "Sources: ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-tactic-outcomes chess-transitions safetensors" >&2
+    usage_sources
     exit 2
 fi
 
@@ -190,7 +211,9 @@ ingest() {
     return "$rc"
 }
 
-case "$source" in
+route="$source"
+if [[ "$LADDER" == *" $source "* ]]; then route=@ladder; fi
+case "$route" in
     all)
         require_cli
         STAGES=( "${FLOOR[@]}" "${DOCUMENT[@]}" "${RELATIONS[@]}" "${USAGE[@]}" )
@@ -224,7 +247,7 @@ case "$source" in
         require_cli
         ingest safetensors "$path"
         ;;
-    unicode|uca|iso639|operational|cili|document|project-gutenberg|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
+    @ladder|stack|tiny-codes|rgba-image|track-audio|frame-video)
         require_cli
         if [[ "$source" == document && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$(corpus)/test-data/text}"
@@ -245,7 +268,7 @@ case "$source" in
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
-    chess-move-outcomes|chess-tactic-outcomes|chess-eval|chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
+    chess-move-outcomes|chess-tactic-outcomes|chess-position-outcomes|chess-player-context-outcomes|chess-eval|chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
         require_cli
         ingest "$source"
         ;;
@@ -255,10 +278,7 @@ case "$source" in
         ;;
     *)
         echo "Unknown source: $source" >&2
-        echo "Sources: ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]} \\" >&2
-        echo "         chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy \\" >&2
-        echo "         chess-opening-match chess-move-outcomes chess-tactic-outcomes \\" >&2
-        echo "         code repo stack tiny-codes tabular recipe agents all safetensors" >&2
+        usage_sources
         exit 2
         ;;
 esac
