@@ -3,6 +3,7 @@ import { exploreContainers, exploreDecompose } from '../../api';
 import { EntityLink } from '../../components/EntityLink';
 import { GatePrompt } from '../../components/GatePrompt';
 import type { ExploreEntityPreviewResponse, ExploreEntityResponse } from '../../types';
+import { decomposableSurface } from '../decomposeSurface';
 import styles from '../EntityDetail.module.css';
 
 export function StructureTab({
@@ -24,6 +25,8 @@ export function StructureTab({
   onDecompose: () => void;
   onLoadContainers: () => void;
 }) {
+  const surface = decomposableSurface(entity, preview);
+  const decomposable = surface !== null;
   return (
     <Stack gap={4}>
       <Panel title="Constituents">
@@ -40,33 +43,35 @@ export function StructureTab({
         )}
       </Panel>
 
-      <Panel title="Decompose (free)">
-        <Stack gap={3}>
-          <Button disabled={decomposeBusy} loading={decomposeBusy} onClick={onDecompose}>
-            {decomposeBusy ? 'Decomposing…' : `Decompose "${preview.label}"`}
-          </Button>
-          {decomposeNodes ? (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Ord</Th>
-                  <Th>Tier</Th>
-                  <Th>Label</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {decomposeNodes.map((n) => (
-                  <tr key={n.ordinal}>
-                    <Td>{n.ordinal}</Td>
-                    <Td>{n.tier}</Td>
-                    <Td><EntityLink idHex={n.id_hex} label={n.label || ''} /></Td>
+      {decomposable ? (
+        <Panel title="Decompose (free)">
+          <Stack gap={3}>
+            <Button disabled={decomposeBusy} loading={decomposeBusy} onClick={onDecompose}>
+              {decomposeBusy ? 'Decomposing…' : `Decompose "${surface}"`}
+            </Button>
+            {decomposeNodes ? (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Ord</Th>
+                    <Th>Tier</Th>
+                    <Th>Label</Th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
-          ) : null}
-        </Stack>
-      </Panel>
+                </thead>
+                <tbody>
+                  {decomposeNodes.map((n) => (
+                    <tr key={n.ordinal}>
+                      <Td>{n.ordinal}</Td>
+                      <Td>{n.tier}</Td>
+                      <Td><EntityLink idHex={n.id_hex} label={n.label || ''} /></Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : null}
+          </Stack>
+        </Panel>
+      ) : null}
 
       <Panel title="Containers">
         {containersUnlocked && containers ? (

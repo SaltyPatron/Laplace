@@ -29,6 +29,7 @@ import { useExploreStore } from '../store';
 import type { BillingReceipt, ExploreEntityPreviewResponse, ExploreEntityResponse } from '../types';
 import styles from './EntityDetail.module.css';
 import { EntityHeader } from './EntityHeader';
+import { decomposableSurface, decompositionMatchesEntity } from './decomposeSurface';
 import type { EntityTab, NeighborMode } from './tabs/types';
 
 const loadOverviewTab = () => import('./tabs/OverviewTab');
@@ -183,11 +184,20 @@ export function EntityDetail() {
   }
 
   async function runDecompose() {
-    if (!preview) return;
+    if (!entity) return;
+    // Decompose the entity's own text surface, never its display label: a label
+    // can be a lexicalization, a record's parts or a typed short id.
+    const surface = decomposableSurface(entity, preview);
+    if (surface === null) return;
     setDecomposeBusy(true);
     setErr(null);
     try {
-      const res = await exploreDecompose(preview.label);
+      const res = await exploreDecompose(surface);
+      if (!decompositionMatchesEntity(entity.id_hex, res.root_id_hex)) {
+        setDecomposeNodes(null);
+        setErr(`"${surface}" decomposes to ${res.root_id_hex}, not this entity; its structure is shown under Constituents.`);
+        return;
+      }
       setDecomposeNodes(res.nodes);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));

@@ -11,16 +11,23 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "trajectory_wkb.h"
+#include "opaque_surface.h"
 
 /* Labels a set of ids for REALIZE. Stages run in a fixed order as set reads;
  * an id leaves once a stage gives it a non-opaque label, so only unlabeled ids
- * reach the next stage. A composition's textual preview follows its first-child
- * spine through trajectory head vertices; siblings are never expanded and no
- * document is rendered whole. */
+ * reach the next stage: a text-typed entity's own surface at or below sentence
+ * tier, then the words a source binds to it (lexicalization), then a record's
+ * parts, then any other entity's own surface, then names. Text (a Word, a
+ * Sentence) is shown as itself and never relabelled as a lemma a source binds
+ * to it; an opaque surface (an ILI, an offset) never labels anything before
+ * its lexicalization has been tried. A composition above
+ * sentence tier of word-grain parts is shown as its parts; one of sentences
+ * previews its first-child spine through trajectory head vertices; siblings
+ * are never expanded and no document is rendered whole. */
 typedef struct {
     hash128_t id, type, target, chosen_evidence;
     int16 tier, target_tier;
-    bool exists, has_type, has_target, record;
+    bool exists, has_type, has_target, record, text;
     int64 chosen_time;
     char *label;
 } DisplayItem;
@@ -76,18 +83,7 @@ batch_text(int which, DisplayItem **items, int n, bool targets)
     return out;
 }
 
-static bool
-opaque_name(const char *s, bool lexicon)
-{
-    if (s==NULL || *s=='\0') return true;
-    Size n=strlen(s),i=0;
-    while(i<n && ((s[i]>='0'&&s[i]<='9')||(s[i]>='a'&&s[i]<='f')||(s[i]>='A'&&s[i]<='F'))) ++i;
-    if(i==32 && (n==32 || strcmp(s+32,"…")==0 || strcmp(s+32,"...")==0)) return true;
-    if(!lexicon) return false;
-    if(s[0]=='i' && n>1) { i=1; while(i<n && s[i]>='0'&&s[i]<='9') ++i; if(i==n) return true; }
-    i=0; while(i<n && s[i]>='0'&&s[i]<='9') ++i;
-    return i>=6 && n==i+2 && s[i]=='-' && strchr("nvarspNVARSP",s[i+1])!=NULL;
-}
+#define opaque_name laplace_opaque_surface
 
 static char *
 short_identity(const hash128_t *id)
@@ -112,6 +108,7 @@ pending(DisplayItem **all,int n,DisplayItem **out,int mode)
     int count=0;
     for(int i=0;i<n;++i) if(all[i]->label==NULL &&
         (mode==0 || (mode==1 && all[i]->exists && all[i]->tier<=3) ||
+         (mode==3 && all[i]->exists && all[i]->text && all[i]->tier<=3) ||
          (mode==2 && !all[i]->has_target))) out[count++]=all[i];
     return count;
 }
@@ -153,7 +150,7 @@ typedef struct {hash128_t id;int at;} RecordSlot;
 typedef struct {hash128_t id;char *label;} PartLabel;
 
 static void
-record_labels(DisplayItem **items,int n)
+record_labels(DisplayItem **items,int n,bool shallow_only)
 {
     if(n==0 || record_depth>=RECORD_DEPTH) return;
     HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(RecordSlot);
@@ -169,14 +166,16 @@ record_labels(DisplayItem **items,int n)
         RecordSlot *s=hash_search(slots,&id,HASH_FIND,NULL);if(s==NULL)continue;
         Datum wkb=SPI_getbinval(t,d,2,&isnull);if(isnull)continue;
         uint32 points;const unsigned char *p=laplace_trajectory_wkb_points(DatumGetByteaPP(wkb),&points);
-        int keep=points>RECORD_PARTS?RECORD_PARTS:(int)points;bool text=true;
+        int keep=points>RECORD_PARTS?RECORD_PARTS:(int)points;bool text=true,deep=false;
         kids[s->at]=palloc(Max(keep,1)*sizeof(hash128_t));runs[s->at]=palloc(Max(keep,1)*sizeof(uint16));
         for(uint32 j=0;j<points;++j) {
             double vertex[4];mantissa_payload_t pl;memcpy(vertex,p+(Size)j*4*sizeof(double),sizeof(vertex));mantissa_unpack(vertex,&pl);
             if(laplace_vflag_has_atom(pl.flags)==0 && laplace_vflag_tier(pl.flags)>1) text=false;
+            if(laplace_vflag_has_atom(pl.flags)==0 && laplace_vflag_tier(pl.flags)>2) deep=true;
             if((int)j<keep){kids[s->at][j]=pl.entity_id;runs[s->at][j]=pl.run_length?pl.run_length:1;}
         }
         if(text){items[s->at]->record=false;continue;}             /* one string: its bytes are its name */
+        if(shallow_only && (deep || points<2)) continue;           /* prose: previewed by its spine */
         nk[s->at]=keep;more[s->at]=points>(uint32)keep;total+=keep;
     }
     SPI_freetuptable(SPI_tuptable);
@@ -362,18 +361,24 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         item->exists=true;item->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
         Datum type=SPI_getbinval(t,d,3,&isnull);item->has_type=!isnull;if(!isnull)item->type=datum_to_hash128(type);
         item->record=item->has_type && item->tier>=2 && laplace_entity_type_is_text(&item->type)==0;
+        item->text=item->has_type && laplace_entity_type_is_text(&item->type)==1;
         /* display.facets: id, tier, type_id, canonical name. An entity row names no source. */
         Datum name=SPI_getbinval(t,d,4,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
     }
     SPI_freetuptable(SPI_tuptable);
-    /* An identifier realizes through the surfaces a source binds to it, never
-     * its own key text. Content then shows its own surface; a HAS_NAME name
-     * labels only what has no surface of its own. */
-    int count=pending(all,unique,work,0);char **labels=batch_text(LEXICAL,work,count,false);
+    /* Text is its own surface: a Word or Sentence at or below sentence tier is
+     * shown as what it writes, before any stage relabels it as the lemma a
+     * source binds to it (word HAS_SENSE entity). An opaque surface (an ILI
+     * written as text) stays pending for its lexicalization. */
+    int count=pending(all,unique,work,3);char **labels=batch_text(TEXT,work,count,false);
+    for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
+    /* Anything else that is not text (an ILI, a concept, a lexicalization)
+     * realizes through the surfaces a source binds to it. */
+    count=pending(all,unique,work,0);labels=batch_text(LEXICAL,work,count,false);
     for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
     /* A record is shown as its parts, before any stage reads its bytes as text. */
     count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->record)work[count++]=all[i];
-    record_labels(work,count);
+    record_labels(work,count,false);
     count=pending(all,unique,work,1);labels=batch_text(TEXT,work,count,false);
     for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
     count=pending(all,unique,work,0);labels=batch_text(NAMES,work,count,false);
@@ -390,6 +395,13 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         }
     }
     for(int i=0;i<unique;++i)all[i]->has_target=false;
+    /* A composition above sentence tier whose parts are all word grain or
+     * shallower (a table row: a lemma, its codes, its pointers) is shown as its
+     * parts. Only a composition holding sentence-tier or deeper parts (prose)
+     * previews its first-child spine, so a row is never shown as its first
+     * column and two rows that share a first column stay distinguishable. */
+    count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->tier>3)work[count++]=all[i];
+    record_labels(work,count,true);
     count=pending(all,unique,work,0);
     if(count>0) {
         run_query(DEF_TYPES,NULL,NULL);

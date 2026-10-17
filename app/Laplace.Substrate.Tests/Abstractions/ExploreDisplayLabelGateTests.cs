@@ -39,6 +39,33 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.DoesNotContain("item&&item->label?item->label:\"Unrealized entity\"", native, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Text is its own surface: a Word or Sentence is shown as what it writes before the
+    /// lexical stage (word HAS_SENSE entity) can relabel it as a lemma, and a composition
+    /// above sentence tier of word-grain parts (a table row) is shown as its parts, never
+    /// collapsed onto its first column. Regressing either order fails here; the behaviour
+    /// is proven against an installed extension by tests/sql/display_label.sql.
+    /// </summary>
+    [Fact]
+    public void DisplayLabels_ShowTextAsItselfBeforeLexicalizationAndRowsAsTheirParts()
+    {
+        var root = TypeIdLawTests.FindRepoRootPublic();
+        var native = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
+        var body = native[native.IndexOf("pg_laplace_display_label_batch(PG_FUNCTION_ARGS)", StringComparison.Ordinal)..];
+
+        int textFirst = body.IndexOf("pending(all,unique,work,3);char **labels=batch_text(TEXT", StringComparison.Ordinal);
+        int lexical = body.IndexOf("batch_text(LEXICAL", StringComparison.Ordinal);
+        int shallowRows = body.IndexOf("record_labels(work,count,true)", StringComparison.Ordinal);
+        int spine = body.IndexOf("A composition still unlabeled previews its own first-child spine", StringComparison.Ordinal);
+        Assert.True(textFirst >= 0, "display: text-typed self render stage missing");
+        Assert.True(lexical > textFirst, "display: lexicalization must run after a text entity's own surface");
+        Assert.True(shallowRows >= 0 && spine > shallowRows,
+            "display: word-grain rows must be labelled by their parts before the first-child spine preview");
+        Assert.Contains("laplace_entity_type_is_text(&item->type)==1", body, StringComparison.Ordinal);
+        Assert.Contains("e2e_display_label_text_over_lemma", File.ReadAllText(Path.Combine(root,
+            "extension", "laplace_substrate", "tests", "sql", "display_label.sql")), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ExploreSurfaces_UseDisplayLabelsAndKeepHashOnlyAsIdentity()
     {
