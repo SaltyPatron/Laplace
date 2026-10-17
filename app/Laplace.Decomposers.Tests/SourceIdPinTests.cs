@@ -12,7 +12,7 @@ public class SourceIdPinTests
     public static readonly TheoryData<Func<IDecomposer>, string, string> Pins = new()
     {
         { () => new Laplace.Decomposers.Unicode.UnicodeDecomposer(),
-          "909b825fe20bd201e70d8c8f6041ec50", "eb0687a0c121cd642fb5bf52d9094685" },
+          "5f36a4c5fb03a7d845c2ad1981b18587", "eb0687a0c121cd642fb5bf52d9094685" },
         { () => new Laplace.Decomposers.ISO.ISODecomposer(),
           "2e0404bdd15c7e19517f1f26d57e240b", "eb0687a0c121cd642fb5bf52d9094685" },
         { () => new Laplace.Decomposers.CILI.CILIDecomposer(),

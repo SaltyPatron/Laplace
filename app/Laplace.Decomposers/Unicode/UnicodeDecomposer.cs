@@ -1143,7 +1143,7 @@ public sealed class UnicodeDecomposer
         }
 
         public override Hash128 SourceId => Source;
-        public override string SourceName => "UnicodeDecomposer";
+        public override string SourceName => UnicodeSource.SourceName;
         public override int LayerOrder => 0;
         public override Hash128 TrustClassId => TrustClass;
         protected override double SourceTrust => TC.StandardsDerived;
@@ -1290,7 +1290,7 @@ public sealed class UnicodeDecomposer
         }
 
         public Hash128 SourceId => Source;
-        public string SourceName => "UnicodeDecomposer";
+        public string SourceName => UnicodeSource.SourceName;
         public int LayerOrder => 0;
         public Hash128 TrustClassId => TrustClass;
         public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)

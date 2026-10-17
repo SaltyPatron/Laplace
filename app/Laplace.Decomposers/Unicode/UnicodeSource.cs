@@ -7,9 +7,9 @@ namespace Laplace.Decomposers.Unicode;
 public readonly struct UnicodeSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        SubstrateCanonicalIds.Source("UnicodeDecomposer");
+        SubstrateCanonicalIds.Source("Unicode");
 
-    public static string SourceName => "UnicodeDecomposer";
+    public static string SourceName => "Unicode";
 
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StandardsDerived");

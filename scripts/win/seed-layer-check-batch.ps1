@@ -7,7 +7,7 @@ $psql = Get-LaplacePostgresTool psql
 
 # key -> (source_name, layer) — document uses physicalities probe
 $layers = [ordered]@{
-    unicode       = @('UnicodeDecomposer', 0)
+    unicode       = @('Unicode', 0)
     iso639        = @('ISO639Decomposer', 1)
     document      = @('UserPrompt', 2)
     wordnet       = @('WordNetDecomposer', 2)

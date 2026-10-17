@@ -34,7 +34,7 @@
   ],
   "sources": {
     "unicode": {
-      "decomposer": "UnicodeDecomposer",
+      "decomposer": "Unicode",
       "layer": 0,
       "prerequisites": [],
       "consensus_gates": [
