@@ -117,6 +117,11 @@ if not "%RC%"=="0" (
 )
 call :wait_cli_exit
 call :verify_step
+if errorlevel 1 exit /b %ERRORLEVEL%
+rem A seeded step leaves statistics the site can read (analyze-substrate.cmd says why); seed-foundation
+rem defers this and analyzes once after its last step.
+if "%LAPLACE_SEED_NO_ANALYZE%"=="1" exit /b 0
+call "%~dp0analyze-substrate.cmd"
 exit /b %ERRORLEVEL%
 
 :ensure_cli
