@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.IO;
 using System.Collections.Generic;
@@ -51,7 +52,21 @@ public sealed class IsoRetirementTests
 
     // The tests below run the per-row rule (IsoRetirementRemedy.Classify) over the admitted
     // retirement table, not just the remedy parser.
-    private const string Retirements = "/vault/Data/ISO639/iso-639-3_Retirements.tab";
+    // The table the iso639/20260415 recipe admits (its required selector), under the data
+    // root (LAPLACE_DATA_ROOT, else the estate's /vault/Data). A flat root copy is only
+    // equivalent packaging: the estate's flat copies are a later SIL edition (2026-07-15
+    // adds mrd and shl), so the pinned table is read whenever it is present.
+    private static readonly string Retirements = ResolveRetirements();
+
+    private static string ResolveRetirements()
+    {
+        string root = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT") is { Length: > 0 } configured
+            ? configured : "/vault/Data";
+        string iso = Path.Combine(root, "ISO639");
+        string pinned = Path.Combine(iso, "iso-639-3_Code_Tables_20260415",
+            "iso-639-3_Code_Tables_20260415", "iso-639-3_Retirements.tab");
+        return File.Exists(pinned) ? pinned : Path.Combine(iso, "iso-639-3_Retirements.tab");
+    }
 
     private static IEnumerable<(string Id, string Reason, string[] Succ, bool Keep)> Rows()
     {

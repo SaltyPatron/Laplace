@@ -195,7 +195,7 @@ public sealed class OMWLmfTests
             artifact.Disposition == IngestArtifactDisposition.Admitted
             && artifact.MediaType == "application/xml"));
         Assert.Contains(graph.Artifacts, artifact =>
-            artifact.RelativePath == "omw-2.0.tar.xz"
+            artifact.RelativePath == ".archive/omw-2.0.tar.xz"
             && artifact.Disposition == IngestArtifactDisposition.EquivalentPackaging);
         Assert.Contains(graph.Artifacts, artifact =>
             artifact.RelativePath == "index.toml"
