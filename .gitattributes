@@ -8,3 +8,6 @@ Justfile text eol=lf
 # pg_regress captures psql's aligned table output verbatim. Header padding and
 # the final separator newline are test data, not whitespace damage.
 extension/*/tests/expected/*.out whitespace=-blank-at-eol,-blank-at-eof
+
+# Generated manifest tables are hashed into perf-caches; their bytes must not depend on the host.
+engine/manifest/**/*.tsv text eol=lf
