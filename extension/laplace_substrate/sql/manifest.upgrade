@@ -110,6 +110,12 @@ functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in
 functions/readback/render_text_fast.sql.in
 functions/readback/render_text_batch.sql.in
+functions/identity/relation_type_id.sql.in
+functions/realize/realize_synset_lemma.sql.in
+generated/relation_set_ids.sql.in
+functions/realize/realize_has_name.sql.in
+generated/relation_family_ids.sql.in
+functions/realize/resolve_name.sql.in
 functions/realize/realize_batch.sql.in
 functions/realize/resolve_name_batch.sql.in
 functions/realize/lexicalize_batch.sql.in
@@ -141,7 +147,6 @@ functions/inspect/attestation_response.sql.in
 functions/inspect/attestation_response_type.sql.in
 functions/inspect/attestation_unary_response.sql.in
 functions/inspect/attestation_unary_response_type.sql.in
-functions/identity/relation_type_id.sql.in
 functions/chess/chess_moves.sql.in
 functions/relation/relation_in_family.sql.in
 functions/consensus/subjects_of_type.sql.in
@@ -230,8 +235,6 @@ functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
 functions/converse/correlate.sql.in
 functions/converse/drop_recompiled_prompt_programs.sql.in
-generated/relation_family_ids.sql.in
-generated/relation_set_ids.sql.in
 generated/qualifier_bits.sql.in
 functions/cascade/astar_path.sql.in
 functions/cascade/cascade.sql.in
@@ -332,11 +335,8 @@ functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
 functions/consensus/consensus_step_edge.sql.in
 functions/consensus/entity_exists.sql.in
-functions/realize/realize_synset_lemma.sql.in
 functions/realize/realize_translation.sql.in
-functions/realize/realize_has_name.sql.in
 functions/realize/realize_defines.sql.in
-functions/realize/resolve_name.sql.in
 functions/readback/render.sql.in
 functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
