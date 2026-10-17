@@ -391,12 +391,6 @@ internal static partial class IngestCommands
             skipSourceCompletion: true);
     }
 
-    internal static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("unicode"), IngestDataPaths.Resolve("unicode", cli.Path), skipLayerCheck: true, cli);
-
-    internal static async Task<int> IngestISO639Async(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("iso639"), IngestDataPaths.Resolve("iso639", cli.Path), skipLayerCheck: false, cli);
-
     private static string ResolveIngestPath(string? cliPath, string defaultPath)
         => Path.GetFullPath(string.IsNullOrWhiteSpace(cliPath) ? defaultPath : cliPath);
 
