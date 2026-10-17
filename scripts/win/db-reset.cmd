@@ -50,5 +50,9 @@ echo ==== install extensions ====
 echo ==== post-create identity health ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d "%LAPLACE_DBNAME%" -P pager=off -v ON_ERROR_STOP=1 -c "SET search_path = laplace, public; SELECT * FROM substrate_health();" || exit /b 1
 
+echo ==== declared role access ====
+rem a recreated database has none of its roles' declared access: applied here, so a reset leaves it usable
+pwsh -NoProfile -File "%~dp0apply-declared-access.ps1" -Database "%LAPLACE_DBNAME%" || exit /b 1
+
 echo ==== DB-RESET COMPLETE ====
 exit /b 0
