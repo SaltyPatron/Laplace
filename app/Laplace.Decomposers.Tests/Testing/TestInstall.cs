@@ -31,7 +31,9 @@ internal static class TestInstall
     internal static string ResolveModelHubOrFallback()
     {
         try { return LaplaceInstall.ResolveModelHub(); }
-        catch (InvalidOperationException)
+        // An undeclared hub and a declared hub cache that does not exist on this host (a hosted
+        // runner has no model estate) both fall back; tests then skip each absent snapshot.
+        catch (Exception e) when (e is InvalidOperationException or DirectoryNotFoundException)
         {
             return OperatingSystem.IsWindows() ? @"D:\Models\hub" : "/vault/models/hub";
         }
