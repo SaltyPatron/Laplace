@@ -60,6 +60,9 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         string? Status = null,
         string? Error = null);
 
+    /// <summary>The ingest_run_journal key of the current run; <see cref="Guid.Empty"/> before OnRunStart.</summary>
+    public Guid RunId => _runId;
+
     public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));

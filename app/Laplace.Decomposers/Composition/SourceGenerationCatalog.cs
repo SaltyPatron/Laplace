@@ -7,7 +7,9 @@ namespace Laplace.Decomposers.Composition;
 /// Selects source-generation recipes. Checked-in recipes, an optional host cookbook
 /// (LAPLACE_COOKBOOK_PATH) and explicit manifest paths (LAPLACE_SOURCE_GENERATIONS) feed one
 /// resolver. A discovered manifest is used only with <c>"selected": true</c>; an explicit
-/// path is always selected. A selected recipe takes the place of the built-in provider.
+/// path is always selected. A recipe-owned source has no built-in provider to fall back to:
+/// missing manifests fail construction and a missing root fails resolution
+/// (SeedDecomposerResolver.RequireGenerationRoot).
 /// </summary>
 public sealed class SourceGenerationCatalog
 {
@@ -23,6 +25,14 @@ public sealed class SourceGenerationCatalog
         // "selected": true.
         foreach (string path in BuiltInRecipeManifests())
             candidates.TryAdd(path, false);
+        // Recipe-owned sources have no built-in provider (SeedIngestComposition.Registry),
+        // so a host that cannot find the checked-in recipes must fail here, loudly, rather
+        // than report those sources as unknown or run something else in their place.
+        if (candidates.Count == 0)
+            throw new InvalidDataException(
+                "No checked-in source-generation manifests (recipes/**/*.source.json) were found next to "
+                + $"'{AppContext.BaseDirectory}', under '{Directory.GetCurrentDirectory()}' or in the repository. "
+                + "Recipe-owned sources (unicode, iso639, omw, verbnet, cili, oewn, ud, ...) cannot be ingested.");
 
         if (!string.IsNullOrWhiteSpace(explicitSelection))
             foreach (string path in SplitPaths(explicitSelection)) candidates[Path.GetFullPath(path)] = true;

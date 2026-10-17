@@ -25,6 +25,18 @@ DECLARE
     opaque   bytea := public.laplace_hash128_blake3('test/display/opaque');
     missing  bytea := public.laplace_hash128_blake3('test/display/missing');
     defrel   bytea := laplace.relation_type_id('HAS_DEFINITION');
+    senserel bytea := laplace.relation_type_id('HAS_SENSE');
+    t_sent   bytea := laplace.entity_type_id('Sentence');
+    t_word   bytea := laplace.entity_type_id('Word');
+    t_doc    bytea := laplace.entity_type_id('Document');
+    keytext  bytea := public.laplace_hash128_blake3('test/display/text-with-lemma');
+    word_a   bytea := public.laplace_hash128_blake3('test/display/word/a');
+    word_b   bytea := public.laplace_hash128_blake3('test/display/word/b');
+    row_ab   bytea := public.laplace_hash128_blake3('test/display/row/ab');
+    row_ba   bytea := public.laplace_hash128_blake3('test/display/row/ba');
+    own      text;
+    lemma    text;
+    parts    text[];
     labels   text[];
     ids      bytea[];
 BEGIN
@@ -133,6 +145,70 @@ BEGIN
     IF labels[1] IS DISTINCT FROM '狼。' OR labels[2] IS DISTINCT FROM '狼。'
        OR strpos(labels[3],'終') > 0 THEN
         RAISE EXCEPTION 'FAIL: label fallback reconstructed an entire source: %',labels;
+    END IF;
+
+    -- e2e_display_label_text_over_lemma
+    -- Text is its own surface (#1871 audit): a text-typed entity that a source binds
+    -- to a word by HAS_SENSE (a sense key such as 'break%2:30:04::' ingested as a
+    -- Sentence) is shown as what it writes, never relabelled as that word.
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (senserel, 0, rel_meta), (keytext, 3, t_sent),
+        (word_a, 2, t_word), (word_b, 2, t_word), (row_ab, 4, t_doc), (row_ba, 4, t_doc)
+    ON CONFLICT DO NOTHING;
+    PERFORM realize.register_canonical('HAS_SENSE');
+    INSERT INTO laplace.physicalities
+        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/display/physicality/text-with-lemma'), keytext, 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.5,0.5,0.5,0.5),0), decode(repeat('35',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(wolf,1,1,0),
+             public.laplace_mantissa_pack(ending,2,1,0)]), 2, now()),
+        (public.laplace_hash128_blake3('test/display/physicality/word/a'), word_a, 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.6,0.6,0.6,0.6),0), decode(repeat('36',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(wolf,1,1,0),
+             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
+        (public.laplace_hash128_blake3('test/display/physicality/word/b'), word_b, 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.7,0.7,0.7,0.7),0), decode(repeat('37',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(ending,1,1,0),
+             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
+        -- vertex flags carry the constituent tier (tier << 1): word grain = 4.
+        (public.laplace_hash128_blake3('test/display/physicality/row/ab'), row_ab, 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.8,0.8,0.8,0.8),0), decode(repeat('38',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(word_a,1,1,4),
+             public.laplace_mantissa_pack(word_b,2,1,4)]), 2, now()),
+        (public.laplace_hash128_blake3('test/display/physicality/row/ba'), row_ba, 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.9,0.9,0.9,0.9),0), decode(repeat('39',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(word_a,1,1,4),
+             public.laplace_mantissa_pack(wolf,2,1,0)]), 2, now());
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
+                                   rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (laplace.consensus_id(stop, senserel, keytext), stop, senserel, keytext,
+            1700000000000, 30000000000, 60000000, 3, now());
+
+    own := (realize.render_text_batch(ARRAY[keytext]))[1];
+    lemma := (realize.lexicalize_batch(ARRAY[keytext]))[1];
+    IF own IS NULL OR lemma IS NULL OR own = lemma THEN
+        RAISE EXCEPTION 'FAIL: fixture must give the text a distinct own surface and lemma: % / %', own, lemma;
+    END IF;
+    SELECT d.label INTO labels[1] FROM realize.display_label_batch(ARRAY[keytext]) d;
+    IF labels[1] IS DISTINCT FROM own THEN
+        RAISE EXCEPTION 'FAIL: lexicalization overrode a text entity''s own surface: % (own %, lemma %)',
+            labels[1], own, lemma;
+    END IF;
+
+    -- A composition above sentence tier of word-grain parts (a table row) is shown as
+    -- its parts, never as its first column: two rows sharing a first part differ.
+    parts := realize.render_text_batch(ARRAY[word_a, word_b, wolf]);
+    SELECT array_agg(d.label ORDER BY d.ord) INTO labels
+      FROM realize.display_label_batch(ARRAY[row_ab, row_ba]) WITH ORDINALITY d(id,label,tier,ord);
+    IF labels[1] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[2])
+       OR labels[2] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[3]) THEN
+        RAISE EXCEPTION 'FAIL: a word-grain row collapsed to its first column: %', labels;
     END IF;
 
     RAISE NOTICE 'display labels: Unicode exact, bounded containment preview, identity-bearing fallback';

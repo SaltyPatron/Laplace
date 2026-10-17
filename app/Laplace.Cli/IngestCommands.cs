@@ -16,7 +16,6 @@ using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.OpenSubtitles;
-using Laplace.Decomposers.VerbNet;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
@@ -390,12 +389,6 @@ internal static partial class IngestCommands
             cli,
             skipSourceCompletion: true);
     }
-
-    internal static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("unicode"), IngestDataPaths.Resolve("unicode", cli.Path), skipLayerCheck: true, cli);
-
-    internal static async Task<int> IngestISO639Async(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("iso639"), IngestDataPaths.Resolve("iso639", cli.Path), skipLayerCheck: false, cli);
 
     private static string ResolveIngestPath(string? cliPath, string defaultPath)
         => Path.GetFullPath(string.IsNullOrWhiteSpace(cliPath) ? defaultPath : cliPath);

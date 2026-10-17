@@ -42,10 +42,10 @@ on:
         required: false
         default: ""
       moby_path:
-        description: "Moby Dick fixture path on the measured host"
+        description: "Moby Dick fixture path on the measured host (empty: $LAPLACE_DATA/test-data/text/moby_dick.txt)"
         type: string
-        required: true
-        default: "/vault/Data/test-data/text/moby_dick.txt"
+        required: false
+        default: ""
       force_rebuild:
         description: "force a clean exact-revision rebuild before measurement"
         type: boolean
@@ -71,7 +71,6 @@ env:
   # the measured host lacks it, from Kitware's release, once; a host that has it is left alone
   LAPLACE_PROVISION_TOOLS: ${{ vars.LAPLACE_PROVISION_TOOLS || '1' }}
   PGDATABASE: laplace
-  LAPLACE_DATA_ROOT: /vault/Data
 
 jobs:
   benchmark:
@@ -122,6 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 0002
+          MOBY_PATH="${MOBY_PATH:-${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}/test-data/text/moby_dick.txt}"; export MOBY_PATH
 
           lock_root="$LAPLACE_WORK_ROOT"
           mkdir -p "$lock_root"

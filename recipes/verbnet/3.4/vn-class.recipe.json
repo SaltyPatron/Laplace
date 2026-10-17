@@ -37,20 +37,8 @@
     {
       "syntaxPath": "Member/@wn",
       "propertyName": "wordNetSense",
-      "valueKind": "Text",
-      "disposition": "Content, Testimony",
-      "relationName": "CORRESPONDS_TO",
-      "sequenceSeparator": " ",
-      "drawPrefix": "?",
-      "objectEntityType": "WordNet_Sense_Key",
-      "objectParts": [
-        {
-          "path": "value()",
-          "splitLast": "%:",
-          "side": "Each",
-          "spaceMark": "_"
-        }
-      ]
+      "valueKind": "Identity",
+      "disposition": "Packaging"
     },
     {
       "syntaxPath": "Member/@grouping",

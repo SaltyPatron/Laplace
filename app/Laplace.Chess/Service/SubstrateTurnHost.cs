@@ -159,7 +159,9 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             ChessVocabulary.AnalysisMarkerType);
 
         var change = await b.BuildAsync(ct);
-        await _writer.ApplyAsync(change, ct);
+        // Overlapping appliers may land the same calculated testimony; re-probe, don't fail.
+        await Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry.ExecuteAsync(
+            token => _writer.ApplyAsync(change, token), ct);
         ChessTransitionObservations.MarkObserved(
             line.Take(line.Count - 1).Select(static n => n.Id),
             moves.Select(static n => n.Id));

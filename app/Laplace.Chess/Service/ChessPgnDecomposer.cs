@@ -20,8 +20,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     private readonly bool _analyzeInline = analyzeInline;
 
     public override Hash128 SourceId => ChessVocabulary.PgnSourceId;
-    public override string SourceName => "ChessPgn";
-    public override int LayerOrder => 20;
+    internal const string PgnSourceName = "ChessPgn";
+    internal const int PgnLayerOrder = 20;
+
+    public override string SourceName => PgnSourceName;
+    public override int LayerOrder => PgnLayerOrder;
     public override Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "chess/pgn";

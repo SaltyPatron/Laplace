@@ -10,7 +10,6 @@ using Laplace.Decomposers.OpenSubtitles;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.Unicode;
-using Laplace.Decomposers.VerbNet;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.WordNet;
 
@@ -75,8 +74,6 @@ internal static class IngestDispatchTable
     /// </summary>
     private static readonly (string Key, IngestHandler Handler)[] Exceptions =
     [
-        ("unicode",  cli => IngestCommands.IngestUnicodeViaRunnerAsync(cli)),
-        ("iso639",   cli => IngestCommands.IngestISO639Async(cli)),
         ("code",     cli => IngestCommands.IngestCodeAsync(cli)),
         ("repo",     cli => IngestCommands.IngestRepoAsync(cli)),
         ("tabular",  cli => IngestCommands.IngestTabularAsync(cli)),
@@ -200,6 +197,7 @@ internal static class IngestDispatchTable
     {
         if (CliRuntime.Decomposers.TryResolveGeneration(sourceKey, cli.Path, out var configured, out var sourceRoot))
         {
+            Laplace.Decomposers.Composition.SeedDecomposerResolver.RequireGenerationRoot(sourceKey, sourceRoot);
             // A selected generation resumes per file and owns its layer: once every
             // admitted artifact commits, the runner records layer completion for the
             // source so the next layer's precondition can see it. A scoped run commits

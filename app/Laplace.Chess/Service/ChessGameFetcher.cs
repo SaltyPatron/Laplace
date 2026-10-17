@@ -28,7 +28,7 @@ public static class ChessGameFetcher
     public static Task<int> FetchAsync(
         string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log,
         CancellationToken ct,
-        Func<IReadOnlyList<string>, CancellationToken, Task>? onBatchReady = null,
+        Func<string, IReadOnlyList<string>, CancellationToken, Task>? onBatchReady = null,
         int? concurrency = null)
         => NormalizeSite(site) switch
         {
@@ -51,7 +51,7 @@ public static class ChessGameFetcher
     public static async Task<int> FetchChessComAsync(
         string user, int? max, int minTcSeconds, string outPath, Action<string>? log,
         CancellationToken ct,
-        Func<IReadOnlyList<string>, CancellationToken, Task>? onBatchReady = null,
+        Func<string, IReadOnlyList<string>, CancellationToken, Task>? onBatchReady = null,
         int? concurrency = null)
     {
         ValidateLimit(max);
@@ -115,7 +115,7 @@ public static class ChessGameFetcher
                 if (ready.Count > 0 && onBatchReady is not null)
                 {
                     log?.Invoke($"  {archiveUrl[^7..]}: validating {ready.Count} downloaded games");
-                    try { await onBatchReady(ready, ct); }
+                    try { await onBatchReady(archiveUrl[^7..], ready, ct); }
                     catch (InvalidDataException ex)
                     {
                         throw new InvalidDataException($"{archiveUrl}: {ex.Message}", ex);
