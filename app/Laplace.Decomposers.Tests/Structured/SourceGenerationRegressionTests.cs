@@ -87,7 +87,9 @@ public sealed class SourceGenerationRegressionTests
             var recipe = SourceGenerationRecipe.Load(RepositoryFile("recipes/cili/a895d7e/cili.source.json"));
             var resolved = await SourceGenerationResolver.ResolveAsync(recipe, root);
             Assert.Empty(resolved.ExecutionErrors);
-            Assert.Equal(6, resolved.Bindings.Count);
+            // The sense-key tables are pointer-to-pointer maps and are excluded: five bindings.
+            Assert.Equal(5, resolved.Bindings.Count);
+            Assert.DoesNotContain(resolved.Bindings, b => b.Artifact.RelativePath.Contains("sense-mappings", StringComparison.Ordinal));
             Assert.DoesNotContain(resolved.Bindings, b => b.Artifact.RelativePath.StartsWith('.'));
         }
         finally { Directory.Delete(root, true); }
