@@ -282,7 +282,13 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             }
 
             var change = await b.BuildAsync(ct);
-            try { await _writer.ApplyAsync(change, ct); }
+            // Overlapping appliers may land the same calculated testimony; re-probe (see
+            // ChessPgnIngestor.ApplyAdmittedAsync) instead of failing the live game.
+            try
+            {
+                await Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry.ExecuteAsync(
+                    token => _writer.ApplyAsync(change, token), ct);
+            }
             finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
             if (session.PositionIds.Count > 1)
                 ChessTransitionObservations.MarkObserved(

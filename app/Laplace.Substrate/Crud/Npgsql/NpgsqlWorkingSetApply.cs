@@ -396,8 +396,8 @@ public sealed partial class NpgsqlSubstrateWriter
             ents.Ids.Count, distinctStagedEntities, phys.Ids.Count, atts.Ids.Count);
         preparationDiagnostic?.Complete();
 
-        // Entity sort+pack overlaps verification. The outer control transaction
-        // already holds the apply lock.
+        // Entity sort+pack overlaps verification. The control transaction takes no
+        // apply lock (IngestMutexGateTests.ContentAddressedApply_DoesNotAcquireGlobalAdvisoryLock).
         Task<(byte[][] Payloads, int[] RowsByLane, int Groups)>? optimisticEntCopy = null;
         long firstEntBytes = TotalEntityBytes(ents, firstEntIdx);
         int optimisticGroups = ResolveCopyGroups(firstEntIdx.Count, firstEntBytes);
@@ -482,20 +482,21 @@ public sealed partial class NpgsqlSubstrateWriter
 
             var probePhysIdsUse = probePhysIds;
 
-            // Probes fan out across pooled connections. This is sound under the
-            // held advisory lock: every snapshot starts after the lock was
-            // acquired, so anything a prior applier committed is visible.
+            // Probes fan out across pooled connections. No apply lock is held, so a
+            // concurrent applier can commit an id after its probe says absent; the COPY
+            // of that id then fails with 23505 and the caller re-probes the whole set
+            // (TransientErrorRetryPolicy.ConcurrencyRetry), which subtracts what landed.
             using var verificationDiagnostic = MeasureApplyPhase("presence-verification");
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
 
-            // Empty-relation skip (sound only under the apply advisory lock): if the
-            // physicalities or attestations relation has no rows, every staged id for
-            // it is absent and the bitmap probe is not run. Entity presence always goes
-            // through the id bitmap.
+            // Empty-relation skip: if the physicalities or attestations relation has no
+            // rows, every staged id for it is absent and the bitmap probe is not run.
+            // Entity presence always goes through the id bitmap. A row a concurrent
+            // applier commits after the emptiness check surfaces as 23505 on COPY and is
+            // resolved by the same re-probe as any other lost race.
             //
             // These probes run on pooled connections, not the control transaction, so
-            // each releases its AccessShare locks when it completes; visibility is the
-            // same because every snapshot starts after the advisory lock was acquired.
+            // each releases its AccessShare locks when it completes.
             long physEmptySkip = 0, attEmptySkip = 0;
             // Canonical entity storage is HASH(id). Tier is altitude, not
             // identity, and cannot participate in row presence or partition routing.
@@ -772,10 +773,11 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 // Bulk COPY fans out across connections that each hold a disjoint
                 // primary-key range. Indexes stay online throughout. Per-table barriers
-                // make referenced rows durable before their referencers. The control
-                // transaction holds the advisory lock across the whole window, so no
-                // other applier interleaves; a crash mid-phase leaves no flush-journal
-                // receipt, and the retry's verification subtracts what already landed.
+                // make referenced rows durable before their referencers. No lock keeps
+                // other appliers out of the window: one that lands the same id first makes
+                // this COPY fail with 23505, and the caller's re-probe subtracts it. A crash
+                // mid-phase leaves no flush-journal receipt, and the retry's verification
+                // subtracts what already landed.
 
                 // Entities complete first, so a committed attestation implies its
                 // working set's entities are committed. Physicalities and

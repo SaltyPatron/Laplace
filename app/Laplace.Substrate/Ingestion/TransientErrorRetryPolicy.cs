@@ -58,6 +58,52 @@ public sealed record TransientErrorRetryPolicy(
         return TimeSpan.FromMilliseconds(baseMs);
     }
 
+    /// <summary>
+    /// Runs <paramref name="operation"/> under this policy: a failure classified by
+    /// <see cref="IsTransient"/> is retried after <see cref="DelayBeforeAttempt"/> until
+    /// <see cref="MaxAttempts"/> is spent, then the last failure surfaces unchanged.
+    /// Cancellation is never retried. For a content-addressed working set this is the
+    /// re-probe contract: each attempt re-runs the presence probe, so a row another
+    /// applier landed meanwhile is subtracted instead of re-inserted.
+    /// </summary>
+    public async Task<T> ExecuteAsync<T>(
+        Func<CancellationToken, Task<T>> operation, CancellationToken ct,
+        Action<Exception, int, TimeSpan>? onRetry = null)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        Random? rng = null;
+        for (int attempt = 0; ; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await operation(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       && attempt + 1 < MaxAttempts
+                                       && IsTransient(ex))
+            {
+                var delay = DelayBeforeAttempt(attempt, rng ??= new Random());
+                onRetry?.Invoke(ex, attempt + 1, delay);
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc cref="ExecuteAsync{T}(Func{CancellationToken, Task{T}}, CancellationToken, Action{Exception, int, TimeSpan}?)"/>
+    public Task ExecuteAsync(
+        Func<CancellationToken, Task> operation, CancellationToken ct,
+        Action<Exception, int, TimeSpan>? onRetry = null)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        return ExecuteAsync<bool>(async token =>
+        {
+            await operation(token).ConfigureAwait(false);
+            return true;
+        }, ct, onRetry);
+    }
+
     private static bool IsCancelledAsyncRead(global::Npgsql.PostgresException pg) =>
         pg.SqlState == "XX000"
         && pg.MessageText is { } m
