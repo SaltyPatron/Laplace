@@ -10,7 +10,6 @@ using Laplace.Decomposers.OpenSubtitles;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.Unicode;
-using Laplace.Decomposers.VerbNet;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.WordNet;
 

@@ -226,7 +226,6 @@ public sealed class DecomposerArchitectureGateTests
         // the decomposer's parser.
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs",
             "app/Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
             "app/Laplace.Decomposers/SemLink/SemLinkIngestAdapter.cs",
             "app/Laplace.Decomposers/Wiktionary/WiktionaryDecomposer.cs",
