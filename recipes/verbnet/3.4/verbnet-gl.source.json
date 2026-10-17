@@ -6,7 +6,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 3,
   "selected": true,
-  "root": "VerbNet/verbnet-master/vn-gl",
+  "root": "VerbNet/verbnet-cu-clear/vn-gl",
   "aliases": [
     "verbnet-gl"
   ],

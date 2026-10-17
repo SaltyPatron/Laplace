@@ -1998,12 +1998,99 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
          * evidence from the neutral prior (laplace.consensus_fold). This
          * transaction's testimony is already durable here, so every cell with
          * retained evidence is recomputed from it; a cell without retained
-         * evidence (consensus-only admission) folds the delta onto its prior. */
+         * evidence (consensus-only admission) folds the delta onto its prior.
+         * When periods.exact is supplied, a novel cell has no prior testimony
+         * beyond this working set's exact grouped periods, so fold_run_states
+         * computes the identical standing directly without scanning
+         * laplace.attestations for novel cells. */
         priors = read_run_priors(type16, types.elems[run_start], cell_ids,
                                  &run_subjects, 0, run_subjects.n, label);
-        evidence = read_evidence_states(type16, &run_subjects, &run_objects,
-                                        &run_games, &run_ts, priors, label,
-                                        false, false);
+        if (periods.exact && priors->matched_n == 0)
+        {
+            evidence = palloc(sizeof(*evidence));
+            evidence->recomputed = palloc0(sizeof(bool) * run_subjects.n);
+            evidence->counts = palloc(sizeof(Datum) * run_subjects.n);
+            evidence->timestamps = palloc(sizeof(Datum) * run_subjects.n);
+            memcpy(evidence->counts, run_games.elems,
+                   sizeof(Datum) * run_subjects.n);
+            memcpy(evidence->timestamps, run_ts.elems,
+                   sizeof(Datum) * run_subjects.n);
+        }
+        else if (periods.exact && priors->matched_n < (uint64) run_subjects.n)
+        {
+            int m = (int) priors->matched_n;
+            int *matched_idx = palloc(sizeof(int) * m);
+            Datum *msub = palloc(sizeof(Datum) * m);
+            Datum *mobj = palloc(sizeof(Datum) * m);
+            bool *mobj_nulls = palloc(sizeof(bool) * m);
+            Datum *mgames = palloc(sizeof(Datum) * m);
+            Datum *mts = palloc(sizeof(Datum) * m);
+            InArray sub_subjects, sub_objects, sub_games, sub_ts;
+            FoldPriorStates *sub_priors = fold_prior_states_create(m);
+            FoldEvidenceStates *sub_ev;
+            int k = 0;
+
+            for (int i = 0; i < run_subjects.n; ++i)
+            {
+                if (!priors->matched[i]) continue;
+                matched_idx[k] = i;
+                msub[k] = run_subjects.elems[i];
+                mobj[k] = run_objects.elems[i];
+                mobj_nulls[k] = run_objects.nulls[i];
+                mgames[k] = run_games.elems[i];
+                mts[k] = run_ts.elems[i];
+                sub_priors->matched[k] = true;
+                sub_priors->ratings[k] = priors->ratings[i];
+                sub_priors->rds[k] = priors->rds[i];
+                sub_priors->volatilities[k] = priors->volatilities[i];
+                ++k;
+            }
+            sub_priors->matched_n = (uint64) m;
+            memset(&sub_subjects, 0, sizeof(sub_subjects));
+            sub_subjects.array = construct_array(msub, m, BYTEAOID, -1, false, 'i');
+            sub_subjects.elems = msub;
+            sub_subjects.n = m;
+            memset(&sub_objects, 0, sizeof(sub_objects));
+            sub_objects.array = construct_md_array(
+                mobj, mobj_nulls, 1, &m, (int[]){1}, BYTEAOID, -1, false, 'i');
+            sub_objects.elems = mobj;
+            sub_objects.nulls = mobj_nulls;
+            sub_objects.n = m;
+            memset(&sub_games, 0, sizeof(sub_games));
+            sub_games.elems = mgames;
+            sub_games.n = m;
+            memset(&sub_ts, 0, sizeof(sub_ts));
+            sub_ts.elems = mts;
+            sub_ts.n = m;
+
+            sub_ev = read_evidence_states(type16, &sub_subjects, &sub_objects,
+                                          &sub_games, &sub_ts, sub_priors, label,
+                                          false, false);
+            evidence = palloc(sizeof(*evidence));
+            evidence->recomputed = palloc0(sizeof(bool) * run_subjects.n);
+            evidence->counts = palloc(sizeof(Datum) * run_subjects.n);
+            evidence->timestamps = palloc(sizeof(Datum) * run_subjects.n);
+            memcpy(evidence->counts, run_games.elems,
+                   sizeof(Datum) * run_subjects.n);
+            memcpy(evidence->timestamps, run_ts.elems,
+                   sizeof(Datum) * run_subjects.n);
+            for (k = 0; k < m; ++k)
+            {
+                int i = matched_idx[k];
+                evidence->recomputed[i] = sub_ev->recomputed[k];
+                evidence->counts[i] = sub_ev->counts[k];
+                evidence->timestamps[i] = sub_ev->timestamps[k];
+                priors->ratings[i] = sub_priors->ratings[k];
+                priors->rds[i] = sub_priors->rds[k];
+                priors->volatilities[i] = sub_priors->volatilities[k];
+            }
+        }
+        else
+        {
+            evidence = read_evidence_states(type16, &run_subjects, &run_objects,
+                                            &run_games, &run_ts, priors, label,
+                                            false, false);
+        }
         fold_run_states(&phis, &opps, &games, &sums, &periods,
                         run_start, run_subjects.n, priors, label,
                         &folds, evidence->recomputed);

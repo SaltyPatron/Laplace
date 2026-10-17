@@ -30,10 +30,10 @@ present "$DATA_ROOT/CILI/ili-map-pwn30.tab"
 present "$DATA_ROOT/Wordnet/WordNet-3.0/dict/data.noun"
 present "$DATA_ROOT/Wordnet/WordNet-3.0/dict/index.sense"
 present "$DATA_ROOT/OMW/index.toml"
-present "$DATA_ROOT/VerbNet/verbnet-master/verbnet3.4"
-present "$DATA_ROOT/PropBank/propbank-frames-main/frames"
+present "$DATA_ROOT/VerbNet/verbnet-cu-clear/verbnet3.4"
+present "$DATA_ROOT/PropBank/propbank-frames/frames"
 present "$DATA_ROOT/FrameNet/framenet_v17/frame"
-present "$DATA_ROOT/SemLink/semlink-master/instances/pb-vn2.json"
+present "$DATA_ROOT/SemLink/semlink-cu-clear/instances/pb-vn2.json"
 present "$DATA_ROOT/PredicateMatrix.v1.3/PredicateMatrix.v1.3.txt"
 present "$DATA_ROOT/MapNet-0.1/mapping_frame_synsets.txt"
 present "$DATA_ROOT/WordFrameNet/WFN/WordFrameNet"
@@ -193,7 +193,7 @@ if [[ -d "$frame_root/lu" && -f "$mapnet_frame" && -f "$mapnet_lu" ]]; then
   fi
 fi
 
-verbnet_root="$DATA_ROOT/VerbNet/verbnet-master/verbnet3.4"
+verbnet_root="$DATA_ROOT/VerbNet/verbnet-cu-clear/verbnet3.4"
 if [[ -d "$verbnet_root" ]]; then
   section "VerbNet structured fields"
   echo "members=$(count_matches '<MEMBER[ >]' "$verbnet_root")"
@@ -204,7 +204,7 @@ if [[ -d "$verbnet_root" ]]; then
   echo "semantic_arguments=$(count_matches '<ARG[ >]' "$verbnet_root")"
 fi
 
-propbank_root="$DATA_ROOT/PropBank/propbank-frames-main/frames"
+propbank_root="$DATA_ROOT/PropBank/propbank-frames/frames"
 if [[ -d "$propbank_root" ]]; then
   section "PropBank structured fields"
   echo "rolesets=$(count_matches '<roleset[ >]' "$propbank_root")"

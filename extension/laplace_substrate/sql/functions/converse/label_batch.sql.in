@@ -8,10 +8,9 @@ BEGIN ATOMIC
         SELECT u.id, u.ord
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
     ), batches AS MATERIALIZED (
-        SELECT realize.resolve_name_batch(p_ids) AS names,
-               realize.render_batch(p_ids) AS rendered
+        SELECT realize.render_batch(p_ids) AS rendered
     ), cleaned AS (
-        SELECT i.id, i.ord, b.names[i.ord] AS name,
+        SELECT i.id, i.ord,
                regexp_replace(
                regexp_replace(
                    regexp_replace(
@@ -31,7 +30,7 @@ BEGIN ATOMIC
         FROM inp i CROSS JOIN batches b
     )
     SELECT COALESCE(array_agg(
-               COALESCE(c.name, NULLIF(c.rendered, ''))
+               COALESCE(NULLIF(c.rendered, ''), realize.resolve_name(c.id))
                ORDER BY c.ord), '{}'::text[])
     FROM cleaned c;
 END;

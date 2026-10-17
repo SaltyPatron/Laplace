@@ -13,18 +13,30 @@ BEGIN ATOMIC
     -- identical md5: 487 ms per-row, 106 ms batched.
     -- Ranked in full, not capped: the render filter can reject any prefix, and a LIMIT
     -- here would turn "unrenderable" into "no name".
-    WITH ranked AS MATERIALIZED (
-        -- The words a source says express the concept: word HAS_SENSE concept.
-        -- The language is the binding's (the attestation context), not the word's.
-        SELECT hs.subject_id AS id,
-               row_number() OVER (ORDER BY EXISTS (
-                            SELECT 1 FROM laplace.attestations a
-                            WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id
-                              AND a.object_id = hs.object_id AND a.context_id = p_lang) DESC,
-                        consensus.eff_mu(hs.rating, hs.rd) DESC, hs.subject_id) AS rn
+    WITH cand AS (
+        -- 1-hop direct KEY_BINDING (word HAS_SENSE concept)
+        SELECT hs.subject_id AS id, hs.type_id, hs.object_id, hs.rating, hs.rd
         FROM laplace.v_consensus_unrefuted hs
         WHERE hs.object_id = p_id
           AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        UNION ALL
+        -- 2-hop WordNet sense binding (word HAS_SENSE sense IS_SENSE_OF synset)
+        SELECT hs.subject_id AS id, hs.type_id, hs.object_id, hs.rating, hs.rd
+        FROM laplace.v_consensus_unrefuted ss
+        JOIN laplace.v_consensus_unrefuted hs
+          ON hs.object_id = ss.subject_id
+         AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        WHERE ss.object_id = p_id
+          AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+    ),
+    ranked AS MATERIALIZED (
+        SELECT hs.id,
+               row_number() OVER (ORDER BY EXISTS (
+                            SELECT 1 FROM laplace.attestations a
+                            WHERE a.subject_id = hs.id AND a.type_id = hs.type_id
+                              AND a.object_id = hs.object_id AND a.context_id = p_lang) DESC,
+                        consensus.eff_mu(hs.rating, hs.rd) DESC, hs.id) AS rn
+        FROM cand hs
     ),
     lbl AS MATERIALIZED (
         SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s

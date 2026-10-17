@@ -15,7 +15,13 @@ internal static class SemLinkRoleMappingIngest
     private static readonly IngestSourceLayout Layout = new()
     {
         Files = [IngestFileMatch.Name(FileName)],
-        EcosystemDirs = [Path.Combine("semlink-master", "other_resources"), "other_resources", "."],
+        EcosystemDirs =
+        [
+            Path.Combine("semlink-cu-clear", "other_resources"),
+            Path.Combine("semlink-master", "other_resources"),
+            "other_resources",
+            ".",
+        ],
     };
 
     internal static bool ExistsLocally(string dir) => File.Exists(Path.Combine(dir, FileName));

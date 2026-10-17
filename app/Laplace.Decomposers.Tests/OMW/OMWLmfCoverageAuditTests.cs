@@ -7,7 +7,7 @@ namespace Laplace.Decomposers.Tests.OMW;
 
 public sealed class OMWLmfCoverageAuditTests
 {
-    private const string Estate = "/vault/Data/.refresh-20260903/OMW-2.0";
+    private const string Estate = "/vault/Data/OMW-2.0";
     [SkippableFact]
     public async Task All_32_Current_Lexicons_Parse_Without_Unknown_Fields_And_Reconcile_References()
     {

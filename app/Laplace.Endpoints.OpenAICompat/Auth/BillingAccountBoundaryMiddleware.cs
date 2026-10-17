@@ -13,6 +13,7 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
         IOptions<StripeBillingOptions> options, IOptions<LaplaceAuthOptions> auth, BillingStoreMode store)
     {
         var path = http.Request.Path;
+        if (path.StartsWithSegments("/v1/mcp") || path.StartsWithSegments("/mcp")) { await next(http); return; }
         if (!path.StartsWithSegments("/v1") && !path.StartsWithSegments("/chess")) { await next(http); return; }
         var tenant = await resolver.ResolveAsync(http, http.RequestAborted);
         if (tenant.AuthKind is "browser" or "api_key" or "dev"

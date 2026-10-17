@@ -15,12 +15,13 @@ public sealed class LaplaceInstallPathTests : IDisposable
     public LaplaceInstallPathTests()
     {
         Directory.CreateDirectory(_root);
-        foreach (var name in new[] { "LAPLACE_DATA", "LAPLACE_DATA_ROOT", "LAPLACE_BUILD_ROOT", "LAPLACE_ENGINE_BUILD",
+        foreach (var name in new[] { "LAPLACE_MACHINE_ENV", "LAPLACE_DATA", "LAPLACE_DATA_ROOT", "LAPLACE_BUILD", "LAPLACE_BUILD_ROOT", "LAPLACE_ENGINE_BUILD",
                      "LAPLACE_PERFCACHE_BIN", "LAPLACE_INSTALL_PREFIX", "LAPLACE_OUT", "HF_HUB_CACHE", "HF_HOME" })
         {
             _prior[name] = Environment.GetEnvironmentVariable(name);
             Environment.SetEnvironmentVariable(name, null);
         }
+        Environment.SetEnvironmentVariable("LAPLACE_MACHINE_ENV", Path.Combine(_root, "absent-machine.env"));
     }
 
     public void Dispose()
@@ -95,5 +96,23 @@ public sealed class LaplaceInstallPathTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => LaplaceInstall.ResolveGgufOutputDir());
         Environment.SetEnvironmentVariable("LAPLACE_OUT", _root);
         Assert.Equal(Path.Combine(_root, "models"), LaplaceInstall.ResolveGgufOutputDir());
+    }
+
+    [Fact]
+    public void MachineEnvDeclarationSuppliesCorpusAndBuildRootWhenProcessEnvIsUnset()
+    {
+        var corpus = Directory.CreateDirectory(Path.Combine(_root, "declared-corpus")).FullName;
+        var machineEnv = Path.Combine(_root, "machine.env");
+        File.WriteAllLines(machineEnv,
+        [
+            "# Installer-generated machine declaration",
+            $"LAPLACE_DATA={corpus}",
+            $"LAPLACE_BUILD_ROOT={_root}",
+        ]);
+        Environment.SetEnvironmentVariable("LAPLACE_MACHINE_ENV", machineEnv);
+
+        Assert.Equal(corpus, LaplaceInstall.ResolveIngestRoot());
+        Assert.True(LaplaceInstall.TryDefaultBuildRoot(out var buildRoot));
+        Assert.Equal(_root, buildRoot);
     }
 }

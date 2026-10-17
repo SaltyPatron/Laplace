@@ -345,18 +345,31 @@ internal static partial class IngestCommands
 
     internal static async Task<int> IngestDocumentAsync(IngestCliArgs cli)
     {
-        if (string.IsNullOrEmpty(cli.Path))
-            return Fail("usage: laplace-mono ingest document <file-or-directory>\n"
-                        + "  Deposits whole documents (entities + physicalities + PRECEDES bigrams).\n"
-                        + "  Bit-perfect proof: laplace-mono db-roundtrip <file>  (reconstruct + compare).");
-        if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
-            return Fail($"ingest document: path not found: {cli.Path}");
+        string docPath = string.IsNullOrEmpty(cli.Path)
+            ? IngestDataPaths.Resolve("document")
+            : cli.Path;
+        if (!File.Exists(docPath) && !Directory.Exists(docPath))
+            return Fail($"ingest document: path not found: {docPath}");
 
         // The document decomposer records completion per file; skipSourceCompletion stays
         // false so the terminal source-level marker is also written for layer ordering.
         return await IngestViaRunnerAsync(
             CliRuntime.Decomposers.Resolve("document"),
-            Path.GetFullPath(cli.Path),
+            Path.GetFullPath(docPath),
+            skipLayerCheck: true,
+            cli,
+            skipSourceCompletion: false);
+    }
+
+    internal static async Task<int> IngestProjectGutenbergAsync(IngestCliArgs cli)
+    {
+        string docPath = IngestDataPaths.Resolve("project-gutenberg", cli.Path);
+        if (!File.Exists(docPath) && !Directory.Exists(docPath))
+            return Fail($"ingest project-gutenberg: path not found: {docPath}");
+
+        return await IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve("document"),
+            Path.GetFullPath(docPath),
             skipLayerCheck: true,
             cli,
             skipSourceCompletion: false);

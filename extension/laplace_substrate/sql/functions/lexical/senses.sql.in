@@ -15,8 +15,11 @@ CREATE OR REPLACE FUNCTION lexical.senses_batch(p_words bytea[])
     RETURNS TABLE(term bytea, sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT b.term, b.key, b.key, b.eff_mu, b.witnesses
+    SELECT b.term, b.key, COALESCE(ss.object_id, b.key), b.eff_mu, b.witnesses
     FROM converse.bindings(p_words, converse.terms_language(p_words)) b
+    LEFT JOIN laplace.v_consensus_unrefuted ss
+      ON ss.subject_id = b.key
+     AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
     WHERE b.rank <= 64
     ORDER BY b.term, b.rank;
 END;

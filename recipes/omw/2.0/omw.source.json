@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 1,
   "selected": true,
-  "root": ".refresh-20260903/OMW-2.0",
+  "root": "OMW-2.0",
   "aliases": [
     "omw"
   ],
@@ -13,11 +13,11 @@
     {
       "selector": "omw-2.0.tar.xz",
       "disposition": "equivalent-packaging",
-      "required": true,
-      "reason": "Compressed release of the same WN-LMF 1.4 generation as extracted/omw-2.0. Not a second lexicon."
+      "required": false,
+      "reason": "Compressed release of the same WN-LMF 1.4 generation as omw-2.0/. Not a second lexicon."
     },
     {
-      "selector": "extracted/omw-2.0/*/*.xml",
+      "selector": "omw-2.0/*/*.xml",
       "disposition": "admitted",
       "required": true,
       "provider": "laplace/native-streaming-xml-recipe/v1",
@@ -26,25 +26,25 @@
       "recordDepth": 2
     },
     {
-      "selector": "extracted/omw-2.0/*/README",
+      "selector": "omw-2.0/*/README",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Per-lexicon release note. Not lexical testimony."
     },
     {
-      "selector": "extracted/omw-2.0/*/README.md",
+      "selector": "omw-2.0/*/README.md",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Per-lexicon release note. Not lexical testimony."
     },
     {
-      "selector": "extracted/omw-2.0/*/LICENSE",
+      "selector": "omw-2.0/*/LICENSE",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "The lexicon's license text (HTML). Its license is claimed natively from the lexicon header (Lexicon/@license -> HAS_LICENSE); no HTML provider records the text yet."
     },
     {
-      "selector": "extracted/omw-2.0/*/citation.bib",
+      "selector": "omw-2.0/*/citation.bib",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "The lexicon's BibTeX citation. Its citation is claimed natively from the lexicon header (Lexicon/@citation -> HAS_CITATION); no BibTeX provider records the entry yet."
@@ -54,6 +54,28 @@
       "disposition": "equivalent-packaging",
       "required": false,
       "reason": "Catalog restating each lexicon header's label, language, license and release URL, which the lexicons themselves state."
+    },
+    {
+      "selector": ".landed",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local acquisition completion marker, not source content."
+    },
+    {
+      "selector": ".archive/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Retained acquisition archives and integrity receipts; the selected working copy supplies the source content."
+    },
+    {
+      "selector": ".superseded-*/**",
+      "disposition": "superseded",
+      "required": false,
+      "reason": "Retained earlier acquisition; not part of this selected release."
     }
+  ],
+  "artifactPrefixes": [
+    "",
+    "extracted"
   ]
 }

@@ -44,3 +44,28 @@ public sealed record MeaningNeighborView(
 public sealed record EmbeddingsUsage(
     [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
     [property: JsonPropertyName("total_tokens")] int TotalTokens);
+
+public sealed record RerankResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("model")] string Model,
+    [property: JsonPropertyName("query_entity_id")] string QueryEntityId,
+    [property: JsonPropertyName("results")] IReadOnlyList<RerankResultItem> Results,
+    [property: JsonPropertyName("usage")] EmbeddingsUsage Usage);
+
+public sealed record RerankResultItem(
+    [property: JsonPropertyName("index")] int Index,
+    [property: JsonPropertyName("relevance_score")] double RelevanceScore,
+    [property: JsonPropertyName("document"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RerankDocumentView? Document,
+    [property: JsonPropertyName("laplace")] RerankProvenance Laplace);
+
+public sealed record RerankDocumentView(
+    [property: JsonPropertyName("text")] string Text);
+
+public sealed record RerankProvenance(
+    [property: JsonPropertyName("entity_id")] string EntityId,
+    [property: JsonPropertyName("frechet_distance")] double FrechetDistance,
+    [property: JsonPropertyName("centroid_distance")] double CentroidDistance,
+    [property: JsonPropertyName("word_overlap")] double WordOverlap,
+    [property: JsonPropertyName("shared_words")] int SharedWords,
+    [property: JsonPropertyName("query_words")] int QueryWords,
+    [property: JsonPropertyName("document_words")] int DocumentWords);

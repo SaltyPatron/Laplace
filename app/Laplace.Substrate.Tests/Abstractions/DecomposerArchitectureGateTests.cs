@@ -249,6 +249,8 @@ public sealed class DecomposerArchitectureGateTests
             // container it would be on disk, and its Content-Type declares the format.
             "app/Laplace.Chess/Service/ChessGameFetcher.cs",
             "app/Laplace.Chess/Service/LichessBot.cs",
+            "app/Laplace.Chess/Service/ChessEngineConnections.cs",
+            "app/Laplace.Chess/Service/Uci/UciProcess.cs",
         };
 
         var violations = new List<string>();
@@ -827,7 +829,7 @@ public sealed class DecomposerArchitectureGateTests
         int dependencyExecutorStart = artifactBase.IndexOf(
             "RunArtifactDependencyLevelsAsync(", StringComparison.Ordinal);
         int dependencyExecutorEnd = artifactBase.IndexOf(
-            "/// <summary>\n    /// File-backed phase", dependencyExecutorStart,
+            "protected new async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(", dependencyExecutorStart,
             StringComparison.Ordinal);
         Assert.True(
             dependencyExecutorStart >= 0 && dependencyExecutorEnd > dependencyExecutorStart);

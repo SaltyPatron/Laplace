@@ -52,6 +52,13 @@ public sealed record EmbeddingsRequest(
     [property: JsonPropertyName("model")] string? Model,
     [property: JsonPropertyName("input")] JsonElement? Input);
 
+public sealed record RerankRequest(
+    [property: JsonPropertyName("model")] string? Model,
+    [property: JsonPropertyName("query")] string? Query,
+    [property: JsonPropertyName("documents")] JsonElement? Documents,
+    [property: JsonPropertyName("top_n")] int? TopN = null,
+    [property: JsonPropertyName("return_documents")] bool ReturnDocuments = true);
+
 public sealed record SearchRequest(
     [property: JsonPropertyName("query")] string? Query,
     [property: JsonPropertyName("count")] int? Count);

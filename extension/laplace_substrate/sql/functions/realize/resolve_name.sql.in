@@ -101,8 +101,9 @@ BEGIN ATOMIC
                 WHERE nm.subject_id = p_id
                   AND nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME'))
                 UNION ALL
-                -- lexicalization: the words bound to the key (word HAS_SENSE p_id),
-                -- the binding attested in the requested language first
+                -- lexicalization: the words bound to the key (word HAS_SENSE p_id, or
+                -- word HAS_SENSE sense IS_SENSE_OF p_id), the binding attested in the
+                -- requested language first
                 SELECT hs.subject_id AS name_id,
                        false AS prim,
                        EXISTS (SELECT 1 FROM laplace.attestations a
@@ -112,6 +113,19 @@ BEGIN ATOMIC
                 FROM laplace.v_consensus_unrefuted hs
                 WHERE hs.object_id = p_id
                   AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+                UNION ALL
+                SELECT hs.subject_id AS name_id,
+                       false AS prim,
+                       EXISTS (SELECT 1 FROM laplace.attestations a
+                               WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id
+                                 AND a.object_id = hs.object_id AND a.context_id = p_lang) AS lp,
+                       consensus.eff_mu(hs.rating, hs.rd) AS mu
+                FROM laplace.v_consensus_unrefuted ss
+                JOIN laplace.v_consensus_unrefuted hs
+                  ON hs.object_id = ss.subject_id
+                 AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+                WHERE ss.object_id = p_id
+                  AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
             ),
             -- RANK FIRST, THEN RENDER. The ordering keys are all fold-side, so the
             -- winner is decided in id space and only the survivors are realized.

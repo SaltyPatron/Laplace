@@ -15,7 +15,7 @@ namespace Laplace.Decomposers.Tests.OMW;
 public sealed class OMWLmfRetainedDbTests
 {
     private const string LexiconRoot =
-        "/vault/Data/.refresh-20260903/OMW-2.0/extracted/omw-2.0/omw-it";
+        "/vault/Data/OMW-2.0/omw-2.0/omw-it";
     private const long XmlRecords = 78_007;
     private const long TotalRecords = XmlRecords + 3;
 

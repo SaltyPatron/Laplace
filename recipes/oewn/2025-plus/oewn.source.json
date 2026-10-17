@@ -5,7 +5,7 @@
   "trustClass": "AcademicCurated",
   "layerOrder": 1,
   "selected": true,
-  "root": ".refresh-20260903/OpenEnglishWordNet-2025-plus",
+  "root": "OpenEnglishWordNet-2025-plus",
   "aliases": [
     "oewn"
   ],
@@ -18,6 +18,24 @@
       "syntax": "WN-LMF/1.4",
       "recipePath": "wn-lmf-1.4.recipe.json",
       "recordDepth": 2
+    },
+    {
+      "selector": ".landed",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local acquisition completion marker, not source content."
+    },
+    {
+      "selector": ".archive/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Retained acquisition archives and integrity receipts; the selected working copy supplies the source content."
+    },
+    {
+      "selector": ".superseded-*/**",
+      "disposition": "superseded",
+      "required": false,
+      "reason": "Retained earlier acquisition; not part of this selected release."
     }
   ]
 }

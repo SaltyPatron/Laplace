@@ -8,29 +8,55 @@ BEGIN ATOMIC
     -- because the bridge is the anchor id, not any rendered string: two words
     -- link iff they attach to the same anchor entity. Ranking is pure id/mu;
     -- realize.label() runs once per surviving row, past the LIMIT, at the boundary.
-    WITH me AS (SELECT lexical.lexical_peers(p_word) AS ids),
-    self AS (SELECT unnest(ids) AS id FROM me),
+    WITH me AS MATERIALIZED (
+        SELECT COALESCE(lexical.lexical_peers(p_word), '{}'::bytea[]) AS ids
+    ),
     -- Source-owned lexical entries carry their semantic edges; the queried
     -- content surface reaches those entries through the inverse alias edge.
-    semantic_self AS (
-        SELECT id FROM self
-        UNION
-        SELECT n.subject_id
-        FROM self s
-        JOIN laplace.v_consensus_unrefuted n
-          ON n.object_id = s.id
-         AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
+    semantic_self AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT id), '{}'::bytea[]) AS ids
+        FROM (
+            SELECT unnest(me.ids) AS id FROM me
+            UNION
+            SELECT n.subject_id
+            FROM me, laplace.v_consensus_unrefuted n
+            WHERE n.object_id = ANY (me.ids)
+              AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
+              AND n.rating IS NOT NULL
+        ) u
     ),
-    anchors AS (
-        SELECT DISTINCT c.object_id AS anchor
-        FROM semantic_self s JOIN laplace.v_consensus_unrefuted c ON c.subject_id = s.id
-        WHERE c.type_id IN (laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('EVOKES_FRAME'))
-          AND c.object_id IS NOT NULL
-        UNION
-        SELECT DISTINCT hs.object_id
-        FROM self s
-        JOIN laplace.v_consensus_unrefuted hs ON hs.subject_id = s.id
-                         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+    anchors AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT anchor), '{}'::bytea[]) AS ids
+        FROM (
+            SELECT c.object_id AS anchor
+            FROM semantic_self s, laplace.v_consensus_unrefuted c
+            WHERE c.subject_id = ANY (s.ids)
+              AND c.type_id IN (
+                  laplace.relation_type_id('IS_SYNONYM_OF'),
+                  laplace.relation_type_id('EVOKES_FRAME'),
+                  laplace.relation_type_id('FORM_OF')
+              )
+              AND c.object_id IS NOT NULL
+              AND c.rating IS NOT NULL
+            UNION
+            SELECT COALESCE(ss.object_id, hs.object_id) AS anchor
+            FROM me, laplace.v_consensus_unrefuted hs
+            LEFT JOIN laplace.v_consensus_unrefuted ss
+              ON ss.subject_id = hs.object_id
+             AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+             AND ss.rating IS NOT NULL
+            WHERE hs.subject_id = ANY (me.ids)
+              AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+              AND COALESCE(ss.object_id, hs.object_id) IS NOT NULL
+              AND hs.rating IS NOT NULL
+        ) a
+    ),
+    sense_anchors AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT ss.subject_id), '{}'::bytea[]) AS ids
+        FROM anchors a, laplace.v_consensus_unrefuted ss
+        WHERE ss.object_id = ANY (a.ids)
+          AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+          AND ss.rating IS NOT NULL
     ),
     -- Set-based member expansion: one reverse-edge join per bridge kind over
     -- ALL anchors at once (consensus_object_type_btree — every join here is
@@ -40,25 +66,36 @@ BEGIN ATOMIC
     -- lexical.concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
     -- 181x for one word (measured 55s -> sub-second). Same three bridges.
     members AS (
-        SELECT c.subject_id AS member, 'synonym'::text AS kind, consensus.eff_mu_display(c.rating, c.rd) AS mu
-        FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
-                          AND c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
+        SELECT c.subject_id AS member,
+               CASE WHEN c.type_id = laplace.relation_type_id('FORM_OF') THEN 'form'::text ELSE 'synonym'::text END AS kind,
+               consensus.eff_mu_display(c.rating, c.rd) AS mu
+        FROM anchors a, laplace.v_consensus_unrefuted c
+        WHERE c.object_id = ANY (a.ids)
+          AND c.type_id IN (laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('FORM_OF'))
         UNION ALL
         SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd)
-        FROM anchors a JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = a.anchor
-                          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+        FROM anchors a, laplace.v_consensus_unrefuted hs
+        WHERE hs.object_id = ANY (a.ids)
+          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+        UNION ALL
+        SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd)
+        FROM sense_anchors sa, laplace.v_consensus_unrefuted hs
+        WHERE hs.object_id = ANY (sa.ids)
+          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
         UNION ALL
         SELECT COALESCE(n.object_id, c.subject_id), 'frame'::text,
                consensus.eff_mu_display(c.rating, c.rd)
-        FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
-                          AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
-        LEFT JOIN laplace.v_consensus_unrefuted n ON n.subject_id = c.subject_id
-                          AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
+        FROM anchors a, laplace.v_consensus_unrefuted c
+        LEFT JOIN laplace.v_consensus_unrefuted n
+          ON n.subject_id = c.subject_id
+         AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
+        WHERE c.object_id = ANY (a.ids)
+          AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu
-        FROM members m
-        WHERE m.member <> ALL (SELECT id FROM self)
+        FROM members m, me
+        WHERE m.member <> ALL (me.ids)
         GROUP BY m.member, m.kind
     ),
     -- Top-mu PER kind, not global: FrameNet frames have huge, high-mu
@@ -84,3 +121,126 @@ BEGIN ATOMIC
     WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
     ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt;
 END;
+
+CREATE OR REPLACE FUNCTION lexical.word_peer_ids_batch(
+    p_word_ids bytea[],
+    p_limit_per_word integer DEFAULT 32
+) RETURNS TABLE(word_id bytea, peer_id bytea, strength double precision)
+LANGUAGE plpgsql STABLE PARALLEL SAFE
+AS $fn$
+DECLARE
+    v_kb_form bytea[] := consensus.relation_set_ids('KEY_BINDING') || laplace.relation_type_id('FORM_OF');
+    v_iso bytea := laplace.relation_type_id('IS_SENSE_OF');
+    v_dr bytea := laplace.relation_type_id('DERIVATIONALLY_RELATED');
+BEGIN
+    IF p_word_ids IS NULL OR COALESCE(array_length(p_word_ids, 1), 0) = 0 THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH q_words AS MATERIALIZED (
+        SELECT DISTINCT u.id AS word_id
+        FROM unnest(p_word_ids) AS u(id)
+        WHERE u.id IS NOT NULL
+    ),
+    word_anchors AS MATERIALIZED (
+        SELECT q.word_id, hs.object_id AS anchor_id, hs.type_id AS anchor_type
+        FROM q_words q
+        JOIN laplace.v_consensus_unrefuted hs
+          ON hs.subject_id = q.word_id
+         AND hs.type_id = ANY (v_kb_form || v_dr)
+         AND hs.rating IS NOT NULL
+    ),
+    all_anchors AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT anchor_id), ARRAY[]::bytea[]) AS ids
+        FROM word_anchors
+        WHERE anchor_type <> v_dr
+    ),
+    sense_to_synset AS MATERIALIZED (
+        SELECT ss.subject_id AS sense_id, ss.object_id AS synset_id
+        FROM all_anchors aa, laplace.v_consensus_unrefuted ss
+        WHERE ss.subject_id = ANY (aa.ids)
+          AND ss.type_id = v_iso
+          AND ss.rating IS NOT NULL
+    ),
+    word_synsets AS MATERIALIZED (
+        SELECT DISTINCT wa.word_id, sts.synset_id
+        FROM word_anchors wa
+        JOIN sense_to_synset sts ON sts.sense_id = wa.anchor_id
+        UNION
+        SELECT DISTINCT wa.word_id, wa.anchor_id AS synset_id
+        FROM word_anchors wa
+        WHERE wa.anchor_type = v_dr
+    ),
+    all_synsets AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT synset_id), ARRAY[]::bytea[]) AS ids
+        FROM word_synsets
+    ),
+    synset_to_deriv_word AS MATERIALIZED (
+        SELECT dr.subject_id AS synset_id,
+               dr.object_id AS peer_id,
+               MAX(consensus.eff_mu_display(dr.rating, dr.rd)) AS mu
+        FROM all_synsets asyn, laplace.v_consensus_unrefuted dr
+        WHERE dr.subject_id = ANY (asyn.ids)
+          AND dr.type_id = v_dr
+          AND dr.rating IS NOT NULL
+        GROUP BY dr.subject_id, dr.object_id
+    ),
+    synset_to_peer_sense AS MATERIALIZED (
+        SELECT s2.object_id AS synset_id, s2.subject_id AS peer_sense_id
+        FROM all_synsets asyn, laplace.v_consensus_unrefuted s2
+        WHERE s2.object_id = ANY (asyn.ids)
+          AND s2.type_id = v_iso
+          AND s2.rating IS NOT NULL
+    ),
+    word_target_hubs AS MATERIALIZED (
+        SELECT DISTINCT wa.word_id, wa.anchor_id AS hub_id
+        FROM word_anchors wa
+        WHERE wa.anchor_type <> v_dr
+        UNION
+        SELECT DISTINCT ws.word_id, stps.peer_sense_id AS hub_id
+        FROM word_synsets ws
+        JOIN synset_to_peer_sense stps ON stps.synset_id = ws.synset_id
+    ),
+    all_hubs AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT hub_id), ARRAY[]::bytea[]) AS ids
+        FROM word_target_hubs
+    ),
+    hub_to_word AS MATERIALIZED (
+        SELECT hs2.object_id AS hub_id,
+               hs2.subject_id AS peer_id,
+               MAX(consensus.eff_mu_display(hs2.rating, hs2.rd)) AS mu
+        FROM all_hubs ah, laplace.v_consensus_unrefuted hs2
+        WHERE hs2.object_id = ANY (ah.ids)
+          AND hs2.type_id = ANY (v_kb_form)
+          AND hs2.rating IS NOT NULL
+        GROUP BY hs2.object_id, hs2.subject_id
+    ),
+    candidates AS (
+        SELECT wth.word_id, htw.peer_id, htw.mu::float8 AS strength
+        FROM word_target_hubs wth
+        JOIN hub_to_word htw ON htw.hub_id = wth.hub_id
+        WHERE htw.peer_id <> wth.word_id
+        UNION ALL
+        SELECT ws.word_id, stdw.peer_id, (stdw.mu * 0.95::float8)::float8 AS strength
+        FROM word_synsets ws
+        JOIN synset_to_deriv_word stdw ON stdw.synset_id = ws.synset_id
+        WHERE stdw.peer_id <> ws.word_id
+    ),
+    ranked AS (
+        SELECT c.word_id,
+               c.peer_id,
+               MAX(c.strength)::float8 AS strength,
+               ROW_NUMBER() OVER (
+                   PARTITION BY c.word_id
+                   ORDER BY MAX(c.strength) DESC, c.peer_id
+               ) AS rn
+        FROM candidates c
+        GROUP BY c.word_id, c.peer_id
+    )
+    SELECT r.word_id, r.peer_id, r.strength
+    FROM ranked r
+    WHERE r.rn <= p_limit_per_word
+    ORDER BY r.word_id, r.strength DESC;
+END;
+$fn$;

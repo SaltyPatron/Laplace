@@ -5,11 +5,13 @@
     <AssemblyName>Laplace.Endpoints.Mcp</AssemblyName>
     <RootNamespace>Laplace.Endpoints.Mcp</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Npgsql" />
     <InternalsVisibleTo Include="Laplace.Endpoints.Mcp.Tests" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.OpenAICompat" />
   </ItemGroup>
 
   <ItemGroup>

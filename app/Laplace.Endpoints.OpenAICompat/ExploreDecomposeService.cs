@@ -20,6 +20,19 @@ internal sealed record ExploreAnchor(
 // A candidate surface whose content id exists in the substrate.
 internal sealed record WitnessedWord(string Surface, string IdHex, long Witnesses);
 
+internal sealed record GeometricTrace(
+    Hash128 RootId,
+    string RootIdHex,
+    double X,
+    double Y,
+    double Z,
+    double M,
+    double Radius,
+    double[] Trajectory,
+    HashSet<Hash128> WordIds,
+    double WordWeightSum,
+    int Constituents);
+
 internal sealed class ExploreDecomposeService
 {
     private readonly object _unicodeCloudGate = new();
@@ -400,6 +413,23 @@ internal sealed class ExploreDecomposeService
             Cx: cx, Cy: cy, Cz: cz, Cm: cm,
             TrajectoryWkt: wkt,
             Decomposition: decomposition);
+    }
+
+    public GeometricTrace ComputeTrace(string text)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(text);
+        EnsurePerfcache();
+
+        var t = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(text);
+        return new GeometricTrace(
+            RootId: t.RootId,
+            RootIdHex: t.RootIdHex,
+            X: t.Cx, Y: t.Cy, Z: t.Cz, M: t.Cm,
+            Radius: t.Radius,
+            Trajectory: t.Trajectory,
+            WordIds: t.WordIds,
+            WordWeightSum: t.WordWeights.Values.Sum(),
+            Constituents: Math.Max(1, t.Trajectory.Length / 4));
     }
 
     private static IReadOnlyList<DecomposeNodeRow> EmittedDecomposition(

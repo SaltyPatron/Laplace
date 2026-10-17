@@ -555,6 +555,42 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         Assert.False(item.GetProperty("laplace").TryGetProperty("meaning", out _));
     }
 
+    [Fact]
+    public async Task Rerank_RanksCandidatesByDeterministicFrechetAndConstituentOverlap()
+    {
+        var quoteId = await ApproveQuoteAsync("embeddings", "rerank-tenant", "evt_rerank");
+        using var response = await PostWithQuoteAsync("/v1/rerank", new
+        {
+            model = "laplace-rerank-001",
+            query = "public static double Frechet(ReadOnlySpan<double> p, ReadOnlySpan<double> q)",
+            documents = new[]
+            {
+                "unrelated text about cooking pasta",
+                "public static double Frechet(ReadOnlySpan<double> p, ReadOnlySpan<double> q)",
+                "double math4d_frechet(const double* p, size_t np, const double* q, size_t nq)"
+            },
+            top_n = 2
+        }, quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("list", json.RootElement.GetProperty("object").GetString());
+        Assert.Equal("laplace-rerank-001", json.RootElement.GetProperty("model").GetString());
+        var results = json.RootElement.GetProperty("results");
+        Assert.Equal(2, results.GetArrayLength());
+
+        // Exact match at index 1 must rank first with relevance_score 1.0 and frechet_distance 0.0.
+        var top = results[0];
+        Assert.Equal(1, top.GetProperty("index").GetInt32());
+        Assert.Equal(1.0, top.GetProperty("relevance_score").GetDouble(), precision: 5);
+        Assert.Equal(0.0, top.GetProperty("laplace").GetProperty("frechet_distance").GetDouble(), precision: 5);
+
+        // Second result should be the related C signature at index 2 rather than the unrelated cooking text at index 0.
+        var second = results[1];
+        Assert.Equal(2, second.GetProperty("index").GetInt32());
+        Assert.True(second.GetProperty("relevance_score").GetDouble() > 0.0);
+    }
+
 
 
     [Fact]
@@ -909,6 +945,73 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         using var response = await _client.PostAsJsonAsync("/v1/explore/decompose", new { text = "hello" });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         GoldenJson.Match("explore-decompose-200", await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("/mcp")]
+    [InlineData("/v1/mcp")]
+    public async Task Mcp_StreamableHttp_HostedInProcess_InitializesListsAndCallsTools(string route)
+    {
+        using var initResp = await _client.PostAsJsonAsync(route, new
+        {
+            jsonrpc = "2.0",
+            id = 1,
+            method = "initialize",
+            @params = new
+            {
+                protocolVersion = "2025-03-26",
+                capabilities = new { },
+                clientInfo = new { name = "iis-test", version = "1.0" }
+            }
+        });
+        Assert.Equal(HttpStatusCode.OK, initResp.StatusCode);
+        Assert.True(initResp.Headers.TryGetValues("Mcp-Session-Id", out var sessionValues));
+        var sessionId = Assert.Single(sessionValues);
+
+        using var listReq = new HttpRequestMessage(HttpMethod.Post, route)
+        {
+            Content = JsonContent.Create(new { jsonrpc = "2.0", id = 2, method = "tools/list" })
+        };
+        listReq.Headers.Add("Mcp-Session-Id", sessionId);
+        using var listResp = await _client.SendAsync(listReq);
+        Assert.Equal(HttpStatusCode.OK, listResp.StatusCode);
+        var listJson = JsonNode.Parse(await listResp.Content.ReadAsStringAsync())!;
+        var toolNames = listJson["result"]!["tools"]!.AsArray()
+            .Select(t => (string)t!["name"]!)
+            .ToArray();
+        Assert.Contains("embeddings", toolNames);
+        Assert.Contains("rerank", toolNames);
+        Assert.Contains("code_search", toolNames);
+
+        using var rerankReq = new HttpRequestMessage(HttpMethod.Post, route)
+        {
+            Content = JsonContent.Create(new
+            {
+                jsonrpc = "2.0",
+                id = 3,
+                method = "tools/call",
+                @params = new
+                {
+                    name = "rerank",
+                    arguments = new
+                    {
+                        query = "public int Add(int a, int b)",
+                        documents = new[]
+                        {
+                            "completely unrelated text about bananas",
+                            "public int Add(int a, int b) => a + b;"
+                        }
+                    }
+                }
+            })
+        };
+        rerankReq.Headers.Add("Mcp-Session-Id", sessionId);
+        using var rerankResp = await _client.SendAsync(rerankReq);
+        Assert.Equal(HttpStatusCode.OK, rerankResp.StatusCode);
+        var rerankOuter = JsonNode.Parse(await rerankResp.Content.ReadAsStringAsync())!;
+        var rerankText = (string)rerankOuter["result"]!["content"]![0]!["text"]!;
+        var rerankInner = JsonNode.Parse(rerankText)!;
+        Assert.Equal(1, (int)rerankInner["rows"]![0]!["index"]!);
     }
 
 

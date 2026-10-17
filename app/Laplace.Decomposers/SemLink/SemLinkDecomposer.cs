@@ -171,6 +171,7 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
 
     private static IEnumerable<string> InstanceDirCandidates(string ecosystemPath)
     {
+        yield return Path.Combine(ecosystemPath, "semlink-cu-clear", "instances");
         yield return Path.Combine(ecosystemPath, "semlink-master", "instances");
         yield return Path.Combine(ecosystemPath, "instances");
         yield return ecosystemPath;

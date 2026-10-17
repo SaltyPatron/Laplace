@@ -11,7 +11,7 @@ USAGE=(tatoeba opensubtitles)
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
-    echo "Sources: ${FLOOR[*]} document ${RELATIONS[*]} ${USAGE[*]} \\" >&2
+    echo "Sources: ${FLOOR[*]} document project-gutenberg ${RELATIONS[*]} ${USAGE[*]} \\" >&2
     echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-tactic-outcomes chess-transitions safetensors" >&2
     exit 2
 fi
@@ -223,7 +223,7 @@ case "$source" in
         require_cli
         ingest safetensors "$path"
         ;;
-    unicode|uca|iso639|operational|cili|document|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
+    unicode|uca|iso639|operational|cili|document|project-gutenberg|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         require_cli
         if [[ "$source" == document && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
