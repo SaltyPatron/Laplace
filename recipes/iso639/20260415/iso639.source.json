@@ -121,10 +121,28 @@
       "reason": "ISO 639-5 feed; language families belong to a 639-5 witness."
     },
     {
+      "selector": "glottolog/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Glottolog languoid data; its own witness, not the SIL 639-3 tables."
+    },
+    {
       "selector": ".landed",
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Local acquisition completion marker, not source content."
+    },
+    {
+      "selector": ".archive/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Retained acquisition archives and integrity receipts; the selected working copy supplies the source content."
+    },
+    {
+      "selector": ".superseded-*/**",
+      "disposition": "superseded",
+      "required": false,
+      "reason": "Retained earlier acquisition; not part of this selected release."
     }
   ]
 }

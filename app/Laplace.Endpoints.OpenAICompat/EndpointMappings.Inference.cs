@@ -422,7 +422,7 @@ internal static class InferenceEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
 
-        app.MapPost("/v1/embeddings", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/embeddings", async (HttpRequest request, ISubstrateClient substrate, ExploreDecomposeService decompose, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<EmbeddingsRequest>(request, ct);
             if (payload is null)
@@ -461,19 +461,34 @@ internal static class InferenceEndpoints
             for (int i = 0; i < inputs.Count; i++)
             {
                 var result = results[i];
-                var vector = result.Form is { } f
+                var entityId = result.EntityIdHex;
+                var form = result.Form;
+                if (form is null)
+                {
+                    try
+                    {
+                        var trace = decompose.ComputeTrace(inputs[i]);
+                        entityId ??= trace.RootIdHex;
+                        form = new EmbeddingForm(
+                            trace.X, trace.Y, trace.Z, trace.M,
+                            Radius: trace.Radius, Constituents: trace.Constituents);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Leave unresolved when T0 perfcache is unavailable.
+                    }
+                }
+                var vector = form is { } f
                     ? new double[] { f.X, f.Y, f.Z, f.M, f.Radius }
                     : Array.Empty<double>();
                 data.Add(new EmbeddingData("embedding", i, vector, new EmbeddingProvenance(
                     Input: inputs[i],
-
-
-                    Resolved: result.Form is not null,
-                    EntityId: result.EntityIdHex,
-                    Form: result.Form is { } ff
+                    Resolved: form is not null,
+                    EntityId: entityId,
+                    Form: form is { } ff
                         ? new EmbeddingFormView(ff.X, ff.Y, ff.Z, ff.M, ff.Radius, ff.Constituents)
                         : null,
-                    Meaning: includeMeaning && result.Meaning.Count > 0
+                    Meaning: includeMeaning
                         ? result.Meaning.Select(m => new MeaningNeighborView(m.Relation, m.ObjectLabel, m.EffMu, m.Witnesses)).ToArray()
                         : null)));
             }
@@ -486,6 +501,87 @@ internal static class InferenceEndpoints
         .Produces<EmbeddingsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
+
+        app.MapPost("/v1/rerank", async (
+            HttpRequest request,
+            ISubstrateClient substrate,
+            ExploreDecomposeService decompose,
+            IBillingOrchestrator billing,
+            CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<RerankRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+            var model = string.IsNullOrWhiteSpace(payload.Model) ? ModelCatalog.Rerank : payload.Model;
+            if (!ModelCatalog.IsRerankModel(model))
+                return EndpointJson.BadRequest("unknown_model",
+                    $"Unknown model '{model}'. Supported rerank models: {ModelCatalog.Rerank}, {ModelCatalog.EmbedForm}, {ModelCatalog.EmbedMeaning}.");
+            if (string.IsNullOrWhiteSpace(payload.Query))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'query' must be a non-empty string.");
+            var docs = ReadRerankDocuments(payload.Documents);
+            if (docs.Count == 0)
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'documents' must be a non-empty array of strings or document objects.");
+
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "embeddings", ct);
+            if (!gate.Allowed)
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
+                    ? new QuoteServiceDetail("embeddings")
+                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
+            if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            Laplace.Endpoints.Mcp.WorkspaceCodeIndex.TraceResult queryTrace;
+            try
+            {
+                queryTrace = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(payload.Query);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("rerank_unavailable", ex.Message);
+            }
+
+            var semanticPeers = await substrate.ResolveSemanticPeersAsync(queryTrace.WordIds, ct);
+
+            var ranked = new List<RerankResultItem>(docs.Count);
+            for (var i = 0; i < docs.Count; i++)
+            {
+                var docText = docs[i];
+                var docTrace = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(docText);
+                var s = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ScoreCandidate(queryTrace, docTrace, payload.Query, docText, semanticPeers);
+
+                ranked.Add(new RerankResultItem(
+                    Index: i,
+                    RelevanceScore: Math.Round(s.RelevanceScore, 6),
+                    Document: payload.ReturnDocuments ? new RerankDocumentView(docText) : null,
+                    Laplace: new RerankProvenance(
+                        EntityId: docTrace.RootIdHex,
+                        FrechetDistance: Math.Round(s.FrechetDistance, 6),
+                        CentroidDistance: Math.Round(s.CentroidDistance, 6),
+                        WordOverlap: Math.Round(s.WordOverlap, 6),
+                        SharedWords: s.SharedWords,
+                        QueryWords: queryTrace.WordIds.Count,
+                        DocumentWords: docTrace.WordIds.Count)));
+            }
+
+            ranked.Sort(static (a, b) =>
+            {
+                var cmp = b.RelevanceScore.CompareTo(a.RelevanceScore);
+                return cmp != 0 ? cmp : a.Index.CompareTo(b.Index);
+            });
+
+            var topN = payload.TopN is > 0 ? Math.Min(payload.TopN.Value, ranked.Count) : ranked.Count;
+            if (topN < ranked.Count)
+                ranked.RemoveRange(topN, ranked.Count - topN);
+
+            var tokens = Math.Max(1, payload.Query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length)
+                + docs.Sum(static s => Math.Max(1, s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length));
+            return Results.Json(new RerankResponse("list", model, queryTrace.RootIdHex, ranked, new EmbeddingsUsage(tokens, tokens)));
+        })
+        .WithTags("openai")
+        .Accepts<RerankRequest>("application/json")
+        .Produces<RerankResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapReportEndpoints();
         app.MapExploreEndpoints();
@@ -559,6 +655,29 @@ internal static class InferenceEndpoints
                     if (item.ValueKind == JsonValueKind.String && item.GetString() is { } v && !string.IsNullOrWhiteSpace(v))
                         list.Add(v.Trim());
                 break;
+        }
+        return list;
+    }
+
+    private static List<string> ReadRerankDocuments(JsonElement? documents)
+    {
+        var list = new List<string>();
+        if (documents is not { } element || element.ValueKind != JsonValueKind.Array)
+            return list;
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String && item.GetString() is { } s && !string.IsNullOrWhiteSpace(s))
+            {
+                list.Add(s);
+            }
+            else if (item.ValueKind == JsonValueKind.Object
+                     && item.TryGetProperty("text", out var textProp)
+                     && textProp.ValueKind == JsonValueKind.String
+                     && textProp.GetString() is { } t
+                     && !string.IsNullOrWhiteSpace(t))
+            {
+                list.Add(t);
+            }
         }
         return list;
     }

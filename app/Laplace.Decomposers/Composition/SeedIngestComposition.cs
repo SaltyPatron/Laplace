@@ -119,10 +119,14 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
         if (requested is not null)
         {
             string path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(requested));
-            // A path beneath the declared root selects part of the same generation; any
+            // A path beneath the declared root selects part of the same generation; an
+            // ancestor of an existing declared root resolves to that declared root; any
             // other path is another copy of the generation and becomes its root.
             if (path.StartsWith(declared + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                 scope = path;
+            else if (declared.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && Directory.Exists(declared))
+                resolvedRoot = declared;
             else if (!string.Equals(path, declared, StringComparison.Ordinal))
                 resolvedRoot = path;
         }

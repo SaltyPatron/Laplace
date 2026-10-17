@@ -82,6 +82,7 @@ internal static class IngestDispatchTable
         ("tabular",  cli => IngestCommands.IngestTabularAsync(cli)),
         ("parquet",  cli => IngestCommands.IngestParquetAsync(cli)),
         ("document", cli => IngestCommands.IngestDocumentAsync(cli)),
+        ("project-gutenberg", cli => IngestCommands.IngestProjectGutenbergAsync(cli)),
         ("recipe",   cli => IngestCommands.IngestRecipeAsync(cli)),
         ("agents",   cli => IngestCommands.IngestAgentsAsync(cli)),
         ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),

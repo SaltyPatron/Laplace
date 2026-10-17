@@ -1189,14 +1189,25 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         else
         {
-            // Chunk workers are bounded by ApplyParallelism.
+            // Chunk workers are bounded by ApplyParallelism and CopyConnectionBudget so
+            // concurrent entity/physicality/attestation probes cannot exhaust the pool.
             int workers = Math.Min(chunkCount, ApplyParallelism);
             int next = -1;
             await CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
             {
                 for (int c = Interlocked.Increment(ref next); c < chunkCount;
                      c = Interlocked.Increment(ref next))
-                    await ProbeChunkAsync(c, token);
+                {
+                    await CopyConnectionBudget.WaitAsync(token);
+                    try
+                    {
+                        await ProbeChunkAsync(c, token);
+                    }
+                    finally
+                    {
+                        CopyConnectionBudget.Release();
+                    }
+                }
             }, ct);
         }
 

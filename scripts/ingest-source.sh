@@ -6,12 +6,13 @@ path="${2:-}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
 FLOOR=(unicode uca iso639 operational cili)
+DOCUMENT=(document project-gutenberg)
 RELATIONS=(wordnet oewn omw verbnet verbnet-gl propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 USAGE=(tatoeba opensubtitles)
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
-    echo "Sources: ${FLOOR[*]} document ${RELATIONS[*]} ${USAGE[*]} \\" >&2
+    echo "Sources: ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]} \\" >&2
     echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-tactic-outcomes chess-transitions safetensors" >&2
     exit 2
 fi
@@ -192,7 +193,7 @@ ingest() {
 case "$source" in
     all)
         require_cli
-        STAGES=( "${FLOOR[@]}" document "${RELATIONS[@]}" "${USAGE[@]}" )
+        STAGES=( "${FLOOR[@]}" "${DOCUMENT[@]}" "${RELATIONS[@]}" "${USAGE[@]}" )
         from="${INGEST_FROM:-}"
         skip=0; [[ -n "$from" ]] && skip=1
         for src in "${STAGES[@]}"; do
@@ -223,7 +224,7 @@ case "$source" in
         require_cli
         ingest safetensors "$path"
         ;;
-    unicode|uca|iso639|operational|cili|document|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
+    unicode|uca|iso639|operational|cili|document|project-gutenberg|omw|oewn|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|verbnet-gl|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         require_cli
         if [[ "$source" == document && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
@@ -254,7 +255,7 @@ case "$source" in
         ;;
     *)
         echo "Unknown source: $source" >&2
-        echo "Sources: ${FLOOR[*]} document ${RELATIONS[*]} ${USAGE[*]} \\" >&2
+        echo "Sources: ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]} \\" >&2
         echo "         chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy \\" >&2
         echo "         chess-opening-match chess-move-outcomes chess-tactic-outcomes \\" >&2
         echo "         code repo stack tiny-codes tabular recipe agents all safetensors" >&2

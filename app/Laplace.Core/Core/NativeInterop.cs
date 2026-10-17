@@ -107,6 +107,12 @@ public static unsafe partial class NativeInterop
     internal static partial void Math4dKarcherMean(
         double* points, nuint nPoints, double* weights, double tol, int maxIters, double* out4);
 
+    [LibraryImport(Library, EntryPoint = "math4d_frechet")]
+    internal static partial double Math4dFrechet(double* p, nuint np, double* q, nuint nq);
+
+    [LibraryImport(Library, EntryPoint = "math4d_hausdorff")]
+    internal static partial double Math4dHausdorff(double* a, nuint na, double* b, nuint nb);
+
     [LibraryImport(Library, EntryPoint = "trajectory_build")]
     internal static partial int TrajectoryBuild(Hash128* entityHashes, nuint n, double* outXyzm);
 

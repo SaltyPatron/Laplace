@@ -48,20 +48,33 @@ static SPIPlanPtr plan_render = NULL;
 /* Names: realize.name_candidates (sql_catalog.def), relation HAS_NAME. */
 
 /* Lexicalization: an entity is realized by the words attested to express it
- * (word HAS_SENSE entity), requested language first, then strongest. */
+ * (word HAS_SENSE entity, or word HAS_SENSE sense IS_SENSE_OF entity),
+ * requested language first, then strongest. */
 static const char *Q_SYNSET_LEMMA =
-    "SELECT hs.object_id, hs.subject_id,"
-    /* The language is the attestation's context, not the word's: one surface
-     * can express different entities in different languages. One probe of the
-     * (subject, type, object) attestation index per candidate. */
-    "       EXISTS (SELECT 1 FROM laplace.attestations a"
-    "               WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id"
-    "                 AND a.object_id = hs.object_id AND a.context_id = $2) AS lp,"
-    "       consensus.eff_mu(hs.rating, hs.rd) AS mu"
-    " FROM laplace.v_consensus_unrefuted hs"
-    " WHERE hs.object_id = ANY($1)"
+    "SELECT cand.entity_id, cand.word_id, cand.lp, cand.mu "
+    "FROM ("
+    "  SELECT hs.object_id AS entity_id, hs.subject_id AS word_id,"
+    "         EXISTS (SELECT 1 FROM laplace.attestations a"
+    "                 WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id"
+    "                   AND a.object_id = hs.object_id AND a.context_id = $2) AS lp,"
+    "         consensus.eff_mu(hs.rating, hs.rd) AS mu"
+    "  FROM laplace.v_consensus_unrefuted hs"
+    "  WHERE hs.object_id = ANY($1)"
+    "    AND hs.type_id = laplace.relation_type_id('HAS_SENSE')"
+    "  UNION ALL"
+    "  SELECT ss.object_id AS entity_id, hs.subject_id AS word_id,"
+    "         EXISTS (SELECT 1 FROM laplace.attestations a"
+    "                 WHERE a.subject_id = hs.subject_id AND a.type_id = hs.type_id"
+    "                   AND a.object_id = hs.object_id AND a.context_id = $2) AS lp,"
+    "         consensus.eff_mu(hs.rating, hs.rd) AS mu"
+    "  FROM laplace.v_consensus_unrefuted ss"
+    "  JOIN laplace.v_consensus_unrefuted hs"
+    "    ON hs.object_id = ss.subject_id"
     "   AND hs.type_id = laplace.relation_type_id('HAS_SENSE')"
-    " ORDER BY hs.object_id, lp DESC, mu DESC, hs.subject_id";
+    "  WHERE ss.object_id = ANY($1)"
+    "    AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')"
+    ") cand "
+    "ORDER BY cand.entity_id, cand.lp DESC, cand.mu DESC, cand.word_id";
 
 static const char *Q_TRANSLATION =
     "SELECT m.subject_id, m.object_id,"

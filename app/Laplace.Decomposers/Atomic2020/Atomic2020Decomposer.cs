@@ -66,10 +66,11 @@ public sealed class Atomic2020Decomposer
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
+        string dir = IngestInput.ResolveSubdir(ecosystemPath, "train.*", "Atomic2020");
         var list = new List<(string, string)>(Splits.Length);
         foreach (var split in Splits)
         {
-            string file = Path.Combine(ecosystemPath, $"{split}.tsv");
+            string file = Path.Combine(dir, $"{split}.tsv");
             if (File.Exists(file))
                 list.Add((file, $"atomic/{split}"));
         }

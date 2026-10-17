@@ -178,6 +178,7 @@ app.MapChessPlayerModelEndpoints();
 app.MapChessReadEndpoints();
 app.MapFeedbackEndpoints();
 app.MapUserContentEndpoints();
+app.MapMcpEndpoints();
 
 app.MapFallback("/v1/{*path}", () => Results.Json(
     new Laplace.Api.Contracts.ErrorResponse(

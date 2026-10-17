@@ -20,11 +20,21 @@ BEGIN ATOMIC
         GROUP BY s.synset_id
     ),
     members AS (
-        -- The key's members: every word a source binds to it (word HAS_SENSE key).
+        -- The key's members: every word a source binds to it (word HAS_SENSE key, or
+        -- word HAS_SENSE sense IS_SENSE_OF synset).
         SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
         FROM syn
         JOIN laplace.consensus hs
           ON hs.object_id = syn.id
+         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
+        UNION ALL
+        SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
+        FROM syn
+        JOIN laplace.consensus ss
+          ON ss.object_id = syn.id
+         AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+        JOIN laplace.consensus hs
+          ON hs.object_id = ss.subject_id
          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
         UNION ALL
         -- OMW and other resources without a source sense key may still make a direct

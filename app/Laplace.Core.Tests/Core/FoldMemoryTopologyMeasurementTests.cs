@@ -21,7 +21,8 @@ public sealed class FoldMemoryTopologyMeasurementCollection
 [Collection("Fold memory topology measurement")]
 public sealed class FoldMemoryTopologyMeasurementTests
 {
-    private readonly record struct PeriodKey(long OpponentRatingFp1e9, long PhiFp1e9);
+    private readonly record struct PeriodKey(
+        long OpponentRatingFp1e9, long PhiFp1e9, long UnitScoreFp1e9);
 
     private struct PeriodAggregate
     {
@@ -52,7 +53,7 @@ public sealed class FoldMemoryTopologyMeasurementTests
             var h = new Hash128((ulong)i, (ulong)~i);
             map[(h, h, h)] = new Delta
             {
-                FirstPeriod = new PeriodKey(Glicko2.DefaultRatingFp1e9, 30_000_000_000L),
+                FirstPeriod = new PeriodKey(Glicko2.DefaultRatingFp1e9, 30_000_000_000L, i),
                 FirstAggregate = new PeriodAggregate { Games = 1, SumScoreFp1e9 = i },
                 Games = 1,
                 SumScoreFp1e9 = i,

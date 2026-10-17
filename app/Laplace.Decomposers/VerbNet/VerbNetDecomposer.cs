@@ -32,6 +32,7 @@ public sealed class VerbNetDecomposer
     {
         string classDir = IngestInput.ResolveSubdir(
             ecosystemPath, "*.xml",
+            Path.Combine("verbnet-cu-clear", "verbnet3.4"),
             Path.Combine("verbnet-master", "verbnet3.4"), "verbnet3.4");
         return SharedXmlFramesetReader.EnumerateXmlFiles(classDir)
             .Select((file, i) => (file, $"verbnet/{i}/{Path.GetFileName(file)}"))

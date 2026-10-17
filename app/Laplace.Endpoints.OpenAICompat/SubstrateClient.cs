@@ -29,6 +29,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     internal NpgsqlDataSource DataSource => _dataSource;
 
+    public Task<IReadOnlyDictionary<Hash128, Hash128[]>?> ResolveSemanticPeersAsync(
+        IEnumerable<Hash128> wordIds, CancellationToken ct) =>
+        Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ResolveSemanticPeersAsync(_dataSourceReadOnly, wordIds, ct);
+
 
 
 

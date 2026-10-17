@@ -3,10 +3,11 @@
   "release": "3.4",
   "sourceName": "VerbNet",
   "trustClass": "AcademicCurated",
-  "layerOrder": 3,
+  "layerOrder": 2,
   "selected": true,
-  "root": "VerbNet/verbnet-master",
+  "root": "VerbNet/verbnet-cu-clear",
   "aliases": [
+    "verbnet",
     "verbnet-recipe"
   ],
   "artifacts": [
@@ -60,6 +61,30 @@
       "disposition": "excluded-with-reason",
       "required": false,
       "reason": "Repository packaging."
+    },
+    {
+      "selector": ".git/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local Git administration, not released corpus content."
+    },
+    {
+      "selector": ".landed",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Local acquisition completion marker, not source content."
+    },
+    {
+      "selector": ".archive/**",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Retained acquisition archives and integrity receipts; the selected working copy supplies the source content."
+    },
+    {
+      "selector": ".superseded-*/**",
+      "disposition": "superseded",
+      "required": false,
+      "reason": "Retained earlier acquisition; not part of this selected release."
     }
   ]
 }

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
 using Laplace.Agents;
@@ -24,6 +26,7 @@ internal sealed class SubstrateTools : IMcpTools
     private const int DefaultRowCap = 200;
     private readonly NpgsqlDataSource _db;
     private readonly NpgsqlDataSource _dbReadOnly;
+    private readonly bool _ownsDataSources;
 
     public SubstrateTools(string? connectionString = null)
     {
@@ -35,14 +38,25 @@ internal sealed class SubstrateTools : IMcpTools
             dsb.ConnectionStringBuilder.Options =
                 "-c default_transaction_read_only=on";
         }, connectionString);
+        _ownsDataSources = true;
+    }
+
+    public SubstrateTools(NpgsqlDataSource db, NpgsqlDataSource dbReadOnly)
+    {
+        _db = db;
+        _dbReadOnly = dbReadOnly;
+        _ownsDataSources = false;
     }
 
     public async ValueTask DisposeAsync()
     {
         if (_turnCloser is not null) await _turnCloser.DisposeAsync();
         if (_plainWriter is IAsyncDisposable writer) await writer.DisposeAsync();
-        await _dbReadOnly.DisposeAsync();
-        await _db.DisposeAsync();
+        if (_ownsDataSources)
+        {
+            await _dbReadOnly.DisposeAsync();
+            await _db.DisposeAsync();
+        }
     }
 
     /// <summary>
@@ -193,6 +207,27 @@ internal sealed class SubstrateTools : IMcpTools
             "The external-agent routing table: every alias from agents.json plus every installed provider, each with the model it would call, the base URL it would call, the environment variable its key is read from, and whether that key is actually resolvable right now. Call this BEFORE concluding an external model is unavailable -- the two failures look identical from a failed `ask` and have different fixes: `credentialed=false` means the named variable is unset in both the process environment and secrets/agents.env, while a null `model` on a provider row means nothing has said which model to call (only anthropic ships a default, because it is the only vendor whose current model id this repository states from a checked-in reference rather than from memory). KEY VALUES ARE NEVER RETURNED, only the variable name that would supply one, so this is safe to read into a model's context. `config` reports which agents.json was loaded, or null when none was found -- a null there with missing aliases means the file is not where the search looked, not that its contents are wrong.",
             () => Schema(),
             (s, _) => s.AgentRoutes()),
+        new("embeddings", "Deterministic 4-D S^3 coordinate and Merkle content id for text or code.",
+            "Decompose text or code in-process via TextDecomposer and HashComposer over the T0 perfcache to compute its deterministic 128-bit content id, 4-D S^3 centroid coordinate [x, y, z, m, radius], and trajectory vertex count. When include_meaning is true, also queries the substrate for rated consensus neighbours.",
+            () => Schema(("input", "string", "text or code snippet to embed (or pass inputs as a JSON array of strings)", false),
+                         ("inputs", "array", "array of text or code strings to embed in batch", false),
+                         ("include_meaning", "boolean", "include rated consensus neighbours from the substrate, default false", false),
+                         ("meaning_limit", "integer", "max consensus neighbours per input when include_meaning is true, default 10", false)),
+            (s, a) => s.Embeddings(a)),
+        new("rerank", "Deterministic 4-D Fréchet trajectory and Merkle constituent overlap reranker.",
+            "Rerank candidate documents or code snippets against a query in-process using exact 4-D trajectory Fréchet distance (math4d_frechet), 4-D centroid distance, and word-tier Merkle content-id overlap. Requires zero neural inference and zero database round-trips.",
+            () => Schema(("query", "string", "the search query or code snippet", true),
+                         ("documents", "array", "array of candidate strings or {\"text\": \"...\"} objects to rerank", true),
+                         ("top_n", "integer", "maximum number of top-ranked results to return, default all", false)),
+            (s, a) => s.Rerank(a)),
+        new("code_search", "Search workspace source code and named substrate entities with 4-D Fréchet ranking.",
+            "Decompose a code or structural query into its root 128-bit content id and word-tier constituent ids, search the in-memory workspace declaration chunk index (with IDF constituent postings and exact 4-D Fréchet trajectory distance) and structural.explore_browse_named_entities in the substrate, and return ranked code snippets with file paths, line ranges, entity ids, and Fréchet distances.",
+            () => Schema(("query", "string", "code symbol, identifier, or natural-language query", true),
+                         ("path", "string", "optional repository, directory, or file path substring filter", false),
+                         ("limit", "integer", "maximum results to return, default 20", false),
+                         ("offset", "integer", "pagination offset, default 0", false),
+                         ("reindex", "boolean", "force a fresh scan of workspace source files, default false", false)),
+            (s, a) => s.CodeSearch(a)),
         new("help", "List every tool (one-line each), or full detail for one name.",
             "Catalog introspection for THIS tool surface, same idea as ops.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
             () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false)),
@@ -280,6 +315,7 @@ internal sealed class SubstrateTools : IMcpTools
     //                  has no session or tenant to scope.
     // These were one writer and one `_turnDepositBroken` flag, so a failure in the
     // note lane silently disabled conversational deposits and vice versa.
+    private readonly object _writerSync = new();
     private TurnCloser? _turnCloser;
     private ISubstrateWriter? _plainWriter;
     private bool _plainBootstrapped;
@@ -838,26 +874,29 @@ internal sealed class SubstrateTools : IMcpTools
         var text = Req(args, "text");
         var origin = Opt(args, "origin") ?? "agent/note";
 
-        EnsurePlainWriter();
-        if (_plainWriterBroken)
-            return ("witness lane offline (writer spine failed earlier in this session)", true);
-
-        if (!UserPromptContent.TryBuildWitnessChange(
-                Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
-            return ("text produced no witnessable content", true);
-
-        _plainWriter!.ApplyAsync(change).GetAwaiter().GetResult();
-
-        var result = new JsonObject
+        lock (_writerSync)
         {
-            ["rows"] = new JsonArray(new JsonObject
+            EnsurePlainWriter();
+            if (_plainWriterBroken)
+                return ("witness lane offline (writer spine failed earlier in this session)", true);
+
+            if (!UserPromptContent.TryBuildWitnessChange(
+                    Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
+                return ("text produced no witnessable content", true);
+
+            _plainWriter!.ApplyAsync(change).GetAwaiter().GetResult();
+
+            var result = new JsonObject
             {
-                ["root"] = Convert.ToHexStringLower(root.ToBytes()),
-                ["origin"] = origin,
-                ["witnessed"] = true,
-            })
-        };
-        return (result.ToJsonString(), false);
+                ["rows"] = new JsonArray(new JsonObject
+                {
+                    ["root"] = Convert.ToHexStringLower(root.ToBytes()),
+                    ["origin"] = origin,
+                    ["witnessed"] = true,
+                })
+            };
+            return (result.ToJsonString(), false);
+        }
     }
 
     // Confirm/refute through the one canonical implementation (FeedbackContent —
@@ -982,7 +1021,12 @@ internal sealed class SubstrateTools : IMcpTools
         _db, warn => Console.Error.WriteLine($"laplace-mcp: {warn}"));
 
     private bool DepositTurn(string prompt, string? reply, Hash128 sessionId)
-        => TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
+    {
+        lock (_writerSync)
+        {
+            return TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
+        }
+    }
 
     // The outbound lane: this substrate as a CLIENT of other models, symmetric with
     // Laplace.Endpoints.OpenAICompat serving them. Routing, credentials and per-wire
@@ -1219,7 +1263,10 @@ internal sealed class SubstrateTools : IMcpTools
         var required = new JsonArray();
         foreach (var (pName, type, description, isRequired) in props)
         {
-            properties[pName] = new JsonObject { ["type"] = type, ["description"] = description };
+            var propObj = new JsonObject { ["type"] = type, ["description"] = description };
+            if (string.Equals(type, "array", StringComparison.Ordinal))
+                propObj["items"] = new JsonObject { ["type"] = "string" };
+            properties[pName] = propObj;
             if (isRequired) required.Add(pName);
         }
 
@@ -1287,4 +1334,275 @@ internal sealed class SubstrateTools : IMcpTools
 
     private static double? OptDouble(JsonObject? args, string name) =>
         args?[name] is { } node ? node.GetValue<double>() : null;
+
+    internal sealed record TraceData(
+        Hash128 RootId,
+        string RootIdHex,
+        double X,
+        double Y,
+        double Z,
+        double M,
+        double Radius,
+        double[] Trajectory,
+        HashSet<Hash128> WordIds,
+        double WordWeightSum,
+        int NodeCount);
+
+    internal static TraceData ComputeTrace(string text)
+    {
+        var t = WorkspaceCodeIndex.ComputeTrace(text);
+        return new TraceData(
+            RootId: t.RootId,
+            RootIdHex: t.RootIdHex,
+            X: t.Cx, Y: t.Cy, Z: t.Cz, M: t.Cm,
+            Radius: t.Radius,
+            Trajectory: t.Trajectory,
+            WordIds: t.WordIds,
+            WordWeightSum: t.WordWeights.Values.Sum(),
+            NodeCount: Math.Max(1, t.NodeCount));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe int PerfcacheResolver(
+        uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
+    {
+        var recs = CodepointPerfcache.Records;
+        if (atom >= (uint)recs.Length) return -1;
+        ref readonly var r = ref recs[(int)atom];
+        *outId = r.Hash;
+        outCoord[0] = r.CoordX;
+        outCoord[1] = r.CoordY;
+        outCoord[2] = r.CoordZ;
+        outCoord[3] = r.CoordM;
+        *outHb = r.Hilbert;
+        return 0;
+    }
+
+    private (string, bool) Embeddings(JsonObject? args)
+    {
+        var texts = new List<string>();
+        if (Opt(args, "input") is { } single && !string.IsNullOrWhiteSpace(single))
+            texts.Add(single);
+        if (args?["inputs"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is JsonValue val && val.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s))
+                    texts.Add(s);
+            }
+        }
+        if (texts.Count == 0)
+            throw new ArgumentException("missing required argument: input (or inputs)");
+
+        var includeMeaning = args?["include_meaning"]?.GetValue<bool>() ?? false;
+        var meaningLimit = Int(args, "meaning_limit", 10);
+        var rows = new List<JsonObject>(texts.Count);
+
+        for (var i = 0; i < texts.Count; i++)
+        {
+            var text = texts[i];
+            var trace = WorkspaceCodeIndex.ComputeTrace(text);
+            var row = new JsonObject
+            {
+                ["index"] = i,
+                ["input"] = text,
+                ["entity_id"] = trace.RootIdHex,
+                ["embedding"] = new JsonArray(
+                    JsonValue.Create(Math.Round(trace.Cx, 8)),
+                    JsonValue.Create(Math.Round(trace.Cy, 8)),
+                    JsonValue.Create(Math.Round(trace.Cz, 8)),
+                    JsonValue.Create(Math.Round(trace.Cm, 8)),
+                    JsonValue.Create(Math.Round(trace.Radius, 8))),
+                ["vertices"] = Math.Max(1, trace.Trajectory.Length / 4),
+                ["words"] = trace.WordIds.Count,
+                ["nodes"] = trace.NodeCount,
+            };
+
+            if (includeMeaning)
+            {
+                try
+                {
+                    using var conn = _dbReadOnly.OpenConnection();
+                    var constituentTerms = WorkspaceCodeIndex.ExtractContentWords(text);
+                    var lookupRows = NpgsqlSubstrateReads.EmbeddingLookupAsync(
+                            conn, text, meaningLimit, includeMeaning: true, default,
+                            constituentTerms: constituentTerms)
+                        .GetAwaiter().GetResult();
+                    var anchor = lookupRows.FirstOrDefault(static r => r.Kind == 0);
+                    row["witnessed_in_substrate"] = anchor.EntityId is not null;
+                    var meaningArr = new JsonArray();
+                    foreach (var m in lookupRows.Where(static r => r.Kind == 1))
+                    {
+                        meaningArr.Add(new JsonObject
+                        {
+                            ["relation"] = m.Relation,
+                            ["object"] = m.ObjectLabel,
+                            ["eff_mu"] = m.EffMu is { } mu ? (double)mu : null,
+                            ["witnesses"] = m.Witnesses,
+                        });
+                    }
+                    row["meaning"] = meaningArr;
+                }
+                catch (NpgsqlException)
+                {
+                    row["witnessed_in_substrate"] = null;
+                }
+            }
+
+            rows.Add(row);
+        }
+
+        return JsonRows(rows);
+    }
+
+    private (string, bool) Rerank(JsonObject? args)
+    {
+        var query = Req(args, "query");
+        if (args?["documents"] is not JsonArray docNodes || docNodes.Count == 0)
+            throw new ArgumentException("missing required argument: documents (non-empty array)");
+
+        var docs = new List<string>(docNodes.Count);
+        foreach (var item in docNodes)
+        {
+            if (item is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s))
+                docs.Add(s);
+            else if (item is JsonObject obj && obj["text"]?.GetValue<string>() is { } t && !string.IsNullOrWhiteSpace(t))
+                docs.Add(t);
+        }
+        if (docs.Count == 0)
+            throw new ArgumentException("documents array contained no non-empty strings");
+
+        var queryTrace = WorkspaceCodeIndex.ComputeTrace(query);
+        var semanticPeers = WorkspaceCodeIndex.ResolveSemanticPeers(_dbReadOnly, queryTrace.WordIds);
+        var scored = new List<(int Index, double Score, JsonObject Row)>(docs.Count);
+
+        for (var i = 0; i < docs.Count; i++)
+        {
+            var docText = docs[i];
+            var docTrace = WorkspaceCodeIndex.ComputeTrace(docText);
+            var s = WorkspaceCodeIndex.ScoreCandidate(queryTrace, docTrace, query, docText, semanticPeers);
+
+            var row = new JsonObject
+            {
+                ["index"] = i,
+                ["relevance_score"] = Math.Round(s.RelevanceScore, 6),
+                ["entity_id"] = docTrace.RootIdHex,
+                ["frechet_distance"] = Math.Round(s.FrechetDistance, 6),
+                ["centroid_distance"] = Math.Round(s.CentroidDistance, 6),
+                ["word_overlap"] = Math.Round(s.WordOverlap, 6),
+                ["shared_words"] = s.SharedWords,
+                ["text"] = docText,
+            };
+            scored.Add((i, s.RelevanceScore, row));
+        }
+
+        scored.Sort(static (a, b) =>
+        {
+            var cmp = b.Score.CompareTo(a.Score);
+            return cmp != 0 ? cmp : a.Index.CompareTo(b.Index);
+        });
+
+        var topN = Int(args, "top_n", scored.Count);
+        if (topN > 0 && topN < scored.Count)
+            scored.RemoveRange(topN, scored.Count - topN);
+
+        return JsonRows(scored.Select(static s => s.Row));
+    }
+
+    private (string, bool) CodeSearch(JsonObject? args)
+    {
+        var query = Req(args, "query");
+        var pathFilter = Opt(args, "path");
+        var limit = Math.Clamp(Int(args, "limit", 20), 1, DefaultRowCap);
+        var offset = Math.Max(0, Int(args, "offset", 0));
+        var forceReindex = args?["reindex"]?.GetValue<bool>() ?? false;
+
+        var queryTrace = WorkspaceCodeIndex.ComputeTrace(query);
+        var semanticPeers = WorkspaceCodeIndex.ResolveSemanticPeers(_dbReadOnly, queryTrace.WordIds);
+
+        var workspaceRows = WorkspaceCodeIndex.Search(
+            query,
+            pathFilter,
+            limit,
+            offset,
+            forceReindex,
+            out var indexedChunks,
+            out var indexedFiles,
+            semanticPeers);
+
+        var combined = new List<JsonObject>(workspaceRows.Count);
+        combined.AddRange(workspaceRows);
+
+        if (combined.Count < limit)
+        {
+            try
+            {
+                var rootBytes = queryTrace.RootId.ToBytes();
+                var memberBytes = queryTrace.WordIds.Select(static id => id.ToBytes()).ToArray();
+
+                using var conn = _dbReadOnly.OpenConnection();
+                var page = NpgsqlBrowseReads.NamedEntitiesAsync(
+                        conn, memberBytes, rootBytes, offset, Math.Min(limit * 3, DefaultRowCap), 500, default)
+                    .GetAwaiter().GetResult();
+
+                var scored = new List<(double Score, JsonObject Row)>(page.Count);
+                foreach (var hit in page)
+                {
+                    double frechetDist = 0.0;
+                    double centroidDist = 0.0;
+                    double wordOverlap = 0.0;
+                    double baseScore = 0.0;
+
+                    if (!string.IsNullOrWhiteSpace(hit.Label))
+                    {
+                        var hitTrace = WorkspaceCodeIndex.ComputeTrace(hit.Label);
+                        var s = WorkspaceCodeIndex.ScoreCandidate(queryTrace, hitTrace, query, hit.Label, semanticPeers);
+                        frechetDist = s.FrechetDistance;
+                        centroidDist = s.CentroidDistance;
+                        wordOverlap = s.WordOverlap;
+                        baseScore = s.RelevanceScore;
+                    }
+
+                    var exactBonus = string.Equals(hit.MatchKind, "exact", StringComparison.OrdinalIgnoreCase) ? 0.15 : 0.0;
+                    var score = Math.Min(1.0, baseScore + exactBonus);
+
+                    scored.Add((score, new JsonObject
+                    {
+                        ["source"] = "substrate",
+                        ["entity_id"] = hit.IdHex,
+                        ["label"] = hit.Label,
+                        ["tier"] = hit.Tier,
+                        ["type"] = hit.Type,
+                        ["match_kind"] = hit.MatchKind,
+                        ["relevance_score"] = Math.Round(score, 6),
+                        ["frechet_distance"] = Math.Round(frechetDist, 6),
+                        ["centroid_distance"] = Math.Round(centroidDist, 6),
+                        ["word_overlap"] = Math.Round(wordOverlap, 6),
+                        ["eff_mu"] = hit.EffMu is { } mu ? (double)mu : null,
+                        ["witnesses"] = hit.Witnesses,
+                    }));
+                }
+
+                scored.Sort(static (a, b) => b.Score.CompareTo(a.Score));
+                foreach (var item in scored)
+                {
+                    if (combined.Count >= limit)
+                        break;
+                    combined.Add(item.Row);
+                }
+            }
+            catch (NpgsqlException)
+            {
+                // Substrate DB lookup is optional when workspace index satisfies code search
+            }
+        }
+
+        var result = new JsonObject
+        {
+            ["indexed_files"] = indexedFiles,
+            ["indexed_chunks"] = indexedChunks,
+            ["rows"] = new JsonArray(combined.Select(static r => (JsonNode)r).ToArray()),
+        };
+        return (result.ToJsonString(), false);
+    }
 }

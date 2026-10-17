@@ -61,6 +61,21 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         "sents.vrb", "sentidx.vrb",
     ];
 
+    internal static string ResolveDictDir(string ecosystemPath)
+    {
+        if (File.Exists(ecosystemPath))
+            return Path.GetDirectoryName(ecosystemPath) ?? ecosystemPath;
+        var wn30Dict = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
+        if (Directory.Exists(wn30Dict))
+            return wn30Dict;
+        var dict = Path.Combine(ecosystemPath, "dict");
+        if (Directory.Exists(dict))
+            return dict;
+        if (File.Exists(Path.Combine(ecosystemPath, "data.noun")))
+            return ecosystemPath;
+        return wn30Dict;
+    }
+
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
@@ -68,7 +83,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     {
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
 
-        string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
+        string dictDir = ResolveDictDir(context.EcosystemPath);
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.WordNet, options);
         var frames = new List<ArtifactPhaseWork>();
         var data = new List<ArtifactPhaseWork>();
@@ -143,7 +158,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         protected override IAsyncEnumerable<WnVerbFrame> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            ParseVerbFramesAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "frames.vrb"), ct);
+            ParseVerbFramesAsync(Path.Combine(ResolveDictDir(ecosystemPath), "frames.vrb"), ct);
     }
 
     private sealed class DataPhase : WnComposePhase<WnSynset>
@@ -162,7 +177,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         protected override IAsyncEnumerable<WnSynset> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            ParseDataAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", _fileName), ct);
+            ParseDataAsync(Path.Combine(ResolveDictDir(ecosystemPath), _fileName), ct);
     }
 
     private sealed class SensePhase : WnComposePhase<WnSense>
@@ -172,7 +187,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         protected override void Compose(WnSense s, SubstrateChangeBuilder b) => ComposeSense(s, b);
         protected override IAsyncEnumerable<WnSense> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            ParseSensesAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "index.sense"), ct);
+            ParseSensesAsync(Path.Combine(ResolveDictDir(ecosystemPath), "index.sense"), ct);
     }
 
     private sealed class ExcPhase : WnComposePhase<WnExcLine>
@@ -183,7 +198,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         protected override void Compose(WnExcLine exc, SubstrateChangeBuilder b) => ComposeExcLine(exc, b);
         protected override IAsyncEnumerable<WnExcLine> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            ParseExceptionFileAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", _fileName), ct);
+            ParseExceptionFileAsync(Path.Combine(ResolveDictDir(ecosystemPath), _fileName), ct);
     }
 
     private sealed class SentenceTextPhase : WnComposePhase<WnVerbSentence>
@@ -206,7 +221,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         protected override IAsyncEnumerable<WnVerbSentence> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            ParseVerbSentenceTextsAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "sents.vrb"), ct);
+            ParseVerbSentenceTextsAsync(Path.Combine(ResolveDictDir(ecosystemPath), "sents.vrb"), ct);
     }
 
     private sealed class SentenceIndexPhase : WnComposePhase<WnVerbSentEntry>
@@ -217,7 +232,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             ComposeVerbSentEntry(entry, b);
         protected override IAsyncEnumerable<WnVerbSentEntry> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            ParseVerbSentenceIndexAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "sentidx.vrb"), ct);
+            ParseVerbSentenceIndexAsync(Path.Combine(ResolveDictDir(ecosystemPath), "sentidx.vrb"), ct);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -234,7 +249,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         }
         else
         {
-            string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
+            string dictDir = ResolveDictDir(context.EcosystemPath);
             files = PhysicalFiles
                 .Select(name => (Name: name, Path: Path.Combine(dictDir, name)))
                 .Where(static file => File.Exists(file.Path))

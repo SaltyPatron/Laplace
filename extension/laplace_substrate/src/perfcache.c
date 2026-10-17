@@ -100,6 +100,30 @@ laplace_substrate_native_mkl_threads(void)
     return native_mkl_threads;
 }
 
+const char *
+laplace_substrate_perfcache_path(void)
+{
+    return perfcache_path;
+}
+
+const char *
+laplace_substrate_highway_perfcache_path(void)
+{
+    return highway_perfcache_path;
+}
+
+const char *
+laplace_substrate_vocabulary_perfcache_path(void)
+{
+    return vocabulary_perfcache_path;
+}
+
+const char *
+laplace_substrate_chess_position_perfcache_path(void)
+{
+    return chess_position_perfcache_path;
+}
+
 bool
 laplace_perfcache_ready(void)
 {

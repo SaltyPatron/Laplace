@@ -157,6 +157,7 @@ internal sealed class ApiKeyEnforcementMiddleware
     {
         var request = context.Request;
         var path = request.Path.Value ?? "";
+        if (IsUnder(path, "/v1/mcp") || IsUnder(path, "/mcp")) { await _next(context); return; }
         if (!IsUnder(path, "/v1") && !IsUnder(path, "/chess")) { await _next(context); return; }
         // /chess is both an engine operation prefix and a web route; a request no
         // chess operation matched is a page navigation served by the web fallback.

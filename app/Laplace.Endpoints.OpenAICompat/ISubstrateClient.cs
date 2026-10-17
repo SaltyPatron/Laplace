@@ -183,4 +183,8 @@ internal interface ISubstrateClient
     Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
         string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
         int timeoutSeconds, CancellationToken ct);
+
+    Task<IReadOnlyDictionary<Laplace.Engine.Core.Hash128, Laplace.Engine.Core.Hash128[]>?> ResolveSemanticPeersAsync(
+        IEnumerable<Laplace.Engine.Core.Hash128> wordIds, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyDictionary<Laplace.Engine.Core.Hash128, Laplace.Engine.Core.Hash128[]>?>(null);
 }

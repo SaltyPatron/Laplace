@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-internal static class PredicateMatrixIngest
+public static class PredicateMatrixIngest
 {
     // PredicateMatrix is a resource distinct from SemLink's JSON maps: each row ties a VN class,
     // FN frame, PB roleset, WN sense and MCR/ILI. Its rows carry their own source id, so
@@ -186,7 +186,14 @@ internal static class PredicateMatrixIngest
         // Canonical name first: only the first matched path is ingested, so versioned
         // siblings the glob also matches must not outrank PredicateMatrix.txt.
         Files = [IngestFileMatch.Name("PredicateMatrix.txt"), IngestFileMatch.Glob("PredicateMatrix*.txt")],
-        EcosystemDirs = [".", "instances", Path.Combine("semlink-master", "instances"), .. UnpackDirs],
+        EcosystemDirs =
+        [
+            ".",
+            "instances",
+            Path.Combine("semlink-cu-clear", "instances"),
+            Path.Combine("semlink-master", "instances"),
+            .. UnpackDirs,
+        ],
         RootDirs = UnpackDirs,
         NestedDirs = UnpackDirs,
         SearchIngestRoots = true,
@@ -240,7 +247,7 @@ internal static class PredicateMatrixIngest
                                       parsed.Value.WnVersion ?? "pwn30");
     }
 
-    internal readonly record struct PredicateMatrixEdge(
+    public readonly record struct PredicateMatrixEdge(
         CategoryCorrespondenceRecord? Category,
         RoleCorrespondenceRecord? Role)
     {
@@ -248,7 +255,7 @@ internal static class PredicateMatrixIngest
         public static PredicateMatrixEdge FromRole(RoleCorrespondenceRecord r) => new(null, r);
     }
 
-    internal readonly record struct PredicateMatrixRecord(
+    public readonly record struct PredicateMatrixRecord(
         string Language,
         string Pos,
         string PredicateKey,

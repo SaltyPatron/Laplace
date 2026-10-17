@@ -217,6 +217,12 @@ public sealed class LocalPgFixture : IAsyncLifetime
     private static string ResolvePgTool(string program)
     {
         if (!OperatingSystem.IsWindows()) return program;
+        var declaredPgDir = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_PG_DIR");
+        if (!string.IsNullOrWhiteSpace(declaredPgDir))
+        {
+            string declaredExe = Path.Combine(declaredPgDir, "bin", program + ".exe");
+            if (File.Exists(declaredExe)) return declaredExe;
+        }
         const string pgBin = @"C:\Program Files\PostgreSQL\18\bin";
         string exe = Path.Combine(pgBin, program + ".exe");
         return File.Exists(exe) ? exe : program;

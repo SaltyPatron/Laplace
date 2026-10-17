@@ -72,15 +72,14 @@ vault_check() {
     "$DATA_ROOT/PropBank" \
     "$DATA_ROOT/FrameNet/framenet_v17" \
     "$DATA_ROOT/MapNet-0.1/mapping_frame_synsets.txt" \
-    "$DATA_ROOT/MapNet/mapping_frame_synsets.txt" \
-    "$DATA_ROOT/SemLink/semlink-master/instances/pb-vn2.json" \
-    "$DATA_ROOT/SemLink/semlink-master/instances/vn-fn2.json" \
+    "$DATA_ROOT/SemLink/semlink-cu-clear/instances/pb-vn2.json" \
+    "$DATA_ROOT/SemLink/semlink-cu-clear/instances/vn-fn2.json" \
     "$DATA_ROOT/PredicateMatrix.v1.3/PredicateMatrix.v1.3.txt" \
     "$DATA_ROOT/CILI/ili-map-pwn30.tab" \
-    "$DATA_ROOT/CILI/ili-map.ttl" \
+    "$DATA_ROOT/CILI/ili.ttl" \
     "$DATA_ROOT/ConceptNet/assertions.csv" \
-    "$DATA_ROOT/Atomic2020/train.tsv" \
-    "$DATA_ROOT/UD-Treebanks/ud-treebanks-v2.17" \
+    "$DATA_ROOT/Atomic/Atomic2020/train.tsv" \
+    "$DATA_ROOT/UD-Treebanks/ud-treebanks-v2.18" \
     "$DATA_ROOT/Wiktionary" \
     "$DATA_ROOT/Tatoeba/sentences.csv" \
     "$TINYLLAMA/config.json"

@@ -51,22 +51,40 @@ CREATE OR REPLACE FUNCTION converse.key_facts(p_keys bytea[], p_per_key int DEFA
                   witnesses bigint, rating bigint, rd bigint, volatility bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH f AS MATERIALIZED (
-        SELECT k.key, c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
+    WITH expanded AS MATERIALIZED (
+        SELECT DISTINCT k.key AS root_key, u.subj_id
         FROM (SELECT DISTINCT u AS key FROM unnest(p_keys) u WHERE u IS NOT NULL) k
+        LEFT JOIN laplace.v_consensus_unrefuted ss
+          ON ss.subject_id = k.key
+         AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
         CROSS JOIN LATERAL (
-            SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
-            FROM laplace.v_consensus_unrefuted c
-            WHERE c.subject_id = k.key AND c.object_id IS NOT NULL
-              AND c.type_id <> ALL (consensus.relation_set_ids('KEY_BINDING'))
-              AND c.type_id <> ALL (consensus.relation_set_ids('NON_SALIENT_STRUCTURAL'))
-              AND c.type_id = ANY (ARRAY(SELECT r.type_id FROM laplace.relation_registry() r))
-            ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.type_id, c.object_id
-            LIMIT GREATEST(p_per_key, 0)) c
+            VALUES (k.key), (ss.object_id)
+        ) AS u(subj_id)
+        WHERE u.subj_id IS NOT NULL
+    ), deduped AS (
+        SELECT DISTINCT ON (e.root_key, c.type_id, c.object_id)
+               e.root_key AS key, c.type_id, c.object_id,
+               c.rating, c.rd, c.volatility, c.witness_count
+        FROM expanded e
+        JOIN laplace.v_consensus_unrefuted c
+          ON c.subject_id = e.subj_id AND c.object_id IS NOT NULL
+         AND c.type_id <> ALL (consensus.relation_set_ids('KEY_BINDING'))
+         AND c.type_id <> ALL (consensus.relation_set_ids('NON_SALIENT_STRUCTURAL'))
+         AND c.type_id = ANY (ARRAY(SELECT r.type_id FROM laplace.relation_registry() r))
+        ORDER BY e.root_key, c.type_id, c.object_id,
+                 consensus.eff_mu(c.rating, c.rd) DESC
+    ), f AS MATERIALIZED (
+        SELECT d.key, d.type_id, d.object_id, d.rating, d.rd, d.volatility, d.witness_count,
+               row_number() OVER (
+                   PARTITION BY d.key
+                   ORDER BY consensus.eff_mu(d.rating, d.rd) DESC, d.type_id, d.object_id
+               ) AS rn
+        FROM deduped d
     )
     SELECT f.key, f.type_id, f.object_id, consensus.eff_mu_display(f.rating, f.rd),
            f.witness_count, f.rating, f.rd, f.volatility
-    FROM f;
+    FROM f
+    WHERE f.rn <= GREATEST(p_per_key, 0);
 END;
 
 -- How two terms couple, and through which of their keys, by typed channel:
@@ -108,8 +126,15 @@ BEGIN ATOMIC
         FROM xf JOIN yf ON yf.type_id = xf.type_id AND yf.object_id = xf.object_id
     ), up AS (
         WITH RECURSIVE walk(root, side, node, depth) AS (
-            SELECT key, 'x', key, 0 FROM xk
-            UNION ALL SELECT key, 'y', key, 0 FROM yk
+            SELECT xk.key, 'x', COALESCE(ss.object_id, xk.key), 0
+            FROM xk
+            LEFT JOIN laplace.v_consensus_unrefuted ss
+              ON ss.subject_id = xk.key AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+            UNION ALL
+            SELECT yk.key, 'y', COALESCE(ss.object_id, yk.key), 0
+            FROM yk
+            LEFT JOIN laplace.v_consensus_unrefuted ss
+              ON ss.subject_id = yk.key AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
             UNION
             SELECT w.root, w.side, c.object_id, w.depth + 1
             FROM walk w
