@@ -226,6 +226,14 @@ if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     get_filename_component(_laplace_pg_root "$ENV{PGBIN}" DIRECTORY)
     set(ZLIB_ROOT "${_laplace_pg_root}")
 endif()
+# Identity is Laplace-Native's (engine/CMakeLists.txt, LAPLACE_NATIVE): its identity.c and the UTF-8 it needs, compiled
+# here with Native's own headers, which only these files and hash128.c see.
+set(LAPLACE_NATIVE_IDENTITY_SOURCES "${LAPLACE_NATIVE}/src/identity.c" "${LAPLACE_NATIVE}/src/utf8.c")
+list(APPEND LAPLACE_CORE_SOURCES ${LAPLACE_NATIVE_IDENTITY_SOURCES})
+set_source_files_properties(${LAPLACE_NATIVE_IDENTITY_SOURCES} PROPERTIES
+    INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include;${LAPLACE_NATIVE}/src")
+set_source_files_properties(src/hash128.c PROPERTIES INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include")
+
 find_package(ZLIB REQUIRED)
 find_package(LibXml2 REQUIRED)
 find_package(ICU COMPONENTS uc REQUIRED)
