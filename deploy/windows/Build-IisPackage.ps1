@@ -6,6 +6,17 @@ $ErrorActionPreference='Stop'
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
 if($Publish){
     if(-not $Installation){throw 'Publication requires an IIS installation. Use -Installation or LAPLACE_IIS_INSTALLATION.'}
+    $hasDevIdentity = $false
+    if(-not $env:LAPLACE_API_KEY -and -not $env:LAPLACE_OPERATOR_TOKEN){
+        $devInstallation=if($env:LAPLACE_DEVELOPMENT_INSTALLATION){$env:LAPLACE_DEVELOPMENT_INSTALLATION}elseif($env:LAPLACE_SRC){Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}else{''}
+        if($devInstallation -and (Test-Path -LiteralPath $devInstallation -PathType Leaf)){
+            try {
+                $devConfig=Get-Content -LiteralPath $devInstallation -Raw | ConvertFrom-Json
+                if($devConfig.secret -and (Test-Path -LiteralPath $devConfig.secret -PathType Leaf)){$hasDevIdentity=$true}
+            } catch {}
+        }
+    }
+    if(-not $env:LAPLACE_API_KEY -and -not $env:LAPLACE_OPERATOR_TOKEN -and -not $hasDevIdentity){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}
     . "$PSScriptRoot/iis-runtime.ps1"
     $null=Read-IisInstallation $Installation
 }

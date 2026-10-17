@@ -77,10 +77,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using (var scopeCmd = new NpgsqlCommand(
-                "CREATE TEMP TABLE consensus AS SELECT * FROM consensus.scoped_consensus(@sources)", conn))
+            await using (var scopeCmd = NpgsqlCatalog.Command(conn, null, "consensus.create_scoped_temp", scopeSources))
             {
-                scopeCmd.Parameters.AddWithValue("sources", scopeSources);
                 await scopeCmd.ExecuteNonQueryAsync(ct);
             }
             return await RunConversationAsync(conn, prompt, session, options, ct);

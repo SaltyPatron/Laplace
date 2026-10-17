@@ -20,6 +20,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="../../engine/core/src/sql_catalog.def">
+      <LogicalName>Laplace.SqlCatalog.def</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="../../engine/core/grammars/**/queries/*.scm">
       <LogicalName>Laplace.GrammarTags.owned.%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
