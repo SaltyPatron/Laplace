@@ -5,6 +5,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "$TMPDIR/site-host-lock.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 sed -n '/^host_lock() {/,/^}/p' "$root/deploy/linux/site.sh" > "$work/functions"
+cat "$root/deploy/linux/host-lock.sh" >> "$work/functions"
 export LAPLACE_LOCKS=$work FUNCTIONS=$work/functions
 fail(){ echo "$*" >&2; exit 1; }
 source "$FUNCTIONS"
@@ -23,6 +24,24 @@ echo 'PASS nested commands reuse the inherited operation lock'
 exec 8>&-
 flock -xn "$work/host-resource.lock" true
 echo 'PASS the next deployment acquires the released lock'
+
+# Writer preference (#1899): while a deployment waits for an ingest, a later ingest waits behind it, not past it; the
+# ingest's own nested command, which inherited its lock, still goes on at once.
+host_lock shared
+LAPLACE_HOST_LOCK_WAIT_SECONDS=10 bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock exclusive && touch "$LAPLACE_LOCKS/deployed"; sleep 1' 8>&- 2> "$work/deploy-waiting" &
+deployment=$!
+for attempt in {1..100}; do grep -q 'Waiting' "$work/deploy-waiting" && break; sleep .02; done
+grep -q 'Waiting' "$work/deploy-waiting" || { echo 'the deployment did not wait'; exit 1; }
+if bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock shared' 8>&- > /dev/null 2>&1; then echo 'a later ingest overtook a waiting deployment'; exit 1; fi
+LAPLACE_HOST_LOCK_WAIT_SECONDS=10 bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock shared && [[ -e "$LAPLACE_LOCKS/deployed" ]] && touch "$LAPLACE_LOCKS/after"' 8>&- 2>/dev/null &
+later=$!
+sleep .3
+[[ ! -e "$work/deployed" ]] || { echo 'the deployment ran during the ingest'; exit 1; }
+bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock shared' || { echo 'the ingest'"'"'s nested command queued behind the deployment'; exit 1; }
+exec 8>&-
+wait "$deployment"; wait "$later"
+[[ -e "$work/deployed" && -e "$work/after" ]] || { echo 'the deployment or the later ingest did not run in turn'; exit 1; }
+echo 'PASS a waiting deployment is not overtaken by a later ingest, which runs after it; a nested command does not queue'
 
 # A compiler daemon remains alive after its caller exits. It must not keep the
 # caller's deployment lock; otherwise the next workflow step fails against itself.

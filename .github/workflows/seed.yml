@@ -132,8 +132,8 @@ jobs:
           if [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
             exec 8>&9
           else
-            exec 8>>"$host_lock"
-            flock 8
+            source deploy/linux/host-lock.sh
+            host_lock_hold exclusive 8 "$host_lock"
           fi
           export LAPLACE_INGEST_RUNTIME="${LAPLACE_APP_DIR:-$LAPLACE_INSTALL_PREFIX/app}/cli"
           export LAPLACE_CLI_BIN="$LAPLACE_INGEST_RUNTIME/Laplace.Cli"

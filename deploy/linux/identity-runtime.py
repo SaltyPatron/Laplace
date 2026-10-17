@@ -153,7 +153,16 @@ def refresh(config, directory, source='installation'):
     target = directory / 'identity.env'
     lock = Path(config['lock'])
     with lock.open('a') as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+        # through the turnstile, as deploy/linux/host-lock.sh takes the lock: while this waits, no later reader is
+        # granted the lock ahead of it (flock alone grants a new shared holder past a waiting exclusive one)
+        mask = os.umask(0o002)
+        try:
+            turnstile = open(str(lock) + '.turnstile', 'a')
+        finally:
+            os.umask(mask)
+        with turnstile:
+            fcntl.flock(turnstile, fcntl.LOCK_EX)
+            fcntl.flock(handle, fcntl.LOCK_EX)
         previous = target.read_bytes() if target.exists() else None
         changed = write(target, rendered)
         try:
