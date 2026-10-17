@@ -140,7 +140,7 @@ if(UNIX)
             "TMPDIR=${_chess_floor_test_work}"
             "LAPLACE_TEST_NATIVE_CORE=$<TARGET_FILE:laplace_core>"
             "${LAPLACE_CODEGEN_PYTHON}"
-            "${CMAKE_SOURCE_DIR}/scripts/test-chess-floor-artifacts.py"
+            "${laplace_engine_SOURCE_DIR}/../scripts/test-chess-floor-artifacts.py"
             ArtifactTests.test_native_hash_abi_and_floor_checksum_when_current_library_is_available)
     set_tests_properties(laplace_chess_floor_artifacts_native PROPERTIES
         TIMEOUT 60 LABELS "chess;artifact")

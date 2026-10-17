@@ -134,6 +134,9 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("self-hosted", text)
         self.assertIn("bash scripts/product-ci.sh check", text)
         self.assertIn("bash tests/identity-law.sh", text)   # the identity law gates every pull request
+        # The dev test profile (native, every managed test project, UCI, browser) gates every pull request.
+        for phase in ("deps", "native", "managed", "uci", "browser"):
+            self.assertIn(f"bash scripts/ci/hosted-dev-tests.sh {phase}", text)
         self.assertIn("laplace-actions-history-{0}", text)
         self.assertIn("[actions-history-cleanup]", text)
         self.assertIn("[actions-evidence-archive]", text)
