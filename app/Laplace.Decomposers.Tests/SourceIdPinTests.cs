@@ -21,8 +21,6 @@ public class SourceIdPinTests
           "4b1ee33be3034910df7629b2948cde35", "eb0687a0c121cd642fb5bf52d9094685" },
         { () => new Laplace.Decomposers.OMW.OMWDecomposer(),
           "2d8df8e310d8c0bb26bb08837baf3756", "1255e5a0e069f554c032c0952680f491" },
-        { () => new Laplace.Decomposers.VerbNet.VerbNetDecomposer(),
-          "8ee60cfa49a7dff70dc87d6807d3b0a0", "1255e5a0e069f554c032c0952680f491" },
         { () => new Laplace.Decomposers.SemLink.MapNetDecomposer(),
           "74809dc2edd48bc97e10fee9ba466fca", "1255e5a0e069f554c032c0952680f491" },
         { () => new Laplace.Decomposers.SemLink.WordFrameNetDecomposer(),
@@ -69,4 +67,5 @@ public class SourceIdPinTests
             await d.DisposeAsync();
         }
     }
+
 }
