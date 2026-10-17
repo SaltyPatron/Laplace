@@ -614,7 +614,7 @@ struct laplace_recipe_stream {
         auto parts = std::move(observation_scopes.back().parts);
         observation_scopes.pop_back();
         if (parts.empty()) return;
-        const auto part = parts.size() == 1 ? parts.front() : compose_trunk(stage, parts, "Document");
+        const auto part = parts.size() == 1 ? parts.front() : compose_trunk(stage, parts, "Source_Record");
         auto& parent = observation_scopes.empty() ? file_parts : observation_scopes.back().parts;
         parent.push_back(part);
     }
@@ -2723,7 +2723,7 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
             if (s->file_parts.empty()) s->file_root = s->file_head;
             else {
                 const auto content = s->file_parts.size() == 1 ? s->file_parts.front()
-                    : s->compose_trunk(stage.get(), s->file_parts, "Document");
+                    : s->compose_trunk(stage.get(), s->file_parts, "Source_Record");
                 s->file_root = s->compose_trunk(stage.get(), {s->file_head, content}, "SourceFile");
             }
             s->file_root_known = true;

@@ -256,10 +256,8 @@
     {
       "syntaxPath": "Sense/@dc:identifier",
       "propertyName": "senseKey",
-      "valueKind": "Text",
-      "disposition": "Content, Testimony",
-      "relationName": "CORRESPONDS_TO",
-      "contextField": "language"
+      "valueKind": "Identity",
+      "disposition": "Packaging"
     },
     {
       "syntaxPath": "Sense/@lexicalized",
