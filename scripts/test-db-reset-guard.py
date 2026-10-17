@@ -108,5 +108,39 @@ class DeclaredAccess(unittest.TestCase):
             self.assertIn("no declaration at", out)
 
 
+class ReseedAnalyze(unittest.TestCase):
+    """A seed leaves statistics the site can read (Laplace#1879).
+
+    The seed role has no MAINTAIN on the postgres-owned substrate tables, so its own post-ingest
+    ANALYZE is skipped with a WARNING, and autovacuum never analyzes a partitioned parent: the
+    reltuples/pg_stats census behind /v1/explore/catalog read 0 on a freshly seeded database.
+    The reseed scripts ANALYZE as postgres, the owner, after the seed.
+    """
+
+    def test_analyze_runs_as_the_owner_on_the_named_database(self):
+        script = text("analyze-substrate.cmd")
+        guard = script.index('call "%~dp0require-dbname.cmd" || exit /b 2')
+        call = script.index('-U postgres -d "%LAPLACE_DBNAME%" -v ON_ERROR_STOP=1 -c "CALL ops.analyze_substrate();" || exit /b 1')
+        self.assertLess(guard, call)
+        self.assertIn("ops.substrate_counts()", script[call:])
+
+    def test_foundation_analyzes_once_after_its_last_step(self):
+        seed = text("seed-foundation.cmd")
+        self.assertLess(seed.index('set "LAPLACE_SEED_NO_ANALYZE=1"'), seed.index("for %%S in ("))
+        done = seed.index(":done")
+        analyze = seed.index('call "%~dp0analyze-substrate.cmd"')
+        self.assertLess(done, analyze)
+        self.assertLess(analyze, seed.index("seed-foundation finished"))
+        self.assertIn('set "ERR=1"', seed[analyze:seed.index("seed-foundation finished")])
+
+    def test_a_single_step_analyzes_after_it_verifies(self):
+        step = text("seed-step.cmd")
+        verify = step.index("call :verify_step\nif errorlevel 1 exit /b %ERRORLEVEL%")
+        skip = step.index('if "%LAPLACE_SEED_NO_ANALYZE%"=="1" exit /b 0')
+        analyze = step.index('call "%~dp0analyze-substrate.cmd"')
+        self.assertLess(verify, skip)
+        self.assertLess(skip, analyze)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(exit=False).result.wasSuccessful() else 1)

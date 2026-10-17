@@ -4,6 +4,8 @@ call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 set "ERR=0"
+rem each step's own ANALYZE is deferred: the whole seed is analyzed once, below
+set "LAPLACE_SEED_NO_ANALYZE=1"
 
 echo ===== seed-foundation started %DATE% %TIME% =====
 
@@ -21,6 +23,14 @@ for %%S in (unicode iso639 operational cili wordnet verbnet propbank framenet ma
 )
 
 :done
+if "!ERR!"=="0" (
+  echo.
+  call "%~dp0analyze-substrate.cmd"
+  if not "!ERRORLEVEL!"=="0" (
+    echo FAILED: analyze-substrate exit=!ERRORLEVEL!
+    set "ERR=1"
+  )
+)
 echo.
 echo ===== seed-foundation finished %DATE% %TIME% err=!ERR! =====
 exit /b !ERR!
