@@ -17,7 +17,10 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("const xmM = x * sx + m * cx", canvas, StringComparison.Ordinal);
         Assert.Contains("const zmZ = z * cz - xmM * sz", canvas, StringComparison.Ordinal);
         Assert.Contains("const radius4", canvas, StringComparison.Ordinal);
-        Assert.Contains("const displayRadius = SHELL * Math.max(0.02, radius4)", canvas, StringComparison.Ordinal);
+        // The stored radius is the depth itself; #1808 removed the 0.02 display floor so a
+        // node at radius 0 sits at the centre instead of on a fabricated minimum shell.
+        Assert.Contains("const displayRadius = SHELL * radius4;", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("Math.max(0.02, radius4)", canvas, StringComparison.Ordinal);
         Assert.Contains("<color attach=\"background\"", canvas, StringComparison.Ordinal);
         // Nodes are painted by their per-instance color; a vertexColors material multiplies
         // by a color attribute the sphere geometry lacks and renders every node black.

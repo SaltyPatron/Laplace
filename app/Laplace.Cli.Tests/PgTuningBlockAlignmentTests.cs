@@ -1,18 +1,18 @@
 using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Reflection;
+using System.IO;
 using System.Text.RegularExpressions;
+using Laplace.Cli;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace Laplace.Engine.Core.Tests;
+namespace Laplace.Cli.Tests;
 
 /// <summary>
 /// PostgreSQL stores shared_buffers, effective_cache_size, temp_buffers and wal_buffers in
 /// BLOCK_SIZE units (8kB by default) and rounds any other value, so a live setting equals
-/// the emitted one only when the emitter aligns it. Runs <c>laplace cpu-topology
-/// --pg-tuning</c> and checks every emitted block-unit GUC is a multiple of 8kB.
+/// the emitted one only when the emitter aligns it. Calls the emitter behind <c>laplace
+/// cpu-topology --pg-tuning</c> in process and checks every emitted block-unit GUC is a
+/// multiple of 8kB.
 /// </summary>
 public sealed class PgTuningBlockAlignmentTests
 {
@@ -25,24 +25,9 @@ public sealed class PgTuningBlockAlignmentTests
 
     private static string EmitTuning()
     {
-        string repo = CustomAttributeExtensions
-            .GetCustomAttributes<AssemblyMetadataAttribute>(
-                typeof(PgTuningBlockAlignmentTests).Assembly)
-            .First(a => a.Key == "LaplaceRepoRoot").Value!;
-        var psi = new ProcessStartInfo("dotnet")
-        {
-            WorkingDirectory = repo,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var a in new[] { "run", "--no-build", "-c", "Release", "--project",
-                                  "app/Laplace.Cli/Laplace.Cli.csproj", "--",
-                                  "cpu-topology", "--pg-tuning" })
-            psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi)!;
-        string outp = p.StandardOutput.ReadToEnd();
-        p.WaitForExit();
-        return outp;
+        using var sql = new StringWriter();
+        CpuTopologyCommands.EmitPgTuning(sql);
+        return sql.ToString();
     }
 
     [Fact]

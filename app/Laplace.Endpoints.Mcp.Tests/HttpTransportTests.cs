@@ -288,6 +288,26 @@ public sealed class HttpTransportTests
     [Fact]
     public async Task SubstrateTools_AdvertisesAndExecutesEmbeddingsAndRerankInProcess()
     {
+        // code_search indexes the declared source root; search the tree this test was built
+        // from, not whatever checkout or install the host happens to declare.
+        string repo = typeof(HttpTransportTests).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .Cast<System.Reflection.AssemblyMetadataAttribute>()
+            .First(a => a.Key == "LaplaceRepoRoot").Value!;
+        string? priorSourceRoot = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
+        Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", repo);
+        try
+        {
+            await SubstrateToolsAgainstSourceRoot();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", priorSourceRoot);
+        }
+    }
+
+    private static async Task SubstrateToolsAgainstSourceRoot()
+    {
         await using var tools = new SubstrateTools("Host=127.0.0.1;Port=5432;Database=laplace-mono;Username=postgres");
         var catalog = tools.ListTools();
         Assert.Contains(catalog, t => (string?)t?["name"] == "embeddings");

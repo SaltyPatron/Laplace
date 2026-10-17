@@ -1,6 +1,6 @@
 {
   "text": "hello",
-  "root_id_hex": "f3f83b8ee76a5df2362b12e3b681b484",
+  "root_id_hex": "ba94b86c4311a98ce5094be29f624c7a",
   "natural_unit_ordinal": 10,
   "nodes": [
     {
@@ -45,7 +45,7 @@
     },
     {
       "ordinal": 10,
-      "id_hex": "f3f83b8ee76a5df2362b12e3b681b484",
+      "id_hex": "ba94b86c4311a98ce5094be29f624c7a",
       "label": "hello",
       "tier": 2,
       "text_offset": 0,

@@ -16,7 +16,7 @@ public sealed class MoveAtomDecodeTests
     /// The stored id of 1.e4, read from a recorded game's move trajectory (ply 1), so the
     /// decode is checked against a real stored id rather than one computed by the test.
     /// </summary>
-    private const string StoredE4 = "fe6ea447874e7e473a3cda37b881d579";
+    private const string StoredE4 = "4d392da7757eb99dd4ed76f44c42beca";
 
     [Fact]
     public void ComposedMoveId_MatchesTheStoredCorpusId()

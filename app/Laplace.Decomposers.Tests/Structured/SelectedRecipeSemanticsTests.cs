@@ -35,8 +35,10 @@ public sealed class SelectedRecipeSemanticsTests
         Assert.Contains(rows, r => r.SubjectId == finance && r.TypeId == example && r.ObjectId == Root("the bank lent money"));
         Assert.Contains(rows, r => r.SubjectId == river && r.TypeId == example && r.ObjectId == Root("the river bank"));
         Assert.DoesNotContain(rows, r => r.SubjectId == Root("bank") && r.TypeId == example);
-        Assert.Contains(rows, r => r.SubjectId == finance && r.ObjectId == river
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("IS_ANTONYM_OF"));
+        // IS_ANTONYM_OF is symmetric, so the substrate stores its endpoints in canonical id order
+        // (RelationTypeRegistryTests.Symmetric_EndpointOrderCanonicalized_OneRow), not source order.
+        Assert.Contains(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("IS_ANTONYM_OF")
+            && ((r.SubjectId == finance && r.ObjectId == river) || (r.SubjectId == river && r.ObjectId == finance)));
         Assert.Contains(rows, r => r.SubjectId == Root("bank") && r.ObjectId == finance
             && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE") && r.ContextId == Root("eng"));
         // Packaging names may change without changing the denoted sense or any testimony.
