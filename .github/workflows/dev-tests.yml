@@ -1,0 +1,61 @@
+name: Policy — dev tests
+
+# The dev test profile (scripts/test-parallel.sh dev): native ctest without the regress label, every managed test
+# project's Tier!=db/live/perf tests on the candidate native build and its perf caches, the UCI handshake, and the
+# browser suites. It runs on hart-server's runner because the build pins MKL's CNR branch to its ISA
+# (engine/CMakeLists.txt: LAPLACE_TARGET_ISA AVX2 -> LAPLACE_MKL_CBWR_AVX2; engine/dynamics/src/init.cpp:
+# mkl_cbwr_set(MKL_CBWR_AVX2)), a branch MKL offers only on Intel CPUs, and the GitHub-hosted ubuntu-24.04 runners are
+# AMD EPYC. hart-server is an Intel Core i7-6850K (Broadwell-E, AVX2), the machine the build is pinned for.
+# Pull requests from forks never run on it.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-dev-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dev-tests:
+    name: Dev test profile (native, managed, UCI, browser) on the pinned Intel host
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, laplace, staging]
+    timeout-minutes: 120
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: The runner's CPU takes the pinned MKL CNR branch (Intel with AVX2)
+        run: |
+          lscpu | grep -E '^(Vendor ID|Model name):'
+          grep -q '^vendor_id[[:space:]]*: GenuineIntel' /proc/cpuinfo && grep -qw avx2 /proc/cpuinfo
+      - name: oneAPI compiler 2026.1, MKL 2026.1 and TBB 2023.1, as hart-server builds with
+        run: bash scripts/ci/install-oneapi.sh
+      - name: Dependency sources, grammars and public corpora at the build host's revisions
+        run: bash scripts/ci/hosted-dev-tests.sh deps
+      - name: Native build and ctest (dev profile)
+        run: bash scripts/ci/hosted-dev-tests.sh native
+      - name: Managed dev tier on the candidate native build
+        run: bash scripts/ci/hosted-dev-tests.sh managed
+      - name: UCI handshake
+        run: bash scripts/ci/hosted-dev-tests.sh uci
+      - name: Browser suites
+        run: bash scripts/ci/hosted-dev-tests.sh browser
+      - name: Keep managed test results
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dev-tests-managed-results
+          path: ${{ runner.temp }}/laplace-ci/managed-results
+          if-no-files-found: ignore
+          retention-days: 7
