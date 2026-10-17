@@ -35,8 +35,11 @@ export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 export LAPLACE_BUILD_GROUP="${LAPLACE_BUILD_GROUP:-$(id -gn)}"
 BUILD="$ROOT/build/engine"   # the layout scripts/sync-managed-native-artifacts.sh and the managed props read
 export LAPLACE_ENGINE_BUILD="$BUILD"
-export LAPLACE_MACHINE_ENV="$WORK/no-machine.env" LAPLACE_INSTALL_PREFIX="$WORK/no-install"
+# An empty machine declaration: the readers (scripts/machine-env.py, LaplaceInstall) take an
+# explicitly named file as the whole declaration, so this host's own declaration is never read.
+export LAPLACE_MACHINE_ENV="$WORK/machine.env" LAPLACE_INSTALL_PREFIX="$WORK/no-install"
 mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess"
+: > "$LAPLACE_MACHINE_ENV"
 
 say() { echo "::group::$*"; }
 end() { echo "::endgroup::"; }
