@@ -322,7 +322,7 @@ jobs:
       - name: Operate on the selected installed runtime
         env:
           OPERATION: ${{ inputs.operation }}
-          LAPLACE_HOST_LOCK_WAIT_SECONDS: '600'
+          LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || '3600' }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
