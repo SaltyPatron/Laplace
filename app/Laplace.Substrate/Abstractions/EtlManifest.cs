@@ -54,7 +54,7 @@ public static class EtlManifest
 
 
 
-            ["unicode"] = Row("unicode", "UnicodeDecomposer", 0, "StandardsDerived",
+            ["unicode"] = Row("unicode", "Unicode", 0, "StandardsDerived",
                 "unicode", new EtlModality("ucd", GrammarReady: false)),
             ["iso639"] = Row("iso639", "ISO639Decomposer", 1, "StandardsDerived",
                 "iso639", new EtlModality("tsv", GrammarReady: false)),

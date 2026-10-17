@@ -10,7 +10,7 @@
     "PredicateMatrixDecomposer",
     "PropBankDecomposer",
     "SemLinkDecomposer",
-    "UnicodeDecomposer",
+    "Unicode",
     "VerbNetDecomposer",
     "WordFrameNetDecomposer",
     "WordNetDecomposer"

@@ -9,7 +9,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public class BootstrapIntentBuilderTests
 {
     private static readonly Hash128 SourceId =
-        SubstrateCanonicalIds.Source("UnicodeDecomposer");
+        SubstrateCanonicalIds.Source("Unicode");
     private static readonly Hash128 TrustClassId =
         TrustClassRegistry.Id("SubstrateMandate");
 
@@ -20,7 +20,7 @@ public class BootstrapIntentBuilderTests
     [Fact]
     public void Build_RegistersSourceEntity()
     {
-        var b = new BootstrapIntentBuilder(SourceId, "UnicodeDecomposer", TrustClassId);
+        var b = new BootstrapIntentBuilder(SourceId, "Unicode", TrustClassId);
         var change = b.Build();
         Assert.Contains(change.Entities, e => e.Id == SourceId);
         var srcRow = change.Entities.First(e => e.Id == SourceId);

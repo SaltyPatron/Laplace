@@ -18,7 +18,7 @@ layer_ok() {
   "${PSQL[@]}" -d "$DB" -tAc "SELECT ${predicate};" | grep -qiE '^(t|true)$'
 }
 
-if layer_ok unicode UnicodeDecomposer 0 && layer_ok iso639 ISO639Decomposer 1; then
+if layer_ok unicode Unicode 0 && layer_ok iso639 ISO639Decomposer 1; then
   echo "floor layers OK on $DB"
   exit 0
 fi
