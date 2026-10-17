@@ -287,7 +287,7 @@ add_custom_command(
 # Perfcache emit is an explicit target, not part of the default build:
 #   ninja laplace_t0_perfcache laplace_highway_perfcache
 # then cmake --install. The blob is a derived map; Tier-0 rows in PostgreSQL are
-# admitted separately by UnicodeDecomposer.
+# admitted separately by the Unicode source.
 add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  DEPENDS laplace_attestation_codegen)
 

@@ -1,7 +1,7 @@
 {
   "authority": "Unicode/UCD",
   "release": "17.0.0",
-  "sourceName": "UnicodeDecomposer",
+  "sourceName": "Unicode",
   "trustClass": "StandardsDerived",
   "layerOrder": 0,
   "selected": true,

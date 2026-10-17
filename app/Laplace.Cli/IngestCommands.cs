@@ -860,7 +860,7 @@ internal static partial class IngestCommands
 
         switch (srcKey)
         {
-            case "UnicodeDecomposer":
+            case "Unicode":
                 {
                     var probe = await NpgsqlIngestOps.UnicodeCapitalAContentProbeAsync(conn);
                     if (probe.Count > 0)
@@ -871,8 +871,8 @@ internal static partial class IngestCommands
                         Console.WriteLine($"    coord   : ({r.X:F6}, {r.Y:F6}, {r.Z:F6}, {r.M:F6})");
                     }
                     else Console.WriteLine("  FAIL: no Unicode CONTENT for U+0041");
-                    long uniProv = await EvidenceForSource("UnicodeDecomposer");
-                    Console.WriteLine($"    provenance: {uniProv:N0} UnicodeDecomposer attestations");
+                    long uniProv = await EvidenceForSource("Unicode");
+                    Console.WriteLine($"    provenance: {uniProv:N0} Unicode attestations");
                     break;
                 }
             case "ISO639Decomposer":

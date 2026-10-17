@@ -5,7 +5,7 @@ if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 set "DB=%LAPLACE_DBNAME%"
 if not defined DB set "DB=laplace"
 
-for /f "usebackq delims=" %%u in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0seed-layer-check.ps1" -Key unicode -Src UnicodeDecomposer -Layer 0 -Dbname "!DB!"`) do set "%%u"
+for /f "usebackq delims=" %%u in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0seed-layer-check.ps1" -Key unicode -Src Unicode -Layer 0 -Dbname "!DB!"`) do set "%%u"
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0seed-layer-check.ps1" -Key iso639 -Src ISO639Decomposer -Layer 1 -Dbname "!DB!"`) do set "%%i"
 if "!STAT_unicode!"=="t" if "!STAT_iso639!"=="t" (
   echo ==== floor layers OK on !DB! ====

@@ -167,7 +167,7 @@ rem source actually landed.
 :verify_step
 set "STEP_SOURCE="
 if /i "%STEP%"=="safetensors"   goto verify_model_step
-if /i "%STEP%"=="unicode"       set "STEP_SOURCE=UnicodeDecomposer"
+if /i "%STEP%"=="unicode"       set "STEP_SOURCE=Unicode"
 if /i "%STEP%"=="iso639"        set "STEP_SOURCE=ISO639Decomposer"
 if /i "%STEP%"=="operational"   set "STEP_SOURCE=OperationalDecomposer"
 if /i "%STEP%"=="cili"          set "STEP_SOURCE=CILIDecomposer"

@@ -107,7 +107,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
     /// <summary>
     /// Tier-0 completeness gate, resolved ONCE per bulk run: true iff the
-    /// UnicodeDecomposer has completed layer 0 in the target DB.
+    /// the Unicode source has completed layer 0 in the target DB.
     /// While true, every tier-0 entity id is present by definition (the t0
     /// space is closed and fully seeded — UCD single-origin law) and skips
     /// the presence probe client-side. Conservative by construction: absent
@@ -146,7 +146,7 @@ public sealed partial class NpgsqlSubstrateWriter
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion "
-            + "WHERE witness_id = laplace.source_id('UnicodeDecomposer') AND layer = 0)";
+            + "WHERE witness_id = laplace.source_id('Unicode') AND layer = 0)";
         return await cmd.ExecuteScalarAsync(ct) is true;
     }
 

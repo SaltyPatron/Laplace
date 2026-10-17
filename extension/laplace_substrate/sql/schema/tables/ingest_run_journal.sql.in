@@ -125,7 +125,7 @@ VALUES
     ('MapNetDecomposer',        3750.0,   15000,   4000, now()),
     ('PropBankDecomposer',     29019.1,  290191,  10000, now()),
     ('SemLinkDecomposer',       9030.2,   90302,  10000, now()),
-    ('UnicodeDecomposer',      94782.6, 3980870,  42000, now()),
+    ('Unicode',                94782.6, 3980870,  42000, now()),
     ('VerbNetDecomposer',       8146.0,   32584,   4000, now()),
     ('WordFrameNetDecomposer', 12195.0,   73170,   6000, now()),
     ('WordNetDecomposer',      26620.8, 3540569, 133000, now())

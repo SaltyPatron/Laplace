@@ -8,7 +8,7 @@ ORDER BY 1;
 
 SELECT source, evidence, content FROM source_counts()
 WHERE source IN (
-  'UnicodeDecomposer', 'ISO639Decomposer', 'CILIDecomposer', 'WordNetDecomposer',
+  'Unicode', 'ISO639Decomposer', 'CILIDecomposer', 'WordNetDecomposer',
   'VerbNetDecomposer', 'PropBankDecomposer', 'FrameNetDecomposer', 'MapNetDecomposer',
   'WordFrameNetDecomposer', 'SemLinkDecomposer', 'UserPrompt'
 )
@@ -17,7 +17,7 @@ ORDER BY 1;
 SELECT step, layer_order, source_name, layer_complete
 FROM (
   VALUES
-    ('unicode',       0, 'UnicodeDecomposer'),
+    ('unicode',       0, 'Unicode'),
     ('iso639',        1, 'ISO639Decomposer'),
     ('cili',          2, 'CILIDecomposer'),
     ('wordnet',       2, 'WordNetDecomposer'),
