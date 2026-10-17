@@ -121,18 +121,9 @@
     },
     {
       "selector": "sense-mappings/*.tab",
-      "disposition": "admitted",
-      "required": true,
-      "provider": "laplace/native-streaming-delimited-recipe/v1",
-      "syntax": "CILI/sense-mapping.tab",
-      "recipePath": "sense-mapping.recipe.json",
-      "configuration": {
-        "constants": {
-          "version": {
-            "pathPattern": "(pwn\\d+)\\.tab$"
-          }
-        }
-      }
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Sense key to synset offset, per WordNet release: both columns are WordNet's internal pointers. A sense key is resolved through the highway to the lexicalization it points at and recorded nowhere (Laplace-Engine recipes/BRIEF.md); the table states no content of its own."
     },
     {
       "selector": "sense-mappings/Makefile",
