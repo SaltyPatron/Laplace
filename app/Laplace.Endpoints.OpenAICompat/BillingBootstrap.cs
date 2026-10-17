@@ -28,14 +28,16 @@ internal sealed class PostgresBillingConfigStore : IBillingConfigStore
 {
     private readonly NpgsqlDataSource _dataSource;
     public PostgresBillingConfigStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
-    public Task<string?> TryGetAsync(string key, CancellationToken ct) =>
-        NpgsqlRead.ExecuteScalarAsync<string>(_dataSource,
-            "SELECT value FROM app.billing_config WHERE key = @key;", p => p.AddWithValue("key", key), ct: ct);
-    public Task SetAsync(string key, string value, CancellationToken ct) =>
-        NpgsqlRead.ExecuteNonQueryAsync(_dataSource, """
-            INSERT INTO app.billing_config (key, value, updated_at) VALUES (@key, @value, now())
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
-            """, p => { p.AddWithValue("key", key); p.AddWithValue("value", value); }, ct: ct);
+    public async Task<string?> TryGetAsync(string key, CancellationToken ct)
+    {
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.get_config", key);
+        return (string?)await cmd.ExecuteScalarAsync(ct);
+    }
+    public async Task SetAsync(string key, string value, CancellationToken ct)
+    {
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.set_config", key, value);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 }
 
 internal interface IWebhookSecretProvider

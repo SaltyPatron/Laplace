@@ -75,6 +75,25 @@ internal sealed record BillingUsageRecord(
     long AmountCents,
     DateTimeOffset ExecutedAt);
 
+internal sealed record RoyaltyAttributionShare(
+    string SourceIdHex,
+    int ShareBp,
+    long HitCount,
+    double TotalWeight,
+    string? SourceOwnerTenant = null);
+
+internal sealed record BillingRoyaltyRecord(
+    string QuoteId,
+    string PayerTenant,
+    string ServiceId,
+    string SourceIdHex,
+    string? SourceOwnerTenant,
+    int ShareBp,
+    long RoyaltyCents,
+    long HitCount,
+    double TotalWeight,
+    DateTimeOffset ExecutedAt);
+
 internal interface IBillingCatalog
 {
     IReadOnlyList<BillingProduct> ListProducts();
@@ -117,11 +136,11 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
                 "Server-side web retrieval used for ephemeral prompt augmentation.", "search"),
             ["laplace.synthesis"] = new(
                 "laplace.synthesis", "Laplace Substrate Synthesis",
-                "Build-a-model export: render the consensus substrate into a recipe's tensor layout (your choice of vocabulary, dimensionality, heads, layers) and download the model. Metered by parameter count.",
+                "Mold-A-Model export: render the consensus substrate into a recipe's tensor layout (your choice of vocabulary, dimensionality, heads, layers) and download the model. Metered by parameter count.",
                 "synthesis"),
             ["laplace.recipe"] = new(
                 "laplace.recipe", "Laplace Synthesis Recipes",
-                "Author, publish, and access reusable build-a-model recipes (the architecture template that defines content scope, shape, and output format).",
+                "Author, publish, and access reusable Mold-A-Model recipes (the architecture template that defines content scope, shape, and output format).",
                 "recipe"),
             ["laplace.audit"] = new(
                 "laplace.audit", "Laplace Substrate Audit",
@@ -495,11 +514,15 @@ internal interface IBillingLedger
 {
     Task RecordAsync(BillingUsageRecord record, CancellationToken ct);
     Task<IReadOnlyList<BillingUsageRecord>> GetByTenantAsync(string tenant, CancellationToken ct);
+    Task RecordRoyaltiesAsync(IReadOnlyList<BillingRoyaltyRecord> records, CancellationToken ct);
+    Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesByTenantAsync(string tenant, CancellationToken ct);
+    Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesBySourceAsync(string sourceIdHex, CancellationToken ct);
 }
 
 internal sealed class InMemoryBillingLedger : IBillingLedger
 {
     private readonly ConcurrentDictionary<string, ConcurrentQueue<BillingUsageRecord>> _records = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentQueue<BillingRoyaltyRecord> _royalties = new();
 
     public Task RecordAsync(BillingUsageRecord record, CancellationToken ct)
     {
@@ -515,6 +538,26 @@ internal sealed class InMemoryBillingLedger : IBillingLedger
         return Task.FromResult<IReadOnlyList<BillingUsageRecord>>(
             queue.ToArray().OrderByDescending(r => r.ExecutedAt).ToArray());
     }
+
+    public Task RecordRoyaltiesAsync(IReadOnlyList<BillingRoyaltyRecord> records, CancellationToken ct)
+    {
+        foreach (var r in records)
+            _royalties.Enqueue(r);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesByTenantAsync(string tenant, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<BillingRoyaltyRecord>>(
+            _royalties.Where(r => string.Equals(r.SourceOwnerTenant, tenant, StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(r.PayerTenant, tenant, StringComparison.OrdinalIgnoreCase))
+                      .OrderByDescending(r => r.ExecutedAt)
+                      .ToArray());
+
+    public Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesBySourceAsync(string sourceIdHex, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<BillingRoyaltyRecord>>(
+            _royalties.Where(r => string.Equals(r.SourceIdHex, sourceIdHex, StringComparison.OrdinalIgnoreCase))
+                      .OrderByDescending(r => r.ExecutedAt)
+                      .ToArray());
 }
 
 internal sealed record StripeCheckoutSessionResult(bool Created, string? SessionId, string? Url, string? Reason);
@@ -675,9 +718,13 @@ internal interface IBillingOrchestrator
     Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string tenant, string serviceId, CancellationToken ct);
     Task<BillingQuote?> TryApproveQuoteAsync(string quoteId, CancellationToken ct);
     Task MarkConsumedAndRecordAsync(BillingQuote quote, CancellationToken ct);
+    Task<IReadOnlyList<BillingRoyaltyRecord>> MarkConsumedAndRecordWithRoyaltiesAsync(
+        BillingQuote quote, IReadOnlyList<RoyaltyAttributionShare> attributions, CancellationToken ct);
     Task<BillingQuote?> TryGetQuoteAsync(string quoteId, CancellationToken ct);
     IReadOnlyList<ServicePrice> ListCatalog();
     Task<IReadOnlyList<BillingUsageRecord>> GetUsageAsync(string tenant, CancellationToken ct);
+    Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesByTenantAsync(string tenant, CancellationToken ct);
+    Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesBySourceAsync(string sourceIdHex, CancellationToken ct);
 }
 
 internal sealed class BillingOrchestrator : IBillingOrchestrator
@@ -709,6 +756,12 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
 
     public Task<IReadOnlyList<BillingUsageRecord>> GetUsageAsync(string tenant, CancellationToken ct) =>
         _ledger.GetByTenantAsync(tenant, ct);
+
+    public Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesByTenantAsync(string tenant, CancellationToken ct) =>
+        _ledger.GetRoyaltiesByTenantAsync(tenant, ct);
+
+    public Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesBySourceAsync(string sourceIdHex, CancellationToken ct) =>
+        _ledger.GetRoyaltiesBySourceAsync(sourceIdHex, ct);
 
     public Task<BillingQuote?> TryGetQuoteAsync(string quoteId, CancellationToken ct) =>
         _store.TryGetAsync(quoteId, ct);
@@ -863,5 +916,112 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             Units: consumed.Units,
             AmountCents: consumed.AmountCents,
             ExecutedAt: DateTimeOffset.UtcNow), ct);
+    }
+
+    public async Task<IReadOnlyList<BillingRoyaltyRecord>> MarkConsumedAndRecordWithRoyaltiesAsync(
+        BillingQuote quote, IReadOnlyList<RoyaltyAttributionShare> attributions, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var consumed = await _store.UpdateAsync(quote with { Consumed = true, Status = "consumed" }, ct);
+        await _ledger.RecordAsync(new BillingUsageRecord(
+            QuoteId: consumed.QuoteId,
+            Tenant: consumed.Tenant,
+            ServiceId: consumed.ServiceId,
+            Units: consumed.Units,
+            AmountCents: consumed.AmountCents,
+            ExecutedAt: now), ct);
+
+        if (attributions is null || attributions.Count == 0)
+            return Array.Empty<BillingRoyaltyRecord>();
+
+        var royalties = ComputeRoyaltyShares(consumed, attributions, now);
+        await _ledger.RecordRoyaltiesAsync(royalties, ct);
+        return royalties;
+    }
+
+    /// <summary>
+    /// Computes deterministic Mold-A-Model basis-point royalty payouts from source attribution shares.
+    /// Uses largest-remainder rounding when share_bp is not yet normalized to 10000 bp, and converts
+    /// basis points into exact integer cent payouts from the seeder pool (default 70% of AmountCents).
+    /// </summary>
+    public static IReadOnlyList<BillingRoyaltyRecord> ComputeRoyaltyShares(
+        BillingQuote quote,
+        IReadOnlyList<RoyaltyAttributionShare> attributions,
+        DateTimeOffset executedAt,
+        int seederPoolBp = 7000)
+    {
+        if (attributions.Count == 0)
+            return Array.Empty<BillingRoyaltyRecord>();
+
+        // Normalize weights into basis points summing to 10000 if caller did not supply pre-normalized share_bp.
+        int suppliedBpSum = attributions.Sum(a => a.ShareBp);
+        int[] normalizedBp = new int[attributions.Count];
+        if (suppliedBpSum == 10000 && attributions.All(a => a.ShareBp >= 0))
+        {
+            for (int i = 0; i < attributions.Count; i++)
+                normalizedBp[i] = attributions[i].ShareBp;
+        }
+        else
+        {
+            double totalWeight = attributions.Sum(a => a.TotalWeight > 0 ? a.TotalWeight : Math.Max(1, a.HitCount));
+            if (totalWeight <= 0) totalWeight = attributions.Count;
+            var raw = new double[attributions.Count];
+            int sumFloor = 0;
+            for (int i = 0; i < attributions.Count; i++)
+            {
+                double w = attributions[i].TotalWeight > 0 ? attributions[i].TotalWeight : Math.Max(1, attributions[i].HitCount);
+                raw[i] = (w * 10000.0) / totalWeight;
+                normalizedBp[i] = (int)Math.Floor(raw[i]);
+                sumFloor += normalizedBp[i];
+            }
+            int rem = 10000 - sumFloor;
+            var order = Enumerable.Range(0, attributions.Count)
+                .OrderByDescending(i => raw[i] - normalizedBp[i])
+                .ThenBy(i => attributions[i].SourceIdHex, StringComparer.Ordinal)
+                .ToArray();
+            for (int k = 0; k < rem && k < order.Length; k++)
+                normalizedBp[order[k]]++;
+        }
+
+        long poolCents = (quote.AmountCents * Math.Clamp(seederPoolBp, 0, 10000)) / 10000L;
+        long[] cents = new long[attributions.Count];
+        long centsSum = 0;
+        var centRems = new long[attributions.Count];
+        for (int i = 0; i < attributions.Count; i++)
+        {
+            long num = poolCents * normalizedBp[i];
+            cents[i] = num / 10000L;
+            centRems[i] = num % 10000L;
+            centsSum += cents[i];
+        }
+        long centLeft = poolCents - centsSum;
+        if (centLeft > 0)
+        {
+            var centOrder = Enumerable.Range(0, attributions.Count)
+                .OrderByDescending(i => centRems[i])
+                .ThenByDescending(i => normalizedBp[i])
+                .ThenBy(i => attributions[i].SourceIdHex, StringComparer.Ordinal)
+                .ToArray();
+            for (int k = 0; k < centLeft && k < centOrder.Length; k++)
+                cents[centOrder[k]]++;
+        }
+
+        var results = new BillingRoyaltyRecord[attributions.Count];
+        for (int i = 0; i < attributions.Count; i++)
+        {
+            var a = attributions[i];
+            results[i] = new BillingRoyaltyRecord(
+                QuoteId: quote.QuoteId,
+                PayerTenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                SourceIdHex: a.SourceIdHex.ToLowerInvariant(),
+                SourceOwnerTenant: a.SourceOwnerTenant,
+                ShareBp: normalizedBp[i],
+                RoyaltyCents: cents[i],
+                HitCount: a.HitCount,
+                TotalWeight: a.TotalWeight,
+                ExecutedAt: executedAt);
+        }
+        return results;
     }
 }

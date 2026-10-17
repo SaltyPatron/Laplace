@@ -87,7 +87,7 @@ internal static class FoundryCommands
                 return Fail("usage: laplace-mono synthesize substrate <recipe.json> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --recipe-from <recipe-id-prefix> --tokenizer <dir> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>\n"
-                          + "  [--scope-source <name,name,...>]  Build-A-Bear: synthesis ONLY the named sources' re-folded consensus (laplace.recipe synthesis runs)");
+                          + "  [--scope-source <name,name,...>]  Mold-A-Model: synthesis ONLY the named sources' re-folded consensus (laplace.recipe synthesis runs)");
 
             if (nativeVocab > 0)
             {
@@ -992,6 +992,8 @@ internal static class FoundryCommands
         }
 
         int status = WriteCast(outputPath, attnGainEnv, residGainEnv);
+        if (status == 0)
+            MaybeEncryptExportedCartridge(outputPath);
 
         return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
     }
@@ -1755,6 +1757,7 @@ internal static class FoundryCommands
         int rcw = SynthInterop.GgufWriterFinalize(gguf);
         SynthInterop.GgufWriterFree(gguf);
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
+        MaybeEncryptExportedCartridge(outputPath);
         long fsz = new FileInfo(outputPath).Length;
         Stage("lm_head + tensor fill + gguf write");
         Console.WriteLine($"Mold-A-Model complete: {outputPath} | {desc.Name} L={nLayers} H={nHeads} D={dModel} V={vocab} "
@@ -2018,6 +2021,7 @@ internal static class FoundryCommands
         int rcw = SynthInterop.GgufWriterFinalize(gguf);
         SynthInterop.GgufWriterFree(gguf);
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
+        MaybeEncryptExportedCartridge(outputPath);
         long fsz = new FileInfo(outputPath).Length;
         Console.WriteLine($"FAITHFUL synthesis complete: {outputPath} ({fsz / 1048576.0:F0} MB) in {swW.Elapsed.TotalSeconds:F1}s");
         return 0;
@@ -2231,6 +2235,23 @@ internal static class FoundryCommands
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_space_prefix", 1);
 
         int n = tokens.Count;
+        var sortedTokens = tokens.OrderBy(t => t.TokenId).ToArray();
+
+        // Laplace Universal BLAKE3 Token Vocabulary (laplace-blake3-v1):
+        // Every token slot in the exported GGUF is anchored to its 16-byte BLAKE3
+        // substrate entity ID (codepoint, word, n-gram, synset, trajectory, or document).
+        SynthInterop.GgufWriterAddMetadataStr(gguf, "laplace.tokenizer.scheme", "laplace-blake3-v1");
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "laplace.vocab.size", (uint)n);
+        var blake3Ids = new string[n];
+        for (int i = 0; i < n; i++)
+            blake3Ids[i] = sortedTokens[i].EntityId.ToHex();
+        byte[] packedBlake3 = PackStrings(blake3Ids);
+        unsafe
+        {
+            fixed (byte* p = packedBlake3)
+                SynthInterop.GgufWriterAddMetadataStrArrayPacked(
+                    gguf, "laplace.vocab.blake3_ids", p, (nuint)packedBlake3.Length, (nuint)n);
+        }
 
         string spPath = Path.Combine(modelDir, "tokenizer.model");
         SpPiece[]? sp = File.Exists(spPath) ? ParseSentencePieceModel(spPath) : null;
@@ -2247,8 +2268,7 @@ internal static class FoundryCommands
         {
             Console.WriteLine($"  WARN: tokenizer.model {(sp is null ? "missing" : $"has {sp.Length} pieces ≠ vocab {n}")} — "
                 + "falling back to tokenizer.json strings + zero scores (tokenization will be degraded)");
-            var sorted = tokens.OrderBy(t => t.TokenId).ToArray();
-            for (int i = 0; i < n; i++) { pieces[i] = sorted[i].RawToken; scores[i] = 0f; types[i] = ClassifyTokenType(sorted[i].RawToken); }
+            for (int i = 0; i < n; i++) { pieces[i] = sortedTokens[i].RawToken; scores[i] = 0f; types[i] = ClassifyTokenType(sortedTokens[i].RawToken); }
         }
 
         if (byteBpe)
@@ -2380,5 +2400,15 @@ internal static class FoundryCommands
         if (raw is "<s>" or "</s>" or "<pad>" or "<bos>" or "<eos>") return 2;
         if (raw.Length == 6 && raw.StartsWith("<0x", StringComparison.Ordinal) && raw.EndsWith('>')) return 5;
         return 0;
+    }
+
+    private static void MaybeEncryptExportedCartridge(string outputPath)
+    {
+        string? keyHex = Environment.GetEnvironmentVariable("LAPLACE_CARTRIDGE_KEY_HEX");
+        if (string.IsNullOrWhiteSpace(keyHex))
+            return;
+        byte[] key = Convert.FromHexString(keyHex.Trim());
+        FoundryCartridgeCrypto.EncryptFileInPlace(outputPath, key);
+        Console.WriteLine($"  encrypted Mold-A-Model cartridge in-place (LPCART01 AES-256-GCM): {outputPath}");
     }
 }

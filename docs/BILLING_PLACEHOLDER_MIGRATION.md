@@ -141,11 +141,28 @@ If one operation performs thousands of avoidable scalar SQL/SPI/PInvoke crossing
 
 The cost model should therefore retain both semantic coordinates (hops/fanout/providers/candidates/etc.) and physical coordinates (calls/rows/CPU/I/O/etc.) so estimator drift and architectural inefficiency are visible.
 
-## Provider model
+## Provider model and two-sided Seeder/Royalty settlement ("The BitTorrent of AI")
 
 Patreon, Stripe, enterprise contracts, grants, test allowances, or future providers are external entitlement/assertion sources. They map into one canonical membership/allowance model.
 
 Normal included calls should reserve and consume internal allowance rather than generate a payment transaction per request. True a-la-carte expensive work can receive an explicit quote/hard ceiling before execution.
+
+Laplace also supports a two-sided Seeder & Knowledge Royalty ledger ("the BitTorrent of AI") over the same measured receipts:
+
+1. **Compute & Storage Seeding (Hardware Contribution)**:
+   - Contributors who host verified perfcache ROMs, execute bounded `OP10 COUPLE` / `OP8 REALIZE` / synthesis work, or serve content-addressed substrate subtrees earn **Compute Allowance Credits** mapped directly from the physical work receipt they served.
+2. **Knowledge Seeding & Micro-Royalty Settlement (Content Contribution)**:
+   - Every corpus, repository, or user-ingested dataset is a **witness trunk** (`[source record, file trunks]`). A principal may keep their witness trunk `private`, `tenant`, `public`, or `licensed` (a gated Content Package).
+   - When a billed query (`OP10 COUPLE` → `OP8 REALIZE`), deep audit, or **Mold-A-Model** synthesis (`OP8 REALIZE` / `EXPORT`) consumes claims/strands from the substrate under an authorized scope (`scope blake3[]`), the native C + SQL attribution function (`laplace_attribution` / `consensus.source_attribution`) walks the containment DAG / evidence bindings in C and computes exact deterministic **basis-point contribution shares (`share_bp`, summing to `10000`)** per witness trunk (`source_id`), weighted by Glicko-2 Fisher information ($I_{c,s} = g(\varphi_s)^2 E(1 - E)$ / $1/\varphi^2$ and trust-bounded games).
+   - The same SQL transaction that reconciles the caller's compute/royalty debit settles the royalty pool across each contributing `source_id` (`billing.settle_usage_attribution` → `billing_royalty_allocations` / `source_royalty_balances`), crediting each licensed witness owner in exact proportion to `share_bp`.
+   - High-uncertainty (`high φ`), uncorroborated, or conflicting spam sources naturally receive near-zero Fisher information weight and fail election in `OP12 STEER`, preventing sybil/spam farming by mathematical construction.
+
+## Single standard SQL + native C implementation law (no hand-rolled wheels)
+
+All substrate folding, scoped consensus, containment provenance (`walk_up` / `attested`), basis-point source attribution (`share_bp`), and **Mold-A-Model** synthesis/billing math must execute through **one canonical SQL script backed by native C** (`Laplace-postgres/sql/laplace--1.12.sql` + `src/laplace_pg.c` in the modular stack; `extension/laplace_substrate` + `engine/core/src/sql_catalog.def` in the monorepo):
+
+- Do **not** hand-roll multi-line SQL CTEs or duplicate math in C# (`Laplace.Substrate/Crud/Npgsql/*`, `BillingPostgres/*`, `FoundryCommands.cs`, `SynthesisBilling.cs`).
+- `ReadPathArchitectureGateTests` must cover `Crud/Npgsql/*` and `BillingPostgres/*` with zero exemptions so every database operation binds a named statement in `sql_catalog.def` or calls a native C extension operator.
 
 ## Acceptance
 
@@ -154,6 +171,8 @@ Normal included calls should reserve and consume internal allowance rather than 
 - each priced/admission-controlled operation maps to a real semantic work envelope and physical plan;
 - preflight and actual receipts share enough dimensions to measure estimator error;
 - hop/fanout/provider/trajectory/evidence/output work remains visible where applicable;
+- every billed query and Mold-A-Model synthesis emits a native C + SQL source attribution receipt (`source_id`, `claims_touched`, `games`, `fisher_weight`, `share_bp` summing to `10000`) that drives deterministic royalty settlement;
+- zero hand-rolled SQL CTEs or duplicate C# synthesis/attribution math remain outside the canonical SQL + native C surface;
 - serviceable capacity is calibrated from headroom-preserving runs, not destructive saturation;
 - saturation evidence is labeled and never silently promoted to normal customer capacity;
 - implementation waste remains measurable and optimizable rather than becoming hidden pricing authority;

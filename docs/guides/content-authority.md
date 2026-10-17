@@ -165,15 +165,34 @@ A school can grant curriculum packages by grade/course. An employer can add/remo
 
 "I know kung fu" is therefore a literal product operation: grant or materialize a governed, receipted portion of the existing world.
 
-## Billing is orthogonal
+## Billing is orthogonal — and powers Knowledge & Compute Seeding ("The BitTorrent of AI")
 
 A principal may own a broad content package and request a cheap surface scan. Another request may use the same package but purchase deep/wide analysis.
 
 More compute never grants additional content authority. Lower compute never means a deliberately dumber model.
+
+Because every witness is a **source trunk** (`[source record, file trunks]`) and provenance is **containment** (`walk_up` / `attested` over the GIN path index), Laplace supports a two-sided Seeder economy without duplicating models:
+
+~~~text
+1. Knowledge Seeding (Gated / Licensed Witness Trunks):
+   - A user or organization ingests a corpus/repository as a witness trunk and sets its visibility/licensing policy:
+     private | tenant | public | licensed (Content Package).
+   - When an authorized caller runs a query (COUPLE -> REALIZE) or a Mold-A-Model export (REALIZE / EXPORT)
+     whose active scope includes that witness trunk, the canonical SQL + native C attribution operator
+     (laplace_attribution / consensus.source_attribution) computes exact basis-point contribution shares
+     (share_bp summing to 10000) per witness trunk weighted by Glicko-2 Fisher information (1 / phi^2).
+   - The receipted share_bp splits the royalty pool directly to the contributing witness owners.
+
+2. Compute & Perfcache Seeding (Hardware Contribution):
+   - Nodes that host verified perfcache ROMs or execute bounded native C/SQL coupling and synthesis work
+     earn Compute Allowance Credits proportional to the verified physical receipt they served.
+~~~
+
+All scope resolution (`effective_scope = public ∪ tenant ∪ subscribed_packages`), scoped consensus refolding (`consensus.scoped_consensus`), and basis-point attribution (`laplace_attribution`) execute in the canonical SQL + native C layer—never as ad-hoc C# post-filtering or hand-rolled application SQL.
 
 See docs/BILLING_PLACEHOLDER_MIGRATION.md and docs/guides/machine-cost-analysis.md.
 
 
 ## Current implementation owner
 
-#1708 owns first-class content packages/grants/capabilities, forward-pass enforcement, honest authority receipts, and Red Spear / Blue Shield / White Judge execution.
+#1708 and #1712 own first-class content packages/grants/capabilities, forward-pass enforcement, native SQL+C source attribution receipts (`share_bp`), and Red Spear / Blue Shield / White Judge execution.

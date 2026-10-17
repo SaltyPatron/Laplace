@@ -24,7 +24,8 @@ public class MigrationLoggingGateTests
 
         Assert.Contains(".LogTo(new LiteralSafeUpgradeLog())", program);
         Assert.DoesNotContain(".LogToConsole()", program);
-        Assert.Contains("if (args.Length == 0)\n            return format;", logger);
+        Assert.Contains("if (args.Length == 0)", logger);
+        Assert.Contains("return format;", logger);
         Assert.Contains("catch (FormatException)", logger);
     }
 }

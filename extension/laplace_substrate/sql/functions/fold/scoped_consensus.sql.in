@@ -1,4 +1,4 @@
--- Plan Phase 8 (Build-A-Bear): re-fold laplace.attestations from ONLY the named sources
+-- Plan Phase 8 (Mold-A-Model): re-fold laplace.attestations from ONLY the named sources
 -- into a scoped consensus edge set — the "I know kung fu" package fold. The
 -- caller materializes this as pg_temp.consensus, which shadows laplace.consensus
 -- inside every plane function for that connection (pg_temp resolves first), so

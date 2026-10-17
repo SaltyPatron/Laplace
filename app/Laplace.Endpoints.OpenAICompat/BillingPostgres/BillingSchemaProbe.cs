@@ -1,3 +1,4 @@
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.BillingPostgres;
@@ -7,8 +8,7 @@ internal static class BillingSchemaProbe
 {
     public static void EnsureQuotesTableReachable(NpgsqlDataSource dataSource)
     {
-        using var conn = dataSource.OpenConnection();
-        using var cmd = new NpgsqlCommand("SELECT 1 FROM app.billing_quotes LIMIT 1;", conn);
+        using var cmd = NpgsqlCatalog.Command(dataSource, "billing.probe_quotes");
         cmd.ExecuteNonQuery();
     }
 }

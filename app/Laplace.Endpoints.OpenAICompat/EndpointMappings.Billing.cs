@@ -467,6 +467,30 @@ internal static class BillingEndpoints
                     u.QuoteId, u.Tenant, u.ServiceId, u.Units, u.AmountCents, u.ExecutedAt)).ToArray()));
         })
         .WithTags("billing").Produces<UsageResponse>();
+
+        app.MapGet("/v1/billing/royalties", async (string? source_id, HttpRequest request, IBillingOrchestrator billing, ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+            var rows = !string.IsNullOrWhiteSpace(source_id)
+                ? await billing.GetRoyaltiesBySourceAsync(source_id.Trim(), ct)
+                : await billing.GetRoyaltiesByTenantAsync(tenant, ct);
+            return Results.Json(new RoyaltiesResponse(
+                Tenant: tenant,
+                SourceId: string.IsNullOrWhiteSpace(source_id) ? null : source_id.Trim().ToLowerInvariant(),
+                TotalRoyaltyCents: rows.Sum(r => r.RoyaltyCents),
+                Entries: rows.Select(r => new RoyaltyEntryView(
+                    QuoteId: r.QuoteId,
+                    PayerTenant: r.PayerTenant,
+                    ServiceId: r.ServiceId,
+                    SourceId: r.SourceIdHex,
+                    SourceOwnerTenant: r.SourceOwnerTenant,
+                    ShareBp: r.ShareBp,
+                    RoyaltyCents: r.RoyaltyCents,
+                    HitCount: r.HitCount,
+                    TotalWeight: r.TotalWeight,
+                    ExecutedAt: r.ExecutedAt)).ToArray()));
+        })
+        .WithTags("billing").Produces<RoyaltiesResponse>();
     }
 
     private static QuoteNextStep NextStep(BillingQuote quote, string note) =>

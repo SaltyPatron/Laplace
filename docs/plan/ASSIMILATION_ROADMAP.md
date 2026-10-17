@@ -129,18 +129,28 @@ Issue: #1717
 Measured and read in code:
 
 - **Evidence round-trips through PostgreSQL.** The native stage builds claims in memory. C# copies them into `attestations`. The fold then reads every touched cell's durable evidence back over SPI and refolds all replayable testimony from neutral, on every working set that touches the cell (`extension/laplace_substrate/src/fold_route.c` header, `consensus.evidence_rows_typed`).
-- **Deduplication by database existence probes.** The OMW seed made 434 round trips at about 8.4k rows/s. Local materialize of UCD produces about 300k rows/s.
-- **The highway mask** is deposited in a separate SQL pass per chunk (`consensus.highway_mask_deposit`).
+- **Connection pool exhaustion from 16-lane 2PC over `UNLOGGED` tables.** `NpgsqlWorkingSetApply.cs` opens up to 16 concurrent `NpgsqlConnection`s per table using `PREPARE TRANSACTION` / `COMMIT PREPARED` while `client.json` / `LaplaceDataSource` caps `Max Pool Size=4`, crashing CILI ingest.
+- **Deduplication by database existence probes without skipping synthetic `blocks_of` spine nodes.** The OMW seed made 434 round trips at about 8.4k rows/s. Local materialize of UCD produces about 300k rows/s.
+- **The highway mask** is deposited in a separate SQL pass per chunk (`consensus.highway_mask_deposit`), and `Laplace-Engine` required raw corpus definitions + a `.nodes` sidecar to build `highway.bin`.
 - **Legacy decomposers do per-row C# work** (`SubstrateChangeBuilder` dictionary merge, `AttestationMergeMath`).
 
-**Target order:**
+**Target order (Bidirectional Tier Traversal + Perf-Cache + Whole-File Stage-Then-Merge):**
 
-1. **Native, per source:** parse, compose ids, emit claims. Then reduce by attestation id (merge games and scores, OR masks). Then solve each witness's series per cell in memory as one update, the rating where the prior standing and the series' score agree, never one linearized period step. Then route to partitions and emit sorted COPY streams, consensus deltas and entity masks.
-2. **PostgreSQL:** stores the rows and resolves key conflicts. It reads prior standing once per cell per source.
-3. **C#:** selects artifacts, orders dependencies, and handles commit epochs, progress and retries. It holds no per-row objects.
-4. **SQL:** set-level orchestration only.
+1. **Client-Side Native C + Perf-Cache (`tier0.bin` + `highway.bin`), Leaf $\rightarrow$ Trunk Creation & In-RAM Deduplication:**
+   - Parse and compose bottom-up from the mmap'd `tier0.bin` and `highway.bin` perf-caches through canonical tier boundaries (UAX #29 for text; grammar AST rules for structured records/files).
+   - Every repeated character, word, phrase, or subtree collapses in $O(1)$ into the client's in-RAM node table (`NODE[]` / `staged_set`). Highway identifiers (`i46360`, `oewn-00001740-n`, `abandon.01`, `va:0001f`, `leave-51.2`, `NOUN`) resolve in $O(1)$ against `highway.bin` without DB round-trips or `.nodes` sidecars.
+2. **Client-Side Trunk $\rightarrow$ Leaf Self-Reducing Subtree Pruning Against PostgreSQL:**
+   - Probe PostgreSQL top-down from the highest logical roots (File Trunk $\rightarrow$ Section/Record Trunks $\rightarrow$ Sentences $\rightarrow$ Words), skipping synthetic binary-tree (`blocks_of`) spine nodes.
+   - When a node at tier $T$ exists in PostgreSQL (or in the perf-cache / `staged_set`), its entire descendant subtree is already recorded and is immediately amputated on the client (`keep = recorded`).
+3. **Grammar-Bounded Streaming $\rightarrow$ Whole-File `UNLOGGED` Staging (`stage.*`):**
+   - Stream large files in a single pass along top-level grammar/record boundaries into `UNLOGGED` `stage.*` tables using bounded connection concurrency (`min(cores, max_pool_size - headroom)`), with zero 2PC (`PREPARE TRANSACTION`) and zero partial commits to `public.*`.
+4. **Unified Database-Side Merge & Series Fold (`Laplace-postgres` C + Thin SQL):**
+   - Once the entire file/source and its trunk are in `stage.*`, execute one set-based merge (`stage.*` $\rightarrow$ `public.*` in Hilbert order, database-side `laplace_attest_series` fold into `consensus`, GIN pending-list cleanup, and atomic `witness` registration).
+5. **Thin C# & SQL Orchestrators:**
+   - C# and SQL hold no per-row managed objects and never pull `consensus` rows back over the socket to fold on the client.
 
-**Correcting a source becomes per-witness replacement,** not a database recreate: evict the witness's claims, refold the touched cells, re-ingest. `seed-foundation.yml` already has `replace_existing` + `confirm_replace`. **Seeds apply the locally materialized rows** rather than re-decomposing.
+**Correcting a source becomes per-witness replacement,** not a database recreate: evict the witness's claims, refold the touched cells, re-ingest. `seed-foundation.yml` already has `replace_existing` + `confirm_replace`.
+
 
 Related: #1714, #1292, #964, #952, #1409, #967.
 
@@ -222,6 +232,10 @@ Issue: #1720
 - **Realization (O) is English/Bulgarian templates** (`chat_scaffold`). `prompt_coherence.c` matches prompt words against English relation labels.
 - **Attestation endpoints do not name a tier.** The tier says which physicality of an entity is meant.
 - **The session's own primitives flatten typed state.** `converse.couple` reduces coupling to one weight (a `1/ln(2 + count)` specificity). `converse.key_facts` normalizes standing into a share, which behaves like a softmax. Both violate spec 36 COUPLE and `INVENTION.md` §19 ("typed state stays typed"). They are rebuilt as typed responses.
+- **Single standard SQL + native C script (no hand-rolled C#/SQL wheels):**
+  - Remove the `ReadPathArchitectureGateTests` exemptions on `Laplace.Substrate/Crud/Npgsql/*` and `Laplace.Endpoints.OpenAICompat/BillingPostgres/*` so every C# database call binds `engine/core/src/sql_catalog.def` or calls a native C extension operator.
+  - Replace all hand-rolled C# synthesis/BPE/eigenmap/SVD/attribution code in `FoundryCommands.cs`, `FoundryExport.cs`, `FoundryExportService.cs`, and `SynthesisBilling.cs` with direct P/Invoke + SQL calls into `liblaplace_synthesis` / `laplace_substrate` (and converge the 168 `.sql.in` files toward the single canonical SQL + native C extension surface modeled by `Laplace-postgres/sql/laplace--1.12.sql` + `src/laplace_pg.c`).
+  - Expose native containment attribution (`walk_up` / `attested` + Fisher-weighted basis-point `share_bp` summing to `10000`) in SQL + C so every query receipt and **Mold-A-Model** export deterministically attributes and settles royalties to contributing witness trunks.
 - **Acceptance:** on one coherent seed, these reads return typed standing (rating, deviation, volatility, witnesses), realized in the query's language, with an auditable path:
   - capital(France) → Paris
   - fire/ice and elephant/electricity contrasts

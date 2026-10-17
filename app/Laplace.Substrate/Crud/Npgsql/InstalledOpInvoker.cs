@@ -136,7 +136,7 @@ public static class InstalledOpInvoker
         {
             var slot = $"a{bound.Count}";
             call.Add($"{QuoteIdent(p.Name)} => @{slot}::{p.Type}");
-            bound.Add((slot, OpValue(args![p.Name])));
+            bound.Add((slot, CoerceForDeclaredType(OpValue(args![p.Name]), p.Type)));
         }
 
         var isProcedure = string.Equals(candidates[0].Row.Kind, "procedure", StringComparison.Ordinal);
@@ -306,6 +306,25 @@ public static class InstalledOpInvoker
         string?[] items => new NpgsqlParameter(slot, NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = items },
         _ => new NpgsqlParameter(slot, value),
     };
+
+    internal static object? CoerceForDeclaredType(object? value, string declaredType)
+    {
+        if (string.Equals(declaredType, "bytea", StringComparison.OrdinalIgnoreCase) && value is string s)
+            return CoerceHexBytea(s);
+        if (string.Equals(declaredType, "bytea[]", StringComparison.OrdinalIgnoreCase) && value is string?[] arr)
+            return arr.Select(item => item is null ? null : CoerceHexBytea(item)).ToArray();
+        return value;
+    }
+
+    private static string CoerceHexBytea(string s)
+    {
+        if (s.StartsWith(@"\x", StringComparison.OrdinalIgnoreCase))
+            return s;
+        var trimmed = s.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? s[2..] : s;
+        if (trimmed.Length >= 32 && (trimmed.Length & 1) == 0 && trimmed.All(Uri.IsHexDigit))
+            return @"\x" + trimmed;
+        return s;
+    }
 
     private static object? Normalize(object value) => value switch
     {

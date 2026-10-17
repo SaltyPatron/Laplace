@@ -122,19 +122,24 @@ internal static class Program
             => Dispatch("app-check", RunAppCheck);
     }
 
-    private static int RunAppCheck(string connectionString)
+    private static bool HasAllAppTables(string connectionString)
     {
-        var owners = PlatformOwnerPolicy.Load();
-        if (BuildEngine(connectionString, IsAppScript).GetScriptsToExecute().Count != 0)
-            throw new InvalidOperationException("Application migrations are pending; run app-up.");
         using var connection = new NpgsqlConnection(connectionString);
         connection.Open();
         using var command = new NpgsqlCommand("""
             SELECT bool_and(to_regclass(name) IS NOT NULL)
             FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',
-                'app.api_keys','app.billing_quotes']) AS required(name)
+                'app.api_keys','app.billing_quotes','app.billing_royalties']) AS required(name)
             """, connection);
-        if (command.ExecuteScalar() is not true)
+        return command.ExecuteScalar() is true;
+    }
+
+    private static int RunAppCheck(string connectionString)
+    {
+        var owners = PlatformOwnerPolicy.Load();
+        if (BuildEngine(connectionString, IsAppScript).GetScriptsToExecute().Count != 0)
+            throw new InvalidOperationException("Application migrations are pending; run app-up.");
+        if (!HasAllAppTables(connectionString))
             throw new InvalidOperationException("The application database is missing required identity or billing tables.");
         using var database = NpgsqlDataSource.Create(connectionString);
         new PlatformOwnerReconciler(database, owners).VerifyAsync().GetAwaiter().GetResult();
@@ -216,6 +221,19 @@ internal static class Program
         {
             EnsureDatabase.For.PostgresqlDatabase(target);
             var engine = BuildEngine(target, filter);
+            if (IncludesApplication(filter) && engine.GetScriptsToExecute().Count == 0 && !HasAllAppTables(target))
+            {
+                var dir = LocateMigrationsDir();
+                var scriptPath = Path.Combine(dir, "20260611000000_app_billing.sql");
+                if (File.Exists(scriptPath))
+                {
+                    using var conn = new NpgsqlConnection(target);
+                    conn.Open();
+                    using var cmd = new NpgsqlCommand(File.ReadAllText(scriptPath), conn) { CommandTimeout = 0 };
+                    cmd.ExecuteNonQuery();
+                    applied.Add(new DbUp.Engine.SqlScript("20260611000000_app_billing.sql (consolidated)", string.Empty));
+                }
+            }
             var result = engine.PerformUpgrade();
             if (!result.Successful)
             {
@@ -251,7 +269,7 @@ internal static class Program
     }
 
     private static bool IncludesApplication(Func<string, bool> filter)
-        => filter("20261012000000_app_platform_access.sql");
+        => filter("20260611000000_app_billing.sql");
 
     private static void ReportOwners(PlatformOwnerPolicy owners)
         => Console.WriteLine(owners.Owners.Count == 0

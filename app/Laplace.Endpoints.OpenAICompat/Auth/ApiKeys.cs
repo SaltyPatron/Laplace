@@ -76,30 +76,21 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
 
     public PostgresApiKeyStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
-    private const string SelectColumns = """
-        SELECT key_hash, key_prefix, tenant, label, created_at, revoked_at, last_used_at
-        FROM app.api_keys
-        """;
-
     public async Task PutAsync(ApiKeyRecord record, CancellationToken ct)
     {
-        const string sql = """
-            INSERT INTO app.api_keys (key_hash, key_prefix, tenant, label, created_at, revoked_at, last_used_at)
-            VALUES (@key_hash, @key_prefix, @tenant, @label, @created_at, @revoked_at, @last_used_at)
-            ON CONFLICT (key_hash) DO NOTHING;
-            """;
         try
         {
-            await NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
-            {
-                p.AddWithValue("key_hash", record.KeyHash);
-                p.AddWithValue("key_prefix", record.KeyPrefix);
-                p.AddWithValue("tenant", record.Tenant);
-                p.AddWithValue("label", (object?)record.Label ?? DBNull.Value);
-                p.AddWithValue("created_at", record.CreatedAt);
-                p.AddWithValue("revoked_at", (object?)record.RevokedAt ?? DBNull.Value);
-                p.AddWithValue("last_used_at", (object?)record.LastUsedAt ?? DBNull.Value);
-            }, ct: ct);
+            await using var cmd = NpgsqlCatalog.Command(
+                _dataSource,
+                "apikey.put",
+                record.KeyHash,
+                record.KeyPrefix,
+                record.Tenant,
+                record.Label,
+                record.CreatedAt,
+                record.RevokedAt,
+                record.LastUsedAt);
+            await cmd.ExecuteNonQueryAsync(ct);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ForeignKeyViolation
                                          && ex.ConstraintName == "api_keys_tenant_fk")
@@ -108,39 +99,44 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         }
     }
 
-    public Task<ApiKeyRecord?> TryGetAsync(string keyHash, CancellationToken ct) =>
-        NpgsqlRead.ReadFirstOrDefaultAsync(
-            _dataSource, SelectColumns + " WHERE key_hash = @key_hash;", Map,
-            p => p.AddWithValue("key_hash", keyHash), ct: ct);
+    public async Task<ApiKeyRecord?> TryGetAsync(string keyHash, CancellationToken ct)
+    {
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.get", keyHash);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? Map(reader) : null;
+    }
 
-    public Task<IReadOnlyList<ApiKeyRecord>> GetByTenantAsync(string tenant, CancellationToken ct) =>
-        NpgsqlRead.ReadRowsAsync(
-            _dataSource, SelectColumns + " WHERE tenant = @tenant ORDER BY created_at DESC;", Map,
-            p => p.AddWithValue("tenant", tenant), ct: ct);
+    public async Task<IReadOnlyList<ApiKeyRecord>> GetByTenantAsync(string tenant, CancellationToken ct)
+    {
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.by_tenant", tenant);
+        return await ReadAllAsync(cmd, ct);
+    }
 
-    public Task<IReadOnlyList<ApiKeyRecord>> GetByLabelAsync(string label, CancellationToken ct) =>
-        NpgsqlRead.ReadRowsAsync(
-            _dataSource, SelectColumns + " WHERE label = @label;", Map,
-            p => p.AddWithValue("label", label), ct: ct);
+    public async Task<IReadOnlyList<ApiKeyRecord>> GetByLabelAsync(string label, CancellationToken ct)
+    {
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.by_label", label);
+        return await ReadAllAsync(cmd, ct);
+    }
+
+    private static async Task<IReadOnlyList<ApiKeyRecord>> ReadAllAsync(NpgsqlCommand cmd, CancellationToken ct)
+    {
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var rows = new List<ApiKeyRecord>();
+        while (await reader.ReadAsync(ct))
+            rows.Add(Map(reader));
+        return rows;
+    }
 
     public async Task<bool> RevokeAsync(string keyHash, CancellationToken ct)
     {
-        const string sql = """
-            UPDATE app.api_keys SET revoked_at = now()
-            WHERE key_hash = @key_hash AND revoked_at IS NULL;
-            """;
-        return await NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql,
-            p => p.AddWithValue("key_hash", keyHash), ct: ct) > 0;
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.revoke", keyHash);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
-    public Task TouchAsync(string keyHash, DateTimeOffset usedAt, CancellationToken ct)
+    public async Task TouchAsync(string keyHash, DateTimeOffset usedAt, CancellationToken ct)
     {
-        const string sql = "UPDATE app.api_keys SET last_used_at = @used_at WHERE key_hash = @key_hash;";
-        return NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
-        {
-            p.AddWithValue("key_hash", keyHash);
-            p.AddWithValue("used_at", usedAt);
-        }, ct: ct);
+        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.touch", keyHash, usedAt);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private static ApiKeyRecord Map(NpgsqlDataReader reader) => new(
