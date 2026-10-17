@@ -99,7 +99,7 @@ jobs:
           CONFIRM_REPLACE_INPUT: ${{ inputs.confirm_replace_existing && '1' || '0' }}
         run: |
           set -euo pipefail
-          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          root="${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"
           chess="$root/Games/Chess"
           lum="$chess/Lumbras"
           source=""

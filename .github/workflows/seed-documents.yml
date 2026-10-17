@@ -41,7 +41,7 @@ jobs:
           PATH_INPUT: ${{ inputs.advanced_path_override }}
         run: |
           set -euo pipefail
-          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          root="${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"
           if [[ -n "$PATH_INPUT" ]]; then
             [[ -e "$PATH_INPUT" ]] || { echo "::error::$PATH_INPUT does not exist"; exit 1; }
             echo "path=$PATH_INPUT" >> "$GITHUB_OUTPUT"

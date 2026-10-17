@@ -3,7 +3,7 @@ set -euo pipefail
 
 source="${1:-}"
 path="${2:-}"
-DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
+DATA_ROOT="${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"
 
 FLOOR=(unicode uca iso639 operational cili)
 DOCUMENT=(document project-gutenberg)
