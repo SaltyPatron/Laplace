@@ -32,6 +32,12 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("needs: production-build", production)
         staging = delivery.split("\n  cloud-host:\n", 1)[0]
         self.assertIn("run: deploy/linux/site.sh bundle", staging)
+        # The MKL CNR tests the hosted dev-tests job skips on a non-Intel runner run on the pinned Intel host.
+        self.assertIn("run: deploy/linux/site.sh cnr", staging)
+        hosted = (ROOT / "scripts/ci/hosted-dev-tests.sh").read_text(encoding="utf-8")
+        for name in ("LaplaceDynamicsInit", "LaplaceDynamicsToolchain", "SynthesisToolchain", "LaplaceDynamicsInit_Idempotent"):
+            self.assertIn(name, hosted)
+            self.assertIn(name, (ROOT / "deploy/linux/site.sh").read_text(encoding="utf-8"))
         self.assertIn("qualify_cloud: true", maintenance)
         self.assertIn("promote:\n", delivery)
         self.assertIn("type: boolean\n        default: true", delivery)

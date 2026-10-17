@@ -100,6 +100,9 @@ jobs:
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
 
+      - name: MKL CNR tests on the pinned branch (hosted dev-tests skips them on a non-Intel runner)
+        run: deploy/linux/site.sh cnr
+
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 

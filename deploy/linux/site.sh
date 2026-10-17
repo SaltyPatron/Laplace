@@ -12,6 +12,7 @@
 #   deploy/linux/site.sh reset seed       the database dropped and made again, then the foundation
 #
 # Phases: externals build install database extensions migrate app publish restart smoke   (and: configure migrate_app reset seed serve)
+#         cnr: the MKL CNR tests on the pinned branch (the hosted dev-tests job skips them on a non-Intel runner)
 #         bundle: what the hosting host receives, after app; receive: on the hosting host, before publish
 #         reconcile: drain installed highway work; chess-lab: update the declared external chess tools
 #         qualification: build all components and run development suites without changing installed services
@@ -179,6 +180,28 @@ phase_build() {
   LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
     cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache 8>&-
   find -H "$SITE_BUILD" -name 'laplace_t0_perfcache*.bin' -print -quit | grep -q . || fail "tier-0 perf-cache not produced"
+}
+
+# ------------------------------------------------------------------------------------------------ cnr
+# The four MKL CNR tests on the branch the build pins: init.cpp sets MKL_CBWR_AVX2 for LAPLACE_TARGET_ISA AVX2, a branch
+# MKL offers only on Intel CPUs, so the hosted dev-tests job skips them on any other runner
+# (scripts/ci/hosted-dev-tests.sh) and they run here on the Intel host. Their own test build, so the site build keeps
+# BUILD_TESTING off; the managed one runs against the site build's libraries.
+phase_cnr() {
+  say "MKL CNR on the pinned branch"
+  oneapi
+  local b="$SITE_WORK/cnr-build" ucd="${LAPLACE_UCD_PATH:-$LAPLACE_DATA_ROOT/UCD/Public/UCD/latest}"
+  cmake -S "$ROOT/engine" -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING=ON \
+    -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" -DLAPLACE_UCD_PATH="$ucd" \
+    -DLAPLACE_CHESS_OPENINGS="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings}" >/dev/null 8>&-
+  cmake --build "$b" --target laplace_dynamics_tests laplace_synthesis_tests 8>&-
+  "$b/dynamics/tests/laplace_dynamics_tests" --gtest_filter='LaplaceDynamicsInit.ReturnsZeroOnSuccess:LaplaceDynamicsToolchain.MklRequiredAndLinked'
+  "$b/synthesis/tests/laplace_synthesis_tests" --gtest_filter='SynthesisToolchain.MklSvdNotStub'
+  LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+    dotnet_app test "$ROOT/app/Laplace.Core.Tests/Laplace.Core.Tests.csproj" -c Release --nologo -v minimal \
+    -p:LAPLACE_BUILD_ROOT="$SITE_WORK/cnr-managed" \
+    --filter 'FullyQualifiedName=Laplace.Engine.Dynamics.Tests.NativeInteropTests.LaplaceDynamicsInit_Idempotent'
 }
 
 # ------------------------------------------------------------------------------------------------ install
@@ -690,7 +713,7 @@ done
 for p in "${phases[@]}"; do
   case "$p" in
     chess-lab) phase_chess_lab ;;
-    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|reconcile|seed|serve|qualification|competitive) "phase_$p" ;;
+    externals|build|cnr|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|reconcile|seed|serve|qualification|competitive) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done

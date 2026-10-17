@@ -27,6 +27,20 @@ BUILD="$ROOT/build/engine"   # the layout scripts/sync-managed-native-artifacts.
 export LAPLACE_ENGINE_BUILD="$BUILD"
 mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess"
 
+# The MKL CNR branch the build pins (engine/CMakeLists.txt: LAPLACE_TARGET_ISA AVX2, so MKL_CBWR_AVX2 in
+# engine/dynamics/src/init.cpp) is one MKL takes only on an Intel CPU with that ISA: "Settings other than
+# MKL_CBWR_AUTO or MKL_CBWR_COMPATIBLE are available only for Intel processors" (oneMKL, Named Constants for CNR
+# Control). The code stays pinned (wiki Reference/Monorepo.md: "one instruction set per build ... with MKL's
+# conditional bitwise reproducibility set to match"), so on any other hosted CPU these four tests cannot pass and are
+# skipped here by name; they run on the Intel host the build is pinned for (laplace.yml deliver: site.sh cnr).
+CNR_NATIVE_TESTS='^(LaplaceDynamicsInit\.ReturnsZeroOnSuccess|LaplaceDynamicsToolchain\.MklRequiredAndLinked|SynthesisToolchain\.MklSvdNotStub)$'
+CNR_MANAGED_TEST='Laplace.Engine.Dynamics.Tests.NativeInteropTests.LaplaceDynamicsInit_Idempotent'
+cnr_host() { grep -q '^vendor_id[[:space:]]*: GenuineIntel' /proc/cpuinfo && grep -qw avx2 /proc/cpuinfo; }
+cnr_skip_reason() {
+  local cpu; cpu="$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo | head -1)"
+  echo "::warning::MKL CNR tests skipped: this runner's CPU ($cpu) cannot take the pinned MKL_CBWR_AVX2 branch (Intel with AVX2 only); they run on the self-hosted Intel host (site.sh cnr). Skipped: $1"
+}
+
 say() { echo "::group::$*"; }
 end() { echo "::endgroup::"; }
 
@@ -115,7 +129,12 @@ native() {
   find "$BUILD" -name 'laplace_t0_perfcache.bin' -print -quit | grep -q . || { echo "::error::tier-0 perf-cache not produced" >&2; exit 1; }
   end
   say "native: ctest (dev profile: everything but the regress label)"
-  ctest --test-dir "$BUILD" --no-tests=error --output-on-failure -j "$(nproc)" -LE regress
+  local skip=()
+  if ! cnr_host; then
+    cnr_skip_reason "LaplaceDynamicsInit.ReturnsZeroOnSuccess LaplaceDynamicsToolchain.MklRequiredAndLinked SynthesisToolchain.MklSvdNotStub"
+    skip=(-E "$CNR_NATIVE_TESTS")
+  fi
+  ctest --test-dir "$BUILD" --no-tests=error --output-on-failure -j "$(nproc)" -LE regress "${skip[@]}"
   end
 }
 
@@ -127,9 +146,11 @@ managed() {
   say "managed: dev tier (Tier!=db&Tier!=live&Tier!=perf) on the candidate native build"
   export LAPLACE_PERFCACHE_BIN; LAPLACE_PERFCACHE_BIN="$(find "$BUILD" -name 'laplace_t0_perfcache.bin' -print -quit)"
   bash scripts/sync-managed-native-artifacts.sh
+  local filter='Tier!=db&Tier!=live&Tier!=perf'
+  if ! cnr_host; then cnr_skip_reason "$CNR_MANAGED_TEST"; filter="$filter&FullyQualifiedName!=$CNR_MANAGED_TEST"; fi
   rm -rf "$WORK/managed-results"
   dotnet test app/Laplace.slnx -c Release --no-build --nologo -v minimal \
-    --filter 'Tier!=db&Tier!=live&Tier!=perf' --logger 'trx' --results-directory "$WORK/managed-results"
+    --filter "$filter" --logger 'trx' --results-directory "$WORK/managed-results"
   python3 "$ROOT/scripts/ci/trx-summary.py" "$WORK/managed-results"
   end
 }
