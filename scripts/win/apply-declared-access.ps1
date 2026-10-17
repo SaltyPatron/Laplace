@@ -6,7 +6,8 @@
 # seed and serve it (Laplace#1879). This applies that declaration through the Operations step that
 # owns it, development/configure-windows.ps1 (roles, CONNECT, schema grants and default privileges,
 # the development SSPI rules, with a backup of pg_hba/pg_ident), then checks the substrate role can
-# use schema laplace. A database no declaration names is said so and left as it is.
+# use schema laplace and MAINTAIN (so ANALYZE) every substrate table and partition.
+# A database no declaration names is said so and left as it is.
 # The declaration: LAPLACE_ACCESS_DECLARATION, else <sources>\Laplace-Operations\development\
 # installation.json, sources being LAPLACE_SRC, REPOS, or the directory beside this checkout.
 # -Plan prints what would run and runs nothing.
@@ -35,4 +36,12 @@ if ($kind -eq 'substrate') {
     $ok = & $psql -X -h localhost -U postgres -d $Database -Atq -v ON_ERROR_STOP=1 -c "SELECT has_schema_privilege('$role', 'laplace', 'USAGE') AND has_database_privilege('$role', current_database(), 'CONNECT')"
     if ($LASTEXITCODE -or $ok -ne 't') { throw "declared access: $role cannot use schema laplace of $Database after configuration" }
     "declared access: $role may connect to $Database and use schema laplace"
+    # The role seeds, so it refreshes the statistics of what it writes: ANALYZE skips, with only a
+    # WARNING, every table or partition it may not MAINTAIN, and the site then reads the seeded
+    # database as empty (Laplace#1879). Every substrate table and partition is checked.
+    $denied = & $psql -X -h localhost -U postgres -d $Database -Atq -v ON_ERROR_STOP=1 -c "SELECT count(*) || ' ' || coalesce(string_agg(c.oid::regclass::text, ', ' ORDER BY c.oid::regclass::text), '') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('laplace', 'realize', 'consensus', 'generation') AND c.relkind IN ('r', 'p') AND NOT has_table_privilege('$role', c.oid, 'MAINTAIN')"
+    if ($LASTEXITCODE) { throw "declared access: could not read the MAINTAIN privileges of $role in $Database" }
+    $count, $names = "$denied".Split(' ', 2)
+    if ($count -ne '0') { throw "declared access: $role may not MAINTAIN $count substrate table(s) of ${Database}, so its ANALYZE would skip them: $names" }
+    "declared access: $role may MAINTAIN every substrate table and partition of $Database"
 }

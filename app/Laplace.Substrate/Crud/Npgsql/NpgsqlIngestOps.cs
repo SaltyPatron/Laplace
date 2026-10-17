@@ -42,23 +42,76 @@ public static class NpgsqlIngestOps
             p => p.AddWithValue(NpgsqlDbType.Uuid, runId), ct: ct, label: "verified_artifact_journal").ConfigureAwait(false);
     }
 
-    public static Task AnalyzeCoreWriteTablesAsync(
-        NpgsqlDataSource ds, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteNonQueryAsync(ds, """
+    public static async Task AnalyzeCoreWriteTablesAsync(
+        NpgsqlDataSource ds, CancellationToken ct = default)
+    {
+        await using var conn = await ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await AnalyzeOrThrowAsync(conn, """
             ANALYZE laplace.attestations;
             ANALYZE laplace.consensus;
             ANALYZE laplace.entities;
             ANALYZE laplace.physicalities (entity_id, type)
-            """, timeoutSeconds: 0, ct: ct, label: "analyze_core_write_tables");
+            """, "analyze_core_write_tables", ct).ConfigureAwait(false);
+    }
 
     public static Task AnalyzePostIngestValidationAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteNonQueryAsync(conn, """
+        AnalyzeOrThrowAsync(conn, """
             ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id);
             ANALYZE laplace.physicalities (entity_id, type);
             ANALYZE laplace.entities (id);
             ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)
-            """, timeoutSeconds: 0, ct: ct, label: "analyze_post_ingest_validation");
+            """, "analyze_post_ingest_validation", ct);
+
+    /// <summary>
+    /// Runs ANALYZE statements and fails if PostgreSQL skipped any relation.
+    /// <para>
+    /// ANALYZE by a role without MAINTAIN on a table, or on any leaf partition of it,
+    /// does not fail: each such relation is skipped with a WARNING ("permission denied to
+    /// analyze ..., skipping it") and the statement succeeds. A seed run that way left
+    /// every leaf at <c>reltuples = -1</c> and reported success (Laplace#1879). Every
+    /// WARNING the statements raise is collected here, and any one of them is a failure
+    /// that names the relations not analyzed.
+    /// </para>
+    /// </summary>
+    public static async Task AnalyzeOrThrowAsync(
+        NpgsqlConnection conn, string sql, string label, CancellationToken ct = default)
+    {
+        var warnings = new List<string>();
+        void OnNotice(object sender, NpgsqlNoticeEventArgs e)
+        {
+            if (string.Equals(e.Notice.InvariantSeverity, "WARNING", StringComparison.Ordinal))
+                lock (warnings) warnings.Add(e.Notice.MessageText);
+        }
+        conn.Notice += OnNotice;
+        try
+        {
+            await NpgsqlRead.ExecuteNonQueryAsync(conn, sql, timeoutSeconds: 0, ct: ct, label: label)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            conn.Notice -= OnNotice;
+        }
+        if (AnalyzeSkipFailure(label, warnings) is { } failure)
+            throw failure;
+    }
+
+    /// <summary>The failure for ANALYZE warnings, or null when there were none. Each
+    /// relation PostgreSQL names in a warning is listed once, in order.</summary>
+    internal static AnalyzeIncompleteException? AnalyzeSkipFailure(
+        string label, IReadOnlyList<string> warnings)
+    {
+        if (warnings.Count == 0) return null;
+        var relations = new List<string>();
+        foreach (string warning in warnings)
+        {
+            var quoted = System.Text.RegularExpressions.Regex.Match(warning, "\"([^\"]+)\"");
+            string name = quoted.Success ? quoted.Groups[1].Value : warning;
+            if (!relations.Contains(name)) relations.Add(name);
+        }
+        return new AnalyzeIncompleteException(label, relations, warnings);
+    }
 
     public sealed record GinMaintenance(string Index, long? PagesCleaned);
 
@@ -240,4 +293,19 @@ public static class NpgsqlIngestOps
         null => 0L,
         _ => Convert.ToInt64(v),
     };
+}
+
+/// <summary>ANALYZE skipped at least one relation, so its planner statistics (and every
+/// reltuples / pg_stats read over it) were not refreshed.</summary>
+public sealed class AnalyzeIncompleteException(
+    string label, IReadOnlyList<string> relations, IReadOnlyList<string> warnings)
+    : InvalidOperationException(
+        $"{label}: ANALYZE skipped {relations.Count} relation(s), so their statistics were not refreshed: "
+        + string.Join(", ", relations)
+        + $". First warning: {warnings[0]}"
+        + (warnings[0].Contains("permission denied", StringComparison.Ordinal)
+            ? ". The connecting role needs MAINTAIN on these tables and every partition of them."
+            : ""))
+{
+    public IReadOnlyList<string> Relations { get; } = relations;
 }
