@@ -219,9 +219,10 @@ def parse_ingest_source_all(text: str) -> list[str] | None:
     floor = extract_bash_array(text, "FLOOR")
     relations = extract_bash_array(text, "RELATIONS")
     usage = extract_bash_array(text, "USAGE")
-    if not floor or not relations or not usage:
+    document = extract_bash_array(text, "DOCUMENT")
+    if not floor or not relations or not usage or not document:
         return None
-    return floor + ["document"] + relations + usage
+    return floor + document + relations + usage
 
 
 def parse_seed_stage_relations(text: str) -> list[str] | None:
