@@ -114,6 +114,31 @@ jobs:
           persist-credentials: false
       - run: bash tests/substrate-runtime-grants.sh
 
+  identity-law:
+    name: Identity law vectors (monorepo composition through Laplace-Native)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Laplace-Native, the one implementation of the identity law
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Native
+          ref: main
+          path: .ci-dependencies/laplace-native
+          persist-credentials: false
+      - name: BLAKE3 1.8.3, as on the build host
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: BLAKE3-team/BLAKE3
+          ref: 8b829b697fa4cfe35de35e9aa8c20b56266cb091
+          path: .ci-dependencies/blake3
+          persist-credentials: false
+      - name: IdentityLawVectorTests' vectors on hash128.c compiled with lp_id_compose
+        run: bash tests/identity-law.sh .ci-dependencies/laplace-native .ci-dependencies/blake3/c
+
   windows-native-package:
     name: Windows native package integrity
     runs-on: windows-2025
