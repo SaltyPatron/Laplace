@@ -335,6 +335,12 @@ canonical = "Source"
 [[type]]
 canonical = "SourceFile"
 
+# A record a recipe reads: the path over what one source record (a row, an element) says,
+# in source order, inside its file's content tree; and the file's content tree itself,
+# its records in order. A record is shown as its parts, never as text.
+[[type]]
+canonical = "Source_Record"
+
 [[type]]
 canonical = "Source_Reference"
 
@@ -470,11 +476,6 @@ canonical = "WordNetSynset"
 
 [[type]]
 canonical = "WordNet_Sense"
-
-# A WordNet sense key decomposed: [lemma, ss_type, lex_filenum, lex_id(, head, head_id)]
-# (amble%2:38:00 is [amble, 2, 38, 00]).
-[[type]]
-canonical = "WordNet_Sense_Key"
 
 [[type]]
 canonical = "WordNet_Synset"

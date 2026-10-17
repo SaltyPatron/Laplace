@@ -1,18 +1,13 @@
 using Laplace.Engine.Core;
 using Laplace.Decomposers.Atomic2020;
-using Laplace.Decomposers.CILI;
 using Laplace.Decomposers.Code;
 using Laplace.Decomposers.ConceptNet;
-using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Media;
 using Laplace.Decomposers.Model;
-using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.OpenSubtitles;
 using Laplace.Decomposers.Operational;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.Unicode;
-using Laplace.Decomposers.VerbNet;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.WordNet;
 using Laplace.Decomposers.Abstractions;
@@ -29,26 +24,25 @@ public static class SeedIngestComposition
 {
     public static IReadOnlyList<string> RegisteredSourceKeys => Registry.Select(entry => entry.Key).ToArray();
     /// <summary>
-    /// Built-in providers by ingest key, used when no source generation is selected for
-    /// that key; a selected generation routes through the shared recipe decomposer.
+    /// Built-in providers by ingest key. A source that has a checked-in source generation
+    /// (recipes/**/*.source.json: unicode, iso639, omw, verbnet, cili, oewn, ud, ...) has
+    /// NO entry here: it is read only by its recipe, and when that recipe cannot be found
+    /// or its root is missing the ingest fails instead of silently running a legacy C#
+    /// decomposer (SourceGenerationGateTests). Add a key here only for a source no
+    /// recipe reads yet.
     /// </summary>
     internal static readonly (string Key, Type Decomposer)[] Registry =
     [
-        ("unicode", typeof(UnicodeDecomposer)),
-        ("iso639", typeof(ISODecomposer)),
         ("operational", typeof(OperationalDecomposer)),
         ("atomic2020", typeof(Atomic2020Decomposer)),
         ("conceptnet", typeof(ConceptNetDecomposer)),
         ("wiktionary", typeof(WiktionaryDecomposer)),
-        ("omw", typeof(OMWDecomposer)),
         ("wordnet", typeof(WordNetDecomposer)),
         ("tatoeba", typeof(TatoebaDecomposer)),
         ("opensubtitles", typeof(OpenSubtitlesDecomposer)),
-        ("verbnet", typeof(VerbNetDecomposer)),
         ("semlink", typeof(SemLinkDecomposer)),
         ("mapnet", typeof(MapNetDecomposer)),
         ("wordframenet", typeof(WordFrameNetDecomposer)),
-        ("cili", typeof(CILIDecomposer)),
         ("code", typeof(CodeDecomposer)),
         ("repo", typeof(RepoDecomposer)),
         ("tabular", typeof(TabularDecomposer)),
@@ -132,6 +126,20 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
         }
         decomposer = new Structured.Decomposer<SourceGenerationRecipe>(recipe, resolvedRoot, scope: scope);
         return true;
+    }
+
+    /// <summary>
+    /// A selected generation reads exactly one root. A root that does not exist is a
+    /// configuration error (wrong manifest root, data not fetched): fail now rather than
+    /// admit an empty or partial generation, and never fall back to another provider.
+    /// </summary>
+    public static void RequireGenerationRoot(string sourceKey, string resolvedRoot)
+    {
+        if (!Directory.Exists(resolvedRoot))
+            throw new DirectoryNotFoundException(
+                $"Source generation '{sourceKey}' root '{resolvedRoot}' does not exist. Fetch the set "
+                + "(Laplace-Operations data.sh / data.tsv) or pass the generation's root; the built-in "
+                + "decomposer is not a fallback for a recipe-owned source.");
     }
 
     public IDecomposer Resolve(string sourceKey)
