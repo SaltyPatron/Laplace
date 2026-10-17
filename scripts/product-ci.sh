@@ -50,6 +50,10 @@ run_ci_contract_checks() {
     scripts/web-artifact.py \
     scripts/atomic-directory-exchange.py
   python3 scripts/validate-pipeline.py
+  # A BEGIN ATOMIC body binds its callees at CREATE: the install and upgrade manifests must
+  # define every callee first, or a fresh CREATE EXTENSION fails (42883 on staging).
+  python3 scripts/check-sql-manifest-dependencies.py
+  python3 scripts/test-sql-manifest-dependencies.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-runtime-installation.py
   python3 scripts/test-service-units.py
