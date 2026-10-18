@@ -36,7 +36,7 @@ Acceptance:
 - A failed activation or an exited worker retries on a 5s, 10s, 30s, 60s schedule while the selected profile stays in force. A new selection revision retries immediately. Off does not retry.
 - `ChessRuntimeConfiguration` treats an unreadable installed environment file as absent. `ChessEngineConnections` turns an unreadable connector file into `ArgumentException`. `/chess/lab/catalog` returns an empty connection list and `connectionError` instead of HTTP 500. There is no `/v1/admin/overview` route; the admin overview section does not read this file.
 
-The committed UCI declaration `Laplace-UCI/installations/hart-server.json` contains `mono-staging` only. A host `connector.json` that adds `mono-prod` is a rendered installation. Laplace main delivery restarts `laplace-mono-lichess` and does not run `Laplace-UCI/setup.py`. Laplace-UCI CI publishes the connector and does not render `/etc/laplace-mono/uci/connector.json`. Until `setup.py` is run on hart-server and hart-prod, those host files can still list `/opt/laplace/app/laplace-api.env`.
+The committed UCI declaration `Laplace-UCI/installations/hart-server.json` contains `mono-staging` only. A host `connector.json` that adds `mono-prod` is a rendered installation. Laplace main delivery restarts `laplace-mono-lichess` and, when `/etc/laplace-mono/uci/delivery.json` is present, asks the root path unit to run `setup.py --refresh`. That refresh rewrites `connector.json` from the installed declaration and drops `laplace-api.env` from every profile. Chess host setup arms the path unit when the declaration has `uci_setup`. Laplace-UCI CI publishes the connector and does not itself render the host file.
 
 ## Sprint 2 — Move selection
 

@@ -448,7 +448,7 @@ phase_restart() {
     sleep 2
     current=$(systemctl show -p InvocationID --value laplace-api)
     [[ -n "$current" && "$current" != "$previous" && "$(systemctl show -p ActiveState --value laplace-api 2>/dev/null)" == active ]] &&
-      curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; restart_mcp; restart_chess_controller; return 0; }
+      curl -fsS -m 5 "$LAPLACE_API_URL/health" >/dev/null 2>&1 && { echo "  up after $((i * 2)) s"; restart_mcp; restart_chess_controller; refresh_uci_connector; return 0; }
   done
   systemctl status laplace-api --no-pager 2>&1 | tail -20 || true
   fail "laplace-api did not answer $LAPLACE_API_URL/health within 180 s"
@@ -502,6 +502,42 @@ PY
     fi
   done
   fail "The installed chess controller did not restart within 180 s"
+}
+
+# The runner has no sudo. Chess host setup installs a root path unit that runs
+# setup.py --refresh when this trigger changes. A host with no delivery.json has
+# not armed that unit yet; API delivery still proceeds.
+refresh_uci_connector() {
+  local declaration="/etc/laplace-mono/uci/delivery.json"
+  [[ -f "$declaration" ]] || { echo "  UCI connector render is not armed on this host"; return 0; }
+  local values service trigger unit rest previous current i
+  values=$(python3 - "$declaration" <<'PY'
+import json, re, sys
+c = json.load(open(sys.argv[1]))
+if (not re.fullmatch(r'[a-zA-Z0-9_-]+\.service', c['service'])
+        or not re.fullmatch(r'/[a-zA-Z0-9_./-]+', c['trigger'])
+        or not re.fullmatch(r'[a-z0-9-]+\.path', c['unit'])):
+    raise ValueError('Invalid installed UCI delivery declaration')
+print(c['service'])
+print(c['trigger'])
+print(c['unit'])
+PY
+  ) || fail "Cannot read the installed UCI delivery declaration"
+  service=${values%%$'\n'*}
+  rest=${values#*$'\n'}
+  trigger=${rest%%$'\n'*}
+  unit=${rest#*$'\n'}
+  systemctl is-active --quiet "$unit" || fail "UCI connector render path is not installed or active"
+  previous=$(systemctl show -p InvocationID --value "$service")
+  date -u +%FT%TZ > "$trigger"
+  for i in $(seq 45); do
+    sleep 2
+    current=$(systemctl show -p InvocationID --value "$service")
+    if [[ -n "$current" && "$current" != "$previous" && "$(systemctl show -p ActiveState --value "$service")" == active ]]; then
+      echo "  $service re-rendered for the delivered revision"; return 0
+    fi
+  done
+  fail "The installed UCI connector did not re-render within 90 s"
 }
 
 # ------------------------------------------------------------------------------------------------ bundle, receive

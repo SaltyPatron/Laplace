@@ -208,6 +208,41 @@ def export_certificate(c, private):
         identity.request(enrollment, 'auth/token/revoke-self', token, {})
 
 
+def arm_uci_delivery(c, units):
+    """Ask later deliveries to re-render connector.json without a hand edit of /etc."""
+    dependency = c.get('uci_setup')
+    trigger = c.get('restart_trigger')
+    if not isinstance(dependency, dict) or not trigger:
+        return None
+    declared_path = Path(dependency.get('configuration', ''))
+    if not declared_path.is_file():
+        return None
+    declared = json.loads(declared_path.read_text())
+    configuration = Path(declared['configuration_directory'])
+    installed_setup = configuration / 'setup.py'
+    installed_json = configuration / 'installation.json'
+    if not installed_setup.is_file() or not installed_json.is_file():
+        return None
+    refresh_trigger = str(Path(trigger).parent / 'refresh-uci')
+    if not re.fullmatch(r'/[a-zA-Z0-9_./-]+', refresh_trigger):
+        raise ValueError('Invalid UCI refresh trigger.')
+    service = declared['service']
+    if not re.fullmatch(r'[a-z][a-z0-9-]+', service):
+        raise ValueError('Invalid UCI service identity.')
+    for path in (installed_setup, installed_json):
+        if not re.fullmatch(r'/[a-zA-Z0-9_./-]+', str(path)):
+            raise ValueError('Invalid installed UCI path: ' + str(path))
+    unit = 'laplace-mono-uci-render'
+    command = '/usr/bin/python3 ' + str(installed_setup) + ' --refresh ' + str(installed_json)
+    identity.write(units / (unit + '.service'),
+        '[Unit]\nDescription=Re-render the Laplace UCI connector after delivery\n[Service]\nType=oneshot\nExecStart=' + command + '\n', 0o644)
+    identity.write(units / (unit + '.path'),
+        '[Unit]\nDescription=Laplace UCI connector delivery render request\n[Path]\nPathChanged=' + refresh_trigger + '\n[Install]\nWantedBy=multi-user.target\n', 0o644)
+    identity.write(configuration / 'delivery.json', json.dumps({
+        'service': service + '.service', 'trigger': refresh_trigger, 'unit': unit + '.path'}), 0o644)
+    return unit
+
+
 def install(c, source, enrollment_path):
     if os.geteuid() != 0:
         raise ValueError('Run the host installation with sudo.')
@@ -298,9 +333,12 @@ def install(c, source, enrollment_path):
         identity.write(units / (restart + '.service'), '[Unit]\nDescription=Restart the declared monorepo chess controller after delivery\n[Service]\nType=oneshot\nExecStart=/usr/bin/systemctl restart ' + c['service'] + '.service\n', 0o644)
         identity.write(units / (restart + '.path'), '[Unit]\nDescription=Monorepo chess delivery restart request\n[Path]\nPathChanged=' + trigger + '\n[Install]\nWantedBy=multi-user.target\n', 0o644)
         identity.write(directory / 'deployment.json', json.dumps({'service': c['service'] + '.service', 'trigger': trigger}), 0o644)
+    uci_render = arm_uci_delivery(c, units)
     identity.run(['systemctl', 'daemon-reload'])
     if c.get('command'):
         identity.run(['systemctl', 'enable', '--now', restart + '.path'])
+    if uci_render:
+        identity.run(['systemctl', 'enable', '--now', uci_render + '.path'])
     identity.run(['systemctl', 'stop', credentials])
     (private / 'candidate.json').unlink(missing_ok=True)
     before = time.time()
