@@ -42,7 +42,9 @@ public sealed class SubstrateCountsExactTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var ingestOps = Path.Combine(
             repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIngestOps.cs");
-        var text = File.ReadAllText(ingestOps);
+        var caller = File.ReadAllText(ingestOps);
+        Assert.Contains("NpgsqlCatalog.Command(conn, null, \"ingest.analyze_core_write_tables\")", caller, StringComparison.Ordinal);
+        var text = Laplace.Engine.Core.SqlCatalog.Get("ingest.analyze_core_write_tables").Text;
 
         Assert.Contains("ANALYZE laplace.attestations", text, StringComparison.Ordinal);
         Assert.Contains("ANALYZE laplace.consensus", text, StringComparison.Ordinal);

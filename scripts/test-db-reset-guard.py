@@ -108,38 +108,57 @@ class DeclaredAccess(unittest.TestCase):
             self.assertIn("no declaration at", out)
 
 
-class ReseedAnalyze(unittest.TestCase):
-    """A seed leaves statistics the site can read (Laplace#1879).
+class SeedRoleAnalyzes(unittest.TestCase):
+    """A seed leaves statistics the site can read, as the seed role, by construction (Laplace#1879).
 
-    The seed role has no MAINTAIN on the postgres-owned substrate tables, so its own post-ingest
-    ANALYZE is skipped with a WARNING, and autovacuum never analyzes a partitioned parent: the
-    reltuples/pg_stats census behind /v1/explore/catalog read 0 on a freshly seeded database.
-    The reseed scripts ANALYZE as postgres, the owner, after the seed.
+    The site's counts are pg_class.reltuples / pg_stats. ANALYZE by a role without MAINTAIN on a
+    table or a leaf partition skips it with only a WARNING, so the seed role is granted MAINTAIN by
+    the declared access db-reset applies, db-reset checks it, the CLI's post-ingest ANALYZE fails on
+    any skipped table, and no reseed step runs ANALYZE as the tables' owner.
     """
 
-    def test_analyze_runs_as_the_owner_on_the_named_database(self):
-        script = text("analyze-substrate.cmd")
-        guard = script.index('call "%~dp0require-dbname.cmd" || exit /b 2')
-        call = script.index('-U postgres -d "%LAPLACE_DBNAME%" -v ON_ERROR_STOP=1 -c "CALL ops.analyze_substrate();" || exit /b 1')
-        self.assertLess(guard, call)
-        self.assertIn("ops.substrate_counts()", script[call:])
+    def test_reset_checks_the_seed_role_may_maintain_every_substrate_table(self):
+        script = text("apply-declared-access.ps1")
+        usage = script.index("has_schema_privilege('$role', 'laplace', 'USAGE')")
+        maintain = script.index("NOT has_table_privilege('$role', c.oid, 'MAINTAIN')")
+        self.assertLess(usage, maintain)
+        self.assertIn("c.relkind IN ('r', 'p')", script)
+        self.assertIn("'laplace', 'realize', 'consensus', 'generation'", script)
+        self.assertRegex(script[maintain:], r"if \(\$count -ne '0'\) \{ throw ")
 
-    def test_foundation_analyzes_once_after_its_last_step(self):
-        seed = text("seed-foundation.cmd")
-        self.assertLess(seed.index('set "LAPLACE_SEED_NO_ANALYZE=1"'), seed.index("for %%S in ("))
-        done = seed.index(":done")
-        analyze = seed.index('call "%~dp0analyze-substrate.cmd"')
-        self.assertLess(done, analyze)
-        self.assertLess(analyze, seed.index("seed-foundation finished"))
-        self.assertIn('set "ERR=1"', seed[analyze:seed.index("seed-foundation finished")])
+    def test_no_reseed_step_analyzes_as_the_owner(self):
+        self.assertFalse((WIN / "analyze-substrate.cmd").exists(),
+                         "the postgres ANALYZE workaround is gone: the seed role analyzes what it writes")
+        for name in ("seed-foundation.cmd", "seed-step.cmd", "seed-chain.cmd", "seed-everything.cmd"):
+            script = text(name)
+            self.assertNotIn("analyze-substrate", script, name)
+            self.assertNotIn("LAPLACE_SEED_NO_ANALYZE", script, name)
+            self.assertIsNone(re.search(r'-U postgres\b.*ANALYZE', script, re.I), name)
 
-    def test_a_single_step_analyzes_after_it_verifies(self):
-        step = text("seed-step.cmd")
-        verify = step.index("call :verify_step\nif errorlevel 1 exit /b %ERRORLEVEL%")
-        skip = step.index('if "%LAPLACE_SEED_NO_ANALYZE%"=="1" exit /b 0')
-        analyze = step.index('call "%~dp0analyze-substrate.cmd"')
-        self.assertLess(verify, skip)
-        self.assertLess(skip, analyze)
+    def test_cli_post_ingest_analyze_fails_on_a_skipped_table(self):
+        ops = (ROOT / "app" / "Laplace.Substrate" / "Crud" / "Npgsql" / "NpgsqlIngestOps.cs").read_text(encoding="utf-8")
+        body = ops[ops.index("AnalyzePostIngestValidationAsync("):]
+        self.assertLess(body.index('NpgsqlCatalog.Command(conn, null, "ingest.analyze_post_ingest_validation")'),
+                body.index("AnalyzeOrThrowAsync(command,"))
+        self.assertLess(body.index("AnalyzeOrThrowAsync(command,"), body.index("public sealed record GinMaintenance"))
+        self.assertIn('InvariantSeverity, "WARNING"', ops)
+        cli = (ROOT / "app" / "Laplace.Cli" / "IngestCommands.cs").read_text(encoding="utf-8")
+        catch = cli.index("catch (AnalyzeIncompleteException ex) { analyzeFailure = ex; }")
+        self.assertLess(catch, cli.index('warn: ingest validation failed'),
+                        "a skipped ANALYZE is caught before the advisory validation warning")
+        tail = cli[catch:]
+        fail = tail.index("if (analyzeFailure is not null)")
+        self.assertLess(fail, tail.index("return 1;", fail))
+        self.assertLess(tail.index("return 1;", fail), tail.index("return 0;"))
+
+    def test_analyze_substrate_raises_on_a_skipped_or_failed_table(self):
+        sql = (ROOT / "extension" / "laplace_substrate" / "sql" / "functions" / "ops" / "repair.sql.in").read_text(encoding="utf-8")
+        proc = sql[sql.index("CREATE OR REPLACE PROCEDURE ops.analyze_substrate"):]
+        self.assertLess(proc.index("NOT pg_catalog.has_table_privilege(p.relid, 'MAINTAIN')"),
+                        proc.index("EXECUTE format('ANALYZE %s', t.rel)"))
+        self.assertIn("pg_partition_tree(c.oid)", proc)
+        self.assertIn("failed ANALYZE", proc)
+        self.assertTrue((ROOT / "tests" / "substrate-analyze-substrate.sh").exists())
 
 
 if __name__ == "__main__":
