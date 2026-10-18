@@ -83,10 +83,10 @@ public sealed class ChessSearchProviderReceiptTests
     {
         long clock = 0;
         int reads = 0;
-        var bias = new SubstrateRootBias((_, _, _, _) =>
+        var bias = new SubstrateRootBias((_, _, _, _, _, _) =>
         {
             reads++;
-            return (Empty(), Empty());
+            return (Empty(), Empty(), Empty());
         }, clock: () => clock);
         var board = Board.FromFen(ChessModality.StartFen);
         var moves = MoveGen.Legal(board);
@@ -141,10 +141,10 @@ public sealed class ChessSearchProviderReceiptTests
     public void FailedEvidenceReadRemainsInItsConfigurationAndRetryStartsAtZero()
     {
         int reads = 0;
-        var bias = new SubstrateRootBias((_, _, _, _) =>
+        var bias = new SubstrateRootBias((_, _, _, _, _, _) =>
         {
             if (++reads == 1) throw new InvalidOperationException("controlled backend failure");
-            return (Empty(), Empty());
+            return (Empty(), Empty(), Empty());
         });
         var board = Board.FromFen(ChessModality.StartFen);
         var moves = MoveGen.Legal(board);

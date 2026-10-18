@@ -34,14 +34,14 @@ public sealed class SubstrateRootBiasTests
 
         var bonus = bias.Bonus(fixture.Board, fixture.Moves);
 
-        Assert.Equal(96, bonus[fixture.Index]);
+        Assert.Equal(ChessShrink.ContextFreeTiebreakCp, bonus[fixture.Index]);
         Assert.Equal(0, bias.ExactTransitionSignals);
         Assert.Equal(1, bias.RootsWithMoveEvidence);
         Assert.Equal(1, bias.MovePhysicalitySignals);
     }
 
     [Fact]
-    public void ExactTransitionAndMovePhysicalityAreFusedNotDoubleCounted()
+    public void ExactTransitionDoesNotMixTheContextFreeMove()
     {
         var fixture = Start("d2d4");
         var bias = Bias((ids, type) => type switch
@@ -55,9 +55,56 @@ public sealed class SubstrateRootBiasTests
 
         var bonus = bias.Bonus(fixture.Board, fixture.Moves);
 
-        Assert.Equal(0, bonus[fixture.Index]);
+        Assert.Equal(80, bonus[fixture.Index]);
         Assert.Equal(1, bias.ExactTransitionSignals);
-        Assert.Equal(1, bias.MovePhysicalitySignals);
+        Assert.Equal(0, bias.MovePhysicalitySignals);
+        Assert.Equal(0, bias.RootsWithMoveEvidence);
+    }
+
+    [Fact]
+    public void TenWitnessesAtUnitPrecisionKeepTwoThirdsOfTheExactEdge()
+    {
+        var fixture = Start("e2e4");
+        var bias = ExactBias(fixture, resultPoints: 9, resultWitnesses: 10, resultRd: 0);
+
+        Assert.Equal(48, bias.Bonus(fixture.Board, fixture.Moves)[fixture.Index]);
+        Assert.Equal(15_000d, ChessShrink.DefaultK0);
+        Assert.Equal(5d, ChessShrink.ExactTransitionK0);
+    }
+
+    [Fact]
+    public void TighterDeviationAndWitnessedEvaluationIncreasePrecisionWithoutUsingTheEvaluationMean()
+    {
+        var fixture = Start("e2e4");
+        var ordinary = ExactBias(fixture, 9, 10, 0);
+        var stronger = ExactBias(fixture, 9, 10, GlickoPriors.InitialRd / 2d);
+        var checkedLine = ExactBias(
+            fixture, 9, 10, GlickoPriors.InitialRd,
+            evaluationPoints: 500, evaluationWitnesses: 10, evaluationRd: 0);
+
+        int ordinaryCp = ordinary.Bonus(fixture.Board, fixture.Moves)[fixture.Index];
+        int strongerCp = stronger.Bonus(fixture.Board, fixture.Moves)[fixture.Index];
+        int checkedCp = checkedLine.Bonus(fixture.Board, fixture.Moves)[fixture.Index];
+
+        Assert.Equal(48, ordinaryCp);
+        Assert.Equal(64, strongerCp);
+        Assert.Equal(58, checkedCp);
+    }
+
+    [Fact]
+    public void ContextFreeTiebreakStaysInsideThreeCentipawns()
+    {
+        var large = Start("g1f3");
+        var loud = Bias((ids, type) => type == ChessVocabulary.OutcomeType
+            ? Present(ids, large.MoveOutcomeEdge, +12) : Empty());
+        var quiet = Bias((ids, type) => type == ChessVocabulary.OutcomeType
+            ? Present(ids, large.MoveOutcomeEdge, 0.2) : Empty());
+        var loss = Bias((ids, type) => type == ChessVocabulary.OutcomeType
+            ? Present(ids, large.MoveOutcomeEdge, -12) : Empty());
+
+        Assert.Equal(3, loud.Bonus(large.Board, large.Moves)[large.Index]);
+        Assert.Equal(2, quiet.Bonus(large.Board, large.Moves)[large.Index]);
+        Assert.Equal(-3, loss.Bonus(large.Board, large.Moves)[large.Index]);
     }
 
     [Fact]
@@ -67,10 +114,10 @@ public sealed class SubstrateRootBiasTests
         int reads = 0;
         long version = 0;
         var bias = new SubstrateRootBias(
-            (firstIds, firstType, secondIds, secondType) =>
+            (firstIds, _, _, _, _, _) =>
             {
                 reads++;
-                return (Present(firstIds, fixture.TransitionEdge, +10), Empty());
+                return (Present(firstIds, fixture.TransitionEdge, +10), Empty(), Empty());
             },
             cpPerPoint: 8d, capCp: 150, shrinkK0: 0d,
             version: (_, _) => version);
@@ -130,7 +177,7 @@ public sealed class SubstrateRootBiasTests
         var fixture = Start("e2e4");
         long clock = 0;
         int reads = 0;
-        var bias = new SubstrateRootBias((_, _, _, _) => { reads++; return (Empty(), Empty()); },
+        var bias = new SubstrateRootBias((_, _, _, _, _, _) => { reads++; return (Empty(), Empty(), Empty()); },
             clock: () => clock);
         for (int i = 0; i < 100; i++)
         {
@@ -165,7 +212,7 @@ public sealed class SubstrateRootBiasTests
         using var release = new ManualResetEventSlim();
         long version = 0;
         int reads = 0;
-        var bias = new SubstrateRootBias((_, _, _, _) =>
+        var bias = new SubstrateRootBias((_, _, _, _, _, _) =>
         {
             if (Interlocked.Increment(ref reads) == 1)
             {
@@ -173,7 +220,7 @@ public sealed class SubstrateRootBiasTests
                 if (!release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
                 throw new InvalidOperationException("old database observation failed");
             }
-            return (Empty(), Empty());
+            return (Empty(), Empty(), Empty());
         }, version: (_, _) => Interlocked.Read(ref version));
         var old = Task.Run(() => Record.Exception(() => bias.Bonus(fixture.Board, fixture.Moves)));
         try
@@ -193,9 +240,23 @@ public sealed class SubstrateRootBiasTests
     private static SubstrateRootBias Bias(
         Func<IReadOnlyCollection<Hash128>, Hash128,
             IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row>> read)
-        => new((firstIds, firstType, secondIds, secondType) =>
-                (read(firstIds, firstType), read(secondIds, secondType)),
+        => new((firstIds, firstType, secondIds, secondType, _, _) =>
+                (read(firstIds, firstType), read(secondIds, secondType), Empty()),
             cpPerPoint: 8d, capCp: 150, shrinkK0: 0d);
+
+    private static SubstrateRootBias ExactBias(
+        Fixture fixture, double resultPoints, double resultWitnesses, double resultRd,
+        double evaluationPoints = 0, double evaluationWitnesses = 0, double evaluationRd = 0)
+        => new((firstIds, firstType, _, _, evaluationIds, _) =>
+        {
+            var transitions = firstType == ChessVocabulary.MoveType
+                ? Row(firstIds, fixture.TransitionEdge, resultPoints, resultWitnesses, resultRd)
+                : Empty();
+            var evaluations = evaluationWitnesses > 0
+                ? Row(evaluationIds, fixture.EvaluationEdge, evaluationPoints, evaluationWitnesses, evaluationRd)
+                : Empty();
+            return (transitions, Empty(), evaluations);
+        });
 
     private static IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Present(
         IReadOnlyCollection<Hash128> requested, Hash128 id, double points)
@@ -207,6 +268,16 @@ public sealed class SubstrateRootBiasTests
                 GlickoPriors.NeutralMu + points * 1e9,
                 Rd: 0d,
                 Witnesses: 100d),
+        };
+    }
+
+    private static IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Row(
+        IReadOnlyCollection<Hash128> requested, Hash128 id, double points, double witnesses, double rd)
+    {
+        Assert.Contains(id, requested);
+        return new Dictionary<Hash128, NpgsqlConsensusByIds.Row>
+        {
+            [id] = new(GlickoPriors.NeutralMu + points * 1e9, rd, witnesses),
         };
     }
 
@@ -232,10 +303,11 @@ public sealed class SubstrateRootBiasTests
             state.Board, moves, index,
             ConsensusKeys.EdgeId(rootId, ChessVocabulary.MoveType, nextId),
             ConsensusKeys.EdgeId(
-                moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject));
+                moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject),
+            ConsensusKeys.EdgeId(nextId, ChessVocabulary.HasEvalType, ChessVocabulary.HasEvalObject));
     }
 
     private sealed record Fixture(
         Board Board, IReadOnlyList<ChessMove> Moves, int Index,
-        Hash128 TransitionEdge, Hash128 MoveOutcomeEdge);
+        Hash128 TransitionEdge, Hash128 MoveOutcomeEdge, Hash128 EvaluationEdge);
 }

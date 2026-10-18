@@ -12,7 +12,8 @@ public sealed class SubstrateRootBias : IRootBias
 {
     private sealed record Evidence(
         IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Transitions,
-        IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Moves);
+        IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Moves,
+        IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Evaluations);
     // Equality retains the complete ordered legal frontier, including flags/promotion.
     // A position-only cache can reuse evidence for a different filtered frontier.
     private sealed class FrontierKey(Hash128 root, IReadOnlyList<ChessMove> moves) : IEquatable<FrontierKey>
@@ -30,7 +31,8 @@ public sealed class SubstrateRootBias : IRootBias
             return hash.ToHashCode();
         }
     }
-    private sealed record Frontier(Hash128[] MoveIds, Hash128[] TransitionEdges, Hash128[] MoveOutcomeEdges);
+    private sealed record Frontier(
+        Hash128[] MoveIds, Hash128[] TransitionEdges, Hash128[] MoveOutcomeEdges, Hash128[] EvaluationEdges);
     private sealed record CacheEntry(long Version, long ExpiresAt, Lazy<Frontier> Frontier, Lazy<Evidence> Value);
 
     private readonly double _cpPerPoint;
@@ -39,8 +41,10 @@ public sealed class SubstrateRootBias : IRootBias
     private readonly Func<
         IReadOnlyCollection<Hash128>, Hash128,
         IReadOnlyCollection<Hash128>, Hash128,
-        (IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> First,
-         IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Second)> _read;
+        IReadOnlyCollection<Hash128>, Hash128,
+        (IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Transitions,
+         IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Moves,
+         IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Evaluations)> _read;
     private readonly Func<Hash128, IReadOnlyList<Hash128>, long> _version;
     private readonly ConcurrentDictionary<FrontierKey, CacheEntry> _cache = new();
     private readonly ConcurrentQueue<FrontierKey> _cacheOrder = new();
@@ -94,11 +98,11 @@ public sealed class SubstrateRootBias : IRootBias
         _capCp = capCp;
         _shrinkK0 = shrinkK0;
         _version = ChessTransitionObservations.Version;
-        _read = (firstIds, firstType, secondIds, secondType) =>
+        _read = (transitionIds, transitionType, moveIds, moveType, evaluationIds, evaluationType) =>
         {
-            var pair = NpgsqlConsensusByIds.ReadPair(
-                ds, firstIds, firstType, secondIds, secondType);
-            return (pair.First, pair.Second);
+            var read = NpgsqlConsensusByIds.ReadTriple(
+                ds, transitionIds, transitionType, moveIds, moveType, evaluationIds, evaluationType);
+            return (read.First, read.Second, read.Third);
         };
     }
 
@@ -106,8 +110,10 @@ public sealed class SubstrateRootBias : IRootBias
         Func<
             IReadOnlyCollection<Hash128>, Hash128,
             IReadOnlyCollection<Hash128>, Hash128,
-            (IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> First,
-             IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Second)> read,
+            IReadOnlyCollection<Hash128>, Hash128,
+            (IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Transitions,
+             IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Moves,
+             IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Evaluations)> read,
         double cpPerPoint = 8.0, int capCp = 150, double? shrinkK0 = null,
         Func<Hash128, IReadOnlyList<Hash128>, long>? version = null, Func<long>? clock = null)
     {
@@ -152,9 +158,10 @@ public sealed class SubstrateRootBias : IRootBias
                     long started = Stopwatch.GetTimestamp();
                     try
                     {
-                        var pair = _read(frontier.TransitionEdges, ChessVocabulary.MoveType,
-                            frontier.MoveOutcomeEdges, ChessVocabulary.OutcomeType);
-                        return new Evidence(pair.First, pair.Second);
+                        var read = _read(frontier.TransitionEdges, ChessVocabulary.MoveType,
+                            frontier.MoveOutcomeEdges, ChessVocabulary.OutcomeType,
+                            frontier.EvaluationEdges, ChessVocabulary.HasEvalType);
+                        return new Evidence(read.Transitions, read.Moves, read.Evaluations);
                     }
                     finally
                     {
@@ -183,19 +190,30 @@ public sealed class SubstrateRootBias : IRootBias
         var identities = entry.Frontier.Value;
         var transitionEdgeIds = identities.TransitionEdges;
         var moveOutcomeEdgeIds = identities.MoveOutcomeEdges;
+        var evaluationEdgeIds = identities.EvaluationEdges;
         var transitions = evidence.Transitions;
         var moveOutcomes = evidence.Moves;
+        var evaluations = evidence.Evaluations;
         bool rootExact = false, rootMove = false;
         for (int i = 0; i < moves.Count; i++)
         {
             double weightedDeviation = 0d, totalWeight = 0d;
-            if (transitions.TryGetValue(transitionEdgeIds[i], out var exact))
+            // An exact transition is the witnessed continuation. The context-free
+            // move average is only a tiebreak when that continuation is absent.
+            bool exactFound = transitions.TryGetValue(transitionEdgeIds[i], out var exact);
+            if (exactFound)
             {
-                AddSignal(exact, ref weightedDeviation, ref totalWeight);
+                double calculatedWitnesses = 0d, calculatedRd = 0d;
+                if (evaluations.TryGetValue(evaluationEdgeIds[i], out var evaluation))
+                {
+                    calculatedWitnesses = evaluation.Witnesses;
+                    calculatedRd = evaluation.Rd;
+                }
+                AddExactSignal(exact, calculatedWitnesses, calculatedRd, ref weightedDeviation, ref totalWeight);
                 rootExact = true;
                 Interlocked.Increment(ref _exactTransitionSignals);
             }
-            if (moveOutcomes.TryGetValue(moveOutcomeEdgeIds[i], out var move))
+            else if (moveOutcomes.TryGetValue(moveOutcomeEdgeIds[i], out var move))
             {
                 AddSignal(move, ref weightedDeviation, ref totalWeight);
                 rootMove = true;
@@ -203,7 +221,10 @@ public sealed class SubstrateRootBias : IRootBias
             }
             if (totalWeight == 0d) continue;
             double pts = weightedDeviation / totalWeight / 1e9;
-            bonus[i] = Math.Clamp((int)Math.Round(_cpPerPoint * pts), -_capCp, _capCp);
+            int cp = (int)Math.Round(_cpPerPoint * pts);
+            bonus[i] = exactFound
+                ? Math.Clamp(cp, -_capCp, _capCp)
+                : Math.Clamp(cp, -ChessShrink.ContextFreeTiebreakCp, ChessShrink.ContextFreeTiebreakCp);
         }
         if (rootExact) Interlocked.Increment(ref _rootsWithExactEvidence);
         if (rootMove) Interlocked.Increment(ref _rootsWithMoveEvidence);
@@ -219,6 +240,7 @@ public sealed class SubstrateRootBias : IRootBias
             var moveIds = new Hash128[key.Moves.Length];
             var transitions = new Hash128[key.Moves.Length];
             var outcomes = new Hash128[key.Moves.Length];
+            var evaluations = new Hash128[key.Moves.Length];
             for (int i = 0; i < key.Moves.Length; i++)
             {
                 ChessMove move = key.Moves[i];
@@ -243,8 +265,9 @@ public sealed class SubstrateRootBias : IRootBias
                 }
                 transitions[i] = ConsensusKeys.EdgeId(key.Root, ChessVocabulary.MoveType, toId);
                 outcomes[i] = ConsensusKeys.EdgeId(moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
+                evaluations[i] = ConsensusKeys.EdgeId(toId, ChessVocabulary.HasEvalType, ChessVocabulary.HasEvalObject);
             }
-            return new Frontier(moveIds, transitions, outcomes);
+            return new Frontier(moveIds, transitions, outcomes, evaluations);
         }
         finally
         {
@@ -257,6 +280,21 @@ public sealed class SubstrateRootBias : IRootBias
         while ((_cache.Count > CacheCapacity || _cacheOrder.Count > CacheCapacity)
                && _cacheOrder.TryDequeue(out var oldest))
             _cache.TryRemove(oldest, out _);
+    }
+
+    private void AddExactSignal(
+        NpgsqlConsensusByIds.Row result, double calculatedWitnesses, double calculatedRd,
+        ref double weightedDeviation, ref double totalWeight)
+    {
+        double confidence = GlickoPriors.InitialRd /
+                            (GlickoPriors.InitialRd + Math.Max(0d, result.Rd));
+        double weight = Math.Sqrt(Math.Max(1d, result.Witnesses)) * confidence;
+        // calculatedWitnesses is the HAS_EVAL count. result.EffMu is the recorded
+        // outcome. The evaluation mean is not readable from here.
+        double shrunk = ChessShrink.ApplyExact(
+            result.EffMu, result.Witnesses, result.Rd, calculatedWitnesses, calculatedRd, _shrinkK0);
+        weightedDeviation += (shrunk - GlickoPriors.NeutralMu) * weight;
+        totalWeight += weight;
     }
 
     private void AddSignal(

@@ -68,6 +68,52 @@ public static class NpgsqlConsensusByIds
         return (first, second);
     }
 
+    /// <summary>
+    /// Reads three relation batches, each pruned to its own partition, in one command.
+    /// The leading discriminator is 0, 1, or 2.
+    /// </summary>
+    public static (
+        Dictionary<Hash128, Row> First,
+        Dictionary<Hash128, Row> Second,
+        Dictionary<Hash128, Row> Third) ReadTriple(
+        NpgsqlDataSource dataSource,
+        IReadOnlyCollection<Hash128> firstIds, Hash128 firstRelationType,
+        IReadOnlyCollection<Hash128> secondIds, Hash128 secondRelationType,
+        IReadOnlyCollection<Hash128> thirdIds, Hash128 thirdRelationType)
+    {
+        using var conn = dataSource.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT 0, id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)
+            UNION ALL
+            SELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)
+            UNION ALL
+            SELECT 2, id, eff_mu, rd, witness_count FROM consensus.by_ids($5, $6)
+            """;
+        AddIds(cmd, firstIds);
+        AddType(cmd, firstRelationType);
+        AddIds(cmd, secondIds);
+        AddType(cmd, secondRelationType);
+        AddIds(cmd, thirdIds);
+        AddType(cmd, thirdRelationType);
+        using var reader = cmd.ExecuteReader();
+        var first = new Dictionary<Hash128, Row>(firstIds.Count);
+        var second = new Dictionary<Hash128, Row>(secondIds.Count);
+        var third = new Dictionary<Hash128, Row>(thirdIds.Count);
+        while (reader.Read())
+        {
+            var target = reader.GetInt32(0) switch
+            {
+                0 => first,
+                1 => second,
+                _ => third,
+            };
+            target[Hash128.FromBytes((byte[])reader[1])] =
+                new Row(reader.GetDouble(2), reader.GetDouble(3), reader.GetDouble(4));
+        }
+        return (first, second, third);
+    }
+
     public static async Task<Dictionary<Hash128, Row>> ReadAsync(
         NpgsqlDataSource dataSource, IReadOnlyCollection<Hash128> edgeIds, Hash128 relationType,
         CancellationToken ct = default)

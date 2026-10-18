@@ -40,7 +40,7 @@ The committed UCI declaration `Laplace-UCI/installations/hart-server.json` conta
 
 ## Sprint 2 — Move selection
 
-`ChessShrink.DefaultK0` is 15,000. `SubstrateRootBias` applies that shrinkage, and `Search` consults the root bias at ply 0. An exact `(position, MOVE, next position)` transition with a few dozen witnesses is reduced to zero centipawns after integer rounding. Context-free move averages are mixed with those exact transitions. Leaf evaluation averages piece-square atoms and does not see pawn structure, king safety, or a witnessed position evaluation.
+Turn scoring and `LearnedPst` still shrink with `ChessShrink.DefaultK0` of 15,000. Exact root transitions use prior strength 5. `Search` still consults that bias at ply 0 only. Leaf evaluation still averages piece-square atoms and does not see pawn structure, king safety, or a witnessed position evaluation.
 
 Acceptance:
 
@@ -48,6 +48,8 @@ Acceptance:
 - Interior nodes can order and blend from a position table seeded by witnessed evaluations, openings, and the active game. The table is a cache of substrate state, not a second source of identity.
 - Leaf evaluation adds pawn structure, bishop pair, open-file rooks, mobility, king safety, and hanging-piece pressure, blended with witnessed `EVAL_CP` by precision.
 - With the 3-4-5 Syzygy set loaded, root moves are filtered by DTZ and interior nodes return WDL when five or fewer pieces remain.
+
+`SubstrateRootBias` keeps the exact-transition contract. Ten result witnesses at unit precision use prior strength 5. A tighter result deviation, and a witnessed `HAS_EVAL` count on the arrival position, increase precision. The evaluation's centipawn mean stays out of the recorded-result mean. A context-free move average is not mixed into an exact transition, and without one it is clamped to 3 centipawns.
 
 ## Sprint 3 — Commentary and concepts
 
