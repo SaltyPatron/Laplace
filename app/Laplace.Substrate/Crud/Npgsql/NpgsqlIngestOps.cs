@@ -46,22 +46,16 @@ public static class NpgsqlIngestOps
         NpgsqlDataSource ds, CancellationToken ct = default)
     {
         await using var conn = await ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await AnalyzeOrThrowAsync(conn, """
-            ANALYZE laplace.attestations;
-            ANALYZE laplace.consensus;
-            ANALYZE laplace.entities;
-            ANALYZE laplace.physicalities (entity_id, type)
-            """, "analyze_core_write_tables", ct).ConfigureAwait(false);
+        await using var command = NpgsqlCatalog.Command(conn, null, "ingest.analyze_core_write_tables");
+        await AnalyzeOrThrowAsync(command, "analyze_core_write_tables", ct).ConfigureAwait(false);
     }
 
-    public static Task AnalyzePostIngestValidationAsync(
-        NpgsqlConnection conn, CancellationToken ct = default) =>
-        AnalyzeOrThrowAsync(conn, """
-            ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id);
-            ANALYZE laplace.physicalities (entity_id, type);
-            ANALYZE laplace.entities (id);
-            ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)
-            """, "analyze_post_ingest_validation", ct);
+    public static async Task AnalyzePostIngestValidationAsync(
+        NpgsqlConnection conn, CancellationToken ct = default)
+    {
+        await using var command = NpgsqlCatalog.Command(conn, null, "ingest.analyze_post_ingest_validation");
+        await AnalyzeOrThrowAsync(command, "analyze_post_ingest_validation", ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Runs ANALYZE statements and fails if PostgreSQL skipped any relation.
@@ -75,8 +69,9 @@ public static class NpgsqlIngestOps
     /// </para>
     /// </summary>
     public static async Task AnalyzeOrThrowAsync(
-        NpgsqlConnection conn, string sql, string label, CancellationToken ct = default)
+        NpgsqlCommand command, string label, CancellationToken ct = default)
     {
+        var conn = command.Connection ?? throw new ArgumentException("ANALYZE requires a connection.", nameof(command));
         var warnings = new List<string>();
         void OnNotice(object sender, NpgsqlNoticeEventArgs e)
         {
@@ -86,8 +81,8 @@ public static class NpgsqlIngestOps
         conn.Notice += OnNotice;
         try
         {
-            await NpgsqlRead.ExecuteNonQueryAsync(conn, sql, timeoutSeconds: 0, ct: ct, label: label)
-                .ConfigureAwait(false);
+            command.CommandTimeout = 0;
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         finally
         {

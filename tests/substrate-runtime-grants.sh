@@ -39,9 +39,7 @@ CREATE TABLE consensus.cells_h0 PARTITION OF consensus.cells FOR VALUES WITH (MO
 RESET ROLE;
 SQL
 for iteration in 1 2; do
-  for migration in 20261015000000_substrate_runtime_grants 20261017000000_substrate_runtime_maintain; do
-    sed "s/'laplace_runtime'/'$role'/" "$root/db/migrations/$migration.sql" | P "$name"
-  done
+  sed "s/'laplace_runtime'/'$role'/" "$root/db/migrations/20261015000000_substrate_runtime_grants.sql" | P "$name"
 done
 P "$name" -v role="$role" <<'SQL'
 CREATE TABLE laplace.future_entity(id serial PRIMARY KEY);

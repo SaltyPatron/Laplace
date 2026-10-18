@@ -65,13 +65,14 @@ public sealed class AnalyzeOrThrowDbTests(LocalPgFixture pg)
         try
         {
             await Exec($"SET ROLE {role}");
+            await using var analyze = new NpgsqlCommand($"ANALYZE public.{table}", conn);
             var ex = await Assert.ThrowsAsync<AnalyzeIncompleteException>(() =>
-                NpgsqlIngestOps.AnalyzeOrThrowAsync(conn, $"ANALYZE public.{table}", "probe"));
+                NpgsqlIngestOps.AnalyzeOrThrowAsync(analyze, "probe"));
             Assert.Equal([table + "_h0", table + "_h1"], ex.Relations.Order().ToArray());
             await Exec("RESET ROLE");
 
             await Exec($"GRANT MAINTAIN ON public.{table}_h0, public.{table}_h1 TO {role}; SET ROLE {role}");
-            await NpgsqlIngestOps.AnalyzeOrThrowAsync(conn, $"ANALYZE public.{table}", "probe");
+            await NpgsqlIngestOps.AnalyzeOrThrowAsync(analyze, "probe");
             await Exec("RESET ROLE");
             await using var cmd = new NpgsqlCommand(
                 $"SELECT sum(reltuples)::bigint FROM pg_class WHERE relname IN ('{table}_h0', '{table}_h1')", conn);

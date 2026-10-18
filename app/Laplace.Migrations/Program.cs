@@ -242,6 +242,18 @@ internal static class Program
                 return 1;
             }
             applied.AddRange(result.Scripts);
+            const string runtimeGrants = "20261015000000_substrate_runtime_grants.sql";
+            if (filter(runtimeGrants))
+            {
+                using var connection = new NpgsqlConnection(target);
+                connection.Open();
+                using var transaction = connection.BeginTransaction();
+                using var command = new NpgsqlCommand(
+                    File.ReadAllText(Path.Combine(LocateMigrationsDir(), runtimeGrants)), connection, transaction)
+                    { CommandTimeout = 0 };
+                command.ExecuteNonQuery();
+                transaction.Commit();
+            }
             if (IncludesApplication(filter))
             {
                 using var database = NpgsqlDataSource.Create(target);

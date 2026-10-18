@@ -291,6 +291,13 @@ SQL_QUERY("evidence.response_type", "bytea,bytea,int4",
 SQL_QUERY("evidence.unary_response_type", "bytea,bytea",
     "SELECT combined_eff_mu,source_count FROM ops.attestation_unary_response_type($1,$2,NULL,NULL)")
 
+SQL_QUERY("ingest.analyze_core_write_tables", "",
+    "ANALYZE laplace.attestations; ANALYZE laplace.consensus; "
+    "ANALYZE laplace.entities; ANALYZE laplace.physicalities (entity_id, type)")
+SQL_QUERY("ingest.analyze_post_ingest_validation", "",
+    "ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id); "
+    "ANALYZE laplace.physicalities (entity_id, type); ANALYZE laplace.entities (id); "
+    "ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)")
 SQL_QUERY("ingest.clean_gin_pending_lists", "",
     "SELECT i.indexrelid::regclass::text, CASE WHEN pg_catalog.pg_has_role(c.relowner, 'USAGE') "
     "THEN pg_catalog.gin_clean_pending_list(i.indexrelid::regclass) ELSE NULL END "
