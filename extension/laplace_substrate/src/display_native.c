@@ -16,8 +16,8 @@
 /* Labels a set of ids for REALIZE. Stages run in a fixed order as set reads;
  * an id leaves once a stage gives it a non-opaque label, so only unlabeled ids
  * reach the next stage: a text-typed entity's own surface at or below sentence
- * tier, then the words a source binds to it (lexicalization), then a record's
- * parts, then any other entity's own surface, then names. Text (a Word, a
+ * tier, then a record's parts, then the words a source binds to it (lexicalization),
+ * then any other entity's own surface, then names. Text (a Word, a
  * Sentence) is shown as itself and never relabelled as a lemma a source binds
  * to it; an opaque surface (an ILI, an offset) never labels anything before
  * its lexicalization has been tried. A composition above
@@ -372,13 +372,13 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
      * written as text) stays pending for its lexicalization. */
     int count=pending(all,unique,work,3);char **labels=batch_text(TEXT,work,count,false);
     for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
+    /* A record is shown as its parts, before any stage reads its bytes as text. */
+    count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->record)work[count++]=all[i];
+    record_labels(work,count,false);
     /* Anything else that is not text (an ILI, a concept, a lexicalization)
      * realizes through the surfaces a source binds to it. */
     count=pending(all,unique,work,0);labels=batch_text(LEXICAL,work,count,false);
     for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
-    /* A record is shown as its parts, before any stage reads its bytes as text. */
-    count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->record)work[count++]=all[i];
-    record_labels(work,count,false);
     count=pending(all,unique,work,1);labels=batch_text(TEXT,work,count,false);
     for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
     count=pending(all,unique,work,0);labels=batch_text(NAMES,work,count,false);

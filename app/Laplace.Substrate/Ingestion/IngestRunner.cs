@@ -246,6 +246,7 @@ public sealed class IngestRunner
         bool syncIngest = false;
 
         var runCt = ct;
+        bool extractionSucceeded = false;
 
         try
         {
@@ -527,6 +528,8 @@ public sealed class IngestRunner
 
                 await producer;
             }
+            extractionSucceeded = failures.Count == 0 && counters.UnitsFailed == 0
+                && options.DecomposerOptions.MaxInputUnits <= 0 && !ct.IsCancellationRequested;
         }
         finally
         {
@@ -534,9 +537,12 @@ public sealed class IngestRunner
             {
                 try
                 {
-                    await bulkRun.CompleteAsync(
-                        phase => _obs.OnCompletionPhase(decomposer.SourceName, phase))
-                        .ConfigureAwait(false);
+                    if (extractionSucceeded)
+                        await bulkRun.CompleteAsync(
+                            phase => _obs.OnCompletionPhase(decomposer.SourceName, phase))
+                            .ConfigureAwait(false);
+                    else
+                        await bulkRun.AbortAsync().ConfigureAwait(false);
                     if (deferredMetrics is not null)
                     {
                         var committed = deferredMetrics.DeferredRowsInserted;
@@ -1350,8 +1356,13 @@ public sealed class IngestRunner
 
         public async ValueTask DisposeAsync()
         {
+            await AbortAsync().ConfigureAwait(false);
+        }
+
+        public async Task AbortAsync()
+        {
             if (Interlocked.Exchange(ref _completed, 1) != 0) return;
-            await _writer.CompleteBulkRunAsync(CancellationToken.None)
+            await _writer.AbortBulkRunAsync(CancellationToken.None)
                 .ConfigureAwait(false);
         }
     }

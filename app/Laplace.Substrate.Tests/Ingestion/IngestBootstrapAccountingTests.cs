@@ -141,7 +141,27 @@ public sealed class IngestBootstrapAccountingTests
         }
     }
 
-    private sealed class BootstrapThenContentDecomposer(int workingSetMode = 0) : IDecomposer
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FailedExtraction_AbortsInsteadOfCompleting(bool duringInitialization)
+    {
+        var writer = new InsertAllWriter(deferContent: true);
+        var runner = new IngestRunner(writer, new EmptyReader(), NullLoggerFactory.Instance);
+        await Assert.ThrowsAsync<InvalidDataException>(() => runner.RunAsync(
+            new BootstrapThenContentDecomposer(failInitialization: duringInitialization,
+                failExtraction: !duringInitialization), IngestRunOptions.Default with
+            {
+                SkipLayerOrderingCheck = true,
+                SkipSourceCompletion = true,
+            }));
+        Assert.True(writer.Aborted);
+        Assert.False(writer.Completed);
+        Assert.Equal((11L, 13L, 17L), writer.DeferredRowsInserted);
+    }
+
+    private sealed class BootstrapThenContentDecomposer(int workingSetMode = 0,
+        bool failInitialization = false, bool failExtraction = false) : IDecomposer
     {
         private static readonly Hash128 Source = Hash128.OfCanonical("test/bootstrap-accounting/source");
         private static readonly Hash128 Governed = Hash128.OfCanonical("test/bootstrap-accounting/governed");
@@ -155,6 +175,7 @@ public sealed class IngestBootstrapAccountingTests
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
+            if (failInitialization) throw new InvalidDataException("initialization failed");
             var bootstrap = new SubstrateChangeBuilder(Source, "bootstrap/test")
                 .AddEntity(Governed, EntityTier.Word, EntityTypeRegistry.SourceReference)
                 .Build();
@@ -190,6 +211,7 @@ public sealed class IngestBootstrapAccountingTests
                 witnessWeight: 1));
             var built = change.Build();
             yield return built;
+            if (failExtraction) throw new InvalidDataException("extraction failed");
             await Task.CompletedTask;
         }
 
@@ -245,6 +267,14 @@ public sealed class IngestBootstrapAccountingTests
         public TimeSpan HighwayMaskBackendWallClock => TimeSpan.FromMilliseconds(ConsensusUpsertCalls * 11);
         public bool Begun { get; private set; }
         public bool Completed { get; private set; }
+        public bool Aborted { get; private set; }
+
+        public Task AbortBulkRunAsync(CancellationToken ct = default)
+        {
+            Aborted = true;
+            _pending = default;
+            return Task.CompletedTask;
+        }
 
         public Task BeginBulkRunAsync(CancellationToken ct = default)
         {

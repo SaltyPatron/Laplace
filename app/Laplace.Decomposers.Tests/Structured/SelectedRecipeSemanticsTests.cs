@@ -16,31 +16,39 @@ public sealed class SelectedRecipeSemanticsTests
     public void Wordnet_sense_examples_and_forward_references_keep_their_concept(string recipe, int chunkSize)
     {
         const string source = """
-            <LexicalResource><Lexicon id="test" label="Test" language="en" version="1">
+            <LexicalResource xmlns:dc="http://purl.org/dc/elements/1.1/"><Lexicon id="test" label="Test" language="en" version="1">
               <LexicalEntry id="entry-bank"><Lemma writtenForm="bank" partOfSpeech="n"/>
-                <Sense id="sense-finance" synset="syn-finance">
+                <Sense id="sense-finance" synset="syn-finance" dc:identifier="bank%1:14:00::">
                   <Example>the bank lent money</Example>
                   <SenseRelation target="sense-river" relType="antonym"/>
                 </Sense>
-                <Sense id="sense-river" synset="syn-river"><Example>the river bank</Example></Sense>
+                <Sense id="sense-river" synset="syn-river" dc:identifier="bank%1:17:01::"><Example>the river bank</Example></Sense>
               </LexicalEntry>
               <Synset id="syn-finance" ili="i100" partOfSpeech="n"><Definition>a financial institution</Definition></Synset>
               <Synset id="syn-river" ili="i200" partOfSpeech="n"><Definition>land beside water</Definition></Synset>
             </Lexicon></LexicalResource>
             """;
-        var rows = Read(recipe, source, chunkSize);
-        Hash128 finance = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("i100")]);
-        Hash128 river = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("i200")]);
+        var entities = new Dictionary<Hash128, Hash128>();
+        var rows = Read(recipe, source, chunkSize, _ => { }, entities);
+        Hash128 finance = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("eng"), Root("i100")]);
+        Hash128 river = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("eng"), Root("i200")]);
         Hash128 example = RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE");
+        Assert.Equal(EntityTypeRegistry.WordNetSense, entities[finance]);
+        Assert.Equal(EntityTypeRegistry.WordNetSense, entities[river]);
+        Assert.DoesNotContain(Root("bank%1:14:00::"), entities.Keys);
+        Assert.DoesNotContain(Root("bank%1:17:01::"), entities.Keys);
         Assert.Contains(rows, r => r.SubjectId == finance && r.TypeId == example && r.ObjectId == Root("the bank lent money"));
         Assert.Contains(rows, r => r.SubjectId == river && r.TypeId == example && r.ObjectId == Root("the river bank"));
         Assert.DoesNotContain(rows, r => r.SubjectId == Root("bank") && r.TypeId == example);
-        // IS_ANTONYM_OF is symmetric, so the substrate stores its endpoints in canonical id order
-        // (RelationTypeRegistryTests.Symmetric_EndpointOrderCanonicalized_OneRow), not source order.
         Assert.Contains(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("IS_ANTONYM_OF")
             && ((r.SubjectId == finance && r.ObjectId == river) || (r.SubjectId == river && r.ObjectId == finance)));
         Assert.Contains(rows, r => r.SubjectId == Root("bank") && r.ObjectId == finance
             && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE") && r.ContextId == Root("eng"));
+        var french = Read(recipe, source.Replace("language=\"en\"", "language=\"fr\""), chunkSize);
+        Hash128 frenchFinance = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("fra"), Root("i100")]);
+        Assert.Contains(french, r => r.SubjectId == Root("bank") && r.ObjectId == frenchFinance
+            && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE") && r.ContextId == Root("fra"));
+        Assert.DoesNotContain(french, r => r.SubjectId == finance || r.ObjectId == finance);
         // Packaging names may change without changing the denoted sense or any testimony.
         var renamed = Read(recipe, source.Replace("sense-", "renamed-sense-").Replace("syn-", "renamed-syn-"), chunkSize);
         Assert.Equal(rows.Select(r => r with { LastObservedAtUnixUs = 0 }),
@@ -150,7 +158,8 @@ public sealed class SelectedRecipeSemanticsTests
     }
 
     internal static List<AttestationRow> Read(string recipePath, string input, int chunkSize = 4096,
-        Action<OrderedCompositionComponent>? fileCompleted = null)
+        Action<OrderedCompositionComponent>? fileCompleted = null,
+        Dictionary<Hash128, Hash128>? entities = null)
     {
         CodepointPerfcache.LoadDefault();
         var recipe = new LaplaceCookbook().InstallJson(SourceGenerationRegressionTests.RepositoryFile(recipePath));
@@ -162,7 +171,14 @@ public sealed class SelectedRecipeSemanticsTests
             stream.SetFile(ContentEmitter.StageComponent(metadata, "source metadata", default)!.Value);
         }
         byte[] bytes = Encoding.UTF8.GetBytes(input);
-        if (stream.RequiresPrescan) stream.Prescan(bytes, true);
+        if (stream.RequiresPrescan)
+        {
+            for (int offset = 0; offset < bytes.Length; offset += chunkSize)
+            {
+                int length = Math.Min(chunkSize, bytes.Length - offset);
+                stream.Prescan(bytes.AsSpan(offset, length), offset + length == bytes.Length);
+            }
+        }
         var rows = new List<AttestationRow>();
         for (int offset = 0; offset < bytes.Length; offset += chunkSize)
         {
@@ -172,6 +188,12 @@ public sealed class SelectedRecipeSemanticsTests
             {
                 using var stage = stream.Drain(100_000, 64 * 1024 * 1024, out _);
                 if (stage is null) break;
+                if (entities is not null)
+                {
+                    var parsed = CopyTupleParser.ParseEntities([stage.TupleBuffer(IntentStageTable.Entities)]);
+                    for (int i = 0; i < parsed.Ids.Count; i++)
+                        entities[parsed.Ids[i]] = parsed.TypeIds[i];
+                }
                 CopyTupleParser.DecodeAttestations([stage.TupleBuffer(IntentStageTable.Attestations)], rows);
             }
         }

@@ -121,6 +121,9 @@ public interface ISubstrateWriter
     Task BeginBulkRunAsync(CancellationToken ct = default)
         => Task.CompletedTask;
 
+    Task AbortBulkRunAsync(CancellationToken ct = default)
+        => Task.CompletedTask;
+
     /// <summary>
     /// Ends the bulk run declared by <see cref="BeginBulkRunAsync"/> and releases run-scoped
     /// writer state. No-op by default.

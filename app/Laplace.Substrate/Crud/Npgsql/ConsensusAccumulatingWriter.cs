@@ -1478,6 +1478,16 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         await _inner.BeginBulkRunAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task AbortBulkRunAsync(CancellationToken ct = default)
+    {
+        try { await DrainFoldsAsync().ConfigureAwait(false); }
+        finally
+        {
+            _bulkRun = false;
+            await _inner.AbortBulkRunAsync(ct).ConfigureAwait(false);
+        }
+    }
+
     public Task CompleteBulkRunAsync(CancellationToken ct = default)
         => CompleteBulkRunAsync(null, ct);
 

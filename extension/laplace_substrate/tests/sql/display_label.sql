@@ -195,7 +195,7 @@ BEGIN
     IF own IS NULL OR lemma IS NULL OR own = lemma THEN
         RAISE EXCEPTION 'FAIL: fixture must give the text a distinct own surface and lemma: % / %', own, lemma;
     END IF;
-    SELECT d.label INTO labels[1] FROM realize.display_label_batch(ARRAY[keytext]) d;
+    SELECT ARRAY[d.label] INTO labels FROM realize.display_label_batch(ARRAY[keytext]) d;
     IF labels[1] IS DISTINCT FROM own THEN
         RAISE EXCEPTION 'FAIL: lexicalization overrode a text entity''s own surface: % (own %, lemma %)',
             labels[1], own, lemma;
@@ -209,6 +209,16 @@ BEGIN
     IF labels[1] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[2])
        OR labels[2] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[3]) THEN
         RAISE EXCEPTION 'FAIL: a word-grain row collapsed to its first column: %', labels;
+    END IF;
+
+    UPDATE laplace.entities SET type_id = laplace.entity_type_id('WordNet_Sense') WHERE id = row_ab;
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
+                                   rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (laplace.consensus_id(stop, senserel, row_ab), stop, senserel, row_ab,
+            1700000000000, 30000000000, 60000000, 3, now());
+    SELECT ARRAY[d.label] INTO labels FROM realize.display_label_batch(ARRAY[row_ab]) d;
+    IF labels[1] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[2]) THEN
+        RAISE EXCEPTION 'FAIL: lexicalization overrode a typed sense record''s parts: %', labels[1];
     END IF;
 
     RAISE NOTICE 'display labels: Unicode exact, bounded containment preview, identity-bearing fallback';

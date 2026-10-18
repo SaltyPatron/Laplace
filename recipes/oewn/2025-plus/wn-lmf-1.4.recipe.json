@@ -25,6 +25,10 @@
           "fromRecord": true
         },
         {
+          "path": "@language",
+          "fromRecord": true
+        },
+        {
           "path": "@synset",
           "identityTable": "concept"
         }
@@ -590,6 +594,7 @@
           "childPath": "Sense",
           "identityField": "id",
           "identityTable": "sense",
+          "entityType": "WordNet_Sense",
           "standalone": true,
           "parentRelation": "HAS_SENSE",
           "linkContextField": "language"

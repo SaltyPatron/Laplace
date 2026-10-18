@@ -188,6 +188,17 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         return _inner.BeginBulkRunAsync(ct);
     }
 
+    public async Task AbortBulkRunAsync(CancellationToken ct = default)
+    {
+        Volatile.Read(ref _stageCompletion)?.TrySetCanceled();
+        lock (_held) _held.Clear();
+        try
+        {
+            if (_staged) await DropStageAsync(ct).ConfigureAwait(false);
+        }
+        finally { await _inner.AbortBulkRunAsync(ct).ConfigureAwait(false); }
+    }
+
     public Task CompleteBulkRunAsync(CancellationToken ct = default) => CompleteBulkRunAsync(null, ct);
 
     public async Task CompleteBulkRunAsync(Action<BulkRunCompletionPhase>? onPhase, CancellationToken ct = default)

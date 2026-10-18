@@ -521,6 +521,7 @@ struct laplace_recipe_stream {
     // Ordered constituents, retained as references until the whole source is scanned.
     using identity_value = std::vector<std::pair<std::string, std::string>>;
     std::unordered_map<std::string, std::unordered_map<std::string, identity_value>> composed_tables;
+    std::unordered_map<std::string, hash128_t> composed_table_entity_types;
     bool prescanned = false;
     hash128_t witness{};
     double trust = 0;
@@ -531,8 +532,10 @@ struct laplace_recipe_stream {
     std::unordered_map<std::string, structure_rule> structures;
     std::unordered_map<std::string, route_rule> routes;
     node parent_scope{};
+    node prescan_parent_scope{};
     std::vector<ordinal_span> parent_spans;
     bool parent_scope_active = false;
+    bool prescan_parent_scope_active = false;
     bool child_inherited = false;
     std::deque<node> pending;
     uint32_t cursor = 0, end = 0;
@@ -782,17 +785,30 @@ struct laplace_recipe_stream {
         if (depth >= table_rules.size()) throw std::runtime_error("cyclic composed identity reference: " + table);
         const auto found = composed->second.find(key);
         if (found == composed->second.end()) throw std::runtime_error("unresolved " + table + " reference: " + key);
-        std::vector<laplace_ordered_component_t> parts;
-        for (const auto& ref : found->second) {
-            const content_form value = identity_form(stage, ref.first, ref.second, depth + 1);
-            laplace_ordered_component_t part{};
-            part.id = value.id; std::memcpy(part.coord, value.coord, sizeof(part.coord));
-            part.tier = value.tier; part.atom = value.atom; part.has_atom = value.tier == 0;
-            parts.push_back(part);
+        if (found->second.size() == 1) {
+            const auto& ref = found->second.front();
+            return identity_form(stage, ref.first, ref.second, depth + 1);
         }
-        if (parts.size() == 1) return identity_form(stage, found->second.front().first, found->second.front().second, depth + 1);
+        const bool was_observing = observing;
+        observing = false;
+        std::vector<laplace_ordered_component_t> parts;
+        try {
+            for (const auto& ref : found->second) {
+                const content_form value = identity_form(stage, ref.first, ref.second, depth + 1);
+                laplace_ordered_component_t part{};
+                part.id = value.id; std::memcpy(part.coord, value.coord, sizeof(part.coord));
+                part.tier = value.tier; part.atom = value.atom; part.has_atom = value.tier == 0;
+                parts.push_back(part);
+            }
+        } catch (...) {
+            observing = was_observing;
+            throw;
+        }
+        observing = was_observing;
         laplace_ordered_composition_request_t request{};
         request.components = parts.data(); request.component_count = parts.size();
+        const auto entity_type = composed_table_entity_types.find(table);
+        if (entity_type != composed_table_entity_types.end()) request.type_id = entity_type->second;
         request.source_id = current_witness; request.observed_at_unix_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
         laplace_ordered_composition_result_t result{};
         check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "identity reference composition");
@@ -2556,6 +2572,11 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (!table.empty() && !child.parts.empty()) throw std::runtime_error("child declares both identity parts and an identity table: " + path);
                 child.identity_table = table;
                 child.link_context = context;
+                if (child.standalone && s->composed_tables.count(table) && nonzero(child.entity_type)) {
+                    const auto bound = s->composed_table_entity_types.emplace(table, child.entity_type);
+                    if (!bound.second && !hash128_equals(&bound.first->second, &child.entity_type))
+                        throw std::runtime_error("conflicting composed identity entity types: " + table);
+                }
             }
             const uint32_t conditional_testimony = r.number();
             for (uint32_t k = 0; k < conditional_testimony; ++k) {
@@ -2585,13 +2606,31 @@ void normalize(const laplace_recipe_stream& s, node& n) {
     for (auto& a : n.own) a.second = s.attribute_value(a.first, std::move(a.second));
     for (auto& c : n.children) normalize(s, c);
 }
-// The prescan collects the recipe's identity tables from whole records; scopes carry none.
 struct harvest_sink final : recipe_record_sink {
     laplace_recipe_stream& s;
     explicit harvest_sink(laplace_recipe_stream& stream) : s(stream) {}
-    void scope_open(node&&) override {}
-    void record(node&& done) override { s.harvest(done); }
-    void scope_close() override {}
+    void scope_open(node&& scope) override {
+        normalize(s, scope);
+        s.prescan_parent_scope = std::move(scope);
+        s.prescan_parent_scope_active = true;
+    }
+    void record(node&& done) override {
+        normalize(s, done);
+        const auto route = s.routes.find(done.name);
+        if (route != s.routes.end() && route->second.inherit_parent_attributes) {
+            if (!s.prescan_parent_scope_active)
+                throw std::runtime_error("record requires inherited parent attributes");
+            if (done.ns != s.prescan_parent_scope.ns)
+                throw std::runtime_error("record/parent namespace mismatch");
+            for (const auto& attribute : s.prescan_parent_scope.attributes)
+                done.attributes.try_emplace(attribute.first, attribute.second);
+        }
+        s.harvest(done);
+    }
+    void scope_close() override {
+        s.prescan_parent_scope = {};
+        s.prescan_parent_scope_active = false;
+    }
 };
 // The lowering read: a record's route decides whether it inherits its scope's
 // attributes, and a coverage scope with no subject of its own is projected over

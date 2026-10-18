@@ -140,6 +140,12 @@ public sealed partial class NpgsqlSubstrateWriter
             indexes.Count(index => !index.PagesCleaned.HasValue));
     }
 
+    public Task AbortBulkRunAsync(CancellationToken ct = default)
+    {
+        _tier0LayerComplete = false;
+        return Task.CompletedTask;
+    }
+
     private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);
