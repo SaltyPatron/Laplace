@@ -9,17 +9,47 @@ namespace Laplace.Chess.Service;
 public static class ChessGameFetcher
 {
     private static readonly HttpClient Http = CreateClient();
-    private const int ChessComMaxConcurrency = 12;
-    private static readonly SemaphoreSlim ChessComRequests =
-        new(ChessComMaxConcurrency, ChessComMaxConcurrency);
+    // Chess.com asks for one request at a time and a User-Agent that names a contact.
+    internal const string ContactUserAgent =
+        "LaplaceChessIngester/1.0 (https://hartonomous.com; contact: aharttn@gmail.com)";
+    private static readonly SemaphoreSlim ChessComRequests = new(1, 1);
     private static readonly SemaphoreSlim LichessRequests = new(1, 1);
     private const int ProviderMaxAttempts = 6;
 
     private static HttpClient CreateClient()
     {
         var c = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        c.DefaultRequestHeaders.UserAgent.ParseAdd("Laplace-Chess-Ingest/1.0");
+        c.DefaultRequestHeaders.UserAgent.ParseAdd(ContactUserAgent);
         return c;
+    }
+
+    internal readonly record struct ProviderResponse(string Body, string? ETag, bool NotModified);
+
+    internal static string ArchiveDirectory(string user)
+        => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "chesscom", Sanitize(user));
+
+    internal static bool TryParseArchiveMonth(string archiveUrl, out int year, out int month)
+    {
+        year = 0;
+        month = 0;
+        if (!Uri.TryCreate(archiveUrl, UriKind.Absolute, out var uri)) return false;
+        string[] parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2) return false;
+        return int.TryParse(parts[^2], out year) && year is >= 1990 and <= 9999
+            && int.TryParse(parts[^1], out month) && month is >= 1 and <= 12;
+    }
+
+    internal static bool IsFinishedMonth(int year, int month, DateTime utcNow)
+        => year < utcNow.Year || (year == utcNow.Year && month < utcNow.Month);
+
+    internal static HttpRequestMessage ChessComRequest(string url, string? ifNoneMatch)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!req.Headers.UserAgent.TryParseAdd(ContactUserAgent))
+            req.Headers.TryAddWithoutValidation("User-Agent", ContactUserAgent);
+        if (!string.IsNullOrWhiteSpace(ifNoneMatch))
+            req.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
+        return req;
     }
 
     public static string DefaultOut(string user, string site)
@@ -66,39 +96,25 @@ public static class ChessGameFetcher
         var archives = ChronologicalArchiveUrls(
             doc.RootElement.GetProperty("archives").EnumerateArray()
                 .Select(e => e.GetString()!));
-        int workers = Math.Clamp(
-            concurrency ?? Math.Min(ChessComMaxConcurrency, IngestTopology.Current.IoWorkersAvailable),
-            1, Math.Max(1, archives.Count));
-        log?.Invoke($"  {archives.Count} monthly archives ({workers} parallel downloads; oldest-first apply)"
+        // Chess.com's public API is one request at a time. A caller-supplied
+        // concurrency does not widen this download.
+        _ = concurrency;
+        log?.Invoke($"  {archives.Count} monthly archives (serial; oldest-first)"
             + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        string cacheDirectory = ArchiveDirectory(user);
         int kept = 0;
         await using (var w = new StreamWriter(outPath, append: false, new UTF8Encoding(false)))
         {
-            // Provider downloads are independent physical artifacts. Keep a bounded window
-            // in flight, then consume it oldest-first so network latency overlaps native
-            // parse/apply without changing deterministic record chronology.
-            var pending = new Queue<(string Url, Task<string> Download)>();
-            int nextArchive = 0;
-            while (nextArchive < archives.Count && pending.Count < workers)
-            {
-                string url = archives[nextArchive++];
-                pending.Enqueue((url, GetStringWithRetryAsync(
-                    $"{url}/pgn", ct, retryNotFound: true, log: log)));
-            }
-
-            while (pending.Count > 0)
+            foreach (string archiveUrl in archives)
             {
                 ct.ThrowIfCancellationRequested();
-                var (archiveUrl, download) = pending.Dequeue();
-                string pgn = await download;
-                if (nextArchive < archives.Count)
-                {
-                    string url = archives[nextArchive++];
-                    pending.Enqueue((url, GetStringWithRetryAsync(
-                        $"{url}/pgn", ct, retryNotFound: true, log: log)));
-                }
+                string pgn = await ReadCachedMonthAsync(
+                    cacheDirectory, archiveUrl, DateTime.UtcNow,
+                    (url, etag, token) => GetResponseWithRetryAsync(
+                        url, token, retryNotFound: true, log: log, ifNoneMatch: etag),
+                    ct);
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
 
                 var ready = new List<string>();
@@ -126,6 +142,61 @@ public static class ChessGameFetcher
             }
         }
         return kept;
+    }
+
+    internal delegate Task<ProviderResponse> ArchiveFetch(string url, string? ifNoneMatch, CancellationToken ct);
+
+    /// <summary>
+    /// One month at a time. A finished month with a PGN file is not requested.
+    /// The current month sends the stored ETag as <c>If-None-Match</c>.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>> LoadMonthsAsync(
+        string cacheDirectory, IReadOnlyList<string> archiveUrls, DateTime utcNow,
+        ArchiveFetch fetch, CancellationToken ct)
+    {
+        var bodies = new List<string>(archiveUrls.Count);
+        foreach (string archiveUrl in archiveUrls)
+        {
+            ct.ThrowIfCancellationRequested();
+            bodies.Add(await ReadCachedMonthAsync(cacheDirectory, archiveUrl, utcNow, fetch, ct));
+        }
+        return bodies;
+    }
+
+    private static async Task<string> ReadCachedMonthAsync(
+        string cacheDirectory, string archiveUrl, DateTime utcNow, ArchiveFetch fetch, CancellationToken ct)
+    {
+        if (!TryParseArchiveMonth(archiveUrl, out int year, out int month))
+        {
+            var uncached = await fetch($"{archiveUrl}/pgn", null, ct);
+            return uncached.NotModified ? "" : uncached.Body;
+        }
+
+        Directory.CreateDirectory(cacheDirectory);
+        string stem = Path.Combine(cacheDirectory, $"{year:0000}-{month:00}");
+        string pgnPath = stem + ".pgn";
+        string etagPath = stem + ".etag";
+        if (IsFinishedMonth(year, month, utcNow) && File.Exists(pgnPath))
+            return await File.ReadAllTextAsync(pgnPath, ct);
+
+        string? etag = null;
+        if (!IsFinishedMonth(year, month, utcNow) && File.Exists(etagPath))
+            etag = (await File.ReadAllTextAsync(etagPath, ct)).Trim();
+
+        string pgnUrl = archiveUrl.EndsWith("/pgn", StringComparison.Ordinal) ? archiveUrl : $"{archiveUrl}/pgn";
+        var response = await fetch(pgnUrl, etag, ct);
+        if (response.NotModified)
+        {
+            if (File.Exists(pgnPath))
+                return await File.ReadAllTextAsync(pgnPath, ct);
+            response = await fetch(pgnUrl, null, ct);
+        }
+
+        var utf8 = new UTF8Encoding(false);
+        await File.WriteAllTextAsync(pgnPath, response.Body, utf8, ct);
+        if (!string.IsNullOrWhiteSpace(response.ETag))
+            await File.WriteAllTextAsync(etagPath, response.ETag.Trim(), utf8, ct);
+        return response.Body;
     }
 
     internal static IReadOnlyList<string> ChronologicalArchiveUrls(IEnumerable<string> archives)
@@ -666,6 +737,16 @@ public static class ChessGameFetcher
     private static async Task<string> GetStringWithRetryAsync(
         string url, CancellationToken ct, bool retryNotFound = false, Action<string>? log = null)
     {
+        var response = await GetResponseWithRetryAsync(url, ct, retryNotFound, log, ifNoneMatch: null);
+        if (response.NotModified)
+            throw new HttpRequestException($"provider returned 304 without a conditional request: {url}");
+        return response.Body;
+    }
+
+    private static async Task<ProviderResponse> GetResponseWithRetryAsync(
+        string url, CancellationToken ct, bool retryNotFound = false, Action<string>? log = null,
+        string? ifNoneMatch = null)
+    {
         SemaphoreSlim? gate = ProviderGate(url);
         for (int attempt = 0; ; attempt++)
         {
@@ -673,7 +754,10 @@ public static class ChessGameFetcher
             if (gate is not null) await gate.WaitAsync(ct);
             try
             {
-                using var resp = await Http.GetAsync(url, ct);
+                using var req = ChessComRequest(url, ifNoneMatch);
+                using var resp = await Http.SendAsync(req, ct);
+                if (resp.StatusCode == HttpStatusCode.NotModified)
+                    return new ProviderResponse("", resp.Headers.ETag?.Tag, NotModified: true);
                 if (IsTransientProviderStatus(resp.StatusCode, retryNotFound)
                     && attempt + 1 < ProviderMaxAttempts)
                 {
@@ -683,7 +767,8 @@ public static class ChessGameFetcher
                 else
                 {
                     resp.EnsureSuccessStatusCode();
-                    return await resp.Content.ReadAsStringAsync(ct);
+                    return new ProviderResponse(
+                        await resp.Content.ReadAsStringAsync(ct), resp.Headers.ETag?.Tag, NotModified: false);
                 }
             }
             catch (HttpRequestException ex) when (ex.StatusCode is null && attempt + 1 < ProviderMaxAttempts)

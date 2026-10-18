@@ -269,4 +269,114 @@ public sealed class ChessGameFetcherTests
         Assert.Equal("CHN", player.Federation);
         Assert.Equal(2617, player.Standard);
     }
+
+    [Fact]
+    public void ChessComRequest_NamesAContactAndCanSendAnEtag()
+    {
+        using var req = ChessGameFetcher.ChessComRequest(
+            "https://api.chess.com/pub/player/ada/games/2026/10/pgn", "\"abc\"");
+        Assert.Contains("contact: aharttn@gmail.com", req.Headers.UserAgent.ToString(), StringComparison.Ordinal);
+        Assert.Contains("https://hartonomous.com", req.Headers.UserAgent.ToString(), StringComparison.Ordinal);
+        Assert.Equal("\"abc\"", Assert.Single(req.Headers.GetValues("If-None-Match")));
+    }
+
+    [Fact]
+    public async Task FinishedMonth_IsNotDownloadedAgain()
+    {
+        string dir = NewCache();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(dir, "2019-06.pgn"), "cached-june");
+            bool called = false;
+            var bodies = await ChessGameFetcher.LoadMonthsAsync(
+                dir,
+                ["https://api.chess.com/pub/player/ada/games/2019/06"],
+                new DateTime(2026, 10, 18, 0, 0, 0, DateTimeKind.Utc),
+                (_, _, _) =>
+                {
+                    called = true;
+                    return Task.FromResult(new ChessGameFetcher.ProviderResponse("fresh", "\"e\"", false));
+                },
+                CancellationToken.None);
+            Assert.False(called);
+            Assert.Equal("cached-june", Assert.Single(bodies));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task CurrentMonth_UsesTheStoredEtagAndKeepsTheBodyOnNotModified()
+    {
+        string dir = NewCache();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(dir, "2026-10.pgn"), "october");
+            await File.WriteAllTextAsync(Path.Combine(dir, "2026-10.etag"), "\"october\"");
+            string? sent = "missing";
+            var bodies = await ChessGameFetcher.LoadMonthsAsync(
+                dir,
+                ["https://api.chess.com/pub/player/ada/games/2026/10"],
+                new DateTime(2026, 10, 18, 0, 0, 0, DateTimeKind.Utc),
+                (_, etag, _) =>
+                {
+                    sent = etag;
+                    return Task.FromResult(new ChessGameFetcher.ProviderResponse("", null, true));
+                },
+                CancellationToken.None);
+            Assert.Equal("\"october\"", sent);
+            Assert.Equal("october", Assert.Single(bodies));
+            Assert.Equal("october", await File.ReadAllTextAsync(Path.Combine(dir, "2026-10.pgn")));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Months_DownloadSeriallyAndStorePgnAndEtag()
+    {
+        string dir = NewCache();
+        try
+        {
+            int inFlight = 0;
+            int max = 0;
+            var bodies = await ChessGameFetcher.LoadMonthsAsync(
+                dir,
+                [
+                    "https://api.chess.com/pub/player/ada/games/2020/01",
+                    "https://api.chess.com/pub/player/ada/games/2020/02",
+                ],
+                new DateTime(2026, 10, 18, 0, 0, 0, DateTimeKind.Utc),
+                async (url, etag, _) =>
+                {
+                    int now = Interlocked.Increment(ref inFlight);
+                    max = Math.Max(max, now);
+                    await Task.Delay(40);
+                    Interlocked.Decrement(ref inFlight);
+                    Assert.Null(etag);
+                    return new ChessGameFetcher.ProviderResponse("game " + url, "\"m\"", false);
+                },
+                CancellationToken.None);
+            Assert.Equal(1, max);
+            Assert.Equal(2, bodies.Count);
+            Assert.StartsWith("game ", await File.ReadAllTextAsync(Path.Combine(dir, "2020-01.pgn")));
+            Assert.Equal("\"m\"", (await File.ReadAllTextAsync(Path.Combine(dir, "2020-01.etag"))).Trim());
+            Assert.True(File.Exists(Path.Combine(dir, "2020-02.pgn")));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private static string NewCache()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-chesscom-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
 }

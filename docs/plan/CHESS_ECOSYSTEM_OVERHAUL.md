@@ -89,3 +89,5 @@ Acceptance:
 
 - Chess.com archive downloads are serial, send a contact `User-Agent`, and keep monthly PGN and ETag files. A finished month is not downloaded again. The current month uses `If-None-Match`.
 - A game keeps the corpus it came from (`lumbrasgigabase-otb`, `lumbrasgigabase-online`, `twic`, `lichess`, `chesscom`) and the PGN tags Site, Round, UTCDate, UTCTime, titles, and FIDE ids. Decomposition, opening classification, motifs, clocks, and outcomes are one grammar-bounded pass per game, staged and folded once per file.
+
+Chess.com archives download one month at a time. The request names `LaplaceChessIngester/1.0 (https://hartonomous.com; contact: aharttn@gmail.com)`. Each month is `{yyyy}-{MM}.pgn` with a sibling `.etag` under the chess data root at `chesscom/<user>/`. A finished month already on disk is not requested again. The current month sends `If-None-Match`.
