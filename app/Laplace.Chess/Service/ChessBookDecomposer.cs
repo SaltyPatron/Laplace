@@ -18,9 +18,12 @@ namespace Laplace.Chess.Service;
 ///  - Embedded PGN games are recorded through ChessPgnDecomposer.RecordGame, as any game is.
 ///    Inline {commentary} is also attested as (comment, EXPLAINS, position after the move).
 ///  - Prose move lines, algebraic ("1. e4 e5 2. Nf3") or descriptive ("1. P-K4, P-K4;
-///    2. Kt-KB3"), are replayed from the standard start; a line that replays legally emits its
-///    ordered line trajectory plus (paragraph, EXPLAINS, line). A fragment that does not replay
-///    (typically quoted from a diagram) is counted in the drop ledger, not attested.
+///    2. Kt-KB3"), replay from the standard start. A diagram FEN, or a move number that
+///    continues a line already replayed in the paragraph, is the anchor when the standard
+///    start cannot play the line. A replayed line emits its ordered trajectory. The paragraph
+///    attests EXPLAINS on that trajectory and on each chess concept it names. A fragment that
+///    does not replay, and had no anchor, is counted as a diagram-anchored drop. A line that
+///    had an anchor and still did not replay is a different refusal.
 ///
 /// Paragraph and comment text compose through the shared content recipe, so a sentence admitted
 /// from any other source is the same entity.
@@ -39,6 +42,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     protected override string BatchLabelPrefix => "chess/book";
 
     internal const string DiagramAnchoredLine = "diagram-anchored-line";
+    internal const string AnchoredLineUnreplayable = "anchored-line-unreplayable";
 
     private const double BookWitnessWeight = 0.7;
     private const int MinProsePlies = 3;
@@ -130,6 +134,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 ?? throw new InvalidDataException("book context could not be admitted as content");
             b.AddAttestation(NativeAttestation.Categorical(
                 ctxId, "EXPLAINS", parsed.LineId, src, null, BookWitnessWeight));
+            ExplainNamedConcepts(b, ctxId, record.Context, src);
         }
 
         var mainline = parsed.Walk.Mainline;
@@ -144,6 +149,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 ?? throw new InvalidDataException("book commentary could not be admitted as content");
             b.AddAttestation(NativeAttestation.Categorical(
                 commentId, "EXPLAINS", posId, src, parsed.PlayingId, BookWitnessWeight));
+            ExplainNamedConcepts(b, commentId, comment.Trim(), src);
         }
 
         if (!ChessAnalyze.DeriveFromParsed(b, parsed, replay)) return;
@@ -156,7 +162,17 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         b.AddEntity(record.RootId, EntityTier.Document, ChessVocabulary.BookLineType);
 
         var m = new ChessModality();
-        var state = m.Initial();
+        ChessState state;
+        try
+        {
+            state = string.IsNullOrWhiteSpace(record.StartFen)
+                ? m.Initial()
+                : m.FromFen(record.StartFen);
+        }
+        catch (FormatException)
+        {
+            return;
+        }
         var states = new List<ChessState>(record.Sans.Count + 1) { state };
         var resolved = new List<(Piece Moving, ChessMove Move)>(record.Sans.Count);
         foreach (var san in record.Sans)
@@ -185,8 +201,27 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 ?? throw new InvalidDataException("book context could not be admitted as content");
             b.AddAttestation(NativeAttestation.Categorical(
                 ctxId, "EXPLAINS", record.LineId, src, null, BookWitnessWeight));
+            ExplainNamedConcepts(b, ctxId, record.Context, src);
         }
         IngestUnitCompletion.Emit(b, record.RootId, src, 20, record.CompletionContextId);
+    }
+
+    // The paragraph explains the concept, and the book-domain member is the context that
+    // selects that sense. Membership is IS_EXAMPLE_OF, which is already a declared relation.
+    private static void ExplainNamedConcepts(
+        SubstrateChangeBuilder b, Hash128 proseId, string prose, Hash128 src)
+    {
+        foreach (var concept in ChessConcepts.All)
+        {
+            if (!concept.MatchesBook(prose)) continue;
+            var member = concept.Member(ChessConcepts.Domain.Book);
+            b.AddEntity(concept.Id, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
+            b.AddEntity(member, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
+            b.AddAttestation(NativeAttestation.Categorical(
+                member, "IS_EXAMPLE_OF", concept.Id, src, null, BookWitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(
+                proseId, "EXPLAINS", concept.Id, src, member, BookWitnessWeight));
+        }
     }
 
     internal static IEnumerable<ChessBookRecord> ExtractFromText(string text, string fallbackTitle)
@@ -206,24 +241,172 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         var titleContentId = ContentEmitter.RootId(title);
         foreach (var paragraph in Paragraphs(remainder))
         {
-            foreach (var sans in ExtractProseLines(paragraph))
+            foreach (var anchored in ExtractAnchoredLines(paragraph))
             {
                 if (titleContentId is null
-                    || ChessPgnDecomposer.TryReplayLineDetailed(sans, startFen: null) is not { } replay)
+                    || ChessPgnDecomposer.TryReplayLineDetailed(anchored.Sans, anchored.StartFen) is not { } replay)
                 {
-                    ChessDropLedger.Drop(DiagramAnchoredLine, string.Join(' ', sans.Take(8)));
+                    string detail = string.Join(' ', anchored.Sans.Take(8));
+                    ChessDropLedger.Drop(
+                        anchored.StartFen is null ? DiagramAnchoredLine : AnchoredLineUnreplayable,
+                        detail);
                     continue;
                 }
                 ChessDropLedger.Kept();
                 var lineId = ChessCompose.LineId(replay.PositionIds[0], replay.MoveIds);
-                yield return new ChessBookRecord(title, null, sans, TrimContext(paragraph))
+                yield return new ChessBookRecord(title, null, anchored.Sans, TrimContext(paragraph))
                 {
                     LineId = lineId,
                     RootId = ChessVocabulary.BookLineMarkerId(titleContentId.Value, lineId),
+                    StartFen = anchored.StartFen,
                 };
             }
         }
     }
+
+    internal readonly record struct AnchoredProseLine(IReadOnlyList<string> Sans, string? StartFen);
+
+    /// <summary>
+    /// Lines that replay from the standard start, from a diagram FEN earlier in the paragraph,
+    /// or from the position a previous line in the paragraph had reached when the move number says so.
+    /// </summary>
+    internal static IEnumerable<AnchoredProseLine> ExtractAnchoredLines(string paragraph)
+    {
+        var modality = new ChessModality();
+        bool descriptive = DescriptiveMarker().IsMatch(paragraph);
+        var fens = new List<(int Index, string Fen, bool FullmoveWritten)>();
+        foreach (Match fen in DiagramFen().Matches(paragraph))
+        {
+            if (TryFen(modality, fen.Groups[1].Value) is null) continue;
+            fens.Add((fen.Index, fen.Groups[1].Value.Trim(), fen.Groups[2].Success));
+        }
+
+        int consumedTo = 0;
+        var kept = new List<(IReadOnlyList<string> Sans, string? StartFen, ChessState End)>();
+        foreach (Match anchor in AnyMoveAnchor().Matches(paragraph))
+        {
+            if (anchor.Index < consumedTo) continue;
+            if (fens.Exists(f => anchor.Index >= f.Index && anchor.Index < f.Index + f.Fen.Length))
+                continue;
+            int number = int.Parse(anchor.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            int dots = 0;
+            foreach (char c in anchor.Groups[2].Value)
+                if (c == '.') dots++;
+            bool blackToMove = dots >= 2;
+            bool numberedContinuation = number != 1 || blackToMove;
+            string? preceding = null;
+            bool fullmoveWritten = false;
+            for (int i = fens.Count - 1; i >= 0; i--)
+            {
+                if (fens[i].Index < anchor.Index)
+                {
+                    preceding = fens[i].Fen;
+                    fullmoveWritten = fens[i].FullmoveWritten;
+                    break;
+                }
+            }
+
+            List<string>? sans = null;
+            string? startFen = null;
+            ChessState? end = null;
+            int played = 0;
+            int used = anchor.Index + anchor.Length;
+
+            // A diagram FEN is the anchor when the moves replay from it. A numbered
+            // continuation only takes that FEN when the side (and the written fullmove,
+            // if the diagram has one) agrees, so an earlier diagram does not steal a
+            // later continuation of a line that was already replayed.
+            if (preceding is not null && TryFen(modality, preceding) is { } fenState
+                && FenAgrees(fenState, fullmoveWritten, numberedContinuation, blackToMove, number))
+            {
+                var fromFen = ReplayMoves(paragraph, anchor.Index, fenState, descriptive, out used);
+                played = fromFen.Count;
+                if (fromFen.Count >= MinProsePlies)
+                {
+                    sans = fromFen;
+                    startFen = preceding;
+                    end = EndState(modality, preceding, fromFen);
+                }
+            }
+
+            if (sans is null && numberedContinuation)
+            {
+                foreach (var prior in kept)
+                {
+                    if (prior.End.Board.WhiteToMove == blackToMove) continue;
+                    if (prior.End.Board.FullmoveNumber != number) continue;
+                    string fen = prior.End.Board.ToFen();
+                    var cont = ReplayMoves(paragraph, anchor.Index, prior.End, descriptive, out int contUsed);
+                    used = Math.Max(used, contUsed);
+                    played = Math.Max(played, cont.Count);
+                    if (cont.Count < MinProsePlies) continue;
+                    sans = cont;
+                    startFen = fen;
+                    end = EndState(modality, fen, cont);
+                    break;
+                }
+            }
+
+            if (sans is null && !numberedContinuation)
+            {
+                var fromStart = ReplayMoves(paragraph, anchor.Index, modality.Initial(), descriptive, out int startUsed);
+                used = Math.Max(used, startUsed);
+                played = Math.Max(played, fromStart.Count);
+                if (fromStart.Count >= MinProsePlies)
+                {
+                    sans = fromStart;
+                    end = EndState(modality, null, fromStart);
+                }
+            }
+
+            consumedTo = Math.Max(consumedTo, used);
+            if (sans is null || end is null)
+            {
+                if (played > 0) continue;
+                ChessDropLedger.Drop(
+                    preceding is not null || numberedContinuation
+                        ? AnchoredLineUnreplayable
+                        : DiagramAnchoredLine,
+                    paragraph.Substring(anchor.Index, Math.Min(80, paragraph.Length - anchor.Index)));
+                continue;
+            }
+
+            kept.Add((sans, startFen, end));
+            yield return new AnchoredProseLine(sans, startFen);
+        }
+    }
+
+    private static bool FenAgrees(
+        ChessState state, bool fullmoveWritten, bool numberedContinuation, bool blackToMove, int number)
+    {
+        if (!numberedContinuation) return true;
+        if (state.Board.WhiteToMove == blackToMove) return false;
+        return !fullmoveWritten || state.Board.FullmoveNumber == number;
+    }
+
+    private static ChessState? TryFen(ChessModality modality, string fen)
+    {
+        try { return modality.FromFen(fen.Trim()); }
+        catch (FormatException) { return null; }
+    }
+
+    private static ChessState EndState(ChessModality modality, string? startFen, IReadOnlyList<string> sans)
+    {
+        var state = startFen is null ? modality.Initial() : modality.FromFen(startFen);
+        foreach (var san in sans)
+        {
+            var mv = San.Resolve(state.Board, modality.LegalActions(state), san);
+            if (mv is null) return state;
+            state = modality.Apply(state, mv.Value);
+        }
+        return state;
+    }
+
+    private static List<string> ReplayMoves(
+        string paragraph, int from, ChessState state, bool descriptive, out int consumedTo)
+        => descriptive
+            ? ReplayDescriptive(paragraph, from, state, out consumedTo)
+            : ReplayAlgebraic(paragraph, from, state, out consumedTo);
 
     private static string? ExtractTitle(string text)
     {
@@ -332,7 +515,13 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     private static List<string> ReplayAlgebraic(string paragraph, int from, out int consumedTo)
     {
         var m = new ChessModality();
-        var state = m.Initial();
+        return ReplayAlgebraic(paragraph, from, m.Initial(), out consumedTo);
+    }
+
+    private static List<string> ReplayAlgebraic(
+        string paragraph, int from, ChessState state, out int consumedTo)
+    {
+        var m = new ChessModality();
         var sans = new List<string>();
         consumedTo = from;
 
@@ -342,6 +531,11 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             if (raw.Length == 0) { consumedTo = from + tok.Index + tok.Length; continue; }
 
             string cleaned = raw.Trim('(', ')').TrimEnd(',', ';', ':', '.', '!', '?');
+            if (sans.Count == 0 && cleaned is "..." or ".." or "." or "…")
+            {
+                consumedTo = from + tok.Index + tok.Length;
+                continue;
+            }
             var legal = m.LegalActions(state);
             var mv = San.Resolve(state.Board, legal, cleaned);
             if (mv is null) break;
@@ -355,7 +549,13 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     private static List<string> ReplayDescriptive(string paragraph, int from, out int consumedTo)
     {
         var m = new ChessModality();
-        var state = m.Initial();
+        return ReplayDescriptive(paragraph, from, m.Initial(), out consumedTo);
+    }
+
+    private static List<string> ReplayDescriptive(
+        string paragraph, int from, ChessState state, out int consumedTo)
+    {
+        var m = new ChessModality();
         var sans = new List<string>();
         consumedTo = from;
 
@@ -444,6 +644,12 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     [GeneratedRegex(@"(?<![\d.])1\s*\.{0,3}\s*(?=[a-hPKQRBNO0])")]
     private static partial Regex LineAnchor();
 
+    [GeneratedRegex(@"(?<![\d.])(\d{1,3})\s*((?:\.\s*){1,3}|\s+)(?=[a-hPKQRBNO0])")]
+    private static partial Regex AnyMoveAnchor();
+
+    [GeneratedRegex(@"\b((?:[pnbrqkPNBRQK1-8]+/){7}[pnbrqkPNBRQK1-8]+\s+[wb]\s+(?:-|K?Q?k?q?|[A-Ha-h]{1,4})\s+(?:-|[a-h][36])(?:\s+\d+(?:\s+(\d+))?)?)")]
+    private static partial Regex DiagramFen();
+
     [GeneratedRegex(@"\b(?:Kt|KT|[PRNBQK])\s*[-–—]\s*(?:Q|K)?\s*(?:Kt|KT|[RNB])?\s*[1-8]|\b(?:Kt|[PRNBQK])x(?:Kt|[PRNBQK])")]
     private static partial Regex DescriptiveMarker();
 
@@ -469,6 +675,7 @@ public sealed record ChessBookRecord(
     internal ChessGameRecord? Parsed { get; init; }
     internal Hash128 RootId { get; init; }
     internal Hash128 LineId { get; init; }
+    internal string? StartFen { get; init; }
     // One root can be quoted with different commentary, so the completion key also binds
     // both text inputs; playing, line, paragraph and testimony identities are unchanged.
     internal Hash128 CompletionContextId => Hash128.OfCanonical(

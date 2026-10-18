@@ -1,3 +1,8 @@
+using System.Reflection;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
+using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -143,5 +148,105 @@ public sealed class ChessBookDecomposerTests
             .Count(r => r.GameText is null);
         Assert.True(grounded > 10,
             $"expected descriptive prose lines to ground from Chess Strategy, got {grounded}");
+    }
+
+    [Fact]
+    public void DiagramFen_ReplaysTheLineFromThatPosition()
+    {
+        var modality = new ChessModality();
+        var state = modality.Initial();
+        foreach (var san in new[] { "e4", "e5", "Nf3", "Nc6", "Bb5" })
+        {
+            var mv = San.Resolve(state.Board, modality.LegalActions(state), san);
+            Assert.NotNull(mv);
+            state = modality.Apply(state, mv.Value);
+        }
+        string fen = state.Board.ToFen();
+        string text = "The pin is the idea.\n\n" + fen + "\n3...a6 4. Ba4 Nf6\n";
+
+        ChessDropLedger.Reset();
+        var line = Assert.Single(
+            ChessBookDecomposer.ExtractFromText(text, "Diagram book"),
+            r => r.GameText is null);
+        Assert.Equal(new[] { "a6", "Ba4", "Nf6" }, line.Sans);
+        Assert.Equal(fen, line.StartFen);
+        Assert.False(ChessDropLedger.SnapshotCounts().ContainsKey(ChessBookDecomposer.DiagramAnchoredLine));
+    }
+
+    [Fact]
+    public void MoveNumberContinuation_ReplaysFromTheLineAlreadyReached()
+    {
+        const string text = "1. e4 e5 2. Nf3 Nc6 3. Bb5 and the pin holds. 3...a6 4. Ba4 Nf6\n";
+        var records = ChessBookDecomposer.ExtractFromText(text, "Continuation").ToList();
+        Assert.Contains(records, r => r.StartFen is null
+            && r.Sans.SequenceEqual(new[] { "e4", "e5", "Nf3", "Nc6", "Bb5" }));
+        var cont = Assert.Single(records, r => r.StartFen is not null);
+        Assert.Equal(new[] { "a6", "Ba4", "Nf6" }, cont.Sans);
+    }
+
+    [Fact]
+    public void AnchorAvailableButIllegal_IsNotCalledDiagramAnchored()
+    {
+        const string fen = "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3";
+        ChessDropLedger.Reset();
+        var records = ChessBookDecomposer.ExtractFromText(
+            fen + "\n3...Ke9 4. Qz5 5. a1\n", "Broken diagram").ToList();
+        Assert.DoesNotContain(records, r => r.GameText is null);
+        var counts = ChessDropLedger.SnapshotCounts();
+        Assert.False(counts.ContainsKey(ChessBookDecomposer.DiagramAnchoredLine));
+        Assert.True(counts.ContainsKey(ChessBookDecomposer.AnchoredLineUnreplayable));
+    }
+
+    [Fact]
+    public void DiagramFragmentWithoutAnAnchor_IsStillDiagramAnchored()
+    {
+        ChessDropLedger.Reset();
+        var records = ChessBookDecomposer.ExtractFromText(
+            "the mate is quickly accomplished by: 1 R - R 7, K - Kt 1; 2 K - Kt 2.", "t").ToList();
+        Assert.Empty(records);
+        Assert.True(ChessDropLedger.SnapshotCounts().ContainsKey(ChessBookDecomposer.DiagramAnchoredLine));
+    }
+
+    [Fact]
+    public void Prose_ExplainsTheLineAndTheConceptsItNames()
+    {
+        const string text = "The knight fork and the pin decide it. 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6\n";
+        var record = Assert.Single(ChessBookDecomposer.ExtractFromText(text, "Concepts"));
+        var compose = typeof(ChessBookDecomposer).GetMethod(
+            "Compose", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(compose);
+        using var builder = new SubstrateChangeBuilder(ChessVocabulary.BookSourceId, "test/book-concepts")
+            .DeclareSourcePrior(SourceTrust.AcademicCurated);
+        compose.Invoke(new ChessBookDecomposer(), [record, builder]);
+        var change = builder.Build();
+        try
+        {
+            Assert.Contains(change.Attestations,
+                a => a.TypeId == ChessVocabulary.ExplainsType && a.ObjectId == record.LineId);
+            Assert.True(ChessConcepts.TryResolve("fork", chessDomain: true, out var fork));
+            Assert.True(ChessConcepts.TryResolve("pin", chessDomain: true, out var pin));
+            Assert.Contains(change.Attestations, a =>
+                a.TypeId == ChessVocabulary.ExplainsType
+                && a.ObjectId == fork.Id
+                && a.ContextId == fork.Member(ChessConcepts.Domain.Book));
+            Assert.Contains(change.Attestations, a =>
+                a.TypeId == ChessVocabulary.ExplainsType
+                && a.ObjectId == pin.Id
+                && a.ContextId == pin.Member(ChessConcepts.Domain.Book));
+            Assert.Contains(change.Attestations, a =>
+                a.TypeId == ChessVocabulary.IsExampleOfType
+                && a.SubjectId == fork.Member(ChessConcepts.Domain.Book)
+                && a.ObjectId == fork.Id);
+            var declared = ChessSeedManifest.Relations
+                .Select(RelationTypeRegistry.RelationTypeId)
+                .ToHashSet();
+            Assert.All(
+                change.Attestations.Select(a => a.TypeId).Distinct(),
+                typeId => Assert.Contains(typeId, declared));
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
     }
 }
