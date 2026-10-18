@@ -137,8 +137,10 @@ class SeedRoleAnalyzes(unittest.TestCase):
 
     def test_cli_post_ingest_analyze_fails_on_a_skipped_table(self):
         ops = (ROOT / "app" / "Laplace.Substrate" / "Crud" / "Npgsql" / "NpgsqlIngestOps.cs").read_text(encoding="utf-8")
-        body = ops[ops.index("public static Task AnalyzePostIngestValidationAsync"):]
-        self.assertLess(body.index("AnalyzeOrThrowAsync(conn,"), body.index("public sealed record GinMaintenance"))
+        body = ops[ops.index("AnalyzePostIngestValidationAsync("):]
+        self.assertLess(body.index('NpgsqlCatalog.Command(conn, null, "ingest.analyze_post_ingest_validation")'),
+                body.index("AnalyzeOrThrowAsync(command,"))
+        self.assertLess(body.index("AnalyzeOrThrowAsync(command,"), body.index("public sealed record GinMaintenance"))
         self.assertIn('InvariantSeverity, "WARNING"', ops)
         cli = (ROOT / "app" / "Laplace.Cli" / "IngestCommands.cs").read_text(encoding="utf-8")
         catch = cli.index("catch (AnalyzeIncompleteException ex) { analyzeFailure = ex; }")
