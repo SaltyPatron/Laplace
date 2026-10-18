@@ -87,6 +87,20 @@ public static class ChessGraph
         b.AddAttestation(EvalRow(from.Position.Id, games, sum, witnessWeight, sourceId, contextId));
     }
 
+    /// <summary>
+    /// The mover's centipawn change across one played transition. The subject is
+    /// <see cref="ChessCompose.TransitionKey"/>, not the static from-position, so a loss
+    /// does not become an evaluation of the square the piece left.
+    /// </summary>
+    internal static void AppendEvaluationChange(
+        SubstrateChangeBuilder b, Hash128 transitionKey, int lossCp, long games, double witnessWeight,
+        Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (games < 1) games = 1;
+        long sum = PgnEvals.EvalSumFp1e9(lossCp, games);
+        b.AddAttestation(EvalRow(transitionKey, games, sum, witnessWeight, sourceId, contextId));
+    }
+
     public static void AppendMoveQuality(
     SubstrateChangeBuilder b, string fromKey, string qualityToken, long games, double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)

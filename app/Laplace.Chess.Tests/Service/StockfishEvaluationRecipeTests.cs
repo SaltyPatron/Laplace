@@ -59,10 +59,9 @@ public sealed class StockfishEvaluationRecipeTests : IDisposable
         Save(before);
         StockfishEvaluationRecipe[] changed =
         [
-            Capture(new() { Threads = 2 }), Capture(new() { HashMb = 64 }),
+            Capture(new() { HashMb = 64 }),
             Capture(new() { NumaPolicy = "none" }), Capture(new() { Depth = 12 }),
             Capture(new() { Nodes = 50_000 }), Capture(new() { TimeoutSeconds = 60 }),
-            Capture(new() { Processes = 1 }),
             Capture(name: "Stockfish next"),
         ];
         foreach (var recipe in changed)
@@ -70,6 +69,33 @@ public sealed class StockfishEvaluationRecipeTests : IDisposable
             Assert.Empty(StockfishEvalCache.Load(Cache, recipe));
             Assert.NotEqual(before.MarkerKey("line-id"), recipe.MarkerKey("line-id"));
         }
+
+        var multiPv = StockfishEvaluationRecipe.Capture(Engine, "Stockfish test", new StockfishEvaluationOptions(),
+            new Dictionary<string, string>
+            {
+                ["Hash"] = "16", ["NumaPolicy"] = "auto", ["EvalFile"] = "nn-embedded.nnue",
+                ["SyzygyPath"] = "", ["UCI_LimitStrength"] = "false", ["MultiPV"] = "4",
+            });
+        Assert.NotEqual(before.Id, multiPv.Id);
+        Assert.Empty(StockfishEvalCache.Load(Cache, multiPv));
+    }
+
+    [Fact]
+    public void HostThreadAndWorkerCountsAreNotRecipeIdentity()
+    {
+        var before = Capture();
+        Save(before);
+        var both = Capture(new() { Threads = 8, Processes = 3 });
+        Assert.Equal(before.Id, Capture(new() { Threads = 2 }).Id);
+        Assert.Equal(before.Id, Capture(new() { Processes = 1 }).Id);
+        Assert.Equal(before.Id, both.Id);
+        Assert.Equal(37, StockfishEvalCache.Load(Cache, both)[Input]);
+        Assert.Equal(before.MarkerKey("line-id"), both.MarkerKey("line-id"));
+        Assert.Equal(before.InputKey("fen"), both.InputKey("fen"));
+        Assert.DoesNotContain("\"Threads\"", before.CanonicalManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("CpuGrant", before.CanonicalManifest, StringComparison.Ordinal);
+        Assert.DoesNotContain("reproducibility", before.CanonicalManifest, StringComparison.Ordinal);
+        Assert.Contains("\"Hash\"", before.CanonicalManifest, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -105,7 +131,7 @@ public sealed class StockfishEvaluationRecipeTests : IDisposable
     public void CopiedCacheAndJournalMustMatchRecipeHeaderAsWellAsFilename()
     {
         var before = Capture();
-        var other = Capture(new() { Threads = 2 });
+        var other = Capture(new() { HashMb = 64 });
         Save(before);
         File.Copy(StockfishEvalCache.RecipePath(Cache, before), StockfishEvalCache.RecipePath(Cache, other));
         Assert.Empty(StockfishEvalCache.Load(Cache, other));
@@ -139,7 +165,8 @@ public sealed class StockfishEvaluationRecipeTests : IDisposable
         var recipe = Capture();
         const string position = "4k3/8/8/8/8/8/8/3QK3 w - - ";
         Assert.NotEqual(recipe.InputKey(position + "0 1"), recipe.InputKey(position + "99 1"));
-        Assert.NotEqual(recipe.InputKey(position + "0 1"), Capture(new() { Threads = 2 }).InputKey(position + "0 1"));
+        Assert.Equal(recipe.InputKey(position + "0 1"), Capture(new() { Threads = 2 }).InputKey(position + "0 1"));
+        Assert.NotEqual(recipe.InputKey(position + "0 1"), Capture(new() { HashMb = 64 }).InputKey(position + "0 1"));
     }
 
     [Fact]

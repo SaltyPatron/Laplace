@@ -3,6 +3,7 @@ using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
 using Laplace.Modality;
+using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Xunit;
 
@@ -71,19 +72,21 @@ public sealed class ChessStockfishEvalTests
         var change = Derive(new ScriptedEvaluator(new int?[] { 20, -15, 25, -30, 90, -120, 350 }));
         var evalRows = change.Attestations
             .Where(a => a.TypeId == ChessVocabulary.HasEvalType).ToList();
-        Assert.Equal(7, evalRows.Count);
         var positions = change.Entities
             .Where(e => e.TypeId == ChessVocabulary.PositionType)
             .Select(e => e.Id)
             .ToHashSet();
+        var positionEvals = evalRows.Where(a => positions.Contains(a.SubjectId)).ToList();
+        Assert.Equal(7, positionEvals.Count);
+        Assert.Equal(6, evalRows.Count - positionEvals.Count);
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var context = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
         Assert.All(evalRows, a =>
         {
             Assert.Equal(ChessStockfishEval.SourceId, a.SourceId);
             Assert.Equal(context, a.ContextId);
-            Assert.Contains(a.SubjectId, positions);
         });
+        Assert.All(positionEvals, a => Assert.Contains(a.SubjectId, positions));
     }
 
     [Fact]
@@ -92,9 +95,62 @@ public sealed class ChessStockfishEvalTests
         var change = Derive(new ScriptedEvaluator(new int?[] { 20, -15, 25, -30, 70, -120, 500 }));
         var quality = change.Attestations
             .Where(a => a.TypeId == ChessVocabulary.MoveQualityType).ToList();
-        Assert.Single(quality);
-        Assert.Equal(ChessStockfishEval.SourceId, quality[0].SourceId);
-        Assert.Equal(ContentEmitter.RootId("blunder"), quality[0].ObjectId);
+        var row = Assert.Single(quality);
+        Assert.Equal(ChessStockfishEval.SourceId, row.SourceId);
+        Assert.Equal(ContentEmitter.RootId("blunder"), row.ObjectId);
+        var positions = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.PositionType)
+            .Select(e => e.Id)
+            .ToHashSet();
+        Assert.DoesNotContain(row.SubjectId, positions);
+        Assert.Equal(TransitionAt(Game, 5), row.SubjectId);
+        var delta = Assert.Single(change.Attestations, a =>
+            a.TypeId == ChessVocabulary.HasEvalType && a.SubjectId == row.SubjectId);
+        int? recovered = SearchContinuationSeed.Centipawns(delta.SumScoreFp1e9 ?? 0, delta.ObservationCount);
+        Assert.NotNull(recovered);
+        Assert.InRange(recovered.Value, 379, 381);
+    }
+
+    [Fact]
+    public void DeriveGame_AttestsTheRecommendedMoveOnThePosition()
+    {
+        var change = Derive(new AdvisingEvaluator("e2e4", 20, -15, 25, -30, 90, -120, 350));
+        var rows = change.Attestations.Where(a => a.TypeId == ChessVocabulary.FeatureType).ToList();
+        var row = Assert.Single(rows);
+        Assert.Equal(ContentEmitter.RootId("chess/stockfish-recommended/e2e4"), row.ObjectId);
+        var modality = new ChessModality();
+        var started = ChessAnalyze.InitialState(null, modality);
+        Assert.NotNull(started);
+        Assert.Equal(ChessCompose.Position(started.Value.Initial.Board).Position.Id, row.SubjectId);
+    }
+
+    private static Hash128 TransitionAt(string pgn, int ply)
+    {
+        var game = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(pgn)!);
+        var modality = new ChessModality();
+        var started = ChessAnalyze.InitialState(game.StartFen, modality, game.Rules);
+        if (started is not { } state) throw new InvalidOperationException("game has no start position");
+        var cur = state.Initial;
+        for (int i = 0; i <= ply; i++)
+        {
+            var from = ChessCompose.Position(cur.Board);
+            var mv = San.Resolve(cur.Board, modality.LegalActions(cur), game.Moves[i])!.Value;
+            if (i == ply)
+                return ChessCompose.TransitionKey(from.Position.Id, ChessCompose.MoveId(cur.Board.MovingPiece(mv), mv));
+            cur = modality.Apply(cur, mv);
+        }
+        throw new InvalidOperationException("ply is past the game");
+    }
+
+    private sealed class AdvisingEvaluator(string uci, params int?[] scores) : IPositionEvaluator
+    {
+        private int _i;
+        public int? EvaluateCp(string fen) => _i < scores.Length ? scores[_i++] : 0;
+        public PositionVerdict? EvaluateVerdict(string fen)
+        {
+            int? cp = EvaluateCp(fen);
+            return cp is int value ? new PositionVerdict(value, uci) : null;
+        }
     }
 
     [Fact]

@@ -73,8 +73,10 @@ public sealed record StockfishEvaluationResources(int CpuGrant, int Processes, b
 
 /// <summary>
 /// Content identity of a calculated Stockfish witness. Artifact locations remain receipt
-/// metadata; exact engine/network/table bytes, effective UCI options and search policy own
-/// the cache and ingest namespace. Legacy v1 caches/markers do not acquire this identity.
+/// metadata. The identity is the engine bytes, depth or node budget, hash, MultiPV, and
+/// the other search options that change the calculated value. Host thread counts and the
+/// resolved worker budget stay on the process; they are not part of <see cref="Id"/>.
+/// Legacy v1 caches/markers do not acquire this identity.
 /// </summary>
 public sealed class StockfishEvaluationRecipe
 {
@@ -110,7 +112,13 @@ public sealed class StockfishEvaluationRecipe
         settings.Validate();
         string binaryHash = FileSha256(executable);
         var canonicalOptions = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, value) in effectiveOptions) canonicalOptions.Add(key, value);
+        foreach (var (key, value) in effectiveOptions)
+        {
+            // Threads is a host budget. Two machines that differ only by core count
+            // witness the same depth, hash, and MultiPV.
+            if (key == "Threads") continue;
+            canonicalOptions.Add(key, value);
+        }
         var networks = new List<Artifact>();
         foreach (var (key, value) in effectiveOptions.Where(static kv => kv.Key.StartsWith("EvalFile", StringComparison.Ordinal)))
         {
@@ -162,10 +170,8 @@ public sealed class StockfishEvaluationRecipe
             depth = settings.Nodes > 0 ? (int?)null : settings.Depth,
             nodes = settings.Nodes,
             timeoutSeconds = settings.TimeoutSeconds,
-            resources,
             input = "complete-fen",
             searchState = "ucinewgame-before-each-position",
-            reproducibility = settings.Threads == 1 ? "single-thread-cold-search" : "parallel-search-first-successful-observation",
         });
         return new StockfishEvaluationRecipe(manifest, binaryHash, engineName, settings,
             effectiveOptions.ToDictionary(static kv => kv.Key, static kv => kv.Value, StringComparer.Ordinal), resources);

@@ -10,8 +10,8 @@ namespace Laplace.Chess.Service;
 
 // Calculation witness over the admitted web: scans witnessed lines (distinct PLAYS_LINE
 // objects) lacking the ChessStockfishEval marker, hydrates each from its trajectory,
-// evaluates every position with Stockfish, and hands HAS_EVAL and eval-delta MOVE_QUALITY
-// testimony under the ChessStockfish source to the shared writer.
+// evaluates every position with Stockfish, and hands position HAS_EVAL, the recommended
+// move, and transition eval-change / MOVE_QUALITY testimony under the ChessStockfish source.
 // Run: `laplace ingest chess-eval [--depth N | --nodes N]`  (no path — substrate is the source)
 public sealed class ChessStockfishEvalDecomposer
     : ComposeDecomposer<ChessStockfishEvalRecord>, IIngestNoOpExplainer
@@ -22,6 +22,7 @@ public sealed class ChessStockfishEvalDecomposer
     private readonly StockfishEvaluatorPool _pool;
     private readonly IPositionEvaluator _evaluator;
     private readonly ConcurrentDictionary<Hash128, int?> _evalMemo;
+    private readonly ConcurrentDictionary<Hash128, string> _recommendations = new();
     private readonly ConcurrentDictionary<Hash128, Lazy<int?>> _evalInflight = new();
     private readonly string _cachePath;
     private Hash128? _recipeMetadataRoot;
@@ -148,7 +149,8 @@ public sealed class ChessStockfishEvalDecomposer
 
     private ChessStockfishEval.PreparedLine? Prepare(ChessWitnessedGame game)
     {
-        var prepared = ChessStockfishEval.PrepareGame(game, _evaluator, Recipe, _evalMemo, _evalInflight);
+        var prepared = ChessStockfishEval.PrepareGame(
+            game, _evaluator, Recipe, _evalMemo, _evalInflight, _recommendations);
         if (prepared is not null)
             StockfishEvalCache.Append(_cachePath, Recipe, prepared.FreshEvaluations);
         return prepared;
@@ -156,14 +158,16 @@ public sealed class ChessStockfishEvalDecomposer
 
     private sealed class PooledEvaluator(StockfishEvaluatorPool pool) : IPositionEvaluator
     {
-        public int? EvaluateCp(string fen)
+        public int? EvaluateCp(string fen) => EvaluateVerdict(fen)?.Centipawns;
+
+        public PositionVerdict? EvaluateVerdict(string fen)
         {
             // PrepareGame calls this only for a real memo miss whose single-flight
             // callback wins. Cached games and waiters never acquire a worker.
             // Return after each search: holding a lease across positions could wait
             // on another unit's callback while that callback waits for this worker.
             var evaluator = pool.Rent();
-            try { return evaluator.EvaluateCp(fen); }
+            try { return evaluator.EvaluateVerdict(fen); }
             finally { pool.Return(evaluator); }
         }
     }

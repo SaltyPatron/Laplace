@@ -73,6 +73,8 @@ Acceptance:
 - Clock pace is attested on the move, game, and player trajectory. It is not a context-free word.
 - Syzygy ingestion probes witnessed positions of five or fewer pieces and their legal neighbors. It does not enumerate the five-man space in C#.
 
+`StockfishEvaluationRecipe` identity is the engine bytes, the depth or node budget, the hash, and MultiPV. Thread counts and the resolved worker budget stay on the process and out of `Recipe.Id`. `HAS_EVAL` on the position is the side-to-move centipawn evaluation. The engine's recommended move is a `HAS_FEATURE` of that position, content `chess/stockfish-recommended/<uci>`, and only when that move is legal there. The played move's evaluation change is `HAS_EVAL` on `ChessCompose.TransitionKey`, and `MOVE_QUALITY` uses that same transition as its subject.
+
 ## Sprint 5 — Corpus identity
 
 Acceptance:

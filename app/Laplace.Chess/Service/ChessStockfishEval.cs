@@ -12,8 +12,9 @@ namespace Laplace.Chess.Service;
 /// <summary>
 /// Versioned calculation witness over recorded lines: replays a witnessed line, evaluates
 /// every position with Stockfish under one exact recipe (side-to-move centipawns), and attests
-/// HAS_EVAL and eval-delta MOVE_QUALITY under the ChessStockfish source. The unit is the line:
-/// its marker is keyed by line and recipe, so another playing of an analyzed line deposits nothing.
+/// HAS_EVAL on the position, the recommended move on that position, and the played move's
+/// evaluation change and MOVE_QUALITY on the transition. The unit is the line: its marker is
+/// keyed by line and recipe, so another playing of an analyzed line deposits nothing.
 /// </summary>
 public static class ChessStockfishEval
 {
@@ -44,7 +45,9 @@ public static class ChessStockfishEval
         ChessComposed?[] Positions,
         int?[] Evals,
         KeyValuePair<Hash128, int?>[] FreshEvaluations,
-        bool Complete);
+        bool Complete,
+        string?[] RecommendedUci,
+        Hash128?[] PlayedTransitions);
 
     public static string? ClassifyLoss(int lossCp) => lossCp switch
     {
@@ -57,9 +60,10 @@ public static class ChessStockfishEval
     public static void DeriveGame(
         SubstrateChangeBuilder b, ChessWitnessedGame game, IPositionEvaluator eval,
         StockfishEvaluationRecipe recipe,
-        ConcurrentDictionary<Hash128, int?>? evalMemo = null)
+        ConcurrentDictionary<Hash128, int?>? evalMemo = null,
+        ConcurrentDictionary<Hash128, string>? recommendations = null)
     {
-        var prepared = PrepareGame(game, eval, recipe, evalMemo, evalInflight: null);
+        var prepared = PrepareGame(game, eval, recipe, evalMemo, evalInflight: null, recommendations);
         if (prepared is not null)
             DepositPrepared(b, prepared);
     }
@@ -75,7 +79,8 @@ public static class ChessStockfishEval
         IPositionEvaluator eval,
         StockfishEvaluationRecipe recipe,
         ConcurrentDictionary<Hash128, int?>? evalMemo,
-        ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight)
+        ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight,
+        ConcurrentDictionary<Hash128, string>? recommendations = null)
     {
         var m = new ChessModality();
         if (ChessAnalyze.InitialState(game.StartFen, m, game.Rules) is not { } start) return null;
@@ -83,6 +88,8 @@ public static class ChessStockfishEval
         int n = game.Moves.Count;
         var evals = new int?[n + 1];
         var composed = new ChessComposed?[n + 1];
+        var recommended = new string?[n + 1];
+        var transitions = new Hash128?[n];
         var fresh = new List<KeyValuePair<Hash128, int?>>();
         bool complete = true;
 
@@ -97,12 +104,15 @@ public static class ChessStockfishEval
             {
                 string fen = cur.Board.ToFen();
                 var evaluationInput = Hash128.OfCanonical(InputKey(fen, recipe));
-                evals[ply] = EvaluatePosition(
+                var verdict = EvaluatePosition(
                     evaluationInput, fen,
                     eval,
                     evalMemo,
                     evalInflight,
+                    recommendations,
                     out bool newlyCached);
+                evals[ply] = verdict?.Centipawns;
+                recommended[ply] = LegalRecommendation(m, cur, verdict?.RecommendedUci);
                 if (newlyCached)
                     fresh.Add(new KeyValuePair<Hash128, int?>(evaluationInput, evals[ply]));
                 if (!evals[ply].HasValue)
@@ -116,11 +126,13 @@ public static class ChessStockfishEval
                 complete = false;
                 break;
             }
+            transitions[ply] = ChessCompose.TransitionKey(
+                node.Position.Id, ChessCompose.MoveId(cur.Board.MovingPiece(mv.Value), mv.Value));
             cur = m.Apply(cur, mv.Value);
             carried = ChessCompose.Position(cur.Board);
         }
 
-        return new PreparedLine(game, recipe, composed, evals, fresh.ToArray(), complete);
+        return new PreparedLine(game, recipe, composed, evals, fresh.ToArray(), complete, recommended, transitions);
     }
 
     /// <summary>
@@ -144,16 +156,22 @@ public static class ChessStockfishEval
             ChessGraph.EmitComposed(b, node, SourceId);
             if (evals[ply] is { } cp)
                 ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, context);
+            if (prepared.RecommendedUci[ply] is { Length: > 0 } uci
+                && ContentEmitter.Emit(b, "chess/stockfish-recommended/" + uci, SourceId) is { } recommendedId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    node.Position.Id, "HAS_FEATURE", recommendedId, SourceId, context, EvalWeight));
         }
 
         int moveCount = Math.Min(game.Moves.Count, Math.Max(0, evals.Length - 1));
         for (int ply = 0; ply < moveCount; ply++)
         {
             if (evals[ply] is not { } before || evals[ply + 1] is not { } after) continue;
-            if (composed[ply] is not { } from) continue;
-            if (ClassifyLoss(before + after) is not { } token) continue;
+            if (prepared.PlayedTransitions[ply] is not { } transition) continue;
+            int loss = before + after;
+            ChessGraph.AppendEvaluationChange(b, transition, loss, games: 1, EvalWeight, SourceId, context);
+            if (ClassifyLoss(loss) is not { } token) continue;
             ChessGraph.AppendMoveQuality(
-                b, from.Position.Id, token, games: 1, QualityWeight,
+                b, transition, token, games: 1, QualityWeight,
                 SourceId, context);
         }
 
@@ -172,36 +190,59 @@ public static class ChessStockfishEval
         IngestUnitCompletion.Emit(b, context, SourceId, 22);
     }
 
-    private static int? EvaluatePosition(
+    private static string? LegalRecommendation(ChessModality modality, ChessState state, string? uci)
+    {
+        if (string.IsNullOrWhiteSpace(uci)) return null;
+        foreach (var candidate in modality.LegalActions(state))
+            if (candidate.ToUci() == uci) return uci;
+        return null;
+    }
+
+    private static PositionVerdict? EvaluatePosition(
         Hash128 positionId,
         string fen,
         IPositionEvaluator eval,
         ConcurrentDictionary<Hash128, int?>? evalMemo,
         ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight,
+        ConcurrentDictionary<Hash128, string>? recommendations,
         out bool newlyCached)
     {
         newlyCached = false;
         if (evalMemo is not null && evalMemo.TryGetValue(positionId, out var cached))
-            return cached;
+        {
+            string? advised = null;
+            recommendations?.TryGetValue(positionId, out advised);
+            return cached is int cp ? new PositionVerdict(cp, advised) : null;
+        }
 
         if (evalMemo is null || evalInflight is null)
         {
-            int? value = eval.EvaluateCp(fen);
-            if (value.HasValue && evalMemo is not null && evalMemo.TryAdd(positionId, value))
+            var verdict = eval.EvaluateVerdict(fen);
+            if (verdict is { } found && evalMemo is not null && evalMemo.TryAdd(positionId, found.Centipawns))
+            {
                 newlyCached = true;
-            return value;
+                if (found.RecommendedUci is { Length: > 0 } uci)
+                    recommendations?.TryAdd(positionId, uci);
+            }
+            return verdict;
         }
 
-        var candidate = new Lazy<int?>(
-            () => eval.EvaluateCp(fen),
-            LazyThreadSafetyMode.ExecutionAndPublication);
+        var candidate = new Lazy<int?>(() =>
+        {
+            var verdict = eval.EvaluateVerdict(fen);
+            if (verdict?.RecommendedUci is { Length: > 0 } uci)
+                recommendations?.TryAdd(positionId, uci);
+            return verdict?.Centipawns;
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
         var shared = evalInflight.GetOrAdd(positionId, candidate);
         try
         {
             int? value = shared.Value;
-            if (value.HasValue && evalMemo.TryAdd(positionId, value))
+            if (value is int cp && evalMemo.TryAdd(positionId, cp))
                 newlyCached = true;
-            return value;
+            string? advised = null;
+            recommendations?.TryGetValue(positionId, out advised);
+            return value is int scored ? new PositionVerdict(scored, advised) : null;
         }
         finally
         {

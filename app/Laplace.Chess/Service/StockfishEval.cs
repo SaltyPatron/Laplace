@@ -6,9 +6,19 @@ namespace Laplace.Chess.Service;
 /// Side-to-move centipawn evaluation of a single position. Null = no evaluation
 /// available (terminal position, engine died, malformed FEN) — never a fabricated 0.
 /// </summary>
+/// <summary>One position's calculated centipawns and, when the engine named one, its recommended move.</summary>
+public readonly record struct PositionVerdict(int Centipawns, string? RecommendedUci);
+
 public interface IPositionEvaluator
 {
     int? EvaluateCp(string fen);
+
+    /// <summary>Centipawns plus the recommended move. Evaluators that only know a score leave the move empty.</summary>
+    PositionVerdict? EvaluateVerdict(string fen)
+    {
+        int? cp = EvaluateCp(fen);
+        return cp is int value ? new PositionVerdict(value, null) : null;
+    }
 }
 
 /// <summary>
@@ -124,7 +134,14 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
 
     public bool Broken => _engine.Broken;
 
-    public int? EvaluateCp(string fen) => Analyse(fen)?.Final?.Score?.SideToMoveCentipawns;
+    public int? EvaluateCp(string fen) => EvaluateVerdict(fen)?.Centipawns;
+
+    public PositionVerdict? EvaluateVerdict(string fen)
+    {
+        var analysis = Analyse(fen);
+        if (analysis?.Final?.Score?.SideToMoveCentipawns is not int cp) return null;
+        return new PositionVerdict(cp, analysis.BestMove.Move?.Text);
+    }
 
     /// <summary>The typed analysis behind <see cref="EvaluateCp"/>: score, PV, bestmove and receipt. Null when the
     /// engine could not answer (it is then Broken) or the FEN is not one.</summary>
