@@ -32,11 +32,11 @@ Acceptance:
 
 - `UciLichessEngine` names the cluster and database the process reported and the cluster and database the selected read source requires. A missing report is named as no identity.
 - The Linux UCI service user does not read `/opt/laplace/app/laplace-api.env`. Credentials stay in the service-owned engine environment file. `LD_LIBRARY_PATH`, `LAPLACE_INSTALL_PREFIX`, and `LAPLACE_OPS_LOG_DIR` are connector variables. The service log directory is created for that user. `LAPLACE_PERFCACHE_BIN` stays unset so the engine resolves the blob under the install prefix.
-- `20261015000000_substrate_runtime_grants.sql` grants the existing writer contract to `laplace_runtime` and a read contract (`USAGE`, `SELECT`, sequence use, function execute, no write and no `MAINTAIN`) to unprivileged roles named `laplace_mono_uci_*` and `laplace_mono_lichess_*`.
+- `20261015000000_substrate_runtime_grants.sql` grants the existing writer contract to `laplace_runtime` and to `laplace_mono_lichess_*`, because the Lichess host records live games through `SubstrateAccess.Ingest`. `laplace_mono_uci_*` gets the read contract (`USAGE`, `SELECT`, sequence use, function execute, no write and no `MAINTAIN`). Migrate re-executes that script, so a database that already applied the earlier reader grant for `laplace_mono_lichess_*` receives the writer contract on the next migrate.
 - A failed activation or an exited worker retries on a 5s, 10s, 30s, 60s schedule while the selected profile stays in force. A new selection revision retries immediately. Off does not retry.
 - `ChessRuntimeConfiguration` treats an unreadable installed environment file as absent. `ChessEngineConnections` turns an unreadable connector file into `ArgumentException`. `/chess/lab/catalog` returns an empty connection list and `connectionError` instead of HTTP 500. There is no `/v1/admin/overview` route; the admin overview section does not read this file.
 
-The committed UCI declaration `Laplace-UCI/installations/hart-server.json` contains `mono-staging` only. A host `connector.json` that adds `mono-prod` is a rendered installation. Reinstall it from the declaration after the declaration no longer points at `laplace-api.env`.
+The committed UCI declaration `Laplace-UCI/installations/hart-server.json` contains `mono-staging` only. A host `connector.json` that adds `mono-prod` is a rendered installation. Laplace main delivery restarts `laplace-mono-lichess` and does not run `Laplace-UCI/setup.py`. Laplace-UCI CI publishes the connector and does not render `/etc/laplace-mono/uci/connector.json`. Until `setup.py` is run on hart-server and hart-prod, those host files can still list `/opt/laplace/app/laplace-api.env`.
 
 ## Sprint 2 — Move selection
 
@@ -51,7 +51,7 @@ Acceptance:
 
 `SubstrateRootBias` keeps the exact-transition contract. Ten result witnesses at unit precision use prior strength 5. A tighter result deviation, and a witnessed `HAS_EVAL` count on the arrival position, increase precision. The evaluation's centipawn mean stays out of the recorded-result mean. A context-free move average is not mixed into an exact transition, and without one it is clamped to 3 centipawns.
 
-`SearchContinuationTable` is the interior cache. It is keyed by `ChessPositionIdentity` and seeded from a witnessed evaluation, an opening line, and the active game before search. At ply greater than 0 the preferred move is ordered after a transposition hit, and the witnessed evaluation nudges the node by at most 512 centipawns. The search does not query the database from that hot path.
+`SearchContinuationTable` is the interior cache. It is keyed by `ChessPositionIdentity` and seeded from a witnessed evaluation, an opening line, and the active game before search. At ply greater than 0 the preferred move is ordered after a transposition hit. The witnessed evaluation is not added on the way down, so it cannot accumulate once per ply, and replacing the table does not clear the transposition table. The leaf blend of that evaluation belongs with the structural evaluation. The search does not query the database from that hot path. Live hosts still pass no table.
 
 ## Sprint 3 — Commentary and concepts
 

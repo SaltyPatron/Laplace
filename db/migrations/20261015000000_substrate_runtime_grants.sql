@@ -1,7 +1,7 @@
 -- The remote runtime login survives database recreation; schema ACLs do not.
--- Restore database-scoped access for the writer role and for the UCI and Lichess
--- reader roles provisioned outside this database. Readers get SELECT only.
--- Writers keep the runtime contract from runtime/database-role.py.
+-- Restore database-scoped access for roles provisioned outside this database.
+-- laplace_runtime and laplace_mono_lichess_* record substrate state and keep the
+-- writer contract from runtime/database-role.py. laplace_mono_uci_* only reads.
 DO $$
 DECLARE
     candidate text;
@@ -20,8 +20,8 @@ BEGIN
                    AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)) THEN
             RAISE EXCEPTION 'Substrate runtime must be an unprivileged role: %', candidate;
         END IF;
-        reader := candidate LIKE 'laplace_mono_uci\_%' ESCAPE '\'
-               OR candidate LIKE 'laplace_mono_lichess\_%' ESCAPE '\';
+        -- Lichess records live games through SubstrateAccess.Ingest. Only UCI is read-only.
+        reader := candidate LIKE 'laplace_mono_uci\_%' ESCAPE '\';
         IF NOT reader THEN
             EXECUTE format('GRANT pg_read_all_stats, pg_signal_backend TO %I', candidate);
         END IF;

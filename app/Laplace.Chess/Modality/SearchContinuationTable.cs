@@ -7,12 +7,13 @@ namespace Laplace.Modality.Chess;
 /// <see cref="ChessPositionIdentity"/> values, the same position identity the
 /// game already uses. The table does not mint a second identity.
 /// Seed it before <see cref="Search.Think"/> and do not mutate it during a search.
+/// Search uses <see cref="Entry.PreferredMove"/> to order interior nodes.
+/// <see cref="Entry.WitnessedEvaluationCp"/> is stored for the leaf blend and is
+/// not added again at every ply.
 /// </summary>
 public sealed class SearchContinuationTable
 {
-    /// <summary>
-    /// Largest position nudge applied inside the tree. Mate distance stays outside this band.
-    /// </summary>
+    /// <summary>Largest witnessed-evaluation nudge a leaf blend may apply.</summary>
     public const int BlendCapCp = 512;
 
     public readonly record struct Entry(

@@ -169,12 +169,13 @@ public sealed class Search
         Func<Board, SearchTablebaseVerdict?>? tablebase = null,
         SearchContinuationTable? continuations = null)
     {
+        // Continuations only order moves. Their scores stay out of the transposition
+        // table, so a new table must not discard entries from the previous ply.
         bool changed = !ReferenceEquals(_rootBias, rootBias)
                        || !ReferenceEquals(_mgPst, mgPst)
                        || !ReferenceEquals(_egPst, egPst)
                        || !ReferenceEquals(_positionEvaluator, positionEvaluator)
-                       || !Equals(_tablebase, tablebase)
-                       || !ReferenceEquals(_continuations, continuations);
+                       || !Equals(_tablebase, tablebase);
         _rootBias = rootBias;
         _mgPst = mgPst;
         _egPst = egPst;
@@ -469,13 +470,9 @@ public sealed class Search
             }
         }
         ChessMove? preferred = null;
-        int? witnessedCp = null;
-        if (ply > 0 && _continuations is not null && _repetitionHistory.Count > 0
-            && _continuations.TryGet(_repetitionHistory[^1], out var continuation))
-        {
+        if (ply > 0 && _continuations is not null
+            && _continuations.TryGet(ChessPositionIdentity.PositionId(b), out var continuation))
             preferred = continuation.PreferredMove;
-            witnessedCp = continuation.WitnessedEvaluationCp;
-        }
         Order(b, moves, ttMove, ply, preferred);
 
         int best = -Inf;
@@ -523,8 +520,6 @@ public sealed class Search
         }
 
         if (ply == 0) _rootBestMove = bestMove;
-        if (witnessedCp is int evalCp && Math.Abs(best) < MateThreshold)
-            best += Math.Clamp(evalCp, -SearchContinuationTable.BlendCapCp, SearchContinuationTable.BlendCapCp);
 
         // Root steering answers which action this forward pass should select; it is not a
         // context-free value of the board. The same board can reappear as an interior

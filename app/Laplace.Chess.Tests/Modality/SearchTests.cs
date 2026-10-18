@@ -379,30 +379,36 @@ public sealed class SearchTests
     }
 
     [Fact]
-    public void InteriorContinuation_ChangesTheRootChoiceWithoutReplacingMate()
+    public void ContinuationOrderingLeavesScoresAndTheTranspositionTableIntact()
     {
         var start = Board.FromFen(ChessModality.StartFen);
         var limits = new Search.Limits(MaxDepth: 3);
-        var classical = new Search(ttBits: 12).Think(start, limits);
+        var search = new Search(ttBits: 12);
+        var cold = search.Think(start, limits);
         var after = start.Clone();
-        MoveApply.Make(after, classical.BestMove!.Value);
+        MoveApply.Make(after, cold.BestMove!.Value);
+        ChessMove reply = MoveGen.Legal(after)[0];
 
         var table = new SearchContinuationTable();
         table.SeedWitnessedEvaluation(after, SearchContinuationTable.BlendCapCp);
-        var steered = new Search(ttBits: 12, continuations: table).Think(start, limits);
+        table.SeedActiveGame(after, [reply]);
+        search.Reconfigure(null, null, null, continuations: table);
+        var warm = search.Think(start, limits);
 
-        Assert.NotEqual(classical.BestMove, steered.BestMove);
-        Assert.Contains(steered.BestMove!.Value, MoveGen.Legal(start));
+        Assert.Equal(cold.BestMove, warm.BestMove);
+        Assert.Equal(cold.Score, warm.Score);
+        Assert.True(warm.Nodes < cold.Nodes);
+
+        var fresh = new Search(ttBits: 12, continuations: table).Think(start, limits);
+        Assert.Equal(cold.BestMove, fresh.BestMove);
+        Assert.Equal(cold.Score, fresh.Score);
 
         var mate = Board.FromFen("7k/6Q1/5K2/8/8/8/8/8 w - - 0 1");
         var forced = new Search(ttBits: 12).Think(mate, new Search.Limits(MaxDepth: 2));
-        var afterMate = mate.Clone();
-        MoveApply.Make(afterMate, forced.BestMove!.Value);
-        var poisoned = new SearchContinuationTable();
-        poisoned.SeedWitnessedEvaluation(afterMate, -SearchContinuationTable.BlendCapCp);
-        var stillMate = new Search(ttBits: 12, continuations: poisoned)
+        Assert.True(forced.Score > MateThreshold);
+        var stillMate = new Search(ttBits: 12, continuations: table)
             .Think(mate, new Search.Limits(MaxDepth: 2));
         Assert.Equal(forced.BestMove, stillMate.BestMove);
-        Assert.True(stillMate.Score > MateThreshold);
+        Assert.Equal(forced.Score, stillMate.Score);
     }
 }

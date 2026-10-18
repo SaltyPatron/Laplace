@@ -6,14 +6,16 @@ name="laplace_grants_${GITHUB_RUN_ID:-$$}_${RANDOM}"
 role="${name}_runtime"
 owner="${name}_owner"
 reader="laplace_mono_uci_r${RANDOM}${RANDOM}"
+recorder="laplace_mono_lichess_w${RANDOM}${RANDOM}"
 P(){ psql -X -v ON_ERROR_STOP=1 -Atq -d "$1" "${@:2}"; }
 printf 'CREATE DATABASE "%s";\n' "$name" | P postgres
 cleanup(){
-  printf 'DROP DATABASE "%s" WITH (FORCE);\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\n' "$name" "$owner" "$owner" "$role" "$role" "$reader" "$reader" | P postgres
+  printf 'DROP DATABASE "%s" WITH (FORCE);\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\n' "$name" "$owner" "$owner" "$role" "$role" "$reader" "$reader" "$recorder" "$recorder" | P postgres
 }
 trap cleanup EXIT
 printf 'CREATE ROLE "%s" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;\n' "$role" | P postgres
 printf 'CREATE ROLE "%s" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;\n' "$reader" | P postgres
+printf 'CREATE ROLE "%s" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;\n' "$recorder" | P postgres
 printf 'CREATE ROLE "%s" NOLOGIN;\n' "$owner" | P postgres
 P "$name" <<'SQL'
 CREATE SCHEMA laplace;
@@ -134,3 +136,43 @@ SELECT has_table_privilege(:'reader','public.reference','SELECT')
 \endif
 SQL
 echo 'PASS UCI reader roles can read substrate tables and cannot write, maintain, signal, or enter app'
+P "$name" -v recorder="$recorder" <<'SQL'
+SELECT has_table_privilege(:'recorder','public.reference','SELECT')
+   AND NOT has_table_privilege(:'recorder','public.reference','INSERT')
+   AND has_table_privilege(:'recorder','laplace.entities','INSERT')
+   AND has_table_privilege(:'recorder','laplace.entities','UPDATE')
+   AND has_table_privilege(:'recorder','laplace.entities','DELETE')
+   AND has_table_privilege(:'recorder','laplace.entities','MAINTAIN')
+   AND has_schema_privilege(:'recorder','consensus','USAGE')
+   AND NOT has_schema_privilege(:'recorder','app','USAGE')
+   AND pg_has_role(:'recorder','pg_signal_backend','MEMBER')
+   AS recorder_writes \gset
+\if :recorder_writes
+\else
+\echo 'FAIL the Lichess recorder role cannot write substrate tables'
+\quit 1
+\endif
+SQL
+echo 'PASS Lichess recorder roles can write and maintain substrate tables and cannot enter app'
+P "$name" -v recorder="$recorder" <<'SQL'
+REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON ALL TABLES IN SCHEMA laplace FROM :"recorder";
+REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON ALL TABLES IN SCHEMA consensus FROM :"recorder";
+REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON ALL TABLES IN SCHEMA ops FROM :"recorder";
+REVOKE pg_signal_backend FROM :"recorder";
+SQL
+sed "s/'laplace_runtime'/'$role'/" "$root/db/migrations/20261015000000_substrate_runtime_grants.sql" | P "$name"
+P "$name" -v recorder="$recorder" -v reader="$reader" <<'SQL'
+SELECT has_table_privilege(:'recorder','laplace.entities','INSERT')
+   AND has_table_privilege(:'recorder','laplace.entities','MAINTAIN')
+   AND NOT has_table_privilege(:'recorder','public.reference','INSERT')
+   AND pg_has_role(:'recorder','pg_signal_backend','MEMBER')
+   AND NOT has_table_privilege(:'reader','laplace.entities','INSERT')
+   AND NOT pg_has_role(:'reader','pg_signal_backend','MEMBER')
+   AS repaired \gset
+\if :repaired
+\else
+\echo 'FAIL reapplying substrate grants did not restore the Lichess writer without promoting UCI'
+\quit 1
+\endif
+SQL
+echo 'PASS reapplying substrate grants restores the Lichess writer and leaves UCI read-only'
