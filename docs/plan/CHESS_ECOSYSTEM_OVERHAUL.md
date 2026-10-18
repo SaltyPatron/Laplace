@@ -51,6 +51,8 @@ Acceptance:
 
 `SubstrateRootBias` keeps the exact-transition contract. Ten result witnesses at unit precision use prior strength 5. A tighter result deviation, and a witnessed `HAS_EVAL` count on the arrival position, increase precision. The evaluation's centipawn mean stays out of the recorded-result mean. A context-free move average is not mixed into an exact transition, and without one it is clamped to 3 centipawns.
 
+`SearchContinuationTable` is the interior cache. It is keyed by `ChessPositionIdentity` and seeded from a witnessed evaluation, an opening line, and the active game before search. At ply greater than 0 the preferred move is ordered after a transposition hit, and the witnessed evaluation nudges the node by at most 512 centipawns. The search does not query the database from that hot path.
+
 ## Sprint 3 — Commentary and concepts
 
 `PositionHistoryAsync` takes an unordered GIN sample and the commentary formats a fixed sentence from the first dated hit. Book text is truncated from one `EXPLAINS` row. Motif names are a fixed C# switch.

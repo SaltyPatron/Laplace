@@ -356,4 +356,53 @@ public sealed class SearchTests
         var legal = MoveGen.Legal(b).Select(m => m.ToUci());
         Assert.Contains(r.BestMove!.Value.ToUci(), legal);
     }
+
+    [Fact]
+    public void ContinuationTable_UsesPositionIdentityAndLetsTheActiveGameOutrankTheOpening()
+    {
+        var start = Board.FromFen(ChessModality.StartFen);
+        ChessMove e4 = MoveGen.Legal(start).Single(m => m.ToUci() == "e2e4");
+        ChessMove d4 = MoveGen.Legal(start).Single(m => m.ToUci() == "d2d4");
+        Hash128 id = ChessPositionIdentity.PositionId(start);
+
+        var table = new SearchContinuationTable();
+        table.SeedOpening(start, [e4]);
+        table.SeedActiveGame(start.Clone(), [d4]);
+        table.SeedWitnessedEvaluation(start.Clone(), 40);
+
+        Assert.Equal(id, ChessPositionIdentity.PositionId(start.Clone()));
+        Assert.True(table.TryGet(id, out var entry));
+        Assert.Equal(d4, entry.PreferredMove);
+        Assert.Equal(d4, entry.ActiveGameMove);
+        Assert.Equal(e4, entry.OpeningMove);
+        Assert.Equal(40, entry.WitnessedEvaluationCp);
+    }
+
+    [Fact]
+    public void InteriorContinuation_ChangesTheRootChoiceWithoutReplacingMate()
+    {
+        var start = Board.FromFen(ChessModality.StartFen);
+        var limits = new Search.Limits(MaxDepth: 3);
+        var classical = new Search(ttBits: 12).Think(start, limits);
+        var after = start.Clone();
+        MoveApply.Make(after, classical.BestMove!.Value);
+
+        var table = new SearchContinuationTable();
+        table.SeedWitnessedEvaluation(after, SearchContinuationTable.BlendCapCp);
+        var steered = new Search(ttBits: 12, continuations: table).Think(start, limits);
+
+        Assert.NotEqual(classical.BestMove, steered.BestMove);
+        Assert.Contains(steered.BestMove!.Value, MoveGen.Legal(start));
+
+        var mate = Board.FromFen("7k/6Q1/5K2/8/8/8/8/8 w - - 0 1");
+        var forced = new Search(ttBits: 12).Think(mate, new Search.Limits(MaxDepth: 2));
+        var afterMate = mate.Clone();
+        MoveApply.Make(afterMate, forced.BestMove!.Value);
+        var poisoned = new SearchContinuationTable();
+        poisoned.SeedWitnessedEvaluation(afterMate, -SearchContinuationTable.BlendCapCp);
+        var stillMate = new Search(ttBits: 12, continuations: poisoned)
+            .Think(mate, new Search.Limits(MaxDepth: 2));
+        Assert.Equal(forced.BestMove, stillMate.BestMove);
+        Assert.True(stillMate.Score > MateThreshold);
+    }
 }

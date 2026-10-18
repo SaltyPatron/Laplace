@@ -101,6 +101,7 @@ public sealed class Search
     private ISearchPositionEvaluator? _activePositionEvaluator;
     private long _positionEvaluatorVersion;
     private Func<Board, SearchTablebaseVerdict?>? _tablebase;
+    private SearchContinuationTable? _continuations;
     private int[][]? _mgPst;
     private int[][]? _egPst;
     private Dictionary<string, int>? _rootBonusByUci;
@@ -118,7 +119,8 @@ public sealed class Search
     public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20,
         int[][]? mgPst = null, int[][]? egPst = null,
         ISearchPositionEvaluator? positionEvaluator = null,
-        Func<Board, SearchTablebaseVerdict?>? tablebase = null)
+        Func<Board, SearchTablebaseVerdict?>? tablebase = null,
+        SearchContinuationTable? continuations = null)
     {
         _terms = terms;
         _rootBias = rootBias;
@@ -127,6 +129,7 @@ public sealed class Search
         _positionEvaluator = positionEvaluator;
         _positionEvaluatorVersion = positionEvaluator?.Version ?? 0;
         _tablebase = tablebase;
+        _continuations = continuations;
         int bits = Math.Clamp(ttBits, 10, 24);
         TtBits = bits;
         _tt = new TtEntry[1 << bits];
@@ -163,18 +166,21 @@ public sealed class Search
     public void Reconfigure(
         IRootBias? rootBias, int[][]? mgPst, int[][]? egPst,
         ISearchPositionEvaluator? positionEvaluator = null,
-        Func<Board, SearchTablebaseVerdict?>? tablebase = null)
+        Func<Board, SearchTablebaseVerdict?>? tablebase = null,
+        SearchContinuationTable? continuations = null)
     {
         bool changed = !ReferenceEquals(_rootBias, rootBias)
                        || !ReferenceEquals(_mgPst, mgPst)
                        || !ReferenceEquals(_egPst, egPst)
                        || !ReferenceEquals(_positionEvaluator, positionEvaluator)
-                       || !Equals(_tablebase, tablebase);
+                       || !Equals(_tablebase, tablebase)
+                       || !ReferenceEquals(_continuations, continuations);
         _rootBias = rootBias;
         _mgPst = mgPst;
         _egPst = egPst;
         _positionEvaluator = positionEvaluator;
         _tablebase = tablebase;
+        _continuations = continuations;
         if (changed) Array.Clear(_tt, 0, _tt.Length);
     }
 
@@ -462,7 +468,15 @@ public sealed class Search
                 _rootBonusByUci[moves[i].ToUci()] = bonus[i];
             }
         }
-        Order(b, moves, ttMove, ply);
+        ChessMove? preferred = null;
+        int? witnessedCp = null;
+        if (ply > 0 && _continuations is not null && _repetitionHistory.Count > 0
+            && _continuations.TryGet(_repetitionHistory[^1], out var continuation))
+        {
+            preferred = continuation.PreferredMove;
+            witnessedCp = continuation.WitnessedEvaluationCp;
+        }
+        Order(b, moves, ttMove, ply, preferred);
 
         int best = -Inf;
         ChessMove bestMove = moves[0];
@@ -509,6 +523,8 @@ public sealed class Search
         }
 
         if (ply == 0) _rootBestMove = bestMove;
+        if (witnessedCp is int evalCp && Math.Abs(best) < MateThreshold)
+            best += Math.Clamp(evalCp, -SearchContinuationTable.BlendCapCp, SearchContinuationTable.BlendCapCp);
 
         // Root steering answers which action this forward pass should select; it is not a
         // context-free value of the board. The same board can reappear as an interior
@@ -661,18 +677,22 @@ public sealed class Search
     // table — the engine's one piece-value fact (one implementation per fact).
     internal static readonly int[] PieceValue = { 0, 100, 320, 330, 500, 900, 20000 };
 
-    private void Order(Board b, List<ChessMove> moves, ChessMove ttMove, int ply)
+    private void Order(Board b, List<ChessMove> moves, ChessMove ttMove, int ply, ChessMove? preferred = null)
     {
         var k0 = ply < MaxPly ? _killers[ply, 0] : default;
         var k1 = ply < MaxPly ? _killers[ply, 1] : default;
-        moves.Sort((x, y) => OrderScore(b, y, ttMove, k0, k1, ply)
-            .CompareTo(OrderScore(b, x, ttMove, k0, k1, ply)));
+        moves.Sort((x, y) => OrderScore(b, y, ttMove, k0, k1, ply, preferred)
+            .CompareTo(OrderScore(b, x, ttMove, k0, k1, ply, preferred)));
     }
 
     private int OrderScore(
-        Board b, ChessMove move, ChessMove ttMove, ChessMove k0, ChessMove k1, int ply)
+        Board b, ChessMove move, ChessMove ttMove, ChessMove k0, ChessMove k1, int ply,
+        ChessMove? preferred)
     {
         int score = Score(b, move, ttMove, k0, k1);
+        // Below a transposition move, above a capture: the cached continuation is tried early
+        // and a proven table move can still lead.
+        if (preferred is { } hint && move == hint) score += 900_000;
         if (ply == 0 && _rootBonusByUci?.TryGetValue(move.ToUci(), out int bonus) == true)
             score += bonus * 1_000;
         return score;
