@@ -146,10 +146,8 @@ internal static class ChessEndpoints
                     new { kind = "fide-roster", label = "Ingest FIDE top players", @default = new { cohort = "open", limit = "25", ingest = "true" } },
                 },
                 engines,
-                connections = ChessEngineConnections.Read().Select(p => new
-                {
-                    p.Id, p.Label, p.Implementation, p.Environment, p.Knowledge, p.Host,
-                }),
+                connections = ReadConnections(out var connectionError),
+                connectionError,
             });
         }).WithTags("chess-lab");
 
@@ -412,6 +410,23 @@ internal static class ChessEndpoints
             => new(tenant.TenantId, key, "api_key"),
         _ => null,
     };
+
+    private static object[] ReadConnections(out string? error)
+    {
+        try
+        {
+            error = null;
+            return ChessEngineConnections.Read().Select(p => (object)new
+            {
+                p.Id, p.Label, p.Implementation, p.Environment, p.Knowledge, p.Host,
+            }).ToArray();
+        }
+        catch (ArgumentException ex)
+        {
+            error = ex.Message;
+            return [];
+        }
+    }
 
     private static bool TryParseKind(string? kind, out ChessLabJobKind parsed) => kind?.ToLowerInvariant() switch
     {

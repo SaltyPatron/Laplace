@@ -55,6 +55,25 @@ public sealed class ChessEngineConnectionsTests
         finally { Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public void LockedConnectorConfigurationIsADeclaredFailure()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "chess-connection-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var executable = Path.Combine(directory, "connector");
+            File.WriteAllText(executable, "");
+            var configuration = Path.Combine(directory, "client.json");
+            File.WriteAllText(configuration, """{"version":1,"profiles":{}}""");
+            using var locked = new FileStream(configuration, FileMode.Open, FileAccess.Read, FileShare.None);
+            var error = Assert.Throws<ArgumentException>(() => ChessEngineConnections.Read(configuration, executable));
+            Assert.Contains("cannot be read", error.Message);
+            Assert.IsNotType<UnauthorizedAccessException>(error);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData("unknown")]
     [InlineData("--profile other")]

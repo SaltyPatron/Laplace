@@ -277,4 +277,17 @@ public sealed class UciClientTests
         var analysis = process.Search(ChessPosition.Start, new UciLimits(Nodes: 5_000), TimeSpan.FromSeconds(60), "warm");
         Assert.NotNull(analysis.BestMove.Move);
     }
+
+    [Fact]
+    public void DatabaseIdentityMismatchNamesBothClusters()
+    {
+        var required = new ChessDatabaseIdentity("required-cluster", "laplace-mono");
+        var missing = UciLichessEngine.DatabaseIdentityMismatch(required, null, "at startup");
+        Assert.Contains("no cluster or database", missing);
+        Assert.Contains("required-cluster/laplace-mono", missing);
+        var reported = UciLichessEngine.DatabaseIdentityMismatch(required,
+            new ChessDatabaseIdentity("desktop-cluster", "laplace-desktop"), "at startup");
+        Assert.Contains("desktop-cluster/laplace-desktop", reported);
+        Assert.Contains("required-cluster/laplace-mono", reported);
+    }
 }

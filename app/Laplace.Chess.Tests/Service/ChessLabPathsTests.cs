@@ -105,6 +105,29 @@ public sealed class ChessLabPathsTests
     }
 
     [Fact]
+    public void UnreadableInstalledEnvironmentFileIsSkipped()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"chess-locked-{Guid.NewGuid():N}");
+        string[] keys = ["LAPLACE_INSTALL_PREFIX", "LAPLACE_CHESS_ENV", "LAPLACE_STOCKFISH"];
+        var previous = keys.ToDictionary(static key => key, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (string key in keys) Environment.SetEnvironmentVariable(key, null);
+            Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", root);
+            Directory.CreateDirectory(Path.Combine(root, "app"));
+            string env = Path.Combine(root, "app", "laplace-api.env");
+            File.WriteAllText(env, "LAPLACE_STOCKFISH=from-locked-file\n");
+            using var locked = new FileStream(env, FileMode.Open, FileAccess.Read, FileShare.None);
+            Assert.Null(ChessRuntimeConfiguration.Read("LAPLACE_STOCKFISH"));
+        }
+        finally
+        {
+            foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value);
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void SourceStockfishPrecedesInstalledBuildAndPathButPreservesExplicitBinary()
     {
         string root = Path.Combine(Path.GetTempPath(), $"stockfish-source-{Guid.NewGuid():N}");

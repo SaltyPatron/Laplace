@@ -60,6 +60,12 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
         return new UciLichessEngine(engine, new UciProcessStart(engine, HandshakeTimeout: TimeSpan.FromSeconds(60)), options, overheadMs);
     }
 
+    internal static string DatabaseIdentityMismatch(ChessDatabaseIdentity required, ChessDatabaseIdentity? reported, string moment)
+    {
+        var actual = reported is null ? "no cluster or database" : $"{reported.Cluster}/{reported.Database}";
+        return $"The UCI engine reported {actual} {moment}. The selected read source requires {required.Cluster}/{required.Database}.";
+    }
+
     public static IReadOnlyDictionary<string, string> ParseOptions(string? text)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -81,7 +87,7 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
             process.NewGame(TimeSpan.FromSeconds(120));
             if (RequiredDatabase is not null && process.DatabaseIdentity != RequiredDatabase)
                 throw new UciEngineException(UciFailure.Rejected,
-                    "The UCI engine did not report the configured read source's cluster and database identity.");
+                    DatabaseIdentityMismatch(RequiredDatabase, process.DatabaseIdentity, "at startup"));
             if (RequiredDatabase is not null && !process.Supports("Refresh Database Snapshot"))
                 throw new UciEngineException(UciFailure.Rejected,
                     "The selected Laplace UCI engine cannot refresh its configured database source; publish the matching monorepo UCI runtime.");
@@ -116,7 +122,8 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
                 long available = position.WhiteToMove ? clock.WTimeMs : clock.BTimeMs;
                 process.IsReady(TimeSpan.FromMilliseconds(Math.Clamp(available - overheadMs, 1, 120_000)));
                 if (requiredDatabase is not null && process.DatabaseIdentity != requiredDatabase)
-                    throw new UciEngineException(UciFailure.Rejected, "The selected engine changed substrate databases during the game.");
+                    throw new UciEngineException(UciFailure.Rejected,
+                        DatabaseIdentityMismatch(requiredDatabase, process.DatabaseIdentity, "after refreshing its database snapshot"));
             }
             ct.ThrowIfCancellationRequested();
             long preparationMs = preparation.ElapsedMilliseconds;

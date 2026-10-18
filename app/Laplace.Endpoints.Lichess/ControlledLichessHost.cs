@@ -59,6 +59,8 @@ internal sealed class LichessController : BackgroundService
     private string? failure;
     private string phase = "off";
     private long attemptedRevision = -1;
+    private int activationFailures;
+    private DateTimeOffset nextActivationUtc = DateTimeOffset.MinValue;
 
     public LichessController(LichessControlConfiguration config, ILogger<LichessController> log)
     {
@@ -76,7 +78,9 @@ internal sealed class LichessController : BackgroundService
     public object Status() => new
     {
         controller = Environment.MachineName, selection = Volatile.Read(ref selection),
-        activeProfile, activeSelection, phase, error = failure, bot = bot?.Status(),
+        activeProfile, activeSelection, phase, error = failure,
+        retryAt = phase == "failed" ? nextActivationUtc : (DateTimeOffset?)null,
+        bot = bot?.Status(),
         routing = config.Routing is not { } routing ? null : new
         {
             executors = routing.Executors.Select(p => new { id = p.Key, p.Value.Label, p.Value.Environment,
@@ -115,6 +119,18 @@ internal sealed class LichessController : BackgroundService
         finally { changes.Release(); }
     }
 
+    internal static TimeSpan ActivationRetryDelay(int consecutiveFailures)
+    {
+        if (consecutiveFailures < 1) throw new ArgumentOutOfRangeException(nameof(consecutiveFailures));
+        return consecutiveFailures switch
+        {
+            1 => TimeSpan.FromSeconds(5),
+            2 => TimeSpan.FromSeconds(10),
+            3 => TimeSpan.FromSeconds(30),
+            _ => TimeSpan.FromSeconds(60),
+        };
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -122,9 +138,11 @@ internal sealed class LichessController : BackgroundService
             while (!stoppingToken.IsCancellationRequested)
             {
                 var desired = Volatile.Read(ref selection);
-                if (attemptedRevision != desired.Revision)
+                bool revisionChanged = attemptedRevision != desired.Revision;
+                bool retryDue = phase == "failed" && desired.Profile is not null && DateTimeOffset.UtcNow >= nextActivationUtc;
+                if (revisionChanged || retryDue)
                 {
-                    if (bot is not null)
+                    if (revisionChanged && bot is not null)
                     {
                         phase = "draining";
                         // Stop accepting challenges; the existing game's engine and writer
@@ -133,9 +151,17 @@ internal sealed class LichessController : BackgroundService
                         await bot.DisposeAsync(); bot = null; activeProfile = null; activeSelection = null;
                     }
                     desired = Volatile.Read(ref selection);
-                    attemptedRevision = desired.Revision;
+                    if (revisionChanged)
+                    {
+                        attemptedRevision = desired.Revision;
+                        activationFailures = 0;
+                    }
                     failure = null;
-                    if (desired.Profile is null) phase = "off";
+                    if (desired.Profile is null)
+                    {
+                        phase = "off";
+                        nextActivationUtc = DateTimeOffset.MaxValue;
+                    }
                     else
                     {
                         phase = "verifying";
@@ -154,17 +180,32 @@ internal sealed class LichessController : BackgroundService
                             if (!bot.Start(profile.MaxConcurrent, profile.Policy, engine))
                                 throw new InvalidOperationException(bot.Status().Error ?? "Lichess worker could not start.");
                             activeProfile = desired.Profile; activeSelection = desired; phase = "running";
+                            activationFailures = 0;
+                            nextActivationUtc = DateTimeOffset.MaxValue;
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
-                            failure = ex is UciEngineException ? ex.Message : $"{ex.GetType().Name}: profile initialization failed; inspect the controller journal.";
+                            await ReleaseFailedBotAsync();
+                            activationFailures++;
+                            var wait = ActivationRetryDelay(activationFailures);
+                            nextActivationUtc = DateTimeOffset.UtcNow + wait;
+                            var detail = ex is UciEngineException ? ex.Message : $"{ex.GetType().Name}: profile initialization failed; inspect the controller journal.";
+                            failure = $"{detail} Retrying in {wait.TotalSeconds:0}s.";
                             phase = "failed";
-                            log.LogError(ex, "Lichess profile {Profile} failed to initialize", desired.Profile);
+                            log.LogError(ex, "Lichess profile {Profile} failed to initialize; retrying in {Seconds}s", desired.Profile, wait.TotalSeconds);
                         }
                     }
                 }
                 if (phase == "running" && bot?.Status() is { Running: false } status)
-                { phase = "failed"; failure = status.Error ?? "Lichess worker exited."; }
+                {
+                    activationFailures++;
+                    var wait = ActivationRetryDelay(activationFailures);
+                    nextActivationUtc = DateTimeOffset.UtcNow + wait;
+                    failure = $"{status.Error ?? "Lichess worker exited."} Retrying in {wait.TotalSeconds:0}s.";
+                    phase = "failed";
+                    log.LogError("Lichess worker exited; retrying in {Seconds}s", wait.TotalSeconds);
+                    await ReleaseFailedBotAsync();
+                }
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
         }
@@ -178,6 +219,14 @@ internal sealed class LichessController : BackgroundService
                 catch (TimeoutException) { log.LogWarning("Shutdown interrupted a game drain; no game outcome was fabricated."); }
             }
         }
+    }
+
+    private async Task ReleaseFailedBotAsync()
+    {
+        if (bot is null) return;
+        try { await bot.DisposeAsync(); }
+        catch (Exception ex) { log.LogWarning(ex, "Failed to dispose the Lichess worker after activation failed"); }
+        bot = null; activeProfile = null; activeSelection = null;
     }
 
     public override void Dispose() { ownership.Dispose(); changes.Dispose(); base.Dispose(); }

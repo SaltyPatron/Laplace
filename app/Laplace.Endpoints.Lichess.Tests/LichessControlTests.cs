@@ -9,6 +9,15 @@ namespace Laplace.Endpoints.Lichess.Tests;
 
 public sealed class LichessControlTests
 {
+    [Theory]
+    [InlineData(1, 5)]
+    [InlineData(2, 10)]
+    [InlineData(3, 30)]
+    [InlineData(4, 60)]
+    [InlineData(9, 60)]
+    public void ActivationRetryBackoffGrowsAndCapsAtOneMinute(int failures, int seconds)
+        => Assert.Equal(TimeSpan.FromSeconds(seconds), LichessController.ActivationRetryDelay(failures));
+
     [Fact]
     public void ExistingProfilePreservesItsDatabaseAndRejectsConflictingNames()
     {

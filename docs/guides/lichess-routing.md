@@ -91,6 +91,12 @@ Stockfish and Lc0 are explicit comparison engines, not substitutes for Laplace.
 Refactor and modular implementations require their own engines and admission
 contracts; the monorepo controller does not claim to implement those contracts.
 
+## When an executor fails to activate
+
+`mono-development` selects the desktop engine. It does not select a different database. The engine process has to report the read source chosen in the selector. The failure names both the identity the process reported and the identity that source requires. A desktop database is usable only after it is declared as its own read source. A failed activation retries with backoff while that selection remains; turning the bot off does not retry. The work program is [`../plan/CHESS_ECOSYSTEM_OVERHAUL.md`](../plan/CHESS_ECOSYSTEM_OVERHAUL.md) under Laplace#1912.
+
+The Linux connector process reads only its own engine environment file. It does not read the API service's private environment file. Public library and log paths belong in the connector's `variables`.
+
 ## Installation and operation
 
 The version 2 `routing` object has these fields:

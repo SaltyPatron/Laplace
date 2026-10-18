@@ -13,3 +13,4 @@ These notes state how particular parts of the machine operate. They do not order
 - [`CI_CD_OPERATOR_MODEL.md`](CI_CD_OPERATOR_MODEL.md) — delivery installs one revision of the surfaces whose bytes changed.
 - [`WORKSTREAMS.md`](WORKSTREAMS.md) — names for areas of the same machine.
 - [`CHESS_QUALIFIED_FLOOR_EXPORT.md`](CHESS_QUALIFIED_FLOOR_EXPORT.md) and [`CHESS_RECORDED_FLOOR_SERVING_ACCEPTANCE.md`](CHESS_RECORDED_FLOOR_SERVING_ACCEPTANCE.md) — chess positions and moves are identities and trajectories on the common substrate.
+- [`CHESS_ECOSYSTEM_OVERHAUL.md`](CHESS_ECOSYSTEM_OVERHAUL.md) — Laplace#1912: the Lichess relay, then witnessed move selection, commentary, books and openings, and corpus identity. Spec 11 still governs what chess testimony is.

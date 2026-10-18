@@ -5,13 +5,15 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 name="laplace_grants_${GITHUB_RUN_ID:-$$}_${RANDOM}"
 role="${name}_runtime"
 owner="${name}_owner"
+reader="laplace_mono_uci_r${RANDOM}${RANDOM}"
 P(){ psql -X -v ON_ERROR_STOP=1 -Atq -d "$1" "${@:2}"; }
 printf 'CREATE DATABASE "%s";\n' "$name" | P postgres
 cleanup(){
-  printf 'DROP DATABASE "%s" WITH (FORCE);\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\n' "$name" "$owner" "$owner" "$role" "$role" | P postgres
+  printf 'DROP DATABASE "%s" WITH (FORCE);\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\nDROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\n' "$name" "$owner" "$owner" "$role" "$role" "$reader" "$reader" | P postgres
 }
 trap cleanup EXIT
 printf 'CREATE ROLE "%s" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;\n' "$role" | P postgres
+printf 'CREATE ROLE "%s" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;\n' "$reader" | P postgres
 printf 'CREATE ROLE "%s" NOLOGIN;\n' "$owner" | P postgres
 P "$name" <<'SQL'
 CREATE SCHEMA laplace;
@@ -115,3 +117,20 @@ SELECT NOT has_table_privilege(:'role', 'public.reference', 'MAINTAIN') AS publi
 SQL
 echo 'PASS runtime MAINTAINs every substrate table and partition, existing and future, its own or another owner'"'"'s, and its ANALYZE refreshes reltuples with no skip'
 echo 'PASS runtime can use existing and future substrate objects, without application, DDL, public-write or owner access'
+P "$name" -v reader="$reader" <<'SQL'
+SELECT has_table_privilege(:'reader','public.reference','SELECT')
+   AND NOT has_table_privilege(:'reader','public.reference','INSERT')
+   AND has_table_privilege(:'reader','laplace.entities','SELECT')
+   AND NOT has_table_privilege(:'reader','laplace.entities','INSERT')
+   AND NOT has_table_privilege(:'reader','laplace.entities','MAINTAIN')
+   AND has_schema_privilege(:'reader','consensus','USAGE')
+   AND NOT has_schema_privilege(:'reader','app','USAGE')
+   AND NOT pg_has_role(:'reader','pg_signal_backend','MEMBER')
+   AS reader_limited \gset
+\if :reader_limited
+\else
+\echo 'FAIL the UCI reader role received writer or application access'
+\quit 1
+\endif
+SQL
+echo 'PASS UCI reader roles can read substrate tables and cannot write, maintain, signal, or enter app'

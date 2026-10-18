@@ -52,17 +52,28 @@ internal static class ChessRuntimeConfiguration
 
     private static string? ReadFile(string path, string key)
     {
-        if (!File.Exists(path)) return null;
-        string? selected = null;
-        foreach (var line in File.ReadLines(path))
+        // An installed file owned by another service is absent for this process.
+        // Callers such as the chess lab catalog must keep serving when a fallback
+        // environment file is unreadable. An explicit missing LAPLACE_CHESS_ENV path
+        // still fails before this method runs.
+        try
         {
-            if (line.TrimStart().StartsWith('#')) continue;
-            int separator = line.IndexOf('=');
-            if (separator <= 0 || !string.Equals(line[..separator].Trim(), key, StringComparison.Ordinal)) continue;
-            var value = line[(separator + 1)..].Trim();
-            if (value.Length >= 2 && value[0] == value[^1] && value[0] is '\'' or '"') value = value[1..^1];
-            selected = value;
+            if (!File.Exists(path)) return null;
+            string? selected = null;
+            foreach (var line in File.ReadLines(path))
+            {
+                if (line.TrimStart().StartsWith('#')) continue;
+                int separator = line.IndexOf('=');
+                if (separator <= 0 || !string.Equals(line[..separator].Trim(), key, StringComparison.Ordinal)) continue;
+                var value = line[(separator + 1)..].Trim();
+                if (value.Length >= 2 && value[0] == value[^1] && value[0] is '\'' or '"') value = value[1..^1];
+                selected = value;
+            }
+            return selected;
         }
-        return selected;
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 }

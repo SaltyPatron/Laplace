@@ -29,26 +29,37 @@ public static class ChessEngineConnections
         if (!Path.IsPathFullyQualified(configuration) || !File.Exists(configuration)
             || !Path.IsPathFullyQualified(executable) || !File.Exists(executable))
             throw new ArgumentException("Chess UCI configuration and connector must be existing absolute file paths.");
-        using var document = JsonDocument.Parse(File.ReadAllText(configuration));
-        if (document.RootElement.GetProperty("version").GetInt32() != 1)
-            throw new ArgumentException("Unsupported chess UCI configuration version.");
-        var result = new List<ChessEngineConnection>();
-        foreach (var entry in document.RootElement.GetProperty("profiles").EnumerateObject())
+        JsonDocument document;
+        try
         {
-            var profile = entry.Value;
-            if (profile.GetProperty("transport").GetString() != "websocket") continue;
-            string Required(string key) => profile.GetProperty(key).GetString() is { Length: > 0 } value
-                ? value : throw new ArgumentException($"UCI profile {entry.Name} needs {key}.");
-            if (entry.Name.Length == 0 || entry.Name.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
-                throw new ArgumentException("Invalid installed UCI profile name.");
-            if (!Uri.TryCreate(Required("endpoint"), UriKind.Absolute, out var endpoint)
-                || endpoint.Scheme != "wss" || endpoint.UserInfo.Length != 0
-                || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
-                throw new ArgumentException($"UCI profile {entry.Name} must use a credential-free WSS endpoint.");
-            result.Add(new(entry.Name, Required("label"), Required("implementation"), Required("environment"),
-                Required("knowledge"), endpoint.Host, executable, configuration));
+            document = JsonDocument.Parse(File.ReadAllText(configuration));
         }
-        return result;
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            throw new ArgumentException($"Chess UCI configuration cannot be read: {configuration}", ex);
+        }
+        using (document)
+        {
+            if (document.RootElement.GetProperty("version").GetInt32() != 1)
+                throw new ArgumentException("Unsupported chess UCI configuration version.");
+            var result = new List<ChessEngineConnection>();
+            foreach (var entry in document.RootElement.GetProperty("profiles").EnumerateObject())
+            {
+                var profile = entry.Value;
+                if (profile.GetProperty("transport").GetString() != "websocket") continue;
+                string Required(string key) => profile.GetProperty(key).GetString() is { Length: > 0 } value
+                    ? value : throw new ArgumentException($"UCI profile {entry.Name} needs {key}.");
+                if (entry.Name.Length == 0 || entry.Name.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
+                    throw new ArgumentException("Invalid installed UCI profile name.");
+                if (!Uri.TryCreate(Required("endpoint"), UriKind.Absolute, out var endpoint)
+                    || endpoint.Scheme != "wss" || endpoint.UserInfo.Length != 0
+                    || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
+                    throw new ArgumentException($"UCI profile {entry.Name} must use a credential-free WSS endpoint.");
+                result.Add(new(entry.Name, Required("label"), Required("implementation"), Required("environment"),
+                    Required("knowledge"), endpoint.Host, executable, configuration));
+            }
+            return result;
+        }
     }
 
     public static CutechessOptions Select(CutechessOptions options, IReadOnlyDictionary<string, string> config)
