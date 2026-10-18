@@ -390,7 +390,6 @@ public sealed class SearchTests
         ChessMove reply = MoveGen.Legal(after)[0];
 
         var table = new SearchContinuationTable();
-        table.SeedWitnessedEvaluation(after, SearchContinuationTable.BlendCapCp);
         table.SeedActiveGame(after, [reply]);
         search.Reconfigure(null, null, null, continuations: table);
         var warm = search.Think(start, limits);
@@ -410,5 +409,75 @@ public sealed class SearchTests
             .Think(mate, new Search.Limits(MaxDepth: 2));
         Assert.Equal(forced.BestMove, stillMate.BestMove);
         Assert.Equal(forced.Score, stillMate.Score);
+    }
+
+    [Fact]
+    public void WitnessedEvaluation_BlendsOnceAtTheLeafAndStaysInsideTheCap()
+    {
+        var entry = new SearchContinuationTable.Entry(null, null, 4_000, 1_000_000d);
+        Assert.Equal(SearchContinuationTable.BlendCapCp, entry.LeafNudge(0));
+        Assert.Equal(0, new SearchContinuationTable.Entry(null, null, 400, 0d).LeafNudge(0));
+
+        var half = new SearchContinuationTable.Entry(null, null, 100, SearchContinuationTable.BlendPrior);
+        Assert.Equal(50, half.LeafNudge(0));
+
+        var start = Board.FromFen(ChessModality.StartFen);
+        var limits = new Search.Limits(MaxDepth: 2);
+        var cold = new Search(ttBits: 12).Think(start, limits);
+        var table = new SearchContinuationTable();
+        table.SeedWitnessedEvaluation(start, 4_000, witnesses: 1_000_000d);
+        var warm = new Search(ttBits: 12, continuations: table).Think(start, limits);
+        Assert.Equal(cold.BestMove, warm.BestMove);
+        Assert.Equal(cold.Score, warm.Score);
+        Assert.NotEqual(0, table.EvaluationStamp);
+    }
+
+    [Fact]
+    public void OpeningFallback_SuppliesTheMoveTheActiveGameDoesNot()
+    {
+        var start = Board.FromFen(ChessModality.StartFen);
+        ChessMove e4 = MoveGen.Legal(start).Single(m => m.ToUci() == "e2e4");
+        var book = new SearchContinuationTable();
+        book.SeedOpening(start, [e4]);
+        book.SeedOpening(start, [MoveGen.Legal(start).Single(m => m.ToUci() == "d2d4")]);
+        var overlay = new SearchContinuationTable(book);
+        Assert.True(overlay.TryGet(ChessPositionIdentity.PositionId(start), out var entry));
+        Assert.Equal(e4, entry.PreferredMove);
+    }
+
+    [Fact]
+    public void TablebaseProbe_IgnoresPositionsAboveFiveMen()
+    {
+        var start = Board.FromFen(ChessModality.StartFen);
+        var limits = new Search.Limits(MaxDepth: 2);
+        var classical = new Search(ttBits: 12).Think(start, limits);
+        var probed = new Search(ttBits: 12, tablebase: _ => new SearchTablebaseVerdict(0, 0))
+            .Think(start, limits);
+        Assert.Equal(classical.BestMove, probed.BestMove);
+        Assert.Equal(classical.Score, probed.Score);
+    }
+
+    [Fact]
+    public void InteriorTablebase_ReplacesMaterialWithWdl()
+    {
+        var board = Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
+        var result = new Search(ttBits: 12, tablebase: _ => new SearchTablebaseVerdict(0, 1))
+            .Think(board, new Search.Limits(MaxDepth: 2));
+        Assert.NotNull(result.BestMove);
+        Assert.True(result.Score > 15_000, $"solved loss for the defender should be a tablebase win, score={result.Score}");
+    }
+
+    [Fact]
+    public void RootTablebase_KeepsTheShorterWinningDtz()
+    {
+        var board = Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
+        int a4 = Board.AlgebraicToSquare("a4");
+        var result = new Search(ttBits: 12, tablebase: position =>
+        {
+            int dtz = position.Squares[a4] == Piece.WQueen ? 2 : 40;
+            return new SearchTablebaseVerdict(0, dtz);
+        }).Think(board, new Search.Limits(MaxDepth: 1));
+
+        Assert.Equal("d1a4", result.BestMove?.ToUci());
     }
 }

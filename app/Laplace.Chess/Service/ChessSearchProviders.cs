@@ -250,14 +250,18 @@ public sealed class ChessSearchConfiguration
     public ISearchPositionEvaluator? PositionEvaluator { get; }
     public Func<Board, SearchTablebaseVerdict?>? Tablebase { get; }
 
+    /// <summary>Seeded before Think. Replacing it does not clear the transposition table unless its evaluations change.</summary>
+    public SearchContinuationTable? Continuations { get; set; }
+
     public Search BuildSearch(int ttBits = 20)
         => new(
             EvalTerm.All, RootBias, ttBits,
             positionEvaluator: PositionEvaluator,
-            tablebase: Tablebase);
+            tablebase: Tablebase,
+            continuations: Continuations);
 
     public void ApplyTo(Search search)
-        => search.Reconfigure(RootBias, null, null, PositionEvaluator, Tablebase);
+        => search.Reconfigure(RootBias, null, null, PositionEvaluator, Tablebase, Continuations);
 
     public ChessSearchProviderReceipt Receipt()
         => !_substrate

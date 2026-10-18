@@ -28,6 +28,8 @@ public sealed class ManagedSearchBackend : IChessBackend
     private string? _builtMode;
     private NpgsqlDataSource? _ds;
     private ChessSearchProviders? _providers;
+    private string? _positionFen;
+    private string[] _positionMoves = [];
 
     public ManagedSearchBackend() => _state = _modality.Initial();
 
@@ -79,6 +81,8 @@ public sealed class ManagedSearchBackend : IChessBackend
             ChessState next = fen is null ? _modality.Initial() : _modality.FromFen(fen);
             foreach (var move in moves) next = ApplyUciMove(next, move);
             _state = next;
+            _positionFen = fen;
+            _positionMoves = moves as string[] ?? moves.ToArray();
         }
         catch (FormatException)
         {
@@ -96,13 +100,18 @@ public sealed class ManagedSearchBackend : IChessBackend
         var state = new ChessState(Board.FromFen(_state.Board.ToFen()), _state.RepetitionHistory);
         var limits = ToSearchLimits(uciLimits);
         var search = _search;
+        var continuations = SearchContinuationSeed.ForUci(
+            _modality, _positionFen, _positionMoves, _substrateMode != "off" ? _ds : null);
         ChessSearchConfiguration? configured = null;
         if (_substrateMode != "off" && _providers is not null)
         {
             // Each substrate search gets a fresh counting configuration so the receipt belongs to THIS go.
             configured = _providers.Configure(substrate: true);
+            configured.Continuations = continuations;
             configured.ApplyTo(search);
         }
+        else
+            search.Reconfigure(null, null, null, null, null, continuations);
         return (ct, emit) =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();

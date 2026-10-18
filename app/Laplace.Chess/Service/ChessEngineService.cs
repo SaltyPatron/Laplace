@@ -297,7 +297,7 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     private readonly System.Collections.Concurrent.ConcurrentBag<Search> _searchPool = new();
 
-    private Search BuildEngine(bool substrate, int ttBits = 20)
+    private Search BuildEngine(bool substrate, int ttBits = 20, SearchContinuationTable? continuations = null)
     {
         IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds!)) : null;
         ISearchPositionEvaluator? evaluator = substrate
@@ -305,13 +305,14 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_searchPool.TryTake(out var pooled) && pooled.TtBits == ttBits)
         {
             pooled.Reconfigure(
-                bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch);
+                bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch, continuations);
             return pooled;
         }
         return new Search(
             EvalTerm.All, bias, ttBits,
             positionEvaluator: evaluator,
-            tablebase: ChessTablebaseRuntime.ProbeSearch);
+            tablebase: ChessTablebaseRuntime.ProbeSearch,
+            continuations: continuations);
     }
 
     private void ReturnEngine(Search search) => _searchPool.Add(search);
@@ -327,7 +328,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             return new ChessPositionEval(whiteCp, 0, 0, substrate, true, Describe(term));
         }
 
-        var search = BuildEngine(substrate);
+        var search = BuildEngine(substrate, continuations: ContinuationsFor(fen, moves: null, substrate));
         var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ReturnEngine(search);
         int score = state.Board.WhiteToMove ? result.Score : -result.Score;
@@ -343,7 +344,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        var search = BuildEngine(substrate);
+        var search = BuildEngine(substrate, continuations: ContinuationsFor(fen, moves, substrate, movesIgnoreFen: true));
         var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ChessMove mv = result.BestMove!.Value;
 
@@ -357,6 +358,14 @@ public sealed class ChessEngineService : IAsyncDisposable
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
             Pv: pv, Motifs: motifs);
+    }
+
+    private SearchContinuationTable ContinuationsFor(
+        string? fen, IReadOnlyList<string>? moves, bool substrate, bool movesIgnoreFen = false)
+    {
+        string? origin = movesIgnoreFen && moves is { Count: > 0 } ? null : fen;
+        return SearchContinuationSeed.ForUci(
+            _modality!, origin, moves, substrate ? _ds : null);
     }
 
     private ChessState StateFromHistory(string fen, IReadOnlyList<string>? moves)
@@ -527,7 +536,9 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        var search = BuildEngine(substrate);
+        string startFen = session.Metadata?.StartFen ?? ChessModality.StartFen;
+        var search = BuildEngine(
+            substrate, continuations: ContinuationsFor(startFen, session.Moves, substrate, movesIgnoreFen: false));
         var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ChessMove mv = result.BestMove!.Value;
 

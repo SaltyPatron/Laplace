@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using Laplace.Engine.Core;
 
 namespace Laplace.Modality.Chess;
@@ -169,13 +170,16 @@ public sealed class Search
         Func<Board, SearchTablebaseVerdict?>? tablebase = null,
         SearchContinuationTable? continuations = null)
     {
-        // Continuations only order moves. Their scores stay out of the transposition
-        // table, so a new table must not discard entries from the previous ply.
+        // Move ordering does not enter the transposition table. A witnessed-evaluation
+        // seed does, because the leaf blend is part of the stored score.
+        int previousEval = _continuations?.EvaluationStamp ?? 0;
+        int nextEval = continuations?.EvaluationStamp ?? 0;
         bool changed = !ReferenceEquals(_rootBias, rootBias)
                        || !ReferenceEquals(_mgPst, mgPst)
                        || !ReferenceEquals(_egPst, egPst)
                        || !ReferenceEquals(_positionEvaluator, positionEvaluator)
-                       || !Equals(_tablebase, tablebase);
+                       || !Equals(_tablebase, tablebase)
+                       || previousEval != nextEval;
         _rootBias = rootBias;
         _mgPst = mgPst;
         _egPst = egPst;
@@ -257,7 +261,7 @@ public sealed class Search
             // contempt for an outcome chess law has already closed as a draw.
             rootAdvantageCp = 0;
         }
-        else if (b.Rules.IsStandard && _tablebase?.Invoke(b) is { } rootTablebase)
+        else if (b.Rules.IsStandard && Men(b) <= TablebaseMen && _tablebase?.Invoke(b) is { } rootTablebase)
         {
             rootAdvantageCp = rootTablebase.Wdl switch
             {
@@ -418,7 +422,7 @@ public sealed class Search
         // each child probe then determines which legal move preserves the best WDL result. WDL
         // draw remains exact truth, but its decision utility depends on whether the root was
         // winning, equal or losing; exact wins/losses retain their much larger tablebase scale.
-        if (ply > 0 && b.Rules.IsStandard && _tablebase?.Invoke(b) is { } tablebase)
+        if (ply > 0 && b.Rules.IsStandard && Men(b) <= TablebaseMen && _tablebase?.Invoke(b) is { } tablebase)
         {
             int distance = Math.Min(Math.Abs(tablebase.Dtz), 1_000);
             return tablebase.Wdl switch
@@ -469,6 +473,8 @@ public sealed class Search
                 _rootBonusByUci[moves[i].ToUci()] = bonus[i];
             }
         }
+        if (ply == 0)
+            FilterRootTablebase(b, moves);
         ChessMove? preferred = null;
         if (ply > 0 && _continuations is not null
             && _continuations.TryGet(ChessPositionIdentity.PositionId(b), out var continuation))
@@ -547,6 +553,79 @@ public sealed class Search
         _ => score,
     };
 
+    private const int TablebaseMen = 5;
+
+    private static int Men(Board b) => BitOperations.PopCount(b.OccupiedBB);
+
+    /// <summary>
+    /// When every legal root move is solved at five men or fewer, keep the moves that
+    /// preserve the best WDL and, among wins and losses, the best DTZ. A mate the
+    /// table does not store outranks a longer tablebase win.
+    /// </summary>
+    private void FilterRootTablebase(Board b, List<ChessMove> moves)
+    {
+        if (_tablebase is null || !b.Rules.IsStandard || Men(b) > TablebaseMen || moves.Count == 0)
+            return;
+
+        var scored = new (int Wdl, int Dtz)[moves.Count];
+        var known = new bool[moves.Count];
+        int bestWdl = int.MinValue;
+        for (int i = 0; i < moves.Count; i++)
+        {
+            var undo = MoveApply.MakeWithUndo(b, moves[i]);
+            bool solved = false;
+            int childWdl = 2, childDtz = 0;
+            if (MoveGen.Legal(b).Count == 0)
+            {
+                solved = true;
+                childWdl = MoveGen.InCheck(b, b.WhiteToMove) ? 0 : 2;
+                childDtz = 0;
+            }
+            else if (Men(b) <= TablebaseMen && _tablebase(b) is { } verdict)
+            {
+                solved = true;
+                childWdl = verdict.Wdl;
+                childDtz = Math.Abs(verdict.Dtz);
+            }
+            MoveApply.Unmake(b, moves[i], undo);
+            if (!solved) return;
+            int parentWdl = childWdl switch
+            {
+                0 => 4,
+                1 => 3,
+                2 => 2,
+                3 => 1,
+                4 => 0,
+                _ => 2,
+            };
+            scored[i] = (parentWdl, childDtz);
+            known[i] = true;
+            if (parentWdl > bestWdl) bestWdl = parentWdl;
+        }
+
+        bool rankDtz = bestWdl != 2;
+        bool shorter = bestWdl >= 3;
+        int bestDtz = shorter ? int.MaxValue : int.MinValue;
+        if (rankDtz)
+        {
+            for (int i = 0; i < moves.Count; i++)
+            {
+                if (!known[i] || scored[i].Wdl != bestWdl) continue;
+                bestDtz = shorter ? Math.Min(bestDtz, scored[i].Dtz) : Math.Max(bestDtz, scored[i].Dtz);
+            }
+        }
+
+        int kept = 0;
+        for (int i = 0; i < moves.Count; i++)
+        {
+            if (!known[i] || scored[i].Wdl != bestWdl) continue;
+            if (rankDtz && scored[i].Dtz != bestDtz) continue;
+            moves[kept++] = moves[i];
+        }
+        if (kept == 0 || kept == moves.Count) return;
+        moves.RemoveRange(kept, moves.Count - kept);
+    }
+
     private int Quiesce(
         Board b,
         int alpha,
@@ -570,6 +649,9 @@ public sealed class Search
         {
             int standPat = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
                            + (_activePositionEvaluator?.Evaluate(b) ?? 0);
+            if (_continuations is not null
+                && _continuations.TryGet(ChessPositionIdentity.PositionId(b), out var seeded))
+                standPat += seeded.LeafNudge(standPat);
             if (standPat >= beta) return beta;
             if (standPat > alpha) alpha = standPat;
         }

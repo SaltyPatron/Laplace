@@ -47,9 +47,13 @@ public sealed class ChessSearchProviderReceiptTests
         var result = search.Think(
             Board.FromFen(ChessModality.StartFen),
             new Search.Limits(MaxDepth: 1, MaxNodes: 100_000, MaxTimeMs: 5_000));
+        var solved = search.Think(
+            Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1"),
+            new Search.Limits(MaxDepth: 1, MaxNodes: 100_000, MaxTimeMs: 5_000));
         var receipt = configured.Receipt();
 
         Assert.NotNull(result.BestMove);
+        Assert.NotNull(solved.BestMove);
         Assert.True(receipt.RootSteerReads > 0);
         Assert.True(receipt.RootMovesInfluenced > 0);
         Assert.True(receipt.PositionEvidenceReads > 0);
@@ -64,6 +68,40 @@ public sealed class ChessSearchProviderReceiptTests
         Assert.True(receipt.SyzygyProbes > 0);
         Assert.Contains("learned-pst=", receipt.Summary);
         Assert.Contains("tactics=", receipt.Summary);
+    }
+
+    [Fact]
+    public void Configuration_CarriesTheContinuationTableIntoSearch()
+    {
+        var start = Board.FromFen(ChessModality.StartFen);
+        var limits = new Search.Limits(MaxDepth: 3);
+        var configured = new ChessSearchConfiguration(
+            substrate: false, rootBias: null, positionEvaluator: null,
+            learnedSelected: false, learnedContributes: false, learnedNonZeroCells: 0);
+        var search = configured.BuildSearch(ttBits: 12);
+        var cold = search.Think(start, limits);
+
+        var table = new SearchContinuationTable();
+        var replyBoard = start.Clone();
+        MoveApply.Make(replyBoard, cold.BestMove!.Value);
+        table.SeedActiveGame(replyBoard, [MoveGen.Legal(replyBoard)[0]]);
+        configured.Continuations = table;
+        configured.ApplyTo(search);
+        var warm = search.Think(start, limits);
+
+        Assert.Equal(cold.BestMove, warm.BestMove);
+        Assert.Equal(cold.Score, warm.Score);
+        Assert.True(warm.Nodes < cold.Nodes);
+    }
+
+    [Fact]
+    public void WitnessedEvalSum_RoundTripsToCentipawns()
+    {
+        long sum = Laplace.Chess.Service.PgnEvals.EvalSumFp1e9(120, games: 3);
+        int? cp = SearchContinuationSeed.Centipawns(sum, 3);
+        Assert.NotNull(cp);
+        Assert.InRange(cp!.Value, 119, 121);
+        Assert.Null(SearchContinuationSeed.Centipawns(0, 0));
     }
 
     [Fact]

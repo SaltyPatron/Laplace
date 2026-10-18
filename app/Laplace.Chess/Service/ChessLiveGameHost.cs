@@ -336,7 +336,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private SubstrateRootBias? _rootBias;
     private SubstrateBoardEvaluator? _boardEvaluator;
 
-    public Search BuildSearch(bool substrate, int ttBits = 20, int maxDepth = 8)
+    public Search BuildSearch(bool substrate, int ttBits = 20, int maxDepth = 8,
+        SearchContinuationTable? continuations = null)
     {
         IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds)) : null;
         ISearchPositionEvaluator? evaluator = substrate
@@ -344,16 +345,18 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         return new Search(
             EvalTerm.All, bias, ttBits,
             positionEvaluator: evaluator,
-            tablebase: ChessTablebaseRuntime.ProbeSearch);
+            tablebase: ChessTablebaseRuntime.ProbeSearch,
+            continuations: continuations ?? new SearchContinuationTable(OpeningContinuationBook.Shared));
     }
 
-    public void RefreshSearch(Search search, bool substrate)
+    public void RefreshSearch(Search search, bool substrate, SearchContinuationTable? continuations = null)
     {
         IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds)) : null;
         ISearchPositionEvaluator? evaluator = substrate
             ? (_boardEvaluator ??= new SubstrateBoardEvaluator(_ds)) : null;
         search.Reconfigure(
-            bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch);
+            bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch,
+            continuations ?? new SearchContinuationTable(OpeningContinuationBook.Shared));
     }
 
     public NpgsqlDataSource DataSource => _ds;

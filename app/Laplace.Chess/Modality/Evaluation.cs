@@ -12,7 +12,12 @@ public enum EvalTerm
     RookFiles = 1 << 3,
     PawnStructure = 1 << 4,
     Tempo = 1 << 5,
-    All = Material | Pst | BishopPair | RookFiles | PawnStructure | Tempo,
+    Mobility = 1 << 6,
+    KingSafety = 1 << 7,
+    Outposts = 1 << 8,
+    Hanging = 1 << 9,
+    All = Material | Pst | BishopPair | RookFiles | PawnStructure | Tempo
+        | Mobility | KingSafety | Outposts | Hanging,
 }
 
 public static class Evaluation
@@ -77,7 +82,11 @@ public static class Evaluation
         {
             white_cp -= DoubledIsolatedPenalty * (Bitboards.Doubled(wPawns) + Bitboards.Isolated(wPawns));
             white_cp += DoubledIsolatedPenalty * (Bitboards.Doubled(bPawns) + Bitboards.Isolated(bPawns));
+            var whitePassed = PassedScores(wPawns, bPawns, white: true);
+            var blackPassed = PassedScores(bPawns, wPawns, white: false);
+            white_cp += TaperedToWhite(whitePassed.Mg - blackPassed.Mg, whitePassed.Eg - blackPassed.Eg, phase);
         }
+        white_cp += StructuralWhite(b, terms, phase);
 
         int stm = b.WhiteToMove ? white_cp : -white_cp;
         if ((terms & EvalTerm.Tempo) != 0) stm += Tempo;
@@ -89,6 +98,168 @@ public static class Evaluation
     private const int RookSemiOpenFile = 12;
     private const int DoubledIsolatedPenalty = 8;
     private const int Tempo = 10;
+    private const int OutpostMg = 18;
+    private const int OutpostEg = 8;
+    private const int ShelterMissingMg = 12;
+    private const int ShelterMissingEg = 4;
+    private const int KingPressureMg = 6;
+    private const int KingPressureEg = 2;
+
+    private static readonly int[] MgPassed = { 0, 8, 16, 28, 48, 80, 130, 0 };
+    private static readonly int[] EgPassed = { 0, 14, 28, 50, 90, 150, 230, 0 };
+
+    private static int StructuralWhite(Board b, EvalTerm terms, int phase)
+    {
+        bool mobility = (terms & EvalTerm.Mobility) != 0;
+        bool safety = (terms & EvalTerm.KingSafety) != 0;
+        bool outposts = (terms & EvalTerm.Outposts) != 0;
+        bool hanging = (terms & EvalTerm.Hanging) != 0;
+        if (!mobility && !safety && !outposts && !hanging) return 0;
+
+        ulong whiteAttacks = 0, blackAttacks = 0;
+        if (mobility || safety || hanging)
+        {
+            whiteAttacks = SideAttacks(b, white: true);
+            blackAttacks = SideAttacks(b, white: false);
+        }
+
+        int mg = 0, eg = 0;
+        if (mobility)
+        {
+            int delta = BitOperations.PopCount(whiteAttacks & ~b.WhiteBB)
+                        - BitOperations.PopCount(blackAttacks & ~b.BlackBB);
+            mg += delta;
+            eg += delta;
+        }
+        if (safety)
+        {
+            var whiteKing = KingSafetyScores(b, white: true, blackAttacks);
+            var blackKing = KingSafetyScores(b, white: false, whiteAttacks);
+            mg += blackKing.Mg - whiteKing.Mg;
+            eg += blackKing.Eg - whiteKing.Eg;
+        }
+        if (outposts)
+        {
+            int delta = OutpostCount(b, white: true) - OutpostCount(b, white: false);
+            mg += delta * OutpostMg;
+            eg += delta * OutpostEg;
+        }
+        int whiteCp = TaperedToWhite(mg, eg, phase);
+        if (hanging)
+        {
+            whiteCp -= HangingPenalty(b, white: true, blackAttacks, whiteAttacks);
+            whiteCp += HangingPenalty(b, white: false, whiteAttacks, blackAttacks);
+        }
+        return whiteCp;
+    }
+
+    private static (int Mg, int Eg) PassedScores(ulong own, ulong enemy, bool white)
+    {
+        int mg = 0, eg = 0;
+        foreach (int bit in Bitboards.Bits(own))
+        {
+            int file = Bitboards.FileOfBit(bit);
+            int rank = Bitboards.RankOfBit(bit);
+            ulong span = Bitboards.FileMask(file) | Bitboards.AdjacentFiles(file);
+            ulong ahead = Ahead(rank, white);
+            if ((enemy & span & ahead) != 0) continue;
+            if ((own & Bitboards.FileMask(file) & ahead) != 0) continue;
+            int advance = white ? rank : 7 - rank;
+            mg += MgPassed[advance];
+            eg += EgPassed[advance];
+        }
+        return (mg, eg);
+    }
+
+    private static ulong Ahead(int rank, bool white)
+    {
+        if (white) return rank >= 7 ? 0UL : ~0UL << ((rank + 1) * 8);
+        return rank <= 0 ? 0UL : (1UL << (rank * 8)) - 1;
+    }
+
+    private static int OutpostCount(Board b, bool white)
+    {
+        ulong minors = b.PieceBB(white ? Piece.WKnight : Piece.BKnight)
+                       | b.PieceBB(white ? Piece.WBishop : Piece.BBishop);
+        ulong own = b.PieceBB(white ? Piece.WPawn : Piece.BPawn);
+        ulong enemy = b.PieceBB(white ? Piece.BPawn : Piece.WPawn);
+        int count = 0;
+        foreach (int bit in Bitboards.Bits(minors))
+        {
+            int rank = Bitboards.RankOfBit(bit);
+            if (rank < 2 || rank > 5) continue;
+            int file = Bitboards.FileOfBit(bit);
+            int support = white ? rank - 1 : rank + 1;
+            ulong supportRank = 0xFFUL << (support * 8);
+            bool defended = (own & Bitboards.AdjacentFiles(file) & supportRank) != 0;
+            bool blocked = (enemy & Bitboards.AdjacentFiles(file) & Ahead(rank, white)) != 0;
+            if (defended && !blocked) count++;
+        }
+        return count;
+    }
+
+    private static ulong SideAttacks(Board b, bool white)
+    {
+        ulong occ = b.OccupiedBB;
+        ulong acc = 0;
+        foreach (int bit in Bitboards.Bits(b.PieceBB(white ? Piece.WPawn : Piece.BPawn)))
+            acc |= ChessAttacks.Pawn(bit, white);
+        foreach (int bit in Bitboards.Bits(b.PieceBB(white ? Piece.WKnight : Piece.BKnight)))
+            acc |= ChessAttacks.Knight(bit);
+        foreach (int bit in Bitboards.Bits(b.PieceBB(white ? Piece.WBishop : Piece.BBishop)))
+            acc |= ChessAttacks.Bishop(bit, occ);
+        foreach (int bit in Bitboards.Bits(b.PieceBB(white ? Piece.WRook : Piece.BRook)))
+            acc |= ChessAttacks.Rook(bit, occ);
+        foreach (int bit in Bitboards.Bits(b.PieceBB(white ? Piece.WQueen : Piece.BQueen)))
+            acc |= ChessAttacks.Queen(bit, occ);
+        foreach (int bit in Bitboards.Bits(b.PieceBB(white ? Piece.WKing : Piece.BKing)))
+            acc |= ChessAttacks.King(bit);
+        return acc;
+    }
+
+    private static (int Mg, int Eg) KingSafetyScores(Board b, bool white, ulong enemyAttacks)
+    {
+        ulong king = b.PieceBB(white ? Piece.WKing : Piece.BKing);
+        if (king == 0) return (0, 0);
+        int bit = BitOperations.TrailingZeroCount(king);
+        int file = Bitboards.FileOfBit(bit);
+        int rank = Bitboards.RankOfBit(bit);
+        int front = white ? rank + 1 : rank - 1;
+        int shelter = 0;
+        if ((uint)front < 8)
+        {
+            ulong rankMask = 0xFFUL << (front * 8);
+            ulong files = Bitboards.FileMask(file) | Bitboards.AdjacentFiles(file);
+            ulong pawns = b.PieceBB(white ? Piece.WPawn : Piece.BPawn);
+            shelter = BitOperations.PopCount(pawns & files & rankMask);
+        }
+        int missing = Math.Max(0, 3 - shelter);
+        int pressure = BitOperations.PopCount(enemyAttacks & ChessAttacks.King(bit));
+        return (missing * ShelterMissingMg + pressure * KingPressureMg,
+                missing * ShelterMissingEg + pressure * KingPressureEg);
+    }
+
+    private static int HangingPenalty(Board b, bool white, ulong enemyAttacks, ulong ownAttacks)
+    {
+        int penalty = 0;
+        penalty += Hanging(b, white ? Piece.WKnight : Piece.BKnight, 40, enemyAttacks, ownAttacks);
+        penalty += Hanging(b, white ? Piece.WBishop : Piece.BBishop, 41, enemyAttacks, ownAttacks);
+        penalty += Hanging(b, white ? Piece.WRook : Piece.BRook, 62, enemyAttacks, ownAttacks);
+        penalty += Hanging(b, white ? Piece.WQueen : Piece.BQueen, 112, enemyAttacks, ownAttacks);
+        return penalty;
+    }
+
+    private static int Hanging(Board b, Piece piece, int penalty, ulong enemyAttacks, ulong ownAttacks)
+    {
+        int total = 0;
+        foreach (int bit in Bitboards.Bits(b.PieceBB(piece)))
+        {
+            ulong square = 1UL << bit;
+            if ((enemyAttacks & square) != 0 && (ownAttacks & square) == 0)
+                total += penalty;
+        }
+        return total;
+    }
 
     private static int TaperedToWhite(int mg, int eg, int phase)
     {

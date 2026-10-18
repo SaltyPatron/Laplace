@@ -13,7 +13,7 @@ public sealed class EvaluationTests
             var p = b.Squares[sq];
             if (p == Piece.Empty) continue;
             int file = Board.FileOf(sq), rank = Board.RankOf(sq);
-            m.Squares[Board.Sq(file, 7 - rank)] = (Piece)(-(sbyte)p);
+            m.Set(Board.Sq(file, 7 - rank), (Piece)(-(sbyte)p));
         }
         return m;
     }
@@ -70,6 +70,10 @@ public sealed class EvaluationTests
     [InlineData(EvalTerm.RookFiles)]
     [InlineData(EvalTerm.PawnStructure)]
     [InlineData(EvalTerm.Tempo)]
+    [InlineData(EvalTerm.Mobility)]
+    [InlineData(EvalTerm.KingSafety)]
+    [InlineData(EvalTerm.Outposts)]
+    [InlineData(EvalTerm.Hanging)]
     public void EveryOverlay_IsIndividuallyMirrorSymmetric(EvalTerm term)
     {
         var b = Board.FromFen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
@@ -100,5 +104,55 @@ public sealed class EvaluationTests
         int pair = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/2B1KB2 w - - 0 1"));
         int mixed = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/2B1KN2 w - - 0 1"));
         Assert.True(pair > mixed, $"bishop pair {pair} should beat bishop+knight {mixed}");
+    }
+
+    [Fact]
+    public void PassedPawn_AdvancesInTheEndgame()
+    {
+        int advanced = Evaluation.Evaluate(
+            Board.FromFen("4k3/4P3/8/8/8/8/8/4K3 w - - 0 1"), EvalTerm.PawnStructure);
+        int home = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"), EvalTerm.PawnStructure);
+        Assert.True(advanced > home, $"advanced passer {advanced} should beat the home passer {home}");
+    }
+
+    [Fact]
+    public void Mobility_PrefersTheCentralKnight()
+    {
+        int center = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/3N4/8/8/8/4K3 w - - 0 1"), EvalTerm.Mobility);
+        int corner = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/8/8/8/8/N3K3 w - - 0 1"), EvalTerm.Mobility);
+        Assert.True(center > corner, $"central knight mobility {center} > corner {corner}");
+    }
+
+    [Fact]
+    public void KingSafety_PaysForAPawnShelter()
+    {
+        int sheltered = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/8/8/8/4PPP1/4K3 w - - 0 1"), EvalTerm.KingSafety);
+        int bare = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/8/8/8/8/4K3 w - - 0 1"), EvalTerm.KingSafety);
+        Assert.True(sheltered > bare, $"shelter {sheltered} should beat a bare king {bare}");
+    }
+
+    [Fact]
+    public void Outpost_RequiresADefendingPawn()
+    {
+        int posted = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/3N4/2P5/8/8/4K3 w - - 0 1"), EvalTerm.Outposts);
+        int loose = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/3N4/8/8/8/4K3 w - - 0 1"), EvalTerm.Outposts);
+        Assert.True(posted > loose, $"defended outpost {posted} > loose knight {loose}");
+    }
+
+    [Fact]
+    public void HangingQueen_IsPenalised()
+    {
+        int hanging = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/5n2/3Q4/8/8/4K3 w - - 0 1"), EvalTerm.Hanging);
+        int safe = Evaluation.Evaluate(
+            Board.FromFen("4k3/8/8/5n2/Q7/8/8/4K3 w - - 0 1"), EvalTerm.Hanging);
+        Assert.True(hanging < safe, $"hanging queen {hanging} should lose to the safe queen {safe}");
     }
 }

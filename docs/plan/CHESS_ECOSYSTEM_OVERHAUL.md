@@ -40,7 +40,7 @@ The committed UCI declaration `Laplace-UCI/installations/hart-server.json` conta
 
 ## Sprint 2 — Move selection
 
-Turn scoring and `LearnedPst` still shrink with `ChessShrink.DefaultK0` of 15,000. Exact root transitions use prior strength 5. `Search` still consults that bias at ply 0 only. Leaf evaluation still averages piece-square atoms and does not see pawn structure, king safety, or a witnessed position evaluation.
+Turn scoring and `LearnedPst` still shrink with `ChessShrink.DefaultK0` of 15,000. Exact root transitions use prior strength 5. `Search` still consults that bias at ply 0 only. Leaf evaluation adds tapered passed pawns, mobility, king safety, outposts, and hanging-piece pressure, and blends one witnessed centipawn at quiescence.
 
 Acceptance:
 
@@ -51,7 +51,7 @@ Acceptance:
 
 `SubstrateRootBias` keeps the exact-transition contract. Ten result witnesses at unit precision use prior strength 5. A tighter result deviation, and a witnessed `HAS_EVAL` count on the arrival position, increase precision. The evaluation's centipawn mean stays out of the recorded-result mean. A context-free move average is not mixed into an exact transition, and without one it is clamped to 3 centipawns.
 
-`SearchContinuationTable` is the interior cache. It is keyed by `ChessPositionIdentity` and seeded from a witnessed evaluation, an opening line, and the active game before search. At ply greater than 0 the preferred move is ordered after a transposition hit. The witnessed evaluation is not added on the way down, so it cannot accumulate once per ply, and replacing the table does not clear the transposition table. The leaf blend of that evaluation belongs with the structural evaluation. The search does not query the database from that hot path. Live hosts still pass no table.
+`SearchContinuationTable` is the interior cache. It is keyed by `ChessPositionIdentity` and seeded from a witnessed evaluation, an opening line, and the active game before search. At ply greater than 0 the preferred move is ordered after a transposition hit. The witnessed evaluation is not added on the way down, so it cannot accumulate once per ply. A move-only table does not clear the transposition table. Seeding a witnessed evaluation changes the leaf score, so that stamp does clear it. The leaf blend runs once at quiescence stand-pat, weighted by `n/(n+5)` and clamped to ±512. The search does not query the database from that hot path. `ChessEngineService`, `ChessLiveGameHost`, and `ManagedSearchBackend` build a per-search overlay on the shared opening book and seed the active line. `HAS_EVAL` centipawns are read once per search when a substrate connection is open.
 
 ## Sprint 3 — Commentary and concepts
 
