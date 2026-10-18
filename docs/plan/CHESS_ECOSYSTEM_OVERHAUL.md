@@ -55,7 +55,7 @@ Acceptance:
 
 ## Sprint 3 — Commentary and concepts
 
-`PositionHistoryAsync` takes an unordered GIN sample and the commentary formats a fixed sentence from the first dated hit. Book text is truncated from one `EXPLAINS` row. Motif names are a fixed C# switch.
+`PositionHistoryAsync` orders playings by the mover's Glicko-2 lower bound (`rating - 2·rd`), then source Elo, then an opening or motif match, and it reports that witness count. The continuation read reports the next-move distribution. A comment states the opening transition, the tactical or structural delta, and the principal variation. A master precedent needs Elo 2400 or a lower bound at the neutral mean, and a book precedent needs an `EXPLAINS` text long enough to be a judgment. Gambit, fork, pin, skewer, discovered attack, sacrifice, zugzwang, fianchetto, outpost, minority attack, and opposition are one chess concept each; domain membership admits that sense.
 
 Acceptance:
 

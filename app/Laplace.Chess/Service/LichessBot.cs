@@ -337,7 +337,9 @@ public sealed class LichessBot : IAsyncDisposable
                                     _host.DataSource,
                                     new ChessMoveCommentary.Inputs(whiteCp, analysis.Depth,
                                         analysis.Pv ?? Array.Empty<string>(), motifs,
-                                        PositionSurface: modality.StateKey(ply.After)),
+                                        PositionSurface: modality.StateKey(ply.After),
+                                        UciMoves: replay.AcceptedMoves,
+                                        StartFen: replay.InitialFen),
                                     ct);
                                 if (!string.IsNullOrWhiteSpace(comment))
                                     await PostChatAsync(lichessGameId, "player", comment, ct);

@@ -1,6 +1,7 @@
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -8,14 +9,15 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Substrate-backed move commentary. The commentary is grounded in the exact chess position:
-/// historical playings that contained it, chess-book testimony about it, the detected chess
-/// motif, and the search that actually chose the move. No generic lexical recall is used for
-/// motif names, so a chess fork can never drift into the culinary sense of "fork".
+/// Substrate-backed move commentary. The sentence is the opening transition, the
+/// structural or tactical delta, the principal variation, and a master or book
+/// precedent only when that precedent is salient. Motif names come from the chess
+/// concept, so a fork stays in the chess domain.
 /// </summary>
 public static class ChessMoveCommentary
 {
     public const int LichessMaxChars = 140;
+    public const int MasterElo = 2400;
 
     public sealed record Inputs(
         int ScoreCp,
@@ -23,50 +25,152 @@ public static class ChessMoveCommentary
         IReadOnlyList<string> Pv,
         IReadOnlyList<string> Motifs,
         string? PositionSurface = null,
-        string? PlayedSan = null);
+        string? PlayedSan = null,
+        IReadOnlyList<string>? UciMoves = null,
+        string? StartFen = null);
 
     public static async Task<string> BuildAsync(
         NpgsqlDataSource ds, Inputs input, CancellationToken ct = default, int maxChars = LichessMaxChars)
     {
-        var parts = new List<string>(5);
+        var sans = SansFromUci(input.StartFen, input.UciMoves);
+        var opening = OpeningClassifier.Classify(sans);
+        string? openingLine = OpeningTransition(opening.Name, sans, input.PlayedSan);
+        string? motif = input.Motifs.FirstOrDefault(static m =>
+            ChessConcepts.TryResolve(m, chessDomain: true, out _));
+        string? delta = motif is null ? null : MotifLabel(motif);
 
-        // Historical and book evidence are independent substrate reads over the same
-        // exact position. Start both before awaiting either; presentation order remains
-        // history -> motif -> book after both evidence lanes complete.
         var historyTask = input.PositionSurface is { } historySurface
-            ? HistoricalPositionLineAsync(ds, historySurface, input.PlayedSan, ct)
+            ? HistoricalPositionLineAsync(ds, historySurface, input.PlayedSan, opening.Eco, motif, ct)
             : Task.FromResult<string?>(null);
         var bookTask = input.PositionSurface is { } bookSurface
             ? BookLineAsync(ds, bookSurface, ct)
             : Task.FromResult<string?>(null);
-        await Task.WhenAll(historyTask, bookTask).ConfigureAwait(false);
+        var populationTask = input.PositionSurface is { } populationSurface
+            ? PopulationLineAsync(ds, populationSurface, ct)
+            : Task.FromResult<string?>(null);
+        await Task.WhenAll(historyTask, bookTask, populationTask).ConfigureAwait(false);
 
-        // Position history is the most distinctive substrate observation, so give it the scarce
-        // Lichess chat budget before generic engine telemetry.
-        if (historyTask.Result is { } history)
-            parts.Add(history);
+        return Compose(
+            openingLine,
+            delta,
+            input.Pv,
+            FormatEval(input.ScoreCp, input.Depth),
+            historyTask.Result,
+            bookTask.Result,
+            populationTask.Result,
+            maxChars);
+    }
 
-        if (input.Motifs.FirstOrDefault() is { } motif)
-            parts.Add($"Chess motif: {MotifLabel(motif)}");
+    internal static string Compose(
+        string? opening,
+        string? delta,
+        IReadOnlyList<string> pv,
+        string? evalLine,
+        string? precedent,
+        string? book,
+        string? population,
+        int maxChars)
+    {
+        var parts = new List<string>(7);
+        if (!string.IsNullOrWhiteSpace(opening)) parts.Add(opening.Trim());
+        if (!string.IsNullOrWhiteSpace(delta)) parts.Add(delta.Trim());
+        if (pv.Count > 0) parts.Add("PV " + string.Join(' ', pv.Take(3)));
+        if (!string.IsNullOrWhiteSpace(evalLine)) parts.Add(evalLine.Trim());
+        if (!string.IsNullOrWhiteSpace(precedent)) parts.Add(precedent.Trim());
+        if (!string.IsNullOrWhiteSpace(book)) parts.Add(book.Trim());
+        if (!string.IsNullOrWhiteSpace(population)) parts.Add(population.Trim());
+        return Truncate(string.Join(" · ", parts.Where(static p => p.Length > 0)), maxChars);
+    }
 
-        // The chess literature's judgment of this exact position, if a book attested one —
-        // (text, EXPLAINS, position) edges deposited by ChessBookDecomposer.
-        if (bookTask.Result is { } bookLine)
-            parts.Add(bookLine);
+    internal static bool IsSalientPlayer(double? effMu, int? elo) =>
+        elo is >= MasterElo || effMu is >= GlickoPriors.NeutralMu;
 
-        string evalLine = FormatEval(input.ScoreCp, input.Depth);
-        if (evalLine.Length > 0) parts.Add(evalLine);
+    internal static bool IsSalientBook(string? text) =>
+        !string.IsNullOrWhiteSpace(text) && text.Trim().Length >= 12;
 
-        if (input.Pv.Count > 0)
-            parts.Add($"PV {string.Join(' ', input.Pv.Take(3))}");
+    /// <summary>
+    /// Higher Glicko-2 lower bound, then higher source Elo, then an opening or motif
+    /// match. A date is not a key.
+    /// </summary>
+    internal static int CompareSalience(
+        double? effMu, int? elo, int openingOrMotif,
+        double? otherEffMu, int? otherElo, int otherOpeningOrMotif)
+    {
+        int byEff = CompareDescending(effMu, otherEffMu);
+        if (byEff != 0) return byEff;
+        int byElo = CompareDescending(elo, otherElo);
+        if (byElo != 0) return byElo;
+        return otherOpeningOrMotif.CompareTo(openingOrMotif);
+    }
 
-        return Truncate(string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p))), maxChars);
+    internal static string FormatDistribution(IReadOnlyList<(string San, long Count)> moves, long witnesses)
+    {
+        if (witnesses <= 0) return "";
+        if (moves.Count == 0 || moves.Sum(static m => m.Count) < witnesses)
+            return witnesses == 1
+                ? "1 game reached this position"
+                : witnesses.ToString(System.Globalization.CultureInfo.InvariantCulture) + " games reached this position";
+        string body = string.Join(", ", moves.Take(4).Select(static m =>
+            m.San + " " + m.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        return "Next " + body;
+    }
+
+    private static int CompareDescending(double? left, double? right)
+    {
+        if (left is null && right is null) return 0;
+        if (left is null) return 1;
+        if (right is null) return -1;
+        return right.Value.CompareTo(left.Value);
+    }
+
+    private static int CompareDescending(int? left, int? right)
+    {
+        if (left is null && right is null) return 0;
+        if (left is null) return 1;
+        if (right is null) return -1;
+        return right.Value.CompareTo(left.Value);
+    }
+
+    private static string? OpeningTransition(string? name, IReadOnlyList<string> sans, string? playedSan)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        string? transition = sans.Count > 0 ? sans[^1] : playedSan;
+        return string.IsNullOrWhiteSpace(transition) ? name : name + ": " + transition;
+    }
+
+    private static List<string> SansFromUci(string? fen, IReadOnlyList<string>? uci)
+    {
+        var sans = new List<string>();
+        if (uci is not { Count: > 0 }) return sans;
+        var modality = new ChessModality();
+        ChessState state;
+        try
+        {
+            state = string.IsNullOrWhiteSpace(fen) ? modality.Initial() : modality.FromFen(fen);
+        }
+        catch (FormatException)
+        {
+            return sans;
+        }
+        foreach (var token in uci)
+        {
+            ChessMove? match = null;
+            foreach (var legal in MoveGen.Legal(state.Board))
+            {
+                if (legal.ToUci() == token) { match = legal; break; }
+            }
+            if (match is null) break;
+            sans.Add(San.ToSan(state.Board, match.Value));
+            state = modality.Apply(state, match.Value);
+        }
+        return sans;
     }
 
     private static readonly Hash128 ExplainsRelation = RelationTypeRegistry.RelationTypeId("EXPLAINS");
 
     private static async Task<string?> HistoricalPositionLineAsync(
-        NpgsqlDataSource ds, string positionSurface, string? playedSan, CancellationToken ct)
+        NpgsqlDataSource ds, string positionSurface, string? playedSan, string? eco, string? motif,
+        CancellationToken ct)
     {
         try
         {
@@ -82,10 +186,20 @@ public static class ChessMoveCommentary
                 (short)PhysicalityType.Projection,
                 containerLimit: 64,
                 limit: 12,
-                ct).ConfigureAwait(false);
+                ct,
+                whiteToMove: board.WhiteToMove,
+                eco: eco,
+                motif: motif).ConfigureAwait(false);
             if (history.Count == 0) return null;
 
-            var distinctLines = history
+            var ordered = history
+                .OrderBy(static h => h, Comparer<NpgsqlChessCommentaryReads.PositionHistoryRow>.Create(
+                    static (a, b) => CompareSalience(
+                        a.MoverEffMu, a.MoverElo, a.OpeningOrMotif,
+                        b.MoverEffMu, b.MoverElo, b.OpeningOrMotif)))
+                .ToArray();
+
+            var distinctLines = ordered
                 .Select(static h => Hash128.FromBytes(h.LineId))
                 .Distinct()
                 .Select(static id => id.ToBytes())
@@ -101,8 +215,9 @@ public static class ChessMoveCommentary
                         .Select(static p => Hash128.FromBytes(p.EntityId)).ToArray());
 
             var nextMoves = LegalSuccessors(board);
-            foreach (var row in history)
+            foreach (var row in ordered)
             {
+                if (!IsSalientPlayer(row.MoverEffMu, row.MoverElo)) continue;
                 string mover = board.WhiteToMove ? row.White : row.Black;
                 if (string.IsNullOrWhiteSpace(mover)) continue;
 
@@ -119,11 +234,8 @@ public static class ChessMoveCommentary
                     }
                 }
 
-                // Prefer a dated witness for the human-facing historical sentence. If an
-                // undated playing is the only witness it remains in the substrate, but it does
-                // not pretend to provide a year it never asserted.
-                if (Year(row.PlayedOn) is null) continue;
-                return FormatHistorical(row.PlayedOn, mover, nextSan, playedSan);
+                return FormatHistorical(row.PlayedOn, mover, nextSan, playedSan)
+                    ?? FormatUndated(mover, nextSan, playedSan);
             }
         }
         catch
@@ -131,6 +243,41 @@ public static class ChessMoveCommentary
             // Commentary is decoration; a failed historical lookup must never affect play.
         }
         return null;
+    }
+
+    private static async Task<string?> PopulationLineAsync(
+        NpgsqlDataSource ds, string positionSurface, CancellationToken ct)
+    {
+        try
+        {
+            if (!PositionContent.TryFenFromSurface(positionSurface, out var fen)) return null;
+            var board = Board.FromFen(fen);
+            Hash128 positionId;
+            lock (ChessCompose.Gate) { positionId = ChessCompose.PositionId(board); }
+            var counts = await NpgsqlChessCommentaryReads.PositionContinuationsAsync(
+                ds,
+                positionId.ToBytes(),
+                ChessVocabulary.GameType.ToBytes(),
+                (short)PhysicalityType.Projection,
+                limit: 8,
+                ct).ConfigureAwait(false);
+            if (counts.Count == 0) return null;
+            var nextMoves = LegalSuccessors(board);
+            var named = new List<(string San, long Count)>();
+            long witnesses = 0;
+            foreach (var row in counts)
+            {
+                witnesses += row.Count;
+                if (nextMoves.TryGetValue(Hash128.FromBytes(row.NextPositionId), out var san))
+                    named.Add((san, row.Count));
+            }
+            string text = FormatDistribution(named, witnesses);
+            return text.Length == 0 ? null : text;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Dictionary<Hash128, string> LegalSuccessors(Board board)
@@ -160,8 +307,8 @@ public static class ChessMoveCommentary
 
             var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
                 ds, [subject], ct);
-            if (rendered is { Length: > 0 } texts && !string.IsNullOrWhiteSpace(texts[0]))
-                return $"Book: {Truncate(texts[0], 70)}";
+            if (rendered is { Length: > 0 } texts && IsSalientBook(texts[0]))
+                return "Book: " + texts[0].Trim();
         }
         catch
         {
@@ -189,13 +336,12 @@ public static class ChessMoveCommentary
         return $"Eval {sign}{pawns:0.0} (d{depth})";
     }
 
-    internal static string MotifLabel(string motif) => motif switch
+    internal static string MotifLabel(string motif)
     {
-        "fork" => "Fork",
-        "discovered_check" => "Discovered check",
-        "hanging_piece_won" => "Material win",
-        _ => motif.Replace('_', ' '),
-    };
+        if (ChessConcepts.TryResolve(motif, chessDomain: true, out var concept))
+            return concept.Name;
+        return motif.Replace('_', ' ');
+    }
 
     internal static string? FormatHistorical(
         string? playedOn, string mover, string? historicalSan, string? playedSan)
@@ -212,6 +358,19 @@ public static class ChessMoveCommentary
         }
 
         return $"{year}: {mover} also reached this exact position.";
+    }
+
+    internal static string? FormatUndated(string mover, string? historicalSan, string? playedSan)
+    {
+        if (string.IsNullOrWhiteSpace(mover)) return null;
+        if (!string.IsNullOrWhiteSpace(historicalSan))
+        {
+            if (!string.IsNullOrWhiteSpace(playedSan)
+                && !string.Equals(historicalSan, playedSan, StringComparison.Ordinal))
+                return $"{mover} reached this position and played {historicalSan}, not {playedSan}.";
+            return $"{mover} reached this position and played {historicalSan}.";
+        }
+        return $"{mover} reached this position.";
     }
 
     private static string? Year(string? playedOn)
