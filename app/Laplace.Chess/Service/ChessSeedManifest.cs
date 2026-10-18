@@ -39,6 +39,7 @@ public static class ChessSeedManifest
         // ChessVocabulary.EmitPlayer (HAS_NAME {name/alias}). Both are family roots, which
         // family expansion never pulls, so they are declared explicitly.
         "HAS_EXTERNAL_ID", "HAS_FEATURE", "CORRESPONDS_TO", "HAS_NAME",
+        "Site", "Round", "UTCDate", "UTCTime", "WhiteTitle", "BlackTitle", "WhiteFideId", "BlackFideId",
     ];
 
     public static ISourceManifest ForLane(Hash128 sourceId, string sourceName, Hash128 trustClass) =>

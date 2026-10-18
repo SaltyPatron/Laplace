@@ -46,6 +46,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             new(ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
                 ChessPositionOutcomes.TrustClassId),
             new(ChessSyzygy.SourceId, ChessSyzygy.SourceName, ChessSyzygy.TrustClassId),
+            ..ChessCorpus.Names.Select(name => new ChessVocabulary.BootstrapSource(
+                ChessCorpus.SourceId(name), name, ChessVocabulary.PgnTrustClass)),
         ], ct, context.Reader);
         ChessDropLedger.Reset();
     }
@@ -94,7 +96,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var chunk = new List<ChessGameRecord>(batch);
         await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
         {
-            if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
+            if (TryParseGame(gameText) is { } parsed) chunk.Add(WithCorpus(parsed, filePath));
             if (chunk.Count < batch) continue;
             foreach (var g in chunk) yield return g;
             chunk.Clear();
@@ -110,7 +112,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         Task<List<ChessGameRecord>>? pending = null;
         await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
         {
-            if (TryPeekPlaying(gameText) is { } peek) peeks.Add(peek);
+            if (TryPeekPlaying(gameText) is { } peek) peeks.Add(WithCorpus(peek, filePath));
             if (peeks.Count < batch) continue;
             var handoff = peeks;
             peeks = new List<ChessPlayingPeek>(batch);
@@ -196,6 +198,16 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var game = TryParseGame(gameText);
         return game is null ? null : new ChessPlayingPeek(game, game.PlayingId);
     }
+
+    private static ChessGameRecord WithCorpus(ChessGameRecord game, string filePath)
+    {
+        if (game.Corpus is not null) return game;
+        string? name = ChessCorpus.FromPath(filePath) ?? ChessCorpus.FromSite(PgnGames.TagStr(game.GameText, "Site"));
+        return name is null ? game : game with { Corpus = name };
+    }
+
+    private static ChessPlayingPeek WithCorpus(ChessPlayingPeek peek, string filePath)
+        => peek with { Game = WithCorpus(peek.Game, filePath) };
 
     protected override void Compose(ChessGameRecord record, SubstrateChangeBuilder b)
         => ComposeGame(record, b, _analyzeInline);
@@ -568,7 +580,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             throw new InvalidDataException("parsed move outcomes lack the validated initial mover");
 
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
-        var src = sourceId ?? ChessVocabulary.PgnSourceId;
+        string? corpus = parsed.Corpus ?? ChessCorpus.FromSite(PgnGames.TagStr(gameText, "Site"));
+        var src = sourceId ?? (corpus is null ? ChessVocabulary.PgnSourceId : ChessCorpus.SourceId(corpus));
+        if (src != ChessVocabulary.PgnSourceId)
+            b.DeclareSourcePrior(src, TC.StructuredCorpus);
 
         var (whiteElo, blackElo) = ParseElos(gameText);
         var (whiteName, blackName) = parsed.WhiteName is { } wn
@@ -584,6 +599,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 b, lineId, parsed.MoveIds, result, initialWhiteToMove.Value,
                 src, PgnWitnessWeight);
 
+        RecordRetainedTags(b, lineId, playingId, gameText, src);
         RecordStartPosition(b, lineId, playingId, parsed.StartFen, src, parsed.Rules);
         RecordOpeningHeaders(b, lineId, gameText, src);
         RecordPlayingTrajectory(b, parsed, src);
@@ -775,6 +791,26 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, playingId, src);
     }
 
+    private static void RecordRetainedTags(
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 playingId, string gameText, Hash128 src)
+    {
+        Keep("Site", "Site");
+        Keep("Round", "Round");
+        Keep("UTCDate", "UTCDate");
+        Keep("UTCTime", "UTCTime");
+        Keep("WhiteTitle", "WhiteTitle");
+        Keep("BlackTitle", "BlackTitle");
+        Keep("WhiteFideId", "WhiteFideId");
+        Keep("BlackFideId", "BlackFideId");
+
+        void Keep(string relation, string tag)
+        {
+            string value = PgnGames.TagStr(gameText, tag);
+            if (value.Length == 0 || value.All(static ch => ch is '?' or ':' or '.')) return;
+            Meta(b, lineId, relation, value, src, playingId);
+        }
+    }
+
     private static void Meta(
         SubstrateChangeBuilder b, Hash128 line, string rel, string value, Hash128 src, Hash128 eventId)
     {
@@ -934,6 +970,8 @@ public sealed record ChessGameRecord(
 {
     internal PgnMovetext.PgnWalkResult Walk { get; init; } = null!;
 
+    /// <summary>Corpus name from the file path, when the extract pass recognized one.</summary>
+    internal string? Corpus { get; init; }
     internal string? WhiteName { get; init; }
     internal string? BlackName { get; init; }
     internal string? Date { get; init; }
