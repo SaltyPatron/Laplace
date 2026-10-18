@@ -431,10 +431,15 @@ public static class ChessSyzygy
         };
     }
 
+    /// <summary>Witnessed endgames are probed through five men. The five-man space is not enumerated.</summary>
+    public const int WitnessedMenCeiling = 5;
+
     /// <summary>
     /// Replay a witnessed line and persist every tablebase-covered state as the same exact
-    /// transition primitive used by material ingest. One-transition chunks deduplicate across
-    /// games by content; the line root preserves the observed endgame sequence.
+    /// transition primitive used by material ingest. Each covered position of at most
+    /// <see cref="WitnessedMenCeiling"/> men, and each of its legal one-ply neighbors, is
+    /// probed once. One-transition chunks deduplicate across games by content; the line root
+    /// preserves the observed endgame sequence.
     /// </summary>
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game, ISyzygyProber prober)
     {
@@ -444,25 +449,18 @@ public static class ChessSyzygy
         var cur = start.Initial;
         if (!cur.Board.Rules.IsStandard) return;
         var chunks = new List<SyzygyChunkRef>();
-        int largest = prober.Largest;
+        int cap = Math.Min(WitnessedMenCeiling, prober.Largest);
+        var seen = new HashSet<Hash128>();
         int n = game.Moves.Count;
         for (int ply = 0; ply <= n; ply++)
         {
-            if (largest > 0
-                && cur.Board.Castle == CastleRights.None
-                && MenCount(cur.Board) <= largest
-                && m.Terminal(cur) is null
-                && prober.Probe(cur.Board) is { } verdict)
+            if (InProbeWindow(cur, cap))
             {
-                string surface = m.StateKey(cur);
-                var product = new SyzygyProduct(
-                    surface, ChessCompose.PositionId(surface), verdict.Wdl, verdict.Dtz,
-                    verdict.From, verdict.To, verdict.Promotes);
-                var chunk = PrepareTransitionChunk([product]);
-                if (chunk is not null)
+                ProbeCovered(b, m, cur, prober, cap, seen, chunks);
+                if (m.Terminal(cur) is null)
                 {
-                    DeriveTransitionChunk(b, chunk);
-                    chunks.Add(chunk.Reference);
+                    foreach (var legal in m.LegalActions(cur))
+                        ProbeCovered(b, m, m.Apply(cur, legal), prober, cap, seen, chunks);
                 }
             }
 
@@ -472,5 +470,31 @@ public static class ChessSyzygy
             cur = m.Apply(cur, mv.Value);
         }
         DeriveMaterialRoot(b, chunks, EndgameLineId(game.LineId));
+    }
+
+    private static bool InProbeWindow(ChessState state, int cap) =>
+        cap >= 2
+        && state.Board.Rules.IsStandard
+        && state.Board.Castle == CastleRights.None
+        && MenCount(state.Board) is var men && men >= 2 && men <= cap;
+
+    private static void ProbeCovered(
+        SubstrateChangeBuilder b, ChessModality modality, ChessState state, ISyzygyProber prober,
+        int cap, HashSet<Hash128> seen, List<SyzygyChunkRef> chunks)
+    {
+        if (cap < 2 || !state.Board.Rules.IsStandard || state.Board.Castle != CastleRights.None) return;
+        int men = MenCount(state.Board);
+        if (men > cap || men < 2 || modality.Terminal(state) is not null) return;
+        string surface = modality.StateKey(state);
+        var positionId = ChessCompose.PositionId(surface);
+        if (!seen.Add(positionId)) return;
+        if (prober.Probe(state.Board) is not { } verdict) return;
+        var product = new SyzygyProduct(
+            surface, positionId, verdict.Wdl, verdict.Dtz,
+            verdict.From, verdict.To, verdict.Promotes);
+        var chunk = PrepareTransitionChunk([product]);
+        if (chunk is null) return;
+        DeriveTransitionChunk(b, chunk);
+        chunks.Add(chunk.Reference);
     }
 }

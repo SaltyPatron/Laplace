@@ -10,10 +10,10 @@ namespace Laplace.Chess.Service;
 /// Provider for Syzygy tablebase packages, admitted through the shared multi-file recipe.
 ///
 /// Every <c>.rtbw</c>/<c>.rtbz</c> file is an input unit, so the shared content fingerprint,
-/// completion receipt, restart skip and file-worker pool cover the whole table set. Only WDL
-/// (<c>.rtbw</c>) tables at or below the configured men ceiling are expanded into position graph
-/// records; larger packages and DTZ files are fingerprinted and receipted as inputs and stay
-/// available to Fathom for exact lazy probing.
+/// completion receipt, restart skip and file-worker pool cover the whole table set. Full
+/// placement enumeration stays at three men. Four- and five-man tables are not walked in C#;
+/// witnessed positions of at most five men, and their legal neighbors, are probed through
+/// <see cref="ChessSyzygy.DeriveGame"/> against whatever 3-4-5 set Fathom has loaded.
 ///
 /// Run: <c>laplace ingest chess-syzygy [&lt;syzygy-dir&gt;]</c>
 /// </summary>
@@ -99,7 +99,7 @@ public sealed class ChessSyzygyDecomposer
         try
         {
             var all = ChessSyzygyPaths.Packages(_resolvedDir);
-            int maxMen = SyzygyTableUnpack.ResolveMaxMen();
+            int maxMen = EnumerationMen(SyzygyTableUnpack.ResolveMaxMen());
             LogPackagePlanOnce(all, maxMen);
             return SchedulePackages(all, _resolvedDir);
         }
@@ -136,6 +136,9 @@ public sealed class ChessSyzygyDecomposer
     /// position→move→position material graph. Package scheduling/completion is independent of
     /// this predicate; returning false means "receipt/cache only", never "ignore the file".
     /// </summary>
+    /// <summary>Placement enumeration never walks a four- or five-man table, whatever the probe ceiling is.</summary>
+    internal static int EnumerationMen(int requested) => Math.Min(requested, SyzygyTableUnpack.DefaultMaxMen);
+
     internal static bool ShouldExpandPackage(string path, int maxMen)
     {
         if (!Path.GetExtension(path).Equals(".rtbw", StringComparison.OrdinalIgnoreCase))
@@ -185,7 +188,7 @@ public sealed class ChessSyzygyDecomposer
             throw new InvalidDataException(
                 $"Syzygy package '{fileLabel}' does not have a parseable material basename.");
 
-        int maxMen = SyzygyTableUnpack.ResolveMaxMen();
+        int maxMen = EnumerationMen(SyzygyTableUnpack.ResolveMaxMen());
         if (!ShouldExpandPackage(filePath, maxMen))
         {
             // No records: the multi-file boundary fingerprints the bytes and receipts completion
@@ -277,7 +280,7 @@ public sealed class ChessSyzygyDecomposer
         // per-file ETL work. ExplainEmptyDirectory distinguishes missing packaging from deliberate
         // package-only semantic scoping.
         if (declaredInputUnits == 0 && _resolvedDir is not null)
-            return ExplainEmptyDirectory(_resolvedDir, SyzygyTableUnpack.ResolveMaxMen());
+            return ExplainEmptyDirectory(_resolvedDir, EnumerationMen(SyzygyTableUnpack.ResolveMaxMen()));
         return null;
     }
 
@@ -302,13 +305,15 @@ public sealed class ChessSyzygyDecomposer
             return ("dependency-unset",
                 "ChessSyzygy: packaging directory resolved but contained no .rtbw/.rtbz files.");
 
+        int enumerate = EnumerationMen(maxMen);
         bool hasDtz = all.Any(static p =>
             Path.GetExtension(p).Equals(".rtbz", StringComparison.OrdinalIgnoreCase));
-        if (!hasDtz && FilterByMenCeiling(all, maxMen).Count == 0)
+        if (!hasDtz && FilterByMenCeiling(all, enumerate).Count == 0)
             return ("scoped-out",
-                $"ChessSyzygy: all {all.Count} WDL table(s) exceed the {maxMen}-men "
+                $"ChessSyzygy: all {all.Count} WDL table(s) exceed the {enumerate}-men "
                 + "full-enumeration ceiling (LAPLACE_SYZYGY_MAX_MEN). Package-byte receipts "
-                + "still complete file-by-file; no position graph was exhaustively expanded.");
+                + "still complete file-by-file; four- and five-man positions are probed from "
+                + "witnessed games, not by enumerating the table.");
         return null;
     }
 

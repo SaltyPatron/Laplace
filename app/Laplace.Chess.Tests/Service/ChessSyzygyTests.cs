@@ -226,16 +226,51 @@ public sealed class ChessSyzygyTests
         var prober = new FakeProber(3, new SyzygyVerdict(SyzygyNative.Win, 12));
         var change = Derive(prober, EndgameGame);
 
-        Assert.Equal(4, prober.ProbedFens.Count);
+        Assert.True(prober.ProbedFens.Count > 4);
+        Assert.Equal(prober.ProbedFens.Count, prober.ProbedFens.Distinct().Count());
+        Assert.All(prober.ProbedFens, fen => Assert.InRange(ChessSyzygy.MenCount(Board.FromFen(fen)), 2, 3));
         var chunks = change.Physicalities.Where(static p => p.NConstituents == 3).ToList();
-        Assert.Equal(4, chunks.Count);
+        Assert.Equal(prober.ProbedFens.Count, chunks.Count);
         Assert.Contains(change.Physicalities,
             p => p.EntityId == ChessSyzygy.EndgameLineId(
                 ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(EndgameGame)!).LineId));
-        Assert.Equal(4, change.Attestations.Count(
+        Assert.Equal(chunks.Count, change.Attestations.Count(
             a => a.TypeId == ChessVocabulary.HasWdlType && a.ContextId is null));
-        Assert.Equal(4, change.Attestations.Count(
+        Assert.Equal(chunks.Count, change.Attestations.Count(
             a => a.TypeId == ChessVocabulary.HasDtzType && a.ContextId is null));
+    }
+
+    [Fact]
+    public void DeriveGame_ProbesFiveManPositionsAndNeighbors_AndSkipsSix()
+    {
+        const string five =
+            "[Event \"T\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n"
+            + "[Result \"1-0\"]\n[SetUp \"1\"]\n[FEN \"4k3/8/8/8/8/3p4/4N3/3QK3 w - - 0 1\"]\n\n"
+            + "1. Nf4 1-0\n";
+        const string six =
+            "[Event \"T\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n"
+            + "[Result \"1-0\"]\n[SetUp \"1\"]\n[FEN \"4k3/8/8/8/8/3p4/3NN3/3QK3 w - - 0 1\"]\n\n"
+            + "1. Nf4 1-0\n";
+        var covered = new FakeProber(6, new SyzygyVerdict(SyzygyNative.Win, 4));
+        Derive(covered, five);
+        Assert.Contains(covered.ProbedFens, fen => fen.StartsWith("4k3/8/8/8/8/3p4/4N3/3QK3", StringComparison.Ordinal));
+        Assert.True(covered.ProbedFens.Count > 1);
+        Assert.All(covered.ProbedFens, fen => Assert.InRange(ChessSyzygy.MenCount(Board.FromFen(fen)), 2, 5));
+
+        var wide = new FakeProber(6, new SyzygyVerdict(SyzygyNative.Win, 4));
+        Derive(wide, six);
+        Assert.Empty(wide.ProbedFens);
+    }
+
+    [Fact]
+    public void EnumerationMen_NeverWalksAFiveManTable()
+    {
+        Assert.Equal(3, ChessSyzygyDecomposer.EnumerationMen(5));
+        Assert.Equal(3, ChessSyzygyDecomposer.EnumerationMen(3));
+        Assert.False(ChessSyzygyDecomposer.ShouldExpandPackage(
+            "/t/KBBvKN.rtbw", ChessSyzygyDecomposer.EnumerationMen(5)));
+        Assert.True(ChessSyzygyDecomposer.ShouldExpandPackage(
+            "/t/KQvK.rtbw", ChessSyzygyDecomposer.EnumerationMen(5)));
     }
 
     [Fact]
@@ -493,7 +528,7 @@ public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixt
         var change = b.SetInputUnitsConsumed(1).Build();
 
         var chunks = change.Physicalities.Where(static p => p.NConstituents == 3).ToList();
-        Assert.Equal(2, chunks.Count);
+        Assert.True(chunks.Count > 2);
         Assert.All(chunks, p => Assert.Equal(ChessSyzygy.SourceId, p.SourceId));
     }
 
@@ -550,11 +585,13 @@ public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixt
             .Select(p => Trajectory.Constituents(p.TrajectoryXyzm!)[0])
             .ToArray();
 
-        // Non-vacuity: 3 plies -> 4 positions, all 3-men and non-terminal, so every leg
-        // must carry exactly 4 ids — an empty==empty pass would prove nothing.
+        // The line is four 3-man positions. Verdict subjects also include legal neighbors,
+        // and the line ids still appear in replay order among those subjects.
         var expected = replayIds.ToArray();
         Assert.Equal(4, expected.Length);
         Assert.Equal(expected, projectionIds);
-        Assert.Equal(expected, verdictSubjects);
+        var lineSubjects = verdictSubjects.Where(id => expected.Contains(id)).ToArray();
+        Assert.Equal(expected, lineSubjects);
+        Assert.True(verdictSubjects.Length > expected.Length);
     }
 }
