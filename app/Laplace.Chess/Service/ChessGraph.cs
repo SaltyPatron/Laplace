@@ -124,17 +124,22 @@ public static class ChessGraph
     }
 
     /// <summary>
-    /// Fold the reusable time-behaviour class without projecting its source occurrence onto an
-    /// exact position. The occurrence remains losslessly present in the playing trajectory.
+    /// Clock pace of one played ply. The class token is the object of
+    /// <c>HAS_THINK_CLASS</c> on the played transition, the line, and the mover.
+    /// The playing is the context, so the English word is not a context-free outcome.
     /// </summary>
-    internal static void AppendThinkOutcome(
-        SubstrateChangeBuilder b, string thinkClass, PlyOutcome moverOutcome,
-        double witnessWeight, Hash128 sourceId)
+    internal static void AppendThinkPace(
+        SubstrateChangeBuilder b, Hash128 transitionKey, Hash128 lineId, Hash128? playerId,
+        Hash128 playingId, string thinkClass, double witnessWeight, Hash128 sourceId)
     {
-        if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
-        b.AddAttestation(Outcome(
-            tid, games: 1, ScoreFp1e9(moverOutcome), witnessWeight, sourceId,
-            contextId: null));
+        if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } token) return;
+        Attest(transitionKey);
+        Attest(lineId);
+        if (playerId is { } player) Attest(player);
+
+        void Attest(Hash128 subject) =>
+            b.AddAttestation(NativeAttestation.Categorical(
+                subject, "HAS_THINK_CLASS", token, sourceId, playingId, witnessWeight));
     }
 
     public static void AppendGameMeta(

@@ -156,23 +156,87 @@ public sealed class ChessAnalyzerTests
     }
 
     [Fact]
-    public void ThinkClass_FoldsOutcomeAtReusableClassGrain()
+    public void ThinkPace_ScopesTheClassToTheMoveLineAndPlayer()
     {
         CodepointPerfcache.LoadDefault();
         var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/think");
-        ChessGraph.AppendThinkOutcome(
-            b, "rushed", PlyOutcome.Win, 0.7, ChessVocabulary.AnalysisSourceId);
+        var transition = Hash128.OfCanonical("test/transition");
+        var line = Hash128.OfCanonical("test/line");
+        var player = Hash128.OfCanonical("test/player");
+        var playing = Hash128.OfCanonical("test/playing");
+        ChessGraph.AppendThinkPace(
+            b, transition, line, player, playing, "rushed", 0.7, ChessVocabulary.AnalysisSourceId);
         var change = b.Build();
         var classId = ContentEmitter.RootId("rushed");
         Assert.NotNull(classId);
 
+        foreach (var subject in new[] { transition, line, player })
+        {
+            Assert.Contains(change.Attestations,
+                a => a.SubjectId == subject
+                     && a.TypeId == ChessVocabulary.HasThinkClassType
+                     && a.ObjectId == classId
+                     && a.ContextId == playing);
+        }
+
         Assert.DoesNotContain(change.Attestations,
-            a => a.TypeId == ChessVocabulary.HasThinkClassType);
-        Assert.Contains(change.Attestations,
-            a => a.SubjectId == classId.Value
-                 && a.TypeId == ChessVocabulary.OutcomeType
-                 && a.ObjectId == ChessVocabulary.OutcomeObject
-                 && a.ContextId is null);
+            a => a.SubjectId == classId.Value && a.ContextId is null);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType && a.SubjectId == classId.Value);
+    }
+
+    [Fact]
+    public void ThinkPace_FollowsThePlayedGame()
+    {
+        const string clocked =
+            "[Event \"T\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Result \"1-0\"]\n\n"
+            + "1. e4 {[%clk 0:05:00]} e5 {[%clk 0:05:00]} "
+            + "2. Qh5 {[%clk 0:04:50]} Nc6 {[%clk 0:04:55]} "
+            + "3. Bc4 {[%clk 0:04:40]} Nf6 {[%clk 0:04:50]} "
+            + "4. Qxf7# {[%clk 0:04:30]} 1-0\n";
+        var parsed = ChessPgnDecomposer.TryParseGame(clocked)!;
+        var change = Analyze(clocked);
+        var pace = change.Attestations
+            .Where(a => a.TypeId == ChessVocabulary.HasThinkClassType)
+            .ToList();
+        Assert.NotEmpty(pace);
+        Assert.All(pace, a => Assert.Equal(parsed.PlayingId, a.ContextId));
+        Assert.Contains(pace, a => a.SubjectId == parsed.LineId);
+        var white = ChessVocabulary.PlayerId("Alice");
+        var black = ChessVocabulary.PlayerId("Bob");
+        Assert.Contains(pace, a => a.SubjectId == white);
+        Assert.Contains(pace, a => a.SubjectId == black);
+        Assert.Contains(pace, a =>
+            a.SubjectId != parsed.LineId && a.SubjectId != white && a.SubjectId != black);
+
+        var classIds = pace.Select(a => a.ObjectId).ToHashSet();
+        Assert.DoesNotContain(change.Attestations,
+            a => a.ContextId is null && classIds.Contains(a.SubjectId));
+    }
+
+    [Fact]
+    public void ThinkPace_FollowsSpentTimeComments()
+    {
+        const string spent =
+            "[Event \"T\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Result \"1-0\"]\n\n"
+            + "1. e4 {+0.28/12 0.95s} e5 {-0.21/14 1.02s} "
+            + "2. Qh5 {+0.35/13 0.98s} Nc6 {-0.30/15 3.50s} "
+            + "3. Bc4 {+1.05/10 0.05s} Nf6 {+8.41/12 1.00s} "
+            + "4. Qxf7# {+M0/5 0.10s} 1-0\n";
+        var parsed = ChessPgnDecomposer.TryParseGame(spent)!;
+        var change = Analyze(spent);
+        var pace = change.Attestations
+            .Where(a => a.TypeId == ChessVocabulary.HasThinkClassType)
+            .ToList();
+        Assert.NotEmpty(pace);
+        Assert.All(pace, a => Assert.Equal(parsed.PlayingId, a.ContextId));
+        Assert.Contains(pace, a => a.SubjectId == parsed.LineId);
+        Assert.Contains(pace, a => a.SubjectId == ChessVocabulary.PlayerId("Alice"));
+        Assert.Contains(pace, a => a.SubjectId == ChessVocabulary.PlayerId("Bob"));
+        var classIds = pace.Select(a => a.ObjectId).ToHashSet();
+        Assert.DoesNotContain(change.Attestations,
+            a => a.ContextId is null && a.TypeId == ChessVocabulary.OutcomeType
+                 && classIds.Contains(a.SubjectId));
     }
 
     [Fact]

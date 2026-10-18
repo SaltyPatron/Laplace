@@ -222,32 +222,41 @@ public static class ChessAnalyze
         // Nothing is emitted until the whole replay is legal. Emission order: opening
         // labels, per-ply think outcomes, motifs, tactic outcomes, then the trajectory.
         if (standardStart) ClassifyOpening(b, lineId, sans, m);
+        // Pace is a fact about this playing's move, line, and mover. The class word is
+        // the object; the playing is the context.
+        void Pace(int ply, string thinkClass)
+        {
+            Board board = boards[ply];
+            ChessMove move = played[ply];
+            int mover = board.WhiteToMove ? 0 : 1;
+            Hash128 fromId = ChessCompose.PositionId(board);
+            Hash128 moveId = ChessCompose.MoveId(board.MovingPiece(move), move);
+            ChessGraph.AppendThinkPace(
+                b, ChessCompose.TransitionKey(fromId, moveId), lineId,
+                mover == 0 ? whitePlayer : blackPlayer, eventId,
+                thinkClass, MetaWeight, src);
+        }
         for (int ply = 0; ply < sans.Count; ply++)
         {
-            int mover = boards[ply].WhiteToMove ? 0 : 1;
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)
             {
                 if (clocks.Length > 0)
                 {
                     double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-                    ChessGraph.AppendThinkOutcome(
-                        b, ChessCanonical.ThinkClass(tf), result.ForMover(mover), MetaWeight, src);
+                    Pace(ply, ChessCanonical.ThinkClass(tf));
                     if (ChessCanonical.ThinkLens(ply, sans.Count, tf, clocks[ply],
                             (ply & 1) == 0 ? medianRemEven : medianRemOdd, medianDrop) is { } lens)
-                        ChessGraph.AppendThinkOutcome(
-                            b, lens, result.ForMover(mover), MetaWeight, src);
+                        Pace(ply, lens);
                 }
             }
             else if (spentSeconds is not null && medianSpent > 0)
             {
                 double tf = PgnClocks.ThinkFactorFromSpent(spentSeconds, medianSpent, ply);
-                ChessGraph.AppendThinkOutcome(
-                    b, ChessCanonical.ThinkClass(tf), result.ForMover(mover), MetaWeight, src);
+                Pace(ply, ChessCanonical.ThinkClass(tf));
                 if (ChessCanonical.ThinkLens(ply, sans.Count, tf,
                         remaining: 0, medianRemaining: 0, medianDrop: 0) is { } lens)
-                    ChessGraph.AppendThinkOutcome(
-                        b, lens, result.ForMover(mover), MetaWeight, src);
+                    Pace(ply, lens);
             }
         }
 

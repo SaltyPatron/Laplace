@@ -64,8 +64,8 @@ public sealed class ChessRelationGateTests
     [Fact]
     public void Gate_ExercisesTheRiskyEmitters()
     {
-        // The gate above is only as strong as the paths it drives. Pin that the two
-        // reusable think-class outcome fires while occurrence projections remain absent.
+        // The gate above is only as strong as the paths it drives. Pin that clock pace
+        // is scoped to this playing, and that occurrence projections stay absent.
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var b = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/relation-gate");
         ChessPgnDecomposer.RecordGame(parsed, b);
@@ -74,17 +74,26 @@ public sealed class ChessRelationGateTests
 
         var alias = RelationTypeRegistry.RelationTypeId("HAS_NAME");
         Assert.Contains(change.Attestations, a => a.TypeId == alias);
-        var thinkClasses = new[] { "rushed", "normal", "deep" }
-            .Select(ContentEmitter.RootId)
-            .Where(static id => id is not null)
-            .Select(static id => id!.Value)
-            .ToHashSet();
-        Assert.Contains(change.Attestations,
-            a => a.TypeId == ChessVocabulary.OutcomeType && thinkClasses.Contains(a.SubjectId));
+
+        var pace = change.Attestations
+            .Where(a => a.TypeId == ChessVocabulary.HasThinkClassType)
+            .ToList();
+        Assert.NotEmpty(pace);
+        Assert.All(pace, a => Assert.Equal(parsed.PlayingId, a.ContextId));
+        Assert.Contains(pace, a => a.SubjectId == parsed.LineId);
+        var white = ChessVocabulary.PlayerId(parsed.WhiteName!);
+        var black = ChessVocabulary.PlayerId(parsed.BlackName!);
+        Assert.Contains(pace, a => a.SubjectId == white);
+        Assert.Contains(pace, a => a.SubjectId == black);
+        Assert.Contains(pace, a =>
+            a.SubjectId != parsed.LineId && a.SubjectId != white && a.SubjectId != black);
+        var classIds = pace.Select(a => a.ObjectId).ToHashSet();
+        Assert.DoesNotContain(change.Attestations,
+            a => a.ContextId is null && classIds.Contains(a.SubjectId));
 
         foreach (var relation in new[]
                  {
-                     "MOVE", "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", "MOVE_QUALITY"
+                     "MOVE", "HAS_CLOCK", "HAS_EVAL_TOKEN", "MOVE_QUALITY"
                  })
         {
             var typeId = RelationTypeRegistry.RelationTypeId(relation);

@@ -81,6 +81,8 @@ A book line replays from a diagram FEN when that FEN precedes the moves and they
 
 Opening classification reads `a.tsv` through `e.tsv`. A game matches the longest UCI prefix and, when a catalog line ends on a position the game reached by a different move order, that deeper position. ECO, the opening name, the family, the variation, and each concept the name contains are substrate entities. There is no hardcoded opening list.
 
+Clock pace is `HAS_THINK_CLASS` on the played transition, the line, and the mover, with the playing as context. The class word is not an outcome with a null context.
+
 ## Sprint 5 — Corpus identity
 
 Acceptance:
