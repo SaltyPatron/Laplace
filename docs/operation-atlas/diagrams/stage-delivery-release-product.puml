@@ -1,0 +1,22 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title delivery.release-product — declared input/output contract
+component "delivery.release-product" as operation
+rectangle "activated product receipts" as in0
+in0 --> operation
+rectangle "configured seed and indirect-inference acceptance" as in1
+in1 --> operation
+rectangle "all required complete-product acceptance evidence" as in2
+in2 --> operation
+rectangle "released package generation or exact blocked disposition" as out0
+operation --> out0
+rectangle "release provenance and publication receipt" as out1
+operation --> out1
+@enduml

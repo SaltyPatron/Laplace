@@ -1,0 +1,43 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/src/laplace_conventional/modality_data.py SHA256 7146f3de4a6639533400234c15eeac9ca3f37ebccc51f6ca50502a41e441dd5c
+' Evidence: Laplace-Conventional/src/laplace_conventional/providers.py SHA256 9f592a00369d83ceab8dd9a6545a5f7e2ff2d735422d0cc82545eada50c69835
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — image frames, audio chunks and video clips
+start
+:Select unique accessible provider-matching manifest entries;
+:Split by SHA256 of path; assign whole entries to loader workers;
+if (Image?) then (yes)
+ :Open each image; iterate every image frame;
+ :Convert RGB; bicubic pad to configured square;
+ :Scale pixels and normalize channels; emit tensor;
+elseif (Audio?) then (yes)
+ :Run ffmpeg on first audio stream only;
+ :Convert to mono, requested sample rate and float32 little-endian PCM;
+ :Emit nonoverlapping chunks; pad final values with zero and validity mask;
+ :Close pipes and wait; nonzero decoder exit raises after emitted chunks;
+else (Video)
+ :Decode sequential RGB frames;
+ :Apply image normalization to each frame;
+ :Emit nonoverlapping configured-size clips;
+ :Repeat last frame to pad final short clip;
+ :Close reader in finally;
+endif
+stop
+legend bottom
+Video audio extraction is a separate audio-provider path.
+Audio probe recognizes explicit no-stream errors; other probe failures raise.
+Decode failure is not silently reclassified as successful coverage.
+Transforms are training representations, not exact source-byte preservation.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire modality_data and provider registry modules reviewed. Only the first audio
+stream is selected; video timestamps/audio synchronization are not carried in emitted clip
+tensors. External decoder behavior and sampling correctness are not runtime-validated
+here.
+end footer
+
+@enduml

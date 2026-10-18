@@ -1,0 +1,42 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/consensus_scan.c SHA256 087394b842f556c8f0325ffc079b5da775d58ea20dbead506835ad5693c19722
+' Evidence: Laplace/extension/laplace_substrate/src/consensus_scan.h SHA256 672e95c6ea41e1f9abde6433cb6d10118ad6eb62801c4d19ac27da782997f6e6
+' Evidence: Laplace/engine/core/src/sql_catalog.def SHA256 065ad0ce0f1aa89793cedf3ed1ee1ff198651b3d2db1650a0ca2d819d6267176
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — complete keyed scan and ranked fallback
+start
+:Require expected identity and standing column types;
+:Prefer subjects as probe endpoint; otherwise objects;
+if (Typed-plane mode and matching typed rank index exists?) then (yes)
+ :Delegate endpoint/type ranges;
+ stop
+endif
+:For endpoint-ranked mode seek valid ready B-tree with effective-mu descending expression;
+if (No compatible ordered index?) then (yes)
+ :Choose valid endpoint B-tree with longest constrained object/type prefix;
+ :Reject absence of endpoint index;
+ :Disable cutoff and scan complete matching keyed set;
+else (ordered)
+ :Scan an independent ordered range for each endpoint;
+endif
+:Read under active snapshot; filter exact endpoint/type sets;
+:Validate stored identities and complete rating/RD/volatility/witness count;
+if (Ordered range and callback cutoff true?) then (yes)
+ :End this endpoint range before invoking consumer for that row;
+else (no)
+ :Stream row to consumer; continue;
+endif
+:Release scan, slot and index lock;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete index recognition and leaf read reviewed. Only absent predicates or the
+specifically admissible object-IS-NOT-NULL predicate are accepted. Ranked access
+recognizes rating − 2*RD by expression, not index name. Callback cutoff correctness
+belongs to its caller. A typed-plane cutoff is never applied to the endpoint-wide
+fallback.
+end footer
+
+@enduml

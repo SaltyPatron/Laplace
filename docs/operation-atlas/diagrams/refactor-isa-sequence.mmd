@@ -1,0 +1,41 @@
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant ISA as laplace_isa_execute
+    participant Validator as laplace_isa_validate
+    participant Binding as Opcode binding
+    participant Receipt
+    Caller->>ISA: program, receipt pointer, error pointer
+    alt receipt pointer is null
+        ISA-->>Caller: INVALID_ARGUMENT
+    else receipt available
+        ISA->>Receipt: Clear; copy available program metadata
+        ISA->>Validator: Validate entire program
+        Validator-->>ISA: Typed status
+        alt validation fails
+            ISA->>Receipt: Set failure status
+            ISA-->>Caller: Validation status
+        else valid program
+            ISA->>ISA: Fingerprint context, program, inputs
+            Note over ISA: Fingerprint failures return typed error
+            loop Instructions in order; stops on first failure
+                ISA->>Binding: Lookup opcode; execute(program, instruction)
+                Binding-->>ISA: Typed status
+                ISA->>Receipt: Record completed instruction count
+            end
+            alt binding missing or execution failed
+                ISA->>Receipt: Set failure status
+                ISA-->>Caller: Error: instruction and output-value index
+                Note over Caller,ISA: Earlier instruction effects are not rolled back by this function
+            else all instructions succeeded
+                ISA->>ISA: Hash outputs
+                alt output hashing fails
+                    ISA-->>Caller: RESOURCE_INSUFFICIENT
+                else output hash succeeds
+                    ISA->>Receipt: Set OK; hash receipt
+                    ISA->>ISA: Clear error
+                    ISA-->>Caller: OK
+                end
+            end
+        end
+    end

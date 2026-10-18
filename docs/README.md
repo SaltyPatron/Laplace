@@ -9,6 +9,7 @@ Laplace is specified by the invention documents. These are the documents that sa
 - [`INVENTIONS.md`](INVENTIONS.md) — the mechanism catalog. It does not override `INVENTION.md`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how this repository implements that machine.
 - [`OPERATING_SEQUENCE.md`](OPERATING_SEQUENCE.md) — admission through a witnessed turn.
+- [`operation-atlas/README.md`](operation-atlas/README.md) — whole-system UML, source-reviewed operation flows, cross-repository integration boundaries, and exportable figures.
 - [`../AGENTS.md`](../AGENTS.md) — implementation of the invention in this repository.
 
 ## Specifications

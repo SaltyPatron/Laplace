@@ -1,0 +1,46 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/prompt_intent.h SHA256 f2d85b0c48eab2623c04dac27f646c781668dc586e22868cde3cd75bb3c5ebfe
+' Evidence: Laplace/extension/laplace_substrate/src/task_shape.c SHA256 7ee11894ae99662225e4d39130b8db1580298087d8c2bf3dfa3431d03ce4e638
+' Evidence: Laplace/engine/core/src/sql_catalog.def SHA256 065ad0ce0f1aa89793cedf3ed1ee1ff198651b3d2db1650a0ca2d819d6267176
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — typed slot alternatives and calculated projection identity
+start
+:Match current parse or observation forms to shape; resolve exact slot ordinals;
+:For a current parse require an unrefuted confirming witness;
+while (Next input slot?) is (yes)
+ :Resolve exact observation occurrence origin;
+ if (current_form slot?) then (yes)
+  :Use observed form itself only if its stored type matches slot type;
+ else (bound concept)
+  :Collect coupled identities with this origin and matching stored type;
+ endif
+ :Sort choices by identity;
+ :Empty choices yield no invocation;
+ :Reject choice or Cartesian-product envelope beyond fanout;
+endwhile (done)
+:Require existing operation count plus combinations within fanout;
+while (Next combination and no overflow?) is (yes)
+ :Append predicate, shape, source/context, call/example/exemplar witnesses;
+ :Record each selected input, slot witness and exact singleton origin;
+ if (No supported current parse?) then (yes)
+  :Calculate request-projection ID from domain, shape, exemplar,
+root, ordered forms/origins and selected inputs;
+  :Do not write a HAS_PARSE observation;
+ else (parse exists)
+  :Retain current parse ID and selected witness;
+ endif
+endwhile (done)
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete instantiation, append and projection-ID helpers reviewed. Slot
+compatibility reads laplace.entities.type_id, not realized labels. A calculated projection
+is in-memory recipe identity; it is not newly witnessed parse evidence. Identity
+serialization uses native hash128 representations plus big-endian 32-bit counts; cross-
+platform canonical-byte acceptance is not established here. Matcher and shape-codec
+contracts remain separate.
+end footer
+
+@enduml

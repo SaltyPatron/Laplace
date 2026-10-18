@@ -1,0 +1,8 @@
+{
+  "checked_utc": "2026-10-13T13:05:44.628476+00:00",
+  "scope": "Artifact references, evidence hashes and export presence; no runtime behavior or semantic completeness asserted.",
+  "engine_registered_handlers": 25,
+  "reviewed_paths": 160,
+  "export_sets": 243,
+  "errors": []
+}

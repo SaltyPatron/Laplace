@@ -1,0 +1,42 @@
+@startuml
+' Evidence: Laplace-Conventional/scripts/train-all.sh SHA256 8051fcff9f40e2ab102eed35f1b6fb122b6bf00870e05abd603d854259344b10
+' Evidence: Laplace-Conventional/scripts/train.sh SHA256 c61c20591d68d644f438b6856845e91da3a844596f70e7b1b3eb97e276ccb1a2
+' Evidence: Laplace-Conventional/scripts/train-modalities.sh SHA256 438c8334c3b6885fccab14f8af95545c963c2a9d4751f21407b2797674f5c1d1
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — launch text, media and aggregate receipt
+start
+:train-all resolves corpus, state, output and project config; creates output directory;
+:Call train.sh for text;
+:Require training/execution/dataset/tokenizer files;
+:If absent, derive MICRO_BATCH_SIZE from execution plan;
+:exec python -m train; forward extra text arguments;
+if (Text exits successfully?) then (yes)
+ :Call train-modalities.sh;
+ :Require manifest and modality plan; read validation split from project config;
+ :Enumerate enabled and present image/audio/video entries;
+ while (Next modality?) is (yes)
+  :If auto resume enabled and marker exists, require checkpoint directory;
+  :Invoke python -m modality_train with modality, manifest, plan and optional resume;
+  if (Training exits unsuccessfully?) then (yes)
+   :Stop shell; prior outputs remain;
+   stop
+  endif
+ endwhile (done)
+ :Hash training/execution/modalities/hardware JSON;
+ :Write run-receipt.json with those hashes and output paths;
+else (no)
+ :Stop shell; prior outputs remain;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete three launch scripts reviewed. Aggregate receipt hashes planning files,
+not checkpoint contents, dataset bytes or verification results. train.sh assigns
+PROJECT_CONFIG but does not consume it. Text auto-resume is not supplied by train-all;
+media auto-resume uses a path from its marker. Bash process-substitution producer errors
+are not explicitly checked after mapfile. No training or launcher was executed.
+end footer
+
+@enduml

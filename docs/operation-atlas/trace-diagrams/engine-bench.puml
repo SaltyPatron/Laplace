@@ -1,0 +1,37 @@
+@startuml
+' Evidence: Laplace-Engine/src/bench.c SHA256 41d5237e9365498991f98faefa4057711f774bbe713380643c9437644cb4b5d4
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — bench
+start
+
+:Report available and active CPU dispatch;
+:Time codepoint and composition identity kernels;
+:Time ID geometry conversion, EWKB encoding and fixed-coordinate kernels;
+:Time scalar continuation scan;
+if (AVX2 supported?) then (yes)
+ :Time AVX2 scan and later distance kernels;
+endif
+if (AVX512 supported?) then (yes)
+ :Time AVX512 scan;
+endif
+:Time scalar distance, Frechet, DTW, EDR and outlier kernels;
+if (Tier0 can be mapped?) then (yes)
+ :Time text decomposition and codepoint lookup;
+else (no)
+ :Print text measurement skipped;
+endif
+:Time frontier reach/drain;
+:Time scalar attestation and trust-bounded series;
+:Return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. This measures kernels on synthetic/fixed inputs. It does not compare outputs
+against correctness expectations; missing tier0 skips text timing and still returns 0.
+Arguments are ignored by this handler; memory allocation failures are not consistently
+checked. Source review only; no Engine command executed.
+end footer
+
+@enduml

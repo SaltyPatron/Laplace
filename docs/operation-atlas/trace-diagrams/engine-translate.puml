@@ -1,0 +1,48 @@
+@startuml
+' Evidence: Laplace-Engine/src/pull.c SHA256 793cafbb4658ff28468316606160696674b1aefe34aa43af2b5a03f9c4eff7e0
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — translate
+start
+
+:Parse source word, source language, target languages and options;
+:Load translate firmware;
+if (Missing arguments or missing up/language route?) then (yes)
+ :Return 2;
+ stop
+endif
+:Map tier0; open read connection and reader; resolve relation IDs;
+:Read first upward claims in witness order;
+while (More upward steps and frontier nonempty?) is (yes)
+ :open_each for entire frontier;
+ if (Last upward step?) then (yes)
+  :Retain first concept and standing per origin;
+ else (no)
+  :Advance claimed targets;
+  :For uncarried steps, expand constituents;
+  :Exclude original word unless composition contains only that word;
+ endif
+endwhile (no)
+:Resolve synset languages; choose distinct concepts in source language up to limit;
+:Read optional gloss and downward synsets in batches;
+:Keep requested target languages, at most 64;
+while (More downward steps and frontier nonempty?) is (yes)
+ :Read inverse relation for whole frontier;
+ if (Uncarried step above final word step?) then (yes)
+  :Fall back to containing entities;
+ endif
+endwhile (no)
+:Print concept standing, gloss and at most eight unique words per target;
+:Print no-concept / nothing-attested labels where applicable;
+:Cleanup; return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Firmware defines the relation route. This traverses attested concepts and
+structural fallbacks; it is not a generic neural translation call. No-concept results
+still return 0. open_each, language_each and parts_each require nested review. Source
+review only; no Engine command executed.
+end footer
+
+@enduml

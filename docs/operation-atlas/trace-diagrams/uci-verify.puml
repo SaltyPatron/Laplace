@@ -1,0 +1,38 @@
+@startuml
+' Evidence: Laplace-UCI/src/Laplace.Uci/Program.cs SHA256 c75d540aac8af80dcdb95b020a41680eba2587cec64b2e48a260a6a091681072
+' Evidence: Laplace-UCI/src/Laplace.Uci/Connections.cs SHA256 804a8785d1e69fd88ab4d3e519c50754ad2408b1767a2c3b12975bb32d30cbd4
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title UCI connector — engine verification probe
+start
+
+:Open configured engine;
+:Start 120-second lifetime deadline;
+:Send uci; receive until uciok;
+:Send isready; receive until readyok;
+:Send ucinewgame; send isready; receive until readyok;
+:Send position startpos; send go depth 1;
+:Receive until bestmove;
+if (Last retained line exactly bestmove 0000 or bestmove (none)?) then (yes)
+ :Throw no-move error;
+else (no)
+ :Print profile metadata, UTC time and retained protocol lines;
+endif
+:Dispose engine;
+legend
+Until reports info-string diagnostics to stderr and retains at most 256 selected lines.
+Selected lines include engine ID, best move, providers, database identity and knowledge identity.
+EOF before expected response throws; timeout cancels the shared lifetime token.
+The outer command catch prints errors and returns 1.
+endlegend
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The timeout starts after connection opening. This is a handshake and minimal
+response probe: the wrapper does not independently validate move legality, chess strength
+or declared knowledge content. Null-move rejection is an exact string comparison. No
+engine process or connector endpoint was started.
+end footer
+
+@enduml

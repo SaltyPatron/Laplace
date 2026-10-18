@@ -1,0 +1,35 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/consensus_scan.c SHA256 087394b842f556c8f0325ffc079b5da775d58ea20dbead506835ad5693c19722
+' Evidence: Laplace/extension/laplace_substrate/src/consensus_plane_scan.h SHA256 c7446e402e91a0cab86cfbb661cc18acaf1587fcd1db1b5ab58c1953daeddf77
+' Evidence: Laplace/engine/core/src/sql_catalog.def SHA256 065ad0ce0f1aa89793cedf3ed1ee1ff198651b3d2db1650a0ca2d819d6267176
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — independent relation-plane cutoffs
+start
+:Require compatible endpoint ASC, type ASC, effective-mu DESC B-tree;
+:Create discovery and ranked scans under active snapshot;
+while (Next operand endpoint?) is (yes)
+ :Start type seek at empty byte string lower bound;
+ while (Next stored relation type exists?) is (yes)
+  :Seek strictly past prior type; validate 16-byte relation identity;
+  if (Type inside hard caller scope?) then (yes)
+   :Open exact endpoint/type ordered range;
+   :Filter endpoint sets and exclude unary rows; validate standing;
+   :Apply caller cutoff only to this type range;
+   :Stream retained rows to consumer;
+  endif
+ endwhile (done)
+endwhile (done)
+:Close both scans and release temporary lower-bound/type values;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete plane-index recognition and range traversal reviewed. Types are
+discovered from stored keys rather than a fixed semantic roster. Empty byte string is an
+index lower bound, not a minted entity. Reaching one type cutoff moves to the next type,
+preserving independent response planes. No ranked index means complete keyed fallback
+without this cutoff.
+end footer
+
+@enduml

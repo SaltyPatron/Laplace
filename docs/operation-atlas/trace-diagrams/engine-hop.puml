@@ -1,0 +1,47 @@
+@startuml
+' Evidence: Laplace-Engine/src/pull.c SHA256 793cafbb4658ff28468316606160696674b1aefe34aa43af2b5a03f9c4eff7e0
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — hop
+start
+
+:Parse options; load hop firmware and default fan/confidence;
+if (Argument count is neither one nor three?) then (yes)
+ :Return 2;
+ stop
+endif
+:Map tier0; create text context; connect for reads;
+if (Whole entity request?) then (yes)
+ :Resolve entity; claims_of;
+else (pattern)
+ :Resolve subject/predicate/object, leaving question marks open;
+ if (All parts open?) then (yes)
+  :Return 2;
+  stop
+ endif
+ :claims_like;
+endif
+:Apply refused and weighed; retrieve witness positions;
+:Order pattern results by witness position when configured;
+:Decode and print at most limit claims;
+if (Pattern request?) then (yes)
+ :Cleanup; return 0;
+ stop
+endif
+:Query non-claim containers of whole entity;
+if (Query fails?) then (yes)
+ :Return 1; claims may already have been printed;
+ stop
+endif
+:Print observed container counts by tier separately from attested claims;
+:Cleanup; return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Refusal, weighting, claim retrieval and text reconstruction remain nested.
+Observed containment is displayed separately from testimony; absence of claims does not
+itself make this handler fail. Source review only; no Engine command executed.
+end footer
+
+@enduml

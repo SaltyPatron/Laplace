@@ -1,0 +1,55 @@
+@startuml
+' Evidence: Laplace-Engine/src/db.c SHA256 bba138c55e319e63598cd8c6640d0de5428975c5b37991e8439823efea5d17c7
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — source series to staged standings
+start
+
+:fold_events skips known/skipped files and non-claim events;
+:Per claim, accumulate games and sum of carried scores;
+if (Fold empty?) then (yes)
+ :standings_write returns 0;
+ stop
+endif
+:Open connections; request synchronous_commit off; stage_open;
+if (Stage setup fails?) then (yes)
+ :Return 1;
+ stop
+endif
+:Create stock standings for fold claim IDs;
+:Group IDs by first hex digit, in chunks up to 100000;
+:Read public standings then staged standings, with staged values overriding;
+if (Any read fails?) then (yes)
+ :Return 1;
+ stop
+endif
+:In parallel per claim, lp_attest_series(trust, games, mean score);
+:Add games to matches;
+:Assign 16 consensus partitions across at most 16 writers;
+fork
+ :Writer begins transaction;
+ :Select new or changed-match-count standings;
+ :Delete their existing staged rows in chunks;
+ :Binary COPY replacement standings into stage;
+ if (Partition operation reports failure?) then (yes)
+  :Attempt writer ROLLBACK;
+ else (no)
+  :Attempt writer COMMIT;
+ endif
+fork again
+ :Other assigned writers execute the same sequence independently;
+end fork
+:Collect reported failures and statistics; close connections;
+:Return 1 if any reported failure, otherwise 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Each writer commits independently here; this is not the merge two-phase commit.
+BEGIN and synchronous_commit SET statuses are discarded. COPY helpers can exit the process
+directly, bypassing the ordinary return/rollback branch. No lineage grouping occurs inside
+this fold routine: its key is claim ID and its scope is the caller-provided source fold.
+This does not establish complete dependence-root handling.
+end footer
+
+@enduml

@@ -1,0 +1,46 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/cognition_program.c SHA256 3bf41a2be32a7712b9b74d54b3911dd4fa7a924defb57b3d6dcf48d0799117a4
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — program, output, semantic-act and receipt identities
+rectangle "Program input / v9" as P {
+ rectangle "Observation root\nExplicit invocation + active context\nRequired occurrence ordinals + IDs" as Required
+ rectangle "COUPLE bindings\nStructural candidates\nGeometry candidates\nOrdered discourse\nInitial typed channels\nDeclared operations + inputs + witnesses" as Planes
+}
+rectangle "BLAKE3 program_id" as PID
+rectangle "Output input / v2\nObservation root\nOrdered output IDs\nPer-output support flags + origins" as O
+rectangle "BLAKE3 output_fingerprint" as OID
+rectangle "semantic-act / v1\nprogram_id + output_fingerprint\nat first successful completion" as A
+rectangle "BLAKE3 semantic_act_id" as AID
+rectangle "Receipt\nAll three IDs\nRequired/satisfied counts\nRemaining=max(required-satisfied,0)\nRouting/output/semantic-output counts\nPresence flags, complete, disposition" as R
+P --> PID
+O --> OID
+PID --> A
+OID --> A
+A --> AID
+PID --> R
+OID --> R
+AID --> R
+note bottom of P
+Separate response planes stay separate in the encoding.
+Geometry and structure are fingerprinted, not semantic ancestry.
+Integer fields use explicit big-endian encoding.
+Bindings, structure, geometry, initial channels and operations are sorted;
+discourse and each operation's input order are retained.
+end note
+note bottom of R
+Occurrence and input-identity obligation counts are summed.
+Receipt copies in-memory state; this helper writes no durable receipt.
+Program fingerprint is created once from initial response data.
+Later channels are not rehashed into program_id by note_semantic_channels.
+end note
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Fingerprint helper bodies and receipt assembly reviewed. Hash identity is not
+proof of persisted replay inputs, database snapshot identity, runtime acceptance or
+independent provenance. Comparator tie/canonicalization guarantees and cross-platform hash
+representation are not established by this view.
+end footer
+
+@enduml

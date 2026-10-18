@@ -1,0 +1,62 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — correction, generations and install verification
+
+!pragma useVerticalIf on
+start
+:29.10 Bind selected install, serving revision and ownership\npreserve unrelated work / bounded resources / cancellation journal;
+if (Maintenance operation?) then (Correct witness)
+ :29.1 Remove selected witness contributions and trunk\nretain other witnesses and addressable prior evidence;
+ :29.2 Sweep unreferenced objects top-down in sets\nretain Tier 0;
+ :Replay affected standings\nadmit corrected source generation;
+ note right
+Containment-only forget is a target contingent on
+equivalent replay proof, not the current row contract.
+Database reset is a separately authorized operation.
+ end note
+elseif (Re-ingest?) then (yes)
+ :29.3 Reuse existing identities\nexclude repeated testimony from another fold;
+ note right #FFE4D6
+CONTRACT CONFLICT:
+29.3 says skip by the byte check of 11.2.
+11.2 explicitly requires the composed trunk ID
+and sends every artifact through decomposition.
+The shortcut is not accepted as an equivalent flow.
+ end note
+elseif (Registry change?) then (yes)
+ if (Semantics or historical bit coverage changes?) then (yes)
+  :29.5 Reseed from materialized rows;
+ else (append only)
+  :Append stable bit / code\nretired bit stays reserved; no reseed;
+ endif
+elseif (New Unicode release?) then (yes)
+ :29.9 Require final data and segmentation tooling\nrepeat stages 1–5 with new fingerprint;
+ :Preserve existing content IDs\nrecompute dependent coordinates / Hilbert from leaves;
+elseif (Extension upgrade?) then (yes)
+ :29.6 Rebuild and install coherent modules\nALTER EXTENSION UPDATE through versioned scripts\nverify installed catalog; retain indexes;
+else (Changed cache dependency)
+ :Identify changed recipe / manifest / lower cache / hot set;
+endif
+if (Derived cache dependencies changed?) then (yes)
+ :29.4 Rebuild only named dependents\npublish atomically; loader refuses stale generation;
+endif
+:29.7 Probe serving application / native libraries\nPostgreSQL execution module / Tier-0 fingerprint\nvocabulary and domain floors / substrate invariants;
+if (Shared ingest spine changed?) then (yes)
+ :29.8 Cross-source legal physical-plan matrix\nrequire identical durable semantic fingerprints;
+endif
+:Retain independent verification evidence\nsummary output alone does not prove the install;
+stop
+legend
+Specified maintenance operations 29.1–29.10.
+Failure recovery must use the actual implementation's commit and publication boundaries.
+No rollback of independently committed state is implied by an activity arrow.
+endlegend
+
+@enduml

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { decodeRouteText } from '../layout/useRouteText';
 import { Breadcrumb } from './components/Breadcrumb';
@@ -24,6 +24,7 @@ const loadTopic = () => import('../topic/TopicView');
 const loadQuery = () => import('../query/QueryConsole');
 const loadProof = () => import('./proof/StorageProofView');
 const loadUnicode = () => import('./unicode/UnicodeGlomeView');
+const loadArchitecture = () => import('./architecture/ArchitectureView');
 
 const BrowseHome = lazy(() => loadBrowse().then((m) => ({ default: m.BrowseHome })));
 const WarehouseHome = lazy(() => loadWarehouse().then((m) => ({ default: m.WarehouseHome })));
@@ -43,6 +44,7 @@ const TopicView = lazy(() => loadTopic().then((m) => ({ default: m.TopicView }))
 const QueryConsole = lazy(() => loadQuery().then((m) => ({ default: m.QueryConsole })));
 const StorageProofView = lazy(() => loadProof().then((m) => ({ default: m.StorageProofView })));
 const UnicodeGlomeView = lazy(() => loadUnicode().then((m) => ({ default: m.UnicodeGlomeView })));
+const ArchitectureView = lazy(() => loadArchitecture().then((m) => ({ default: m.ArchitectureView })));
 
 const EXPLORE_PREFETCH: Record<string, () => Promise<unknown>> = {
   '/explore': loadBrowse,
@@ -57,13 +59,14 @@ const EXPLORE_PREFETCH: Record<string, () => Promise<unknown>> = {
   '/query': loadQuery,
   '/proof': loadProof,
   '/unicode': loadUnicode,
+  '/explore/architecture': loadArchitecture,
 };
 
 /** Explore's tools, grouped by what they do with the one admitted world. */
 const NAV_GROUPS: { title: string; items: readonly (readonly [string, string])[] }[] = [
   { title: 'Find', items: [['Browse', '/explore'], ['Read a topic', '/topic'], ['Structured read', '/query'], ['Matchup', '/explore/matchup']] },
   { title: 'Structure', items: [['Mesh', '/explore/mesh'], ['Highway', '/explore/highway'], ['Warehouse', '/explore/warehouse'], ['Constellation', '/explore/constellation'], ['Tier-0 glome', '/unicode']] },
-  { title: 'Execution', items: [['Walk', '/explore/walk'], ['Storage proof', '/proof'], ['Audit', '/explore/audit']] },
+  { title: 'Execution', items: [['Architecture & operations', '/explore/architecture'], ['Walk', '/explore/walk'], ['Storage proof', '/proof'], ['Audit', '/explore/audit']] },
 ];
 
 /** Pages that live at their own address but belong to Explore's layout. */
@@ -75,6 +78,7 @@ function ExploreBreadcrumb() {
   const segments: { label: string; to?: string }[] = [{ label: 'Browse', to: '/explore' }];
 
   const stageMatch = pathname.match(/\/explore\/stage\/([^/]+)/);
+  if (pathname.startsWith('/explore/architecture')) segments.push({ label: 'Architecture & operations' });
   if (stageMatch) {
     const stage = decodeRouteText(stageMatch[1]);
     segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
@@ -96,10 +100,18 @@ function ExploreBreadcrumb() {
 }
 
 export function ExploreView({ page }: { page?: ExplorePage }) {
+  const navigation = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const mobile = window.matchMedia('(max-width: 700px)');
+    const resize = () => { if (navigation.current) navigation.current.open = !mobile.matches; };
+    resize();
+    mobile.addEventListener('change', resize);
+    return () => mobile.removeEventListener('change', resize);
+  }, []);
   return (
     <div className={styles.layout}>
       <aside className={styles.sidebar}>
-        <details className={styles.navDisclosure} open>
+        <details ref={navigation} className={styles.navDisclosure} open>
           <summary className={styles.navSummary}>Explore tools</summary>
           <nav className={styles.nav} aria-label="Explore tools">
             {NAV_GROUPS.map((group) => (
@@ -142,6 +154,7 @@ export function ExploreView({ page }: { page?: ExplorePage }) {
           <Route path="matchup" element={<MatchupView />} />
           <Route path="matchup/:x/:y" element={<MatchupView />} />
           <Route path="audit" element={<AuditPanel />} />
+          <Route path="architecture" element={<ArchitectureView />} />
           <Route path="*" element={<Navigate to="/explore" replace />} />
         </Routes>}
         </Suspense>

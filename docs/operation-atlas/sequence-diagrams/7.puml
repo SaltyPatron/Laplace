@@ -1,0 +1,24 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 7. Perfcaches — Wiki specified order
+start
+:7.1 Declare the blob&#x27,s format;
+:7.2 Choose dense or sparse;
+:7.3 Bind the dependency generations;
+:7.4 Declare the selector and profile;
+:7.5 Emit, checksum, publish atomically;
+:7.6 Load strictly;
+:7.7 Prove parity;
+:7.8 Look up trunk first, and resolve keys before the index;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Perfcaches.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

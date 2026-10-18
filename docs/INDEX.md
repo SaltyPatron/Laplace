@@ -7,6 +7,7 @@ The map is [`README.md`](README.md).
 - [`INVENTIONS.md`](INVENTIONS.md)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - [`OPERATING_SEQUENCE.md`](OPERATING_SEQUENCE.md)
+- [`operation-atlas/README.md`](operation-atlas/README.md)
 - [`../AGENTS.md`](../AGENTS.md)
 - [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md)
 - [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md)

@@ -1,0 +1,52 @@
+@startuml
+' Evidence: Laplace-Engine/src/pull.c SHA256 793cafbb4658ff28468316606160696674b1aefe34aa43af2b5a03f9c4eff7e0
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — degrees
+start
+
+:Parse search options;
+if (Missing origin or batch below one?) then (yes)
+ :Return 2;
+ stop
+endif
+:Load firmware; resolve origin, optional goal and weights;
+:Open reads; seed forward frontier;
+if (Goal supplied?) then (yes)
+ :Seed backward frontier; best = infinity;
+ while (Open costs can improve best and a frontier is available?) is (yes)
+  :Expand side with lower open cost, bounded by half hop budget;
+  if (Expansion empty?) then (yes)
+   break
+  endif
+  :Compare meetings with opposite frontier; exclude hubs;
+  :Keep cheaper meeting within total hop budget;
+ endwhile (no)
+ if (No meeting found?) then (yes)
+  :Report no chain; cleanup; return 1;
+  stop
+ endif
+ :Reconstruct forward chain and reversed backward chain; print;
+else (nearest)
+ while (Fewer than limit known or open frontier may improve top results?) is (yes)
+  :expand forward frontier;
+  if (Expansion empty?) then (yes)
+   break
+  endif
+  :Collect closed entities except origin;
+ endwhile (no)
+ :Sort by cost; reconstruct and print up to limit chains;
+endif
+:Report expansion statistics; cleanup; return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. expand, frontier ordering, costs and show_chain remain nested. The diagram
+assumes a positive result limit: this wrapper checks batch but does not reject
+zero/negative limit, and the nearest branch indexes near[limit-1]. Source review does not
+establish global optimality under fan/hop limits. Source review only; no Engine command
+executed.
+end footer
+
+@enduml

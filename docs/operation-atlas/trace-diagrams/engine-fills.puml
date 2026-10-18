@@ -1,0 +1,36 @@
+@startuml
+' Evidence: Laplace-Engine/src/fills.c SHA256 9476e3f6d65a82529f185b7353ab89a99222fefc8ea847b211d3f3ad50656a34
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — fills
+start
+
+:Parse phrase, row limit, tier0 and connection;
+if (No phrase?) then (yes)
+ :Return 2;
+ stop
+endif
+:Map tier0; initialize working table/context;
+:Compose exact phrase and constituent IDs;
+:Choose composed lookup keys, falling back to all phrase parts;
+:Fetch candidate containers;
+:lp_path_follows checks exact run including separators;
+while (Parent frontier nonempty?) is (yes)
+ :Fetch parents in sets of up to 20000;
+ :Record parent multiplicities; enqueue unseen parents;
+endwhile (no)
+:occ_of propagates root occurrences down through multiplicities;
+:Weight each continuation by containing path occurrence count;
+:Sort descending occurrence totals;
+:Batch request top continuation texts; print at most limit;
+:Report traversal/timings; free maps and close; return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. This calculates occurrence-weighted continuations; repetition is structural
+occurrence, not independent testimony. Path matching and decoding remain native nested
+operations. Source review only; no Engine command executed.
+end footer
+
+@enduml

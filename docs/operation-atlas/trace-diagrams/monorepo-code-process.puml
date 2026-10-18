@@ -1,0 +1,38 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/CodeToolchain.cs SHA256 08a12fbc7ebe3255f38e7cd05cc88b76089f6c9ce7fc1395270c0d711fffc97c
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — tool process, timeout and caller cancellation
+start
+:Build ProcessStartInfo with argument list, no shell/window and redirected output;
+:Set npm no-auto-confirm and dotnet telemetry/no-logo flags;
+:Start tool in temporary directory;
+if (Win32 start error or null process?) then (yes)
+ :Return unavailable, exit 127;
+ stop
+endif
+:Start complete stdout/stderr reads;
+:Wait with caller-linked token and 30-second timeout;
+if (Cancellation caused only by timeout?) then (yes)
+ :Attempt kill entire process tree;
+ :Await both output streams; return timed-out exit 124;
+elseif (Caller cancellation?) then (yes)
+ :Exception propagates; this branch does not explicitly kill process;
+ :Dispose process wrapper; outer verifier attempts directory cleanup;
+ stop
+else (normal exit)
+ :Await both output streams; capture exit code;
+endif
+:Normalize diagnostics; trim each to 16384 characters after full read;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire RunAsync reviewed. DiagnosticLimit bounds returned strings, not memory
+consumed by ReadToEndAsync. Timeout kill errors are swallowed and stream waits have no
+separate bound. Caller cancellation bypasses the timeout-only kill catch; disposing
+Process is not explicit termination. No OS isolation or memory quota is configured in this
+process wrapper.
+end footer
+
+@enduml

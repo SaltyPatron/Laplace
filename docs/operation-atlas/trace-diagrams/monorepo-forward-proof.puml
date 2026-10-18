@@ -1,0 +1,32 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs SHA256 da65d421f5a62d2dc147b5c0cb783b94157e1227f093908ea63b4393f9c6fd30
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — response proof assembly
+start
+:Receive events from the invocation that produced the reply;
+:Select last complete/unresolved/ambiguous/budget_exhausted event;
+if (No terminal event?) then (yes)
+ :Return null proof;
+ stop
+endif
+:Project resolve/couple/orient/route/propose/scan/compose/steer/select/emit/realize events;
+:Retain event dimensions, supports and routing rounds;
+if (Caller reports response witnessed?) then (yes)
+ :Append synthetic witness trace event using terminal context;
+endif
+:Build proof with session, prompt occurrence key, program ID and semantic-act ID;
+:Include fingerprint, completion/disposition, obligations, output count and prior discourse;
+:Return proof;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. The witness event is appended by managed response-proof assembly after the
+caller’s RecordResponseAsync returns. It is not another native forward execution. This
+wrapper neither verifies the fingerprint nor proves durable replay from all consumed
+evidence; RecordResponseAsync skips the write for empty replies, so the synthetic event
+alone does not establish a response deposit. Native receipt semantics remain separate.
+end footer
+
+@enduml

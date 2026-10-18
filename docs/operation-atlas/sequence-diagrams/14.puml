@@ -1,0 +1,28 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 14. Indexes — Wiki specified order
+start
+:14.1 B-tree on IDs;
+:14.2 B-tree on Hilbert values;
+:14.3 4D GiST on real coordinates;
+:14.4 GIN on the IDs decoded from paths;
+:14.5 B-tree on occurrences;
+:14.6 Indexes on the semantics tables;
+:14.7 `ANALYZE`;
+:14.8 Measure every native operation;
+:14.9 Measure every query;
+:14.10 Check the install against itself;
+:14.11 Confirm the fingerprints;
+:14.12 Publish the hot cache generations;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Indexes.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

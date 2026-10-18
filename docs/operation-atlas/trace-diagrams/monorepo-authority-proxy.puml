@@ -1,0 +1,39 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/RefactorProxyMiddleware.cs SHA256 15d0270bb3e760900da8438f459419db045ed4db457963c9f839bdfc05175664
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/Program.cs SHA256 97454cdfa33b2c0bdd7eef44de4d6ee79c82732207d2f655b573d2ba1f2f816b
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — fixed-origin Refactor streaming proxy
+start
+:Reject CONNECT with 405;
+:Require literal /refactor/ raw target; reject control, backslash and fragment;
+:Strip prefix; concatenate fixed http://127.0.0.1:55434;
+:Preserve escaped path/query; assert fixed authority;
+:Stream request body; forward end-to-end headers;
+:Remove Host and hop-by-hop/Connection-nominated headers;
+:Send without redirects, cookies, proxy or decompression;
+:Ten-second connection timeout; no overall client timeout;
+if (Upstream switches protocol?) then (yes)
+ :502; stop;
+ stop
+endif
+:Forward status and end-to-end response headers;
+:Disable buffering; SSE sets X-Accel-Buffering=no;
+:Start response; HEAD/204/304 return without body;
+:Otherwise read/write/flush each chunk until end;
+note right
+ Caller cancellation aborts client response.
+ Transport failure before response start gives 502;
+ after response start aborts connection.
+end note
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire proxy reviewed. It adds no credential, but forwards incoming end-to-end
+Authorization/Cookie headers unless excluded by Connection. Upstream authentication is a
+separate boundary. It does not support CONNECT or protocol upgrade. Client-owned
+cancellation controls streams; pooled buffers are returned in finally.
+end footer
+
+@enduml

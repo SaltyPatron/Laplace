@@ -1,0 +1,19 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Calculus Extension — specified cycle
+start
+repeat
+:locate typed vacancy;
+:propose recipe grammar operator or firmware extension;
+:test disjoint evidence and counterexamples;
+:activate a new version only after authority gates;
+repeat while (Further authorized work / evidence?) is (yes) not (no)
+stop
+@enduml

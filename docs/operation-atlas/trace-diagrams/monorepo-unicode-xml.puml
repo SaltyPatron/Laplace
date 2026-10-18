@@ -1,0 +1,46 @@
+@startuml
+' Evidence: Laplace/engine/core/src/ucd_xml.cpp SHA256 0e7bbd811562610544bc885b071ebecda93c34384c2e47b39222749137281ab5
+' Evidence: Laplace/engine/core/src/unicode_seed.cpp SHA256 556dafd215f1b730c225a5f0de865e48ee67dcc42fb9d87478fdfe4f7f77320a
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — UCD artifact decoding and XML event parser
+start
+if (Path ends exactly in .zip?) then (yes)
+ :Read whole archive; find end-of-central-directory;
+ :Require nonzero entry count; read first central-directory entry;
+ :Validate local header and payload bounds;
+ if (Stored or deflated method?) then (yes)
+  :Copy or inflate whole selected entry; require size and CRC;
+ else (unsupported)
+  :Return read failure;
+  stop
+ endif
+else (plain)
+ :Read whole XML file; reject empty bytes;
+endif
+while (More bytes?) is (yes)
+ :Skip text until next tag;
+ if (Comment, processing instruction or CDATA?) then (yes)
+  :Skip to terminator; reject missing terminator;
+ else (element)
+  :Read ASCII-style name and quoted attribute pairs;
+  :Reject malformed lexical delimiters;
+  :Invoke start/end callbacks; self-closing tag invokes both;
+ endif
+endwhile (done)
+:Return parser success;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete XML event parser and both archive readers reviewed. The archive reader
+selects the first entry; despite its name it does not require exactly one entry or
+validate the entry filename. Parsing avoids a full AST but retains whole
+compressed/inflated buffers; it is not bounded streaming from disk. The event parser has
+no nesting stack, root/repertoire completeness check, entity-reference decoding or
+duplicate-attribute rejection. ValidateUcdXml uses no-op callbacks, so lexical success is
+not full UAX42/XML/repertoire conformance. Native snapshot callbacks add property
+interpretation separately.
+end footer
+
+@enduml

@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace-Native/src/utf8.c SHA256 59f21a636908807089205828d04ac47c4a6eb080cfac1451d76077757d7c08cb
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Native — generalized UTF8 decoder
+start
+:Caller provides cursor below input length;
+:Read leading byte;
+if (ASCII?) then (yes)
+ :Return codepoint; advance one; true;
+ stop
+endif
+:Choose length from leading byte thresholds;
+if (Invalid lead or insufficient remaining bytes?) then (yes)
+ :Return false; cursor unchanged;
+ stop
+endif
+:Initialize codepoint from leading payload;
+while (More continuation bytes?) is (yes)
+ if (Byte does not begin 10?) then (yes)
+  :Return false; cursor unchanged;
+  stop
+ endif
+ :Shift codepoint and append payload;
+endwhile (no)
+if (Codepoint at or above LP_NCP?) then (yes)
+ :Return false; cursor unchanged;
+ stop
+endif
+:Return codepoint; advance by selected length; true;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Surrogates are accepted intentionally. No shortest-encoding check occurs in this
+function: overlong encodings below LP_NCP can be accepted. Callers differ: text
+decomposition replaces failures one byte at a time, whereas lp_ref_codepoints returns a
+zero reference with ok=false. No malformed-input execution was performed.
+end footer
+
+@enduml

@@ -2,6 +2,8 @@
 
 This document describes how the repository implements the machine in [`INVENTION.md`](INVENTION.md) and [`INVENTIONS.md`](INVENTIONS.md). Generated counts live in `docs/INVENTORY.md`.
 
+The [operation atlas](operation-atlas/README.md) provides whole-system UML and source-linked control, persistence, and recovery flows, with implementation families and evidence boundaries kept explicit.
+
 When this document and the code disagree, fix the document. When two code paths disagree with each other, they implement one law. The invention is that law.
 
 ---

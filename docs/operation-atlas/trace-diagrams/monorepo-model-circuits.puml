@@ -1,0 +1,50 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Decomposers/Model/ModelTokenEdgeETL.cs SHA256 da0df6373f5b8fefdaaf8eb04be4fe9af34741882bc4bfde87f565a636f1cdc4
+' Evidence: Laplace/app/Laplace.Decomposers/Model/ModelCoordinates.cs SHA256 857ec5232d621d3762c120c4fbbe0a99a4829a9fa9247ff0daf975c4f90da7f9
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — circuit decomposition and snapshot lifetime
+start
+if (Runnable text recipe, classified embedding, positive dimensions?) then (no)
+ :End without circuit changes;
+ stop
+endif
+:Deduplicate in-range tokenizer entities\nretain first available canonical placement per entity;
+if (At least two distinct entities?) then (no)
+ stop
+endif
+:Open model content snapshot\nrequire snapshot source ID to equal admitted source;
+:Own snapshot through reference-counted apply envelope\nattach VerifySourceId callback;
+while (Relation family remains?) is (yes)
+ while (Circuit descriptor remains?) is (yes)
+  :Native contraction computes salience and ordering;
+  :Check returned cardinality and index bounds;
+  :Pack ordered entity IDs and salience\ncentroid uses first at most 64 available placement anchors;
+  :StageCircuit identity from witness + model-circuit + plane\nplus layer / head path components when present;
+  :Attach Projection physicality containing ordered token trajectory;
+  :Yield circuit change with retained snapshot envelope;
+  :Emit significant claim pages\neach also retains snapshot envelope;
+ endwhile (no)
+ :Update observed peak native resident bytes;
+endwhile (no)
+:Log forms, significant claims, skipped circuits\nand raw_weight_bytes_retained = 0;
+:Dispose iterator's snapshot owner\nemitted envelopes retain their own lifetime;
+stop
+legend
+IDENTITY DIFFERENCE: Wiki 24.6 identifies a circuit by its coupled content.
+This source identifies it by witness and structural plane/layer/head address;
+ordered coupled entities are stored in its Projection physicality.
+Equal circuits in different source witnesses do not converge by this construction.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete EmitAsync, BuildCircuitObservation and ModelCoordinates reviewed. Array
+cardinality and index ranges are checked; permutation uniqueness is not checked here.
+Native contraction, ModelCircuitEstate and apply-envelope implementation remain nested.
+Yielding a retained envelope is not proof that every writer calls its verifier. This
+source has no whole-checkpoint acceptance read. Logged raw retained bytes is a source
+assertion, not an independent storage measurement.
+end footer
+
+@enduml

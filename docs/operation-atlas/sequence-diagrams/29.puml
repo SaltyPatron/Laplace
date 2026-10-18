@@ -1,0 +1,26 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 29. Maintenance — Wiki specified order
+start
+:29.1 Forget a source;
+:29.2 Sweep;
+:29.3 Re-ingest idempotently;
+:29.4 Regenerate the caches that depend on what changed;
+:29.5 Reseed only when semantics change;
+:29.6 Upgrade the extension in place;
+:29.7 Prove one deployed revision;
+:29.8 Prove physical-plan invariance across sources;
+:29.9 Adopt a new Unicode version;
+:29.10 Keep the operating rules;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Maintenance.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

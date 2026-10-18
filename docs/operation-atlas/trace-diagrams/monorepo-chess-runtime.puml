@@ -1,0 +1,34 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/ChessRuntimeService.cs SHA256 81b2e15ffc1aedb376286b751ce63634e0c31e27b73e3a6ad5b84aa29f43554c
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — lazy shared live-host lifetime
+start
+:StartAsync creates lifetime cancellation source; no database initialization;
+if (GetAsync?) then (yes)
+ :Require started and uncanceled lifetime;
+ :Under lock clear faulted/canceled initialization;
+ :Share one InitializeAsync task using lifetime token;
+ :Caller awaits shared task with its own cancellation;
+ :Publish created host only if lifetime remains active;
+ :If canceled before publication, initializer disposes its own host;
+elseif (StopAsync?) then (yes)
+ :Cancel lifetime; detach initialization task;
+ :Await initialization with stop token; swallow errors;
+ :Atomically detach and dispose published host;
+else (DisposeAsync)
+ :Detach lifetime and initialization; cancel lifetime;
+ :Await initialization without separate wait timeout; swallow errors;
+ :Dispose published host and cancellation source;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire runtime wrapper reviewed. Caller cancellation stops its wait, not the
+shared initialization. Failed initialization is retried by a later caller. Host creation,
+witness writer and host disposal semantics remain nested. No runtime was started for this
+atlas.
+end footer
+
+@enduml

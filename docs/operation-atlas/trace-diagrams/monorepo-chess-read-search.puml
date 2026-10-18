@@ -1,0 +1,38 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Chess.cs SHA256 d86eead36cf95b90252f6e228a9831f943e4518a6307e46476fad986bf25e674
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessEngineService.cs SHA256 f1612cc77fb73d442be573c8d483c077d4f6ab1a1d95e1a61b9657c20c4869ce
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — legal moves, position history and search
+start
+:Lazily initialize modality engine under gate;
+:Use configured read-only datasource, else obtain live-host datasource;
+:Load perfcache; create shared modality engine; schedule learned-PST refresh;
+if (Legal moves?) then (yes)
+ :Parse FEN; detect terminal/check; score legal candidates through modality engine;
+ :Return moves ordered by effective standing;
+elseif (Apply move or best move with nonempty history?) then (yes)
+ :Replay moves from standard initial position; stop at first illegal move;
+ :Use replayed state instead of supplied FEN;
+else (no history)
+ :Parse supplied FEN;
+endif
+if (Search requested and state nonterminal?) then (yes)
+ :Rent/create Search with optional substrate root bias/board evaluator and tablebase probe;
+ :Think synchronously with depth clamped 1..12;
+ :Extract best move/PV; apply move; detect terminal and motifs;
+ :Return engine to pool; format side-to-move and white scores;
+endif
+:Return response; terminal evaluation uses draw zero or win +/-30000;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete service read/search orchestration reviewed. Search internals, legal
+rules and substrate evaluators remain separate. Request cancellation is used for
+initialization but is not passed to these synchronous Think calls. Nonempty history
+ignores FEN and truncates replay at an invalid move. BestMoveAsync ignores its temperature
+argument; HTTP bestmove also does not forward its Temperature field.
+end footer
+
+@enduml

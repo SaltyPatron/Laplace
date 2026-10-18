@@ -1,0 +1,39 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessLabService.Ingestion.cs SHA256 dcbe76f26c82b0119145fa3c06f4a31460be5bd1da27e516e2d8f395c756d626
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessLabService.cs SHA256 0be064e9994a01d7643fb3f690d6381453e2de1969ccb384846a8b4da7b017cf
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessPgnIngestor.cs SHA256 9775995dd88b88edc591f4794d36bd9286fa19f82e85992470867d952e857cca
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — retained PGN admission and separate receipt publication
+start
+:Find terminal job under lock; increment ActiveIngests;
+:Acquire per-job ingestion gate; locate retained games.pgn;
+if (Completed Cutechess job with existing experiment?) then (yes)
+ :Allocate new ingest receipt name before validation;
+ :Read experiment; hash its UTF8 text; initialize recording measurement;
+ :Bind PGN to retained experiment;
+endif
+:Attach shared host writer; ingest PGN through common ingestor;
+if (Measurement exists?) then (yes)
+ :Verify PGN unchanged and experiment still matches;
+ :Mark measurement completed;
+endif
+:Determine fresh/mixed/replay/repaired/existing-or-repaired disposition;
+:Prepare return result;
+:Finally, when receipt allocated, serialize .pending then move to final JSON;
+:Register receipt artifact; prune old ingestion receipts to 32;
+:Always release gate if acquired and decrement ActiveIngests;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete retained ingestion method and pruning reviewed. Post-ingest input
+verification and receipt serialization happen after database effects; neither rolls them
+back. Receipt writing in finally has no caller cancellation token and can throw,
+overriding a pending return or exception. No explicit Flush(true) is used for these
+receipts. PGN/experiment measurement is conditional, not universal to every job.
+Replay/no-write acceptance depends on nested measurement code; names alone do not
+establish it.
+end footer
+
+@enduml

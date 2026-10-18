@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title world.discover-qualify-sources — declared input/output contract
+component "world.discover-qualify-sources" as operation
+rectangle "authority-selected source coordinates" as in0
+in0 --> operation
+rectangle "observed artifact roots" as in1
+in1 --> operation
+rectangle "pinned provider estate" as in2
+in2 --> operation
+rectangle "finite probe resources" as in3
+in3 --> operation
+rectangle "deterministic discovery catalog" as out0
+operation --> out0
+rectangle "artifact-family candidates" as out1
+operation --> out1
+rectangle "provider qualification receipts" as out2
+operation --> out2
+rectangle "explicit unsupported ambiguous corrupt and inaccessible dispositions" as out3
+operation --> out3
+@enduml

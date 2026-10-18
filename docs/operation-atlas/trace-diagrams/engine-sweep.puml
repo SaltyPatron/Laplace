@@ -1,0 +1,46 @@
+@startuml
+' Evidence: Laplace-Engine/src/forget.c SHA256 a38bd17960c904cd1d00158a684b48a7a993b5e1b617cb51439c09b6a483ca78
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — reference-count sweep and dry run
+
+start
+:Parse connection / workers / --dry; reject extra args with return 2;
+:Map tier0 and open connections;
+:Discover populated entity / physicality partitions;
+:Read paths above tier0 in parallel; count holders by child ID;
+:Mark witness trunks and lineages as roots;
+if (Standalone sweep?) then (yes)
+ :Keep non-curated file roots;
+ :Select entities with no holder and no root;
+else (forget supplies seed)
+ :Select seed entities that are not roots;
+endif
+while (Current removal set nonempty?) is (yes)
+ :Read selected paths; decrement child holder counts;
+ :Queue newly unheld non-root entities;
+ if (Not dry?) then (yes)
+  :DELETE consensus for selected IDs;
+  :DELETE selected physicality rows by partition;
+  :DELETE selected entity rows by partition;
+ endif
+ :Report level; advance removal set;
+endwhile (no)
+:Free count maps; report total;
+:Close connections; return 0;
+stop
+legend
+--dry calculates cascade without issuing the deletion statements.
+This source does not wrap the whole cascade in a single transaction.
+The tier0 paths are excluded from the scanned entity set.
+endlegend
+
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. cmd_sweep and sweep orchestration reviewed. row_path/root classification, path
+decoding and over_ids transport are nested helpers; the source navigator exposes them. No
+sweep or deletion executed.
+end footer
+
+@enduml

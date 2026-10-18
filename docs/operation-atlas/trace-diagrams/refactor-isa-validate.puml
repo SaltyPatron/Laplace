@@ -1,0 +1,41 @@
+@startuml
+' Evidence: Laplace-Refactor/engine/src/isa.c SHA256 39c5301c21e30a2182ab6ebbb856588d413f1a0eaa20d5b1515955e72b2ca0ab
+' Evidence: Laplace-Refactor/engine/src/framework.c SHA256 f5f90ced035976592e9dd149785964ab5bf57ec391f741b0f77009f30707ecf2
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Refactor — whole-program preflight and buffer separation
+start
+:Clear error; validate pointers and nonempty program;
+:Validate framework context;
+:Check ISA version, exact flags, zero reserved and FULL receipt detail;
+:Reject array-size overflow and value_count beyond uint32;
+while (More values?) is (yes)
+ :Require known type, exact flags, zero reserved, count at most capacity;
+ :Validate capacity span: data, stride, multiplication and pointer overflow;
+endwhile (no)
+while (More instructions?) is (yes)
+ :Check flags and register indices; forbid same input/output register;
+ :Binary-search operation registry by opcode;
+ :Check introduced minor version, instruction version and input/output types;
+ :Invoke operation-specific validator;
+endwhile (no)
+:Check each output capacity range against its input count range;
+:Check pairwise output/output and both output/input overlaps;
+:Return OK;
+stop
+legend bottom
+First validation failure returns typed status and relevant instruction/value indices.
+Zero-length spans do not overlap. Input/input overlap is permitted here.
+Normal build validates every instruction; a named test mutation validates only the first.
+Operation-specific validation and resource arithmetic remain separate paths.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Top-level validator, value spans, instruction registry lookup and global-range
+checks reviewed. Pairwise checks mean these public instruction buffers are not an
+unrestricted in-place dataflow chain. Successful preflight does not itself execute or
+commit an operation.
+end footer
+
+@enduml

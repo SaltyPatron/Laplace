@@ -1,0 +1,23 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 22. Users — Wiki specified order
+start
+:22.1 Compose the user&#x27,s effective mind;
+:22.2 Give the user a firmware;
+:22.3 Set the user&#x27,s operating language;
+:22.4 Set the user&#x27,s envelope;
+:22.5 Admit the prompt as content;
+:22.6 Record what the user gave as observation;
+:22.7 Pull, and answer;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Users.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

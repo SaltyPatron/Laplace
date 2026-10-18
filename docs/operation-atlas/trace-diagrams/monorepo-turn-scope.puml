@@ -1,0 +1,40 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs SHA256 da65d421f5a62d2dc147b5c0cb783b94157e1227f093908ea63b4393f9c6fd30
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — tenant and conversation scope
+start
+:Resolve tenant context through ITenantResolver;
+if (Tenant identifier invalid?) then (yes)
+ :Return invalid_tenant error;
+ stop
+endif
+:Choose session key: body, then X-Laplace-Session, then fresh s-GUID;
+if (Session identifier invalid?) then (yes)
+ :Return invalid_session error;
+ stop
+endif
+if (Tenant claims contain parsable user_id GUID?) then (yes)
+ :Replace supplied user key with authenticated GUID;
+else (no)
+ if (Supplied user identifier invalid?) then (yes)
+  :Return invalid_user error;
+  stop
+ endif
+endif
+:Derive SessionId from tenant and session key; return TurnScope;
+stop
+legend
+CatalogConversationAsync writes only for authenticated user GUIDs.
+Its title collapses whitespace and truncates to 160 characters before UpsertConversationAsync.
+These checks are identifiers and scope plumbing, not the tenant resolver's authentication proof.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. ConversationContent identity derivation, tenant resolver trust, store
+authorization and session ownership enforcement remain nested. The source wrapper alone
+cannot establish the whole access-control policy.
+end footer
+
+@enduml

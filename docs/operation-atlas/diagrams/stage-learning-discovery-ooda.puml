@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title learning.discovery-ooda — declared input/output contract
+component "learning.discovery-ooda" as operation
+rectangle "observed consequence" as in0
+in0 --> operation
+rectangle "typed frays" as in1
+in1 --> operation
+rectangle "current calculus" as in2
+in2 --> operation
+rectangle "disjoint fit evaluation and counterexample boundaries" as in3
+in3 --> operation
+rectangle "new testimony" as out0
+operation --> out0
+rectangle "new adjudication epoch" as out1
+operation --> out1
+rectangle "falsifiable extension candidates" as out2
+operation --> out2
+rectangle "versioned accepted calculus" as out3
+operation --> out3
+@enduml

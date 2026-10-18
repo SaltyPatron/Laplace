@@ -1,0 +1,54 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/FoundryExportService.cs SHA256 86df5a4b49eb84d80039e4924a2ae8cfe1e86c2bb20fa37441bbe6b552f2e125
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — export subprocess, file result and failure boundaries
+start
+:Default format to gguf; reject every other format;
+:Locate repo and existing CLI project;
+:Create temporary laplace-export GUID directory;
+if (Recipe prefix supplied?) then (yes)
+ :Require existing tokenizer directory\npass recipe-from prefix and absolute tokenizer options;
+else (JSON recipe)
+ :Require recipe and write workDir/recipe.json;
+endif
+:Combine work directory with caller filename or default\nappend output path to argument list;
+note right
+This service does not validate output containment.
+Rooted names or parent traversal can escape workDir.
+No cleanup is implemented in this body.
+end note
+:Start dotnet run with CLI project and no-build\nCLI command: synthesize substrate\nUseShellExecute=false; arguments passed individually;
+:Read stdout to end, then stderr to end\nwait for exit with request cancellation;
+note right
+Sequential redirected-pipe reads can stall if stderr fills.
+Cancellation does not explicitly kill the subprocess.
+Process disposal is not a declared effect rollback.
+end note
+if (Exit code nonzero?) then (yes)
+ :Throw with stderr or stdout detail;
+ stop
+endif
+if (Output path exists?) then (no)
+ :Throw missing output error;
+ stop
+endif
+:Read file length and return path / size / gguf;
+stop
+legend
+Success here is exit zero plus file presence.
+This wrapper does not load the file, run held-out semantics or verify provenance.
+CLI synthesis and external-consumer validation remain separate boundaries.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete CliFoundryExportService reviewed. This is a source-observed export
+boundary, not an executed export. The generated output is returned as a filesystem path,
+not streamed as artifact bytes by this endpoint. No timeout, process-tree termination,
+result fingerprint, external load, ablation or temporary-directory cleanup occurs in this
+service. Lower CLI tensor construction was only partially inspected and is not claimed
+reviewed here.
+end footer
+
+@enduml

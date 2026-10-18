@@ -1,0 +1,33 @@
+@startuml
+' Evidence: Laplace-MCP/native/lpm.c SHA256 ead42232fcd9abbabe2d9dffb92900067c1585a3ed2f964bc7a6f78e27015e8d
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular liblpm — CSV/TSV structural composition
+start
+:Split bytes into physical newline-delimited lines;
+:Remove trailing carriage return; skip empty lines;
+while (More lines?) is (yes)
+ :Scan comma fields with quote state, or tab fields without quote handling;
+ :In comma mode skip over doubled quote while scanning;
+ :Strip one surrounding quote pair from a field when present;
+ :Text-compose retained field bytes; empty field gives zero reference;
+ :Compose ordered fields at max child tier plus one;
+endwhile (no)
+:Compose ordered rows at max row tier plus one;
+:Return trunk; no rows gives zero reference;
+stop
+legend bottom
+This body splits lines before quote parsing: quoted multiline CSV is not preserved here.
+Doubled quotes affect scanning but are not unescaped from field bytes.
+Separators, line endings and surrounding quote syntax are not child content.
+The resulting structure is not established as an exact original-file byte round trip.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. admit_delimited reviewed. This local parser is not promoted to the general
+source-recipe contract. Empty fields, blank lines and syntax removal remain visible
+behavioral distinctions.
+end footer
+
+@enduml

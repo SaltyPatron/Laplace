@@ -1,0 +1,43 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/trajectory_generate.c SHA256 c6cdd7266c80070d27e0d836f2316637591cff6b5f1d45e42473957ef7b1f4ff
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo native — typed candidate election order
+start
+
+:Compare positive output-projection summaries;
+if (Tie?) then (yes)
+ :Compare positive traversal summaries;
+ if (Tie?) then (yes)
+  :Compare positive query summaries;
+  if (Tie?) then (yes)
+   :Prefer longer structural stride;
+   if (Tie?) then (yes)
+    :Prefer more trajectory occurrences;
+    if (Tie?) then (yes)
+     :Compare query opposition, then traversal opposition,
+then projection opposition;
+     if (Tie?) then (yes)
+      :Compare typed geometry summary;
+      if (Tie?) then (yes)
+       :Compare ID bytes;
+      endif
+     endif
+    endif
+   endif
+  endif
+ endif
+endif
+:Return first non-tied comparison;
+
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. candidate_compare uses a lexicographic ordering, not a product of evidence,
+sequence and geometry scores. positive_summary_compare and opposition_summary_compare
+internals remain deeper boundaries. Open-turn sharing refinement and seeded ordinal
+selection occur after this comparator.
+end footer
+
+@enduml

@@ -1,0 +1,39 @@
+@startuml
+' Evidence: Laplace/extension/laplace_substrate/src/trajectory_generate.c SHA256 c6cdd7266c80070d27e0d836f2316637591cff6b5f1d45e42473957ef7b1f4ff
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo native — terminal receipt and cleanup
+start
+
+:Election loop ends by completion, exhaustion, limit or blocked intent;
+if (Cognition program exists?) then (yes)
+ :Read current receipt;
+ if (Incomplete and disposition still OPEN?) then (yes)
+  if (Not exhausted and output count reached step limit?) then (yes)
+   :Finalize BUDGET_EXHAUSTED;
+  else (no)
+   :Finalize EXHAUSTED;
+  endif
+ endif
+ if (Trace requested?) then (yes)
+  :Emit terminal row at output_count + 1;
+  :Event is complete if receipt.complete, otherwise unresolved;
+  :Keep more specific disposition as a separate receipt field;
+  :Include program, obligations, output count and optional fingerprints/semantic act;
+ endif
+endif
+:Delete round scratch; destroy output/query/cognition states;
+:Free routing index, origin bitmaps and retained ordered context;
+:Finish SPI; return materialized result;
+
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. This is normal control-flow cleanup; PostgreSQL ERROR/interrupt paths are not
+translated here into ordinary terminal rows. Terminal event name and specific disposition
+are different fields. The surrounding SQL realization gate consumes this receipt;
+persistent response witnessing happens later in the managed HTTP path.
+end footer
+
+@enduml

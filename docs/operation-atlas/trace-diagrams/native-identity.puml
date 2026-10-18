@@ -1,0 +1,57 @@
+@startuml
+' Evidence: Laplace-Native/src/identity.c SHA256 45bf5d2cac1000a76b9dc6a94b6f70d4b5b39b24901281ba964fb95293a7a204
+' Evidence: Laplace-Native/src/compose.c SHA256 c213317c0871e015319c2a293fa82f7264f74bf7ec136d9ce2b2a867a38756f2
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Native — content identity and reference composition
+
+start
+if (Which public operation?) then (lp_id_codepoint)
+ :Encode codepoint with lp_utf8_put;
+ :lp_hash16 UTF-8 bytes;
+ :Return 128-bit ID;
+ stop
+elseif (Operation?) then (lp_id_compose)
+ if (Exactly one child?) then (yes)
+  :Copy child ID;
+ else (zero or many)
+  :lp_hash16 ordered contiguous child IDs;
+ endif
+ :Return ID;
+ stop
+else (lp_ref_compose)
+ if (Exactly one child?) then (yes)
+  :Return entire child reference;
+  stop
+ endif
+ :Initialize zero reference and selected tier;
+ if (No children?) then (yes)
+  :Return zero reference;
+  stop
+ endif
+ if (At most 64 children?) then (yes)
+  :Gather IDs; sum each coordinate; lp_hash16;
+ else (more)
+  :Stream groups of up to 64 ordered IDs into BLAKE3;
+  :Accumulate child coordinates; finalize first 16 bytes;
+ endif
+ :lp_coord_mean from accumulated coordinates;
+ :Return identity, coordinate and tier;
+ stop
+endif
+legend
+No recipe, tier, source, coordinate or domain prefix is hashed here.
+Empty lp_id_compose hashes empty bytes; empty lp_ref_compose returns zeros.
+These entry points therefore do not have identical empty-input behavior.
+One-child reference composition preserves the child's tier too.
+endlegend
+
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. lp_id_codepoint, lp_id_compose, lp_hash16 and lp_ref_compose reviewed. UTF-8
+encoding, fixed-point accumulation/mean and BLAKE3 implementation remain nested. No digest
+fixtures executed; this establishes the actual hash inputs and branches.
+end footer
+
+@enduml

@@ -1,0 +1,54 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/src/laplace_conventional/modality_train.py SHA256 1f33c1afc3bb598b6b658ffa6921113fb744dad4e85639ffb81126cec582e765
+' Evidence: Laplace-Conventional/src/laplace_conventional/modality_data.py SHA256 7146f3de4a6639533400234c15eeac9ca3f37ebccc51f6ca50502a41e441dd5c
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — media training, source selection and resume binding
+start
+:Require selected modality enabled and present; validate execution plan;
+:Construct accelerator; load manifest and path-based train/validation sets;
+:For audio, probe configured video containers and record missing audio streams;
+:Fingerprint modality plan and source summary; write source receipt;
+if (No train entries?) then (yes)
+ if (Audio, no validation entries and video-audio search enabled?) then (yes)
+  :Write no_selected_audio_streams_present receipt; return;
+ else (no)
+  :Raise missing training files;
+ endif
+ stop
+endif
+:Construct provider model, datasets, loaders and AdamW;
+:Require positive whole-number epochs;
+if (Resume?) then (yes)
+ :Require matching provider, plan and source-summary fingerprints;
+ :Load accelerator state and progress; restore epoch/batch/example counters;
+ :If recorded epoch already at target, return;
+endif
+while (Epochs remain?) is (yes)
+ :Skip saved prefix batches in first resumed epoch;
+ :For each batch build modality objective; forward, backward, clip and step;
+ :At synchronized time threshold save state, progress and latest-checkpoint path;
+ :Reject zero epoch batches;
+ :If validation set exists, gather and average batch losses;
+ :Report epoch; reset batch offset;
+endwhile (done)
+:Synchronize; save final state; export model;
+:Write final progress and training receipt;
+stop
+legend bottom
+Image objective uses model pixel reconstruction; audio creates feature masks
+and sampled negatives; video randomly masks spatiotemporal positions.
+The source fingerprint hashes source_receipt summaries, not the full manifest
+or all selected content hashes. Equal summaries do not establish identical corpora.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Entire modality_train module reviewed. Resume rejects changed summary
+fingerprints but does not prove exact source-byte identity. Final artifacts are separate
+writes. Provider model construction and library optimization internals remain nested; no
+training or decoder was run.
+end footer
+
+@enduml

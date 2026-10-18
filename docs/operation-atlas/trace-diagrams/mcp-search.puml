@@ -1,0 +1,40 @@
+@startuml
+' Evidence: Laplace-MCP/native/api.c SHA256 51ff00d86b27e74206f04c97974b8cc433e9c6d3184d88665411d55d6f17eefc
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular MCP — trunk, constituent and attestation search
+start
+:Prefer nonempty input text; otherwise require 32-hex ID;
+:Name text or look up stored tier; parse optional fan;
+:Read holds_above trunk with standing;
+:Read trunk physicality leaf; gather trunk and holding-claim attestation ancestry;
+:Obtain constituents from text parts or first stored physicality path;
+while (More constituents?) is (yes)
+ if (Constituent tier at least two?) then (yes)
+  :Read holds_above, claim ancestry and its physicality path;
+  :Decode children and look up non-codepoint child tiers;
+ else (no)
+  :Keep constituent/codepoint in path without holds lookup;
+ endif
+endwhile (no)
+:Separate claims from occurrences; rank claims by lp_confidence with factor two;
+:If fan positive cap returned claims and occurrences separately;
+:Serialize physicality, claims, occurrences, attestations and constituent details;
+:Release buffers; return HTTP 200;
+stop
+legend bottom
+fan caps response selections after reads; it does not bound the initial database work.
+Database unavailable -> 503; failed trunk physicality query -> 500.
+Failed nested constituent physicality read is skipped by the local success guard.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. on_search orchestration reviewed. holds_above, attested, emitted nested detail
+and Native path decoding remain deeper boundaries. The linked db_bridge returns NULL from
+db_snapshot, so this service does not import the Engine command snapshot. Its separate
+statements need not observe one world. Bridge connection/prepare failures exit the
+process.
+end footer
+
+@enduml

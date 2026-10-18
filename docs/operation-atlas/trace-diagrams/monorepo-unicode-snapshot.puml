@@ -1,0 +1,46 @@
+@startuml
+' Evidence: Laplace/engine/core/src/unicode_seed.cpp SHA256 556dafd215f1b730c225a5f0de865e48ee67dcc42fb9d87478fdfe4f7f77320a
+' Evidence: Laplace/engine/core/src/ucd_xml.cpp SHA256 0e7bbd811562610544bc885b071ebecda93c34384c2e47b39222749137281ab5
+' Evidence: Laplace/app/Laplace.Core/Core/UnicodeSeed.cs SHA256 62f64794fd8e80d4721077587c72e1d62af68fe6e6d2719ba7a2079ab1cc65ab
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — native Unicode snapshot, ranks and staging
+start
+:Allocate fixed-window records; retain inflated XML bytes;
+:Initialize segmentation/combining/whitespace arrays to defaults;
+:Parse repertoire events; inherit group attributes unless locally overridden;
+:Recognize char, reserved, surrogate and noncharacter;
+:Expand cp or first-cp/last-cp into property arrays;
+:Read single-codepoint DUCET entries; retain only first collation element;
+:For nonexplicit Hangul use leading-jamo key;
+:Fill remaining keys from declared implicit ranges or hard-coded Han/fallback bands;
+:Sort by packed key, then codepoint; derive rank;
+while (Codepoint remains?) is (yes)
+ :Compute open-placement point from rank;
+ :Compute Hilbert128 and hash UTF8 codepoint;
+ :Pack segmentation/combining/whitespace flags and store record;
+endwhile (done)
+:Return snapshot; managed wrapper requires fixed record count;
+if (StageRange requested?) then (yes)
+ :Validate bounds; hold snapshot reference across native call;
+ :One crossing stages contiguous entities and physicalities;
+ :Managed wrapper requires exactly count rows of each kind;
+ :Record source span for staged physicalities;
+else (semantic XML pass)
+ :Expose bounded-copy stream over retained XML bytes;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete native snapshot compute/stage/copy routines and managed stage entry
+reviewed. Fixed record count follows preallocation and iteration, not proof that XML
+contained each codepoint exactly once. No seen bitmap detects gaps/duplicates; absent
+properties remain defaults, repeated ranges overwrite, out-of-range last codepoint is
+skipped. DUCET expansions after first element and NFD tie-breaks are absent here, unlike
+the modular generator; version directives are not enforced in this parser. Open-placement
+and UTF8 helpers are separate nested boundaries. Native stage failure can occur after
+appending a prefix; owner disposal/admission governs cleanup.
+end footer
+
+@enduml

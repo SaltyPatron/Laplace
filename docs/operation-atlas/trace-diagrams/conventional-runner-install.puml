@@ -1,0 +1,48 @@
+@startuml
+' Evidence: Laplace-Conventional/src/laplace_conventional/cli.py SHA256 36d0a136f9cbe4f76c959b641b3d9b2dc676619caa633c1b8724fa8ec11f1359
+' Evidence: Laplace-Conventional/scripts/install-runner.sh SHA256 59eb595832c22461fa89c3f70491c4bd41a98ac472001c8b602de11046412be1
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Conventional — runner registration, service and online verification
+start
+:Read required runner/work/scratch paths and host-derived labels;
+:Require root or reexec sudo; require commands and non-root operator;
+:Create service group/user as needed; add operator to group;
+:Require runner primary group matches;
+:Require absolute paths without whitespace or percent; refuse final-path symlinks;
+:Create setgid directories; export scratch environment;
+:Require operator GitHub ADMIN permission;
+if (Distribution absent or recorded hash differs?) then (yes)
+ :Reuse verified archive or download pinned version; verify SHA256;
+ :Extract as runner user; write distribution hash marker;
+endif
+if (Existing registration?) then (yes)
+ :Require repository, runner name and work path match;
+else (no)
+ :Request GitHub registration token; configure runner as service user;
+ :Unset token;
+endif
+:Install service if absent; require service User matches;
+:Write systemd mount/group/umask/scratch/host override;
+:Reload systemd; enable and restart service; require active;
+while (Up to 20 online polls?) is (yes)
+ :Query repository runners and find matching name;
+ if (Reported online?) then (yes)
+  :Print ONLINE; exit success;
+  stop
+ endif
+ :Wait two seconds;
+endwhile (exhausted)
+:Report service started but online unconfirmed; exit failure;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Complete installer source reviewed without running it or contacting GitHub for
+registration. Failure retains earlier user/group/files/registration/service changes. Path
+checks inspect the supplied final path and do not canonicalize symlink ancestors. A
+matching distribution marker does not rehash every extracted executable. GitHub online
+status is not a completed workflow acceptance test.
+end footer
+
+@enduml

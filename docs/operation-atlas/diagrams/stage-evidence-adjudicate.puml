@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title evidence.adjudicate — declared input/output contract
+component "evidence.adjudicate" as operation
+rectangle "immutable testimony" as in0
+in0 --> operation
+rectangle "root observations" as in1
+in1 --> operation
+rectangle "dependence graph" as in2
+in2 --> operation
+rectangle "time context and trust recipe" as in3
+in3 --> operation
+rectangle "immutable consensus epoch" as out0
+operation --> out0
+rectangle "standing" as out1
+operation --> out1
+rectangle "contradiction evidence" as out2
+operation --> out2
+rectangle "referential candidates and adjudication" as out3
+operation --> out3
+@enduml

@@ -1,0 +1,34 @@
+@startuml
+' Evidence: Laplace-MCP/native/lpm.c SHA256 ead42232fcd9abbabe2d9dffb92900067c1585a3ed2f964bc7a6f78e27015e8d
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular liblpm — local search, lookup and bounded child fetch
+start
+if (Search requested?) then (yes)
+ :Require nonzero result capacity and existing documents;
+ :Decompose query; collect and deduplicate features;
+ :Restore file/byte/composition/document counters; retain created entities;
+ :For each feature add document_count / posting_count to matching document rank;
+ :Count shared features per document;
+ :Select untaken positive-match documents by rank, then shared count;
+ :Emit at most caller capacity with document ID, path and metadata;
+else (Lookup/fetch)
+ :Find exact ID in local hash table; missing returns minus one;
+ :Return coordinate, tier, Hilbert, seen and found;
+ :Return full child count; copy at most caller child capacity;
+endif
+stop
+legend bottom
+Search mutates the local entity table even though it adds no document occurrence.
+Ranking uses local feature rarity, not typed consensus confidence.
+This is distinct from native HTTP search over PostgreSQL holds and attestations.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. lpm_search, lpm_lookup and lpm_fetch reviewed. Their callers choose capacities
+(Python fetch shows eight children). Container and realization helpers remain separate
+local operations.
+end footer
+
+@enduml

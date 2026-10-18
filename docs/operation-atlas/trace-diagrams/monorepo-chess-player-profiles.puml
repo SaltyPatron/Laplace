@@ -1,0 +1,34 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Chess/Service/ChessPgnIngestor.cs SHA256 9775995dd88b88edc591f4794d36bd9286fa19f82e85992470867d952e857cca
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo chess — provider facts and cross-provider identity testimony
+start
+:Empty input returns; otherwise acquire process-wide ingestion gate;
+:Bootstrap distinct provider sources; register canonical-name union;
+while (Profile remains?) is (yes)
+ :Validate FIDE identifier when applicable;
+ :Select source/trust; derive player from FIDE display name or online provider ID;
+ :Compose aliases, provider identifier, biography, title, federation, links and ratings;
+endwhile (done)
+if (Exactly one FIDE profile supplied?) then (yes)
+ :For every supplied online profile, compose association context;
+ :Attest CORRESPONDS_TO online player to FIDE player under online source;
+endif
+:Build changes; probe attestation IDs grouped by relation type;
+:Suppress already-present testimony; mark changes CountsAsUnit false;
+:ApplyMany through shared writer; return profile/player/link counts;
+:Release gate in finally;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Provider facts are separately witnessed. This method interprets co-supplying
+exactly one FIDE profile and online profiles as explicit association; it does not
+independently validate that each online profile is the same person. Matching names alone
+do not create the association branch. Counts report supplied/planned profiles and links,
+not proven novel identities. The presence probe and subsequent shared-writer apply are
+separate operations; cross-process race handling belongs to the writer.
+end footer
+
+@enduml

@@ -1,0 +1,30 @@
+@startuml
+' Evidence: Laplace-Engine/src/deploy.c SHA256 20bf1358963aa85db31ca32fcf81f9cfb64aa537c5bbef16542ceb278f261fe9
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — status
+start
+
+:Connect; query extension version, ISA, tier0 path/fingerprint,
+database size and server version;
+:Print available values with fallback labels;
+if (Local tier0 and server fingerprint available?) then (yes)
+ :Compare fingerprints; print same or DIFFERS;
+endif
+:Read and compare highway settings/fingerprints when available;
+:Sample entity rows at 1 percent; estimate counts by tier;
+:Read planner row estimates and relation sizes;
+:Read witness / consensus estimates and index counts;
+:Free results and close;
+:Return 0;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Fingerprint mismatch is printed but this handler still returns 0. Printed
+population counts include sampled and planner estimates; they are not exact admission or
+acceptance counts. Connection/helper failures remain separate. Source review only; no
+Engine command executed.
+end footer
+
+@enduml

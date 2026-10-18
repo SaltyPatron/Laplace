@@ -1,0 +1,38 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Refactor ISA — source_profile_validate_batch
+start
+:Entry after whole-program validation;
+
+if (Input stride or alignment requires a copy?) then (yes)
+ :Calculate contiguous input bytes;
+ if (Bytes exceed context memory grant?) then (yes)
+  :Return RESOURCE_INSUFFICIENT;
+  stop
+ endif
+ :Allocate contiguous input;
+ if (Allocation fails?) then (yes)
+  :Return RESOURCE_INSUFFICIENT;
+  stop
+ endif
+ :Copy strided input records;
+endif
+:Clear native receipt and error;
+:Call laplace_source_profile_validate_batch once over records;
+:Free temporary input;
+if (Native status not OK?) then (yes)
+ :Return EXECUTION_FAILED;
+ stop
+endif
+:Copy native receipt to output[0];
+:Set output.count = 1;
+:Return ISA_OK;
+stop
+legend
+Execute-wrapper source trace.
+Validation and native semantic callees are separate boundaries.
+No runtime acceptance asserted.
+endlegend
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 8. Database — Wiki specified order
+start
+:8.1 Initialize the cluster on the drives;
+:8.2 Set memory;
+:8.3 Set I/O;
+:8.4 Set the write-ahead log;
+:8.5 Set observability;
+:8.6 Restart, and check the huge pages;
+:8.7 Create the role, the database, and the extensions;
+:8.8 Tell the database its tier 0;
+:8.9 Make the content schema;
+:8.10 Partition it;
+:8.11 Make the semantics schema;
+:8.12 Apply the planning settings;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Database.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

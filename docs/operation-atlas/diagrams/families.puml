@@ -1,0 +1,50 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — three independently owned implementation families
+
+package "Monorepo / laplace-mono" {
+ component "Laplace\nApplication + substrate extension\nOwn setup / deploy" as mono
+}
+package "Refactor / laplace-refactor" {
+ component "Laplace-Refactor\nContracts + native framework\nManaged / PostgreSQL bindings\nOwn setup / activation" as refactor
+}
+package "Modular / laplace" {
+ component "Laplace-Operations\nInstallation ownership" as ops
+ component "Laplace-Native" as native
+ component "Laplace-Engine" as engine
+ component "Laplace-postgres" as pg
+ component "Laplace-MCP" as mcp
+ ops ..> engine : install
+ ops ..> pg : install
+ ops ..> mcp : install
+ engine ..> native : compiled native code
+ pg ..> native : compiled native code
+ mcp ..> native : compiled native code
+ engine --> pg : libpq
+ mcp --> pg : query paths
+ mcp --> engine : selected child-process paths
+}
+component "Laplace-UCI\nLocal / SSH / WSS engine connector" as uci
+component "Laplace-Conventional\nIndependent training pipeline" as conventional
+note bottom of uci
+Runs the configured UCI engine endpoint.
+The connector does not establish which family supplies it.
+end note
+note bottom of mono
+Identity implementation conflict recorded:
+legacy hash prefix vs content-only governing law.
+Do not infer cross-family identity equivalence.
+end note
+note bottom of refactor
+Integration, activation, world admission,
+seed completion and release are separate states.
+end note
+
+@enduml

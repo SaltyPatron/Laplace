@@ -1,0 +1,35 @@
+@startuml
+' Evidence: Laplace-MCP/native/api.c SHA256 51ff00d86b27e74206f04c97974b8cc433e9c6d3184d88665411d55d6f17eefc
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular MCP — hop, text, translate, degrees and pull subprocesses
+start
+:Extract required strings into fixed buffers;
+:Require nonempty arguments not beginning with dash and shorter than 4096;
+:Build argv for selected Engine command;
+:Create pipe and fork; child creates process group;
+:Merge child stdout and stderr into pipe; execv configured Engine;
+:Parent reads up to 4 MiB minus one byte;
+:Close read pipe; waitpid;
+:Escape captured log; return exit code and log;
+if (Exit code zero?) then (yes)
+ :HTTP 200;
+else (no)
+ :HTTP 500;
+endif
+stop
+legend bottom
+on_engine supplies timeout_s=0: these five routes have no configured timeout here.
+engine_run has a timeout branch using process-group SIGTERM, but still blocking waitpid.
+No shell command is built. Native Engine semantics are linked separately.
+Output capacity ends reading; truncated output is not explicitly marked in this response.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Five argument wrappers and engine_run reviewed. Fixed-buffer jstr extraction can
+truncate before argument validation. Process invocation success, child exit zero and
+semantic acceptance are separate observations.
+end footer
+
+@enduml

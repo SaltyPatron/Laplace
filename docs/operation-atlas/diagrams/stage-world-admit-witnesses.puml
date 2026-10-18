@@ -1,0 +1,28 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title world.admit-witnesses — declared input/output contract
+component "world.admit-witnesses" as operation
+rectangle "selected heterogeneous digital source boundary" as in0
+in0 --> operation
+rectangle "exact conforming source profiles with artifact grammar codec recipe AST witness denominator and completion declarations" as in1
+in1 --> operation
+rectangle "active highway and evidence recording capabilities" as in2
+in2 --> operation
+rectangle "canonical working-set and persistence providers" as in3
+in3 --> operation
+rectangle "SQL-addressable universal world AST" as out0
+operation --> out0
+rectangle "exact source occurrences and competing testimony" as out1
+operation --> out1
+rectangle "calculation realization and counterexample inputs" as out2
+operation --> out2
+rectangle "source fidelity and read reachability receipts" as out3
+operation --> out3
+@enduml

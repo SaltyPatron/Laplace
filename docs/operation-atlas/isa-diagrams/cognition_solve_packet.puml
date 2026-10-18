@@ -1,0 +1,29 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Refactor ISA — cognition_solve_packet
+start
+:Entry after whole-program validation;
+
+if (Program, instruction or values absent?) then (yes)
+ :Return INVALID_ARGUMENT;
+ stop
+endif
+:laplace_cognition_packet_execute_words(request, result capacity);
+if (Native result-capacity status?) then (yes)
+ :Return RESULT_CAPACITY_INSUFFICIENT;
+ stop
+elseif (Other non-OK status?) then (yes)
+ :Return EXECUTION_FAILED;
+ stop
+endif
+:Set output.count = native result word count;
+:Return ISA_OK;
+stop
+legend
+Execute-wrapper source trace.
+Validation and native semantic callees are separate boundaries.
+No runtime acceptance asserted.
+endlegend
+@enduml

@@ -1,0 +1,70 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — shared source admission, reuse and completion
+
+start
+:9–10 Active source generation + artifact graph\nprovider + declared recipe + admitted resource plan;
+:11.1 Unpack into records, spans and packaging facts\nWhole working set or physically partitioned stream;
+note right
+One semantic object survives physical partitioning.
+Shared scheduling preserves service headroom.
+No adapter-private identity or persistence loop.
+end note
+:11.2–11.5 Decompose exact content on client\nfile = [metadata, content]\nsource = [source record, file trunks in path order]\nassign altitude and hash children bottom-up;
+note right
+Single child reuses its identity.
+Identity excludes tier, source, role and coordinate.
+No skipping an artifact before its trunk ID exists.
+end note
+:11.6–11.7 Compute physicalities\ncoordinate / Hilbert locality / typed packed path;
+note right
+Packing stores child identity and structure.
+A realized curve resolves child coordinates.
+Locality and coordinate equality are not identity.
+Numerics / carrier differences require conflict review.
+end note
+:11.8 Coalesce identical canonical rows in working set;
+while (Unresolved trunks / lower tiers?) is (yes)
+ :Probe a set of IDs against canonical store / valid cache;
+ if (Trunk already complete?) then (yes)
+  :Reuse its canonical subtree\nretain new occurrences and distinct testimony;
+ else (no)
+  :Retain novel rows and descend to children;
+ endif
+endwhile (no)
+:11.9–11.10 Count occurrences / containers\naccumulate partition-routed streams;
+if (Recipe declares attributable claims?) then (yes)
+ :12 Reduce by claim + witness identity\nretain outcomes, games, scores, qualifiers, context;
+ note right
+Ordinary content is observation, not testimony.
+Structural containment / order are read from paths.
+Repeated packaging is not independent witnessing.
+ end note
+endif
+:11.11 Shared writer applies new rows in bulk\nleaves before parents + set merges;
+note right
+Trunk pruning depends on complete descendants.
+This is the specified atomicity requirement;
+reviewed implementation commit boundaries differ.
+end note
+:11.12 / 13 Fold admitted matchups in sets\nexclude already-folded testimony on retry\nretain FIFO where the fold is noncommutative;
+:Record operational completion per unit / layer;
+if (Recipe declares reconstruction?) then (yes)
+ :11.13 Recompose from canonical paths\ncompare with artifact / declared loss;
+endif
+:11.14 Independent acceptance read\nentity / physicality census + fingerprints\nwork receipt + resumable journal;
+stop
+legend
+Specified source lifecycle, not proof that a command implements it.
+Completion state and a receipt are not independent acceptance evidence.
+Source: Sequence/Content.md and Laplace/AGENTS.md.
+endlegend
+
+@enduml

@@ -1,0 +1,24 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 1. Unicode — Wiki specified order
+start
+:1.1 Fix the version;
+:1.2 Read the UCD XML;
+:1.3 Read `allkeys.txt`;
+:1.4 Read the normalization data;
+:1.5 Read the segmentation data;
+:1.6 Read the bidi, CJK, and emoji data, and the flags;
+:1.7 Run the conformance tests;
+:1.8 Bind the generation as a source;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Unicode.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

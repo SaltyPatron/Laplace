@@ -1,0 +1,49 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — chess and Knowledge Arena: play, compare, then learn
+
+start
+if (Domain?) then (Chess)
+ :27.1–27.2 Compose canonical board vocabulary\nrecord reusable positions / moves and attributed game trajectories;
+ :27.3 Keep recorder, analyzer and runtime sources distinct;
+ :27.4 Pin Stockfish calculation boundary\nposition / move / binary / network / options / recipe;
+ :27.5 Bind typed cross-modal evidence\nlexical meaning / motifs / book / game / calculation;
+ :27.7 Freeze experiment generation\nconductor / opponents / openings / clocks / resources\nevidence epoch / firmware / adjudication / holdout law;
+else (Knowledge Arena)
+ :28.1 Compile MATCH / CONNECT / COMBINE / EXPLORE / PLAY obligation;
+ :28.2 Pin ranked challenge generation\nepoch / ordered queue / scope / providers\nvisibility / scoring / timing / envelope;
+ :28.3 Resolve pieces as canonical entities\nlabels and aliases are realization state;
+endif
+repeat
+ :27.6 / 28.4 Run action through shared Forward\nCOUPLE → ORIENT → routed bounded operators\nlegal proposals → authorized selection → realization;
+ :Append event trajectory and typed action receipt\nupdate state before the next action;
+ note right
+Exact legality and terminal state constrain chess.
+Evidence standing cannot legalize a move.
+Stockfish bestmove is not a hidden SELECT authority.
+ end note
+repeat while (Challenge permits another action?) is (yes) not (no)
+if (Domain?) then (Chess)
+ :27.8 Compare cumulative planes and matched ablations\nfixed reference / uncertainty / work / crashes / raw artifacts;
+else (Knowledge Arena)
+ :28.5 Score by declared components\nvalidity / obligations before style or novelty;
+ :28.6 Receipt generation, exact transitions, evidence\nstanding, work, timing and trajectory fingerprint;
+endif
+:Close the frozen comparison;
+:27.9 / 28.7 Admit artifacts into a later evidence epoch\nordinary testimony / fold / subsequent learning;
+stop
+legend
+Specification flows; this depicts frozen comparisons, not every practice session.
+Ranked / benchmark evidence cannot train its own reference world mid-match.
+Produced games do not self-certify truth. Player ratings are not claim standing.
+Chess source: 27.1–27.9; Arena source: 28.1–28.7.
+endlegend
+
+@enduml

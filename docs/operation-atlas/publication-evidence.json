@@ -1,0 +1,168 @@
+{
+  "updated_utc": "2026-10-13T10:30:29.908359+00:00",
+  "sources": [
+    {
+      "repo": "Laplace-Prototype",
+      "revision": "d488b3b097421a9aed8de713b7ae0485857631dd",
+      "path": "README.md",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\research-sources\\Laplace-Prototype\\README.md",
+      "sha256": "cff4017dc1c0b5604428ac807e62a6652ea68eb5d3ef8826d24800b103b718ac",
+      "url": "https://github.com/SaltyPatron/Laplace-Prototype/blob/d488b3b097421a9aed8de713b7ae0485857631dd/README.md"
+    },
+    {
+      "repo": "Laplace-Prototype",
+      "revision": "d488b3b097421a9aed8de713b7ae0485857631dd",
+      "path": "tier0/gen_tier0.py",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\research-sources\\Laplace-Prototype\\tier0\\gen_tier0.py",
+      "sha256": "bd3947d72b1fd0010c3c245e8ecbba8682842d976bb9ca1bbdc461f35b051173",
+      "url": "https://github.com/SaltyPatron/Laplace-Prototype/blob/d488b3b097421a9aed8de713b7ae0485857631dd/tier0/gen_tier0.py"
+    },
+    {
+      "repo": "Laplace-Prototype",
+      "revision": "d488b3b097421a9aed8de713b7ae0485857631dd",
+      "path": "tier0/fingerprint.txt",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\research-sources\\Laplace-Prototype\\tier0\\fingerprint.txt",
+      "sha256": "97ab488d061a50ee4c3589d7e7743706316d72faea33ffc15e3f32f7465285bd",
+      "url": "https://github.com/SaltyPatron/Laplace-Prototype/blob/d488b3b097421a9aed8de713b7ae0485857631dd/tier0/fingerprint.txt"
+    },
+    {
+      "repo": "Laplace-Prototype",
+      "revision": "d488b3b097421a9aed8de713b7ae0485857631dd",
+      "path": "dag/ingest.c",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\research-sources\\Laplace-Prototype\\dag\\ingest.c",
+      "sha256": "9ba831a22b687585573ee2e669cbf3eac3aa5f187bcceb887db18bc765556ec2",
+      "url": "https://github.com/SaltyPatron/Laplace-Prototype/blob/d488b3b097421a9aed8de713b7ae0485857631dd/dag/ingest.c"
+    },
+    {
+      "repo": "Laplace-Prototype",
+      "revision": "d488b3b097421a9aed8de713b7ae0485857631dd",
+      "path": "tests/verify.py",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\research-sources\\Laplace-Prototype\\tests\\verify.py",
+      "sha256": "1d6e0039d6280a3be2c3529d4439ae8d2027e02e30934fb5b18377fea4ca7be0",
+      "url": "https://github.com/SaltyPatron/Laplace-Prototype/blob/d488b3b097421a9aed8de713b7ae0485857631dd/tests/verify.py"
+    },
+    {
+      "repo": "Laplace-Wiki",
+      "revision": "1145467f6da11b13a5916f0c70d4282d555ab2d3",
+      "path": "Research/Placement.md",
+      "local": "E:\\Repositories\\Laplace\\Laplace-Wiki\\Research\\Placement.md",
+      "sha256": "0dd64ea8564e10799412b221264f3105cb4255721649abc7329a51d78e5e7349",
+      "url": "https://github.com/SaltyPatron/Laplace-Wiki/blob/1145467f6da11b13a5916f0c70d4282d555ab2d3/Research/Placement.md"
+    },
+    {
+      "repo": "Laplace-Wiki",
+      "revision": "1145467f6da11b13a5916f0c70d4282d555ab2d3",
+      "path": "Research/Prototype.md",
+      "local": "E:\\Repositories\\Laplace\\Laplace-Wiki\\Research\\Prototype.md",
+      "sha256": "34599989b3be633049472ad9cb0f477f3dea436160e0362afd7f14efce15cbb9",
+      "url": "https://github.com/SaltyPatron/Laplace-Wiki/blob/1145467f6da11b13a5916f0c70d4282d555ab2d3/Research/Prototype.md"
+    },
+    {
+      "repo": "Laplace-Wiki",
+      "revision": "1145467f6da11b13a5916f0c70d4282d555ab2d3",
+      "path": "Research/Numerics.md",
+      "local": "E:\\Repositories\\Laplace\\Laplace-Wiki\\Research\\Numerics.md",
+      "sha256": "ee30204feb5b69ca26df3312037886af2873281f626aa714dac4427d948e052f",
+      "url": "https://github.com/SaltyPatron/Laplace-Wiki/blob/1145467f6da11b13a5916f0c70d4282d555ab2d3/Research/Numerics.md"
+    },
+    {
+      "repo": "Laplace-Engine",
+      "revision": "64f6184c6c92949e4c58f1d1f27f9414406a56d0",
+      "path": "src/tier0.c",
+      "local": "E:\\Repositories\\Laplace\\Laplace-Engine\\src\\tier0.c",
+      "sha256": "46b4ac6572697558b4f4314783aa7264033ddd0d018973a8f0dafad3fd426d4b",
+      "url": "https://github.com/SaltyPatron/Laplace-Engine/blob/64f6184c6c92949e4c58f1d1f27f9414406a56d0/src/tier0.c"
+    },
+    {
+      "repo": "Laplace-Native",
+      "revision": "8022bbddb5f6ab33c7c8b94b1a9247a057da50e1",
+      "path": "src/coord.c",
+      "local": "E:\\Repositories\\Laplace\\Laplace-Native\\src\\coord.c",
+      "sha256": "c9a8ce8dfde73a03946ce0b17aafacd4346fcb7edf6f892b6b2b5f0b314e56a4",
+      "url": "https://github.com/SaltyPatron/Laplace-Native/blob/8022bbddb5f6ab33c7c8b94b1a9247a057da50e1/src/coord.c"
+    },
+    {
+      "repo": "Laplace-Patreon",
+      "revision": "4416c2750051578e4bb7e13281fc526cef902d18",
+      "path": "scripts/render.py",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\publication-sources\\scripts\\render.py",
+      "sha256": "a7da866159d478344d0ef69fd965b7a63469b72f0834b34f3b04c0a1629fe3cc",
+      "url": "https://github.com/SaltyPatron/Laplace-Patreon/blob/4416c2750051578e4bb7e13281fc526cef902d18/scripts/render.py"
+    },
+    {
+      "repo": "Laplace-Patreon",
+      "revision": "4416c2750051578e4bb7e13281fc526cef902d18",
+      "path": "drafts/01-every-character-on-one-sphere.md",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\publication-sources\\drafts\\01-every-character-on-one-sphere.md",
+      "sha256": "d7aa5a1d36cae3a14b665b119eabbee545dcdb29ca5cafebec0e3bd2224a1a70",
+      "url": "https://github.com/SaltyPatron/Laplace-Patreon/blob/4416c2750051578e4bb7e13281fc526cef902d18/drafts/01-every-character-on-one-sphere.md"
+    },
+    {
+      "repo": "Laplace-Patreon",
+      "revision": "4416c2750051578e4bb7e13281fc526cef902d18",
+      "path": "drafts/02-the-cosmic-wall.md",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\publication-sources\\drafts\\02-the-cosmic-wall.md",
+      "sha256": "fa4b29c936c23fa490467cd07cdec3e29ab43d16d22f540a3fa91c614e0c3f81",
+      "url": "https://github.com/SaltyPatron/Laplace-Patreon/blob/4416c2750051578e4bb7e13281fc526cef902d18/drafts/02-the-cosmic-wall.md"
+    },
+    {
+      "repo": "Laplace-Patreon",
+      "revision": "4416c2750051578e4bb7e13281fc526cef902d18",
+      "path": "drafts/03-git-for-all-knowledge.md",
+      "local": "C:\\Users\\ahart\\laplace-operation-atlas\\publication-sources\\drafts\\03-git-for-all-knowledge.md",
+      "sha256": "363eb73da7c6738cca45ae3663f817f8643e584cefff16f286694829973b9dc3",
+      "url": "https://github.com/SaltyPatron/Laplace-Patreon/blob/4416c2750051578e4bb7e13281fc526cef902d18/drafts/03-git-for-all-knowledge.md"
+    }
+  ],
+  "figures": [
+    {
+      "id": "centroid-population",
+      "title": "Averages approach the population mean",
+      "caption": "Independent identically distributed samples give E||mean||² = ||μ||² + (E||X||² − ||μ||²)/k. The 1/√k RMS curve requires zero mean and unit squared norm. Correlated text, hierarchy and fixed-point truncation need their own analysis.",
+      "kind": "Analytic illustration, not a measured Laplace corpus result"
+    },
+    {
+      "id": "wall-and-order",
+      "title": "Inside the wall; no universal inward step",
+      "caption": "The triangle inequality bounds a parent by the average norm of its immediate children, not by each child or the previous prefix. A hierarchy averages immediate children, so regrouping generally changes the effective leaf weights. This example does not use Unicode placement data.",
+      "kind": "Analytic illustration, not a measured Laplace corpus result"
+    },
+    {
+      "id": "identity-and-geometry",
+      "title": "A location is not the content address",
+      "caption": "Prototype dag/ingest.c: one-child collapse; BLAKE3-128 over ordered child IDs, including repeats; integer centroid; run-length path. Different ordered preimages ordinarily produce different IDs, subject to hash collisions. No collision-free proof or lookup-performance claim is made.",
+      "kind": "Analytic illustration, not a measured Laplace corpus result"
+    }
+  ],
+  "findings": [
+    {
+      "topic": "Old image 03 versus revised draft 02",
+      "observation": "The renderer samples assigned codepoints and overlays 1/√k. The revised draft requests an unrendered prototype database tier-band figure. They are different claims and neither supplies local measurement inputs."
+    },
+    {
+      "topic": "Exact repeats versus exact unit norm",
+      "observation": "Both generators nudge rounded coordinates inward until the integer squared norm is at most 2^106. A repeat preserves its constituent coordinate; that does not establish that the stored coordinate lies exactly at norm one."
+    },
+    {
+      "topic": "Measurement precision",
+      "observation": "Prototype verify.py checks the wall using integer squared norms. Its sampled average-depth check uses Decimal square roots at precision 80 with tolerance 1e−40 grid units. Calling every check exact integer arithmetic overstates the latter test."
+    },
+    {
+      "topic": "Verification coverage",
+      "observation": "The count equality check does not by itself establish one physicality per entity. ID/tier checks are sampled; recomposition checks select two books; an idempotence test launches ingest in a temporary output directory. None of those tests was executed for this atlas."
+    },
+    {
+      "topic": "Fingerprint boundaries",
+      "observation": "Prototype fingerprint.txt reports SHA-256 of its table and order. Current modular Engine prints BLAKE3-256 and uses CORE-MATH trigonometry. A digest from one generator is not verification of the other."
+    },
+    {
+      "topic": "Required empirical inputs",
+      "observation": "P_h1.npy, assigned.npy, pinned Unicode script data and the historical prototype database were not supplied in these source repositories. The published distance and 3.9-million-record results remain attributed reports, not reproduced results."
+    },
+    {
+      "topic": "Publication scope",
+      "observation": "These figures explain researched storage geometry boundaries. They supplement the whole-system operation atlas; they do not replace its authority, learning, runtime, modality, deployment or recovery flows."
+    }
+  ],
+  "empirical_reproduction": false
+}

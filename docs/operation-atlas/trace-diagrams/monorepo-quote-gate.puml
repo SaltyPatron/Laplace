@@ -1,0 +1,57 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/Billing.cs SHA256 23d39e4ae022f1dc7fbbc055a423e32487b9664be8a1ef9d688c02322a621ab9
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/QuoteGate.cs SHA256 48a0921754dbe63d5a0ef36be88869aa94809e98ad6d7664cb49c52d4450b498
+' Evidence: Laplace/app/Laplace.Endpoints.OpenAICompat/BillingPostgres/PostgresBillingQuoteStore.cs SHA256 079bcdcadde8478023dfcd185b107ec879f3a35ff7be1daf954644098b3f1841
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — billing admission and credit debit
+start
+if (Billing bypass configured?) then (yes)
+ :Allow with no quote;
+ stop
+endif
+if (No quote ID?) then (yes)
+ if (Tenant nonblank and known flat nonmetered service?) then (yes)
+  :Attempt one-unit plan credit debit;
+  if (Debit succeeded?) then (yes)
+   :Persist zero-price approved_credit quote expiring in five minutes;
+   :Allow with credit quote;
+   stop
+  endif
+ endif
+ :Deny quote_not_found;
+ stop
+endif
+:Read quote; require exact tenant, case-insensitive service match,
+unexpired quote and consumed=false;
+if (Status approved or approved_credit?) then (yes)
+ :Allow existing quote;
+ stop
+endif
+:Attempt plan debit for all quoted units;
+if (Debit succeeded?) then (yes)
+ :Update quote approved_credit and price zero; allow;
+elseif (Awaiting manual approval?) then (yes)
+ :Deny payment_pending;
+elseif (Stripe session exists?) then (yes)
+ :Ask gateway whether session paid;
+ if (Paid?) then (yes)
+  :Update quote approved; allow;
+ else (no)
+  :Deny payment_pending;
+ endif
+else (no)
+ :Deny payment_pending;
+endif
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Gate checks and plan debit do not reserve a quote in the transaction that
+executes an operation. Debit can precede a failed quote write or later operation failure.
+Quote updates are unconditional upserts; concurrent admission of the same unconsumed
+approved quote is not excluded here. A billing gate is not a native resource grant,
+cognition completion or successful effect receipt.
+end footer
+
+@enduml

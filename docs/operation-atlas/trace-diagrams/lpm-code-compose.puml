@@ -1,0 +1,40 @@
+@startuml
+' Evidence: Laplace-MCP/native/lpm.c SHA256 ead42232fcd9abbabe2d9dffb92900067c1585a3ed2f964bc7a6f78e27015e8d
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular liblpm — grammar composition and text fallback
+start
+:Choose grammar by recognized filename suffix;
+:Load configured tree-sitter shared library and entry symbol;
+if (No available grammar?) then (yes)
+ :Caller falls back to cached text decomposition;
+ stop
+endif
+:Reject input larger than uint32 in grammar helper;
+:Create parser; set language; parse entire byte string;
+:Recursively traverse all concrete children;
+if (Leaf or recursion depth greater than 200?) then (yes)
+ :Use exact span through text_cached;
+else (branch)
+ :Compose nonempty children recursively;
+ :Keep bytes before, between and after child spans as text;
+ :Compose resulting ordered pieces at max tier plus one;
+endif
+:Destroy tree/parser; return trunk;
+stop
+legend bottom
+Node type labels are not added as semantic testimony by this composition body.
+Parser error nodes are not separately rejected here.
+text_cached verifies hash, byte length and exact bytes; cache hits replay feature IDs.
+ent_kids stores at most 200000 children and skips allocation failure silently.
+endlegend
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Grammar selection, dynamic loader, AST recursion and text cache bodies reviewed.
+Grammar ABI compatibility, parser-null behavior, parse correctness and native exact-
+content guarantees remain external boundaries. This is not a code execution or software-
+correctness proof.
+end footer
+
+@enduml

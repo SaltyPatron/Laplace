@@ -1,0 +1,28 @@
+@startuml
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam activityBackgroundColor #E6EFF7
+title 12. Attestations — Wiki specified order
+start
+:12.1 Decide what the corpus attests;
+:12.2 Name the witness and its lineage;
+:12.3 Set the witness&#x27,s trust from its class;
+:12.4 Ingest the corpus&#x27,s files as content;
+:12.5 Form each claim as a composition of entities;
+:12.6 Hash each claim twice;
+:12.7 Set the qualifier mask and the entity masks;
+:12.8 Record each set-valued fact as one collection;
+:12.9 Record each attestation with its outcome;
+:12.10 Keep recorded and calculated apart;
+:12.11 Keep dependence visible;
+:12.12 Play the matchups;
+stop
+legend
+Source: Laplace-Wiki/Sequence/Attestations.md
+Revision: 1145467f6da1
+Sequential projection of numbered source operations.
+Branches, iteration and obligations are in the linked contracts.
+Not a code trace or runtime acceptance result.
+endlegend
+@enduml

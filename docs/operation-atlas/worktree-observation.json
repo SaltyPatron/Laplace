@@ -1,0 +1,21 @@
+{
+  "Laplace": [],
+  "Laplace-Refactor": [],
+  "Laplace-Native": [],
+  "Laplace-Engine": [],
+  "Laplace-postgres": [],
+  "Laplace-MCP": [],
+  "Laplace-Operations": [
+    " M acceptance/criteria.json",
+    " M docs/operating-laplace.md",
+    " M setup.sh",
+    "?? docs/operator-database-access.md",
+    "?? installation/Install-OperatorAccess.ps1",
+    "?? installation/Verify-OperatorAccess.ps1",
+    "?? installation/hart-desktop-operator.json",
+    "?? installation/operator-access-client.py",
+    "?? installation/operator-access-server.py"
+  ],
+  "Laplace-UCI": [],
+  "Laplace-Conventional": []
+}

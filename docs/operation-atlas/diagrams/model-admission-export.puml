@@ -1,0 +1,62 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam ArrowColor #385978
+skinparam componentBackgroundColor #E6EFF7
+skinparam classBackgroundColor #E6EFF7
+title Laplace — checkpoint evidence and constructed model export
+
+!pragma useVerticalIf on
+start
+if (Requested operation?) then (Admit checkpoint)
+ :24.1 Stage source generation\nconfig / tokenizer / shards / sidecars\nfile trunks + checkpoint source witness;
+ :24.2 Native container read\nmetadata once / transient numeric tiles;
+ :24.3–24.4 Admit ordered tokenizer vocabulary\nand canonical configuration facts;
+ :24.5 Match tensor shapes to operator templates;
+ if (Role established?) then (yes)
+  :24.6 Derive circuit composition + Projection physicality\nmodel / layer / head retained as source context;
+  :24.7 Apply declared significance calculation\nwrite attributable claims through shared admission / fold;
+ else (no)
+  :Retain ambiguous or unrecognized role\nnever guess an operator;
+ endif
+ :24.11 Receipt decoded work, reuse, circuits, claims\nprovider / precision / recipe / result fingerprints\nraw_weight_bytes_retained = 0;
+ note right
+Weights are transient operands in this contract.
+This is not the Conventional training pipeline.
+ end note
+elseif (Separately requested model execution?) then (yes)
+ :24.8 Pin checkpoint / input / runtime / tokenizer\nprecision / provider / seed / decoding recipe;
+ :Admit versioned calculated transformation + receipt\nrepeat occurrences are not independent corroboration;
+elseif (Query model evidence?) then (yes)
+ :24.9–24.10 Select authorized source or pooled evidence\nrun one shared forward program;
+ :Keep provenance and disagreements inspectable\nno hidden judge over separate model answers;
+else (Construct export)
+ :25.1 Require EXPORT for boundary crossing\nresolve source / context / evidence scope;
+ :25.2 Deposit versioned Model_Recipe as content\nread the admitted recipe;
+ :25.3 Assign operator per target slot\nrelation / metric / trajectory / coord / spectral / unary;
+ :25.4 Build bounded circuits from eligible witnesses\nretain support, uncertainty, refutation and provenance;
+ :25.5 Derive every tensor in bulk\nslot-to-cell calculation receipts;
+ if (Target codec represents declared construction?) then (yes)
+  :25.6 Emit model artifact + reproducible provenance;
+  :25.7 Load in declared external runtime\nheld-out semantics + source ablation + provenance checks;
+  if (Consumer acceptance passes?) then (yes)
+   :Validated consumer artifact;
+  else (no)
+   :Retain failed validation and its evidence;
+  endif
+ else (no)
+  :Explicit codec limitation;
+ endif
+endif
+stop
+legend
+Specification contracts 24.1–24.11 and 25.1–25.7.
+Export requires a correctly reading forward program and coherent seed.
+A loadable artifact is not semantic acceptance or proof of the native substrate.
+Source-scoped evidence is not a separate identity world or commercial intelligence tier.
+endlegend
+
+@enduml

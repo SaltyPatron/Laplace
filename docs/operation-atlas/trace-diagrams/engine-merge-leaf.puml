@@ -1,0 +1,54 @@
+@startuml
+' Evidence: Laplace-Engine/src/db.c SHA256 bba138c55e319e63598cd8c6640d0de5428975c5b37991e8439823efea5d17c7
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Modular Engine — merge one leaf
+start
+
+:Resolve live table columns;
+if (No columns?) then (yes)
+ :Return failure;
+ stop
+endif
+if (Rewrite selected?) then (yes)
+ :COPY merged live/staged rows out through read connection;
+ :For consensus, staged claim replaces live claim;
+ :Buffer binary result in memory;
+ if (COPY read succeeds?) then (yes)
+  :TRUNCATE live leaf;
+  :COPY buffered rows into live leaf with FREEZE;
+ endif
+else (append/update)
+ if (Consensus leaf?) then (yes)
+  :UPDATE existing claims from stage;
+  :INSERT stage claims absent from live leaf;
+ else (entity or path)
+  :INSERT staged rows in declared order;
+ endif
+endif
+if (Any reported failure?) then (yes)
+ :Return failure;
+ stop
+endif
+if (Physicality leaf?) then (yes)
+ :Clean GIN pending lists inside writer transaction;
+ :Lock matching entity leaf SHARE ROW EXCLUSIVE;
+ :Count staged paths whose entity is absent;
+ if (Query/lock fails or missing entities found?) then (yes)
+  :Return failure;
+  stop
+ endif
+endif
+:TRUNCATE staged leaf if prior steps succeeded;
+:Return reported status to merge coordinator;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Runs within caller-owned writer transaction. Entity existence is checked as a set
+after referential triggers are disabled by the coordinator. The copy rewrite buffers a
+whole leaf in memory. Library failures and unchecked allocations are not represented as
+invented typed receipts.
+end footer
+
+@enduml

@@ -1,0 +1,52 @@
+@startuml
+' Evidence: Laplace/app/Laplace.Decomposers/Unicode/UnicodeDecomposer.cs SHA256 ba27b10953eebe561f5a000669d4fe80a6a181ad34e1c51906add3d623c15507
+' Evidence: Laplace/app/Laplace.Core/Core/UnicodeSeed.cs SHA256 62f64794fd8e80d4721077587c72e1d62af68fe6e6d2719ba7a2079ab1cc65ab
+skinparam backgroundColor #FAFCFF
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+title Monorepo — Unicode source floor through semantic admission
+start
+:Resolve selected artifact jobs;
+:Require exactly one complete-XML artifact and one DUCET artifact;
+:Load installed UAX42/ucd.all.grouped.xml recipe and register cookbook;
+:Claim files; resolve source roots and provenance/recipe identities;
+if (Both file roots completed and ReObservePresent false?) then (yes)
+ :Skip floor and XML semantic work;
+else (admit)
+ :Open immutable XML + DUCET native snapshot;
+ :Yield contiguous floor ranges through common phase/admission machinery;
+ :Yield tier0-floor-persisted barrier;
+endif
+:Load installed runtime perfcache only after floor barrier or completed-floor check;
+if (New floor and no MaxInputUnits limit?) then (yes)
+ :Replay retained XML bytes through installed native semantic recipe;
+ :Bind semantic provenance; phase owns snapshot disposal;
+endif
+if (Floor skipped?) then (yes)
+ :Emit skipped boundaries for both artifacts;
+elseif (Input limit specified?) then (yes)
+ :Emit cancelled boundaries for both artifacts;
+else (full source)
+ :Yield XML/DUCET provenance and recipe changes;
+ :Yield provenance-persisted barrier;
+ :Emit file completion or period boundaries;
+endif
+if (Input limit specified?) then (yes)
+ :Dispose remaining snapshot and end iterator;
+ stop
+endif
+:Yield license metadata;
+:Run independent artifacts excluding XML, DUCET and repertoire compensation;
+stop
+footer
+Source-reviewed orchestration. Nested semantics remain open; no runtime acceptance
+claimed. Reviewed RunIngestAsync, PrepareFloor, RunFloorDataAsync, FinalizeFloorAsync and
+UcdXmlSemanticPhase; independent property parsers and full recipe interpreter remain
+nested. Barriers are yielded to the common ingestion executor, not direct commits in this
+iterator. Source floor generation does not use installed cache rows; later cache load is a
+separate dependency. The selected grouped-XML recipe differs from Wiki flat-XML input.
+Full XML property semantics are a second pass, separate from the small set packed into
+floor flags. No ingestion or conformance test executed.
+end footer
+
+@enduml
