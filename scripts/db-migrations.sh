@@ -34,7 +34,7 @@ done
 supports() {
   local help requested
   [[ $# -gt 0 ]] || return 2
-  help=$(dotnet "$runtime" --help) || return
+  help=$(NO_COLOR=1 dotnet "$runtime" --help) || return
   for requested in "$@"; do
     if [[ ! "$requested" =~ ^[a-z-]+$ ]] || ! grep -Eq "^[[:space:]]*$requested([[:space:]]|$)" <<< "$help"; then
       echo "Installed migration runtime does not support $requested; publish the matching migration runtime first." >&2

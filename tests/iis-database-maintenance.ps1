@@ -43,6 +43,10 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
         if($verb -eq '--help'){
             $global:LASTEXITCODE=0
             if($env:TEST_OLD_RUNTIME -eq '1'){'up';'status';'reset';'nuke';return}
+            if($env:GITHUB_ACTIONS -eq 'true' -and -not $env:NO_COLOR){
+                foreach($name in 'app-status','app-up','app-check','app-reset','app-nuke','substrate-up','substrate-status','reset','nuke'){"    `e[38;5;7m$name`e[0m"}
+                return
+            }
             'app-status';'app-up';'app-check';'app-reset';'app-nuke';'substrate-up';'substrate-status';'reset';'nuke'
             return
         }
@@ -83,6 +87,12 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
         Assert ($env:LAPLACE_DB -ceq 'ambient-connection' -and $env:PGPASSWORD -ceq 'ambient-secret-fixture') 'Process environment was not restored.'
         Write-Host "PASS $($case[0]) $($case[1]): scoped commands, runtime grants, environment restoration"
     }
+    '' | Set-Content $env:TEST_EVENTS
+    $env:GITHUB_ACTIONS='true';Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue
+    & $command @invoke -Database application -Operation recreate
+    Remove-Item Env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+    Assert (((Get-Content $env:TEST_EVENTS | Where-Object {$_ -like 'migration:*'}) -join ',') -ceq 'migration:app-nuke,migration:app-check') 'Colored CI help output blocked application recreation.'
+    Write-Host 'PASS colored CI help output does not hide supported migration commands'
     '' | Set-Content $env:TEST_EVENTS
     $configLock=$null;$publicationLock=$null
     $originalWork=$env:LAPLACE_WORK

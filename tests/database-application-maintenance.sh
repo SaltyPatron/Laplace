@@ -20,7 +20,11 @@ cat > "$work/bin/dotnet" <<'STUB'
 shift
 if [[ "$1" == --help ]]; then
   if [[ "${TEST_OLD_RUNTIME:-}" == 1 ]]; then printf '%s\n' up status reset nuke; exit 0; fi
-  printf '%s\n' app-up app-status app-check app-reset app-nuke substrate-up substrate-status
+  if [[ "${GITHUB_ACTIONS:-}" == true && -z "${NO_COLOR:-}" ]]; then
+    printf '    \033[38;5;7m%s\033[0m\n' app-up app-status app-check app-reset app-nuke substrate-up substrate-status
+  else
+    printf '%s\n' app-up app-status app-check app-reset app-nuke substrate-up substrate-status
+  fi
   exit 0
 fi
 printf '%s\n' "$*" >> "$TEST_EVENTS"
@@ -44,6 +48,11 @@ run remigrate
 run recreate
 [[ "$(cat "$TEST_EVENTS")" == $'app-nuke --yes\napp-check' ]]
 echo 'PASS application selection routes all supported operations through the actual migration wrapper'
+export GITHUB_ACTIONS=true
+unset NO_COLOR
+run recreate
+[[ "$(cat "$TEST_EVENTS")" == $'app-nuke --yes\napp-check' ]]
+echo 'PASS GitHub Actions color formatting does not hide supported migration commands'
 for operation in reindex invalid; do
   if run "$operation"; then echo "FAIL accepted $operation"; exit 1; fi
   [[ ! -s "$TEST_EVENTS" ]]

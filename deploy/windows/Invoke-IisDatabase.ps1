@@ -48,7 +48,13 @@ $psql=$access.psql
 if(-not(Test-Path -LiteralPath $psql -PathType Leaf)){throw 'The declared PostgreSQL client is missing.'}
 if(-not(Test-Path -LiteralPath $access.root_certificate -PathType Leaf)){throw 'The declared PostgreSQL root certificate is missing.'}
 $null=Get-Command dotnet -ErrorAction Stop
-$help=& dotnet $MigrationRuntime --help 2>&1
+$savedNoColor=$env:NO_COLOR
+try {
+    $env:NO_COLOR='1'
+    $help=& dotnet $MigrationRuntime --help 2>&1
+}finally{
+    [Environment]::SetEnvironmentVariable('NO_COLOR',$savedNoColor)
+}
 if($LASTEXITCODE){throw 'The selected migration runtime cannot start.'}
 $needed=if($Database -eq 'application'){@('app-status','app-up','app-check','app-reset','app-nuke')}else{@('substrate-status','substrate-up','reset','nuke')}
 foreach($verb in $needed){
