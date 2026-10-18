@@ -67,6 +67,7 @@ def main():
         if limit < 1:
             raise ValueError('Runtime connection limit must be positive')
         statements.append('ALTER ROLE ' + quoted_role + ' CONNECTION LIMIT ' + str(limit))
+    statements.append('GRANT pg_read_all_stats, pg_signal_backend TO ' + quoted_role)
     statements.append('GRANT CONNECT ON DATABASE "' + database + '" TO ' + quoted_role)
     schemas = sql("SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' "
                   "AND nspname NOT IN ('information_schema','app') ORDER BY nspname").splitlines()

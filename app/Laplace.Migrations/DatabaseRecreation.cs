@@ -123,6 +123,57 @@ internal static class DatabaseRecreation
         }
     }
 
+    public static void RunApplicationSchema(string connectionString, Func<string, int> migrate)
+    {
+        var target = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
+        _ = target.Database ?? throw new InvalidOperationException("Database name is required.");
+        List<(string Prefix, string Suffix)> access;
+        string? schemaOwner;
+        using (var db = new NpgsqlConnection(target.ConnectionString))
+        {
+            db.Open();
+            schemaOwner = Scalar(db, "SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname=@name", "app");
+            access = Rows(db, AccessSql, null)
+                .Where(static row => row.Suffix == "SCHEMA app" || row.Suffix.Contains(" app.", StringComparison.Ordinal))
+                .ToList();
+            using var tx = db.BeginTransaction();
+            Execute(db, """
+                DROP SCHEMA IF EXISTS app CASCADE;
+                DO $$
+                BEGIN
+                    IF to_regclass('public.schemaversions') IS NOT NULL THEN
+                        DELETE FROM public.schemaversions
+                        WHERE scriptname ~ '^[0-9]+_(app_|browser_)';
+                    END IF;
+                END $$;
+                """, tx);
+            if (!string.IsNullOrWhiteSpace(schemaOwner))
+                Execute(db, $"CREATE SCHEMA app AUTHORIZATION {Identifier(schemaOwner)}", tx);
+            else
+                Execute(db, "CREATE SCHEMA app", tx);
+            tx.Commit();
+        }
+
+        if (migrate(target.ConnectionString) != 0)
+            throw new InvalidOperationException("Application schema migrations failed.");
+
+        using (var db = new NpgsqlConnection(target.ConnectionString))
+        {
+            db.Open();
+            var objects = Rows(db, ObjectSql + " SELECT target,'' FROM objects", null)
+                .Select(static row => row.Prefix).ToHashSet(StringComparer.Ordinal);
+            using var tx = db.BeginTransaction();
+            foreach (var statements in access.Where(row => row.Suffix.Length == 0 || objects.Contains(row.Suffix)).Chunk(256))
+            {
+                using var batch = new NpgsqlBatch(db, tx) { Timeout = 60 };
+                foreach (var (statement, _) in statements)
+                    batch.BatchCommands.Add(new NpgsqlBatchCommand(statement));
+                batch.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
     private static void Execute(NpgsqlConnection connection, string sql, NpgsqlTransaction? transaction = null)
     {
         using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = 60 };

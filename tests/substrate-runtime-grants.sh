@@ -57,7 +57,9 @@ SELECT NOT has_schema_privilege(:'role','laplace','CREATE')
    AND NOT has_schema_privilege(:'role','app','USAGE')
    AND NOT has_table_privilege(:'role','app.accounts','SELECT')
    AND NOT has_table_privilege(:'role','public.reference','INSERT')
-   AND NOT pg_has_role(:'role',current_user,'MEMBER') AS restricted \gset
+   AND NOT pg_has_role(:'role',current_user,'MEMBER')
+   AND pg_has_role(:'role','pg_read_all_stats','MEMBER')
+   AND pg_has_role(:'role','pg_signal_backend','MEMBER') AS restricted \gset
 \if :restricted
 \else
 \quit 1

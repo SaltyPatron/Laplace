@@ -39,4 +39,26 @@ owners
 query "SELECT to_regclass('public.owner_recreation_sentinel') IS NULL" | grep -qx t
 dotnet "$runtime" app-up
 owners
+
+# Co-located application/substrate topology (where LAPLACE_DB and LAPLACE_APP_DB name the same database)
+# recreates only SCHEMA app while preserving public/substrate tables, non-app schemaversions, and app schema grants.
+export LAPLACE_DB="$LAPLACE_APP_DB"
+query "CREATE ROLE platform_owner_app_runtime NOLOGIN; GRANT USAGE ON SCHEMA app TO platform_owner_app_runtime; GRANT SELECT ON ALL TABLES IN SCHEMA app TO platform_owner_app_runtime; ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO platform_owner_app_runtime" >/dev/null
+query "CREATE TABLE public.colocated_substrate_sentinel(value integer); INSERT INTO public.colocated_substrate_sentinel VALUES(42); INSERT INTO public.schemaversions(scriptname,applied) VALUES('20260606000000_layer1_database.sql',now())" >/dev/null
+colocated_before=$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")
+query "INSERT INTO app.web_sessions(session_id,user_id,tenant_id,ticket,expires_at) SELECT 'colocated-ticket',m.user_id,m.tenant_id,decode('00','hex'),now()+interval '1 day' FROM app.tenant_memberships m LIMIT 1" >/dev/null
+dotnet "$runtime" app-nuke --yes
+dotnet "$runtime" app-check
+owners
+[[ $colocated_before != "$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")" ]]
+query 'SELECT count(*)=1 AND max(value)=42 FROM public.colocated_substrate_sentinel' | grep -qx t
+query "SELECT count(*)=1 FROM public.schemaversions WHERE scriptname='20260606000000_layer1_database.sql'" | grep -qx t
+query "SELECT has_schema_privilege('platform_owner_app_runtime','app','USAGE') AND has_table_privilege('platform_owner_app_runtime','app.users','SELECT')" | grep -qx t
+dotnet "$runtime" app-reset --yes
+query "SELECT count(*)=1 FROM public.schemaversions WHERE scriptname='20260606000000_layer1_database.sql'" | grep -qx t
+query "SELECT count(*)=0 FROM public.schemaversions WHERE scriptname ~ '^[0-9]+_(app_|browser_)'" | grep -qx t
+dotnet "$runtime" app-up
+dotnet "$runtime" app-check
+owners
+query "DROP OWNED BY platform_owner_app_runtime; DROP ROLE platform_owner_app_runtime" >/dev/null
 echo 'PASS real app-up, app-check and app-nuke restore both verified owners without sessions, duplicate grants or historical local UUIDs'

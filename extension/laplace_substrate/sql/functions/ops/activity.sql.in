@@ -27,9 +27,10 @@ CREATE OR REPLACE FUNCTION ops.activity(
 BEGIN ATOMIC
     SELECT a.pid,
            a.pid = pg_backend_pid(),
-           -- No state AND no query on a live backend is the privilege mask, not
-           -- an idle session: an idle session still reports state='idle'.
-           a.state IS NULL AND a.query IS NULL,
+           -- No state on a live backend with a null or masked query is the
+           -- privilege mask, not an idle session: an idle session still reports
+           -- state='idle'.
+           a.state IS NULL AND (a.query IS NULL OR a.query = '<insufficient privilege>'),
            a.usename::text,
            a.application_name,
            host(a.client_addr),

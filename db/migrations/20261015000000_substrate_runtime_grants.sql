@@ -13,6 +13,7 @@ BEGIN
                AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)) THEN
         RAISE EXCEPTION 'Substrate runtime must be an unprivileged role';
     END IF;
+    EXECUTE format('GRANT pg_read_all_stats, pg_signal_backend TO %I', runtime_role);
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), runtime_role);
     FOR namespace IN
         SELECT oid, nspname, pg_get_userbyid(nspowner) AS owner FROM pg_namespace

@@ -152,7 +152,7 @@ internal static class Program
     internal sealed class AppResetCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
-            => Dispatch("app-reset", connection => { RequireSeparateApplication(connection); return RunReset(connection); });
+            => Dispatch("app-reset", connection => RunReset(connection, applicationOnly: true));
     }
 
     [System.ComponentModel.Description("Recreate the selected application database; deletes its accounts, sessions, keys and billing data.")]
@@ -328,6 +328,9 @@ internal static class Program
     }
 
     private static int RunReset(string connectionString)
+        => RunReset(connectionString, applicationOnly: false);
+
+    private static int RunReset(string connectionString, bool applicationOnly)
     {
         Console.WriteLine("Clears the selected database's migration journal while preserving its data and extensions.");
         Console.WriteLine("Run the matching up command to reapply migrations.");
@@ -338,9 +341,23 @@ internal static class Program
         }
         using var conn = new NpgsqlConnection(connectionString);
         conn.Open();
-        using var cmd = new NpgsqlCommand(
-            "DROP TABLE IF EXISTS public.schemaversions", conn);
-        cmd.ExecuteNonQuery();
+        if (applicationOnly && IsCoLocatedApplication(connectionString))
+        {
+            using var cmd = new NpgsqlCommand("""
+                DO $$
+                BEGIN
+                    IF to_regclass('public.schemaversions') IS NOT NULL THEN
+                        DELETE FROM public.schemaversions
+                        WHERE scriptname ~ '^[0-9]+_(app_|browser_)';
+                    END IF;
+                END $$;
+                """, conn);
+            cmd.ExecuteNonQuery();
+            Console.WriteLine("[migrate reset] application schemaversions entries cleared. Run 'app-up' to re-apply.");
+            return 0;
+        }
+        using (var cmd = new NpgsqlCommand("DROP TABLE IF EXISTS public.schemaversions", conn))
+            cmd.ExecuteNonQuery();
         Console.WriteLine("[migrate reset] schemaversions dropped. Run 'up' to re-apply.");
         return 0;
     }
@@ -348,18 +365,16 @@ internal static class Program
     private static int RunNuke(string connectionString)
         => RunNuke(connectionString, applicationOnly: false);
 
-    private static void RequireSeparateApplication(string connectionString)
+    private static bool IsCoLocatedApplication(string connectionString)
     {
         var app = new NpgsqlConnectionStringBuilder(connectionString);
         var substrate = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString());
-        if (app.Database == substrate.Database && app.Port == substrate.Port &&
-            string.Equals(app.Host, substrate.Host, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Application-only reset requires distinct application and substrate databases.");
+        return app.Database == substrate.Database && app.Port == substrate.Port &&
+            string.Equals(app.Host, substrate.Host, StringComparison.OrdinalIgnoreCase);
     }
 
     private static int RunNuke(string connectionString, bool applicationOnly)
     {
-        if (applicationOnly) RequireSeparateApplication(connectionString);
         var b = new NpgsqlConnectionStringBuilder(connectionString);
         var targetDb = b.Database
             ?? throw new InvalidOperationException("Target database name missing from connection string.");
@@ -380,10 +395,18 @@ internal static class Program
         bool includesApp = app.Database == b.Database && app.Host == b.Host && app.Port == b.Port;
         // Validate durable authority before creating a replacement or disconnecting serving clients.
         if (applicationOnly || includesApp) PlatformOwnerPolicy.Load();
-        DatabaseRecreation.Run(connectionString, replacement => RunUpTargets(new[]
+        if (applicationOnly && IsCoLocatedApplication(connectionString))
         {
-            (replacement, (Func<string, bool>)(path => applicationOnly ? IsAppScript(path) : includesApp || !IsAppScript(path)), "replacement database")
-        }));
+            DatabaseRecreation.RunApplicationSchema(connectionString,
+                target => RunUpTargets(new[] { (target, (Func<string, bool>)IsAppScript, "application schema") }));
+        }
+        else
+        {
+            DatabaseRecreation.Run(connectionString, replacement => RunUpTargets(new[]
+            {
+                (replacement, (Func<string, bool>)(path => applicationOnly ? IsAppScript(path) : includesApp || !IsAppScript(path)), "replacement database")
+            }));
+        }
         Console.WriteLine("[migrate nuke] Re-created with migrations, database settings and existing access grants.");
         return 0;
     }
