@@ -151,14 +151,10 @@ public static class ChessAnalyze
     private static void ClassifyOpening(
         SubstrateChangeBuilder b, Hash128 lineId, IReadOnlyList<string> sans, ChessModality m)
     {
-        var src = SourceId;
         var classified = OpeningClassifier.Classify(sans, m);
-        if (classified.Eco is { } eco)
-            ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_ECO", eco, MoveWeight, src);
-        if (classified.Name is { } name)
-            ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_OPENING", name, MoveWeight, src);
+        OpeningClassifier.Attest(b, lineId, classified, MoveWeight, SourceId);
         if (ChessMotifs.DetectNamedTrap(sans) is { } motif)
-            ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", motif, MoveWeight, src);
+            ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", motif, MoveWeight, SourceId);
     }
 
     private static bool AppendGame(

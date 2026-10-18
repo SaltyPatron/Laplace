@@ -79,6 +79,8 @@ Syzygy package enumeration stays at three men. `ChessSyzygy.DeriveGame` probes e
 
 A book line replays from a diagram FEN when that FEN precedes the moves and they are legal there. A move number other than white's first move replays from the position already reached in the same paragraph when the side and fullmove agree. The paragraph attests `EXPLAINS` on that trajectory and on each chess concept it names, with the book-domain member as the context. A line that had a FEN or a continuation number and still does not replay is refused as `anchored-line-unreplayable`, not as a diagram-anchored line.
 
+Opening classification reads `a.tsv` through `e.tsv`. A game matches the longest UCI prefix and, when a catalog line ends on a position the game reached by a different move order, that deeper position. ECO, the opening name, the family, the variation, and each concept the name contains are substrate entities. There is no hardcoded opening list.
+
 ## Sprint 5 — Corpus identity
 
 Acceptance:

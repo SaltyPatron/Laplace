@@ -135,6 +135,8 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         if (ecoId is { } eid)
             b.AddAttestation(NativeAttestation.Categorical(
                 lineId, ChessSeedManifest.HasEco, eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+        OpeningClassifier.AttestStructure(
+            b, lineId, name, TC.AcademicCurated, ChessVocabulary.OpeningsSourceId);
     }
 
     internal static SubstrateChange ComposeLineForTest(string eco, string name, IReadOnlyList<string> sans)
