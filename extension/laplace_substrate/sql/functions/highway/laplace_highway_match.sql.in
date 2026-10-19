@@ -7,4 +7,4 @@ DROP FUNCTION IF EXISTS laplace.laplace_highway_match(mask bytea, band_mask byte
 CREATE OR REPLACE FUNCTION consensus.highway_match(mask bytea, band_mask bytea)
     RETURNS boolean
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_match'
-    LANGUAGE C IMMUTABLE;
+    LANGUAGE C IMMUTABLE PARALLEL SAFE;

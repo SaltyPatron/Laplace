@@ -93,7 +93,11 @@ public static class SearchContinuationSeed
         {
             if (!byId.TryGetValue(id, out var row)) continue;
             if (Centipawns(row.SumScoreFp1e9, row.Observations) is not int cp) continue;
-            table.SeedWitnessedEvaluation(board, cp, row.Observations);
+            table.SeedWitnessedEvaluation(
+                board,
+                cp,
+                row.Observations,
+                amputateInterior: row.Observations >= SearchContinuationTable.AmputationWitnesses);
         }
     }
 }

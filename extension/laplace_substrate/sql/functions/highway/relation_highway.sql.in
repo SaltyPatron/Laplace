@@ -11,10 +11,10 @@ DROP FUNCTION IF EXISTS laplace.relation_highway_bit(bytea);
 CREATE OR REPLACE FUNCTION consensus.relation_highway_bit(p_type_id bytea)
     RETURNS int
     AS 'MODULE_PATHNAME', 'pg_laplace_relation_highway_bit'
-    LANGUAGE C STABLE STRICT;
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;
 
 DROP FUNCTION IF EXISTS laplace.relation_highway_band(bytea);
 CREATE OR REPLACE FUNCTION consensus.relation_highway_band(p_type_id bytea)
     RETURNS int
     AS 'MODULE_PATHNAME', 'pg_laplace_relation_highway_band'
-    LANGUAGE C STABLE STRICT;
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;

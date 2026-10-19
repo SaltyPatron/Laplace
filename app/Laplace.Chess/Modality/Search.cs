@@ -476,9 +476,22 @@ public sealed class Search
         if (ply == 0)
             FilterRootTablebase(b, moves);
         ChessMove? preferred = null;
-        if (ply > 0 && _continuations is not null
+        if (_continuations is not null
             && _continuations.TryGet(ChessPositionIdentity.PositionId(b), out var continuation))
-            preferred = continuation.PreferredMove;
+        {
+            if (ply > 0)
+            {
+                if (continuation.IsRetrogradeSolved)
+                    return RetrogradeScore(continuation, ply);
+                if (continuation.CanAmputateInterior && depth >= 2 && !MoveGen.InCheck(b, b.WhiteToMove))
+                    return Quiesce(b, alpha, beta, ply, repetitionStart, repetitionSignature);
+                preferred = continuation.PreferredMove;
+            }
+            else if (continuation.IsRetrogradeSolved)
+            {
+                preferred = continuation.RetrogradeMove;
+            }
+        }
         Order(b, moves, ttMove, ply, preferred);
 
         int best = -Inf;
@@ -552,6 +565,31 @@ public sealed class Search
         <= -MateThreshold => score + ply,
         _ => score,
     };
+
+    private int RetrogradeScore(SearchContinuationTable.Entry continuation, int ply)
+    {
+        int wdl = continuation.RetrogradeWdl!.Value;
+        int distance = Math.Min(Math.Abs(continuation.RetrogradePlies!.Value), 500);
+        if (continuation.RetrogradeCheckmate)
+        {
+            return wdl switch
+            {
+                0 or 1 => -(Mate - ply - distance),
+                2 => DrawScoreAtPly(ply),
+                3 or 4 => Mate - ply - distance,
+                _ => 0,
+            };
+        }
+        return wdl switch
+        {
+            0 => -20_000 + distance + ply,
+            1 => -10_000 + distance + ply,
+            2 => DrawScoreAtPly(ply),
+            3 => 10_000 - distance - ply,
+            4 => 20_000 - distance - ply,
+            _ => 0,
+        };
+    }
 
     private const int TablebaseMen = 5;
 

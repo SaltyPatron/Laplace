@@ -68,7 +68,7 @@ CREATE INDEX IF NOT EXISTS web_sessions_user_active
     WHERE revoked_at IS NULL;
 
 CREATE OR REPLACE FUNCTION app.preserve_web_session_revocation()
-RETURNS trigger LANGUAGE plpgsql
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, app
 AS $function$
 BEGIN
     IF NEW.user_id IS DISTINCT FROM OLD.user_id OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id THEN
@@ -86,6 +86,7 @@ CREATE TRIGGER preserve_web_session_revocation
 CREATE OR REPLACE FUNCTION app.check_browser_ticket_identity()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = pg_catalog, app
 AS $function$
 DECLARE
     bound_user uuid;
@@ -268,6 +269,7 @@ CREATE TABLE IF NOT EXISTS app.billing_customers (
 CREATE OR REPLACE FUNCTION app.bind_billing_customer()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = pg_catalog, app
 AS $function$
 DECLARE
     bound_tenant text;
@@ -276,7 +278,7 @@ BEGIN
     INSERT INTO app.billing_customers (stripe_customer_id, tenant)
     VALUES (NEW.stripe_customer_id, NEW.tenant)
     ON CONFLICT (stripe_customer_id) DO UPDATE SET updated_at = now()
-    WHERE app.billing_customers.tenant = EXCLUDED.tenant
+    WHERE billing_customers.tenant = EXCLUDED.tenant
     RETURNING tenant INTO bound_tenant;
     IF bound_tenant IS NULL OR bound_tenant <> NEW.tenant THEN
         RAISE EXCEPTION 'Stripe customer is already bound to another tenant'
@@ -299,6 +301,7 @@ CREATE OR REPLACE FUNCTION app.apply_subscription(
     p_cancel_at_period_end boolean)
 RETURNS SETOF app.billing_entitlements
 LANGUAGE plpgsql
+SET search_path = pg_catalog, app
 AS $function$
 DECLARE
     current_row app.billing_entitlements%ROWTYPE;
@@ -411,7 +414,7 @@ CREATE OR REPLACE FUNCTION app.consume_credit(
         p_units int)
     RETURNS TABLE(plan_id text, remaining int, period_end timestamptz)
     LANGUAGE sql
-BEGIN ATOMIC
+AS $$
     WITH candidate AS (
         SELECT e.tenant, e.plan_id,
                COALESCE((e.monthly_credits->>p_service)::int, 0) AS credit_limit,
@@ -438,7 +441,7 @@ BEGIN ATOMIC
     RETURNING e.plan_id,
               (c.credit_limit - c.used - p_units)::int,
               e.period_end;
-END;
+$$;
 
 -- =============================================================================
 -- 4. Seeded Tenants & Default Platform Administrators

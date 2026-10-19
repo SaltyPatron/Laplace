@@ -5,4 +5,4 @@ DROP FUNCTION IF EXISTS laplace.laplace_highway_band_mask(int);
 CREATE OR REPLACE FUNCTION consensus.highway_band_mask(p_band int)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_band_mask'
-    LANGUAGE C STABLE;
+    LANGUAGE C STABLE PARALLEL SAFE;

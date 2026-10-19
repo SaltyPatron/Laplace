@@ -480,4 +480,48 @@ public sealed class SearchTests
 
         Assert.Equal("d1a4", result.BestMove?.ToUci());
     }
+
+    [Fact]
+    public void HorizonCheckpoint_AmputatesInteriorSubtreesAndFlattensDepthCost()
+    {
+        var start = Board.FromFen(ChessModality.StartFen);
+        var limits = new Search.Limits(MaxDepth: 4);
+        var unseeded = new Search(ttBits: 12).Think(start, limits);
+
+        var table = new SearchContinuationTable();
+        foreach (var mv in MoveGen.Legal(start))
+        {
+            var next = start.Clone();
+            MoveApply.Make(next, mv);
+            int cpForOpponent = mv.ToUci() == "c2c4" ? -400 : 100;
+            table.SeedHorizonCheckpoint(next, cpForOpponent, witnesses: 50d);
+        }
+
+        var amputated = new Search(ttBits: 12, continuations: table).Think(start, limits);
+        Assert.Equal("c2c4", amputated.BestMove?.ToUci());
+        Assert.True(amputated.Nodes < unseeded.Nodes / 3,
+            $"expected flat-horizon amputation to cut interior nodes (amputated={amputated.Nodes}, unseeded={unseeded.Nodes})");
+    }
+
+    [Fact]
+    public void RetrogradeCheckmate_SelectsFastestMateAboveFiveMen()
+    {
+        var root = Board.FromFen("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 2 3");
+        ChessMove qh5 = MoveGen.Legal(root).Single(m => m.ToUci() == "d1h5");
+        ChessMove qf3 = MoveGen.Legal(root).Single(m => m.ToUci() == "d1f3");
+
+        var afterQh5 = root.Clone();
+        MoveApply.Make(afterQh5, qh5);
+        var afterQf3 = root.Clone();
+        MoveApply.Make(afterQf3, qf3);
+
+        var table = new SearchContinuationTable();
+        table.SeedRetrogradeCheckpoint(afterQf3, null, wdl: 0, pliesToClose: 4, isCheckmate: true);
+        table.SeedRetrogradeCheckpoint(afterQh5, null, wdl: 0, pliesToClose: 2, isCheckmate: true);
+
+        var result = new Search(ttBits: 12, continuations: table)
+            .Think(root, new Search.Limits(MaxDepth: 3));
+        Assert.Equal("d1h5", result.BestMove?.ToUci());
+        Assert.True(result.Score > MateThreshold);
+    }
 }

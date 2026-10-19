@@ -22,14 +22,34 @@ public sealed class SearchContinuationTable
     /// </summary>
     public const double BlendPrior = 5d;
 
+    /// <summary>
+    /// Witness count at which a horizon-settled node retains at least 75% of its
+    /// empirical standing and can amputate remaining interior depth to quiescence.
+    /// </summary>
+    public const double AmputationWitnesses = 15d;
+
     public readonly record struct Entry(
         ChessMove? ActiveGameMove,
         ChessMove? OpeningMove,
         int? WitnessedEvaluationCp,
-        double WitnessedEvaluationWitnesses = 0d)
+        double WitnessedEvaluationWitnesses = 0d,
+        ChessMove? RetrogradeMove = null,
+        int? RetrogradeWdl = null,
+        int? RetrogradePlies = null,
+        bool RetrogradeCheckmate = false,
+        bool AmputateInterior = false)
     {
-        /// <summary>The game being played outranks the opening catalog.</summary>
-        public ChessMove? PreferredMove => ActiveGameMove ?? OpeningMove;
+        /// <summary>The game being played outranks retrograde and opening moves.</summary>
+        public ChessMove? PreferredMove => ActiveGameMove ?? RetrogradeMove ?? OpeningMove;
+
+        /// <summary>True when backward unrolling resolved an exact mate or tablebase closure.</summary>
+        public bool IsRetrogradeSolved => RetrogradeWdl is not null && RetrogradePlies is not null;
+
+        /// <summary>True when consensus precision is high enough to amputate interior branching.</summary>
+        public bool CanAmputateInterior =>
+            AmputateInterior
+            && WitnessedEvaluationCp is not null
+            && WitnessedEvaluationWitnesses >= AmputationWitnesses;
 
         /// <summary>
         /// Precision-weighted step from a structural leaf toward the witnessed
@@ -86,7 +106,12 @@ public sealed class SearchContinuationTable
             mine.WitnessedEvaluationCp ?? parent.WitnessedEvaluationCp,
             mine.WitnessedEvaluationWitnesses > 0d
                 ? mine.WitnessedEvaluationWitnesses
-                : parent.WitnessedEvaluationWitnesses);
+                : parent.WitnessedEvaluationWitnesses,
+            mine.RetrogradeMove ?? parent.RetrogradeMove,
+            mine.RetrogradeWdl ?? parent.RetrogradeWdl,
+            mine.RetrogradePlies ?? parent.RetrogradePlies,
+            mine.RetrogradeCheckmate || parent.RetrogradeCheckmate,
+            mine.AmputateInterior || parent.AmputateInterior);
         return true;
     }
 
@@ -96,7 +121,8 @@ public sealed class SearchContinuationTable
     public void SeedOpening(Board start, IReadOnlyList<ChessMove> line)
         => SeedLine(start, line, activeGame: false);
 
-    public void SeedWitnessedEvaluation(Board position, int centipawnsFromSideToMove, double witnesses = BlendPrior)
+    public void SeedWitnessedEvaluation(
+        Board position, int centipawnsFromSideToMove, double witnesses = BlendPrior, bool amputateInterior = false)
     {
         Hash128 id = ChessPositionIdentity.PositionId(position);
         double n = witnesses > 0d ? witnesses : BlendPrior;
@@ -105,8 +131,55 @@ public sealed class SearchContinuationTable
         {
             WitnessedEvaluationCp = centipawnsFromSideToMove,
             WitnessedEvaluationWitnesses = n,
+            AmputateInterior = current.AmputateInterior || amputateInterior,
         };
-        _evalStamp = HashCode.Combine(_evalStamp, id.GetHashCode(), centipawnsFromSideToMove, n);
+        _evalStamp = HashCode.Combine(_evalStamp, id.GetHashCode(), centipawnsFromSideToMove, n, amputateInterior);
+    }
+
+    /// <summary>
+    /// Seeds a horizon-settled checkpoint whose witness count is sufficient to amputate
+    /// interior search subtrees directly to quiescence.
+    /// </summary>
+    public void SeedHorizonCheckpoint(Board position, int centipawnsFromSideToMove, double witnesses = AmputationWitnesses)
+        => SeedWitnessedEvaluation(
+            position,
+            centipawnsFromSideToMove,
+            Math.Max(AmputationWitnesses, witnesses),
+            amputateInterior: true);
+
+    /// <summary>
+    /// Seeds a retrograde checkmate or tablebase-closure checkpoint (including on positions
+    /// with more than five pieces). When multiple backward lines reach the same position,
+    /// the higher WDL wins, and among equal winning WDLs the fastest closure (minimum plies)
+    /// wins.
+    /// </summary>
+    public void SeedRetrogradeCheckpoint(
+        Board position, ChessMove? bestMove, int wdl, int pliesToClose, bool isCheckmate = false)
+    {
+        Hash128 id = ChessPositionIdentity.PositionId(position);
+        int clampedWdl = Math.Clamp(wdl, 0, 4);
+        int clampedPlies = Math.Max(0, pliesToClose);
+        Entry current = _entries.GetValueOrDefault(id);
+        if (current.IsRetrogradeSolved)
+        {
+            int curWdl = current.RetrogradeWdl!.Value;
+            int curPlies = current.RetrogradePlies!.Value;
+            bool betterWdl = clampedWdl > curWdl;
+            bool sameWdlBetterMate = clampedWdl == curWdl && isCheckmate && !current.RetrogradeCheckmate;
+            bool sameKindFaster = clampedWdl == curWdl
+                && isCheckmate == current.RetrogradeCheckmate
+                && (clampedWdl >= 3 ? clampedPlies < curPlies : clampedPlies > curPlies);
+            if (!betterWdl && !sameWdlBetterMate && !sameKindFaster)
+                return;
+        }
+        _entries[id] = current with
+        {
+            RetrogradeMove = bestMove ?? current.RetrogradeMove,
+            RetrogradeWdl = clampedWdl,
+            RetrogradePlies = clampedPlies,
+            RetrogradeCheckmate = isCheckmate,
+        };
+        _evalStamp = HashCode.Combine(_evalStamp, id.GetHashCode(), clampedWdl, clampedPlies, isCheckmate);
     }
 
     private void SeedLine(Board start, IReadOnlyList<ChessMove> line, bool activeGame)

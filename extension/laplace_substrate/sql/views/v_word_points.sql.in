@@ -4,9 +4,7 @@
 -- one add it. Bounded use only: a point lookup by id or a KNN with LIMIT plans
 -- as a nested loop into entities; without a selective predicate or LIMIT it
 -- scans every Content physicality.
--- DROP+CREATE because CREATE OR REPLACE VIEW cannot reorder columns.
-DROP VIEW IF EXISTS laplace.v_word_points CASCADE;
-CREATE VIEW laplace.v_word_points AS
+CREATE OR REPLACE VIEW laplace.v_word_points AS
 SELECT e.id,
        e.tier,
        e.type_id,

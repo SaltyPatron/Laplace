@@ -6,4 +6,4 @@ DROP FUNCTION IF EXISTS laplace.laplace_highway_mask_bits(mask bytea);
 CREATE OR REPLACE FUNCTION consensus.highway_mask_bits(mask bytea)
     RETURNS int[]
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_bits'
-    LANGUAGE C IMMUTABLE;
+    LANGUAGE C IMMUTABLE PARALLEL SAFE;
