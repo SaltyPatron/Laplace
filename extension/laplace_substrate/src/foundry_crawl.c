@@ -145,7 +145,9 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
         frontier[n_front++] = id;
     }
 
-    if (if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+    if (n_front > 0 && hops > 0 && fanout > 0)
+    {
+        if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
             elog(ERROR, "foundry_crawl: SPI_connect failed");
         if (crawl_neighbors_plan == NULL)
         {
@@ -159,9 +161,7 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
                      SPI_result_code_string(SPI_result));
             crawl_neighbors_plan = plan;
         }
-        plan = crawl_neighbors_plan
-            elog(ERROR, "foundry_crawl: SPI_prepare failed: %s",
-                 SPI_result_code_string(SPI_result));
+        plan = crawl_neighbors_plan;
 
         for (int depth = 0; depth < hops && n_front > 0; depth++)
         {
@@ -313,9 +313,6 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
     }
 
     if (plan != NULL)
-    {
-        SPI_freeplan(plan);
         laplace_spi_finish(spi_top);
-    }
     return (Datum) 0;
 }
