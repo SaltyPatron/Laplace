@@ -5,21 +5,36 @@ DROP FUNCTION IF EXISTS laplace.language_coverage(bytea, int);
 CREATE OR REPLACE FUNCTION converse.language_coverage(p_word bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    WITH langs AS (
-        SELECT DISTINCT realize.label(sm.lang) AS code
-        FROM lexical.synset_members(p_word) sm
-        WHERE sm.lang IS NOT NULL
-        UNION
-        SELECT realize.label(converse.word_language(p_word))
+BEGIN ATOMIC
+    WITH lang_ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT u.lang ORDER BY u.lang) AS ids
+        FROM (
+            SELECT sm.lang
+            FROM lexical.synset_members(p_word) sm
+            WHERE sm.lang IS NOT NULL
+            UNION
+            SELECT converse.word_language(p_word) AS lang
+        ) u
+        WHERE u.lang IS NOT NULL
     ),
-    shown AS (SELECT code FROM langs WHERE code IS NOT NULL ORDER BY code LIMIT p_limit)
+    langs AS MATERIALIZED (
+        SELECT DISTINCT code
+        FROM lang_ids li,
+             LATERAL unnest(realize.label_batch(li.ids)) AS code
+        WHERE code IS NOT NULL
+    ),
+    cnt AS MATERIALIZED (
+        SELECT count(*)::bigint AS total FROM langs
+    ),
+    shown AS (
+        SELECT code FROM langs ORDER BY code LIMIT p_limit
+    )
     SELECT COALESCE(realize.label(p_word), '?') || ' is witnessed across '
-           || (SELECT count(*) FROM langs WHERE code IS NOT NULL)::text || ' languages: '
+           || c.total::text || ' languages: '
            || (SELECT string_agg(code, ', ' ORDER BY code) FROM shown)
-           || CASE WHEN (SELECT count(*) FROM langs WHERE code IS NOT NULL) > p_limit
-                   THEN ', …' ELSE '' END,
+           || CASE WHEN c.total > p_limit THEN ', …' ELSE '' END,
            NULL::numeric,
-           (SELECT count(*) FROM langs WHERE code IS NOT NULL)::bigint
-    WHERE (SELECT count(*) FROM langs WHERE code IS NOT NULL) > 0
-$$;
+           c.total
+    FROM cnt c
+    WHERE c.total > 0;
+END;

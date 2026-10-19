@@ -6,20 +6,14 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
                                         p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    -- Dedup and rank by (member, lang) id pair, never by rendered surface.
-    -- The text language reference is resolved at the input boundary: each
-    -- distinct candidate language is matched once by label or definition
-    -- surface. render_text runs above the sort, only until p_limit rows survive.
-    -- object_id IS NOT NULL is load-bearing: src_langs feeds a NOT IN, and one
-    -- NULL (a unary HAS_LANGUAGE cell) would make NOT IN drop every row.
+BEGIN ATOMIC
     WITH src_langs AS (
         SELECT c.object_id AS id FROM laplace.consensus c
         WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
           AND c.object_id IS NOT NULL
     ),
     want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
-    agg AS (
+    agg AS MATERIALIZED (
         SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
                max(sm.sense_mu) AS sense_mu
         FROM lexical.synset_members(p_word) sm
@@ -27,43 +21,66 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     ),
-    -- Definition surfaces of the candidate languages, realized once in a
-    -- fenced CTE, never per probed edge inside a predicate. eff_mu > 0 keeps a
-    -- refuted HAS_DEFINITION cell from admitting its language.
-    lang_def_names AS MATERIALIZED (
-        SELECT d.subject_id AS lang, lower(realize.render_text(d.object_id)) AS dname
-        FROM laplace.consensus d, want w0
+    cand_langs AS MATERIALIZED (
+        SELECT array_agg(DISTINCT lang ORDER BY lang) AS langs FROM agg
+    ),
+    cand_lang_labels AS MATERIALIZED (
+        SELECT u.lang, u.lbl, lower(u.lbl) AS lower_lbl
+        FROM cand_langs cl,
+             LATERAL ROWS FROM (
+                 unnest(cl.langs),
+                 unnest(realize.label_batch(cl.langs))
+             ) AS u(lang, lbl)
+    ),
+    lang_def_edges AS MATERIALIZED (
+        SELECT d.subject_id AS lang, d.object_id AS def_id,
+               row_number() OVER (ORDER BY d.subject_id, d.object_id) AS rn
+        FROM laplace.consensus d, want w0, cand_langs cl
         WHERE w0.name IS NOT NULL
-          AND d.subject_id IN (SELECT DISTINCT lang FROM agg)
+          AND cl.langs IS NOT NULL
+          AND d.subject_id = ANY (cl.langs)
           AND d.type_id = laplace.relation_type_id('HAS_DEFINITION')
           AND consensus.eff_mu(d.rating, d.rd) > 0
     ),
+    lang_def_rendered AS MATERIALIZED (
+        SELECT realize.render_text_batch(array_agg(def_id ORDER BY rn)) AS txt
+        FROM lang_def_edges
+    ),
+    lang_def_names AS MATERIALIZED (
+        SELECT e.lang, lower(r.txt[e.rn]) AS dname
+        FROM lang_def_edges e
+        CROSS JOIN lang_def_rendered r
+    ),
     lang_match AS (
-        -- No language filter: every candidate language passes with no
-        -- realization (PostgreSQL does not guarantee OR short-circuit).
         SELECT l.lang
-        FROM (SELECT DISTINCT lang FROM agg) l, want w
+        FROM cand_lang_labels l, want w
         WHERE w.name IS NULL
         UNION ALL
-        -- Named filter: label realized once per candidate language as a
-        -- projection; definition surfaces are consulted when the label misses.
-        SELECT s.lang
-        FROM (
-            SELECT l.lang, lower(realize.label(l.lang)) AS lbl
-            FROM (SELECT DISTINCT lang FROM agg) l, want w0
-            WHERE w0.name IS NOT NULL
-        ) s, want w
-        WHERE s.lbl = w.name
-           OR s.lang IN (SELECT ld.lang FROM lang_def_names ld WHERE ld.dname = w.name)
+        SELECT l.lang
+        FROM cand_lang_labels l, want w
+        WHERE w.name IS NOT NULL
+          AND (l.lower_lbl = w.name
+               OR l.lang IN (SELECT ld.lang FROM lang_def_names ld WHERE ld.dname = w.name))
+    ),
+    ranked AS MATERIALIZED (
+        SELECT a.member, a.lang, a.mu, a.witnesses,
+               row_number() OVER (ORDER BY a.sense_mu DESC NULLS LAST, a.mu DESC, a.witnesses DESC, a.lang, a.member) AS rn
+        FROM agg a
+        WHERE a.lang IN (SELECT lang FROM lang_match)
+        ORDER BY a.sense_mu DESC NULLS LAST, a.mu DESC, a.witnesses DESC, a.lang, a.member
+        LIMIT p_limit
+    ),
+    rendered AS MATERIALIZED (
+        SELECT realize.render_text_batch(array_agg(member ORDER BY rn)) AS txt
+        FROM ranked
     )
-    -- a.mu is fp1e9 (synset_members) — convert through the one display definition
-    SELECT r.txt AS translation, realize.label(a.lang) AS language, consensus.eff_mu_display(a.mu), a.witnesses
-    FROM (
-        SELECT member, lang, mu, witnesses FROM agg
-        WHERE lang IN (SELECT lang FROM lang_match)
-        ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
-    ) a
-    CROSS JOIN LATERAL (SELECT realize.render_text(a.member) AS txt) r
-    WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
-    LIMIT p_limit
-$$;
+    SELECT NULLIF(btrim(r.txt[a.rn]), '') AS translation,
+           cl.lbl AS language,
+           consensus.eff_mu_display(a.mu),
+           a.witnesses
+    FROM ranked a
+    CROSS JOIN rendered r
+    LEFT JOIN cand_lang_labels cl ON cl.lang = a.lang
+    WHERE NULLIF(btrim(r.txt[a.rn]), '') IS NOT NULL
+    ORDER BY a.rn;
+END;

@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION ops.ingest_run_close_open_files(p_run_id uuid)
     RETURNS bigint
     LANGUAGE sql
     VOLATILE
-AS $$
+BEGIN ATOMIC
     WITH closed AS (
         UPDATE laplace.ingest_file_journal f
            SET status = 'cancelled',
@@ -21,7 +21,7 @@ AS $$
         RETURNING f.file_label
     )
     SELECT count(*) FROM closed;
-$$;
+END;
 
 CREATE OR REPLACE FUNCTION ops.ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
     RETURNS laplace.ingest_run_journal

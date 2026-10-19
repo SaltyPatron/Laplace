@@ -15,15 +15,9 @@ CREATE OR REPLACE FUNCTION laplace.physicalities_merge(
     p_has_source_dim boolean[],
     p_observed_at timestamptz[])
 RETURNS bigint
-LANGUAGE SQL
+LANGUAGE sql
 VOLATILE
-SET enable_material = off
--- Hash-partitioned INSERT from unnest arrays: a generic plan cannot runtime-
--- prune by the id parameter and probes all 64 partition indexes per call
--- (measured 381 vs 74 buffer touches for one novel row). Novel admission is
--- probe-filtered upstream, so calls are small and custom plans dominate.
-SET plan_cache_mode = force_custom_plan
-AS $$
+BEGIN ATOMIC
     WITH admitted AS (
         INSERT INTO laplace.physicalities
             (id, entity_id, type, coord, hilbert_index, trajectory,
@@ -51,5 +45,5 @@ AS $$
         ON CONFLICT (id) DO NOTHING
         RETURNING 1
     )
-    SELECT count(*)::bigint FROM admitted
-$$;
+    SELECT count(*)::bigint FROM admitted;
+END;

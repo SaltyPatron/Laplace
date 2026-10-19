@@ -3,7 +3,7 @@
 DROP FUNCTION IF EXISTS laplace.usage_overlap(bytea, bytea);
 CREATE OR REPLACE FUNCTION consensus.usage_overlap(p_x bytea, p_y bytea)
     RETURNS bigint
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     -- Pillar 5 (2026-07-20): shared-usage is read from the GEOMETRY. The usage
     -- neighbourhood of a point is the adjacent content constituent in every
@@ -13,8 +13,12 @@ BEGIN ATOMIC
     -- directions are readable and the measure is never truncated to fit the walk.
     WITH xn(n) AS (
         SELECT neighbour_id FROM structural.geometry_neighbours(p_x, 200, 8)
+        WHERE p_x IS NOT NULL AND p_y IS NOT NULL
     ), yn(n) AS (
         SELECT neighbour_id FROM structural.geometry_neighbours(p_y, 200, 8)
+        WHERE p_x IS NOT NULL AND p_y IS NOT NULL
     )
-    SELECT count(*)::bigint FROM xn JOIN yn USING (n);
+    SELECT CASE WHEN p_x IS NULL OR p_y IS NULL THEN NULL::bigint
+                ELSE (SELECT count(*)::bigint FROM xn JOIN yn USING (n))
+           END;
 END;

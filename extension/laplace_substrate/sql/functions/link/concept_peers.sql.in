@@ -126,21 +126,11 @@ CREATE OR REPLACE FUNCTION lexical.word_peer_ids_batch(
     p_word_ids bytea[],
     p_limit_per_word integer DEFAULT 32
 ) RETURNS TABLE(word_id bytea, peer_id bytea, strength double precision)
-LANGUAGE plpgsql STABLE PARALLEL SAFE
-AS $fn$
-DECLARE
-    v_kb_form bytea[] := consensus.relation_set_ids('KEY_BINDING') || laplace.relation_type_id('FORM_OF');
-    v_iso bytea := laplace.relation_type_id('IS_SENSE_OF');
-    v_dr bytea := laplace.relation_type_id('DERIVATIONALLY_RELATED');
-BEGIN
-    IF p_word_ids IS NULL OR COALESCE(array_length(p_word_ids, 1), 0) = 0 THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH q_words AS MATERIALIZED (
         SELECT DISTINCT u.id AS word_id
-        FROM unnest(p_word_ids) AS u(id)
+        FROM unnest(COALESCE(p_word_ids, ARRAY[]::bytea[])) AS u(id)
         WHERE u.id IS NOT NULL
     ),
     word_anchors AS MATERIALIZED (
@@ -148,19 +138,21 @@ BEGIN
         FROM q_words q
         JOIN laplace.v_consensus_unrefuted hs
           ON hs.subject_id = q.word_id
-         AND hs.type_id = ANY (v_kb_form || v_dr)
+         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING')
+                               || laplace.relation_type_id('FORM_OF')
+                               || laplace.relation_type_id('DERIVATIONALLY_RELATED'))
          AND hs.rating IS NOT NULL
     ),
     all_anchors AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT anchor_id), ARRAY[]::bytea[]) AS ids
         FROM word_anchors
-        WHERE anchor_type <> v_dr
+        WHERE anchor_type <> laplace.relation_type_id('DERIVATIONALLY_RELATED')
     ),
     sense_to_synset AS MATERIALIZED (
         SELECT ss.subject_id AS sense_id, ss.object_id AS synset_id
         FROM all_anchors aa, laplace.v_consensus_unrefuted ss
         WHERE ss.subject_id = ANY (aa.ids)
-          AND ss.type_id = v_iso
+          AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
           AND ss.rating IS NOT NULL
     ),
     word_synsets AS MATERIALIZED (
@@ -170,7 +162,7 @@ BEGIN
         UNION
         SELECT DISTINCT wa.word_id, wa.anchor_id AS synset_id
         FROM word_anchors wa
-        WHERE wa.anchor_type = v_dr
+        WHERE wa.anchor_type = laplace.relation_type_id('DERIVATIONALLY_RELATED')
     ),
     all_synsets AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT synset_id), ARRAY[]::bytea[]) AS ids
@@ -182,7 +174,7 @@ BEGIN
                MAX(consensus.eff_mu_display(dr.rating, dr.rd)) AS mu
         FROM all_synsets asyn, laplace.v_consensus_unrefuted dr
         WHERE dr.subject_id = ANY (asyn.ids)
-          AND dr.type_id = v_dr
+          AND dr.type_id = laplace.relation_type_id('DERIVATIONALLY_RELATED')
           AND dr.rating IS NOT NULL
         GROUP BY dr.subject_id, dr.object_id
     ),
@@ -190,13 +182,13 @@ BEGIN
         SELECT s2.object_id AS synset_id, s2.subject_id AS peer_sense_id
         FROM all_synsets asyn, laplace.v_consensus_unrefuted s2
         WHERE s2.object_id = ANY (asyn.ids)
-          AND s2.type_id = v_iso
+          AND s2.type_id = laplace.relation_type_id('IS_SENSE_OF')
           AND s2.rating IS NOT NULL
     ),
     word_target_hubs AS MATERIALIZED (
         SELECT DISTINCT wa.word_id, wa.anchor_id AS hub_id
         FROM word_anchors wa
-        WHERE wa.anchor_type <> v_dr
+        WHERE wa.anchor_type <> laplace.relation_type_id('DERIVATIONALLY_RELATED')
         UNION
         SELECT DISTINCT ws.word_id, stps.peer_sense_id AS hub_id
         FROM word_synsets ws
@@ -212,7 +204,8 @@ BEGIN
                MAX(consensus.eff_mu_display(hs2.rating, hs2.rd)) AS mu
         FROM all_hubs ah, laplace.v_consensus_unrefuted hs2
         WHERE hs2.object_id = ANY (ah.ids)
-          AND hs2.type_id = ANY (v_kb_form)
+          AND hs2.type_id = ANY (consensus.relation_set_ids('KEY_BINDING')
+                                 || laplace.relation_type_id('FORM_OF'))
           AND hs2.rating IS NOT NULL
         GROUP BY hs2.object_id, hs2.subject_id
     ),
@@ -243,4 +236,3 @@ BEGIN
     WHERE r.rn <= p_limit_per_word
     ORDER BY r.word_id, r.strength DESC;
 END;
-$fn$;

@@ -344,6 +344,14 @@ laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_
     return SPI_OK_SELECT;
 }
 
+int
+laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+{
+    return batch_presence_core(ids_array, bm, candidate_count,
+                               "SELECT idx FROM laplace.attestations_present_ordinals($1)",
+                               false, NULL);
+}
+
 static void
 mark_identity_presence(TupleTableSlot *slot, AttrNumber id, void *opaque)
 {

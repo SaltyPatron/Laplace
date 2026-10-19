@@ -48,6 +48,25 @@ if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
 # builder owns configuration and the shared build-tree lock.
 & (Join-Path $repo 'scripts/win/build-engine.cmd') laplace_core laplace_syzygy laplace_dynamics laplace_synthesis laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_chess_transition_perfcache
 if($LASTEXITCODE){throw 'Native runtime build failed; no application package was created.'}
+if($Publish){
+    & (Join-Path $repo 'scripts/win/build-extensions.cmd')
+    if($LASTEXITCODE){throw 'PostgreSQL extension build failed; no application package was created.'}
+    $iisConfig=Read-IisInstallation $Installation
+    $accessPath=if($iisConfig.database_access_file){$iisConfig.database_access_file}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
+    if(Test-Path -LiteralPath $accessPath -PathType Leaf){
+        $access=Get-Content -LiteralPath $accessPath -Raw | ConvertFrom-Json
+        if($access.database_host){$env:LAPLACE_PGHOST=$access.database_host}
+        if($access.port){$env:LAPLACE_PGPORT=[string]$access.port}
+        if($access.admin_role){$env:LAPLACE_PGUSER=$access.admin_role}
+        if($access.authentication -eq 'sspi'){
+            $env:PGSSLMODE='verify-full'
+            $env:PGSSLROOTCERT=$access.root_certificate
+            $env:PGREQUIREAUTH='sspi'
+        }
+    }
+    & (Join-Path $repo 'scripts/win/install-extensions.cmd') --skip-build --recycle
+    if($LASTEXITCODE){throw 'PostgreSQL extension installation failed; no application package was created.'}
+}
 $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid().ToString('N'))
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'
 $null=New-Item -ItemType Directory -Path $published -Force

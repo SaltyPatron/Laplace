@@ -17,45 +17,40 @@ CREATE OR REPLACE FUNCTION chess.opening_shape_peers(
         peer_line_id bytea,
         geodesic double precision,
         frechet double precision)
-    LANGUAGE plpgsql STABLE
- AS $peers$
-DECLARE
-    v_coord geometry;
-    v_curve geometry;
-    v_openings_src bytea := laplace.source_id('ChessOpenings');
-    v_game_type bytea := laplace.entity_type_id('Chess_Game');
-BEGIN
-    SELECT p.coord, structural.entity_curve(p_line, 3::smallint)
-      INTO v_coord, v_curve
-    FROM laplace.physicalities p
-    WHERE p.entity_id = p_line AND p.type = 3;
-    IF v_coord IS NULL OR v_curve IS NULL THEN RETURN; END IF;
-
-    RETURN QUERY
-    WITH catalog AS MATERIALIZED (
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH anchor AS MATERIALIZED (
+        SELECT p.coord AS v_coord,
+               structural.entity_curve(p_line, 3::smallint) AS v_curve
+        FROM laplace.physicalities p
+        WHERE p.entity_id = p_line AND p.type = 3
+    ),
+    catalog AS MATERIALIZED (
         SELECT e.id AS line_id
-        FROM laplace.entities e
+        FROM anchor an
+        JOIN laplace.entities e ON e.type_id = laplace.entity_type_id('Chess_Game')
         JOIN laplace.physicalities w ON w.entity_id = e.id AND w.type = 3
-        WHERE e.type_id = v_game_type
+        WHERE an.v_coord IS NOT NULL AND an.v_curve IS NOT NULL
           AND e.id <> p_line
           AND EXISTS (SELECT 1 FROM laplace.attestations a
-                      WHERE a.source_id = v_openings_src
+                      WHERE a.source_id = laplace.source_id('ChessOpenings')
                         AND a.subject_id = e.id)
           AND w.coord IS NOT NULL
           AND w.trajectory IS NOT NULL
     ),
     knn AS (
-        SELECT w.entity_id, w.coord
+        SELECT w.entity_id, w.coord, an.v_coord, an.v_curve
         FROM catalog c
+        CROSS JOIN anchor an
         JOIN laplace.physicalities w ON w.entity_id = c.line_id AND w.type = 3
-        ORDER BY w.coord <<->> v_coord
+        ORDER BY w.coord <<->> an.v_coord
         LIMIT p_k
     ),
     scored AS (
         SELECT k.entity_id,
-               public.laplace_angular_distance_4d(k.coord, v_coord) AS geo,
+               public.laplace_angular_distance_4d(k.coord, k.v_coord) AS geo,
                public.laplace_frechet_4d(
-                   structural.entity_curve(k.entity_id, 3::smallint), v_curve) AS fr
+                   structural.entity_curve(k.entity_id, 3::smallint), k.v_curve) AS fr
         FROM knn k
     )
     SELECT s.entity_id, s.geo, s.fr
@@ -64,4 +59,3 @@ BEGIN
     ORDER BY s.fr ASC, s.geo ASC, s.entity_id
     LIMIT p_k;
 END;
-$peers$;

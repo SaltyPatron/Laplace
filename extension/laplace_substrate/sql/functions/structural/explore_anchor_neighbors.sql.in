@@ -32,89 +32,84 @@ RETURNS TABLE(
     tier        smallint,
     geodesic    float8,
     frechet     float8)
-LANGUAGE plpgsql STABLE PARALLEL SAFE
- AS $$
-DECLARE
-    v_anchor geometry := public.ST_SetSRID(
-        public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0);
-    v_traj   geometry := CASE
-        WHEN p_traj_wkt IS NULL OR p_traj_wkt = '' THEN NULL
-        ELSE public.ST_SetSRID(public.ST_GeomFromText(p_traj_wkt), 0)
-    END;
-BEGIN
-    -- Geodesic: exact angular KNN on unit directions, then label the caller-sized
-    -- result once. Chord order on S3 is angular order; no candidate multiplier.
-    RETURN QUERY
-    WITH g AS (
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH params AS MATERIALIZED (
+        SELECT public.ST_SetSRID(public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0) AS v_anchor,
+               CASE
+                   WHEN p_traj_wkt IS NULL OR p_traj_wkt = '' THEN NULL::geometry
+                   ELSE public.ST_SetSRID(public.ST_GeomFromText(p_traj_wkt), 0)
+               END AS v_traj
+    ),
+    g AS (
         SELECT w.id AS entity_id,
-               public.laplace_angular_distance_4d(w.coord, v_anchor) AS geo
-        FROM laplace.v_word_points w
-        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
-          AND public.laplace_direction_4d(v_anchor) IS NOT NULL
+               public.laplace_angular_distance_4d(w.coord, pr.v_anchor) AS geo
+        FROM params pr
+        JOIN laplace.v_word_points w
+          ON public.laplace_direction_4d(w.coord) IS NOT NULL
+         AND public.laplace_direction_4d(pr.v_anchor) IS NOT NULL
         ORDER BY public.laplace_direction_4d(w.coord)
-                 <<->> public.laplace_direction_4d(v_anchor)
+                 <<->> public.laplace_direction_4d(pr.v_anchor)
         LIMIT p_geodesic_k
-    ), numbered AS MATERIALIZED (
+    ), geo_numbered AS MATERIALIZED (
         SELECT g.*, row_number() OVER (ORDER BY g.geo, g.entity_id) AS rn FROM g
-    ), ids AS MATERIALIZED (
-        SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
-    ), display AS MATERIALIZED (
+    ), geo_ids AS MATERIALIZED (
+        SELECT array_agg(geo_numbered.entity_id ORDER BY geo_numbered.rn) AS a FROM geo_numbered
+    ), geo_display AS MATERIALIZED (
         SELECT realize.render_text_batch(a) AS rendered,
                realize.label_batch(a) AS labels
-        FROM ids
+        FROM geo_ids
+    ),
+    pre AS (
+        SELECT w.id AS entity_id, pr.v_traj
+        FROM params pr
+        JOIN laplace.v_word_points w
+          ON w.tier = 2 AND w.trajectory IS NOT NULL
+        WHERE pr.v_traj IS NOT NULL
+        ORDER BY w.coord <<->> pr.v_anchor
+        LIMIT p_frechet_k
+    ),
+    f AS (
+        SELECT c.entity_id,
+               public.laplace_frechet_4d(c.curve, c.v_traj) AS fr
+        FROM (
+            SELECT pre.entity_id, pre.v_traj, structural.entity_curve(pre.entity_id) AS curve
+            FROM pre
+        ) c
+        WHERE c.curve IS NOT NULL
+    ), shape_survivors AS MATERIALIZED (
+        SELECT f.entity_id, f.fr
+        FROM f
+        WHERE f.fr IS NOT NULL AND f.fr <= p_frechet_max
+        ORDER BY f.fr, f.entity_id
+    ), shape_numbered AS MATERIALIZED (
+        SELECT s.*, row_number() OVER (ORDER BY s.fr, s.entity_id) AS rn FROM shape_survivors s
+    ), shape_ids AS MATERIALIZED (
+        SELECT array_agg(shape_numbered.entity_id ORDER BY shape_numbered.rn) AS a FROM shape_numbered
+    ), shape_display AS MATERIALIZED (
+        SELECT realize.render_text_batch(a) AS rendered,
+               realize.label_batch(a) AS labels
+        FROM shape_ids
     )
-    SELECT 'geodesic'::text,
-           n.entity_id,
-           COALESCE(NULLIF(d.rendered[n.rn], ''), d.labels[n.rn]),
-           (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = n.entity_id),
-           n.geo,
-           NULL::float8
-    FROM numbered n CROSS JOIN display d
-    ORDER BY n.geo;
-
-    -- Shape: p_frechet_k is the exact coordinate-nearest candidate/output
-    -- budget. Frechet filters that declared population; there is no hidden
-    -- 500-row workload behind a request for fewer rows.
-    IF v_traj IS NOT NULL THEN
-        RETURN QUERY
-        WITH pre AS (
-            SELECT w.id AS entity_id
-            FROM laplace.v_word_points w
-            WHERE w.tier = 2 AND w.trajectory IS NOT NULL
-            ORDER BY w.coord <<->> v_anchor
-            LIMIT p_frechet_k
-        ),
-        f AS (
-            SELECT c.entity_id,
-                   public.laplace_frechet_4d(c.curve, v_traj) AS fr
-            FROM (
-                SELECT pre.entity_id, structural.entity_curve(pre.entity_id) AS curve
-                FROM pre
-            ) c
-            WHERE c.curve IS NOT NULL
-        ), survivors AS MATERIALIZED (
-            SELECT f.entity_id, f.fr
-            FROM f
-            WHERE f.fr IS NOT NULL AND f.fr <= p_frechet_max
-            ORDER BY f.fr, f.entity_id
-        ), numbered AS MATERIALIZED (
-            SELECT s.*, row_number() OVER (ORDER BY s.fr, s.entity_id) AS rn FROM survivors s
-        ), ids AS MATERIALIZED (
-            SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
-        ), display AS MATERIALIZED (
-            SELECT realize.render_text_batch(a) AS rendered,
-                   realize.label_batch(a) AS labels
-            FROM ids
-        )
-        SELECT 'shape'::text,
+    SELECT * FROM (
+        SELECT 'geodesic'::text AS axis,
+               n.entity_id,
+               COALESCE(NULLIF(d.rendered[n.rn], ''), d.labels[n.rn]) AS label,
+               (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = n.entity_id) AS tier,
+               n.geo AS geodesic,
+               NULL::float8 AS frechet
+        FROM geo_numbered n CROSS JOIN geo_display d
+        ORDER BY n.geo
+    ) geo_rows
+    UNION ALL
+    SELECT * FROM (
+        SELECT 'shape'::text AS axis,
                f.entity_id,
-               COALESCE(NULLIF(d.rendered[f.rn], ''), d.labels[f.rn]),
-               2::smallint,
-               NULL::float8,
-               f.fr
-        FROM numbered f CROSS JOIN display d
+               COALESCE(NULLIF(d.rendered[f.rn], ''), d.labels[f.rn]) AS label,
+               2::smallint AS tier,
+               NULL::float8 AS geodesic,
+               f.fr AS frechet
+        FROM shape_numbered f CROSS JOIN shape_display d
         ORDER BY f.fr
-        ;
-    END IF;
+    ) shape_rows;
 END;
-$$;

@@ -22,156 +22,41 @@ CREATE OR REPLACE FUNCTION generation.walk_batch(p_prompt text,
                                                   p_seeds bigint[],
                                                   p_corpus_limit int)
     RETURNS TABLE(seed bigint, reply text)
-    LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    -- Only the definitional band survives here: it selects the concept's own gloss
-    -- as the GATHER seed below. The taxonomic/partitive/associative constants went
-    -- with the orientation block that used them for band-mass. They were magic
-    -- integers duplicated across this file, converse.converse() and converse.facts() anyway
-    -- -- converse.relation_band_catalog() is the published surface for band identity.
-    b_def  int := 1;   -- definitional band (gloss)
-    -- Resolved once (see converse_facts): a function on consensus.type_id is a
-    -- function on the partition key, so it prunes nothing and runs per edge.
-    t_def  bytea[];
-    SENT   bytea := '\x00';
-    MINLEN int := 5;
-    syn    bytea;
-    topic_word bytea;   -- the tier-2 word whose usage lives in the tier above
-    stream bytea[];
-    w      bigint[];    -- per-token topic weight, aligned to stream
-    starts bytea[];     -- starts of CORE sentences (on-topic seed)
-    core_seq bytea[];   -- longest CORE gloss (deterministic seed)
-    n      int;
-BEGIN
-    t_def := laplace.relation_band_types(b_def);
-    -- ORIENT: the same native election converse.chat() and converse.converse() run — one election,
-    -- one key order, so the three cannot disagree about what a prompt is about.
-    -- prompt_coherence returns the elected TOKEN alongside its synset, which is
-    -- what this lane needs for the tier fan-out below, so both come off one call.
-    --
-    -- This replaces a verbatim copy of converse.converse()'s pre-specificity ranking. Its
-    -- primary sort key was lower(realize.realize(x.syn)) = x.surface -- case-folding used
-    -- as an identity test. "King" and "king" are different content and therefore
-    -- different ids, and the substrate already attests the link both ways
-    -- (K --HAS_CASE_MAPPING {lower}--> k, k --HAS_CASE_MAPPING {upper}--> K, resolved
-    -- natively by word_case_variants); lower() discards those edges to re-derive a
-    -- worse answer in string space, per row. The rest of that block was two renders
-    -- per candidate, a char_length tiebreak, a 29.6s correlated band-mass count and
-    -- a 73s top_synset per token. See converse.sql.in for the full ledger.
-    -- Delegates to converse.elect -- the ONE election body (spec 37).
-    SELECT e.tok, e.synset_id INTO topic_word, syn FROM converse.elect(p_prompt) e;
-    IF syn IS NULL THEN
-        RETURN QUERY
-        SELECT s.seed, NULL::text
-        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
-        ORDER BY s.ord;
-        RETURN;
-    END IF;
-
-    -- GATHER: the concept's own gloss (tier-1 definition, the seed) PLUS the
-    -- TIER FAN-OUT -- a word's usage lives in the tier above it, so pull the
-    -- tier-3 sentences that contain the topic word as a constituent (dense real
-    -- usage) via the realize.constituents index. This is the corpus, not just the gloss.
-    -- Word-level tokens only: the inter-word whitespace realize.constituents are
-    -- dropped, else (word,space) bigrams match every boundary and the walk
-    -- jumps (e.g. "a"+space -> "creek" from "...than a creek").
-    -- The corpus is ranked by the WEB, not by storage order. containers_of walks
-    -- the trajectory constituent index, which is GEOMETRY -- identity and
-    -- retrieval, never semantics. What a candidate sentence is WORTH is the
-    -- Glicko fold's answer, and it is already on the edge that attests it.
-    --
-    -- The old ORDER BY was `is_core DESC, gid`: content-hash order. MEASURED on
-    -- 'water', of the 400 tier-3 containers returned, 398 are the object of a
-    -- HAS_DEFINITION consensus edge whose consensus.eff_mu spans 1.17e12 to 1.46e12 -- a
-    -- 25% spread, witness_count up to 4. The signal was sitting on 99.5% of the
-    -- candidates and the corpus that decides what this engine SAYS was picked by
-    -- hash instead.
-    --
-    -- Rank on the INBOUND edge (c.object_id = the sentence). A usage sentence is
-    -- rated by what attests it -- HAS_DEFINITION, HAS_EXAMPLE -- not by anything
-    -- it asserts itself; probing c.subject_id finds almost nothing (4 of 400) and
-    -- is the wrong direction. LEFT JOIN so an unrated candidate still competes at
-    -- the neutral prior rather than being silently dropped: absence of evidence is
-    -- not evidence of worthlessness, and dropping it would be an
-    -- operator-invented floor.
-    --
-    -- Corpus capacity is caller-owned. NULL means the complete indexed
-    -- container population; zero means no usage containers. There is no
-    -- hidden upstream 400-row subset followed by a second 160-row cut.
-    WITH gids AS (
-        -- DISTINCT: a gloss reachable through two def-band relation types
-        -- contributes its token stream once, not twice.
-        -- THE STEER IS THE VERDICT. wt was 50 for the core gloss and 40 for a
-        -- containing sentence -- two hand-set numbers whose 1.25 ratio disappears
-        -- inside sw_score's `weight * (rng % 100000)`, so the stream was effectively
-        -- unsteered while the adjudicated belief sat one column over, computed for
-        -- the ORDER BY and then discarded. wt is that belief now; eff_mu and the
-        -- weight array are both bigint at the same fp scale, so nothing is rescaled.
-        -- GREATEST(.,0) keeps a refuted source from flipping sw_score's sign instead
-        -- of merely ranking last. The SENT boundary's weight 0 is set in `seq`.
-        --
-        -- GROUP BY gid, not DISTINCT (gid, wt, is_core): a gloss reachable through
-        -- two def-band relation types, or present in both arms, produced two rows
-        -- under DISTINCT and contributed its token stream twice -- the exact thing
-        -- the comment above forbids.
-        SELECT g.gid, MAX(g.wt) AS wt, bool_or(g.is_core) AS is_core FROM (
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    WITH elected AS MATERIALIZED (
+        SELECT e.tok AS topic_word, e.synset_id AS syn
+        FROM converse.elect(p_prompt) e
+    ),
+    gids AS MATERIALIZED (
+        SELECT g.gid, MAX(g.wt) AS wt, bool_or(g.is_core) AS is_core
+        FROM elected el
+        CROSS JOIN LATERAL (
             SELECT c.object_id AS gid,
-                   GREATEST(consensus.eff_mu(c.rating, c.rd), 0) AS wt, true AS is_core,
-                   consensus.eff_mu(c.rating, c.rd) AS mu
+                   GREATEST(consensus.eff_mu(c.rating, c.rd), 0) AS wt,
+                   true AS is_core
             FROM laplace.consensus c
-            WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
+            WHERE c.subject_id = el.syn
+              AND c.type_id = ANY (laplace.relation_band_types(1))
             UNION ALL
             SELECT co.entity_id,
                    GREATEST(COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)),
                                      consensus.glicko2_neutral_mu()), 0),
-                   false,
-                   COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)), consensus.glicko2_neutral_mu())
-            FROM structural.containers_of(topic_word, 1, p_corpus_limit) co
+                   false
+            FROM structural.containers_of(el.topic_word, 1, p_corpus_limit) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
             GROUP BY co.entity_id
         ) g
+        WHERE el.syn IS NOT NULL
         GROUP BY g.gid
     ),
     toks AS (
-        -- The WHOLE attested constituent sequence, at whatever tier the content
-        -- decomposed into. NO ctier filter: tier is a FLOOR, never an identity,
-        -- so selecting the walk's alphabet by tier is a tokenizer -- the fixed
-        -- vocabulary assumption this engine exists to replace.
-        --
-        -- What the filter discarded, MEASURED over 12 containers of 'water':
-        --   ctier 0 : 164 realize.constituents,  12 distinct  <- the separators
-        --   ctier 2 : 144 realize.constituents,  94 distinct  <- the words
-        -- The separators were in the trajectory all along, in attested order.
-        -- Dropping them is why REALIZE had to invent a ' ', false for every script
-        -- that does not space its words.
-        --
-        -- The letter-by-letter worry the old comment recorded is real but narrow:
-        -- a ONE-WORD gloss, where the tier-is-a-floor collapse makes the gloss root
-        -- its own word, so unpacking reaches that word's codepoints. 12 distinct
-        -- tier-0 ids across 12 sentences is punctuation, not spelling -- a word is
-        -- a single tier-2 id. The cnt >= 2 guard below already drops the degenerate
-        -- one-word case, and that is what actually handled it.
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
         CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
     ),
-    -- The whitespace classification that sat here is GONE. It rendered every
-    -- DISTINCT token to text to ask "is this blank" -- MEASURED on 'water' (1,645
-    -- distinct tokens over 400 containers) at 29,899ms of a 48,435ms
-    -- converse_walk, 18ms per token, purely to answer a predicate.
-    --
-    -- Against this stream it was a NO-OP as well as a cost: `toks` restricts to
-    -- u.ctier = 2, and separator tokens live below tier 2, so the set it filtered
-    -- could not contain one. Removing it left the emitted token sequence
-    -- byte-identical and cut converse_walk 39,588ms -> 27,760ms.
-    --
-    -- The general form of the mistake is rendering an entity to text in order to
-    -- classify it. corpus_whitespace_vocab_indices had the same shape and reading
-    -- the attested General_Category instead measured 22.6ms against 29,899ms
-    -- with zero disagreement (#688/#689). Nothing here needs to classify at all,
-    -- so this just goes.
     kept AS MATERIALIZED (
         SELECT q.* FROM (
             SELECT t.gid, t.wt, t.is_core, t.entity_id,
@@ -181,106 +66,59 @@ BEGIN
         ) q
         WHERE q.cnt >= 2
     ),
-    -- QUERY x KEY. The query is the oriented topic `syn`; the key is a stream token;
-    -- the score is the adjudicated belief on the edge BETWEEN them, either direction.
-    -- A per-source prior cannot express this: it gives every token of a sentence the
-    -- same weight regardless of the prompt, so it is a single-token scalar, which
-    -- INVENTION §7 forbids as a ranking key. Edge-conditioned, the same token scores
-    -- differently under a different topic -- which is what makes it attention rather
-    -- than a frequency prior.
-    --
-    -- = ANY(array), never a join: laplace.consensus is LIST(type_id) with hash
-    -- sub-partitions and this constrains neither side's partition key, so a join
-    -- plans as a full index-only scan of every partition.
     tokset AS MATERIALIZED (
         SELECT DISTINCT k.entity_id AS id FROM kept k
     ),
     qk AS MATERIALIZED (
-        SELECT e.id, MAX(e.mu) AS mu FROM (
+        SELECT e.id, MAX(e.mu) AS mu
+        FROM elected el
+        CROSS JOIN LATERAL (
             SELECT c.object_id AS id, consensus.eff_mu(c.rating, c.rd) AS mu
             FROM laplace.consensus c
-            WHERE c.subject_id = syn
+            WHERE c.subject_id = el.syn
               AND c.object_id = ANY (ARRAY(SELECT t.id FROM tokset t))
             UNION ALL
             SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
             FROM laplace.consensus c
-            WHERE c.object_id = syn
+            WHERE c.object_id = el.syn
               AND c.subject_id = ANY (ARRAY(SELECT t.id FROM tokset t))
         ) e
+        WHERE el.syn IS NOT NULL
         GROUP BY e.id
     ),
     seq AS MATERIALIZED (
-        -- Each sentence's tokens in order, then one SENT boundary (weight 0)
-        -- ordered past every real token of its sentence. Weight is the query-key
-        -- belief where the topic and the token are bound by testimony, and falls back
-        -- to the source's own belief where they are not -- absence of a direct edge is
-        -- not evidence of worthlessness, and dropping to zero there would be an
-        -- operator-invented floor.
-        -- NO FALLBACK. A token the topic has no attested relation to weighs zero,
-        -- because that is what the substrate says about it: absence is provable and
-        -- first-class (§8), not a gap to be filled with the source's prior. Filling it
-        -- was manufacturing a score no witness deposited, and it is also what made the
-        -- steer unable to matter -- every token arrived pre-scored whether or not any
-        -- testimony bound it to this prompt.
-        --
-        -- A stream that goes quiet under this is ABSTAINING, which is the lawful
-        -- answer here ("Abstain = zero rows, never fabricate"), not a failure to be
-        -- engineered around by widening the neighbourhood until something scores.
         SELECT k.gid, k.is_core, GREATEST(COALESCE(q.mu, 0), 0) AS wt, k.entity_id AS id, k.rn
         FROM kept k LEFT JOIN qk q ON q.id = k.entity_id
         UNION ALL
-        SELECT DISTINCT k.gid, k.is_core, 0::bigint, SENT, 2147483647::bigint
+        SELECT DISTINCT k.gid, k.is_core, 0::bigint, '\x00'::bytea, 2147483647::bigint
         FROM kept k
-    )
-    SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
-           (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
-           -- Core starts when the gloss survives; otherwise the fall-through
-           -- the toks comment promises: a one-word gloss (an OMW/Wiktionary
-           -- translation like "roi") leaves no core rows, and the walk seeds
-           -- from the on-topic tier-3 usage sentences instead of going dark.
-           COALESCE(
-               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
-                 WHERE k.is_core AND k.rn = 1),
-               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
-                 WHERE k.rn = 1)),
-           (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
-             WHERE k.is_core AND k.gid = (
-                 SELECT k2.gid FROM kept k2 WHERE k2.is_core
-                 GROUP BY k2.gid ORDER BY max(k2.cnt) DESC, k2.gid LIMIT 1))
-    INTO stream, w, starts, core_seq;
-
-    n := COALESCE(array_length(stream,1), 0);
-    IF n < 3 OR starts IS NULL THEN
-        RETURN QUERY
-        SELECT s.seed, NULL::text
-        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
-        ORDER BY s.ord;
-        RETURN;
-    END IF;
-
-    -- SEED + WALK runs natively over every requested seed after the prompt's
-    -- orientation and corpus plan have been built ONCE. generation.probe used
-    -- to call converse.walk once per seed, rebuilding everything above for an
-    -- input that only changes the final RNG. This batch is the one implementation;
-    -- converse.walk below is its scalar compatibility wrapper.
-    --
-    -- REALIZE is also one batch over the union of emitted ids. No punctuation
-    -- scrub and no whitespace normalization. The old tail ran
-    -- regexp_replace('\s*[();:]\s*') then regexp_replace('\s+') because REALIZE
-    -- had just wedged a ' ' between every token, orphaning the brackets the gloss
-    -- actually attested. With separators carried through, the spacing IS the
-    -- corpus's -- scrubbing it overwrites testimony with a rule, and a
-    -- hardcoded-ASCII one ([();:] says nothing about U+3001, U+060C or U+0E5A).
-    RETURN QUERY
-    WITH emitted AS MATERIALIZED (
+    ),
+    corpus_arrays AS MATERIALIZED (
+        SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s) AS stream,
+               (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s) AS w,
+               COALESCE(
+                   (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+                     WHERE k.is_core AND k.rn = 1),
+                   (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+                     WHERE k.rn = 1)) AS starts,
+               (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
+                 WHERE k.is_core AND k.gid = (
+                     SELECT k2.gid FROM kept k2 WHERE k2.is_core
+                     GROUP BY k2.gid ORDER BY max(k2.cnt) DESC, k2.gid LIMIT 1)) AS core_seq
+    ),
+    emitted AS MATERIALIZED (
         SELECT s.ord, s.seed,
-               converse.steered_walk_raw(
-                   stream, w, COALESCE(core_seq, ARRAY[]::bytea[]), starts,
-                   p_steps, MINLEN,
-                   abs(COALESCE(s.seed,
-                       ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647
-               ) AS ids
+               CASE
+                   WHEN COALESCE(array_length(ca.stream, 1), 0) < 3 OR ca.starts IS NULL THEN NULL::bytea[]
+                   ELSE converse.steered_walk_raw(
+                       ca.stream, ca.w, COALESCE(ca.core_seq, ARRAY[]::bytea[]), ca.starts,
+                       p_steps, 5,
+                       abs(COALESCE(s.seed,
+                           ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647
+                   )
+               END AS ids
         FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        CROSS JOIN corpus_arrays ca
     ),
     ids AS MATERIALIZED (
         SELECT array_agg(DISTINCT u.id) AS a
@@ -306,7 +144,6 @@ BEGIN
     GROUP BY e.ord, e.seed
     ORDER BY e.ord;
 END;
-$$;
 
 -- Existing three-argument surface: an ordinal-preserving adapter to the one
 -- implementation. Omission requests the complete corpus rather than choosing
@@ -327,17 +164,13 @@ CREATE OR REPLACE FUNCTION converse.walk(p_prompt text,
                                          p_seed bigint,
                                          p_corpus_limit int)
     RETURNS text
-    LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    out_text text;
-BEGIN
-    SELECT b.reply INTO out_text
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT b.reply
     FROM generation.walk_batch(
         p_prompt, p_steps, ARRAY[p_seed]::bigint[], p_corpus_limit) b
     LIMIT 1;
-    RETURN out_text;
 END;
-$$;
 
 -- Scalar compatibility surface. All semantics live in the capacity-aware
 -- overload; omitted capacity means exact/unbounded.

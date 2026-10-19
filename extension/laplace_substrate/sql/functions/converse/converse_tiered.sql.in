@@ -139,7 +139,7 @@ BEGIN
 
     -- CONCEPTS per unit: tier-2 realize.constituents lifted to synsets. SET-BASED,
     -- NOT PER WORD (taxonomy.top_synset per row hung at 73s for 48 dog units).
-    -- Fence HAS_SENSE family once (incl. dynamic children via relation_in_family).
+    -- Fence HAS_SENSE family once via IMMUTABLE manifest array so LIST partitions prune.
     SELECT coalesce(array_agg(q.unit ORDER BY q.unit, q.concept), ARRAY[]::bytea[]),
            coalesce(array_agg(q.concept ORDER BY q.unit, q.concept), ARRAY[]::bytea[])
     INTO c_unit, c_concept
@@ -148,11 +148,7 @@ BEGIN
         FROM unnest(u_id) AS p(id)
         CROSS JOIN LATERAL generation.trajectory_unpacked_points(p.id) tp
         JOIN laplace.consensus sc ON sc.subject_id = tp.entity_id
-        JOIN (
-            SELECT r.type_id AS id
-            FROM laplace.relation_registry() r
-            WHERE consensus.relation_in_family(r.type_id, 'HAS_SENSE')
-        ) fam ON fam.id = sc.type_id
+          AND sc.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
         WHERE tp.ctier = 2
         ORDER BY p.id, tp.entity_id, consensus.eff_mu(sc.rating, sc.rd) DESC, sc.object_id
     ) q;

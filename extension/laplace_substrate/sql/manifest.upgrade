@@ -111,10 +111,10 @@ functions/readback/render_text.sql.in
 functions/readback/render_text_fast.sql.in
 functions/readback/render_text_batch.sql.in
 functions/identity/relation_type_id.sql.in
-functions/realize/realize_synset_lemma.sql.in
 generated/relation_set_ids.sql.in
-functions/realize/realize_has_name.sql.in
 generated/relation_family_ids.sql.in
+functions/realize/realize_synset_lemma.sql.in
+functions/realize/realize_has_name.sql.in
 functions/realize/resolve_name.sql.in
 functions/realize/realize_batch.sql.in
 functions/realize/resolve_name_batch.sql.in
@@ -215,9 +215,19 @@ functions/converse/recall.sql.in
 functions/converse/witness_precedes_chain.sql.in
 functions/converse/non_kin_assoc_types.sql.in
 functions/converse/converse_facts.sql.in
+functions/realize/realize.sql.in
 functions/converse/converse_about.sql.in
 functions/converse/converse.sql.in
 functions/converse/steered_walk_raw.sql.in
+functions/variant/trajectory_unpacked_points.sql.in
+functions/structural/containers_of.sql.in
+functions/relation/relation_band_types.sql.in
+functions/corpus/separator_ids.sql.in
+functions/highway/laplace_highway_popcount.sql.in
+functions/converse/forward_pass.sql.in
+functions/structural/geometry_successors.sql.in
+functions/lexical/senses.sql.in
+functions/taxonomy/bubble_up_batch.sql.in
 functions/converse/converse_walk.sql.in
 functions/converse/converse_compose.sql.in
 functions/converse/generation_probe.sql.in
@@ -229,6 +239,8 @@ functions/converse/chat.sql.in
 functions/converse/session_trajectory.sql.in
 functions/converse/recall_session.sql.in
 functions/converse/session_turns.sql.in
+functions/structural/entity_curve.sql.in
+functions/structural/word_anchor.sql.in
 functions/converse/structural_neighbors.sql.in
 functions/converse/structural_neighbors_of.sql.in
 functions/converse/structural_locale.sql.in
@@ -241,11 +253,8 @@ functions/cascade/cascade.sql.in
 functions/structural/word_curve.sql.in
 functions/structural/word_shape_distance.sql.in
 functions/structural/anagrams_of.sql.in
-functions/structural/containers_of.sql.in
-functions/converse/forward_pass.sql.in
 functions/converse/contrast.sql.in
 functions/structural/browse_named_entities.sql.in
-functions/structural/geometry_successors.sql.in
 functions/structural/collocates.sql.in
 functions/structural/explore_anchor_neighbors.sql.in
 functions/structural/nearest_neighbors_4d.sql.in
@@ -292,7 +301,6 @@ functions/generation/consensus_adjacency.sql.in
 functions/generation/foundry_vocab.sql.in
 functions/generation/grapheme_floor_vocab.sql.in
 functions/generation/grapheme_order.sql.in
-functions/corpus/separator_ids.sql.in
 functions/generation/word_adjacency.sql.in
 functions/generation/word_order.sql.in
 functions/generation/sentence_order.sql.in
@@ -322,7 +330,6 @@ functions/consensus/entity_has_type.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
 functions/highway/relation_highway.sql.in
 functions/converse/relation_bands.sql.in
-functions/relation/relation_band_types.sql.in
 functions/highway/laplace_highway_mask_bits.sql.in
 functions/relation/relation_mask_types.sql.in
 functions/generation/consensus_layer_plane_masked.sql.in
@@ -347,7 +354,6 @@ inference/translations.sql.in
 inference/translate_to.sql.in
 inference/language_coverage.sql.in
 inference/attention.sql.in
-functions/realize/realize.sql.in
 functions/realize/realize_canonical.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/edges.sql.in
@@ -362,9 +368,7 @@ functions/consensus/usage_overlap.sql.in
 functions/consensus/relate_path.sql.in
 functions/consensus/relation_summary.sql.in
 functions/consensus/gaps.sql.in
-functions/taxonomy/bubble_up_batch.sql.in
 functions/taxonomy/bubble_up.sql.in
-functions/lexical/senses.sql.in
 functions/taxonomy/retrieve_grounded.sql.in
 functions/taxonomy/top_synset.sql.in
 functions/taxonomy/synset_gloss.sql.in
@@ -373,8 +377,6 @@ functions/taxonomy/translation_sources.sql.in
 functions/contrast/consensus_subject_edges.sql.in
 functions/contrast/physicality_count.sql.in
 functions/variant/consensus_peer.sql.in
-functions/variant/trajectory_unpacked_points.sql.in
-functions/structural/entity_curve.sql.in
 functions/generation/metric_edges.sql.in
 functions/converse/execute_prompt.sql.in
 functions/variant/entity_tier_of.sql.in
@@ -406,7 +408,6 @@ functions/corpus/corpus_whitespace_vocab_indices.sql.in
 functions/geometry/entity_physicality_coord.sql.in
 functions/geometry/entity_container_degree.sql.in
 functions/highway/laplace_highway_match.sql.in
-functions/highway/laplace_highway_popcount.sql.in
 functions/highway/laplace_highway_band_mask.sql.in
 functions/highway/consensus_band_edges.sql.in
 functions/ops/substrate_pulse.sql.in
@@ -444,7 +445,6 @@ views/v_word_senses.sql.in
 functions/lexical/senses_with_context.sql.in
 functions/structural/word_anchor.sql.in
 functions/geometry/structural_cluster_batch.sql.in
-functions/geometry/structural_cluster.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/drop_retired_ducet_geometry.sql.in
 functions/analysis/laplace_entity_attestations.sql.in

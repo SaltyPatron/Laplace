@@ -2,7 +2,8 @@
 -- Foldable family membership: see the note in the generator.
 CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
     RETURNS bytea[]
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fam$
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT CASE p_family
         WHEN 'ADJACENT_TO_PIXEL' THEN ARRAY[laplace.relation_type_id('ADJACENT_TO_PIXEL')]
         WHEN 'ALSO_SEE' THEN ARRAY[laplace.relation_type_id('ALSO_SEE')]
@@ -238,5 +239,5 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'X_REASON' THEN ARRAY[laplace.relation_type_id('X_REASON')]
         WHEN 'X_WANT' THEN ARRAY[laplace.relation_type_id('X_WANT')]
         ELSE NULL::bytea[]
-    END
-$fam$;
+    END;
+END;

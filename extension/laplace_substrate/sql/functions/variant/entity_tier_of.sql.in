@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.entity_tier_of(bytea);
 -- BEGIN ATOMIC: canonical entity tier is the retained lowest structural floor.
 CREATE OR REPLACE FUNCTION generation.entity_tier_of(p_entity bytea)
     RETURNS int
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT COALESCE(
         (SELECT e.tier::int FROM laplace.entities e WHERE e.id = p_entity),

@@ -28,6 +28,7 @@ int laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int ca
 int laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_ids_array,
                                               ArrayType *subject_ids_array,
                                               uint8_t *bm, int candidate_count);
+int laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
 
 /* Presence of physicality rows by their own id. A physicality can be staged
  * for an entity already stored, so physicality presence is never inferred from

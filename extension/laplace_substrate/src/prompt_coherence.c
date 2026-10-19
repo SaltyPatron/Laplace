@@ -368,18 +368,20 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         args[0] = PointerGetDatum(prompt);
         portal = SPI_cursor_open_with_args(
             "pc_cand",
-            /* bubble_up_batch runs once over every resolved id, with a NULL cut
-             * that keeps the complete candidate field. The token's resolved
-             * language and the sense's language are read for comparison by id.
-             * Row order carries no weight: each row is appended and indexed by
-             * token. */
+            /* b.sense_id is batched through word_language_candidates_batch once
+             * instead of calling scalar converse.word_language(b.sense_id) per row. */
             "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
             "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
-            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)) "
+            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)), "
+            "     s AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT b.sense_id "
+            "         FROM b WHERE b.sense_id IS NOT NULL ORDER BY b.sense_id) AS ids), "
+            "     lr AS MATERIALIZED (SELECT l.word, l.lang, "
+            "         row_number() OVER (PARTITION BY l.word ORDER BY l.mu DESC, l.lang) AS rn "
+            "         FROM s CROSS JOIN LATERAL converse.word_language_candidates_batch(s.ids) l) "
             "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
-            "       b.witnesses::bigint, p.language, "
-            "       converse.word_language(b.sense_id) "
+            "       b.witnesses::bigint, p.language, lr.lang "
             "FROM p JOIN b ON b.term = p.id "
+            "LEFT JOIN lr ON lr.word = b.sense_id AND lr.rn = 1 "
             "WHERE p.id IS NOT NULL AND b.synset_id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);
 
@@ -511,6 +513,68 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         }
         syn_arr = construct_array(syn_datums, n_syn, BYTEAOID, -1, false, TYPALIGN_INT);
         MemoryContextSwitchTo(old);
+    }
+
+    /* ---- single-token fast path: coherence and relation naming are zero when
+     * only one token resolved; compute total_mass via set aggregation in SQL
+     * instead of streaming every incident edge into C. ---- */
+    {
+        bool  multi_tok = false;
+        int32 first_ord = cands[0].ord;
+
+        for (int i = 1; i < n_cand; i++)
+        {
+            if (cands[i].ord != first_ord)
+            {
+                multi_tok = true;
+                break;
+            }
+        }
+
+        if (!multi_tok)
+        {
+            Oid   argtypes[1] = { BYTEAARRAYOID };
+            Datum args[1] = { PointerGetDatum(syn_arr) };
+            int   rc = SPI_execute_with_args(
+                "SELECT m.id, sum(m.mass)::float8 FROM ("
+                "  SELECT c.subject_id AS id, "
+                "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
+                "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
+                "  FROM laplace.consensus c WHERE c.subject_id = ANY($1) GROUP BY c.subject_id "
+                "  UNION ALL "
+                "  SELECT c.object_id AS id, "
+                "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
+                "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
+                "  FROM laplace.consensus c WHERE c.object_id = ANY($1) GROUP BY c.object_id"
+                ") m GROUP BY m.id",
+                1, argtypes, args, NULL, true, 0);
+
+            if (rc == SPI_OK_SELECT)
+            {
+                for (uint64 r = 0; r < SPI_processed; r++)
+                {
+                    HeapTuple   tup = SPI_tuptable->vals[r];
+                    TupleDesc   td = SPI_tuptable->tupdesc;
+                    bool        isnull;
+                    bytea      *id = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
+                    double      mass;
+                    PcSynEntry *me;
+
+                    if (isnull || VARSIZE_ANY_EXHDR(id) != 16)
+                        continue;
+                    mass = DatumGetFloat8(SPI_getbinval(tup, td, 2, &isnull));
+                    if (isnull)
+                        continue;
+                    me = (PcSynEntry *) hash_search(syn_h, VARDATA_ANY(id), HASH_FIND, NULL);
+                    if (me == NULL)
+                        continue;
+                    for (int i = 0; i < me->n_idx; i++)
+                        cands[me->idx[i]].total_mass += mass;
+                }
+                SPI_freetuptable(SPI_tuptable);
+            }
+            goto emit_winners;
+        }
     }
 
     /* ---- coherence: two indexed range reads, O(1) probe per edge ---- */
@@ -837,6 +901,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         }
     }
 
+emit_winners:
     /* ---- emit one row per token: its elected sense ---- */
     {
         for (int i = 0; i < n_cand; i++)

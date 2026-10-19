@@ -4,55 +4,48 @@
 DROP FUNCTION IF EXISTS laplace.structural_neighbors(text, integer);
 CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
-    LANGUAGE plpgsql STABLE AS $sn$
-DECLARE
-    v_id    bytea;
-    v_coord geometry;
-    v_curve geometry;
-BEGIN
-    SELECT w.id, w.coord, structural.entity_curve(w.id)
-      INTO v_id, v_coord, v_curve
-    FROM laplace.v_word_points w
-    JOIN converse.prompt_state(p_word) s ON w.id = s.id
-    WHERE w.coord IS NOT NULL
-    ORDER BY s.ord, w.physicality_id
-    LIMIT 1;
-    IF v_id IS NULL OR public.laplace_direction_4d(v_coord) IS NULL THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    WITH nearest AS (
-        SELECT w.id AS entity_id, w.coord,
-               public.laplace_angular_distance_4d(w.coord, v_coord) AS geo
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH anchor AS MATERIALIZED (
+        SELECT w.id AS v_id, w.coord AS v_coord, structural.entity_curve(w.id) AS v_curve
         FROM laplace.v_word_points w
-        WHERE w.id <> v_id
+        JOIN converse.prompt_state(p_word) s ON w.id = s.id
+        WHERE w.coord IS NOT NULL
           AND public.laplace_direction_4d(w.coord) IS NOT NULL
+        ORDER BY s.ord, w.physicality_id
+        LIMIT 1
+    ),
+    nearest AS MATERIALIZED (
+        SELECT w.id AS entity_id, w.coord,
+               public.laplace_angular_distance_4d(w.coord, a.v_coord) AS geo
+        FROM anchor a
+        JOIN laplace.v_word_points w ON w.id <> a.v_id
+        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
         ORDER BY public.laplace_direction_4d(w.coord)
-                 <<->> public.laplace_direction_4d(v_coord)
-        LIMIT p_k),
-    -- Resolve via the full mesh in ONE realize_batch over the <= p_k survivors
-    -- (was: scalar realize per neighbour). Hubs surface as their real word;
-    -- only truly unlabelable nodes drop (abstention, no hex here by design).
-    ordered AS (
-        SELECT t.*, row_number() OVER (ORDER BY t.geo) AS ord
+                 <<->> public.laplace_direction_4d(a.v_coord)
+        LIMIT p_k
+    ),
+    ordered AS MATERIALIZED (
+        SELECT t.entity_id, t.geo, row_number() OVER (ORDER BY t.geo) AS ord
         FROM nearest t
     ),
-    curves AS (
+    curves AS MATERIALIZED (
         SELECT o.entity_id, o.geo, o.ord, structural.entity_curve(o.entity_id) AS curve
         FROM ordered o
     ),
-    labels AS (
+    labels AS MATERIALIZED (
         SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
-    SELECT r.lbl, r.geo, r.frechet FROM (
+    SELECT r.lbl, r.geo, r.frechet
+    FROM (
         SELECT labels.l[c.ord] AS lbl, c.geo, c.ord,
-               CASE WHEN c.curve IS NOT NULL AND v_curve IS NOT NULL
-                    THEN public.laplace_frechet_4d(c.curve, v_curve) END AS frechet
-        FROM curves c, labels
+               CASE WHEN c.curve IS NOT NULL AND a.v_curve IS NOT NULL
+                    THEN public.laplace_frechet_4d(c.curve, a.v_curve) END AS frechet
+        FROM curves c
+        CROSS JOIN labels
+        CROSS JOIN anchor a
     ) r
     WHERE r.lbl IS NOT NULL AND r.lbl <> ''
     ORDER BY r.ord;
 END;
-$sn$;

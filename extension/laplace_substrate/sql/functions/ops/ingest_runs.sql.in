@@ -114,8 +114,6 @@ RETURNS TABLE(
     input_units_total bigint)
 LANGUAGE sql
 VOLATILE
-SECURITY DEFINER
-SET search_path = pg_catalog, laplace, ops
 BEGIN ATOMIC
     WITH dead AS (
         UPDATE laplace.ingest_run_journal j
@@ -148,8 +146,6 @@ CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
 RETURNS SETOF laplace.ingest_run_journal
 LANGUAGE sql
 STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog, laplace, ops
 BEGIN ATOMIC
     SELECT jsonb_populate_record(
                j,

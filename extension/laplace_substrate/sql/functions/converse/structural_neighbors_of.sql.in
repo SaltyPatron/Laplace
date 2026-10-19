@@ -18,55 +18,47 @@ CREATE OR REPLACE FUNCTION structural.neighbors_of(
         radius      double precision,
         geodesic    double precision,
         frechet     double precision)
-    LANGUAGE plpgsql STABLE
-    AS $sn$
-DECLARE
-    v_coord geometry;
-    v_curve geometry;
-BEGIN
-    SELECT a.coord, structural.entity_curve(p_id)
-      INTO v_coord, v_curve
-    FROM structural.word_anchor(p_id) a;
-    IF v_coord IS NULL OR public.laplace_direction_4d(v_coord) IS NULL THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    WITH nearest AS (
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH anchor AS MATERIALIZED (
+        SELECT a.coord AS v_coord, structural.entity_curve(p_id) AS v_curve
+        FROM structural.word_anchor(p_id) a
+        WHERE a.coord IS NOT NULL
+          AND public.laplace_direction_4d(a.coord) IS NOT NULL
+    ),
+    nearest AS MATERIALIZED (
         SELECT w.id AS entity_id, w.coord, w.radius_origin,
-               public.laplace_angular_distance_4d(w.coord, v_coord) AS geo
-        FROM laplace.v_word_points w
-        WHERE w.id <> p_id
-          AND public.laplace_direction_4d(w.coord) IS NOT NULL
+               public.laplace_angular_distance_4d(w.coord, a.v_coord) AS geo
+        FROM anchor a
+        JOIN laplace.v_word_points w ON w.id <> p_id
+        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
         ORDER BY public.laplace_direction_4d(w.coord)
-                 <<->> public.laplace_direction_4d(v_coord)
-        LIMIT p_k),
-    ordered AS (
-        SELECT n.*, row_number() OVER (ORDER BY n.geo) AS ord
+                 <<->> public.laplace_direction_4d(a.v_coord)
+        LIMIT p_k
+    ),
+    ordered AS MATERIALIZED (
+        SELECT n.entity_id, n.coord, n.radius_origin, n.geo,
+               row_number() OVER (ORDER BY n.geo) AS ord
         FROM nearest n
     ),
-    curves AS (
-        -- Cache realized curves once per survivor (never rebuild inside Frechet).
+    curves AS MATERIALIZED (
         SELECT o.entity_id, o.coord, o.radius_origin, o.geo, o.ord,
                structural.entity_curve(o.entity_id) AS curve
         FROM ordered o
     ),
-    labels AS (
-        -- Full-mesh resolution via ONE realize_batch over the <= p_k survivors
-        -- (was: scalar realize per neighbour): synset/ILI hubs resolve through
-        -- the name/synset-lemma/translation arms to the real word. Unresolved
-        -- identities receive an honest marker rather than fabricated content.
+    labels AS MATERIALIZED (
         SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
     SELECT c.entity_id,
            COALESCE(NULLIF(labels.l[c.ord], ''), 'Unrealized entity'),
-           ST_X(c.coord), ST_Y(c.coord), ST_Z(c.coord), ST_M(c.coord),
+           public.ST_X(c.coord), public.ST_Y(c.coord), public.ST_Z(c.coord), public.ST_M(c.coord),
            c.radius_origin,
            c.geo,
-           CASE WHEN c.curve IS NOT NULL AND v_curve IS NOT NULL
-                THEN public.laplace_frechet_4d(c.curve, v_curve) END
-    FROM curves c, labels
+           CASE WHEN c.curve IS NOT NULL AND a.v_curve IS NOT NULL
+                THEN public.laplace_frechet_4d(c.curve, a.v_curve) END
+    FROM curves c
+    CROSS JOIN labels
+    CROSS JOIN anchor a
     ORDER BY c.ord;
 END;
-$sn$;

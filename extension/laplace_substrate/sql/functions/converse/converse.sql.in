@@ -44,23 +44,9 @@
 DROP FUNCTION IF EXISTS laplace.converse(text, bytea);
 CREATE OR REPLACE FUNCTION converse.converse(p_prompt text, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE plpgsql STABLE AS $$
-DECLARE
-    syn bytea;
-BEGIN
-    -- ORIENT: the same native election converse.chat() runs. Key order is converse.chat()'s,
-    -- verbatim. Each signal is an explicit ordered dimension; unlike the retired
-    -- specificity*denote_mu product, no unit conversion or weighting constant can
-    -- silently change the election as the seed grows.
-    -- Delegates to converse.elect_sense -- the ONE election body (spec 37: "one
-    -- canonical implementation per operation fact"). The key order used to be
-    -- inlined here and in four other files; identical copies are still copies.
-    syn := converse.elect_sense(p_prompt);
-
-    IF syn IS NULL THEN
-        RETURN NULL;
-    END IF;
-
-    RETURN converse.about(syn, p_lang);
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT converse.about(syn, p_lang)
+      FROM (SELECT converse.elect_sense(p_prompt) AS syn) e
+     WHERE e.syn IS NOT NULL;
 END;
-$$;

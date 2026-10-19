@@ -12,7 +12,15 @@ CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT e.tier, e.type_id
+    SELECT e.tier,
+           COALESCE((
+               SELECT c.object_id
+               FROM laplace.consensus c
+               WHERE c.subject_id = e.id
+                 AND c.type_id = ANY(consensus.relation_family_ids('IS_TYPED_AS'))
+               ORDER BY c.rating DESC, c.object_id ASC
+               LIMIT 1
+           ), e.type_id) AS type_id
     FROM laplace.entities e
     WHERE e.id = p_id;
 END;
@@ -63,7 +71,16 @@ CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.id, e.tier, e.type_id
+    SELECT e.id,
+           e.tier,
+           COALESCE((
+               SELECT c.object_id
+               FROM laplace.consensus c
+               WHERE c.subject_id = e.id
+                 AND c.type_id = ANY(consensus.relation_family_ids('IS_TYPED_AS'))
+               ORDER BY c.rating DESC, c.object_id ASC
+               LIMIT 1
+           ), e.type_id) AS type_id
     FROM laplace.entities e
     WHERE e.id = ANY(COALESCE(p_ids, '{}'::bytea[]))
     ORDER BY e.id;

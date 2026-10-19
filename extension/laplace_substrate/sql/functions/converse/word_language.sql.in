@@ -35,10 +35,11 @@ END;
 
 CREATE OR REPLACE FUNCTION converse.word_language(p_word bytea)
     RETURNS bytea
-    LANGUAGE sql LAPLACE_STABLE_STRICT
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT v.lang
     FROM converse.word_language_candidates_batch(ARRAY[p_word]) v
+    WHERE p_word IS NOT NULL
     ORDER BY v.mu DESC, v.lang
     LIMIT 1;
 END;

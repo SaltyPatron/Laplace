@@ -32,7 +32,7 @@
 DROP FUNCTION IF EXISTS laplace.prompt_state(text);
 CREATE OR REPLACE FUNCTION converse.prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH tokens AS MATERIALIZED (
         SELECT pw.ord, pw.word, pw.id

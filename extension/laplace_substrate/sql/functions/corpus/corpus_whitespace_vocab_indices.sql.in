@@ -71,22 +71,19 @@
 DROP FUNCTION IF EXISTS laplace.corpus_whitespace_vocab_indices(bytea[]);
 CREATE OR REPLACE FUNCTION generation.corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
-    LANGUAGE plpgsql STABLE PARALLEL SAFE AS $$
-DECLARE
-    v_type bytea := laplace.relation_type_id('HAS_CHARACTER_PROPERTY');
-    v_sep  bytea[] := ARRAY[laplace.property_value_id('General_Category', 'Space_Separator'),
-                      laplace.property_value_id('General_Category', 'Line_Separator'),
-                      laplace.property_value_id('General_Category', 'Paragraph_Separator'),
-                      laplace.property_value_id('General_Category', 'Control')];
-BEGIN
-    RETURN QUERY
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH cat AS MATERIALIZED (
         SELECT a.subject_id AS id,
-               -- The UCD states a character's General_Category as [General_Category, value].
-               bool_or(a.object_id = ANY (v_sep)) AS is_sep
+               bool_or(a.object_id = ANY (ARRAY[
+                   laplace.property_value_id('General_Category', 'Space_Separator'),
+                   laplace.property_value_id('General_Category', 'Line_Separator'),
+                   laplace.property_value_id('General_Category', 'Paragraph_Separator'),
+                   laplace.property_value_id('General_Category', 'Control')
+               ])) AS is_sep
         FROM laplace.attestations a
-        WHERE a.type_id = v_type              -- bound literal -> LIST prune at plan time
-          AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id
+        WHERE a.type_id = laplace.relation_type_id('HAS_CHARACTER_PROPERTY')
+          AND a.subject_id = ANY (p_vocab)
         GROUP BY a.subject_id
     ), missing AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT v.id ORDER BY v.id), '{}'::bytea[]) AS ids
@@ -105,4 +102,3 @@ BEGIN
     LEFT JOIN rendered r ON r.id = v.id
     WHERE COALESCE(cat.is_sep, realize.is_all_whitespace(r.s));
 END;
-$$;

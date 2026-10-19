@@ -166,6 +166,24 @@ try {
         }
         recreate { Migrate $(if($Database -eq 'application'){'app-nuke'}else{'nuke'}) }
     }
+    if($Operation -ne 'status' -and $Database -eq 'substrate'){
+        $deployExtDir=Join-Path $env:LAPLACE_DATA_ROOT 'deploy/share/extension'
+        if(-not(Test-Path -LiteralPath $deployExtDir -PathType Container)){
+            $deployExtDir=Join-Path $env:LAPLACE_DATA_ROOT 'deploy/pgsql-18/share/extension'
+        }
+        foreach($ext in 'laplace_geom','laplace_substrate'){
+            $installed=(Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected)
+            $avail=(Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected)
+            if($installed -and $avail -and $installed -cne $avail){
+                $upgradeSrc=Join-Path $deployExtDir "${ext}_upgrade.sql"
+                if(Test-Path -LiteralPath $upgradeSrc -PathType Leaf){
+                    Copy-Item -LiteralPath $upgradeSrc -Destination (Join-Path $deployExtDir "${ext}--${installed}--${avail}.sql") -Force
+                }
+                Write-Host "Upgrading extension $ext from $installed to $avail in $selected"
+                $null=Query "SET lock_timeout = '20s'; ALTER EXTENSION $ext UPDATE TO '$avail';" $selected
+            }
+        }
+    }
     if($Operation -ne 'status'){
         # Recreating an absent database cannot copy its old grants; the access declaration owns them.
         $null=Query ('REVOKE CONNECT ON DATABASE "'+$selected+'" FROM PUBLIC; GRANT CONNECT ON DATABASE "'+$selected+'" TO "'+$role+'";')

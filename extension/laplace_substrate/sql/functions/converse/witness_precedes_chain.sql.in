@@ -17,43 +17,45 @@
 DROP FUNCTION IF EXISTS laplace.witness_precedes_chain(text, bytea);
 CREATE OR REPLACE FUNCTION converse.witness_precedes_chain(p_text text, p_source bytea)
     RETURNS int
-    LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    r_prec bytea := laplace.relation_type_id('PRECEDES');
-    ids    bytea[];
-    n      int;
-    subs   bytea[];
-    objs   bytea[];
-    games  bigint[];
-    sums   bigint[];
-BEGIN
-    SELECT array_agg(id ORDER BY ord) INTO ids
-    FROM converse.prompt_state(p_text) WHERE id IS NOT NULL;
-    n := COALESCE(array_length(ids, 1), 0);
-    IF n < 2 THEN RETURN 0; END IF;
-
-    SELECT array_agg(d.s               ORDER BY d.s, d.cid),
-           array_agg(d.o               ORDER BY d.s, d.cid),
-           array_agg(d.g               ORDER BY d.s, d.cid),
-           array_agg(d.g * 1000000000  ORDER BY d.s, d.cid)
-      INTO subs, objs, games, sums
-    FROM (
-        SELECT p.s, p.o, count(*)::bigint AS g,
-               laplace.consensus_id(p.s, r_prec, p.o) AS cid
-        FROM (SELECT ids[i] AS s, ids[i + 1] AS o
-              FROM generate_series(1, n - 1) i) p
-        GROUP BY p.s, p.o
-    ) d;
-
-    PERFORM consensus.upsert(
-        subs,
-        array_fill(r_prec, ARRAY[cardinality(subs)]),
-        objs,
-        array_fill(consensus.glicko2_initial_rd(), ARRAY[cardinality(subs)]),
-        games,
-        sums,
-        array_fill(now(), ARRAY[cardinality(subs)]));
-
-    RETURN n - 1;
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    WITH toks AS MATERIALIZED (
+        SELECT array_agg(id ORDER BY ord) AS ids,
+               count(*)::int AS n
+        FROM converse.prompt_state(p_text)
+        WHERE id IS NOT NULL
+    ),
+    bigrams AS MATERIALIZED (
+        SELECT array_agg(d.s               ORDER BY d.s, d.cid) AS subs,
+               array_agg(d.o               ORDER BY d.s, d.cid) AS objs,
+               array_agg(d.g               ORDER BY d.s, d.cid) AS games,
+               array_agg(d.g * 1000000000  ORDER BY d.s, d.cid) AS sums
+        FROM toks t
+        CROSS JOIN LATERAL (
+            SELECT p.s, p.o, count(*)::bigint AS g,
+                   laplace.consensus_id(p.s, laplace.relation_type_id('PRECEDES'), p.o) AS cid
+            FROM (SELECT t.ids[i] AS s, t.ids[i + 1] AS o
+                  FROM generate_series(1, t.n - 1) i) p
+            GROUP BY p.s, p.o
+        ) d
+        WHERE t.n >= 2
+    ),
+    folded AS MATERIALIZED (
+        SELECT CASE
+                   WHEN t.n < 2 OR b.subs IS NULL THEN 0::bigint
+                   ELSE consensus.upsert_type(
+                       laplace.relation_type_id('PRECEDES'),
+                       b.subs,
+                       b.objs,
+                       array_fill(consensus.glicko2_initial_rd(), ARRAY[cardinality(b.subs)]),
+                       b.games,
+                       b.sums,
+                       array_fill(now(), ARRAY[cardinality(b.subs)]))
+               END AS affected
+        FROM toks t
+        CROSS JOIN bigrams b
+    )
+    SELECT GREATEST(t.n - 1, 0)
+    FROM toks t
+    CROSS JOIN folded f;
 END;
-$$;

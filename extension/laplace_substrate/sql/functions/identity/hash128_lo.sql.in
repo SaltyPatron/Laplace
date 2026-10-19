@@ -2,10 +2,5 @@
 -- advisory locks, and walk RNG.
 CREATE OR REPLACE FUNCTION laplace.hash128_lo(p_id bytea)
     RETURNS bigint
-    LANGUAGE sql
-    IMMUTABLE
-    STRICT
-    PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT ('x' || encode(substring(p_id FOR 8), 'hex'))::bit(64)::bigint;
-END;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_hash128_lo'
+    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

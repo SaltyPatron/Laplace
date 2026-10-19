@@ -16,19 +16,22 @@ if(-not $Installation){throw 'No IIS installation is configured. Use -Installati
 $c=Read-IisInstallation $Installation
 $operatorToken=if($env:LAPLACE_OPERATOR_TOKEN){$env:LAPLACE_OPERATOR_TOKEN}else{''}
 $apiKey=if($env:LAPLACE_API_KEY){$env:LAPLACE_API_KEY}else{''}
-if(-not $apiKey -and -not $operatorToken){
-    $devInstallation=if($env:LAPLACE_DEVELOPMENT_INSTALLATION){$env:LAPLACE_DEVELOPMENT_INSTALLATION}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
-    $credHelper=Join-Path (Split-Path -Parent $devInstallation) 'credentials.ps1'
-    if((Test-Path -LiteralPath $devInstallation -PathType Leaf) -and (Test-Path -LiteralPath $credHelper -PathType Leaf)){
+$devInstallation=if($env:LAPLACE_DEVELOPMENT_INSTALLATION){$env:LAPLACE_DEVELOPMENT_INSTALLATION}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
+$credHelper=Join-Path (Split-Path -Parent $devInstallation) 'credentials.ps1'
+if(-not $operatorToken -and (Test-Path -LiteralPath $devInstallation -PathType Leaf) -and (Test-Path -LiteralPath $credHelper -PathType Leaf)){
+    try {
         . $credHelper
         $devConfig=Get-Content -LiteralPath $devInstallation -Raw | ConvertFrom-Json
         $token=New-DevelopmentBaoSession $devConfig
         try {
             $path=(Get-DevelopmentSecretPaths $devConfig)['laplace-api'] -replace '^kv/', 'kv/data/'
             $operatorToken=(Invoke-DevelopmentBao $devConfig GET $path $token).data.data.operator_token
+            if($operatorToken){$apiKey=''}
         } finally {
             try { if($token){ $null=Invoke-DevelopmentBao $devConfig POST 'auth/token/revoke-self' $token @{} } } catch {}
         }
+    } catch {
+        if(-not $apiKey){throw}
     }
 }
 if(-not $apiKey -and -not $operatorToken){throw 'Authenticated publication verification requires an enrolled desktop identity, LAPLACE_OPERATOR_TOKEN, or LAPLACE_API_KEY.'}

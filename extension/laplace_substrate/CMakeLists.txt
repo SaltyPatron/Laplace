@@ -36,6 +36,8 @@ set(EXT_EXECUTION_SOURCES
     src/forward_respond.c
     src/trajectory_continuations.c
     src/trajectory_generate.c
+    src/realize_batch.c
+    src/prompt_coherence.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"

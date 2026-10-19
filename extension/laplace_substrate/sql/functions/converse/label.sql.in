@@ -4,37 +4,8 @@
 DROP FUNCTION IF EXISTS laplace.label(bytea);
 CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
     RETURNS text
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-BEGIN ATOMIC
-
-    -- A label is a surface, never a definition. An unresolved label abstains; a
-    -- content hash is an internal identity handle, not a surface.
-    -- The entity's own realization comes first: realize.render lexicalizes an identifier
-    -- through its bindings and renders content as its own surface. A name labels only
-    -- what has no surface. Name-first rendered the word "not" as "Nomatsiguenga" (its
-    -- ISO 639-3 code's language name).
-    SELECT COALESCE(
-        NULLIF(
-            regexp_replace(
-            regexp_replace(
-                regexp_replace(
-                    regexp_replace(
-                        regexp_replace(
-                            regexp_replace(
-                                regexp_replace(
-                                    regexp_replace(realize.render(p_id),
-                                        '^substrate/(?:type|relation|source|entity)/(.*)/v1$', '\1'),
-                                    '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
-                                '^source/file/(.+)/v1$', '\1'),
-                            '^repo:(.+)/v1$', '\1'),
-                        '^language:([a-z]{3})$', '\1'),
-                    '^ud/feature/(.+)$', '\1'),
-                '^tiny-codes/concept/(.+)/v1$', '\1'),
-            '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', ''),
-            ''),
-        realize.resolve_name(p_id))
-;
-END;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_label'
+    LANGUAGE C STABLE PARALLEL SAFE;
 
 -- realize.display_label_batch — the FINAL bounded-display projection used by Explore.
 --

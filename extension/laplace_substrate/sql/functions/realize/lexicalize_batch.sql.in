@@ -4,4 +4,4 @@ CREATE OR REPLACE FUNCTION realize.lexicalize_batch(
     p_ids bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text[]
     LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_lexicalize_batch';
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_lexicalize_batch';

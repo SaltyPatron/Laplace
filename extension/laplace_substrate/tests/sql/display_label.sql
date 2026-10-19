@@ -221,6 +221,73 @@ BEGIN
         RAISE EXCEPTION 'FAIL: lexicalization overrode a typed sense record''s parts: %', labels[1];
     END IF;
 
+    -- A reference anchor (an ILI composed as a tier-2 Word with IS_TYPED_AS in consensus)
+    -- reports its attested semantic type in ops.entity_facets / ops.entity_facets_batch
+    -- and lexicalizes to a tier-2 Word lemma ahead of an equally rated tier-3 Sentence phrase,
+    -- even when the Sentence phrase has a lexicographically smaller bytea id.
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (decode('00000000000000000000000000000001', 'hex'), 3, t_sent),
+        (decode('fffffffffffffffffffffffffffffffe', 'hex'), 2, t_word),
+        (decode('00023b79bc7914eb76187513d92f8f6d', 'hex'), 2, t_word),
+        (laplace.relation_type_id('IS_TYPED_AS'), 0, rel_meta)
+    ON CONFLICT DO NOTHING;
+    PERFORM realize.register_canonical('IS_TYPED_AS');
+    INSERT INTO laplace.physicalities
+        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/display/physicality/phrase-low-id'),
+         decode('00000000000000000000000000000001', 'hex'), 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.11,0.11,0.11,0.11),0), decode(repeat('3a',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(ending,1,1,0),
+             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
+        (public.laplace_hash128_blake3('test/display/physicality/word-high-id'),
+         decode('fffffffffffffffffffffffffffffffe', 'hex'), 1,
+         public.ST_SetSRID(public.ST_MakePoint(0.12,0.12,0.12,0.12),0), decode(repeat('3b',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(wolf,1,1,0)]), 1, now());
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
+                                   rating, rd, volatility, witness_count, last_observed_at)
+    VALUES
+        (laplace.consensus_id(decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
+                              laplace.relation_type_id('IS_TYPED_AS'),
+                              laplace.entity_type_id('CILI_Instance')),
+         decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
+         laplace.relation_type_id('IS_TYPED_AS'),
+         laplace.entity_type_id('CILI_Instance'),
+         1700000000000, 30000000000, 60000000, 1, now()),
+        (laplace.consensus_id(decode('00000000000000000000000000000001', 'hex'),
+                              senserel,
+                              decode('00023b79bc7914eb76187513d92f8f6d', 'hex')),
+         decode('00000000000000000000000000000001', 'hex'),
+         senserel,
+         decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
+         1700000000000, 30000000000, 60000000, 1, now()),
+        (laplace.consensus_id(decode('fffffffffffffffffffffffffffffffe', 'hex'),
+                              senserel,
+                              decode('00023b79bc7914eb76187513d92f8f6d', 'hex')),
+         decode('fffffffffffffffffffffffffffffffe', 'hex'),
+         senserel,
+         decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
+         1700000000000, 30000000000, 60000000, 1, now());
+
+    IF (SELECT f.type_id FROM ops.entity_facets(decode('00023b79bc7914eb76187513d92f8f6d', 'hex')) f)
+       IS DISTINCT FROM laplace.entity_type_id('CILI_Instance') THEN
+        RAISE EXCEPTION 'FAIL: ops.entity_facets ignored IS_TYPED_AS semantic type';
+    END IF;
+    IF (SELECT f.type_id FROM ops.entity_facets_batch(ARRAY[decode('00023b79bc7914eb76187513d92f8f6d', 'hex')]) f)
+       IS DISTINCT FROM laplace.entity_type_id('CILI_Instance') THEN
+        RAISE EXCEPTION 'FAIL: ops.entity_facets_batch ignored IS_TYPED_AS semantic type';
+    END IF;
+    IF (realize.lexicalize_batch(ARRAY[decode('00023b79bc7914eb76187513d92f8f6d', 'hex')]))[1]
+       IS DISTINCT FROM '狼' THEN
+        RAISE EXCEPTION 'FAIL: lexicalize_batch preferred tier-3 phrase over tier-2 word lemma';
+    END IF;
+    IF realize._synset_lemma(decode('00023b79bc7914eb76187513d92f8f6d', 'hex'), NULL)
+       IS DISTINCT FROM '狼' THEN
+        RAISE EXCEPTION 'FAIL: _synset_lemma preferred tier-3 phrase over tier-2 word lemma';
+    END IF;
+
     RAISE NOTICE 'display labels: Unicode exact, bounded containment preview, identity-bearing fallback';
 END
 $display_label$;

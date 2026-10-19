@@ -3,32 +3,5 @@
 DROP FUNCTION IF EXISTS laplace.render_batch(bytea[]);
 CREATE OR REPLACE FUNCTION realize.render_batch(p_ids bytea[])
     RETURNS text[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-BEGIN ATOMIC
-    WITH inp AS MATERIALIZED (
-        SELECT u.id, u.ord
-        FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
-    ), batches AS MATERIALIZED (
-        SELECT realize.lexicalize_batch(p_ids) AS words,
-               realize.render_text_batch(p_ids) AS bodies
-    ), primary_pass AS MATERIALIZED (
-        SELECT i.id, i.ord,
-               COALESCE(r.canonical,
-                        t.canonical,
-                        b.words[i.ord],
-                        chr(realize.codepoint_for_id(i.id)),
-                        CASE
-                            WHEN b.bodies[i.ord] ~ '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$'
-                            THEN COALESCE(realize._synset_lemma(i.id, NULL), b.bodies[i.ord])
-                            ELSE b.bodies[i.ord]
-                        END) AS val
-        FROM inp i
-        CROSS JOIN batches b
-        LEFT JOIN laplace.relation_registry() r ON r.type_id = i.id
-        LEFT JOIN laplace.entity_type_registry() t ON t.type_id = i.id
-    )
-    SELECT COALESCE(array_agg(
-               COALESCE(p.val, realize.resolve_name(p.id))
-               ORDER BY p.ord), '{}'::text[])
-    FROM primary_pass p;
-END;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_render_batch'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;

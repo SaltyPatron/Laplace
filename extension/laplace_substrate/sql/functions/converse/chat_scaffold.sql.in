@@ -23,68 +23,57 @@ CREATE OR REPLACE FUNCTION converse.chat_scaffold(
         p_labels text DEFAULT NULL,
         p_extra  text DEFAULT NULL)
     RETURNS text
-    LANGUAGE plpgsql STABLE PARALLEL SAFE AS $$
-DECLARE
-    en bytea := realize.canonical_id('language:eng');
-    bg bytea := realize.canonical_id('language:bul');
-    t  text := COALESCE(p_topic, '');
-    l  text := COALESCE(p_labels, '');
-    x  text := COALESCE(p_extra, '');
-BEGIN
-    IF p_key IS NULL THEN RETURN NULL; END IF;
-
-    -- English (explicit eng id, or NULL lang — today's chat leaves lang NULL when
-    -- the prompt carries no HAS_LANGUAGE evidence; English templates remain the
-    -- S9 default for that case, matching prior behaviour).
-    IF p_lang IS NULL OR p_lang = en THEN
-        RETURN CASE p_key
-            WHEN 'parts'      THEN initcap(t) || ' has parts such as ' || l || '.'
-            WHEN 'kinds'      THEN 'Kinds of ' || t || ' include ' || l || '.'
-            WHEN 'related'    THEN initcap(t) || ' is related to ' || l || '.'
-            WHEN 'core'       THEN 'That is the core of what I hold about ' || t || '.'
-            WHEN 'no_edges'   THEN 'I hold no witnessed edges for ' || t || ' in the selected bands yet.'
-            WHEN 'no_type'    THEN 'I hold no witnessed ' || lower(x) || ' for ' || t || ' yet.'
-            WHEN 'no_forward' THEN CASE WHEN t = ''
-                                   THEN 'No witnessed continuation was selected in this forward pass.'
-                                   ELSE 'No witnessed continuation was selected for ' || t || ' in this forward pass.'
-                               END
-            WHEN 'band'       THEN x || ': ' || l || '.'
-            ELSE NULL
-        END;
-    END IF;
-
-    IF p_lang = bg THEN
-        RETURN CASE p_key
-            WHEN 'parts'      THEN initcap(t) || ' има части като ' || l || '.'
-            WHEN 'kinds'      THEN 'Видове ' || t || ' включват ' || l || '.'
-            WHEN 'related'    THEN initcap(t) || ' е свързано с ' || l || '.'
-            WHEN 'core'       THEN 'Това е същността на това, което знам за ' || t || '.'
-            WHEN 'no_edges'   THEN 'Нямам засвидетелствани връзки за ' || t || ' в избраните ленти още.'
-            WHEN 'no_type'    THEN 'Нямам засвидетелствано ' || lower(x) || ' за ' || t || ' още.'
-            WHEN 'no_forward' THEN CASE WHEN t = ''
-                                   THEN 'Няма избрано засвидетелствано продължение в този ход.'
-                                   ELSE 'Няма избрано засвидетелствано продължение за ' || t || ' в този ход.'
-                               END
-            WHEN 'band'       THEN x || ': ' || l || '.'
-            ELSE NULL
-        END;
-    END IF;
-
-    -- Other languages: no English verbs. Band name (still English from the
-    -- catalog) is omitted so the line is not a mixed-language lie. An empty
-    -- forward pass uses a language-neutral absence marker instead of pretending
-    -- a translation exists. The topic arrived from the selected realization;
-    -- do not add a second case-folding policy merely to decorate an abstention.
-    RETURN CASE p_key
-        WHEN 'parts'      THEN initcap(t) || ': ' || l || '.'
-        WHEN 'kinds'      THEN initcap(t) || ': ' || l || '.'
-        WHEN 'related'    THEN initcap(t) || ': ' || l || '.'
-        WHEN 'core'       THEN initcap(t) || '.'
-        WHEN 'no_edges'   THEN initcap(t) || '.'
-        WHEN 'no_type'    THEN initcap(t) || '.'
-        WHEN 'no_forward' THEN CASE WHEN t = '' THEN '∅' ELSE t || ': ∅' END
-        WHEN 'band'       THEN l || '.'
-        ELSE NULL
-    END;
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH vars AS (
+        SELECT COALESCE(p_topic, '') AS t,
+               COALESCE(p_labels, '') AS l,
+               COALESCE(p_extra, '') AS x
+    )
+    SELECT CASE
+        WHEN p_key IS NULL THEN NULL::text
+        WHEN p_lang IS NULL OR p_lang = realize.canonical_id('language:eng') THEN
+            CASE p_key
+                WHEN 'parts'      THEN initcap(v.t) || ' has parts such as ' || v.l || '.'
+                WHEN 'kinds'      THEN 'Kinds of ' || v.t || ' include ' || v.l || '.'
+                WHEN 'related'    THEN initcap(v.t) || ' is related to ' || v.l || '.'
+                WHEN 'core'       THEN 'That is the core of what I hold about ' || v.t || '.'
+                WHEN 'no_edges'   THEN 'I hold no witnessed edges for ' || v.t || ' in the selected bands yet.'
+                WHEN 'no_type'    THEN 'I hold no witnessed ' || lower(v.x) || ' for ' || v.t || ' yet.'
+                WHEN 'no_forward' THEN CASE WHEN v.t = ''
+                                       THEN 'No witnessed continuation was selected in this forward pass.'
+                                       ELSE 'No witnessed continuation was selected for ' || v.t || ' in this forward pass.'
+                                   END
+                WHEN 'band'       THEN v.x || ': ' || v.l || '.'
+                ELSE NULL::text
+            END
+        WHEN p_lang = realize.canonical_id('language:bul') THEN
+            CASE p_key
+                WHEN 'parts'      THEN initcap(v.t) || ' има части като ' || v.l || '.'
+                WHEN 'kinds'      THEN 'Видове ' || v.t || ' включват ' || v.l || '.'
+                WHEN 'related'    THEN initcap(v.t) || ' е свързано с ' || v.l || '.'
+                WHEN 'core'       THEN 'Това е същността на това, което знам за ' || v.t || '.'
+                WHEN 'no_edges'   THEN 'Нямам засвидетелствани връзки за ' || v.t || ' в избраните ленти още.'
+                WHEN 'no_type'    THEN 'Нямам засвидетелствано ' || lower(v.x) || ' за ' || v.t || ' още.'
+                WHEN 'no_forward' THEN CASE WHEN v.t = ''
+                                       THEN 'Няма избрано засвидетелствано продължение в този ход.'
+                                       ELSE 'Няма избрано засвидетелствано продължение за ' || v.t || ' в този ход.'
+                                   END
+                WHEN 'band'       THEN v.x || ': ' || v.l || '.'
+                ELSE NULL::text
+            END
+        ELSE
+            CASE p_key
+                WHEN 'parts'      THEN initcap(v.t) || ': ' || v.l || '.'
+                WHEN 'kinds'      THEN initcap(v.t) || ': ' || v.l || '.'
+                WHEN 'related'    THEN initcap(v.t) || ': ' || v.l || '.'
+                WHEN 'core'       THEN initcap(v.t) || '.'
+                WHEN 'no_edges'   THEN initcap(v.t) || '.'
+                WHEN 'no_type'    THEN initcap(v.t) || '.'
+                WHEN 'no_forward' THEN CASE WHEN v.t = '' THEN '∅' ELSE v.t || ': ∅' END
+                WHEN 'band'       THEN v.l || '.'
+                ELSE NULL::text
+            END
+    END
+    FROM vars v;
 END;
-$$;

@@ -10,9 +10,9 @@ CREATE OR REPLACE FUNCTION lexical.lexical_peers_batch(p_words bytea[])
 
 CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
     RETURNS bytea[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT b.peers
     FROM lexical.lexical_peers_batch(ARRAY[p_word]) b
-    WHERE b.input_ordinal = 1;
+    WHERE p_word IS NOT NULL AND b.input_ordinal = 1;
 END;

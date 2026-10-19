@@ -34,7 +34,7 @@
 -- ordering by either gives the same sequence, and the indexes only match the literal form.
 CREATE OR REPLACE FUNCTION consensus.belief_logit(p_rating bigint, p_rd bigint)
     RETURNS double precision
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT ((consensus.eff_mu(p_rating, p_rd) - consensus.glicko2_neutral_mu()) / 1e9)
          / (400 / ln(10));

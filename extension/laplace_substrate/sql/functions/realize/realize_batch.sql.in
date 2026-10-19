@@ -9,24 +9,10 @@
 DROP FUNCTION IF EXISTS laplace.realize_batch(bytea[], bytea);
 CREATE OR REPLACE FUNCTION realize._batch_c(p_ids bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text[]
-    AS 'MODULE_PATHNAME', 'pg_laplace_realize_batch'
-    LANGUAGE C STABLE;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_realize_batch'
+    LANGUAGE C STABLE PARALLEL SAFE;
 
 CREATE OR REPLACE FUNCTION realize.batch(p_ids bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text[]
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    WITH c_out AS MATERIALIZED (
-        SELECT realize._batch_c(p_ids, p_lang) AS arr
-    )
-    SELECT COALESCE(array_agg(
-        CASE
-            WHEN NULLIF(u.lbl, '') IS NULL OR u.lbl ~ '^i[0-9]+$' OR u.lbl ~ '^[0-9]{8}-[nvars]$'
-            THEN COALESCE(realize._synset_lemma(u.id, p_lang), NULLIF(u.lbl, ''))
-            ELSE u.lbl
-        END
-        ORDER BY u.ord
-    ), ARRAY[]::text[])
-    FROM c_out,
-         ROWS FROM (unnest(p_ids), unnest(c_out.arr)) WITH ORDINALITY AS u(id, lbl, ord);
-END;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_realize_batch'
+    LANGUAGE C STABLE PARALLEL SAFE;

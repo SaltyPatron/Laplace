@@ -1,133 +1,83 @@
 DROP FUNCTION IF EXISTS laplace.consensus_peer(bytea, int);
 CREATE OR REPLACE FUNCTION generation.consensus_peer(p_id bytea, p_k int DEFAULT 6)
     RETURNS bytea
-    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
- AS $$
-DECLARE
-    v_result bytea;
-    v_coord  geometry;
-    v_curve  geometry;
-BEGIN
-    -- Relational election: laplace.entities of p_id's own type that share p_id's
-    -- (relation, partner) edges, scored by min-shared confidence. Reads through
-    -- laplace.v_consensus_unrefuted(was two inline `NOT consensus.refuted` base-table scans). The
-    -- winner is the top-p_k by score, then one picked by the deterministic
-    -- hash tie-break -- identical to the old UNION's hash pick over `elected`.
-    --
-    -- p_id's own edge set is read BOTH ways as two direction-pinned arms unioned,
-    -- never as `subject_id = p_id OR object_id = p_id` (GH #871, spec 37 OP5).
-    -- That disjunction spans two different leading
-    -- columns, so it is not an index qual on either consensus_subject_type_btree
-    -- or consensus_object_type_btree: the planner's only options are a BitmapOr
-    -- across both or a scan, which is the shape spec 37 blames for the 280s hang.
-    -- Split, each arm is a plain equality the matching index serves directly.
-    --
-    -- The arms reproduce the CASE the OR needed: the outbound arm is the rows
-    -- where p_id is the subject (partner = object_id, as_subject = true), the
-    -- inbound arm the rows where it is the object. `subject_id IS DISTINCT FROM
-    -- p_id` on the inbound arm keeps a self-loop (subject = object = p_id) a
-    -- single row exactly as the CASE did, instead of one per arm. The inbound arm
-    -- needs no `object_id IS NOT NULL` -- its own equality already proves it.
-    -- The PEER join is split the same way, and for the same reason (GH #908/#871).
-    -- It used to carry the direction as a boolean and re-disjoin on it:
-    --   ((as_subject AND c2.object_id = partner AND ...)
-    --     OR (NOT as_subject AND c2.subject_id = partner AND ...))
-    -- which is the identical defect the p_id arms above avoid, one level down --
-    -- the two branches lead with different columns, so neither index serves the
-    -- qual and the planner is back to BitmapOr or a scan. Carrying the flag into a
-    -- CASE for the laplace.entities join spread it further. Split, each arm is a plain
-    -- equality on its own leading column and the flag disappears entirely.
-    SELECT z.id INTO v_result
-    FROM (
-        SELECT x.id, sum(arms.contrib) AS score
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
+    WITH rel_winner AS MATERIALIZED (
+        SELECT z.id
         FROM (
-            -- OUTBOUND: p_id -> partner. A peer is another SUBJECT asserting the
-            -- same (relation, object).
-            SELECT c2.subject_id AS peer,
-                   LEAST(m.mu, consensus.eff_mu(c2.rating, c2.rd)) AS contrib
+            SELECT x.id, sum(arms.contrib) AS score
             FROM (
-                SELECT c.type_id AS rel, c.object_id AS partner,
-                       consensus.eff_mu(c.rating, c.rd) AS mu
-                FROM laplace.v_consensus_unrefuted c
-                WHERE c.subject_id = p_id
-                  AND c.object_id IS NOT NULL
-            ) m
-            JOIN laplace.v_consensus_unrefuted c2
-              ON c2.type_id = m.rel
-             AND c2.object_id = m.partner
-             AND c2.subject_id <> p_id
-            UNION ALL
-            -- INBOUND: partner -> p_id. A peer is another OBJECT the same subject
-            -- asserts under that relation. `subject_id IS DISTINCT FROM p_id`
-            -- keeps a self-loop one row, exactly as the CASE did.
-            SELECT c2.object_id AS peer,
-                   LEAST(m.mu, consensus.eff_mu(c2.rating, c2.rd))
-            FROM (
-                SELECT c.type_id AS rel, c.subject_id AS partner,
-                       consensus.eff_mu(c.rating, c.rd) AS mu
-                FROM laplace.v_consensus_unrefuted c
-                WHERE c.object_id = p_id
-                  AND c.subject_id IS DISTINCT FROM p_id
-            ) m
-            JOIN laplace.v_consensus_unrefuted c2
-              ON c2.type_id = m.rel
-             AND c2.subject_id = m.partner
-             AND c2.object_id <> p_id
-        ) arms
-        JOIN laplace.entities x ON x.id = arms.peer
-        WHERE EXISTS (
-            SELECT 1 FROM laplace.entities own
-            JOIN laplace.entities peer ON peer.type_id = own.type_id
-            WHERE own.id = p_id AND peer.id = x.id)
-        GROUP BY x.id
-        ORDER BY score DESC
-        LIMIT GREATEST(p_k, 0)
-    ) z
-    ORDER BY public.laplace_hash128_blake3(z.id || p_id)
-    LIMIT 1;
-
-    IF v_result IS NOT NULL THEN
-        RETURN v_result;
-    END IF;
-
-    -- Geometric fallback -- only reached when the relational election is empty.
-    -- As a single SQL statement this KNN was planned (and could run) on every
-    -- call even when `elected` had rows, and its `me.coord` was a correlated
-    -- FROM-subquery reference that could not drive the coord GiST index. Fetch
-    -- the anchor into locals first so the ordering operand is a genuine bound
-    -- parameter, and gate the whole branch behind the election miss.
-    -- Shape rank uses REALIZED curves (entity_curve), never packed trajectory
-    -- (Rule #3 / Issue 51). p_k is the declared admission/election budget for
-    -- both paths. The old fixed 48-row KNN pool silently changed the meaning and
-    -- work of the same call regardless of p_k.
-    SELECT a.coord, structural.entity_curve(p_id)
-      INTO v_coord, v_curve
-    FROM structural.word_anchor(p_id) a;
-    IF v_coord IS NULL THEN
-        RETURN NULL;
-    END IF;
-
-    SELECT z.id INTO v_result
-    FROM (
-        SELECT knn.id
-        FROM (
-            SELECT w.id, structural.entity_curve(w.id) AS curve
-            FROM laplace.v_word_points w
-            WHERE w.id <> p_id AND w.trajectory IS NOT NULL
-              AND EXISTS (
-                  SELECT 1 FROM laplace.entities own
-                  JOIN laplace.entities peer ON peer.type_id = own.type_id
-                  WHERE own.id = p_id AND peer.id = w.id)
-            ORDER BY w.coord <<->> v_coord
+                SELECT c2.subject_id AS peer,
+                       LEAST(m.mu, consensus.eff_mu(c2.rating, c2.rd)) AS contrib
+                FROM (
+                    SELECT c.type_id AS rel, c.object_id AS partner,
+                           consensus.eff_mu(c.rating, c.rd) AS mu
+                    FROM laplace.v_consensus_unrefuted c
+                    WHERE c.subject_id = p_id
+                      AND c.object_id IS NOT NULL
+                ) m
+                JOIN laplace.v_consensus_unrefuted c2
+                  ON c2.type_id = m.rel
+                 AND c2.object_id = m.partner
+                 AND c2.subject_id <> p_id
+                UNION ALL
+                SELECT c2.object_id AS peer,
+                       LEAST(m.mu, consensus.eff_mu(c2.rating, c2.rd))
+                FROM (
+                    SELECT c.type_id AS rel, c.subject_id AS partner,
+                           consensus.eff_mu(c.rating, c.rd) AS mu
+                    FROM laplace.v_consensus_unrefuted c
+                    WHERE c.object_id = p_id
+                      AND c.subject_id IS DISTINCT FROM p_id
+                ) m
+                JOIN laplace.v_consensus_unrefuted c2
+                  ON c2.type_id = m.rel
+                 AND c2.subject_id = m.partner
+                 AND c2.object_id <> p_id
+            ) arms
+            JOIN laplace.entities x ON x.id = arms.peer
+            WHERE EXISTS (
+                SELECT 1 FROM laplace.entities own
+                JOIN laplace.entities peer ON peer.type_id = own.type_id
+                WHERE own.id = p_id AND peer.id = x.id)
+            GROUP BY x.id
+            ORDER BY score DESC
             LIMIT GREATEST(p_k, 0)
-        ) knn
-        WHERE knn.curve IS NOT NULL AND v_curve IS NOT NULL
-        ORDER BY public.laplace_frechet_4d(knn.curve, v_curve) ASC
-        LIMIT GREATEST(p_k, 0)
-    ) z
-    ORDER BY public.laplace_hash128_blake3(z.id || p_id)
-    LIMIT 1;
-
-    RETURN v_result;
+        ) z
+        ORDER BY public.laplace_hash128_blake3(z.id || p_id)
+        LIMIT 1
+    ),
+    anchor AS MATERIALIZED (
+        SELECT a.coord AS v_coord, structural.entity_curve(p_id) AS v_curve
+        FROM structural.word_anchor(p_id) a
+        WHERE NOT EXISTS (SELECT 1 FROM rel_winner rw WHERE rw.id IS NOT NULL)
+    ),
+    geo_winner AS (
+        SELECT z.id
+        FROM (
+            SELECT knn.id
+            FROM anchor an
+            CROSS JOIN LATERAL (
+                SELECT w.id, structural.entity_curve(w.id) AS curve
+                FROM laplace.v_word_points w
+                WHERE w.id <> p_id AND w.trajectory IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM laplace.entities own
+                      JOIN laplace.entities peer ON peer.type_id = own.type_id
+                      WHERE own.id = p_id AND peer.id = w.id)
+                ORDER BY w.coord <<->> an.v_coord
+                LIMIT GREATEST(p_k, 0)
+            ) knn
+            WHERE an.v_coord IS NOT NULL AND an.v_curve IS NOT NULL AND knn.curve IS NOT NULL
+            ORDER BY public.laplace_frechet_4d(knn.curve, an.v_curve) ASC
+            LIMIT GREATEST(p_k, 0)
+        ) z
+        ORDER BY public.laplace_hash128_blake3(z.id || p_id)
+        LIMIT 1
+    )
+    SELECT COALESCE(
+        (SELECT rw.id FROM rel_winner rw LIMIT 1),
+        (SELECT gw.id FROM geo_winner gw LIMIT 1)
+    );
 END;
-$$;

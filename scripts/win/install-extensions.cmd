@@ -113,7 +113,9 @@ if "%FILES_ONLY%"=="1" (
 )
 
 set "PSQL=%PGBIN%\psql.exe"
-"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;" >nul 2>&1
+if "%LAPLACE_PGHOST%"=="" set "LAPLACE_PGHOST=localhost"
+if "%LAPLACE_PGPORT%"=="" set "LAPLACE_PGPORT=5432"
+"%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;" >nul 2>&1
 if errorlevel 1 (
   echo [install-extensions] ERROR: Postgres is not accepting connections.
   echo   Files are deployed under %DEPLOY% but postgresql.auto.conf was NOT updated.
@@ -135,11 +137,11 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
   echo ALTER SYSTEM SET shared_preload_libraries = :spl;
   echo SELECT pg_reload_conf^(^);
 )
-"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
-"%PSQL%" -h localhost -U postgres -d postgres -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;"
+"%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
+"%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;"
 if "%RECYCLE%"=="1" (
   echo recycling laplace backends so fresh DLLs/SQL load on next connection...
-  "%PSQL%" -h localhost -U postgres -d postgres -tAc "SELECT count(pg_terminate_backend(pid)) || ' backend(s) recycled' FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid <> pg_backend_pid();"
+  "%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -tAc "SELECT count(pg_terminate_backend(pid)) || ' backend(s) recycled' FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid <> pg_backend_pid();"
 )
 echo wired: extension_control_path + dynamic_library_path + t0/highway/chess perfcache GUCs -^> %DEPLOY%
 exit /b 0

@@ -9,12 +9,5 @@ BEGIN
 END $retire_flat_label$;
 CREATE OR REPLACE FUNCTION converse.label_or_hex(p_id bytea)
     RETURNS text
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-BEGIN ATOMIC
-
-    -- Legacy name retained for installed-call compatibility. Human-facing reads
-    -- receive the entity's realized label or an honest abstention marker. A hash
-    -- is identity metadata and must never be fabricated as display content.
-    SELECT COALESCE(realize.label(p_id), 'unrealized entity')
-;
-END;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_label_or_hex'
+    LANGUAGE C STABLE PARALLEL SAFE;

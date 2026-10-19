@@ -35,8 +35,11 @@ BEGIN ATOMIC
                             SELECT 1 FROM laplace.attestations a
                             WHERE a.subject_id = hs.id AND a.type_id = hs.type_id
                               AND a.object_id = hs.object_id AND a.context_id = p_lang) DESC,
-                        consensus.eff_mu(hs.rating, hs.rd) DESC, hs.id) AS rn
+                        consensus.eff_mu(hs.rating, hs.rd) DESC,
+                        COALESCE(w.tier, 32767) ASC,
+                        hs.id) AS rn
         FROM cand hs
+        LEFT JOIN laplace.entities w ON w.id = hs.id
     ),
     lbl AS MATERIALIZED (
         SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s

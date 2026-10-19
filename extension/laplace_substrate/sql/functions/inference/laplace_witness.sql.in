@@ -4,13 +4,8 @@ CREATE OR REPLACE FUNCTION generation.witness(
     p_source   bytea,
     p_score_fp1e9 bigint DEFAULT 1000000000)
 RETURNS void
-LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    v_affected bigint;
-BEGIN
-    -- One observation follows the same keyed, row-locked, native fold path as
-    -- corpus ingest.  The historical hand-written id-only SELECT/UPDATE opened
-    -- every LIST/HASH leaf and also duplicated the fold implementation.
+LANGUAGE sql VOLATILE
+BEGIN ATOMIC
     SELECT consensus.upsert_type(
         p_type,
         ARRAY[p_subject]::bytea[],
@@ -18,7 +13,5 @@ BEGIN
         ARRAY[consensus.glicko2_initial_rd()]::bigint[],
         ARRAY[1::bigint],
         ARRAY[p_score_fp1e9]::bigint[],
-        ARRAY[now()]::timestamptz[])
-    INTO v_affected;
+        ARRAY[now()]::timestamptz[]);
 END;
-$$;

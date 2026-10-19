@@ -92,11 +92,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert'
-    LANGUAGE C VOLATILE
-    SET enable_material = off
-    SET enable_hashjoin = on
-    SET enable_mergejoin = on
-    SET enable_seqscan = on;
+    LANGUAGE C VOLATILE;
 
 -- Direct routed form for first-party type lanes. The type is part of every cell
 -- identity but is transmitted once per set operation, not once per row.
@@ -116,11 +112,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_type'
-    LANGUAGE C VOLATILE
-    SET enable_material = off
-    SET enable_hashjoin = on
-    SET enable_mergejoin = on
-    SET enable_seqscan = on;
+    LANGUAGE C VOLATILE;
 
 
 -- Primary evidence admission boundary. The complete mixed-type working-set
@@ -138,11 +130,7 @@ CREATE OR REPLACE FUNCTION consensus.merge_evidence(
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_merge_evidence'
-    LANGUAGE C VOLATILE
-    SET enable_material = off
-    SET enable_hashjoin = on
-    SET enable_mergejoin = on
-    SET enable_seqscan = on;
+    LANGUAGE C VOLATILE;
 
 
 -- Atomic evidence-backed route. Every requested cell must already have durable
@@ -165,12 +153,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert_evidence_type(
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_evidence_type'
-    LANGUAGE C VOLATILE
-    SET plan_cache_mode = force_custom_plan
-    SET enable_material = off
-    SET enable_hashjoin = on
-    SET enable_mergejoin = on
-    SET enable_seqscan = on;
+    LANGUAGE C VOLATILE;
 
 
 -- Repair has no incoming score delta. It shares the same canonical target
@@ -180,12 +163,7 @@ CREATE OR REPLACE FUNCTION consensus.refold_evidence_type(
     p_type bytea, p_subjects bytea[], p_objects bytea[])
     RETURNS bigint
     AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_refold_evidence_type'
-    LANGUAGE C VOLATILE
-    SET plan_cache_mode = force_custom_plan
-    SET enable_material = off
-    SET enable_hashjoin = on
-    SET enable_mergejoin = on
-    SET enable_seqscan = on;
+    LANGUAGE C VOLATILE;
 
 -- The physical owner of one consensus key, resolved by the same PostgreSQL
 -- partition support function as the native ingest writer.  This is the single

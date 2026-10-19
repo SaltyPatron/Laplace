@@ -56,43 +56,27 @@ CREATE OR REPLACE FUNCTION structural.geometry_audit(p_sample double precision D
                   min_radius numeric, avg_radius numeric, max_radius numeric,
                   on_sphere bigint, interior bigint, avg_constituents numeric,
                   hilbert_bands int, min_band bigint, max_band bigint)
-    LANGUAGE plpgsql VOLATILE
-    AS $$
-DECLARE
-    q text;
-BEGIN
-    -- TABLESAMPLE percent cannot be a bound parameter, so the sample clause is
-    -- built here. p_sample is forced numeric before interpolation: it is the
-    -- only user input that reaches the statement text, and it never reaches it
-    -- as a string.
-    q := format($f$
-        WITH j AS (
-            SELECT v.tier, v.radius_origin AS r,
-                   substring(encode(v.hilbert_index,'hex'),1,1) AS band,
-                   v.n_constituents AS nc
-            FROM laplace.v_word_points v %s
-        ),
-        bands AS (
-            SELECT tier, band, count(*) AS n FROM j GROUP BY tier, band
-        )
-        SELECT j.tier, count(*)::bigint,
-               round(min(j.r)::numeric,3), round(avg(j.r)::numeric,3),
-               round(max(j.r)::numeric,3),
-               count(*) FILTER (WHERE j.r >= 0.999)::bigint,
-               count(*) FILTER (WHERE j.r <  0.999)::bigint,
-               round(avg(j.nc)::numeric,1),
-               (SELECT count(*)::int FROM bands b WHERE b.tier = j.tier),
-               (SELECT min(b.n)::bigint FROM bands b WHERE b.tier = j.tier),
-               (SELECT max(b.n)::bigint FROM bands b WHERE b.tier = j.tier)
-        FROM j GROUP BY j.tier ORDER BY j.tier
-    $f$, CASE WHEN p_sample > 0 AND p_sample < 100
-              -- TABLESAMPLE cannot be applied to a view (0A000), and standing on
-              -- v_word_points is worth more than the cheaper sample: re-deriving
-              -- the join is what produced two defects in the first draft. A
-              -- Bernoulli filter costs a seq scan; this is a diagnostic, not a
-              -- hot path, and the caller chooses the fraction.
-              THEN format('WHERE random() < %s', (p_sample/100.0)::numeric)
-              ELSE '' END);
-    RETURN QUERY EXECUTE q;
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    WITH j AS (
+        SELECT v.tier, v.radius_origin AS r,
+               substring(encode(v.hilbert_index,'hex'),1,1) AS band,
+               v.n_constituents AS nc
+        FROM laplace.v_word_points v
+        WHERE NOT (p_sample > 0 AND p_sample < 100)
+           OR random() < (p_sample / 100.0)
+    ),
+    bands AS (
+        SELECT j.tier, j.band, count(*) AS n FROM j GROUP BY j.tier, j.band
+    )
+    SELECT j.tier, count(*)::bigint,
+           round(min(j.r)::numeric,3), round(avg(j.r)::numeric,3),
+           round(max(j.r)::numeric,3),
+           count(*) FILTER (WHERE j.r >= 0.999)::bigint,
+           count(*) FILTER (WHERE j.r <  0.999)::bigint,
+           round(avg(j.nc)::numeric,1),
+           (SELECT count(*)::int FROM bands b WHERE b.tier = j.tier),
+           (SELECT min(b.n)::bigint FROM bands b WHERE b.tier = j.tier),
+           (SELECT max(b.n)::bigint FROM bands b WHERE b.tier = j.tier)
+    FROM j GROUP BY j.tier ORDER BY j.tier;
 END;
-$$;

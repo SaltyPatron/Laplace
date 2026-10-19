@@ -7,42 +7,17 @@
 DROP FUNCTION IF EXISTS laplace.vocab_dominant_pos(bytea[]);
 CREATE OR REPLACE FUNCTION generation.vocab_dominant_pos(p_vocab bytea[])
     RETURNS TABLE(word_id bytea, pos_id bytea)
-    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED AS $$
-DECLARE
-    v_type bytea;
-BEGIN
-    v_type := laplace.relation_type_id('HAS_POS');
-    RETURN QUERY
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     direct AS (
         SELECT DISTINCT ON (c.subject_id) c.subject_id AS wid, c.object_id AS pos
         FROM v
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = v.id
-            AND c.type_id = v_type
+            AND c.type_id = laplace.relation_type_id('HAS_POS')
         WHERE c.object_id IS NOT NULL
         ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC
     ),
-    -- CASE-VARIANT ASYMMETRY, resolved through the ATTESTED case surface.
-    -- 'ALL' may carry no HAS_POS witness while 'all' does. They are different
-    -- content and therefore different ids -- that is the identity law, not a
-    -- defect -- and the substrate already holds the link: HAS_CASE_MAPPING, its
-    -- upper/lower/title qualifiers governed in qualifiers.toml and
-    -- relation_types.toml, witnessed per codepoint from UnicodeData.txt fields
-    -- 12/13/14, and composed to word grain natively and batched by
-    -- lexical.word_case_variants(src/lexical_case.c), which also gates on entity_exists.
-    --
-    -- This previously read `laplace.word_id(lower(realize.render(vv.id)))`: realize.render the id back to
-    -- text, case-fold the text, then MINT AN ID FROM THE FOLDED STRING. Not a
-    -- lookup -- a fabrication. It leaves hash space mid-operation, discards the
-    -- attested edges, and laplace.word_id() mints unconditionally, so an unwitnessed fold
-    -- yields a well-formed id for content that may have no entity at all (the
-    -- `m.fid IS NOT NULL` guard cannot catch that; laplace.word_id is never null). The
-    -- result feeds pos_transition_plane and therefore the exported model's POS
-    -- shaping, so a fabricated identity here becomes a weight.
-    --
-    -- Any attested variant is admissible, not just the lowercase one: the
-    -- asymmetry runs both ways ('all' -> 'All' when only the title form is
-    -- witnessed). Ties break on consensus.eff_mu then id, so the choice stays deterministic.
     missing AS (
         SELECT vv.id, unnest(lexical.word_case_variants(vv.id)) AS fid
         FROM v vv
@@ -52,7 +27,7 @@ BEGIN
         SELECT DISTINCT ON (m.id) m.id AS wid, c.object_id AS pos
         FROM missing m
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = m.fid
-            AND c.type_id = v_type
+            AND c.type_id = laplace.relation_type_id('HAS_POS')
         WHERE c.object_id IS NOT NULL AND m.fid IS NOT NULL AND m.fid <> m.id
         ORDER BY m.id, consensus.eff_mu(c.rating, c.rd) DESC, m.fid
     )
@@ -60,7 +35,6 @@ BEGIN
     UNION ALL
     SELECT f.wid, f.pos FROM folded f;
 END;
-$$;
 
 -- Class-transition log-conditionals P^(class(y) | class(x)) from the same
 -- fused continuation evidence as the conditional plane (word_order trajectory
@@ -74,9 +48,8 @@ DROP FUNCTION IF EXISTS laplace.pos_class_transitions(bytea[], int, double preci
 CREATE OR REPLACE FUNCTION generation.pos_class_transitions(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED AS $$
-BEGIN
-    RETURN QUERY
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     word_pos AS MATERIALIZED (
         SELECT wp.word_id AS wid, wp.pos_id AS pos FROM generation.vocab_dominant_pos(p_vocab) wp
@@ -102,4 +75,3 @@ BEGIN
     JOIN class_marginals cm ON cm.px = cp.px
     CROSS JOIN nclasses nc;
 END;
-$$;

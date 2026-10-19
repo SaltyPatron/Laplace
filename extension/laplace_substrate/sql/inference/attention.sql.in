@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION converse.attention(p_word bytea, p_k int DEFAULT 12)
     RETURNS TABLE(neighbor text, relation text, attention double precision,
                   geodesic double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     WITH qcoord AS (
         SELECT coord FROM laplace.v_word_points WHERE id = p_word LIMIT 1),
     edges AS (
@@ -23,19 +23,31 @@ CREATE OR REPLACE FUNCTION converse.attention(p_word bytea, p_k int DEFAULT 12)
     ),
     best AS (
         SELECT nb, (array_agg(type_id ORDER BY mu DESC))[1] AS type_id, max(mu) AS mu
-        FROM edges WHERE nb <> p_word GROUP BY nb)
-    SELECT l.txt AS neighbor, lexical.type_label(r.type_id) AS relation,
-           r.attention, r.geodesic
-    FROM (
+        FROM edges WHERE nb <> p_word GROUP BY nb),
+    ranked AS MATERIALIZED (
         SELECT b.nb, b.type_id, (b.mu::double precision / 1e9) AS attention,
                CASE WHEN qc.coord IS NOT NULL AND w.coord IS NOT NULL
-                    THEN laplace_angular_distance_4d(w.coord, qc.coord) END AS geodesic
+                    THEN laplace_angular_distance_4d(w.coord, qc.coord) END AS geodesic,
+               row_number() OVER (ORDER BY (b.mu::double precision / 1e9) DESC NULLS LAST,
+                                           CASE WHEN qc.coord IS NOT NULL AND w.coord IS NOT NULL
+                                                THEN laplace_angular_distance_4d(w.coord, qc.coord) END NULLS LAST,
+                                           b.nb) AS rn
         FROM best b
         LEFT JOIN laplace.v_word_points w ON w.id = b.nb
         CROSS JOIN qcoord qc
-        ORDER BY attention DESC NULLS LAST, geodesic NULLS LAST
-    ) r
-    CROSS JOIN LATERAL (SELECT realize.label(r.nb) AS txt) l
-    WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
-    LIMIT p_k
-$$;
+        ORDER BY attention DESC NULLS LAST, geodesic NULLS LAST, b.nb
+        LIMIT p_k
+    ),
+    labels AS MATERIALIZED (
+        SELECT realize.label_batch(array_agg(nb ORDER BY rn)) AS txt
+        FROM ranked
+    )
+    SELECT NULLIF(btrim(l.txt[r.rn]), '') AS neighbor,
+           lexical.type_label(r.type_id) AS relation,
+           r.attention,
+           r.geodesic
+    FROM ranked r
+    CROSS JOIN labels l
+    WHERE NULLIF(btrim(l.txt[r.rn]), '') IS NOT NULL
+    ORDER BY r.rn;
+END;

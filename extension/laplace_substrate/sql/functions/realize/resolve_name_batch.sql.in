@@ -5,4 +5,4 @@ CREATE OR REPLACE FUNCTION realize.resolve_name_batch(
     p_ids bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text[]
     LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_resolve_name_batch';
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_resolve_name_batch';

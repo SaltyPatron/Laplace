@@ -4,6 +4,13 @@
 -- measured throughput. The latest clean run carrying a throughput verdict is
 -- projected beside the latest run status, so a later marker skip does not hide
 -- it, and an `unmeasured` verdict stays visible.
+--
+-- Attestation source ids are included beside the journal. A recipe witness is
+-- the composition [authority, release] (rendered Unicode/UCD17.0.0, oewn2025+,
+-- FrameNet1.7). Older journal rows stored source_id(sourceName), which is a
+-- different entity and has no attestations. A zero-evidence journal name is
+-- folded onto the witness whose realized label extends that name, so OEWN
+-- reads the oewn2025+ evidence instead of a second empty row.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -57,22 +64,22 @@ by_throughput AS (
       AND j.throughput_status <> 'not-measured'
     ORDER BY j.source_name, j.started_at DESC
 ),
+by_attestations AS MATERIALIZED (
+    SELECT a.source_id, count(*)::bigint AS evidence
+    FROM @extschema@.attestations a
+    GROUP BY a.source_id
+),
 ids AS (
-    SELECT source_id FROM by_evidence
+    SELECT source_id FROM by_attestations
+    UNION SELECT source_id FROM by_evidence
     UNION SELECT source_id FROM by_journal WHERE source_id IS NOT NULL
 ),
 rolled AS (
     SELECT i.source_id,
-           -- Estimate for sources in the MCV statistics, exact count for the
-           -- small ones the estimate misses.
-           COALESCE(ev.evidence_approx,
-                    (SELECT count(*) FROM @extschema@.attestations a
-                      WHERE a.source_id = i.source_id))             AS evidence_approx,
+           COALESCE(at.evidence, ev.evidence_approx, 0)            AS evidence_approx,
            -- Entities are source-independent; a source's content presence is
            -- its attestation presence.
-           COALESCE(ev.evidence_approx,
-                    (SELECT count(*) FROM @extschema@.attestations a
-                      WHERE a.source_id = i.source_id)) > 0          AS has_entities,
+           COALESCE(at.evidence, ev.evidence_approx, 0) > 0        AS has_entities,
            jr.source_name                                          AS journal_name,
            jr.status                                               AS last_run_status,
            jr.started_at                                           AS last_run_at,
@@ -82,9 +89,10 @@ rolled AS (
            tp.throughput_baseline_rows_per_s,
            tp.throughput_slowdown_ratio
     FROM ids i
-    LEFT JOIN by_evidence   ev ON ev.source_id = i.source_id
-    LEFT JOIN by_journal    jr ON jr.source_id = i.source_id
-    LEFT JOIN by_throughput tp ON tp.source_id = i.source_id
+    LEFT JOIN by_attestations at ON at.source_id = i.source_id
+    LEFT JOIN by_evidence     ev ON ev.source_id = i.source_id
+    LEFT JOIN by_journal      jr ON jr.source_id = i.source_id
+    LEFT JOIN by_throughput   tp ON tp.source_id = i.source_id
 ), rolled_numbered AS MATERIALIZED (
     SELECT r.*, row_number() OVER (ORDER BY r.source_id) AS rn FROM rolled r
 ), rendered AS MATERIALIZED (
@@ -111,11 +119,77 @@ matched AS (
     -- The journal's recorded name wins; a source with no run row of its own
     -- shows its realized id with the substrate/source/.../v1 envelope stripped.
     FROM rolled_numbered r CROSS JOIN rendered x
+),
+labeled AS (
+    SELECT m.*,
+           regexp_replace(m.source, '[^a-zA-Z0-9]', '', 'g') AS norm
+    FROM matched m
+),
+-- A journal row filed under source_id(name) has no attestations. Hand its run
+-- metadata to the witness whose realized label extends that name, and drop the
+-- empty row. The longest name wins when two journal names are prefixes.
+borrow AS (
+    SELECT DISTINCT ON (ev.source_id)
+           ev.source_id AS evidence_id,
+           ghost.source AS ghost_source,
+           ghost.last_run_status,
+           ghost.last_run_at,
+           ghost.throughput_status,
+           ghost.throughput_compared,
+           ghost.throughput_rows_per_s,
+           ghost.throughput_baseline_rows_per_s,
+           ghost.throughput_slowdown_ratio
+    FROM labeled ev
+    JOIN labeled ghost
+      ON ghost.evidence_approx = 0
+     AND length(ghost.norm) >= 3
+     AND ev.evidence_approx > 0
+     AND ev.source_id <> ghost.source_id
+     AND ev.norm ILIKE ghost.norm || '%'
+    ORDER BY ev.source_id, length(ghost.norm) DESC
+),
+presented AS (
+    SELECT ev.source,
+           ev.source_id,
+           ev.ingested,
+           ev.known,
+           ev.evidence_approx,
+           ev.has_entities,
+           COALESCE(ev.last_run_status, b.last_run_status) AS last_run_status,
+           COALESCE(ev.last_run_at, b.last_run_at)         AS last_run_at,
+           COALESCE(ev.throughput_status, b.throughput_status) AS throughput_status,
+           ev.throughput_compared OR COALESCE(b.throughput_compared, false) AS throughput_compared,
+           COALESCE(ev.throughput_rows_per_s, b.throughput_rows_per_s) AS throughput_rows_per_s,
+           COALESCE(ev.throughput_baseline_rows_per_s, b.throughput_baseline_rows_per_s) AS throughput_baseline_rows_per_s,
+           COALESCE(ev.throughput_slowdown_ratio, b.throughput_slowdown_ratio) AS throughput_slowdown_ratio,
+           ev.norm
+    FROM labeled ev
+    LEFT JOIN borrow b ON b.evidence_id = ev.source_id
+    WHERE ev.evidence_approx > 0
+       OR NOT EXISTS (SELECT 1 FROM borrow g WHERE g.ghost_source = ev.source)
+),
+asked AS (
+    SELECT regexp_replace(p_source, '[^a-zA-Z0-9]', '', 'g') AS norm
+),
+answer AS (
+    SELECT p.source, p.source_id, p.ingested, p.known, p.evidence_approx, p.has_entities,
+           p.last_run_status, p.last_run_at, p.throughput_status, p.throughput_compared,
+           p.throughput_rows_per_s, p.throughput_baseline_rows_per_s, p.throughput_slowdown_ratio
+    FROM presented p
+    CROSS JOIN asked a
     WHERE p_source IS NULL
-       OR r.journal_name = p_source
-       OR r.source_id = @extschema@.source_id(p_source)
+       OR p.source = p_source
+       OR p.source_id = @extschema@.source_id(p_source)
+       OR p.norm ILIKE a.norm
+       OR (
+            length(a.norm) >= 3
+            AND p.norm ILIKE a.norm || '%'
+            AND EXISTS (
+                SELECT 1 FROM labeled j
+                WHERE j.norm ILIKE a.norm)
+          )
 )
-SELECT * FROM matched
+SELECT * FROM answer
 UNION ALL
 -- A named query always returns one row, so an unknown name reads as known = false.
 SELECT p_source,
@@ -133,6 +207,6 @@ SELECT p_source,
        NULL::double precision,
        NULL::double precision
 WHERE p_source IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM matched)
+  AND NOT EXISTS (SELECT 1 FROM answer)
 ORDER BY evidence_approx DESC, source_id;
 END;

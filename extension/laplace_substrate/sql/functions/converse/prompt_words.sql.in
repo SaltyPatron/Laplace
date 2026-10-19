@@ -17,7 +17,7 @@ END;
 DROP FUNCTION IF EXISTS laplace.prompt_words(text);
 CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT s.ord, s.word, s.id
     FROM converse.word_segment_resolved(p_text) s

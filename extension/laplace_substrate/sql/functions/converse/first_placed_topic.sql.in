@@ -2,7 +2,7 @@
 DROP FUNCTION IF EXISTS laplace.first_placed_topic(text);
 CREATE OR REPLACE FUNCTION converse.first_placed_topic(p_text text)
     RETURNS bytea
-    LANGUAGE sql LAPLACE_STABLE_STRICT
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT w.id
     FROM laplace.v_word_points w

@@ -37,7 +37,7 @@ CREATE OR REPLACE FUNCTION converse.prompt_coherence_native(p_prompt text)
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,
                   specificity double precision, total_mass double precision)
-    AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_prompt_coherence'
     LANGUAGE C STABLE STRICT;
 
 CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
@@ -45,128 +45,5 @@ CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,
                   specificity double precision, total_mass double precision)
-    LANGUAGE plpgsql STABLE AS $$
-DECLARE
-    resolved_count bigint;
-    only_ord       int;
-    only_tok       bytea;
-    only_lang      bytea;
-BEGIN
-    -- prompt_state is evaluated once on the fast path. array_agg preserves the
-    -- row alongside its language without a scalar lookup or rendered label.
-    SELECT count(*),
-           (array_agg(p.ord      ORDER BY p.ord))[1],
-           (array_agg(p.id       ORDER BY p.ord))[1],
-           (array_agg(p.language ORDER BY p.ord))[1]
-      INTO resolved_count, only_ord, only_tok, only_lang
-      FROM converse.prompt_state(p_prompt) p
-     WHERE p.id IS NOT NULL;
-
-    IF resolved_count <> 1 THEN
-        RETURN QUERY
-        SELECT n.ord, n.tok, n.synset_id, n.coherence, n.denote_mu, n.peers,
-               n.rel_type_id, n.rel_mass, n.specificity, n.total_mass
-          FROM converse.prompt_coherence_native(p_prompt) n;
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    WITH bubble AS MATERIALIZED (
-        -- Empty domain context deliberately keeps the complete candidate field;
-        -- this is the same call shape used by the native joint elector.
-        SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
-          FROM taxonomy.bubble_up_batch(
-                   ARRAY[only_tok], ARRAY[]::bytea[], NULL) b
-         WHERE b.term = only_tok
-           AND b.synset_id IS NOT NULL
-    ),
-    sense_ids AS MATERIALIZED (
-        SELECT ARRAY(SELECT DISTINCT b.sense_id
-                       FROM bubble b
-                      WHERE b.sense_id IS NOT NULL
-                      ORDER BY b.sense_id) AS ids
-    ),
-    language_ranked AS MATERIALIZED (
-        SELECT l.word, l.lang,
-               row_number() OVER (
-                   PARTITION BY l.word
-                   ORDER BY l.mu DESC, l.lang) AS rn
-          FROM sense_ids s
-          CROSS JOIN LATERAL converse.word_language_candidates_batch(s.ids) l
-    ),
-    candidates AS MATERIALIZED (
-        SELECT b.sense_id,
-               b.synset_id,
-               b.base_eff_mu,
-               b.witnesses,
-               CASE
-                   WHEN only_lang IS NULL OR lr.lang IS NULL THEN 0
-                   WHEN only_lang = lr.lang THEN 1
-                   ELSE -1
-               END AS lang_agree
-          FROM bubble b
-          LEFT JOIN language_ranked lr
-            ON lr.word = b.sense_id
-           AND lr.rn = 1
-    ),
-    probe_ids AS MATERIALIZED (
-        SELECT ARRAY(
-            SELECT DISTINCT q.id
-              FROM (
-                    SELECT c.synset_id AS id FROM candidates c
-                    UNION ALL
-                    SELECT only_tok
-                   ) q
-             WHERE q.id IS NOT NULL
-             ORDER BY q.id
-        ) AS ids
-    ),
-    -- Preserve pc_scan_edges' denominator exactly: outgoing and incoming mass
-    -- both count, including a self-loop in both directions. Unknown/dynamic
-    -- relation ids contribute zero here just as laplace_relation_lookup does in C.
-    mass_arms AS MATERIALIZED (
-        SELECT c.subject_id AS id,
-               sum(COALESCE(consensus.relation_rank(c.type_id), 0.0)
-                   * (consensus.eff_mu(c.rating, c.rd)::double precision)) AS mass
-          FROM probe_ids p
-          JOIN laplace.consensus c ON c.subject_id = ANY (p.ids)
-         GROUP BY c.subject_id
-        UNION ALL
-        SELECT c.object_id AS id,
-               sum(COALESCE(consensus.relation_rank(c.type_id), 0.0)
-                   * (consensus.eff_mu(c.rating, c.rd)::double precision)) AS mass
-          FROM probe_ids p
-          JOIN laplace.consensus c ON c.object_id = ANY (p.ids)
-         GROUP BY c.object_id
-    ),
-    mass AS MATERIALIZED (
-        SELECT m.id, sum(m.mass)::double precision AS mass
-          FROM mass_arms m
-         GROUP BY m.id
-    ),
-    ranked AS MATERIALIZED (
-        SELECT c.*,
-               COALESCE(ms.mass, 0.0) + COALESCE(mt.mass, 0.0) AS total_mass
-          FROM candidates c
-          LEFT JOIN mass ms ON ms.id = c.synset_id
-          LEFT JOIN mass mt ON mt.id = only_tok
-    )
-    SELECT only_ord,
-           only_tok,
-           r.synset_id,
-           0.0::double precision AS coherence,
-           r.base_eff_mu::numeric AS denote_mu,
-           0::bigint AS peers,
-           NULL::bytea AS rel_type_id,
-           0.0::double precision AS rel_mass,
-           0.0::double precision AS specificity,
-           r.total_mass::double precision
-      FROM ranked r
-     ORDER BY r.lang_agree DESC,
-              r.witnesses DESC,
-              r.base_eff_mu DESC NULLS LAST,
-              r.total_mass DESC,
-              r.synset_id
-     LIMIT 1;
-END;
-$$;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_prompt_coherence'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;
