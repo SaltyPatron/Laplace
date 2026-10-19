@@ -393,6 +393,7 @@ ${LAPLACE_API_STATE_DIR:+LAPLACE_OUT=$LAPLACE_API_STATE_DIR/out}
 ${LAPLACE_PUBLIC_BASE_URL:+LAPLACE_PUBLIC_BASE_URL=$LAPLACE_PUBLIC_BASE_URL}
 EOF
   python3 "$ROOT/deploy/linux/platform-owner-policy.py" --apply-api-env "$env_file"
+  chmod 0664 "$env_file"
 }
 
 # The MCP server's non-secret environment, beside the API's: the same database and perf-cache, its own port and
