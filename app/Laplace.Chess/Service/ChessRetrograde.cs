@@ -1,7 +1,10 @@
 using System.Numerics;
+using System.Text;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
@@ -34,6 +37,16 @@ public static class ChessRetrograde
         double ShrunkWinRate,
         int? FastestCheckmatePlies,
         double AveragePliesToFinish);
+
+    public readonly record struct GameSliceInput(
+        IReadOnlyList<string> Sans,
+        GameOutcome Result,
+        string? StartFen = null,
+        int? WhiteElo = null,
+        int? BlackElo = null,
+        string? TimeControl = null,
+        string? Eco = null,
+        IReadOnlyList<string?>? ClockTokens = null);
 
     /// <summary>
     /// Minimal causal sub-board constellation of <c>piece×square</c> atoms at
@@ -351,6 +364,168 @@ public static class ChessRetrograde
     }
 
     /// <summary>
+    /// Multi-dimensional retrograde rule discovery correlating board conditions
+    /// (<c>bishop-pair</c>, <c>fork</c>, <c>pin</c>, etc.) with rating bands, time-control
+    /// classes, openings (<c>ECO</c>), and per-ply clock pressure (<c>rushed</c>,
+    /// <c>pressed_think</c>, <c>flagging</c>) to surface "7/10 games" winning rules.
+    /// </summary>
+    public static IReadOnlyList<WinningConditionRule> DiscoverMultiDimensionalRules(
+        IEnumerable<GameSliceInput> games,
+        double minWinRate = 0.70,
+        int minGames = 3)
+    {
+        ArgumentNullException.ThrowIfNull(games);
+        var modality = new ChessModality();
+        var stats = new Dictionary<string, (int Games, int Wins, int Draws, int Losses, int? FastestMate, long TotalPliesToFinish)>(
+            StringComparer.Ordinal);
+
+        foreach (var game in games)
+        {
+            if (game.Sans.Count == 0 || game.Result.Winner is null && !game.Result.IsDraw) continue;
+            if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } started) continue;
+
+            var state = started.Initial;
+            var boards = new List<Board>(game.Sans.Count + 1) { state.Board.Clone() };
+            foreach (string san in game.Sans)
+            {
+                var mv = San.Resolve(state.Board, modality.LegalActions(state), san);
+                if (mv is null) break;
+                state = modality.Apply(state, mv.Value);
+                boards.Add(state.Board.Clone());
+            }
+
+            int totalPlies = boards.Count - 1;
+            if (totalPlies == 0) continue;
+            Board terminal = boards[^1];
+            bool endedInMate = MoveGen.Legal(terminal).Count == 0
+                               && MoveGen.InCheck(terminal, terminal.WhiteToMove);
+
+            double[] clocks = game.ClockTokens is { Count: > 0 }
+                ? game.ClockTokens.Select(static t => t is not null && PgnClocks.TryParseHms(t, out double s) ? s : 0.0).ToArray()
+                : [];
+            double medianDrop = clocks.Length > 0 ? PgnClocks.MedianDrop(clocks) : 0.0;
+            double medianRemEven = clocks.Length > 0 ? PgnClocks.MedianRemaining(clocks, 0) : 0.0;
+            double medianRemOdd = clocks.Length > 0 ? PgnClocks.MedianRemaining(clocks, 1) : 0.0;
+
+            string tcClass = !string.IsNullOrWhiteSpace(game.TimeControl)
+                ? ChessPgnDecomposer.TcClass(game.TimeControl!)
+                : "";
+            string eco = !string.IsNullOrWhiteSpace(game.Eco) ? game.Eco!.Trim() : "";
+
+            for (int side = 0; side <= 1; side++)
+            {
+                bool white = side == 0;
+                int? myElo = white ? game.WhiteElo : game.BlackElo;
+                string eloBand = RatingBand(myElo);
+                var contextTags = new List<string>(4);
+                if (tcClass.Length > 0) contextTags.Add($"tc:{tcClass}");
+                if (eloBand.Length > 0) contextTags.Add($"elo:{eloBand}");
+                if (eco.Length > 0) contextTags.Add($"eco:{eco}");
+
+                var earliestPlyByCondition = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int ply = totalPlies; ply >= 0; ply--)
+                {
+                    var active = new List<string>(ExtractConditions(boards[ply], white));
+
+                    // Check if the opponent was under clock pressure on the move leading into or out of this ply.
+                    int oppPly = ply < totalPlies && boards[ply].WhiteToMove != white ? ply : ply - 1;
+                    if (oppPly >= 0 && oppPly < clocks.Length && game.ClockTokens![oppPly] is not null)
+                    {
+                        double tf = PgnClocks.ThinkFactor(clocks, medianDrop, oppPly);
+                        string thinkClass = ChessCanonical.ThinkClass(tf);
+                        active.Add($"opp-pace:{thinkClass}");
+                        if (ChessCanonical.ThinkLens(
+                                oppPly,
+                                totalPlies,
+                                tf,
+                                clocks[oppPly],
+                                (oppPly & 1) == 0 ? medianRemEven : medianRemOdd,
+                                medianDrop) is { } lens)
+                        {
+                            active.Add($"opp-lens:{lens}");
+                        }
+                    }
+
+                    for (int i = 0; i < active.Count; i++)
+                    {
+                        string c1 = active[i];
+                        earliestPlyByCondition[c1] = ply;
+                        foreach (string ctx in contextTags)
+                            earliestPlyByCondition[$"{ctx} + {c1}"] = ply;
+
+                        for (int j = i + 1; j < active.Count; j++)
+                        {
+                            string c2 = active[j];
+                            string pair = string.CompareOrdinal(c1, c2) < 0
+                                ? $"{c1} + {c2}"
+                                : $"{c2} + {c1}";
+                            earliestPlyByCondition[pair] = ply;
+                            foreach (string ctx in contextTags)
+                                earliestPlyByCondition[$"{ctx} + {pair}"] = ply;
+                        }
+                    }
+                }
+
+                PlyOutcome sideOutcome = game.Result.ForMover(side);
+                foreach (var (condition, firstPly) in earliestPlyByCondition)
+                {
+                    int pliesToFinish = Math.Max(1, totalPlies - firstPly);
+                    var cur = stats.GetValueOrDefault(condition);
+                    int wins = cur.Wins + (sideOutcome == PlyOutcome.Win ? 1 : 0);
+                    int draws = cur.Draws + (sideOutcome == PlyOutcome.Draw ? 1 : 0);
+                    int losses = cur.Losses + (sideOutcome == PlyOutcome.Loss ? 1 : 0);
+                    int? fastestMate = cur.FastestMate;
+                    if (sideOutcome == PlyOutcome.Win && endedInMate)
+                        fastestMate = fastestMate is int prev ? Math.Min(prev, pliesToFinish) : pliesToFinish;
+
+                    stats[condition] = (
+                        cur.Games + 1,
+                        wins,
+                        draws,
+                        losses,
+                        fastestMate,
+                        cur.TotalPliesToFinish + pliesToFinish);
+                }
+            }
+        }
+
+        var rules = new List<WinningConditionRule>();
+        foreach (var (condition, s) in stats)
+        {
+            if (s.Games < minGames) continue;
+            double empirical = (s.Wins + 0.5 * s.Draws) / s.Games;
+            if (empirical < minWinRate) continue;
+            double shrunk = 0.5 + (empirical - 0.5) * (s.Games / (s.Games + ChessShrink.ExactTransitionK0));
+            rules.Add(new WinningConditionRule(
+                condition,
+                s.Games,
+                s.Wins,
+                s.Draws,
+                s.Losses,
+                empirical,
+                shrunk,
+                s.FastestMate,
+                (double)s.TotalPliesToFinish / s.Games));
+        }
+
+        return rules
+            .OrderBy(static r => r.FastestCheckmatePlies ?? int.MaxValue)
+            .ThenByDescending(static r => r.ShrunkWinRate)
+            .ThenByDescending(static r => r.Games)
+            .ThenBy(static r => r.Condition, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string RatingBand(int? elo) => elo switch
+    {
+        null or <= 0 => "",
+        < 1600 => "under-1600",
+        < 2000 => "1600-1999",
+        < 2400 => "2000-2399",
+        _ => "2400-plus",
+    };
+
+    /// <summary>
     /// Structural and tactical conditions active for <paramref name="white"/> on <paramref name="board"/>.
     /// </summary>
     public static IReadOnlyList<string> ExtractConditions(Board board, bool white)
@@ -518,8 +693,22 @@ public static class ChessRetrograde
             state = modality.Apply(state, mv.Value);
             boards.Add(state.Board.Clone());
         }
+        return UnrollCausalConstellations(boards, moves, maxLookbackPlies);
+    }
 
+    /// <summary>
+    /// Walks the causal mating cone backwards over an already-replayed board and move sequence.
+    /// </summary>
+    public static IReadOnlyList<CausalConstellation> UnrollCausalConstellations(
+        IReadOnlyList<Board> boards,
+        IReadOnlyList<ChessMove> moves,
+        int maxLookbackPlies = 6)
+    {
+        ArgumentNullException.ThrowIfNull(boards);
+        ArgumentNullException.ThrowIfNull(moves);
         int n = moves.Count;
+        if (boards.Count != n + 1 || n == 0)
+            return [];
         if (ExtractMatingKernel(boards[n]) is not { } terminalKernel)
             return [];
 
@@ -560,6 +749,110 @@ public static class ChessRetrograde
         list.Reverse();
         return list;
     }
+
+    /// <summary>
+    /// Canonical surface for a causal mating constellation, ordered by square so it
+    /// realizes directly in SQL via <c>realize.batch</c>.
+    /// </summary>
+    public static string Surface(CausalConstellation constellation)
+    {
+        if (constellation.Atoms is null || constellation.Atoms.Count == 0)
+            return "chess/mating-kernel/empty";
+        var ordered = constellation.Atoms
+            .OrderBy(static a => a.Square0x88)
+            .ThenBy(static a => (int)a.Piece);
+        var sb = new StringBuilder("chess/mating-kernel/");
+        bool first = true;
+        foreach (var (piece, sq0x88, _) in ordered)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append(PieceSymbol(piece));
+            sb.Append('@');
+            sb.Append(Board.SquareToAlgebraic(sq0x88));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Deposits retrograde causal mating kernels and their distance-to-mate (<c>HAS_DTZ</c>)
+    /// and <c>OUTCOME</c> testimony when a replayed game ends in checkmate.
+    /// </summary>
+    public static void AppendGame(
+        SubstrateChangeBuilder b,
+        Hash128 lineId,
+        IReadOnlyList<Board> boards,
+        IReadOnlyList<ChessMove> moves,
+        GameOutcome result,
+        Hash128 playingId,
+        Hash128 analysisSourceId,
+        Hash128 outcomeSourceId,
+        double witnessWeight = 0.9,
+        int maxLookbackPlies = 4)
+    {
+        ArgumentNullException.ThrowIfNull(b);
+        ArgumentNullException.ThrowIfNull(boards);
+        ArgumentNullException.ThrowIfNull(moves);
+        if (boards.Count == 0 || moves.Count == 0 || boards.Count != moves.Count + 1)
+            return;
+
+        var constellations = UnrollCausalConstellations(boards, moves, maxLookbackPlies);
+        if (constellations.Count == 0) return;
+
+        // The side that delivered checkmate is the mover of the final ply.
+        int winnerSide = boards[^1].WhiteToMove ? 1 : 0;
+        long score = ChessGraph.ScoreFp1e9(result.ForMover(winnerSide));
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var c in constellations)
+        {
+            string surface = Surface(c);
+            if (!seen.Add(surface)) continue;
+            if (ContentEmitter.Emit(b, surface, outcomeSourceId) is not { } kernelId)
+                continue;
+
+            b.AddAttestation(NativeAttestation.Aggregated(
+                subject: kernelId,
+                typeId: ChessVocabulary.OutcomeType,
+                obj: ChessVocabulary.OutcomeObject,
+                sourceId: outcomeSourceId,
+                contextId: playingId,
+                games: 1,
+                sumScoreFp1e9: score,
+                witnessWeight: witnessWeight));
+
+            if (ContentEmitter.Emit(
+                    b,
+                    c.PliesToMate.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    analysisSourceId) is { } dtzId)
+            {
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    kernelId, ChessVocabulary.HasDtzType, dtzId,
+                    analysisSourceId, playingId, witnessWeight));
+            }
+
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                lineId, ChessVocabulary.FeatureType, kernelId,
+                analysisSourceId, playingId, witnessWeight));
+        }
+    }
+
+    private static char PieceSymbol(Piece p) => p switch
+    {
+        Piece.WPawn => 'P',
+        Piece.WKnight => 'N',
+        Piece.WBishop => 'B',
+        Piece.WRook => 'R',
+        Piece.WQueen => 'Q',
+        Piece.WKing => 'K',
+        Piece.BPawn => 'p',
+        Piece.BKnight => 'n',
+        Piece.BBishop => 'b',
+        Piece.BRook => 'r',
+        Piece.BQueen => 'q',
+        Piece.BKing => 'k',
+        _ => '?',
+    };
 
     /// <summary>
     /// True when <paramref name="board"/> contains every <c>(Piece, Square)</c> atom of

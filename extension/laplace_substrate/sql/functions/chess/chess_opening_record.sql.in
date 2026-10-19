@@ -26,7 +26,10 @@ WITH claim AS MATERIALIZED (
     -- assert the opening for the same line — two witnesses, one line.
     SELECT DISTINCT a.object_id AS name_id, a.subject_id AS line
     FROM laplace.attestations a
-    WHERE a.type_id = laplace.relation_type_id('GAME_HAS_OPENING')
+    WHERE a.type_id IN (
+          laplace.relation_type_id('Opening'),
+          laplace.relation_type_id('GAME_HAS_OPENING'),
+          laplace.relation_type_id('OPENING_NAME'))
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 scored AS MATERIALIZED (

@@ -273,6 +273,9 @@ public static class ChessAnalyze
         ChessTacticOutcomes.AppendGame(
             b, boards, result, eventId,
             ChessTacticOutcomes.SourceId, witnessWeight: 0.9);
+        ChessRetrograde.AppendGame(
+            b, lineId, boards, played, result, eventId,
+            src, ChessTacticOutcomes.SourceId, witnessWeight: 0.9);
 
         // One trajectory per line, deposited only once the whole line resolved (an unresolved
         // SAN returned above, so no partial path is written). The trajectory is a function of

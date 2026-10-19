@@ -15,17 +15,24 @@ BEGIN ATOMIC
     -- witnessed the identical transition. Colour and result are still joined on both the line
     -- and playing context, so a shared line cannot leak another playing's side or score.
     WITH rel AS MATERIALIZED (
-        SELECT consensus.relation_family_ids('HAS_RESULT') AS result_types
+        SELECT array_append(consensus.relation_family_ids('HAS_RESULT'),
+                            laplace.relation_type_id('Result')) AS result_types,
+               laplace.relation_type_id('HAS_PLAYER') AS has_player,
+               laplace.relation_type_id('White')      AS white_tag,
+               laplace.relation_type_id('Black')      AS black_tag
     ),
     player_playings AS MATERIALIZED (
         SELECT h.subject_id AS line_id, h.context_id AS playing_id,
                max(h.observation_count)::bigint AS games
         FROM laplace.attestations h
-        WHERE h.type_id = laplace.relation_type_id('HAS_PLAYER')
-          AND laplace.has_qualifier(h.qualifier_mask, 'side',
-                  CASE WHEN p_as_white THEN 'white' ELSE 'black' END)
-          AND h.object_id = p_player
+        JOIN rel r ON true
+        WHERE h.object_id = p_player
           AND h.context_id IS NOT NULL
+          AND ((p_as_white AND h.type_id = r.white_tag)
+               OR (NOT p_as_white AND h.type_id = r.black_tag)
+               OR (h.type_id = r.has_player
+                   AND laplace.has_qualifier(h.qualifier_mask, 'side',
+                           CASE WHEN p_as_white THEN 'white' ELSE 'black' END)))
         GROUP BY h.subject_id, h.context_id
     ),
     player_steps AS MATERIALIZED (

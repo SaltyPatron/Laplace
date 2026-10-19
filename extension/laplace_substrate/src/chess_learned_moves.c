@@ -26,10 +26,13 @@
  * evaluates realize.realize once per HAS_RESULT row instead of once per
  * distinct result entity. */
 static const char *FOLD_QUERY =
-    "WITH ids AS MATERIALIZED ("
+    "WITH rel AS MATERIALIZED ("
+    "  SELECT ARRAY[laplace.relation_type_id('HAS_RESULT'),"
+    "               laplace.relation_type_id('Result')] AS result_types"
+    "), ids AS MATERIALIZED ("
     "  SELECT DISTINCT c.object_id AS id"
-    "  FROM laplace.consensus c"
-    "  WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')"
+    "  FROM laplace.consensus c, rel r"
+    "  WHERE c.type_id = ANY (r.result_types)"
     "), scored AS MATERIALIZED ("
     "  SELECT id, CASE realize.realize(id) WHEN '1-0' THEN 1.0::float8"
     "                                      WHEN '0-1' THEN 0.0::float8"
@@ -38,10 +41,10 @@ static const char *FOLD_QUERY =
     "), g AS ("
     "  SELECT s.white_score, p.trajectory"
     "  FROM laplace.consensus c"
+    "  JOIN rel r ON c.type_id = ANY (r.result_types)"
     "  JOIN scored s ON s.id = c.object_id AND s.white_score IS NOT NULL"
     "  JOIN laplace.physicalities p"
     "    ON p.entity_id = c.subject_id AND p.type = 1 AND p.trajectory IS NOT NULL"
-    "  WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')"
     "  LIMIT CASE WHEN $1 <= 0 THEN NULL ELSE $1 END"
     ") "
     "SELECT t.entity_id, t.ordinal + rs.i - 1, g.white_score "

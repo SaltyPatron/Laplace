@@ -21,24 +21,35 @@ BEGIN ATOMIC
     -- PLAYING, so the result join threads both -- the line finds the rows, the
     -- context pins each to its own playing (a shared line must not cross one
     -- playing's result onto another's appearance).
-    WITH sides AS (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('HAS_PLAYER') AS has_player,
+               laplace.relation_type_id('White')      AS white_tag,
+               laplace.relation_type_id('Black')      AS black_tag,
+               laplace.relation_type_id('HAS_RESULT') AS has_result,
+               laplace.relation_type_id('Result')     AS result_tag
+    ),
+    sides AS (
         SELECT a.subject_id AS line,
                a.context_id AS event,
-               -- The side is the claim's qualifier.
-               laplace.has_qualifier(a.qualifier_mask, 'side', 'white') AS white
+               (a.type_id = r.white_tag
+                OR (a.type_id = r.has_player
+                    AND laplace.has_qualifier(a.qualifier_mask, 'side', 'white'))) AS white
         FROM laplace.attestations a
+        JOIN rel r ON true
         WHERE a.object_id = p_player
           AND a.context_id IS NOT NULL
-          AND a.type_id = laplace.relation_type_id('HAS_PLAYER')
+          AND a.type_id IN (r.has_player, r.white_tag, r.black_tag)
     ),
     scored AS (
         SELECT s.white,
-               chess.outcome(s.white, r.object_id) AS outcome
+               chess.outcome(s.white, max(r.object_id)) AS outcome
         FROM sides s
+        JOIN rel rl ON true
         LEFT JOIN laplace.attestations r
                ON r.subject_id = s.line
               AND r.context_id = s.event
-              AND r.type_id = laplace.relation_type_id('HAS_RESULT')
+              AND r.type_id IN (rl.result_tag, rl.has_result)
+        GROUP BY s.line, s.event, s.white
     )
     SELECT sc.white,
            count(*)::bigint,

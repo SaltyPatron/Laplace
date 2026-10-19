@@ -153,4 +153,104 @@ public sealed class ChessRetrogradeTests
         Assert.Equal(1, projected.Value.Dtz);
         Assert.Equal("f7g7", projected.Value.BestMove?.ToUci());
     }
+
+    [Fact]
+    public void AppendGame_DepositsCausalMatingKernelsWithOutcomeAndDtzIntoSubstrateChange()
+    {
+        Laplace.Engine.Core.CodepointPerfcache.LoadDefault();
+        const string pgn =
+            "[Event \"T\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Result \"1-0\"]\n\n"
+            + "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0\n";
+        var parsed = ChessPgnDecomposer.TryParseGame(pgn)!;
+        using var b = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/retrograde-append");
+        ChessAnalyze.DeriveFromParsed(b, parsed);
+        var change = b.SetInputUnitsConsumed(1).Build();
+
+        var constellations = ChessRetrograde.UnrollCausalConstellations(parsed.Moves, maxLookbackPlies: 4);
+        Assert.NotEmpty(constellations);
+        var terminalSurface = ChessRetrograde.Surface(constellations[^1]);
+        var kernelId = Laplace.Decomposers.Abstractions.ContentEmitter.RootId(terminalSurface);
+        Assert.NotNull(kernelId);
+
+        Assert.Contains(change.Attestations, a =>
+            a.SubjectId == kernelId!.Value
+            && a.TypeId == ChessVocabulary.OutcomeType
+            && a.ContextId == parsed.PlayingId);
+        Assert.Contains(change.Attestations, a =>
+            a.SubjectId == kernelId!.Value
+            && a.TypeId == ChessVocabulary.HasDtzType
+            && a.ContextId == parsed.PlayingId);
+        Assert.Contains(change.Attestations, a =>
+            a.SubjectId == parsed.LineId
+            && a.TypeId == ChessVocabulary.FeatureType
+            && a.ObjectId == kernelId!.Value
+            && a.ContextId == parsed.PlayingId);
+    }
+
+    [Fact]
+    public void ApplyHorizonSteps_ExpandsMultiPlyTrajectoryHorizonAndSeedsPreferredMoves()
+    {
+        var modality = new ChessModality();
+        var s0 = modality.Initial();
+        var e4 = MoveGen.Legal(s0.Board).Single(m => m.ToUci() == "e2e4");
+        var s1 = modality.Apply(s0, e4);
+        var c5 = MoveGen.Legal(s1.Board).Single(m => m.ToUci() == "c7c5");
+        var s2 = modality.Apply(s1, c5);
+        var nf3 = MoveGen.Legal(s2.Board).Single(m => m.ToUci() == "g1f3");
+        var s3 = modality.Apply(s2, nf3);
+
+        var id0 = ChessPositionIdentity.PositionId(s0.Board);
+        var id1 = ChessPositionIdentity.PositionId(s1.Board);
+        var id2 = ChessPositionIdentity.PositionId(s2.Board);
+        var id3 = ChessPositionIdentity.PositionId(s3.Board);
+
+        var steps = new[]
+        {
+            new Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads.HorizonStepRow(id0.ToBytes(), id1.ToBytes(), 20),
+            new Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads.HorizonStepRow(id1.ToBytes(), id2.ToBytes(), 18),
+            new Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads.HorizonStepRow(id2.ToBytes(), id3.ToBytes(), 15),
+        };
+
+        var table = new SearchContinuationTable();
+        var boards = new Dictionary<Laplace.Engine.Core.Hash128, Board>();
+        int seeded = SearchContinuationSeed.ApplyHorizonSteps(table, s0.Board, boards, steps, maxPlies: 4);
+
+        Assert.Equal(3, seeded);
+        Assert.Equal(4, boards.Count);
+        Assert.True(table.TryGet(id0, out var e0) && e0.PreferredMove == e4);
+        Assert.True(table.TryGet(id1, out var e1) && e1.PreferredMove == c5);
+        Assert.True(table.TryGet(id2, out var e2) && e2.PreferredMove == nf3);
+    }
+
+    [Fact]
+    public void DiscoverMultiDimensionalRules_CorrelatesTimeControlEloBandOpeningAndClockPressure()
+    {
+        const string fen = "6k1/5ppp/8/8/8/2B3B1/5PPP/3R2K1 w - - 0 1";
+        var slices = Enumerable.Range(0, 8)
+            .Select(_ => new ChessRetrograde.GameSliceInput(
+                Sans: ["Rd8#"],
+                Result: GameOutcome.WonBy(0),
+                StartFen: fen,
+                WhiteElo: 2150,
+                BlackElo: 2100,
+                TimeControl: "180+0",
+                Eco: "D30",
+                ClockTokens: ["0:00:05"]))
+            .Concat(Enumerable.Range(0, 2)
+                .Select(_ => new ChessRetrograde.GameSliceInput(
+                    Sans: ["Kf1", "Kf8"],
+                    Result: GameOutcome.WonBy(1),
+                    StartFen: fen,
+                    WhiteElo: 2150,
+                    BlackElo: 2100,
+                    TimeControl: "180+0",
+                    Eco: "D30",
+                    ClockTokens: ["0:02:50", "0:02:50"])))
+            .ToList();
+
+        var rules = ChessRetrograde.DiscoverMultiDimensionalRules(slices, minWinRate: 0.70, minGames: 5);
+        Assert.Contains(rules, r => r.Condition == "tc:blitz + bishop-pair + rook-open-file" && r.Wins == 8 && r.Games == 10);
+        Assert.Contains(rules, r => r.Condition == "elo:2000-2399 + bishop-pair + rook-open-file" && r.Wins == 8);
+        Assert.Contains(rules, r => r.Condition == "eco:D30 + bishop-pair + rook-open-file" && r.FastestCheckmatePlies == 1);
+    }
 }

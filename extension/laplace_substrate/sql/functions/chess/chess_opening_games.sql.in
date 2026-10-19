@@ -48,7 +48,10 @@ WITH claim AS MATERIALIZED (
     SELECT DISTINCT a.subject_id AS line
     FROM laplace.attestations a
     WHERE a.object_id = laplace.word_id(p_opening)
-      AND a.type_id = laplace.relation_type_id('GAME_HAS_OPENING')
+      AND a.type_id IN (
+          laplace.relation_type_id('Opening'),
+          laplace.relation_type_id('GAME_HAS_OPENING'),
+          laplace.relation_type_id('OPENING_NAME'))
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 played AS MATERIALIZED (

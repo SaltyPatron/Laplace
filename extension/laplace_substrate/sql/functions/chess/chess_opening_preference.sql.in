@@ -19,21 +19,31 @@ CREATE OR REPLACE FUNCTION chess.opening_preference(p_player bytea,
     RETURNS TABLE(tc_class text, eco text, games bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-WITH grouped AS (
-    SELECT tcc.object_id AS tc_id, e.object_id AS eco_id, count(*) AS games
+WITH rel AS MATERIALIZED (
+    SELECT laplace.relation_type_id('HAS_PLAYER')       AS has_player,
+           laplace.relation_type_id('White')            AS white_tag,
+           laplace.relation_type_id('Black')            AS black_tag,
+           laplace.relation_type_id('HAS_TC_CLASS')     AS has_tcc,
+           laplace.relation_type_id('TimeControl')      AS tc_tag,
+           laplace.relation_type_id('HAS_ECO')          AS has_eco,
+           laplace.relation_type_id('ECO')              AS eco_tag
+),
+grouped AS (
+    SELECT tcc.object_id AS tc_id, e.object_id AS eco_id, count(DISTINCT a.context_id) AS games
     FROM laplace.attestations a
+    JOIN rel r ON true
     JOIN laplace.attestations tcc ON tcc.subject_id = a.subject_id
                          AND tcc.context_id = a.context_id
-                         AND tcc.type_id = laplace.relation_type_id('HAS_TC_CLASS')
+                         AND tcc.type_id IN (r.has_tcc, r.tc_tag)
     JOIN laplace.attestations e ON e.subject_id = a.subject_id
-                       AND e.context_id = a.context_id
-                       AND e.type_id = laplace.relation_type_id('HAS_ECO')
+                       AND (e.context_id = a.context_id OR e.context_id IS NULL)
+                       AND e.type_id IN (r.eco_tag, r.has_eco)
     WHERE a.object_id = p_player
       AND a.context_id IS NOT NULL
-      AND a.type_id = laplace.relation_type_id('HAS_PLAYER')
+      AND a.type_id IN (r.has_player, r.white_tag, r.black_tag)
       AND (p_tc_class IS NULL OR tcc.object_id = laplace.word_id(lower(p_tc_class)))
     GROUP BY tcc.object_id, e.object_id
-    ORDER BY count(*) DESC, tcc.object_id, e.object_id
+    ORDER BY count(DISTINCT a.context_id) DESC, tcc.object_id, e.object_id
     LIMIT p_limit
 ),
 ord AS (

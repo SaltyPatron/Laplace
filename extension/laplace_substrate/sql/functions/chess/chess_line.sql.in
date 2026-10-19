@@ -17,7 +17,13 @@ BEGIN ATOMIC
     -- before the fold ran returns its playings with NULL rating rather than
     -- nothing (unattested, not attested-false), and a line nobody played
     -- returns zero rows.
-    WITH playings AS MATERIALIZED (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('ON_DATE')    AS on_date,
+               laplace.relation_type_id('Date')       AS date_tag,
+               laplace.relation_type_id('HAS_RESULT') AS has_result,
+               laplace.relation_type_id('Result')     AS result_tag
+    ),
+    playings AS MATERIALIZED (
         SELECT pl.subject_id AS event
         FROM laplace.attestations pl
         WHERE pl.object_id = p_line
@@ -31,14 +37,14 @@ BEGIN ATOMIC
         -- by context: each playing's own date/result, never a sibling's.
         SELECT a.context_id AS event,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = laplace.relation_type_id('ON_DATE')) AS date_id,
+                   WHERE a.type_id IN (r.date_tag, r.on_date)) AS date_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = laplace.relation_type_id('HAS_RESULT')) AS result_id
+                   WHERE a.type_id IN (r.result_tag, r.has_result)) AS result_id
         FROM laplace.attestations a
+        JOIN rel r ON true
         WHERE a.subject_id = p_line
           AND a.context_id IS NOT NULL
-          AND a.type_id IN (laplace.relation_type_id('ON_DATE'),
-                            laplace.relation_type_id('HAS_RESULT'))
+          AND a.type_id IN (r.on_date, r.date_tag, r.has_result, r.result_tag)
         GROUP BY a.context_id
     ),
     fold AS MATERIALIZED (
