@@ -77,21 +77,32 @@ BEGIN ATOMIC
         FROM taxonomy.bubble_up_batch(ARRAY(SELECT id FROM ctx)) b
         WHERE b.synset_id IS NOT NULL
     ),
+    peers AS MATERIALIZED (
+        SELECT DISTINCT p.wid
+        FROM unnest(lexical.lexical_peers(p_word)) AS p(wid)
+        WHERE p.wid IS NOT NULL
+    ),
     cand AS MATERIALIZED (
         -- A sense is the word's binding to a key (or sense -> synset via IS_SENSE_OF).
         SELECT s.sense_id, COALESCE(ss.object_id, s.sense_id) AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
                COALESCE(ss.witness_count, 0)::bigint AS w2
-        FROM @extschema@.v_word_senses s
+        FROM peers p
+        JOIN @extschema@.v_word_senses s ON s.word_id = p.wid
         LEFT JOIN @extschema@.v_consensus_unrefuted ss
           ON ss.subject_id = s.sense_id
          AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
-        WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     candidate_nodes AS (
         SELECT c.synset_id AS sid, c.synset_id AS node_id FROM cand c
         UNION
         SELECT c.synset_id, c.sense_id FROM cand c
+    ),
+    band_1_7 AS MATERIALIZED (
+        SELECT laplace.relation_band_types(ARRAY[1, 7]) AS types
+    ),
+    band_2_4_7 AS MATERIALIZED (
+        SELECT laplace.relation_band_types(ARRAY[2, 4, 7]) AS types
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier realize.constituents include a context token.
@@ -99,8 +110,10 @@ BEGIN ATOMIC
         SELECT DISTINCT n.sid, c.object_id AS gid,
                consensus.eff_mu(c.rating, c.rd) AS w
         FROM candidate_nodes n
-        JOIN @extschema@.consensus c ON c.subject_id = n.node_id
-        WHERE consensus.relation_highway_band(c.type_id) IN (1, 7)
+        CROSS JOIN band_1_7 b
+        JOIN @extschema@.consensus c
+          ON c.subject_id = n.node_id
+         AND c.type_id = ANY (b.types)
     ),
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
@@ -129,16 +142,18 @@ BEGIN ATOMIC
     lane_taxon AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
             SELECT c.subject_id AS sid, consensus.eff_mu(c.rating, c.rd) AS w
-            FROM @extschema@.consensus c
+            FROM band_2_4_7 b
+            CROSS JOIN @extschema@.consensus c
             WHERE c.subject_id IN (SELECT synset_id FROM cand)
               AND c.object_id IN (SELECT sid FROM ctx_syn)
-              AND consensus.relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND c.type_id = ANY (b.types)
             UNION ALL
             SELECT c.object_id, consensus.eff_mu(c.rating, c.rd)
-            FROM @extschema@.consensus c
+            FROM band_2_4_7 b
+            CROSS JOIN @extschema@.consensus c
             WHERE c.object_id IN (SELECT synset_id FROM cand)
               AND c.subject_id IN (SELECT sid FROM ctx_syn)
-              AND consensus.relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND c.type_id = ANY (b.types)
         ) x
         GROUP BY x.sid
     ),

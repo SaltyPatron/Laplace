@@ -63,4 +63,30 @@ public sealed class ChessCorpusTests
         Assert.Contains(change.Attestations, a => a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId);
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
     }
+
+    [Fact]
+    public void RecordingWitnessId_MatchesEmittedPlaysLineForChessComAndLichessSites()
+    {
+        const string chessComGame =
+            "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n"
+            + "[Date \"2026.02.14\"]\n[Round \"-\"]\n"
+            + "[White \"anthony-hart\"]\n[Black \"opponent\"]\n"
+            + "[Result \"1-0\"]\n\n"
+            + "1. e4 e5 2. Nf3 Nc6 1-0\n";
+
+        CodepointPerfcache.LoadDefault();
+        var parsed = ChessPgnDecomposer.WithCorpus(
+            ChessPgnDecomposer.TryParseGame(chessComGame)!,
+            "https://api.chess.com/pub/player/anthony-hart/games/2026/02");
+        Assert.Equal(ChessCorpus.ChessCom, parsed.Corpus);
+
+        using var b = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/chesscom-readback")
+            .DeclareSourcePrior(Laplace.Decomposers.Abstractions.SourceTrust.StructuredCorpus);
+        ChessPgnDecomposer.RecordGame(parsed, b);
+        var change = b.SetInputUnitsConsumed(1).Build();
+
+        var playsLine = Assert.Single(change.Attestations, a => a.TypeId == ChessVocabulary.PlaysLineType);
+        Assert.Equal(ChessCorpus.SourceId(ChessCorpus.ChessCom), playsLine.SourceId);
+        Assert.Equal(playsLine.Id, ChessPgnDecomposer.RecordingWitnessId(parsed));
+    }
 }

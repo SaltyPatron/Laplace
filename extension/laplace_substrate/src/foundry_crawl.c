@@ -63,6 +63,8 @@ allocate_items(uint64 count, Size item_size, const char *what)
     return palloc((Size) count * item_size);
 }
 
+static SPIPlanPtr crawl_neighbors_plan = NULL;
+
 Datum
 pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
 {
@@ -143,17 +145,21 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
         frontier[n_front++] = id;
     }
 
-    if (n_front > 0 && hops > 0 && fanout > 0)
-    {
-        Oid argtypes[3] = { BYTEAARRAYOID, INT4OID, BYTEAARRAYOID };
-
-        if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+    if (if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
             elog(ERROR, "foundry_crawl: SPI_connect failed");
-        plan = SPI_prepare_cursor(
-            "SELECT frontier_id, object_id, tier, rating, rd "
-            "FROM consensus.foundry_crawl_neighbors($1, $2, $3)",
-            3, argtypes, CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL)
+        if (crawl_neighbors_plan == NULL)
+        {
+            Oid argtypes[3] = { BYTEAARRAYOID, INT4OID, BYTEAARRAYOID };
+            plan = SPI_prepare_cursor(
+                "SELECT frontier_id, object_id, tier, rating, rd "
+                "FROM consensus.foundry_crawl_neighbors($1, $2, $3)",
+                3, argtypes, CURSOR_OPT_PARALLEL_OK);
+            if (plan == NULL || SPI_keepplan(plan) != 0)
+                elog(ERROR, "foundry_crawl: SPI_prepare failed: %s",
+                     SPI_result_code_string(SPI_result));
+            crawl_neighbors_plan = plan;
+        }
+        plan = crawl_neighbors_plan
             elog(ERROR, "foundry_crawl: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
 

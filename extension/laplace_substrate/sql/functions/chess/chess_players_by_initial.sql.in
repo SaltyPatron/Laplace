@@ -24,10 +24,11 @@ BEGIN ATOMIC
     ),
     name_ids AS MATERIALIZED (
         -- This expression is exactly the physicalities_traj_first_id_btree key.
-        SELECT w.id AS name_id
-        FROM laplace.v_word_points w, target t
-        WHERE w.trajectory IS NOT NULL
-          AND (public.laplace_trajectory_constituent_ids(w.trajectory))[1] = ANY (t.cps)
+        SELECT p.entity_id AS name_id
+        FROM laplace.physicalities p, target t
+        WHERE p.type = 1
+          AND p.trajectory IS NOT NULL
+          AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1] = ANY (t.cps)
     ),
     players AS MATERIALIZED (
         -- Primary names and aliases are both names: one relation, HAS_NAME, whose

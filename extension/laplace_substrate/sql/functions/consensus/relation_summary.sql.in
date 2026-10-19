@@ -32,8 +32,8 @@ BEGIN ATOMIC
            round((1.0 / (GREATEST(b.depth, 1) * ln(2.0 + b.sharing)))::numeric, 6),
            s.n,
            public.laplace_angular_distance_4d(
-               (SELECT coord FROM laplace.v_word_points WHERE id = p_x AND coord IS NOT NULL LIMIT 1),
-               (SELECT coord FROM laplace.v_word_points WHERE id = p_y AND coord IS NOT NULL LIMIT 1)),
+               (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = p_x AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1),
+               (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = p_y AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1)),
            concat_ws('',
              CASE WHEN b.channel IS NOT NULL THEN 'related via ' || b.channel
                   ELSE 'no witnessed coupling' END,

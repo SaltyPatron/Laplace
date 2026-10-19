@@ -443,8 +443,8 @@ functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
 views/v_word_senses.sql.in
 functions/lexical/senses_with_context.sql.in
-functions/structural/word_anchor.sql.in
 functions/geometry/structural_cluster_batch.sql.in
+functions/geometry/structural_cluster.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/drop_retired_ducet_geometry.sql.in
 functions/analysis/laplace_entity_attestations.sql.in

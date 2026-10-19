@@ -46,7 +46,7 @@ run_query(int which, ArrayType *ids, ArrayType *types)
     int n = which == DEF_TYPES ? 0 : which == DEF_OWNED || which == DEF_INVERSE ? 2 : 1;
     Oid oids[] = {BYTEAARRAYOID,BYTEAARRAYOID};
     if (plans[which] == NULL) {
-        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(query_keys[which]),n,oids,CURSOR_OPT_GENERIC_PLAN);
+        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(query_keys[which]),n,oids,CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (plans[which] == NULL || SPI_keepplan(plans[which]) != 0)
             elog(ERROR,"display: cannot retain %s",query_keys[which]);
     }

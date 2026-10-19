@@ -111,6 +111,7 @@ public sealed class ChessMoveOutcomesDecomposer
     [
         ChessMoveOutcomes.SourceId, ChessVocabulary.PgnSourceId,
         ChessVocabulary.BookSourceId, ChessVocabulary.SourceId,
+        ..ChessCorpus.Names.Select(ChessCorpus.SourceId),
     ];
 
     public override Hash128 SourceId => ChessMoveOutcomes.SourceId;

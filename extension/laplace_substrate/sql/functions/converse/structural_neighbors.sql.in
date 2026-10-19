@@ -7,21 +7,23 @@ CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH anchor AS MATERIALIZED (
-        SELECT w.id AS v_id, w.coord AS v_coord, structural.entity_curve(w.id) AS v_curve
-        FROM laplace.v_word_points w
-        JOIN converse.prompt_state(p_word) s ON w.id = s.id
-        WHERE w.coord IS NOT NULL
-          AND public.laplace_direction_4d(w.coord) IS NOT NULL
-        ORDER BY s.ord, w.physicality_id
+        SELECT p.entity_id AS v_id, p.coord AS v_coord, structural.entity_curve(p.entity_id) AS v_curve
+        FROM converse.prompt_state(p_word) s
+        JOIN laplace.physicalities p ON p.entity_id = s.id AND p.type = 1
+        WHERE p.coord IS NOT NULL
+          AND public.laplace_direction_4d(p.coord) IS NOT NULL
+        ORDER BY s.ord, p.id
         LIMIT 1
     ),
     nearest AS MATERIALIZED (
-        SELECT w.id AS entity_id, w.coord,
-               public.laplace_angular_distance_4d(w.coord, a.v_coord) AS geo
+        SELECT p.entity_id, p.coord,
+               public.laplace_angular_distance_4d(p.coord, a.v_coord) AS geo
         FROM anchor a
-        JOIN laplace.v_word_points w ON w.id <> a.v_id
-        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
-        ORDER BY public.laplace_direction_4d(w.coord)
+        JOIN laplace.physicalities p
+          ON p.type = 1
+         AND p.entity_id <> a.v_id
+        WHERE public.laplace_direction_4d(p.coord) IS NOT NULL
+        ORDER BY public.laplace_direction_4d(p.coord)
                  <<->> public.laplace_direction_4d(a.v_coord)
         LIMIT p_k
     ),

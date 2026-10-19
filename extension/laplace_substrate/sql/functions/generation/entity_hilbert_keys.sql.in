@@ -7,9 +7,10 @@ CREATE OR REPLACE FUNCTION generation.entity_hilbert_keys(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, hilbert_index bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT DISTINCT ON (w.id) w.id, w.hilbert_index
-    FROM laplace.v_word_points w
-    JOIN unnest(p_vocab) AS u(id) ON u.id = w.id
-    WHERE w.hilbert_index IS NOT NULL
-    ORDER BY w.id, w.physicality_id;
+    SELECT DISTINCT ON (p.entity_id) p.entity_id, p.hilbert_index
+    FROM laplace.physicalities p
+    WHERE p.entity_id = ANY(p_vocab)
+      AND p.type = 1
+      AND p.hilbert_index IS NOT NULL
+    ORDER BY p.entity_id, p.id;
 END;

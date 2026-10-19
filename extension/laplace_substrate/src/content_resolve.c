@@ -66,8 +66,9 @@ typedef struct
  * and the LIMIT lets the Append stop early on a hit.
  */
 static const char *RESOLVE_CONTAINER_QUERY =
-    "SELECT w.id FROM laplace.v_word_points w "
-    "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) "
+    "SELECT p.entity_id FROM laplace.physicalities p "
+    "WHERE p.type = 1 AND p.trajectory IS NOT NULL "
+    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) "
     "      @> ARRAY[$1]::bytea[] "
     "LIMIT $2";
 
@@ -100,20 +101,20 @@ ensure_resolve_container_plan(void)
  * rating tuple, not a scalar.
  */
 static const char *RESOLVE_JOINT_EDGE_QUERY =
-    "WITH cand AS (SELECT unnest($1::bytea[]) AS id), "
-    "     e AS ("
-    "       SELECT c.subject_id AS id, c.witness_count, c.rating, c.rd "
-    "         FROM laplace.consensus c "
-    "        WHERE c.subject_id IN (SELECT id FROM cand) "
-    "          AND c.object_id  IN (SELECT id FROM cand) "
-    "       UNION ALL "
-    "       SELECT c.object_id AS id, c.witness_count, c.rating, c.rd "
-    "         FROM laplace.consensus c "
-    "        WHERE c.subject_id IN (SELECT id FROM cand) "
-    "          AND c.object_id  IN (SELECT id FROM cand)) "
-    "SELECT e.id, sum(e.witness_count)::bigint, sum(e.rating)::bigint, "
-    "       min(e.rd)::bigint "
-    "  FROM e GROUP BY e.id";
+    "WITH cand AS MATERIALIZED ("
+    "  SELECT DISTINCT id FROM unnest($1::bytea[]) AS u(id) WHERE id IS NOT NULL"
+    "), "
+    "edges AS MATERIALIZED ("
+    "  SELECT c.subject_id, c.object_id, c.witness_count, c.rating, c.rd "
+    "    FROM cand s "
+    "    JOIN laplace.consensus c ON c.subject_id = s.id "
+    "   WHERE c.object_id = ANY($1::bytea[])"
+    ") "
+    "SELECT ep.id, sum(edges.witness_count)::bigint, sum(edges.rating)::bigint, "
+    "       min(edges.rd)::bigint "
+    "  FROM edges "
+    "  CROSS JOIN LATERAL (VALUES (edges.subject_id), (edges.object_id)) AS ep(id) "
+    " GROUP BY ep.id";
 
 static SPIPlanPtr resolve_joint_edge_plan = NULL;
 

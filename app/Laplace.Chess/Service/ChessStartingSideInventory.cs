@@ -344,8 +344,12 @@ internal static class ChessStartingSideInventory
                     Comparer<Hash128>.Create((a, b) => a.CompareToBytewise(b))) < 0))
                 throw new InvalidDataException("Hydration requested a playing outside the immutable selection.");
             var result = await inner.HydrateAsync(page, maximumBytes, ct).ConfigureAwait(false);
+            var pgnSourceIds = ChessCorpus.Names
+                .Select(static c => ChessCorpus.SourceId(c).ToString())
+                .Append(ChessVocabulary.PgnSourceId.ToString())
+                .ToHashSet(StringComparer.Ordinal);
             if (page.Any(id => !result.Sources.TryGetValue(id, out var owners)
-                    || !owners.Any(owner => owner.SourceId == ChessVocabulary.PgnSourceId.ToString())))
+                    || !owners.Any(owner => pgnSourceIds.Contains(owner.SourceId))))
                 throw new InvalidDataException("Selected playing lacks its recorded PGN source ownership.");
             return result;
         }
@@ -376,12 +380,14 @@ internal static class ChessStartingSideInventory
             byte[][] subjects = ids.Select(id => id.ToBytes()).ToArray();
             var relation = ChessVocabulary.PlaysLineType;
             var bindings = ids.ToDictionary(id => id, _ => new List<SourceBinding>());
-            foreach (var (name, source) in new[]
-            {
+            (string Name, Hash128 Source)[] sources =
+            [
                 ("ChessPgn", ChessVocabulary.PgnSourceId),
                 ("ChessBook", ChessVocabulary.BookSourceId),
-                ("ChessSelfPlay", ChessVocabulary.SourceId)
-            })
+                ("ChessSelfPlay", ChessVocabulary.SourceId),
+                ..ChessCorpus.Names.Select(static c => (c, ChessCorpus.SourceId(c))),
+            ];
+            foreach (var (name, source) in sources)
             {
                 // The read row has no Source column; querying one source at a time binds
                 // every returned row to its provenance.

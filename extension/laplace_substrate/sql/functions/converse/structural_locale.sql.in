@@ -17,11 +17,11 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    SELECT w.id, w.coord INTO v_id, v_coord
-    FROM laplace.v_word_points w
-    JOIN converse.prompt_state(p_word) s ON w.id = s.id
-    WHERE w.coord IS NOT NULL
-    ORDER BY s.ord, w.physicality_id
+    SELECT p.entity_id, p.coord INTO v_id, v_coord
+    FROM converse.prompt_state(p_word) s
+    JOIN laplace.physicalities p ON p.entity_id = s.id AND p.type = 1
+    WHERE p.coord IS NOT NULL
+    ORDER BY s.ord, p.id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 

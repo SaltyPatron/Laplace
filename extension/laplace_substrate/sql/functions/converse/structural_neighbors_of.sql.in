@@ -27,12 +27,14 @@ BEGIN ATOMIC
           AND public.laplace_direction_4d(a.coord) IS NOT NULL
     ),
     nearest AS MATERIALIZED (
-        SELECT w.id AS entity_id, w.coord, w.radius_origin,
-               public.laplace_angular_distance_4d(w.coord, a.v_coord) AS geo
+        SELECT p.entity_id, p.coord, p.radius_origin,
+               public.laplace_angular_distance_4d(p.coord, a.v_coord) AS geo
         FROM anchor a
-        JOIN laplace.v_word_points w ON w.id <> p_id
-        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
-        ORDER BY public.laplace_direction_4d(w.coord)
+        JOIN laplace.physicalities p
+          ON p.type = 1
+         AND p.entity_id <> p_id
+        WHERE public.laplace_direction_4d(p.coord) IS NOT NULL
+        ORDER BY public.laplace_direction_4d(p.coord)
                  <<->> public.laplace_direction_4d(a.v_coord)
         LIMIT p_k
     ),

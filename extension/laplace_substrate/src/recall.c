@@ -929,10 +929,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         Datum args2[3] = { p_word, me_coord, Int32GetDatum(500) };
 
         rc = SPI_execute_with_args(
+            "WITH self_type AS MATERIALIZED ("
+            "  SELECT self.type_id FROM laplace.entities self WHERE self.id = $1 LIMIT 1"
+            ") "
             "SELECT w.id, w.coord, EXISTS ("
-            "  SELECT 1 FROM laplace.entities self "
-            "  JOIN laplace.entities peer ON peer.type_id=self.type_id "
-            "  WHERE self.id=$1 AND peer.id=w.id"
+            "  SELECT 1 FROM self_type st WHERE st.type_id = w.type_id"
             "), w.n_constituents "
             "FROM laplace.v_word_points w "
             "WHERE w.trajectory IS NOT NULL AND w.coord IS NOT NULL "

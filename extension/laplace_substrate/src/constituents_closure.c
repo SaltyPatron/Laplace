@@ -1,14 +1,19 @@
 #include "postgres.h"
 #include "miscadmin.h"
 
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "nodes/makefuncs.h"
+#include "parser/parse_func.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
+#include "utils/lsyscache.h"
 
 #include "laplace/core/mantissa.h"
+#include "content_trajectory_read.h"
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "trajectory_wkb.h"
@@ -17,23 +22,35 @@
 /*
  * realize.constituents_closure(roots, max_depth)
  *
- * Descends the composition face level by level: each level reads the trajectory
- * manifest of every frontier entity in one bytea[] request and unpacks each
- * vertex (child id, ordinal, run length, flags) natively. Emits
- * (parent, ordinal, child, run_length, flags) sorted by parent and ordinal;
- * max_depth 0 is unbounded. Where an entity has several trajectory rows, the
- * lowest physicality id wins, then the one with more points.
+ * Descends the composition face level by level: each level first probes the
+ * canonical (entity_id, type=1) primary-key address on the exact owning HASH(id)
+ * leaf partition via laplace_content_trajectory_read, and falls back to the
+ * entity_id-indexed query only for any frontier entity not found at its
+ * canonical physicality id.
  */
 static const char *CLOSURE_LEVEL_QUERY =
-    "SELECT DISTINCT ON (w.id) w.id, public.ST_AsBinary(w.trajectory) "
-    "FROM laplace.v_word_points w "
-    "JOIN unnest($1::bytea[]) AS f(entity_id) ON f.entity_id = w.id "
-    "WHERE w.trajectory IS NOT NULL "
-    "ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC";
+    "SELECT DISTINCT ON (p.entity_id) p.entity_id, public.ST_AsBinary(p.trajectory) "
+    "FROM laplace.physicalities p "
+    "WHERE p.entity_id = ANY($1::bytea[]) AND p.type = 1 AND p.trajectory IS NOT NULL "
+    "ORDER BY p.entity_id, p.id, public.ST_NPoints(p.trajectory) DESC";
 
-/* Prepared once per backend; every level reuses the generic plan over the
- * partitioned view. */
+/* Prepared once per backend; every fallback level reuses the generic plan. */
 static SPIPlanPtr closure_level_plan = NULL;
+static Oid closure_st_asbinary_oid = InvalidOid;
+
+static Oid
+ensure_closure_asbinary_oid(void)
+{
+    if (!OidIsValid(closure_st_asbinary_oid))
+    {
+        Oid phys_rel = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+        Oid geom_type = get_atttype(phys_rel, get_attnum(phys_rel, "trajectory"));
+        closure_st_asbinary_oid = LookupFuncName(
+            list_make2(makeString("public"), makeString("st_asbinary")),
+            1, &geom_type, false);
+    }
+    return closure_st_asbinary_oid;
+}
 
 static void
 ensure_closure_level_plan(void)
@@ -43,7 +60,7 @@ ensure_closure_level_plan(void)
     {
         Oid argtypes[1] = {BYTEAARRAYOID};
         SPIPlanPtr plan = SPI_prepare_cursor(CLOSURE_LEVEL_QUERY, 1, argtypes,
-                                              CURSOR_OPT_GENERIC_PLAN);
+                                              CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "constituents_closure: SPI_prepare(level) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -182,6 +199,36 @@ append_manifest_edges(const hash128_t *parent, const bytea *wkb,
     }
 }
 
+typedef struct ClosureReadCtx
+{
+    Oid as_binary;
+    HTAB *resolved;
+    EdgeVec *edges;
+    IdVec *next;
+    HTAB *visited;
+    MemoryContext owner;
+} ClosureReadCtx;
+
+static void
+closure_consume_trajectory(Datum physicality, Datum entity, Datum geometry, void *opaque)
+{
+    ClosureReadCtx *ctx = (ClosureReadCtx *) opaque;
+    hash128_t parent = datum_to_hash128(entity);
+    bool found;
+
+    (void) physicality;
+    (void) hash_search(ctx->resolved, &parent, HASH_ENTER, &found);
+    if (found)
+        return;
+    {
+        MemoryContext prev = MemoryContextSwitchTo(ctx->owner);
+        bytea *wkb = DatumGetByteaP(OidFunctionCall1(ctx->as_binary, geometry));
+        append_manifest_edges(&parent, wkb, ctx->edges, ctx->next, ctx->visited, ctx->owner);
+        pfree(wkb);
+        MemoryContextSwitchTo(prev);
+    }
+}
+
 Datum
 pg_laplace_constituents_closure(PG_FUNCTION_ARGS)
 {
@@ -196,6 +243,8 @@ pg_laplace_constituents_closure(PG_FUNCTION_ARGS)
     MemoryContext owner = CurrentMemoryContext;
     HASHCTL ctl;
     HTAB *visited;
+    Oid as_binary;
+    bool spi_connected = false;
     bool spi_top = false;
 
     InitMaterializedSRF(fcinfo, 0);
@@ -228,47 +277,79 @@ pg_laplace_constituents_closure(PG_FUNCTION_ARGS)
     if (frontier.count == 0)
         return (Datum) 0;
 
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "constituents_closure: SPI_connect failed");
-    ensure_closure_level_plan();
+    as_binary = ensure_closure_asbinary_oid();
 
     for (int depth = 0; frontier.count > 0 && (max_depth == 0 || depth < max_depth); ++depth) {
         if (frontier.count > INT_MAX)
             ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                             errmsg("constituents_closure: frontier exceeds PostgreSQL array capacity")));
-        Datum *ids = (Datum *) palloc(frontier.count * sizeof(Datum));
+        Datum *ids = (Datum *) MemoryContextAlloc(owner, frontier.count * sizeof(Datum));
         for (size_t i = 0; i < frontier.count; ++i)
             ids[i] = hash128_to_datum(&frontier.ids[i]);
         ArrayType *arg_array = construct_array(ids, (int) frontier.count,
                                                BYTEAOID, -1, false, TYPALIGN_INT);
-        Datum args[1] = {PointerGetDatum(arg_array)};
-        int rc = SPI_execute_plan(closure_level_plan, args, NULL, true, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "constituents_closure: level query failed: %s", SPI_result_code_string(rc));
 
         next.count = 0;
-        for (uint64 row = 0; row < SPI_processed; ++row) {
-            HeapTuple tuple = SPI_tuptable->vals[row];
-            TupleDesc desc = SPI_tuptable->tupdesc;
-            bool isnull;
-            Datum parent_d = SPI_getbinval(tuple, desc, 1, &isnull);
-            if (isnull) continue;
-            bytea *parent_b = DatumGetByteaPP(parent_d);
-            if (VARSIZE_ANY_EXHDR(parent_b) != sizeof(hash128_t)) continue;
-            Datum trajectory_d = SPI_getbinval(tuple, desc, 2, &isnull);
-            if (isnull) continue;
-            hash128_t parent;
-            memcpy(&parent, VARDATA_ANY(parent_b), sizeof(parent));
-            append_manifest_edges(&parent, DatumGetByteaPP(trajectory_d),
-                                  &edges, &next, visited, owner);
+        HASHCTL rctl;
+        memset(&rctl, 0, sizeof(rctl));
+        rctl.keysize = sizeof(hash128_t);
+        rctl.entrysize = sizeof(hash128_t);
+        rctl.hcxt = owner;
+        HTAB *resolved = hash_create("constituents closure resolved",
+                                     (int) Min(frontier.count, 1024), &rctl,
+                                     HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        ClosureReadCtx read_ctx = {as_binary, resolved, &edges, &next, visited, owner};
+        laplace_content_trajectory_read(arg_array, closure_consume_trajectory, &read_ctx);
+
+        if ((size_t) hash_get_num_entries(resolved) < frontier.count) {
+            int rem_n = 0;
+            Datum *rem_ids = (Datum *) MemoryContextAlloc(owner, frontier.count * sizeof(Datum));
+            for (size_t i = 0; i < frontier.count; ++i) {
+                if (!hash_search(resolved, &frontier.ids[i], HASH_FIND, NULL))
+                    rem_ids[rem_n++] = ids[i];
+            }
+            if (rem_n > 0) {
+                if (!spi_connected) {
+                    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+                        elog(ERROR, "constituents_closure: SPI_connect failed");
+                    ensure_closure_level_plan();
+                    spi_connected = true;
+                }
+                ArrayType *rem_array = construct_array(rem_ids, rem_n,
+                                                       BYTEAOID, -1, false, TYPALIGN_INT);
+                Datum args[1] = {PointerGetDatum(rem_array)};
+                int rc = SPI_execute_plan(closure_level_plan, args, NULL, true, 0);
+                if (rc != SPI_OK_SELECT)
+                    elog(ERROR, "constituents_closure: level query failed: %s", SPI_result_code_string(rc));
+
+                for (uint64 row = 0; row < SPI_processed; ++row) {
+                    HeapTuple tuple = SPI_tuptable->vals[row];
+                    TupleDesc desc = SPI_tuptable->tupdesc;
+                    bool isnull;
+                    Datum parent_d = SPI_getbinval(tuple, desc, 1, &isnull);
+                    if (isnull) continue;
+                    bytea *parent_b = DatumGetByteaPP(parent_d);
+                    if (VARSIZE_ANY_EXHDR(parent_b) != sizeof(hash128_t)) continue;
+                    Datum trajectory_d = SPI_getbinval(tuple, desc, 2, &isnull);
+                    if (isnull) continue;
+                    hash128_t parent;
+                    memcpy(&parent, VARDATA_ANY(parent_b), sizeof(parent));
+                    append_manifest_edges(&parent, DatumGetByteaPP(trajectory_d),
+                                          &edges, &next, visited, owner);
+                }
+                SPI_freetuptable(SPI_tuptable);
+            }
+            pfree(rem_ids);
         }
-        SPI_freetuptable(SPI_tuptable);
+        hash_destroy(resolved);
+        pfree(arg_array);
         pfree(ids);
         IdVec swap = frontier;
         frontier = next;
         next = swap;
     }
-    laplace_spi_finish(spi_top);
+    if (spi_connected)
+        laplace_spi_finish(spi_top);
 
     if (edges.count > 1)
         qsort(edges.items, edges.count, sizeof(ClosureEdge), edge_compare);

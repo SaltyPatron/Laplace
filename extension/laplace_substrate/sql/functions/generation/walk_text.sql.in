@@ -159,21 +159,24 @@ BEGIN
         WHERE l.surface_id IS NOT NULL
     ),
     candidate_ids AS MATERIALIZED (
-        SELECT ARRAY(SELECT DISTINCT p.surface_id FROM path_candidates p ORDER BY p.surface_id) AS ids
+        SELECT DISTINCT p.surface_id FROM path_candidates p
+    ),
+    lang_contexts AS MATERIALIZED (
+        SELECT DISTINCT a.subject_id AS surface_id, a.context_id
+        FROM candidate_ids ci
+        JOIN laplace.attestations a ON a.subject_id = ci.surface_id
+        WHERE p_lang IS NOT NULL
+          AND a.context_id IS NOT NULL
     ),
     lang_any AS MATERIALIZED (
-        SELECT DISTINCT a.subject_id AS surface_id
-        FROM candidate_ids ci
-        JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
-        WHERE p_lang IS NOT NULL
-          AND laplace.is_language(a.context_id)
+        SELECT DISTINCT a.surface_id
+        FROM lang_contexts a
+        WHERE laplace.is_language(a.context_id)
     ),
     lang_hit AS MATERIALIZED (
-        SELECT DISTINCT a.subject_id AS surface_id
-        FROM candidate_ids ci
-        JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
-        WHERE p_lang IS NOT NULL
-          AND a.context_id = p_lang
+        SELECT DISTINCT a.surface_id
+        FROM lang_contexts a
+        WHERE a.context_id = p_lang
     ),
     scoped AS MATERIALIZED (
         SELECT p.*

@@ -4,15 +4,15 @@ CREATE OR REPLACE FUNCTION converse.first_placed_topic(p_text text)
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT w.id
-    FROM laplace.v_word_points w
-    JOIN converse.prompt_state(p_text) s ON w.id = s.id
-    WHERE w.coord IS NOT NULL
+    SELECT p.entity_id
+    FROM converse.prompt_state(p_text) s
+    JOIN laplace.physicalities p ON p.entity_id = s.id AND p.type = 1
+    WHERE p.coord IS NOT NULL
     -- "first" is a claim about prompt order, so it has to be stated. Without this
     -- the LIMIT took an arbitrary placed token out of a multi-token prompt and the
     -- answer could change between identical calls. Same ranking the structural
     -- siblings use (structural_locale, structural_neighbors): prompt ordinal, then
     -- physicality_id to break the tie a repeated surface would otherwise leave open.
-    ORDER BY s.ord, w.physicality_id
+    ORDER BY s.ord, p.id
     LIMIT 1;
 END;

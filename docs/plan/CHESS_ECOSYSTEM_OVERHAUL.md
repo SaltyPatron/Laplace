@@ -15,6 +15,7 @@ Delivery constraint: hart-prod is promoted by CI/CD. Source and installation dec
 | 3 | Commentary is synthesized from the transition, the opening, and a salience-ranked precedent | |
 | 4 | Books, the Lichess openings catalog, Stockfish, clocks, and Syzygy enter as the right kind of testimony | |
 | 5 | Fetchers keep corpus identity, and one grammar-bounded pass admits a game | |
+| 6 | Retrograde checkmate/Syzygy unrolling, minimal causal mating kernels, >5-man sub-board Syzygy projection, flat-horizon search amputation, and multi-dimensional player/clock/opening/rule analytics | |
 
 ## Sprint 1 — Relay
 
@@ -92,4 +93,26 @@ Acceptance:
 
 Chess.com archives download one month at a time. The request names `LaplaceChessIngester/1.0 (https://hartonomous.com; contact: aharttn@gmail.com)`. Each month is `{yyyy}-{MM}.pgn` with a sibling `.etag` under the chess data root at `chesscom/<user>/`. A finished month already on disk is not requested again. The current month sends `If-None-Match`.
 
-A game's witness source is `lumbrasgigabase-otb`, `lumbrasgigabase-online`, `twic`, `lichess`, or `chesscom` when the file path or the Site tag says so. Site, Round, UTCDate, UTCTime, the titles, and the FIDE ids are kept on that game. Decomposition, opening classification, motifs, clocks, and outcomes are the same grammar pass, and that pass is staged once for the file.
+A game's witness source is `lumbrasgigabase-otb`, `lumbrasgigabase-online`, `twic`, `lichess`, or `chesscom` when the file path or the Site tag says so. Site, Round, UTCDate, UTCTime, the titles, and the FIDE ids are kept on that game. Decomposition, opening classification, motifs, clocks, and outcomes are the same grammar pass, and that pass is staged once for the file. `ChessPgnDecomposer.RecordingWitnessId`, `ChessPgnIngestor.BootstrapSourcesAsync`, `ChessWitnessHydrator`, `ChessMoveOutcomes`, and `ChessStartingSideInventory` resolve the corpus witness source so exact readback and hydration recognize every corpus-stamped playing.
+
+## Sprint 6 — Retrograde causal kernels, sub-board Syzygy projection, flat-horizon amputation, and multi-dimensional analytics
+
+Traditional engines search forward in $O(b^d)$ while discarding player, clock, rating, opening, and event provenance. Traditional tablebases (Syzygy) stop at 5–7 pieces because they brute-force enumerate $\binom{64}{k}$ boards in a vacuum. Because Laplace stores ordered `LineTier` trajectories (`Content` and `Projection`), `SegmentTier` sub-board constellations, `PositionTier` boards, and `SubstructureTier` `piece×square` atoms with 16-byte BLAKE3 IDs, $S^3$ Karcher mean coordinates, 128-bit Hilbert indices, and Glicko-2 `(rating, rd, witness_count)` standing, horizon depth and retrograde induction become flat $O(1)$ index operations:
+
+1. **Backward Checkmate & >5-Man Syzygy Unrolling (`ChessRetrograde.UnrollLine`, `SeedSearchContinuations`, `ProbeOnePlySyzygyClosure`)**:
+   - Terminal checkmates ($\text{DTZ} = 0$, $\text{WDL} = 0$ for the mated side) and 3-4-5 Syzygy verdicts propagate backwards along witnessed game trajectories into $>5$-piece predecessors, recording exact `Wdl`, `PliesToClose`, and `IsCheckmate`.
+   - On 6-piece boards (`maxTbMen + 1`), `ProbeOnePlySyzygyClosure` tests legal captures that drop into a $\le 5$-piece tablebase win and propagates that exact Syzygy conversion backwards into earlier middlegame plies.
+   - When multiple lines reach the same ancestor position, `SearchContinuationTable.SeedRetrogradeCheckpoint` retains the highest `Wdl` and the **fastest checkmate / shortest closure** (`min PliesToClose`).
+2. **Minimal Causal Mating Kernels & Retrograde Constellation Cones (`ChessRetrograde.ExtractMatingKernel`, `UnrollCausalConstellations`, `BoardContainsConstellation`)**:
+   - At any checkmate on a crowded board (e.g. 28 pieces), `ExtractMatingKernel` isolates the 3–7 `SubstructureTier` `piece×square` atoms that actually cause the mate: the mated King, the checking piece(s), any attacker defending a contact checker, friendly pieces blocking the King's flight squares, and enemy pieces controlling the King's flight squares.
+   - `UnrollCausalConstellations` walks that minimal kernel backwards $k$ plies along the trajectory, composing a content-addressed `SegmentTier` Merkle entity (`Hash128.Merkle(SegmentTier, atomIds)`) and $S^3$ Karcher mean coordinate at each step before mate.
+   - Any 20–32 piece board can be tested against a constellation via `BoardContainsConstellation` (or Hilbert/$S^3$ neighborhood lookup) without enumerating irrelevant bystander pieces.
+3. **Sub-Board Syzygy Projection Above Five Men (`ChessRetrograde.ProjectSubBoardForSyzygy`)**:
+   - On boards with $>5$ pieces, `ProjectSubBoardForSyzygy` retains both Kings plus the highest-urgency attackers/defenders around the target King and advanced passed pawns, projecting the crowded board onto a legal $\le 5$-man sub-board and probing Fathom/Syzygy to detect underlying tablebase wins before captures even occur.
+4. **Flat-Horizon Search Amputation (`SearchContinuationTable.AmputationWitnesses`, `Search.Negamax`)**:
+   - At interior search nodes (`ply > 0`), retrograde-solved checkpoints return `RetrogradeScore` immediately in $O(1)$ without expanding child moves.
+   - Positions with high-precision witnessed evaluations (`witnesses >= AmputationWitnesses`, $\ge 75\%$ precision weight under $K_0 = 5$) amputate remaining interior depth (`depth >= 2`) directly to quiescence (`Quiesce`), flattening search depth cost.
+5. **Multi-Dimensional "7/10 Games" Rule Discovery & Human/Temporal Correlation (`ChessRetrograde.DiscoverWinningConditions`)**:
+   - Walks games backwards from checkmates and terminal outcomes to extract single and conjunctive structural/tactical conditions (`bishop-pair`, `rook-open-file`, `passed-pawn`, `material-advantage`, `fork`, `pin`, `skewer`, and pairs such as `bishop-pair + rook-open-file`) with empirical and $K_0 = 5$ shrunk win rates ($\ge 70\%$) and `FastestCheckmatePlies`.
+   - Because `playingId` (`ContextId`), `lineId`, `playerId`, `WhiteElo`/`BlackElo`, `TimeControl`, `ECO`/`Opening`, `HAS_THINK_CLASS` (`rushed`, `normal`, `deep`, `planned_quick`, `pressed_think`, `flagging`), `MOVE_QUALITY` (`blunder`, `mistake`, `inaccuracy`), and `HAS_EVAL` all join in 16-byte ID space, queries can correlate board constellations and transitions with player rating bands, time controls, and clock-pressure blunders in a single indexed pass.
+

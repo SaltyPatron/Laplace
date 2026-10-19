@@ -17,7 +17,7 @@ static SPIPlanPtr
 plan(SPIPlanPtr *slot, const char *sql, int n, Oid *types)
 {
     if (*slot == NULL) {
-        *slot = SPI_prepare_cursor(sql, n, types, CURSOR_OPT_GENERIC_PLAN);
+        *slot = SPI_prepare_cursor(sql, n, types, CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (*slot == NULL || SPI_keepplan(*slot) != 0)
             elog(ERROR, "browse: cannot retain indexed read plan");
     }

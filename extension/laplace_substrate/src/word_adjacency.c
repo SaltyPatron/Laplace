@@ -22,7 +22,7 @@ adjacency_plan(SPIPlanPtr *slot, const char *key, int n, Oid *types)
 {
     if (*slot == NULL) {
         *slot = SPI_prepare_cursor(laplace_sql_query_text(key), n, types,
-                                  CURSOR_OPT_GENERIC_PLAN);
+                                  CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (*slot == NULL || SPI_keepplan(*slot) != 0)
             elog(ERROR, "word_adjacency: cannot retain read plan");
     }

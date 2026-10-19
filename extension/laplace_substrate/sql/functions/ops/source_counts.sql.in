@@ -12,10 +12,12 @@ BEGIN ATOMIC
 
     FROM (SELECT a.source_id AS sid, count(*) AS evidence
           FROM @extschema@.attestations a GROUP BY a.source_id) ev
-    FULL JOIN (SELECT a.source_id AS sid, count(DISTINCT w.id) AS content
-               FROM @extschema@.attestations a
-               JOIN @extschema@.v_word_points w ON w.id = a.subject_id
-               GROUP BY a.source_id) ct
+    FULL JOIN (SELECT s.source_id AS sid, count(*) AS content
+               FROM (SELECT DISTINCT a.source_id, a.subject_id
+                     FROM @extschema@.attestations a) s
+               WHERE EXISTS (SELECT 1 FROM @extschema@.physicalities p
+                             WHERE p.entity_id = s.subject_id AND p.type = 1)
+               GROUP BY s.source_id) ct
       ON ev.sid = ct.sid
     ), numbered AS MATERIALIZED (
       SELECT r.*, row_number() OVER (ORDER BY evidence DESC NULLS LAST, source_id) AS rn FROM raw r

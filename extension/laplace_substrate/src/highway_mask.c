@@ -1169,7 +1169,7 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
          * every tied row before returning a small page. Keep the prepared query,
          * but plan its indexed reads with the actual arguments. */
         SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("consensus.band_edges"),
-            3, argtypes, CURSOR_OPT_CUSTOM_PLAN);
+            3, argtypes, CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL || SPI_keepplan(plan) != 0)
             elog(ERROR, "consensus_band_edges: cannot retain typed page plan");
         band_edges_plan = plan;

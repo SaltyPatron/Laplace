@@ -600,13 +600,13 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     {
         SPIPlanPtr angular = SPI_prepare_cursor(
             angular_sql, 7, angular_types,
-            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
         SPIPlanPtr hilbert = SPI_prepare_cursor(
             hilbert_sql, 4, hilbert_types,
-            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
         SPIPlanPtr frechet = SPI_prepare_cursor(
             frechet_sql, 6, frechet_types,
-            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (!angular || !hilbert || !frechet ||
             SPI_keepplan(angular) != 0 ||
             SPI_keepplan(hilbert) != 0 ||

@@ -11,12 +11,13 @@ END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_physicality_coords(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, x double precision, y double precision,
                   z double precision, m double precision)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT DISTINCT ON (w.id) w.id AS entity_id,
-           ST_X(w.coord), ST_Y(w.coord), ST_Z(w.coord), ST_M(w.coord)
-    FROM laplace.v_word_points w
-    JOIN unnest(p_ids) AS u(id) ON u.id = w.id
-    WHERE w.coord IS NOT NULL
-    ORDER BY w.id, w.physicality_id;
+    SELECT DISTINCT ON (p.entity_id) p.entity_id,
+           public.ST_X(p.coord), public.ST_Y(p.coord), public.ST_Z(p.coord), public.ST_M(p.coord)
+    FROM laplace.physicalities p
+    WHERE p.entity_id = ANY(p_ids)
+      AND p.type = 1
+      AND p.coord IS NOT NULL
+    ORDER BY p.entity_id, p.id;
 END;

@@ -142,6 +142,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             new(ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
                 ChessPositionOutcomes.TrustClassId),
             new(ChessSyzygy.SourceId, ChessSyzygy.SourceName, ChessSyzygy.TrustClassId),
+            ..ChessCorpus.Names.Select(static name => new ChessVocabulary.BootstrapSource(
+                ChessCorpus.SourceId(name), name, ChessVocabulary.PgnTrustClass)),
         ], ct, reader);
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
     }
@@ -219,12 +221,13 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         chunkGames: chunk.Count);
                     if (ChessPgnDecomposer.TryParseGame(gameText,
                         requireNormalCompletion: measurement?.RequiresNormalCompletion == true,
-                        requireCompleteSource: requireCompleteSource || measurement?.IsCorpus == true) is not { } game)
+                        requireCompleteSource: requireCompleteSource || measurement?.IsCorpus == true) is not { } parsedGame)
                     {
                         if (measurement is not null) measurement.Work.ParseRejected++;
                         measurement?.Checkpoint("SourceReadParseAndValidation", "parse-progress", periodic: true);
                         continue;
                     }
+                    var game = ChessPgnDecomposer.WithCorpus(parsedGame, sourceLabel);
                     measurement?.ObserveParsed(game);
                     parsed++;
                     chunk.Add(game);

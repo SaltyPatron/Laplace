@@ -26,10 +26,9 @@
 static const char *SYZYGY_CHUNK_QUERY =
     "SELECT public.ST_AsBinary(p.trajectory) "
     "FROM laplace.physicalities p "
-    "JOIN laplace.entities e ON e.id = p.entity_id "
     "WHERE EXISTS (SELECT 1 FROM laplace.attestations sy_witness "
     " WHERE sy_witness.source_id = laplace.source_id('ChessSyzygy') "
-    "   AND sy_witness.subject_id = e.id) "
+    "   AND sy_witness.subject_id = p.entity_id) "
     "  AND p.type = 3::smallint "
     "  AND p.trajectory IS NOT NULL "
     "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1 "

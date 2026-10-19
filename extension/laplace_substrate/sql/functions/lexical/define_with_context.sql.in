@@ -11,9 +11,14 @@ BEGIN ATOMIC
                    g.witness_count AS witnesses,
                    sn.score AS sense_rank
             FROM lexical.senses(p_word, p_context) sn
+            CROSS JOIN LATERAL (
+                VALUES (sn.sense_id),
+                       (CASE WHEN sn.synset_id IS DISTINCT FROM sn.sense_id THEN sn.synset_id END)
+            ) AS k(subj)
             JOIN laplace.consensus g
-              ON g.subject_id = ANY (ARRAY[sn.sense_id, sn.synset_id])
-                            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
+              ON g.subject_id = k.subj
+             AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
+            WHERE k.subj IS NOT NULL
             UNION ALL
             SELECT g.object_id,
                    consensus.eff_mu_display(g.rating, g.rd),

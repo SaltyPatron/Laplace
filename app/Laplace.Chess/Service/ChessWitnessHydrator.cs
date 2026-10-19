@@ -55,6 +55,7 @@ internal static class ChessWitnessHydrator
     [
         ChessVocabulary.PgnSourceId.ToBytes(),
         ChessVocabulary.BookSourceId.ToBytes(),
+        ..ChessCorpus.Names.Select(static name => ChessCorpus.SourceId(name).ToBytes()),
     ];
 
     private static byte[][] TransitionWitnessSources() =>
@@ -62,6 +63,7 @@ internal static class ChessWitnessHydrator
         ChessVocabulary.PgnSourceId.ToBytes(),
         ChessVocabulary.BookSourceId.ToBytes(),
         ChessVocabulary.SourceId.ToBytes(),
+        ..ChessCorpus.Names.Select(static name => ChessCorpus.SourceId(name).ToBytes()),
     ];
 
     internal static async Task<long?> CountRecordedEventsAsync(NpgsqlDataSource ds, CancellationToken ct)

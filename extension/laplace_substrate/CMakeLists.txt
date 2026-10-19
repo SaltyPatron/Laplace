@@ -120,6 +120,7 @@ set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/presence.c
     src/identity_scan.c
+    src/content_trajectory_read.c
     src/content_membership_read.c
     src/content_text_read.c
     src/prompt_coherence.c

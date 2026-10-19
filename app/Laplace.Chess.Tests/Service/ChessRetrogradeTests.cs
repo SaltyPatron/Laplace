@@ -102,4 +102,55 @@ public sealed class ChessRetrogradeTests
         Assert.True(conjunctive.ShrunkWinRate > 0.65);
         Assert.Equal(1, conjunctive.FastestCheckmatePlies);
     }
+
+    [Fact]
+    public void ExtractMatingKernel_IsolatesCausalPiecesFromCrowdedBoardAndUnrollsCone()
+    {
+        Laplace.Engine.Core.CodepointPerfcache.LoadDefault();
+        string[] scholarsMate = ["e4", "e5", "Bc4", "Nc6", "Qh5", "Nf6", "Qxf7#"];
+        var constellations = ChessRetrograde.UnrollCausalConstellations(scholarsMate, maxLookbackPlies: 3);
+        Assert.Equal(4, constellations.Count);
+
+        // Terminal mating kernel (PliesToMate == 0) has only the ~6 causal pieces out of 31 on the board!
+        var mateKernel = constellations[^1];
+        Assert.Equal(0, mateKernel.PliesToMate);
+        Assert.InRange(mateKernel.Atoms.Count, 5, 7);
+        Assert.Contains(mateKernel.Atoms, a => a.Piece == Piece.BKing && a.Square0x88 == Board.AlgebraicToSquare("e8"));
+        Assert.Contains(mateKernel.Atoms, a => a.Piece == Piece.WQueen && a.Square0x88 == Board.AlgebraicToSquare("f7"));
+        Assert.Contains(mateKernel.Atoms, a => a.Piece == Piece.WBishop && a.Square0x88 == Board.AlgebraicToSquare("c4"));
+
+        // 1 ply before mate (before Qxf7#), the constellation has WQueen@h5 + WBishop@c4 + BPawn@f7 + BKing@e8
+        // and matches even when queenside pieces are rearranged!
+        var onePlyBefore = constellations[^2];
+        Assert.Equal(1, onePlyBefore.PliesToMate);
+        Assert.Equal("h5f7", onePlyBefore.NextMove?.ToUci());
+
+        var differentQueenside = Board.FromFen("2bqkbnr/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/R1B1K1NR w KQk - 4 4");
+        Assert.True(ChessRetrograde.BoardContainsConstellation(differentQueenside, onePlyBefore));
+    }
+
+    [Fact]
+    public void ProjectSubBoardForSyzygy_ProjectsTenPieceBoardIntoFiveManSyzygyWin()
+    {
+        Laplace.Engine.Core.CodepointPerfcache.LoadDefault();
+        // 10-piece board where White has K+Q+R near Black's bare King on h8, plus distant queenside pieces.
+        var crowded = Board.FromFen("7k/5Q2/6K1/2n5/p7/P1N5/1p6/1P5R w - - 0 1");
+        Assert.Equal(10, ChessSyzygy.MenCount(crowded));
+
+        var prober = new FakeSyzygyProber(5, sub =>
+        {
+            int men = ChessSyzygy.MenCount(sub);
+            if (men > 5) return null;
+            int f7 = Board.AlgebraicToSquare("f7");
+            int g7 = Board.AlgebraicToSquare("g7");
+            return new SyzygyVerdict(4, 1, From: (Board.RankOf(f7) << 3) | Board.FileOf(f7), To: (Board.RankOf(g7) << 3) | Board.FileOf(g7));
+        });
+
+        var projected = ChessRetrograde.ProjectSubBoardForSyzygy(crowded, prober, maxMen: 5);
+        Assert.NotNull(projected);
+        Assert.Equal(5, projected!.Value.Men);
+        Assert.Equal(4, projected.Value.Wdl);
+        Assert.Equal(1, projected.Value.Dtz);
+        Assert.Equal("f7g7", projected.Value.BestMove?.ToUci());
+    }
 }

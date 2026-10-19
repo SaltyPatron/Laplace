@@ -199,7 +199,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         return game is null ? null : new ChessPlayingPeek(game, game.PlayingId);
     }
 
-    private static ChessGameRecord WithCorpus(ChessGameRecord game, string filePath)
+    internal static ChessGameRecord WithCorpus(ChessGameRecord game, string? filePath = null)
     {
         if (game.Corpus is not null) return game;
         string? name = ChessCorpus.FromPath(filePath) ?? ChessCorpus.FromSite(PgnGames.TagStr(game.GameText, "Site"));
@@ -283,9 +283,16 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
     }
 
+    internal static Hash128 RecordingSourceId(ChessGameRecord game, Hash128? sourceId = null)
+    {
+        if (sourceId is { } explicitSource) return explicitSource;
+        string? corpus = game.Corpus ?? ChessCorpus.FromSite(PgnGames.TagStr(game.GameText, "Site"));
+        return corpus is null ? ChessVocabulary.PgnSourceId : ChessCorpus.SourceId(corpus);
+    }
+
     internal static Hash128 RecordingWitnessId(ChessGameRecord game)
         => NativeAttestation.ComputeId(game.PlayingId, ChessVocabulary.PlaysLineType,
-            game.LineId, ChessVocabulary.PgnSourceId, null);
+            game.LineId, RecordingSourceId(game), null);
 
     internal static async IAsyncEnumerable<ChessGameRecord> FilterNovelAsync(
         List<ChessGameRecord> chunk, ISubstrateReader? reader, [EnumeratorCancellation] CancellationToken ct)
@@ -580,8 +587,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             throw new InvalidDataException("parsed move outcomes lack the validated initial mover");
 
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
-        string? corpus = parsed.Corpus ?? ChessCorpus.FromSite(PgnGames.TagStr(gameText, "Site"));
-        var src = sourceId ?? (corpus is null ? ChessVocabulary.PgnSourceId : ChessCorpus.SourceId(corpus));
+        var src = RecordingSourceId(parsed, sourceId);
         if (sourceId is null && src != ChessVocabulary.PgnSourceId)
             b.DeclareSourcePrior(src, TC.StructuredCorpus);
 

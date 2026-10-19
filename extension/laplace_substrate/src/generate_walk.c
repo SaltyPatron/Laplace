@@ -71,8 +71,8 @@ static const char *WALK_BATCH_QUERY =
     "SELECT e.idx, e.neighbor, false, "
     "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask, "
-    "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.physicality_tableoid, "
-    "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.physicality_tableoid "
+    "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.tableoid, "
+    "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.tableoid "
     "FROM ( "
     "  SELECT f.idx, f.subject_id AS anchor, c.object_id AS neighbor, "
     "         c.type_id, c.rating, c.rd, c.witness_count "
@@ -91,8 +91,8 @@ static const char *WALK_BATCH_QUERY =
     "     AND ($2::bytea IS NULL OR c.type_id = $2) "
     ") e "
     "JOIN laplace.entities eo ON eo.id = e.neighbor "
-    "LEFT JOIN laplace.v_word_points ps ON ps.id = e.anchor "
-    "LEFT JOIN laplace.v_word_points po ON po.id = e.neighbor";
+    "LEFT JOIN laplace.physicalities ps ON ps.entity_id = e.anchor AND ps.type = 1 "
+    "LEFT JOIN laplace.physicalities po ON po.entity_id = e.neighbor AND po.type = 1";
 
 /* The same edge set without coordinates; the fetch loop reads columns 9..18
  * only from the geometry plan. */
@@ -273,8 +273,9 @@ mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
  */
 static const char *ORDINAL_CONTINUITY_QUERY =
     "WITH t AS ( "
-    "  SELECT w.trajectory FROM laplace.v_word_points w "
-    "  WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[$1]::bytea[] "
+    "  SELECT p.trajectory FROM laplace.physicalities p "
+    "  WHERE p.type = 1 AND p.trajectory IS NOT NULL "
+    "    AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[] "
     "  LIMIT 1 "
     ") "
     "SELECT ST_X(dp.geom), ST_Y(dp.geom), ST_Z(dp.geom), ST_M(dp.geom) "
