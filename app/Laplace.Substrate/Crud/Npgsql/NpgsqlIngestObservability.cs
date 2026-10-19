@@ -147,6 +147,22 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         string sourceName,
         int layerOrder,
         IngestInventory? inventory,
+        IngestArtifactGraph? artifactGraph) =>
+        StartRun(sourceName, sourceId: null, layerOrder, inventory, artifactGraph);
+
+    public void OnRunStart(
+        string sourceName,
+        Hash128 sourceId,
+        int layerOrder,
+        IngestInventory? inventory,
+        IngestArtifactGraph? artifactGraph) =>
+        StartRun(sourceName, sourceId.ToBytes(), layerOrder, inventory, artifactGraph);
+
+    private void StartRun(
+        string sourceName,
+        byte[]? sourceId,
+        int layerOrder,
+        IngestInventory? inventory,
         IngestArtifactGraph? artifactGraph)
     {
         _runId = Guid.NewGuid();
@@ -154,14 +170,23 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         _lastProgressUtc = DateTime.MinValue;
         _lastHeartbeatUtc = DateTime.MinValue;
         ReconcileOrphanedRuns();
+        // A caller that has the witness id records that id. source_id(name) is the
+        // canonical substrate/source/<name>/v1 envelope, which is a different entity
+        // from the [authority, release] witness attestations are filed under.
+        string sourceExpr = sourceId is null ? "laplace.source_id($2)" : "$3";
+        string tail = sourceId is null
+            ? "$3, 'running', $4, $5, $6"
+            : "$4, 'running', $5, $6, $7";
         bool journaled = Execute(
             "INSERT INTO laplace.ingest_run_journal "
             + "(run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) "
-            + "VALUES ($1, $2, laplace.source_id($2), $3, 'running', $4, $5, $6)",
+            + "VALUES ($1, $2, " + sourceExpr + ", " + tail + ")",
             cmd =>
             {
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName });
+                if (sourceId is not null)
+                    cmd.Parameters.Add(new NpgsqlParameter { Value = sourceId, NpgsqlDbType = NpgsqlDbType.Bytea });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = layerOrder });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (long)(inventory?.FileCount ?? 0) });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = inventory?.TotalInputUnits ?? 0L });
@@ -587,17 +612,31 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     public void OnRunSkipped(string sourceName, int layerOrder) =>
+        InsertSkipped(sourceName, sourceId: null, layerOrder);
+
+    public void OnRunSkipped(string sourceName, Hash128 sourceId, int layerOrder) =>
+        InsertSkipped(sourceName, sourceId.ToBytes(), layerOrder);
+
+    private void InsertSkipped(string sourceName, byte[]? sourceId, int layerOrder)
+    {
+        string sourceExpr = sourceId is null ? "laplace.source_id($2)" : "$3";
+        string tail = sourceId is null
+            ? "$3, 'skipped-complete', 'complete', now(), $4"
+            : "$4, 'skipped-complete', 'complete', now(), $5";
         Execute(
             "INSERT INTO laplace.ingest_run_journal "
             + "(run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted) "
-            + "VALUES ($1, $2, laplace.source_id($2), $3, 'skipped-complete', 'complete', now(), $4)",
+            + "VALUES ($1, $2, " + sourceExpr + ", " + tail + ")",
             cmd =>
             {
                 cmd.Parameters.Add(new NpgsqlParameter { Value = Guid.NewGuid(), NpgsqlDbType = NpgsqlDbType.Uuid });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName });
+                if (sourceId is not null)
+                    cmd.Parameters.Add(new NpgsqlParameter { Value = sourceId, NpgsqlDbType = NpgsqlDbType.Bytea });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = layerOrder });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
+    }
 
     /// <summary>
     /// Per-file ledger rows (<c>laplace.ingest_file_journal</c>). Calls only enqueue; the

@@ -15,26 +15,17 @@ public readonly struct SemLinkSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
         [
-            "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO",
-            // Relations of the annotated SemLink 2 instances.
-            "APPEARS_IN", "HAS_ROLE", "HAS_SENSE",
-            "IS_INSTANCE_OF", "EVOKES_FRAME",
+            "pb-vn2", "vn-fn2", "pb-wn", "vn-wn", "fn-wn", "external_vn2pb",
+            "vn-class", "frame", "roleset", "ontonotes-sense", "semlink-2",
+            "vn-fn-role-mapping",
         ];
 
-    internal static readonly Hash128 RoleCorrespondsToTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[1]);
-    internal static readonly Hash128 AppearsInTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[2]);
-    internal static readonly Hash128 HasRoleTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[3]);
-    internal static readonly Hash128 HasSenseTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[4]);
-    // An annotated occurrence IS_INSTANCE_OF its VerbNet class; lexical membership is
-    // VerbNet's own HAS_PART {member}.
-    internal static readonly Hash128 InstanceOfTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[5]);
-    internal static readonly Hash128 EvokesFrameTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[6]);
+    internal static readonly Hash128 VnFnRoleTypeId = RelationTypeRegistry.RelationTypeId("vn-fn-role-mapping");
+    internal static readonly Hash128 VnClassTypeId = RelationTypeRegistry.RelationTypeId("vn-class");
+    internal static readonly Hash128 FrameTypeId = RelationTypeRegistry.RelationTypeId("frame");
+    internal static readonly Hash128 RolesetTypeId = RelationTypeRegistry.RelationTypeId("roleset");
+    internal static readonly Hash128 OntoNotesSenseTypeId = RelationTypeRegistry.RelationTypeId("ontonotes-sense");
+    internal static readonly Hash128 InstancePairTypeId = RelationTypeRegistry.RelationTypeId("semlink-2");
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         [
@@ -60,31 +51,12 @@ public readonly struct PredicateMatrixSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
         [
-            "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO", "HAS_LANGUAGE", "HAS_POS",
-            "domain_topic", "HAS_LEX_CATEGORY", "HAS_BASE_CONCEPT_STATUS",
-            "HAS_SENSE_FREQUENCY", "HAS_SYNSET_RELATION_COUNT",
+            "4_VN_CLASS", "9_VN_ROLE", "10_WN_SENSE", "11_MCR_iliOffset",
+            "12_FN_FRAME", "13_FN_LE", "14_FN_FRAME_ELEMENT", "15_PB_ROLESET", "16_PB_ARG",
+            "18_MCR_BC", "19_MCR_DOMAIN", "20_MCR_SUMO", "21_MCR_TO", "22_MCR_LEXNAME",
+            "23_MCR_BLC", "24_WN_SENSEFREC", "25_WN_SYNSET_REL_NUM",
+            "26_ESO_CLASS", "27_ESO_ROLE",
         ];
-
-    internal static readonly Hash128 CorrespondsToTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[0]);
-    internal static readonly Hash128 RoleCorrespondsToTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[1]);
-    internal static readonly Hash128 HasLanguageTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[2]);
-    internal static readonly Hash128 HasPosTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[3]);
-    // A topic domain is HAS_DOMAIN qualified domain/topic: the resolution carries both.
-    internal static readonly RelationTypeRegistry.RelationTypeResolution DomainTopic =
-        RelationTypeRegistry.Resolve(Relations[4]);
-    internal static readonly Hash128 HasDomainTopicTypeId = DomainTopic.Id;
-    internal static readonly Hash128 HasLexCategoryTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[5]);
-    internal static readonly Hash128 HasBaseConceptStatusTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[6]);
-    internal static readonly Hash128 HasSenseFrequencyTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[7]);
-    internal static readonly Hash128 HasSynsetRelationCountTypeId =
-        RelationTypeRegistry.RelationTypeId(Relations[8]);
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         [
@@ -115,7 +87,7 @@ public readonly struct MapNetSource : ISeedSource
         TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["CORRESPONDS_TO"];
+        ["mapping_frame_synsets", "mapping_lus_synsets"];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["FrameNet_Frame", "FrameNet_LU"];
@@ -136,7 +108,7 @@ public readonly struct WordFrameNetSource : ISeedSource
         TrustClassRegistry.Id("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["CORRESPONDS_TO"];
+        ["lu_synset", "WordFrameNet", "wordframenet", "WFN", "XWFN", "eXtendedWFN"];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["FrameNet_LU"];

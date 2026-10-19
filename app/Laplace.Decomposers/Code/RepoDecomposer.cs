@@ -47,22 +47,25 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
 
         if (verifiedRepository is null) ThrowIfNestedRepos(root);
 
-        string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
-        _canonicalNames.TryAdd(repoCanonical, 0);
-        _repoId = Hash128.OfCanonical(repoCanonical);
-
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/repo-root", null,
-            entityCapacity: 16, physicalityCapacity: 16, attestationCapacity: 0)
+            entityCapacity: 4, physicalityCapacity: 4, attestationCapacity: 0)
             .DeclareSourcePrior(SourceTrust);
-        StageRepoRoot(seed, repoCanonical, _repoId);
-        if (verifiedRepository is null) await context.Writer.ApplyAsync(seed.Build(), ct);
-        else
+        if (verifiedRepository is null)
         {
-            verifiedRepository.VerifyUnchanged();
-            ProvenanceRoot = ContentEmitter.Emit(seed, Encoding.UTF8.GetString(verifiedRepository.ProvenanceUtf8), Source)
-                ?? throw new InvalidDataException("Git provenance did not produce native content.");
-            seed.AddAttestation(NativeAttestation.CategoricalResolved(
-                _repoId, RepoSource.ReferencesTypeId, ProvenanceRoot.Value, Source, null, SourceTrust));
+            await context.Writer.ApplyAsync(seed.Build(), ct);
+            return;
+        }
+
+        verifiedRepository.VerifyUnchanged();
+        // The git observation is the repository witness. The directory path is where
+        // this machine keeps the checkout, and it is not the repository.
+        OrderedCompositionComponent provenance = ContentEmitter.StageComponent(
+            seed, Encoding.UTF8.GetString(verifiedRepository.ProvenanceUtf8), Source)
+            ?? throw new InvalidDataException("Git provenance did not produce native content.");
+        ProvenanceRoot = provenance.Id;
+        _repoId = provenance.Id;
+        seed.AddEntity(new EntityRow(_repoId, provenance.Tier, RepoTypeId));
+        {
             await context.Writer.ApplyWorkingSetAsync([seed.Build()], token =>
             {
                 token.ThrowIfCancellationRequested();
@@ -75,8 +78,6 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
-        if (_repoId == default && Directory.Exists(ecosystemPath))
-            _repoId = Hash128.OfCanonical($"repo:{Path.GetFullPath(ecosystemPath)}/v1");
         if (verifiedRepository is not null)
             return verifiedRepository.Graph.Selected.Select(a => (a.Path, a.FileLabel)).ToList();
         return EnumerateRepoFiles(ecosystemPath)
@@ -109,23 +110,11 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
             : fileLabel.StartsWith("repo/", StringComparison.Ordinal)
             ? fileLabel["repo/".Length..]
             : Path.GetFileName(filePath);
-        var filename = Path.GetFileNameWithoutExtension(filePath);
-        var segments = new List<string>();
-        if (!string.IsNullOrEmpty(filename))
-        {
-            foreach (var seg in filename.Split(['_', '-', '.'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (seg.Length >= 3)
-                    segments.Add(seg.ToLowerInvariant());
-            }
-        }
 
         yield return new GrammarComposeRecord(
             bytes, modality,
-            ExampleSegments: segments.Count > 0 ? segments : null,
             ConceptAnchorKey: relPath,
             ConceptCategoryTypeId: FileTypeId,
-            ParentContainerId: _repoId,
             FileMetadata: GrammarSourceFileSupport.MetadataFromPath(
                 filePath, relPath, modality),
             RequireSourceAst: verifiedRepository is not null,
@@ -164,31 +153,6 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
         if (verifiedRepository is not null) return Task.FromResult<IngestArtifactGraph?>(verifiedRepository.Graph);
         return Task.FromResult(GrammarSourceFileSupport.BuildArtifactGraph(
             ecosystemPath, RepoSource.SourceName, "repo", ModalityFor));
-    }
-
-    private static void StageRepoRoot(SubstrateChangeBuilder b, string repoCanonical, Hash128 repoId)
-    {
-        b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId));
-
-        // repoId is a stable governed handle for the repository. The canonical path text is
-        // content and composes through the ordinary text Merkle DAG down to codepoints; the
-        // handle is placed as a Projection onto that content root, not as a content leaf.
-        Hash128 pathRoot = ContentEmitter.Emit(b, repoCanonical, Source)
-            ?? throw new InvalidOperationException("repository canonical path did not produce content");
-        if (!TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
-                out var decomposedRoot, out _, out double cx, out double cy, out double cz, out double cm)
-            || decomposedRoot != pathRoot)
-            throw new InvalidOperationException("repository canonical path content root was not reproducible");
-
-        Span<double> coord = stackalloc double[4] { cx, cy, cz, cm };
-        Hash128 physId = PhysicalityId.Compute(repoId, PhysicalityType.Projection);
-        b.AddPhysicality(new PhysicalityRow(
-            Id: physId, EntityId: repoId, SourceId: Source,
-            Type: PhysicalityType.Projection,
-            CoordX: cx, CoordY: cy, CoordZ: cz, CoordM: cm,
-            HilbertIndex: Hilbert128.Encode(coord),
-            TrajectoryXyzm: Trajectory.Build([pathRoot]), NConstituents: 1,
-            AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
     }
 
     internal static void ThrowIfNestedRepos(string root)

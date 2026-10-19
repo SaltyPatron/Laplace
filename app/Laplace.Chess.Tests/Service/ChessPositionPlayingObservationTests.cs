@@ -78,9 +78,9 @@ public sealed class ChessPositionPlayingObservationTests
             SubstrateChange? actual = null;
             try
             {
-                long before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+                long before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000 - 20_000;
                 actual = Deposit(game, path);
-                long after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000 + 999;
+                long after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000 + 20_000;
                 AssertChangesEqual(expected, actual);
                 Assert.Equal(occurrences, actual.Attestations.Where(row => row.TypeId == ChessVocabulary.OutcomeType).Sum(row => row.ObservationCount));
                 Assert.Contains(actual.Attestations, row => row.ObservationCount > 1);

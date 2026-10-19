@@ -48,7 +48,9 @@ public readonly record struct RelationTripleRecord(
     /// Independent witnesses the source states for this triple (e.g. the length of
     /// ConceptNet's "sources" array); the fold counts them as observations. Defaults to 1.
     /// </summary>
-    long ObservationCount = 1);
+    long ObservationCount = 1,
+    string? SubjectIli = null,
+    string? ObjectIli = null);
 
 /// <summary>
 /// Ingest handler shared by every relation-triple provider. Each record becomes a two-tree
@@ -124,61 +126,51 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
                 observationCount: record.ObservationCount));
         }
 
-        // Source-encoded POS (n/v/a/r/s) maps to the canonical POS entity through the
-        // WordNet tagset; POS entities are seeded with the foundation, so the reference exists.
-        if (subjectRoot != default && record.SubjectPos is { } sp)
-            EmitPosDeclaration(
-                builder, subjectRoot, sp, sourceId, sourceTrust, sourceNodeDeclarations);
-        if (objectRoot != default && record.ObjectPos is { } op)
-            EmitPosDeclaration(
-                builder, objectRoot, op, sourceId, sourceTrust, sourceNodeDeclarations);
-
-        EmitSynsetMembership(
-            builder, subjectRoot, record.SubjectSynsetId,
-            sourceId, sourceTrust, sourceNodeDeclarations);
-        EmitSynsetMembership(
-            builder, objectRoot, record.ObjectSynsetId,
-            sourceId, sourceTrust, sourceNodeDeclarations);
-
-        if (subjectRoot != default && record.SubjectLangCode is { Length: > 0 } subjectLang)
-        {
-            Hash128 sl = LanguageReference.Emit(
-                builder, subjectLang, sourceId, sourceTrust);
-            AddSourceNodeDeclaration(builder, NativeAttestation.Categorical(
-                subjectRoot, "HAS_LANGUAGE", sl, sourceId, sourceTrust),
-                sourceNodeDeclarations);
-        }
-        if (objectRoot != default && record.ObjectLangCode is { Length: > 0 } objectLang)
-        {
-            Hash128 ol = LanguageReference.Emit(
-                builder, objectLang, sourceId, sourceTrust);
-            AddSourceNodeDeclaration(builder, NativeAttestation.Categorical(
-                objectRoot, "HAS_LANGUAGE", ol, sourceId, sourceTrust),
-                sourceNodeDeclarations);
-        }
+        if (record.SubjectCanonical is { Length: > 0 } subjectText)
+            EmitLexicalization(
+                builder, subjectText, record.SubjectLangCode, record.SubjectIli, record.SubjectPos,
+                sourceId, sourceTrust, sourceNodeDeclarations);
+        if (record.ObjectCanonical is { Length: > 0 } objectText)
+            EmitLexicalization(
+                builder, objectText, record.ObjectLangCode, record.ObjectIli, record.ObjectPos,
+                sourceId, sourceTrust, sourceNodeDeclarations);
     }
 
-    private static void EmitPosDeclaration(
-        SubstrateChangeBuilder builder, Hash128 nodeRoot, char pos,
+    // [lemma, language, ILI]. The language is a constituent of that composition and the
+    // context of the Sense claim. The concept's UPOS slot is painted on the ILI and on
+    // the tuple. A lemma with no identifier has no carrier, and the spelling of the tag
+    // is not an entity.
+    private static void EmitLexicalization(
+        SubstrateChangeBuilder builder, byte[] lemma, string? language, string? ili, char? pos,
         Hash128 sourceId, double sourceTrust, ConcurrentIdSet? sourceNodeDeclarations)
     {
-        Hash128 posId = PosReference.Resolve(
-            pos.ToString(), PosReference.PosTagset.WordNet, out _);
-        AttestationRow declaration = NativeAttestation.CategoricalResolved(
-            nodeRoot, PosReference.HasPosTypeId, posId, sourceId, null, sourceTrust);
-        if (sourceNodeDeclarations is not null && !sourceNodeDeclarations.Add(declaration.Id)) return;
-        PosReference.Attest(
-            builder, nodeRoot, pos.ToString(), PosReference.PosTagset.WordNet,
-            sourceId, null, sourceTrust);
-    }
-
-    private static void EmitSynsetMembership(
-        SubstrateChangeBuilder builder, Hash128 nodeRoot, Hash128? synId,
-        Hash128 sourceId, double sourceTrust, ConcurrentIdSet? sourceNodeDeclarations)
-    {
-        if (nodeRoot == default || synId is not { } syn || syn == default) return;
+        if (lemma.Length == 0 || string.IsNullOrEmpty(language) || string.IsNullOrEmpty(ili)) return;
+        if (ContentEmitter.StageComponent(builder, lemma, sourceId) is not { } lemmaPart) return;
+        if (ContentEmitter.StageComponent(builder, language, sourceId) is not { } languagePart) return;
+        if (ContentEmitter.StageComponent(builder, ili, sourceId) is not { } iliPart) return;
+        Span<OrderedCompositionResult> result = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(
+            builder.ContentStage,
+            [new OrderedCompositionRequest(
+                [lemmaPart, languagePart, iliPart],
+                EntityTypeRegistry.WordNetSense,
+                sourceId,
+                0)],
+            result);
+        if (pos is char tag)
+        {
+            string sourceTag = tag.ToString();
+            PosReference.Deposit(
+                builder, iliPart.Id, iliPart.CoordX, iliPart.CoordY, iliPart.CoordZ, iliPart.CoordM,
+                sourceTag, PosReference.PosTagset.WordNet);
+            OrderedCompositionResult face = result[0];
+            PosReference.Deposit(
+                builder, face.Id, face.CoordX, face.CoordY, face.CoordZ, face.CoordM,
+                sourceTag, PosReference.PosTagset.WordNet);
+        }
         AddSourceNodeDeclaration(builder, NativeAttestation.Categorical(
-            nodeRoot, "CORRESPONDS_TO", syn, sourceId, sourceTrust), sourceNodeDeclarations);
+            lemmaPart.Id, "Sense", result[0].Id, sourceId, sourceTrust,
+            contextId: languagePart.Id), sourceNodeDeclarations);
     }
 
     private static void AddSourceNodeDeclaration(

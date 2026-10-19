@@ -13,8 +13,7 @@ public readonly struct OpenSubtitlesSource : ISeedSource
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StructuredCorpus");
 
-    public static IReadOnlyList<string> Relations { get; } =
-        [EtlSource.LanguageScopeRelation];
+    public static IReadOnlyList<string> Relations { get; } = [];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["OpenSubtitles_Sequence", "OpenSubtitles_Alignment"];

@@ -19,16 +19,16 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
     {
         switch (kind)
         {
-            case SemLinkDocumentKind.PbVn: WalkPbVn(composed, builder); break;
-            case SemLinkDocumentKind.VnFn: WalkVnFn(composed, builder); break;
-            case SemLinkDocumentKind.PbWn: WalkCategoryToSynset(composed, builder, RolesetTypeId, NormalizeRolesetKey); break;
-            case SemLinkDocumentKind.VnWn: WalkCategoryToSynset(composed, builder, VnClassTypeId, NormalizeVnClassKey); break;
-            case SemLinkDocumentKind.FnWn: WalkCategoryToSynset(composed, builder, FrameTypeId, static k => k); break;
-            case SemLinkDocumentKind.VnPbExternal: WalkVnPbExternal(composed, builder); break;
+            case SemLinkDocumentKind.PbVn: WalkPbVn(composed, builder, "pb-vn2"); break;
+            case SemLinkDocumentKind.VnFn: WalkVnFn(composed, builder, "vn-fn2"); break;
+            case SemLinkDocumentKind.PbWn: WalkCategoryToSynset(composed, builder, RolesetTypeId, NormalizeRolesetKey, "pb-wn"); break;
+            case SemLinkDocumentKind.VnWn: WalkCategoryToSynset(composed, builder, VnClassTypeId, NormalizeVnClassKey, "vn-wn"); break;
+            case SemLinkDocumentKind.FnWn: WalkCategoryToSynset(composed, builder, FrameTypeId, static k => k, "fn-wn"); break;
+            case SemLinkDocumentKind.VnPbExternal: WalkVnPbExternal(composed, builder, "external_vn2pb"); break;
         }
     }
 
-    private static void WalkPbVn(in GrammarComposeContext ctx, SubstrateChangeBuilder b)
+    private static void WalkPbVn(in GrammarComposeContext ctx, SubstrateChangeBuilder b, string predicate)
     {
         int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);
         if (rootObj < 0) return;
@@ -54,7 +54,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                 if (vnEntity is null) continue;
 
                 b.AddAttestation(NativeAttestation.Categorical(
-                    rsEntity.Value, "CORRESPONDS_TO", vnEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
+                    rsEntity.Value, predicate, vnEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
 
                 if (!JsonGrammarHelper.IsObjectNode(ctx.Ast, rolesObjNode)) continue;
                 foreach (var (argKeyNode, thetaNode) in JsonGrammarHelper.EnumerateObjectPairs(ctx.Ast, rolesObjNode))
@@ -66,21 +66,21 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                     string arg = JsonGrammarHelper.Utf8ToString(argSpan).Trim();
                     string theta = JsonGrammarHelper.Utf8ToString(thetaSpan).Trim();
                     Hash128? argId = RoleAnchor.Declare(
-                        b, RoleIdentityKind.PropBank, rsEntity.Value, arg,
+                        b, RoleIdentityKind.PropBank, rsEntity.Value, ContentFloor(rolesetKey), arg,
                         EntityTypeRegistry.PropBankRole, SemLinkDecomposer.Source);
                     Hash128? thetaId = RoleAnchor.Declare(
-                        b, RoleIdentityKind.VerbNet, vnEntity.Value, theta,
+                        b, RoleIdentityKind.VerbNet, vnEntity.Value, ContentFloor(vnClass), theta,
                         EntityTypeRegistry.VerbNetRole, SemLinkDecomposer.Source);
                     if (argId is null || thetaId is null) continue;
-                    b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        argId.Value, SemLinkSource.RoleCorrespondsToTypeId, thetaId.Value,
-                        SemLinkDecomposer.Source, null, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        argId.Value, predicate, thetaId.Value,
+                        SemLinkDecomposer.Source, TC.AcademicCurated));
                 }
             }
         }
     }
 
-    private static void WalkVnFn(in GrammarComposeContext ctx, SubstrateChangeBuilder b)
+    private static void WalkVnFn(in GrammarComposeContext ctx, SubstrateChangeBuilder b, string predicate)
     {
         int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);
         if (rootObj < 0) return;
@@ -105,12 +105,12 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                 var fnEntity = StageCategory(b, frame, FrameTypeId);
                 if (fnEntity is null) continue;
                 b.AddAttestation(NativeAttestation.Categorical(
-                    vnEntity.Value, "CORRESPONDS_TO", fnEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
+                    vnEntity.Value, predicate, fnEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
             }
         }
     }
 
-    private static void WalkVnPbExternal(in GrammarComposeContext ctx, SubstrateChangeBuilder b)
+    private static void WalkVnPbExternal(in GrammarComposeContext ctx, SubstrateChangeBuilder b, string predicate)
     {
         int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);
         if (rootObj < 0) return;
@@ -135,7 +135,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                 var rsEntity = StageCategory(b, roleset, RolesetTypeId);
                 if (rsEntity is null) continue;
                 b.AddAttestation(NativeAttestation.Categorical(
-                    vnEntity.Value, "CORRESPONDS_TO", rsEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
+                    vnEntity.Value, predicate, rsEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
             }
         }
     }
@@ -144,7 +144,8 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
         in GrammarComposeContext ctx,
         SubstrateChangeBuilder b,
         Hash128 categoryTypeId,
-        Func<string, string?> normalizeKey)
+        Func<string, string?> normalizeKey,
+        string predicate)
     {
         int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);
         if (rootObj < 0) return;
@@ -164,7 +165,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                 Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(target);
                 if (synId is null) continue;
                 b.AddAttestation(NativeAttestation.Categorical(
-                    category.Value, "CORRESPONDS_TO", synId.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
+                    category.Value, predicate, synId.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
             }
         }
     }
@@ -189,6 +190,11 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
 
     private static string? NormalizeVnClassKey(string key) =>
         key.Length == 0 ? null : SourceEntityIdConventions.NumericVerbNetClassId(key);
+
+    private static byte ContentFloor(string? value) =>
+        value is not null && CompositionLaw.TryFace(value, out CompositionLaw.Face face)
+            ? face.Tier
+            : (byte)0;
 
     private static Hash128? StageCategory(SubstrateChangeBuilder b, string key, Hash128 categoryTypeId)
     {

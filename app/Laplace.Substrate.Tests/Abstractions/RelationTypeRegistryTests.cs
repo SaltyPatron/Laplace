@@ -118,10 +118,9 @@ public class RelationTypeRegistryTests
     {
         Hash128 animal = Hash128.OfCanonical("e/animal"), dog = Hash128.OfCanonical("e/dog");
         var flipped = NativeAttestation.Categorical(animal, "HAS_HYPONYM", dog, Hash128.OfCanonical("src"), null, 1.0);
-        var direct = NativeAttestation.Categorical(dog, "IS_A", animal, Hash128.OfCanonical("src"), null, 1.0);
-        Assert.Equal(dog, flipped.SubjectId);
-        Assert.Equal(animal, flipped.ObjectId);
-        Assert.Equal(direct.Id, flipped.Id);
+        Assert.Equal(animal, flipped.SubjectId);
+        Assert.Equal(dog, flipped.ObjectId);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_HYPONYM"), flipped.TypeId);
     }
 
     [Fact]

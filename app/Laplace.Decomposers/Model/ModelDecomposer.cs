@@ -386,18 +386,14 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         }
     }
 
-    // The config's declared dimensions, as the model witness states them about its
-    // checkpoint structure: each is the property value [config key, value] under
-    // HAS_ATTRIBUTE. The key is the config's own vocabulary, never a relation of its own;
-    // the config file is not minted as a recipe entity of its own.
-    private static readonly string[] DeclaredRelations = ["HAS_ATTRIBUTE"];
-    private static string HasAttribute => DeclaredRelations[0];
-
+    // Each config key is the claim. The object is the value the config wrote.
     private static readonly string[] ConfigFacts =
     [
         "hidden_size", "num_hidden_layers", "num_attention_heads", "num_key_value_heads",
         "intermediate_size", "vocab_size",
     ];
+
+    private static readonly string[] DeclaredRelations = ConfigFacts;
 
     private int StageConfigFacts(
         SubstrateChangeBuilder b, Hash128 checkpoint, IReadOnlyDictionary<string, long> config)
@@ -406,11 +402,10 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         foreach (string key in ConfigFacts)
         {
             if (!config.TryGetValue(key, out long value)) continue;
-            Hash128 fact = ContentEmitter.StagePropertyValue(
-                    b, key, value.ToString(System.Globalization.CultureInfo.InvariantCulture), _source)
-                ?? throw new InvalidOperationException($"config value {key}={value} has no content root");
+            string text = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (ContentEmitter.Emit(b, text, _source) is not { } valueId) continue;
             b.AddAttestation(NativeAttestation.Categorical(
-                checkpoint, HasAttribute, fact, _source, null, 1.0));
+                checkpoint, key, valueId, _source, null, 1.0));
             written++;
         }
         return written;

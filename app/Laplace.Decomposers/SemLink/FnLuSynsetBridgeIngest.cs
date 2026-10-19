@@ -39,6 +39,7 @@ internal static class FnLuSynsetBridgeIngest
 
             yield return new CategoryCorrespondenceRecord(
                 $"{luFrame} {luLabel}", LuTypeId, synId.Value,
+                Path.GetFileNameWithoutExtension(path),
                 DeclareSubject: (builder, source) =>
                     FrameNetLexicalUnit.Declare(builder, luFrame, luLabel, source));
 
@@ -83,6 +84,7 @@ internal static class FnLuSynsetBridgeIngest
 
             yield return new CategoryCorrespondenceRecord(
                 $"{luFrame} {luLabel}", LuTypeId, synId.Value,
+                Path.GetFileNameWithoutExtension(path),
                 DeclareSubject: (builder, source) =>
                     FrameNetLexicalUnit.Declare(builder, luFrame, luLabel, source));
 

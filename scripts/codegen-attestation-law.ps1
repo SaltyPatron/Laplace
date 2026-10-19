@@ -23,7 +23,9 @@ if (-not $Force -and (Test-Path -LiteralPath $stamp)) {
     }
 }
 
-python $py
+$pythonExe = Join-Path $env:LOCALAPPDATA 'Python\bin\python.exe'
+if (-not (Test-Path $pythonExe)) { $pythonExe = 'python' }
+& $pythonExe $py
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 New-Item -ItemType Directory -Force -Path $stampDir | Out-Null

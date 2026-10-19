@@ -9,6 +9,9 @@ namespace Laplace.Decomposers.ConceptNet;
 
 public static class ConceptNetUri
 {
+    // ConceptNet's /wn/ suffix and lexfile topics cite Princeton WordNet 3.0.
+    public const string CitedWordNet = "pwn30";
+
     public static bool TryParseLangAndTerm(
         ReadOnlySpan<byte> uri, out ReadOnlySpan<byte> lang, out ReadOnlySpan<byte> termUnderscored)
     {
@@ -79,8 +82,20 @@ public static class ConceptNetUri
     {
         if (wnSuffix.IsEmpty) return null;
         string suffix = Encoding.UTF8.GetString(wnSuffix);
-        Hash128? fromAnchor = SourceEntityIdConventions.ResolveSynsetAnchor(suffix);
+        Hash128? fromAnchor = SourceEntityIdConventions.ResolveSynsetAnchor(suffix, CitedWordNet);
         return fromAnchor ?? ConceptNetWnTopicMap.Resolve(suffix, pos);
+    }
+
+    /// <summary>The ILI text a /wn/ suffix names, when the suffix is an offset or a topic.</summary>
+    public static string? IliText(ReadOnlySpan<byte> wnSuffix, char? pos)
+    {
+        if (wnSuffix.IsEmpty) return null;
+        string suffix = Encoding.UTF8.GetString(wnSuffix);
+        if (SourceEntityIdConventions.TryWordNetIli(suffix, out string? ili, CitedWordNet))
+            return ili;
+        if (pos is char p && ConceptNetWnTopicMap.TryOffset(suffix, p, out long offset))
+            return SourceEntityIdConventions.WordNetIli(offset, p, CitedWordNet);
+        return null;
     }
 
     public static Hash128? ResolveSynsetFromExternalUrl(ReadOnlySpan<byte> url) =>

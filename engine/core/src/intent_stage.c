@@ -1,6 +1,7 @@
 #include "laplace/core/intent_stage.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/mantissa.h"
 #include "laplace/core/relation_law.h"
 
 #include <stdlib.h>
@@ -527,6 +528,31 @@ int intent_stage_add_physicality(
     if (buf_append_field_timestamptz(b, observed_at_unix_us) != 0) return -1;
     b->row_count++;
     return 0;
+}
+
+int intent_stage_deposit_lexical_upos(
+    intent_stage_t*     stage,
+    const hash128_t*    entity_id,
+    const double        coord[4],
+    const hilbert128_t* hilbert_index,
+    int32_t             slot) {
+    if (!stage || !entity_id || !coord || !hilbert_index || slot < 0 || slot > 30) return -1;
+    hash128_t physicality;
+    laplace_physicality_id_compute(*entity_id, INTENT_STAGE_LEXICAL_UPOS, &physicality);
+    if (intent_stage_witness_seen(stage, &physicality)) return 0;
+    /* Slot+1 in the UPOS field, no parse-class bit: a mask on this entity, not an
+     * occurrence in a sentence and not the bytes of an English tag. */
+    const uint64_t flags =
+        ((uint64_t)(slot + 1) & LAPLACE_VFLAG_PARSE_UPOS_MASK) << LAPLACE_VFLAG_PARSE_UPOS_SHIFT;
+    double trajectory[4];
+    if (trajectory_build_flagged(entity_id, &flags, 1, trajectory) != 0) return -1;
+    if (intent_stage_add_physicality(
+            stage, &physicality, entity_id, INTENT_STAGE_LEXICAL_UPOS,
+            coord, hilbert_index, trajectory, 1, 1,
+            1, 0.0, 1, 0, 0) != 0) return -1;
+    /* 0 inserted, 1 already recorded. Either is the one face. */
+    int recorded = intent_stage_witness_record(stage, &physicality);
+    return recorded < 0 ? recorded : 0;
 }
 
 int intent_stage_add_attestation_mode(

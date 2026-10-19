@@ -58,7 +58,7 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await foreach (var (conceptKey, lang, prompt, response) in
+        await foreach (var (_, lang, prompt, response) in
                        SharedParquetRecordStream.ReadTinyCodesRowsAsync(filePath, ct))
         {
             ct.ThrowIfCancellationRequested();
@@ -74,9 +74,9 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
             yield return new GrammarComposeRecord(
                 codeBytes,
                 modality,
-                ConceptAnchorKey: string.IsNullOrEmpty(conceptKey) ? null : conceptKey,
                 ConceptCategoryTypeId: CodeConceptTypeId,
-                ObservedPromptUtf8: prompt is null ? null : Encoding.UTF8.GetBytes(prompt));
+                ObservedPromptUtf8: prompt is null ? null : Encoding.UTF8.GetBytes(prompt),
+                Language: string.IsNullOrEmpty(lang) ? null : lang);
         }
     }
 

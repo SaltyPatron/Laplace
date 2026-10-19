@@ -5,6 +5,17 @@ namespace Laplace.Decomposers.ConceptNet;
 
 internal static class ConceptNetWnTopicMap
 {
+    internal static bool TryOffset(string suffix, char pos, out long offset)
+    {
+        if (Map.TryGetValue(suffix + "|" + pos, out var hit))
+        {
+            offset = hit.Offset;
+            return true;
+        }
+        offset = 0;
+        return false;
+    }
+
     private static readonly Dictionary<string, (long Offset, char Pos)> Map = new(StringComparer.Ordinal)
     {
         ["act|n"] = (34479, 'n'),
@@ -55,14 +66,14 @@ internal static class ConceptNetWnTopicMap
         if (pos is { } p)
         {
             if (Map.TryGetValue($"{topic}|{p}", out var exact))
-                return ConceptAnchor.SynsetId(exact.Offset, exact.Pos);
+                return ConceptAnchor.SynsetId(exact.Offset, exact.Pos, ConceptNetUri.CitedWordNet);
             return null;
         }
 
         foreach (var (key, entry) in Map)
         {
             if (!key.StartsWith(topic + '|', StringComparison.Ordinal)) continue;
-            return ConceptAnchor.SynsetId(entry.Offset, entry.Pos);
+            return ConceptAnchor.SynsetId(entry.Offset, entry.Pos, ConceptNetUri.CitedWordNet);
         }
         return null;
     }

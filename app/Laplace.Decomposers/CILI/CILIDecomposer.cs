@@ -156,14 +156,11 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                 return;
             if (ContentEmitter.Emit(b, rec.Status, Source) is not { } statusId)
                 return;
-            var verCtx = ReferenceAnchor.Declare(
-                b, ReferenceIdentityKind.CiliMapVersion, rec.Version,
-                EntityTypeRegistry.SourceVersion, Source);
-
-            // The status key is a relation key, not content; no entity is materialized for it.
+            // A map-file version is packaging, so the status claim carries no version entity.
+            // The witness is this CILI source.
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 iliId, CILISource.IliStatusMetaTypeId, statusId,
-                Source, verCtx, TC.AcademicCurated));
+                Source, null, TC.AcademicCurated));
         }
 
         protected override async IAsyncEnumerable<(string Ili, string Status, string Version)> ExtractRecordsAsync(
@@ -235,20 +232,11 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
     private static void EmitMapRow(
         SubstrateChangeBuilder mb, (byte[] Ili, byte[] OffsetPos, string Version) rec)
     {
-        var (ili, offsetPos, version) = rec;
-        if (ReferenceAnchor.DeclareUtf8(
-                mb, ReferenceIdentityKind.CiliIli, ili, SynsetTypeId, Source) is not { } id)
-            return;
-        string offsetKey = System.Text.Encoding.UTF8.GetString(offsetPos);
-        if (ReferenceAnchor.DeclareWordNetSynsetKey(
-                mb, version, offsetKey, Source) is not { } keyId)
-            return;
-        var verCtx = ReferenceAnchor.Declare(
-            mb, ReferenceIdentityKind.CiliMapVersion, version,
-            EntityTypeRegistry.SourceVersion, Source) ?? id;
-        mb.AddAttestation(NativeAttestation.CategoricalResolved(
-            id, CILISource.HasSynsetKeyTypeId, keyId,
-            Source, verCtx, TC.AcademicCurated));
+        var (ili, _, _) = rec;
+        // The offset and the release label are packaging. Resolve them through the
+        // in-memory ILI map at ingest; do not store either as an entity or an edge.
+        ReferenceAnchor.DeclareUtf8(
+            mb, ReferenceIdentityKind.CiliIli, ili, SynsetTypeId, Source);
     }
 
     private static async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ParseIliMapAsync(

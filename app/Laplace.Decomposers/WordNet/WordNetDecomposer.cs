@@ -12,22 +12,12 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 {
     public static readonly Hash128 Source = WordNetSource.SourceId;
 
-    /// <summary>
-    /// The language this source asserts for its lexical surfaces, from the manifest.
-    /// Read here rather than written here so the fact has ONE home: a literal "eng" in a
-    /// decomposer is the per-source hand-roll that left nine English sources emitting no
-    /// language at all. Null when the manifest declares no scope.
-    /// </summary>
-    private static readonly Hash128? LanguageScopeId =
-        EtlManifest.TryGet("wordnet", out var _wnRow) ? _wnRow.LanguageScopeId : null;
+    // This decomposer reads the WordNet 3.0 dict. The offset is that release's key.
+    private const string Release = "pwn30";
+
     public static readonly Hash128 TrustClass = WordNetSource.TrustClass;
 
-    // A sense's lemma is one of its names: HAS_NAME qualified name/alias.
-    private static readonly Hash128 RelTypeHasName =
-        RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasName)));
-    private static readonly Mask256 AliasName = ClaimQualifiers.Of("name", "alias");
-
-    private static Dictionary<string, string> PointerTypes => WordNetSource.PointerTypes;
+    private static HashSet<string> PointerSymbols => WordNetSource.PointerSymbols;
 
     private static readonly string[] Lexnames =
     {
@@ -145,15 +135,8 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         protected override void Compose(WnVerbFrame frame, SubstrateChangeBuilder b)
         {
-            Hash128? frameId = ReferenceAnchor.Emit(
-                b, ReferenceIdentityKind.WordNetVerbFrame,
-                frame.Number.ToString(CultureInfo.InvariantCulture),
-                EntityTypeRegistry.SourceReference, Source, TC.StandardsDerived);
-            Hash128? templateId = EmitSurface(b, frame.Template, Source);
-            if (frameId is { } fid && templateId is { } tid)
-                b.AddAttestation(NativeAttestation.CategoricalResolved(
-                    fid, WordNetSource.CorrespondsToTypeId, tid, Source,
-                    null, TC.StandardsDerived));
+            // The frame number is the file's join index. The template text is the content.
+            EmitSurface(b, frame.Template, Source);
         }
 
         protected override IAsyncEnumerable<WnVerbFrame> ExtractRecordsAsync(
@@ -208,15 +191,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         protected override void Compose(WnVerbSentence sentence, SubstrateChangeBuilder b)
         {
-            Hash128? sentenceId = ReferenceAnchor.Emit(
-                b, ReferenceIdentityKind.WordNetVerbSentence,
-                sentence.Number.ToString(CultureInfo.InvariantCulture),
-                EntityTypeRegistry.SourceReference, Source, TC.StandardsDerived);
-            Hash128? textId = EmitSurface(b, sentence.Text, Source);
-            if (sentenceId is { } sid && textId is { } tid)
-                b.AddAttestation(NativeAttestation.CategoricalResolved(
-                    sid, WordNetSource.CorrespondsToTypeId, tid, Source,
-                    null, TC.StandardsDerived));
+            EmitSurface(b, sentence.Text, Source);
         }
 
         protected override IAsyncEnumerable<WnVerbSentence> ExtractRecordsAsync(
@@ -272,7 +247,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn)
     {
-        ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source);
+        ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source, Release);
         foreach (var lemma in syn.Lemmas)
             EmitSurface(b, lemma, Source);
 
@@ -286,17 +261,22 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn)
     {
-        Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
+        Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType, Release);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
 
-        foreach (var lemma in syn.Lemmas)
+        // The concept carries one UPOS slot. The lemma does not: one spelling lexicalizes
+        // many concepts. The English tag is not an entity on either.
+        string? ili = SourceEntityIdConventions.WordNetIli(syn.Offset, syn.SsType, Release);
+        if (ili is not null
+            && ContentEmitter.StageComponent(b, ili, Source) is { } carrier
+            && PosReference.TrySlot(syn.SsType.ToString(), PosReference.PosTagset.WordNet, out int slot))
         {
-            var lemmaId = RootSurface(lemma);
-            if (lemmaId is null) continue;
-            PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
-                PosReference.PosTagset.WordNet, Source, null, TC.StandardsDerived,
-                _vocabularyNames);
+            Span<double> coord = stackalloc double[]
+            {
+                carrier.CoordX, carrier.CoordY, carrier.CoordZ, carrier.CoordM,
+            };
+            b.ContentStage.DepositUpos(carrier.Id, coord, Hilbert128.Encode(coord), slot);
         }
 
         var (defs, examples) = ParseGloss(syn.Gloss);
@@ -305,14 +285,14 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             var defId = RootSurface(d);
             if (defId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_DEFINITION", defId.Value, Source, TC.StandardsDerived));
+                    synId, "gloss", defId.Value, Source, TC.StandardsDerived));
         }
         foreach (var ex in examples)
         {
             var exId = RootSurface(ex);
             if (exId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_EXAMPLE", exId.Value, Source, TC.StandardsDerived));
+                    synId, "example", exId.Value, Source, TC.StandardsDerived));
         }
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
@@ -321,35 +301,15 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             var lexId = RootSurface(lexname);
             if (lexId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_LEX_CATEGORY", lexId.Value,
+                    synId, "lex_filenum", lexId.Value,
                     Source, TC.StandardsDerived));
-        }
-
-        foreach (var (frame, wordNum) in syn.Frames)
-        {
-            if (frame <= 0) continue;
-            Hash128? frameId = ReferenceAnchor.Id(
-                ReferenceIdentityKind.WordNetVerbFrame,
-                frame.ToString(CultureInfo.InvariantCulture));
-            if (frameId is null) continue;
-            Hash128 subject = synId;
-            if (wordNum > 0 && wordNum <= syn.Lemmas.Count)
-            {
-                var lemmaId = RootSurface(syn.Lemmas[wordNum - 1]);
-                if (lemmaId is { } lid) subject = lid;
-            }
-            b.AddAttestation(NativeAttestation.Categorical(
-                subject, "HAS_VERB_FRAME", frameId.Value, Source, TC.StandardsDerived));
         }
 
         foreach (var ptr in syn.Pointers)
         {
-            if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
+            if (!PointerSymbols.Contains(ptr.Symbol)) continue;
 
-            if (syn.SsType == 'v' && ptr.Symbol == "@")
-                typeName = "MANNER_OF";
-
-            Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
+            Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos, Release);
             if (tgt is null) continue;
 
             Hash128 subject = synId;
@@ -359,69 +319,61 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
                 if (srcId is { } sid) subject = sid;
             }
             b.AddAttestation(NativeAttestation.Categorical(
-                subject, typeName, tgt.Value, Source, TC.StandardsDerived));
+                subject, ptr.Symbol, tgt.Value, Source, TC.StandardsDerived));
         }
     }
 
     private static void ComposeSense(WnSense s, SubstrateChangeBuilder b)
     {
         EmitSurface(b, s.Lemma, Source);
-
-        var senseId = SenseAnchor.EmitExact(
-            b, s.SenseKey, Source, TC.StandardsDerived);
-        var compatibilityId = SenseAnchor.Emit(
-            b, s.SenseKey, Source, TC.StandardsDerived);
-        if (senseId is null) return;
-
-        if (compatibilityId is { } alias && alias != senseId.Value)
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                alias, WordNetSource.CorrespondsToTypeId, senseId.Value, Source,
-                null, TC.StandardsDerived));
-
-        var lemmaId = RootSurface(s.Lemma);
-        var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
-        if (lemmaId is null || synAnchor is null) return;
-
-        if (LanguageScopeId is { } langId)
-        {
-            b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, EtlSource.LanguageScopeRelation, langId, Source,
-                TC.StandardsDerived));
-            b.AddAttestation(NativeAttestation.Categorical(
-                senseId.Value, EtlSource.LanguageScopeRelation, langId, Source,
-                TC.StandardsDerived));
-        }
-        b.AddAttestation(NativeAttestation.Categorical(
-            lemmaId.Value, "HAS_SENSE", senseId.Value, Source, TC.StandardsDerived,
-            magnitude: s.WitnessedMagnitude, arenaScale: 1.0));
-        b.AddAttestation(NativeAttestation.Categorical(
-            senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, TC.StandardsDerived));
+        // The sense key is packaging. The lexicalization is [lemma, eng, ILI], the same
+        // composition the WN-LMF recipe records. An offset with no ILI has no concept.
+        string? ili = SourceEntityIdConventions.WordNetIli(s.Offset, s.Pos, Release);
+        if (ili is null) return;
+        string surface = s.Lemma.Contains('_') ? Surface(s.Lemma) : s.Lemma;
+        Hash128? lexicalization = EmitLexicalization(b, surface, ili, s.Pos);
+        Hash128? lemmaId = RootSurface(s.Lemma);
+        Hash128? language = ContentEmitter.RootId("eng");
+        if (lexicalization is null || lemmaId is null || language is null) return;
         b.AddAttestation(NativeAttestation.CategoricalResolved(
-            senseId.Value, RelTypeHasName, lemmaId.Value, Source, null, TC.StandardsDerived)
-            with { QualifierMask = AliasName });
-        PosReference.Attest(b, senseId.Value, s.Pos.ToString(),
-            PosReference.PosTagset.WordNet, Source, null, TC.StandardsDerived,
-            _vocabularyNames);
-        int lexFilenum = ParseLexFilenum(s.SenseKey);
-        if (lexFilenum >= 0 && lexFilenum < Lexnames.Length)
+            lemmaId.Value,
+            RelationTypeRegistry.RelationTypeId("Sense"),
+            lexicalization.Value,
+            Source,
+            language,
+            TC.StandardsDerived,
+            observationCount: s.TagCount > 0 ? s.TagCount : 1));
+    }
+
+    private static Hash128? EmitLexicalization(SubstrateChangeBuilder b, string lemma, string ili, char pos)
+    {
+        if (ContentEmitter.StageComponent(b, lemma, Source) is not { } lemmaPart) return null;
+        if (ContentEmitter.StageComponent(b, "eng", Source) is not { } languagePart) return null;
+        if (ContentEmitter.StageComponent(b, ili, Source) is not { } iliPart) return null;
+        Span<OrderedCompositionResult> result = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(
+            b.ContentStage,
+            [new OrderedCompositionRequest(
+                [lemmaPart, languagePart, iliPart],
+                EntityTypeRegistry.WordNetSense,
+                Source,
+                0)],
+            result);
+        // The tuple [lemma, language, identifier] has the concept's one UPOS slot.
+        // Changing the language constituent is how another lexicalization is reached.
+        if (PosReference.TrySlot(pos.ToString(), PosReference.PosTagset.WordNet, out int slot))
         {
-            EmitSurface(b, Lexnames[lexFilenum], Source);
-            var lexId = RootSurface(Lexnames[lexFilenum]);
-            if (lexId is not null)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    senseId.Value, "HAS_LEX_CATEGORY", lexId.Value, Source, TC.StandardsDerived));
+            OrderedCompositionResult face = result[0];
+            Span<double> coord = stackalloc double[]
+            {
+                face.CoordX, face.CoordY, face.CoordZ, face.CoordM,
+            };
+            b.ContentStage.DepositUpos(face.Id, coord, face.Hilbert, slot);
         }
+        return result[0].Id;
     }
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
-
-    private static int ParseLexFilenum(string senseKey)
-    {
-        int pct = senseKey.IndexOf('%');
-        if (pct < 0 || pct + 1 >= senseKey.Length) return -1;
-        var fields = senseKey[(pct + 1)..].Split(':');
-        return fields.Length >= 2 && int.TryParse(fields[1], out var n) ? n : -1;
-    }
 
     private static Hash128? EmitSurface(SubstrateChangeBuilder b, string surface, Hash128 sourceId)
     {
@@ -494,7 +446,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             var baseId = EmitSurface(b, baseStr, Source);
             if (baseId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    baseId.Value, "IS_LEMMA_OF", infId.Value, Source, TC.StandardsDerived));
+                    infId.Value, "lemma", baseId.Value, Source, TC.StandardsDerived));
         }
     }
 
@@ -553,20 +505,10 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
     private static void ComposeVerbSentEntry(WnVerbSentEntry entry, SubstrateChangeBuilder b)
     {
-        Hash128? senseId = SenseAnchor.EmitExact(
-            b, entry.SenseKey, Source, TC.StandardsDerived);
-        if (senseId is null) return;
-        foreach (int sentenceNumber in entry.SentenceNumbers)
-        {
-            Hash128? sentenceId = ReferenceAnchor.Declare(
-                b, ReferenceIdentityKind.WordNetVerbSentence,
-                sentenceNumber.ToString(CultureInfo.InvariantCulture),
-                EntityTypeRegistry.SourceReference, Source);
-            if (sentenceId is not null)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    senseId.Value, "HAS_EXAMPLE", sentenceId.Value,
-                    Source, TC.StandardsDerived));
-        }
+        // Sense keys and sentence numbers are packaging indexes. The sentence text is
+        // staged from sents.vrb; the number is not an entity to hang it on.
+        _ = entry;
+        _ = b;
     }
 
     internal static (List<string> Defs, List<string> Examples) ParseGloss(string gloss)

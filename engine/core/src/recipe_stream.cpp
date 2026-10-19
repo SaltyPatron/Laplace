@@ -1171,13 +1171,10 @@ struct laplace_recipe_stream {
         check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "witness composition");
         return result.id;
     }
-    // A sentence's parse is its own entity: the ordered composition of its token units
-    // [form, UPOS, deprel, head], the deprel slot [relation, subtype] when subtyped and the
-    // head the content of its ordinal (0 the root), so two annotations of one token
-    // sequence are two parses. Its type-8 trajectory runs over the token forms with each
-    // vertex carrying the governed codes (UPOS index, deprel and subtype codes, head
-    // ordinal) for decoding, and the treebank attests sentence HAS_PARSE parse in the
-    // parse context (the treebank file).
+    // A sentence's parse is the ordered composition of the sentence and its token forms.
+    // UPOS and deprel are mask slots on the type-8 vertex flags (the occurrence). The
+    // English tag and the head's decimal ordinal are not constituents. The treebank
+    // attests sentence --parse--> parse in the parse context (the treebank file).
     laplace_ordered_component_t form_component(const content_form& c) {
         laplace_ordered_component_t out{};
         out.id = c.id; std::memcpy(out.coord, c.coord, sizeof(out.coord));
@@ -1200,6 +1197,19 @@ struct laplace_recipe_stream {
         if (hilbert) *hilbert = result.hilbert;
         return out;
     }
+    // A pos-vocabulary column that the parse structure already writes into vertex flags.
+    // That slot stays on the occurrence. It is not also a claim about the token's text.
+    bool parse_upos_field(const std::string& path) const {
+        for (const auto& route : routes) {
+            if (!route.second.parse.on || route.second.parse.upos >= delimited_columns.size()) continue;
+            const std::string& column = delimited_columns[route.second.parse.upos];
+            if (column.empty() || path.size() < column.size()) continue;
+            if (path.compare(path.size() - column.size(), column.size(), column) != 0) continue;
+            const size_t at = path.size() - column.size();
+            if (at == 0 || path[at - 1] == '@' || path[at - 1] == '/') return true;
+        }
+        return false;
+    }
     void lower_parse(intent_stage_t* stage, const route_rule& route, const node& record) {
         const auto& p = route.parse;
         const auto trunk = record.attributes.find(p.trunk);
@@ -1208,7 +1218,7 @@ struct laplace_recipe_stream {
         const size_t width = std::max({p.id, p.form, p.upos, p.head, p.deprel}) + 1;
         std::vector<hash128_t> ids;
         std::vector<uint64_t> flags;
-        std::vector<laplace_ordered_component_t> units;
+        std::vector<laplace_ordered_component_t> parse_parts{form_component(sentence)};
         for (const auto& line : *record.group) {
             if (line.size() < width) continue;
             const std::string& id = line[p.id];
@@ -1232,47 +1242,30 @@ struct laplace_recipe_stream {
                 const unsigned long v = std::stoul(h);
                 if (v < 0xFFFF) head = static_cast<uint16_t>(v);
             }
-            // The unit [form, UPOS, deprel, head]; an unresolved UPOS or relation is the
-            // source's own label, an absent one no slot.
-            std::vector<laplace_ordered_component_t> unit{form_component(token)};
-            const std::string upos_label = resolved ? std::string(canonical) : line[p.upos];
-            if (!upos_label.empty() && upos_label != "_") unit.push_back(form_component(compose_content(stage, upos_label)));
-            if (!label.empty() && label != "_") {
-                std::vector<laplace_ordered_component_t> relation;
-                const char* universal = deprel_code > 0 ? laplace_deprel_label(deprel_code) : nullptr;
-                const size_t colon = label.find(':');
-                relation.push_back(form_component(compose_content(stage,
-                    universal ? std::string(universal) : label.substr(0, colon))));
-                if (colon != std::string::npos && colon + 1 < label.size()) {
-                    const char* sub = subtype > 0 ? laplace_deprel_subtype_label(subtype) : nullptr;
-                    relation.push_back(form_component(compose_content(stage, sub ? std::string(sub) : label.substr(colon + 1))));
-                }
-                unit.push_back(compose_components(stage, relation, "UD_Deprel"));
-            }
-            if (head != 0xFFFF) unit.push_back(form_component(compose_content(stage, std::to_string(head))));
-            units.push_back(compose_components(stage, unit, "UD_Parse_Unit"));
+            parse_parts.push_back(form_component(token));
             ids.push_back(token.id);
             flags.push_back(laplace_parse_vertex_flags(token.tier, upos1, deprel, head, subtype));
         }
         if (ids.empty()) return;
         hilbert128_t hilbert{};
-        const laplace_ordered_component_t parse = compose_components(stage, units, "UD_Parse", &hilbert);
-        if (units.size() == 1) hilbert = {};
+        const laplace_ordered_component_t parse = compose_components(stage, parse_parts, "UD_Parse", &hilbert);
         std::vector<double> trajectory(ids.size() * 4);
         check(trajectory_build_flagged(ids.data(), flags.data(), ids.size(), trajectory.data()), "parse trajectory");
         hash128_t physicality;
         laplace_physicality_id_compute(parse.id, 8, &physicality);
-        check(intent_stage_add_physicality(stage, &physicality, &parse.id, 8, parse.coord,
-            &hilbert, trajectory.data(), static_cast<uint32_t>(ids.size()),
-            static_cast<int32_t>(ids.size()), 1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US), "parse physicality");
+        if (!intent_stage_witness_seen(stage, &physicality)) {
+            check(intent_stage_add_physicality(stage, &physicality, &parse.id, 8, parse.coord,
+                &hilbert, trajectory.data(), static_cast<uint32_t>(ids.size()),
+                static_cast<int32_t>(ids.size()), 1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US), "parse physicality");
+            check(intent_stage_witness_record(stage, &physicality), "parse face");
+        }
         // The treebank's testimony: the sentence has this parse, in its file.
         fact f;
         f.subject = sentence.id; f.has_subject = true;
         f.object = parse.id; f.has_object = true;
-        hash128_t has_parse{}, parent{}; laplace_rel_symmetry_t symmetry{}; uint8_t flipped = 0; double rank = 1.0;
-        check(laplace_relation_resolve_surface("HAS_PARSE", &has_parse, &rank, &symmetry, &flipped, &parent) < 0 ? -1 : 0,
-              "HAS_PARSE relation");
-        f.relation = has_parse; f.rank = rank; f.explicit_rank = true;
+        hash128_t parse_relation{};
+        check(laplace_relation_type_id("parse", &parse_relation) < 0 ? -1 : 0, "parse relation");
+        f.relation = parse_relation; f.rank = 1.0; f.explicit_rank = true;
         if (!p.context.empty()) {
             const std::string context = record.get(p.context);
             if (!context.empty()) { f.context = content(stage, context); f.has_context = true; }
@@ -1304,6 +1297,13 @@ struct laplace_recipe_stream {
         if (i == fields.end()) throw std::runtime_error("recipe has no field disposition");
         const auto& rule = i->second;
         if (rule.disposition & (1u << 10)) return;
+        // A packaging index (a synset offset, a sense key, a row number, a file position)
+        // is how a release points. It is not an entity and not a claim, whichever other
+        // disposition a recipe also set.
+        if (rule.disposition & (1u << 9)) return;
+        // The record's identity is the subject entity. An edge beside it (HAS_EXTERNAL_ID
+        // and the same shape) records the identifier as a predicate instead of as the thing.
+        if ((rule.disposition & 1u) && subject_binding) return;
         if (!rule.observation_of.empty() || !rule.score_of.empty()) {
             if (raw.empty()) return;
             const std::string& of = rule.observation_of.empty() ? rule.score_of : rule.observation_of;
@@ -1487,6 +1487,29 @@ struct laplace_recipe_stream {
                 ? split(raw, rule.separator) : std::vector<std::string>{raw};
             for (auto value : values) {
                 value = identify(rule.identity_table, value);
+                if (rule.vocabulary.kind == 1) {
+                    const char* canonical = nullptr;
+                    int index = -1;
+                    if (laplace_pos_resolve_canonical(value.c_str(),
+                            static_cast<laplace_pos_tagset_t>(rule.vocabulary.tagset),
+                            &canonical, &index) == 0 && index >= 0) {
+                        // A resolved tag is one UPOS slot. On a parse column the vertex
+                        // flags already hold it. On an entity carrier the slot is the
+                        // lexical bank face. The English spelling is not the object.
+                        if (!parse_upos_field(path) && subject_form_known)
+                            check(intent_stage_deposit_lexical_upos(
+                                stage, &subject_form.id, subject_form.coord, &subject_form.hilbert, index),
+                                "upos bank");
+                        else if (!parse_upos_field(path)) {
+                            value = canonical;
+                            auto alias = rule.aliases.find(alias_key(value));
+                            if (alias != rule.aliases.end()) value = alias->second;
+                            f.object = classifier(stage, value);
+                            emit_fact(f);
+                        }
+                        continue;
+                    }
+                }
                 value = governed(rule, value);
                 auto alias = rule.aliases.find(alias_key(value)); if (alias != rule.aliases.end()) value = alias->second;
                 f.object = classifier(stage, value); emit_fact(f);
@@ -1498,18 +1521,16 @@ struct laplace_recipe_stream {
     // The qualifier the last Surface-resolved relation name carries, applied to the
     // facts that name produces (holo_member -> HAS_PART {meronymy/member}); -1 none.
     int surface_qualifier_bit = -1;
+    // The file's token is the predicate. Surface aliasing stored "antonym" as IS_ANTONYM_OF
+    // and "holo_member" as HAS_PART; the direction and the subcategory are the token itself.
     hash128_t resolve_relation(const field_rule& rule, const std::string& name, double* rank, bool* flip) {
-        surface_qualifier_bit = rule.relation_resolver == 4
-            ? laplace_relation_surface_qualifier(name.c_str()) : -1;
-        hash128_t id{}, parent{}; laplace_rel_symmetry_t symmetry{}; uint8_t flipped = 0;
-        double resolved_rank = 1.0;
-        int rc = -1;
-        switch (rule.relation_resolver) {
-        case 4: rc = laplace_relation_resolve_surface(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
-        default: throw std::runtime_error("relation resolver is not declared");
-        }
+        (void)rule;
+        (void)rank;
+        surface_qualifier_bit = -1;
+        hash128_t id{};
+        int rc = laplace_relation_type_id(name.c_str(), &id);
         if (rc < 0 || !nonzero(id)) throw std::runtime_error("relation vocabulary has no entry for " + name);
-        *rank = resolved_rank; *flip = flipped != 0;
+        *flip = false;
         return id;
     }
     hash128_t endpoint(intent_stage_t* stage, const field_rule& rule, const std::string& value,
@@ -1733,6 +1754,7 @@ struct laplace_recipe_stream {
             check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "composition subject");
             subject = result.id;
             subject_form.id = result.id; std::memcpy(subject_form.coord, result.coord, sizeof(subject_form.coord));
+            subject_form.hilbert = result.hilbert;
             subject_form.tier = result.tier; subject_form.atom = 0;
             subject_form_known = true;
             record_subject_form = subject_form;

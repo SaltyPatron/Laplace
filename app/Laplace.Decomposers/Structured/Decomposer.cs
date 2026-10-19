@@ -195,16 +195,14 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     }
 
     internal static IReadOnlyList<string> RelationsFor(SemanticSourceRecipe? recipe) => (recipe?.Fields ?? [])
-            .Where(static field => field.Disposition.HasFlag(SourceFieldDisposition.Testimony))
-            .Select(static field => field.RelationName ?? field.PropertyName)
+            .Where(field => recipe is not null && NativeRecipeCompiler.EmitsTestimony(recipe, field))
+            .Select(static field => NativeRecipeCompiler.WitnessPredicate(field))
             .Concat((recipe?.Fields ?? []).Where(static field => field.PreserveLexicalValue && field.LexicalRelationName is not null)
                 .Select(static field => field.LexicalRelationName!))
             .Concat((recipe?.Fields ?? []).Where(static field => field.RelationParent is not null)
                 .Select(static field => field.RelationParent!))
             .Concat((recipe?.ProviderRoutes ?? []).Where(static route => route.RangeRelationName is not null || route.RangeRelationProperty is not null)
                 .Select(static route => route.RangeRelationName ?? route.RangeRelationProperty!))
-            .Concat(["HAS_PROPERTY", "HAS_VERSION", "HAS_NAME",
-                "IS_A", "CONTAINS", "REQUIRES", "HAS_SOURCE_URL", "HAS_LICENSE", "HAS_CITATION"])
             .Distinct(StringComparer.Ordinal).ToArray();
 
     public Hash128 SourceId => _options.SourceId;
@@ -557,7 +555,7 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
         SemanticSourceRecipe[] recipes = resolved.Bindings.Where(static b => b.Recipe is not null)
             .Select(static b => b.Recipe!).DistinctBy(static r => r.RecipeId).ToArray();
         _relations = recipes.SelectMany(SingleArtifactRecipeDecomposer.RelationsFor)
-            .Concat(SingleArtifactRecipeDecomposer.RelationsFor(null)).Distinct(StringComparer.Ordinal).ToArray();
+            .Distinct(StringComparer.Ordinal).ToArray();
         string[] types = recipes.SelectMany(SingleArtifactRecipeDecomposer.TypesFor)
             .Concat(SingleArtifactRecipeDecomposer.TypesFor(null)).Distinct(StringComparer.Ordinal).ToArray();
         // A generation without an explicit source id is its own witness [authority, release].

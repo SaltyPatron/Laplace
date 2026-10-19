@@ -22,9 +22,10 @@ public static class ConceptAnchor
 
 
 
-    public static Hash128? EmitAnchor(SubstrateChangeBuilder b, long offset, char ssType, Hash128 source)
+    public static Hash128? EmitAnchor(
+        SubstrateChangeBuilder b, long offset, char ssType, Hash128 source, string? version)
     {
-        string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType);
+        string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType, version);
         return ili is null ? null : ReferenceAnchor.Declare(
             b, ReferenceIdentityKind.CiliIli, ili, SynsetTypeId, source);
     }
@@ -41,16 +42,16 @@ public static class ConceptAnchor
 
 
     public static Hash128? EmitSynset(
-        SubstrateChangeBuilder b, long offset, char ssType, Hash128 source, double trust)
+        SubstrateChangeBuilder b, long offset, char ssType, Hash128 source, double trust, string? version)
     {
-        return EmitAnchor(b, offset, ssType, source);
+        return EmitAnchor(b, offset, ssType, source, version);
     }
 
 
 
 
 
-    public static Hash128? SynsetId(long offset, char ssType, string version = "pwn30")
+    public static Hash128? SynsetId(long offset, char ssType, string? version)
     {
         string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType, version);
         return ili is null ? null : ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, ili);

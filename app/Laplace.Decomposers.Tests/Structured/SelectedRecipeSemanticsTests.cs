@@ -30,9 +30,9 @@ public sealed class SelectedRecipeSemanticsTests
             """;
         var entities = new Dictionary<Hash128, Hash128>();
         var rows = Read(recipe, source, chunkSize, _ => { }, entities);
-        Hash128 finance = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("eng"), Root("i100")]);
-        Hash128 river = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("eng"), Root("i200")]);
-        Hash128 example = RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE");
+        Hash128 finance = Hash128.Merkle((byte)(EntityTier.Word + 1), [Root("bank"), Root("en"), Root("i100")]);
+        Hash128 river = Hash128.Merkle((byte)(EntityTier.Word + 1), [Root("bank"), Root("en"), Root("i200")]);
+        Hash128 example = RelationTypeRegistry.RelationTypeId("Example");
         Assert.Equal(EntityTypeRegistry.WordNetSense, entities[finance]);
         Assert.Equal(EntityTypeRegistry.WordNetSense, entities[river]);
         Assert.DoesNotContain(Root("bank%1:14:00::"), entities.Keys);
@@ -40,14 +40,14 @@ public sealed class SelectedRecipeSemanticsTests
         Assert.Contains(rows, r => r.SubjectId == finance && r.TypeId == example && r.ObjectId == Root("the bank lent money"));
         Assert.Contains(rows, r => r.SubjectId == river && r.TypeId == example && r.ObjectId == Root("the river bank"));
         Assert.DoesNotContain(rows, r => r.SubjectId == Root("bank") && r.TypeId == example);
-        Assert.Contains(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("IS_ANTONYM_OF")
+        Assert.Contains(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("antonym")
             && ((r.SubjectId == finance && r.ObjectId == river) || (r.SubjectId == river && r.ObjectId == finance)));
         Assert.Contains(rows, r => r.SubjectId == Root("bank") && r.ObjectId == finance
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE") && r.ContextId == Root("eng"));
+            && r.TypeId == RelationTypeRegistry.RelationTypeId("Sense") && r.ContextId == Root("en"));
         var french = Read(recipe, source.Replace("language=\"en\"", "language=\"fr\""), chunkSize);
-        Hash128 frenchFinance = Hash128.Merkle(EntityTier.Document, [Root("bank"), Root("fra"), Root("i100")]);
+        Hash128 frenchFinance = Hash128.Merkle((byte)(EntityTier.Word + 1), [Root("bank"), Root("fr"), Root("i100")]);
         Assert.Contains(french, r => r.SubjectId == Root("bank") && r.ObjectId == frenchFinance
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE") && r.ContextId == Root("fra"));
+            && r.TypeId == RelationTypeRegistry.RelationTypeId("Sense") && r.ContextId == Root("fr"));
         Assert.DoesNotContain(french, r => r.SubjectId == finance || r.ObjectId == finance);
         // Packaging names may change without changing the denoted sense or any testimony.
         var renamed = Read(recipe, source.Replace("sense-", "renamed-sense-").Replace("syn-", "renamed-syn-"), chunkSize);
@@ -81,14 +81,16 @@ public sealed class SelectedRecipeSemanticsTests
             ili:i1 a ili:Concept ; skos:definition "a concept"@en ; dc:source pwn30:02084071-n .
             ili:i2 a ili:Instance ; skos:definition "an instance"@en .
             """, chunkSize);
-        AssertClaim(rows, "i1", "IS_TYPED_AS", "Concept");
-        AssertClaim(rows, "i2", "IS_TYPED_AS", "Instance");
-        AssertClaim(rows, "i2", "HAS_DEFINITION", "an instance", "eng");
+        AssertClaim(rows, "i1", "a", "Concept");
+        AssertClaim(rows, "i2", "a", "Instance");
+        AssertClaim(rows, "i2", "skos:definition", "an instance", "en");
         Assert.DoesNotContain(rows, r => r.SubjectId == Root("i1")
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_DEFINITION"));
-        AssertClaim(rows, "i1", "HAS_ATTRIBUTION", "http://wordnet-rdf.princeton.edu/wn30/");
-        Assert.DoesNotContain(rows, r => r.SubjectId == Root("i2")
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTION"));
+            && r.TypeId == RelationTypeRegistry.RelationTypeId("skos:definition"));
+        Assert.DoesNotContain(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_EXTERNAL_ID")
+            || r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_DEFINITION")
+            || r.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
+            || r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTION")
+            || r.ObjectId == Root("02084071-n"));
     }
 
     [Fact]
@@ -108,14 +110,22 @@ public sealed class SelectedRecipeSemanticsTests
     }
 
     [Fact]
+    public void Ili_map_offset_is_recorded_nowhere()
+    {
+        var rows = Read("recipes/cili/a895d7e/ili-map.recipe.json", "i46360\t02084071-n\t1\n", 64);
+        Assert.DoesNotContain(rows, r => r.SubjectId == Root("02084071-n") || r.ObjectId == Root("02084071-n"));
+        Assert.DoesNotContain(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_EXTERNAL_ID"));
+    }
+
+    [Fact]
     public void Iso_recipe_preserves_comment_as_a_scoped_source_statement()
     {
         var rows = Read("recipes/iso639/20260415/code-table.recipe.json",
             "Id\tPart2b\tPart2t\tPart1\tScope\tLanguage_Type\tRef_Name\tComment\n"
             + "eng\teng\teng\ten\tI\tL\tEnglish\tSource qualification\n", 7);
-        AssertClaim(rows, "eng", "HAS_LANGUAGE_SCOPE", "Individual");
-        AssertClaim(rows, "eng", "HAS_LANGUAGE_TYPE", "Living");
-        AssertClaim(rows, "eng", "HAS_ATTRIBUTE", "Source qualification", "Comment");
+        AssertClaim(rows, "eng", "Scope", "Individual");
+        AssertClaim(rows, "eng", "Language_Type", "Living");
+        AssertClaim(rows, "eng", "Comment", "Source qualification", "Comment");
     }
 
     [Fact]
@@ -157,13 +167,74 @@ public sealed class SelectedRecipeSemanticsTests
         Assert.NotEqual(once, twice);
     }
 
+    [Fact]
+    public void Propbank_alias_keeps_the_source_pos_code()
+    {
+        var entities = new Dictionary<Hash128, Hash128>();
+        var rows = Read("recipes/propbank/3.4/frameset.recipe.json", """
+            <frameset><predicate lemma="give"><roleset id="give.01" name="transfer">
+              <aliases><alias pos="v">give</alias></aliases>
+            </roleset></predicate></frameset>
+            """, entities: entities);
+        Hash128 alias = Hash128.Merkle((byte)(EntityTier.Word + 1), [Root("give"), Root("v")]);
+        Assert.Equal(EntityTypeRegistry.Id("Lexeme"), entities[alias]);
+        Assert.DoesNotContain(rows, r => r.ObjectId == Root("VERB") || r.ObjectId == Root("NOUN")
+            || r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_POS"));
+        Assert.DoesNotContain(entities.Keys, id => id == Root("VERB"));
+        Assert.Contains(rows, r => r.SubjectId == Root("give.01") && r.ObjectId == Root("transfer"));
+    }
+
+    [Fact]
+    public void Verbnet_class_and_roleset_are_the_ids_as_written()
+    {
+        var entities = new Dictionary<Hash128, Hash128>();
+        var rows = Read("recipes/verbnet/3.4/vn-class.recipe.json", """
+            <VNCLASS ID="give-13.1">
+              <MEMBERS>
+                <MEMBER name="give" grouping="give.01" fn_mapping="Giving" verbnet_key="give#1"/>
+              </MEMBERS>
+            </VNCLASS>
+            """, entities: entities, recordDepth: 0);
+        Assert.Contains(entities.Keys, id => id == Root("give-13.1"));
+        Assert.Contains(rows, r => r.ObjectId == Root("give.01"));
+        Assert.Contains(rows, r => r.ObjectId == Root("Giving"));
+        Assert.DoesNotContain(rows, r => r.SubjectId == Root("give#1") || r.ObjectId == Root("give#1"));
+        Hash128 split = Hash128.Merkle((byte)(EntityTier.Word + 1), [Root("give"), Root("13"), Root("1")]);
+        Assert.DoesNotContain(entities.Keys, id => id == split);
+    }
+
+    [Fact]
+    public void Usource_identifier_is_the_id_as_written()
+    {
+        var entities = new Dictionary<Hash128, Hash128>();
+        Read("recipes/unicode/UCD/17.0.0/usource-data.recipe.json",
+            "UTC-00001;Comp;U+4E00;1.1;;;;;;\n",
+            entities: entities);
+        Assert.Contains(entities.Keys, id => id == Root("UTC-00001"));
+        Hash128 split = Hash128.Merkle((byte)(EntityTier.Word + 1), [Root("UTC"), Root("00001")]);
+        Assert.DoesNotContain(entities.Keys, id => id == split);
+    }
+
+    [Fact]
+    public void Framenet_lexical_unit_pos_is_not_a_has_pos_edge()
+    {
+        var rows = Read("recipes/framenet/1.7/lexunit.recipe.json", """
+            <lexUnit xmlns="http://framenet.icsi.berkeley.edu" name="give.v" POS="V" frame="Giving">
+              <lexeme name="give"/>
+            </lexUnit>
+            """, recordDepth: 0);
+        Assert.DoesNotContain(rows, r => r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_POS")
+            || r.ObjectId == Root("VERB"));
+    }
+
     internal static List<AttestationRow> Read(string recipePath, string input, int chunkSize = 4096,
         Action<OrderedCompositionComponent>? fileCompleted = null,
-        Dictionary<Hash128, Hash128>? entities = null)
+        Dictionary<Hash128, Hash128>? entities = null,
+        int recordDepth = 2)
     {
         CodepointPerfcache.LoadDefault();
         var recipe = new LaplaceCookbook().InstallJson(SourceGenerationRegressionTests.RepositoryFile(recipePath));
-        using var stream = NativeRecipeStream.Open(NativeRecipeCompiler.Compile(recipe),
+        using var stream = NativeRecipeStream.Open(NativeRecipeCompiler.Compile(recipe, recordDepth),
             SourceWitness.Id(recipe.Authority, recipe.Release), 1);
         if (fileCompleted is not null)
         {

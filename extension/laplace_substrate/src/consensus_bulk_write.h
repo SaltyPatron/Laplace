@@ -12,6 +12,10 @@
 bool laplace_consensus_copy_novel(Datum type, Datum *values, int count,
                                   uint64 *processed);
 
+bool laplace_consensus_copy_novel_batch(const Datum *types, Datum single_type,
+                                        const int *leaves, Datum *values,
+                                        int count, uint64 *processed);
+
 /* Apply the matched rows of the folded arrays, already locked by the caller:
  * route each to its HASH leaf by subject and update standing and witness count
  * there with one set UPDATE per leaf, with no parent partition routing or

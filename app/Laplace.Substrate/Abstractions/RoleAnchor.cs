@@ -45,16 +45,18 @@ public static class RoleAnchor
         SubstrateChangeBuilder builder,
         RoleIdentityKind kind,
         Hash128 parentId,
+        byte parentTier,
         string? roleKey,
         Hash128 entityTypeId,
         Hash128 source) =>
-        DeclareComponent(builder, kind, parentId, roleKey, entityTypeId, source)?.Id;
+        DeclareComponent(builder, kind, parentId, parentTier, roleKey, entityTypeId, source)?.Id;
 
     /// <summary>The role as a composition part: identity plus realized coordinate.</summary>
     public static OrderedCompositionComponent? DeclareComponent(
         SubstrateChangeBuilder builder,
         RoleIdentityKind kind,
         Hash128 parentId,
+        byte parentTier,
         string? roleKey,
         Hash128 entityTypeId,
         Hash128 source)
@@ -74,8 +76,12 @@ public static class RoleAnchor
         {
             schema.Id, system.Id, parentId, component.Id
         };
-        Hash128 id = Hash128.Merkle(EntityTier.Word, constituents);
-        builder.AddEntity(id, EntityTier.Word, entityTypeId);
+        byte floor = CompositionLaw.ParentFloor(
+        [
+            schema.Tier, system.Tier, parentTier, component.Tier,
+        ]);
+        Hash128 id = Hash128.Merkle(floor, constituents);
+        builder.AddEntity(id, floor, entityTypeId);
 
         double[] coord = Math4d.KarcherMean(
         [
@@ -89,7 +95,7 @@ public static class RoleAnchor
             coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
             Trajectory.Build(constituents), constituents.Length,
             null, null, 0));
-        return new OrderedCompositionComponent(id, EntityTier.Word, coord[0], coord[1], coord[2], coord[3]);
+        return new OrderedCompositionComponent(id, floor, coord[0], coord[1], coord[2], coord[3]);
     }
 
     public static Hash128? Emit(
@@ -99,9 +105,10 @@ public static class RoleAnchor
         string? roleKey,
         Hash128 entityTypeId,
         Hash128 source,
-        double trust)
+        double trust,
+        byte parentTier)
     {
-        Hash128? id = Declare(builder, kind, parentId, roleKey, entityTypeId, source);
+        Hash128? id = Declare(builder, kind, parentId, parentTier, roleKey, entityTypeId, source);
         if (id is null) return null;
         return id;
     }

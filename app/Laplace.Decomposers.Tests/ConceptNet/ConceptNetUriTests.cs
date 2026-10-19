@@ -56,7 +56,7 @@ public sealed class ConceptNetUriTests
         CodepointPerfcache.LoadDefault();
         Hash128? fromSuffix = ConceptNetUri.ResolveSynsetFromWnSuffix("30-02244956-v"u8);
         Assert.NotNull(fromSuffix);
-        Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v'), fromSuffix);
+        Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v', "pwn30"), fromSuffix);
     }
 
     [Fact]
@@ -71,15 +71,15 @@ public sealed class ConceptNetUriTests
         Assert.Equal('n', pos);
         Hash128? fromUri = ConceptNetUri.ResolveSynsetFromWnSuffix(wn, pos);
         Assert.NotNull(fromUri);
-        Assert.Equal(ConceptAnchor.SynsetId(6252138, 'n'), fromUri);
+        Assert.Equal(ConceptAnchor.SynsetId(6252138, 'n', "pwn30"), fromUri);
 
         Hash128? communication = ConceptNetUri.ResolveSynsetFromWnSuffix("communication"u8, 'n');
         Assert.NotNull(communication);
-        Assert.Equal(ConceptAnchor.SynsetId(6252138, 'n'), communication);
+        Assert.Equal(ConceptAnchor.SynsetId(6252138, 'n', "pwn30"), communication);
 
         Hash128? animal = ConceptNetUri.ResolveSynsetFromWnSuffix("animal"u8, 'n');
         Assert.NotNull(animal);
-        Assert.Equal(ConceptAnchor.SynsetId(1313093, 'n'), animal);
+        Assert.Equal(ConceptAnchor.SynsetId(1313093, 'n', "pwn30"), animal);
     }
 
     [Fact]
@@ -97,8 +97,7 @@ public sealed class ConceptNetUriTests
         CodepointPerfcache.LoadDefault();
         Hash128? synId = ConceptNetUri.ResolveSynsetFromExternalUrl(
             "http://wordnet-rdf.princeton.edu/wn31/02244956-v"u8);
-        Assert.NotNull(synId);
-        Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v'), synId);
+        Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v', "pwn31"), synId);
     }
 
     [Fact]

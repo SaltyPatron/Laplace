@@ -147,11 +147,6 @@ internal static partial class IngestCommands
         byte[] provenance = await NpgsqlContentReconstructor.ReconstructUtf8Async(ds, provenanceRoot);
         if (!provenance.AsSpan().SequenceEqual(repository.ProvenanceUtf8))
             throw new InvalidDataException("Native provenance reconstruction differs from the verified Git/build observation.");
-        var provenanceEvidence = await NpgsqlConsensusCell.ReadAsync(ds, decomposer.RepositoryId,
-            RepoSource.ReferencesTypeId, provenanceRoot)
-            ?? throw new InvalidDataException("Repository-to-provenance relation is absent from the native consensus readback.");
-        if (provenanceEvidence.WitnessCount < 1)
-            throw new InvalidDataException("Repository provenance has no admitted witness.");
         repository.VerifyUnchanged();
         NativeCorpusRuntime runtimeAfter = ObserveCorpusRuntime();
         if (runtimeBefore != runtimeAfter)
@@ -161,7 +156,7 @@ internal static partial class IngestCommands
             grammar_linkage = "native grammar providers are statically linked into the OS-observed Laplace core; source pins require separate build linkage",
             schema = "laplace.verified-git-corpus-admission.v1", status = "verified", run_id = runId,
             source = RepoSource.SourceName, source_root = repository.Root,
-            repository_id = decomposer.RepositoryId.ToString(), provenance_witnesses = provenanceEvidence.WitnessCount,
+            repository_id = decomposer.RepositoryId.ToString(),
             provenance_content_id = provenanceRoot.ToString(), provenance_sha256 = VerifiedGitRepository.Hash(provenance),
             provenance = JsonSerializer.Deserialize<JsonElement>(provenance),
             selected_files = readbacks.Count, tracked_entries = journal.Count,

@@ -394,6 +394,22 @@ static int attestation_resolved_finish(
         &out->id);
 }
 
+/* The string the caller passes is the predicate. Surface aliasing stored "antonym"
+ * as IS_ANTONYM_OF and "RelatedTo" as RELATED_TO, and it reversed holo_member into
+ * HAS_PART. A manifest canonical keeps its symmetry. An alias or a source token does not. */
+static int attestation_token_relation(
+    const char* token, hash128_t* type_id, laplace_rel_symmetry_t* symmetry) {
+    if (!token || !type_id || !symmetry) return -1;
+    int rc = laplace_relation_type_id(token, type_id);
+    if (rc < 0) return rc;
+    if (laplace_relation_retired(type_id, NULL)) return LAPLACE_REL_RETIRED;
+    *symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
+    const laplace_relation_def_t* def = NULL;
+    if (laplace_relation_lookup(type_id, &def) == 0 && def)
+        *symmetry = def->symmetry;
+    return 0;
+}
+
 static int attestation_orient_resolved(
     const hash128_t* type_id,
     const hash128_t* subject,
@@ -437,14 +453,9 @@ int laplace_attestation_categorical_build(
     if (observation_count < 0) return -1;
 
     hash128_t type_id;
-    double rank = 0.09;
     laplace_rel_symmetry_t symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
-    uint8_t flip = 0;
-    hash128_t parent_id;
-    int rc = laplace_relation_resolve_surface(
-        surface_relation, &type_id, &rank, &symmetry, &flip, &parent_id);
+    int rc = attestation_token_relation(surface_relation, &type_id, &symmetry);
     if (rc < 0) return rc;
-    (void)parent_id;
 
     hash128_t subj = *subject;
     hash128_t obj;
@@ -455,15 +466,12 @@ int laplace_attestation_categorical_build(
     if (!ctx_null && context) ctx = *context;
 
     if (!obj_null) {
-        if (laplace_attestation_orient(&type_id, flip, symmetry, &subj, &obj, &obj_null) != 0)
+        if (laplace_attestation_orient(&type_id, 0, symmetry, &subj, &obj, &obj_null) != 0)
             return -1;
-    } else if (flip) {
-        return -1;
     }
 
     /* A claim is "this witness says X is (or is not) Y": its strength is the witness's
      * trust. Relation rank is read-time salience (QK coupling), never truth standing. */
-    (void)rank;
     double witness_weight = trust_weight;
     double score = confirm ? 1.0 : 0.0;
     int64_t score_fp = (int64_t)(score * (double)LAPLACE_GLICKO2_FP_SCALE);
@@ -494,14 +502,9 @@ int laplace_attestation_categorical_scored_build(
     if (observation_count < 0) return -1;
 
     hash128_t type_id;
-    double rank = 0.09;
     laplace_rel_symmetry_t symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
-    uint8_t flip = 0;
-    hash128_t parent_id;
-    int rc = laplace_relation_resolve_surface(
-        surface_relation, &type_id, &rank, &symmetry, &flip, &parent_id);
+    int rc = attestation_token_relation(surface_relation, &type_id, &symmetry);
     if (rc < 0) return rc;
-    (void)parent_id;
 
     hash128_t subj = *subject;
     hash128_t obj;
@@ -512,15 +515,12 @@ int laplace_attestation_categorical_scored_build(
     if (!ctx_null && context) ctx = *context;
 
     if (!obj_null) {
-        if (laplace_attestation_orient(&type_id, flip, symmetry, &subj, &obj, &obj_null) != 0)
+        if (laplace_attestation_orient(&type_id, 0, symmetry, &subj, &obj, &obj_null) != 0)
             return -1;
-    } else if (flip) {
-        return -1;
     }
 
     /* A claim is "this witness says X is (or is not) Y": its strength is the witness's
      * trust. Relation rank is read-time salience (QK coupling), never truth standing. */
-    (void)rank;
     double witness_weight = trust_weight;
     int64_t score_fp = laplace_score_fp(magnitude, arena_scale);
     int16_t outcome;

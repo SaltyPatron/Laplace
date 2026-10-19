@@ -67,9 +67,9 @@ public sealed class FrameVideoTrajectoryTests
         };
         var frames = new SortedDictionary<int, VideoFrameIngestHandler.FramePlacement>
         {
-            [0] = new(roots[0], 1, 0, 0, 0),
-            [1] = new(roots[1], 0, 1, 0, 0),
-            [2] = new(roots[2], 0, 0, 1, 0),
+            [0] = new(roots[0], 1, 0, 0, 0, 0),
+            [1] = new(roots[1], 0, 1, 0, 0, 0),
+            [2] = new(roots[2], 0, 0, 1, 0, 0),
         };
         var builder = new SubstrateChangeBuilder(source, "test/video");
 
@@ -101,8 +101,8 @@ public sealed class FrameVideoTrajectoryTests
         Hash128 source = Hash128.OfCanonical("test/video/source");
         var frames = new SortedDictionary<int, VideoFrameIngestHandler.FramePlacement>
         {
-            [0] = new(Hash128.OfCanonical("frame/0"), 1, 0, 0, 0),
-            [2] = new(Hash128.OfCanonical("frame/2"), 0, 1, 0, 0),
+            [0] = new(Hash128.OfCanonical("frame/0"), 1, 0, 0, 0, 0),
+            [2] = new(Hash128.OfCanonical("frame/2"), 0, 1, 0, 0, 0),
         };
 
         Assert.Throws<InvalidOperationException>(() =>

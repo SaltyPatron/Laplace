@@ -69,15 +69,15 @@ public sealed class WiktionaryGrammarWitnessTests
         var ctx = new GrammarComposeContext(utf8, ast, root, composer, JsonGrammarHelper.FindRootObjectNode(ast));
         Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "word", out var wordId));
 
-        Hash128? synId = ConceptAnchor.SynsetId(1313093, 'n');
+        Hash128? synId = ConceptAnchor.SynsetId(1313093, 'n', "pwn30");
         Assert.NotNull(synId);
 
         var witness = new WiktionaryGrammarWitness(DecomposerOptions.ForWitness("WiktionaryDecomposer"));
         witness.WalkRow(ctx, new RowContext(0, 1), b);
 
         var change = b.Build();
-        Hash128 hasSense = RelationTypeRegistry.Resolve("HAS_SENSE").Id;
-        Hash128 isSenseOf = RelationTypeRegistry.Resolve("IS_SENSE_OF").Id;
+        Hash128 hasSense = RelationTypeRegistry.RelationTypeId("senses");
+        Hash128 isSenseOf = RelationTypeRegistry.RelationTypeId("links");
         Hash128 senseId = Assert.Single(change.Attestations, a =>
             a.TypeId == hasSense && a.SubjectId == wordId).ObjectId!.Value;
         Assert.Contains(change.Attestations, a =>

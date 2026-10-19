@@ -63,7 +63,7 @@ public class ZipEntryArtifactTests
                 foreach (IntentStage stage in change.IntentStages)
                     CopyTupleParser.DecodeAttestations([stage.TupleBuffer(IntentStageTable.Attestations)], rows);
 
-            Hash128 name = RelationTypeRegistry.RelationTypeId("HAS_NAME");
+            Hash128 name = RelationTypeRegistry.RelationTypeId("name");
             Hash128[] subjects = rows.Where(row => row.TypeId == name).Select(static row => row.SubjectId).ToArray();
             Assert.Equal(2, subjects.Length);
             Assert.Contains(ContentEmitter.RootId("AB")!.Value, subjects);

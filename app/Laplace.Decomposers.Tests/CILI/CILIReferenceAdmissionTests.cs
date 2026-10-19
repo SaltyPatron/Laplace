@@ -54,37 +54,22 @@ public sealed class CILIReferenceAdmissionTests
             }
 
             Hash128 ili = ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, "i35545")!.Value;
-            Hash128 key = ReferenceAnchor.WordNetSynsetKeyId("pwn30", "02084071-n")!.Value;
-            Hash128 version = ReferenceAnchor.Id(
-                ReferenceIdentityKind.CiliMapVersion, "pwn30")!.Value;
-            Hash128 pwn31Key = ReferenceAnchor.WordNetSynsetKeyId(
-                "pwn31", "02084071-n")!.Value;
-            Hash128 pwn31Version = ReferenceAnchor.Id(
-                ReferenceIdentityKind.CiliMapVersion, "pwn31")!.Value;
+            Assert.Null(ReferenceAnchor.WordNetSynsetKeyId("pwn30", "02084071-n"));
+            Assert.Null(ReferenceAnchor.Id(ReferenceIdentityKind.CiliMapVersion, "pwn30"));
+            Assert.Null(ReferenceAnchor.WordNetSynsetKeyId("pwn31", "02084071-n"));
+            Assert.Null(ReferenceAnchor.Id(ReferenceIdentityKind.CiliMapVersion, "pwn31"));
 
-            Assert.Equal(key, pwn31Key);
-            // References are content entities; what they denote is stated by the
-            // attestations over them (IS_TYPED_AS, HAS_SYNSET_KEY), not by an entity type.
             Assert.Contains(entities, e => e.Id == ili);
-            Assert.Contains(entities, e => e.Id == key);
-            Assert.Contains(entities, e => e.Id == version);
-            Assert.Contains(entities, e => e.Id == pwn31Version);
+            Assert.DoesNotContain(entities, e => e.Id == ContentEmitter.RootId("02084071-n"));
+            Assert.DoesNotContain(entities, e => e.Id == ContentEmitter.RootId("pwn30"));
+            Assert.DoesNotContain(entities, e => e.Id == ContentEmitter.RootId("pwn31"));
             Assert.Contains(ili, physicalEntities);
-            Assert.Contains(key, physicalEntities);
-            Assert.Contains(version, physicalEntities);
-            Assert.Contains(pwn31Version, physicalEntities);
+            Assert.DoesNotContain(ContentEmitter.RootId("02084071-n")!.Value, physicalEntities);
 
             Assert.Equal(ContentEmitter.RootId("i35545")!.Value, ili);
-            Assert.Equal(ContentEmitter.RootId("02084071-n")!.Value, key);
-            Assert.Equal(ContentEmitter.RootId("pwn30")!.Value, version);
 
             Hash128 hasSynsetKey = RelationTypeRegistry.RelationTypeId("HAS_SYNSET_KEY");
-            Assert.Single(attestations, a =>
-                a.SubjectId == ili && a.TypeId == hasSynsetKey
-                && a.ObjectId == key && a.ContextId == version);
-            Assert.Single(attestations, a =>
-                a.SubjectId == ili && a.TypeId == hasSynsetKey
-                && a.ObjectId == pwn31Key && a.ContextId == pwn31Version);
+            Assert.DoesNotContain(attestations, a => a.TypeId == hasSynsetKey);
 
             Hash128 typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
             Assert.Contains(attestations, a =>

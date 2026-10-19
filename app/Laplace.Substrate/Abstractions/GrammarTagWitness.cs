@@ -118,6 +118,7 @@ public static class GrammarTagWitness
         {
             Hash128? name = null;
             Hash128? definition = null;
+            TagType? definitionType = null;
             Hash128? call = null;
             Hash128? reference = null;
             foreach (TagCapture capture in group)
@@ -133,6 +134,7 @@ public static class GrammarTagWitness
                     case TagType.DefType:
                     case TagType.DefVar:
                         definition = id;
+                        definitionType = capture.Type;
                         break;
                     case TagType.RefCall:
                         call = id;
@@ -144,15 +146,17 @@ public static class GrammarTagWitness
             }
 
             if (name is not { } nameId) continue;
-            if (definition is { } definitionId)
+            // The tag class is the predicate. DefFunction, DefType and DefVar are
+            // different claims; a call is RefCall and a type mention is RefType.
+            if (definition is { } definitionId && definitionType is { } defType)
                 rows.Add(NativeAttestation.Categorical(
-                    definitionId, "DEFINES", nameId, sourceId, contextId, weight));
+                    definitionId, defType.ToString(), nameId, sourceId, contextId, weight));
             if (call is { } callId)
                 rows.Add(NativeAttestation.Categorical(
-                    callId, "CALLS", nameId, sourceId, contextId, weight));
+                    callId, TagType.RefCall.ToString(), nameId, sourceId, contextId, weight));
             if (reference is { } referenceId)
                 rows.Add(NativeAttestation.Categorical(
-                    referenceId, "REFERENCES", nameId, sourceId, contextId, weight));
+                    referenceId, TagType.RefType.ToString(), nameId, sourceId, contextId, weight));
         }
         return rows.ToImmutable();
     }

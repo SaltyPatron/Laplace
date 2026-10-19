@@ -18,8 +18,7 @@ public readonly struct ParquetSource : ISeedSource
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StructuredCorpus");
 
-    public static IReadOnlyList<string> Relations { get; } =
-        ["IS_VALUE_IN", "IS_INSTANCE_OF"];
+    public static IReadOnlyList<string> Relations { get; } = [];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["TabularColumn", "TabularValue"];

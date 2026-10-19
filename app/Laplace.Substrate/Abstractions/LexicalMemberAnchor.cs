@@ -40,7 +40,8 @@ public static class LexicalMemberAnchor
         string? memberKey,
         Hash128 entityTypeId,
         Hash128 source,
-        double trust)
+        double trust,
+        byte ownerTier)
     {
         Validate(kind, ownerId);
         string? key = Normalize(memberKey);
@@ -57,8 +58,12 @@ public static class LexicalMemberAnchor
         {
             schema.Id, system.Id, ownerId, component.Id
         };
-        Hash128 id = Hash128.Merkle(EntityTier.Word, constituents);
-        builder.AddEntity(id, EntityTier.Word, entityTypeId);
+        byte floor = CompositionLaw.ParentFloor(
+        [
+            schema.Tier, system.Tier, ownerTier, component.Tier,
+        ]);
+        Hash128 id = Hash128.Merkle(floor, constituents);
+        builder.AddEntity(id, floor, entityTypeId);
 
         double[] coord = Math4d.KarcherMean(
         [

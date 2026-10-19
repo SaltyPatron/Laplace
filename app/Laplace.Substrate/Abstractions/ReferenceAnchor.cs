@@ -4,50 +4,54 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Kinds of source reference key. A kind is validated but enters no identity: the key's
-/// canonical serialization is ordinary content, so the same bytes converge on the same
-/// entity and physicality everywhere. Source, version and domain meaning belong to type
-/// interpretations, relations and context.
+/// Kinds of source reference key. An identifier kind is the entity: the canonical
+/// composition of its name (i46360, abandon.01, a FrameNet frame, a Wikidata Q-id).
+/// A packaging kind is an index inside one release — a synset offset, a sense key,
+/// a map-file version, a frames.vrb number — and is recorded nowhere.
 /// </summary>
 public enum ReferenceIdentityKind : ushort
 {
     CiliIli = 1,
-    // Three-field bridge key; it can denote several adjective-satellite senses, so it
-    // never stands for an exact sense. The enum value is persisted.
+    // Three-field bridge key. Packaging: it moves and collides across releases.
     WordNetSenseKey = 2,
+    // offset-pos serialization (02084071-n). Packaging: pwn30 and pwn31 assign
+    // different offsets to one ILI.
     WordNetSynsetKey = 3,
     CiliMapVersion = 4,
     PropBankRoleset = 5,
     VerbNetClass = 6,
     FrameNetLexicalUnit = 7,
-    // Complete lemma%ss_type:lex_filenum:lex_id:head_word:head_id source key.
+    // lemma%ss_type:lex_filenum:lex_id:head_word:head_id. Packaging.
     WordNetExactSenseKey = 8,
     WikidataItem = 9,
     PredicateMatrixPredicate = 10,
     PredicateMatrixVocabulary = 11,
     PredicateMatrixAnnotationValue = 12,
-    // Integer keys published by WordNet's frames.vrb and sents.vrb; as references,
-    // data.* and sentidx.vrb resolve their operands without reopening those files.
+    // Integer keys published by WordNet's frames.vrb and sents.vrb. Packaging.
     WordNetVerbFrame = 13,
     WordNetVerbSentence = 14,
 }
 
 /// <summary>
-/// Admission of source/catalog references.
+/// Admission of source identifiers.
 ///
-/// A reference serialization is content. Declaring one stages only that content entity
-/// and its physicality through the content composer. What a reference denotes follows from
-/// the attestations that use it, never from a second identity or a type attestation:
-///
-/// same canonical content -> same entity -> same physicality/trajectory
-///
-/// Version, source system, and proposition role remain explicit state around that entity.
+/// An identifier serializes as its own name and is ordinary content, so the same
+/// name is the same entity everywhere. A packaging index has no id and stages nothing.
 /// </summary>
 public static class ReferenceAnchor
 {
+    public static bool IsPackaging(ReferenceIdentityKind kind) => kind is
+        ReferenceIdentityKind.WordNetSenseKey
+        or ReferenceIdentityKind.WordNetSynsetKey
+        or ReferenceIdentityKind.WordNetExactSenseKey
+        or ReferenceIdentityKind.CiliMapVersion
+        or ReferenceIdentityKind.WordNetVerbFrame
+        or ReferenceIdentityKind.WordNetVerbSentence;
+
     public static Hash128? Id(ReferenceIdentityKind kind, string? rawKey)
     {
         ValidateKind(kind);
+        if (IsPackaging(kind)) return null;
         string? key = Normalize(rawKey);
         return key is null ? null : ContentEmitter.RootId(key);
     }
@@ -55,6 +59,9 @@ public static class ReferenceAnchor
     public static Hash128 IdUtf8(ReferenceIdentityKind kind, ReadOnlySpan<byte> normalizedKey)
     {
         ValidateKind(kind);
+        if (IsPackaging(kind))
+            throw new InvalidOperationException(
+                "a packaging index is recorded nowhere and has no entity id");
         if (normalizedKey.IsEmpty)
             throw new ArgumentException("reference key must not be empty", nameof(normalizedKey));
         return ContentEmitter.RootId(normalizedKey)
@@ -82,6 +89,7 @@ public static class ReferenceAnchor
         Hash128 source)
     {
         ValidateKind(kind);
+        if (IsPackaging(kind)) return null;
         string? key = Normalize(rawKey);
         if (key is null) return null;
         OrderedCompositionComponent? component = ContentEmitter.StageComponent(builder, key, source);
@@ -111,6 +119,7 @@ public static class ReferenceAnchor
         Hash128 source)
     {
         ValidateKind(kind);
+        if (IsPackaging(kind)) return null;
         if (normalizedKey.IsEmpty) return null;
         OrderedCompositionComponent? component =
             ContentEmitter.StageComponent(builder, normalizedKey, source);
@@ -120,9 +129,8 @@ public static class ReferenceAnchor
     }
 
     /// <summary>
-    /// The offset/POS serialization is content. WordNet generation is proposition context,
-    /// not part of the content identity. A pwn30 and pwn31 row with the same exact key
-    /// therefore converge on one key entity while HAS_SYNSET_KEY keeps the version context.
+    /// A synset offset is packaging. pwn30 maps i46360 to 02084071-n and pwn31 maps the
+    /// same ILI to 02086723-n, so the offset is not an entity in either release.
     /// </summary>
     public static Hash128? WordNetSynsetKeyId(string version, string key)
     {

@@ -21,8 +21,8 @@ public static class PredicateMatrixIngest
     private const int ColPredicate = 2;
     private const int ColPredicateRole = 3;
     private const int ColVnClass = 4;
+    private const int ColVnClassNumber = 5;
     private const int ColVnSubclass = 6;
-    private const int ColVnLemma = 8;
     private const int ColVnRole = 9;
     private const int ColWnSense = 10;
     private const int ColMcrIli = 11;
@@ -129,40 +129,34 @@ public static class PredicateMatrixIngest
         if (roleset is not null && synId is { } rsSynset)
         {
             edges.Add(PredicateMatrixEdge.FromCategory(
-                new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rsSynset)));
+                new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rsSynset, "11_MCR_iliOffset")));
             if (senseId is { } rs)
                 edges.Add(PredicateMatrixEdge.FromCategory(
-                    new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rs)));
+                    new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rs, "10_WN_SENSE")));
         }
 
         string? frame = Field(fields, ColFnFrame);
         if (frame is not null && synId is { } fnSynset)
         {
             edges.Add(PredicateMatrixEdge.FromCategory(
-                new CategoryCorrespondenceRecord(frame, FrameTypeId, fnSynset)));
+                new CategoryCorrespondenceRecord(frame, FrameTypeId, fnSynset, "11_MCR_iliOffset")));
             if (senseId is { } fs)
                 edges.Add(PredicateMatrixEdge.FromCategory(
-                    new CategoryCorrespondenceRecord(frame, FrameTypeId, fs)));
+                    new CategoryCorrespondenceRecord(frame, FrameTypeId, fs, "10_WN_SENSE")));
         }
 
         string? vnClass = VerbNetClassKey(fields);
         if (vnClass is not null && synId is { } vnSynset)
         {
             edges.Add(PredicateMatrixEdge.FromCategory(
-                new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vnSynset)));
+                new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vnSynset, "11_MCR_iliOffset")));
             if (senseId is { } vs)
                 edges.Add(PredicateMatrixEdge.FromCategory(
-                    new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vs)));
+                    new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vs, "10_WN_SENSE")));
         }
 
         string? vnRole = Field(fields, ColVnRole);
         string? fnFe = Field(fields, ColFnFe);
-        if (vnClass is not null && vnRole is not null && fnFe is not null && frame is not null)
-        {
-            edges.Add(PredicateMatrixEdge.FromRole(new RoleCorrespondenceRecord(
-                vnClass, VnClassTypeId, vnRole,
-                frame, FrameTypeId, fnFe)));
-        }
 
         record = new PredicateMatrixRecord(
             lang, pos, predicate, predicateRole,
@@ -209,16 +203,15 @@ public static class PredicateMatrixIngest
 
     private static string? VerbNetClassKey(string[] fields)
     {
-        string? lemma = Field(fields, ColVnLemma);
-        if (lemma is null) return null;
-
-        string? subclass = Field(fields, ColVnSubclass);
-        if (subclass is not null)
-            return SourceEntityIdConventions.NumericVerbNetClassId($"{lemma}-{subclass}");
-
-        string? cls = Field(fields, ColVnClass);
-        if (cls is null) return null;
-        return SourceEntityIdConventions.NumericVerbNetClassId($"{lemma}-{cls}");
+        // The class file writes give-13.1-1. The matrix names that class in the class
+        // column and its number beside it. The member lemma is not the class name.
+        string? className = Field(fields, ColVnClass);
+        if (className is null) return null;
+        string? number = Field(fields, ColVnSubclass) ?? Field(fields, ColVnClassNumber);
+        if (number is null) return className;
+        return number.StartsWith(className + "-", StringComparison.Ordinal)
+            ? number
+            : $"{className}-{number}";
     }
 
     private static string? Field(string[] fields, int index)
@@ -244,7 +237,7 @@ public static class PredicateMatrixIngest
         return parsed is null
             ? null
             : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
-                                      parsed.Value.WnVersion ?? "pwn30");
+                                      parsed.Value.WnVersion);
     }
 
     public readonly record struct PredicateMatrixEdge(
@@ -284,19 +277,36 @@ public static class PredicateMatrixIngest
     internal static IIngestRecordHandler<PredicateMatrixRecord> CreateRecordHandler(double trust) =>
         new PredicateMatrixRecordHandler(Source, trust);
 
-    internal static Hash128? PredicateId(string language, string pos, string predicateKey) =>
-        ReferenceAnchor.Id(
-            ReferenceIdentityKind.PredicateMatrixPredicate,
-            PredicateIdentityKey(language, pos, predicateKey));
+    // The row is the composition [predicate, language, pos], one boundary above
+    // those constituents. The predicate name (give.01) stays the PropBank roleset.
+    internal static Hash128? PredicateId(string language, string pos, string predicateKey)
+    {
+        if (!TryContent(predicateKey, out Hash128 predicate, out byte predicateTier)
+            || !TryContent(language, out Hash128 lang, out byte langTier)
+            || !TryContent(pos, out Hash128 tag, out byte tagTier))
+            return null;
+        byte tier = (byte)(Math.Max(predicateTier, Math.Max(langTier, tagTier)) + 1);
+        return Hash128.Merkle(tier, [predicate, lang, tag]);
+    }
+
+    private static bool TryContent(string surface, out Hash128 id, out byte tier)
+    {
+        id = default;
+        tier = 0;
+        if (string.IsNullOrEmpty(surface)) return false;
+        using var tree = ContentTierSpine.BuildTree(Encoding.UTF8.GetBytes(surface));
+        if (tree is null) return false;
+        var node = tree.GetNode(tree.NaturalUnitIndex());
+        id = node.Id;
+        tier = node.Tier;
+        return true;
+    }
 
     internal static Hash128? PredicateRoleId(
         string language, string pos, string predicateKey, string roleKey) =>
         PredicateId(language, pos, predicateKey) is { } predicateId
             ? RoleAnchor.Id(RoleIdentityKind.PredicateMatrix, predicateId, roleKey)
             : null;
-
-    private static string PredicateIdentityKey(string language, string pos, string predicateKey) =>
-        $"{language}\0{pos}\0{predicateKey}";
 
     private sealed class PredicateMatrixRecordHandler : IIngestRecordHandler<PredicateMatrixRecord>
     {
@@ -328,143 +338,117 @@ public static class PredicateMatrixIngest
 
         private Hash128 Drain(PredicateMatrixRecord record, SubstrateChangeBuilder builder)
         {
-            Hash128? predicateId = EmitReference(
-                ReferenceIdentityKind.PredicateMatrixPredicate,
-                PredicateIdentityKey(record.Language, record.Pos, record.PredicateKey),
-                EntityTypeRegistry.PredicateMatrixPredicate,
-                builder);
-            if (predicateId is null) return default;
+            if (ContentEmitter.StageComponent(builder, record.PredicateKey, _sourceId) is not { } predicatePart
+                || ContentEmitter.StageComponent(builder, record.Language, _sourceId) is not { } languagePart
+                || ContentEmitter.StageComponent(builder, record.Pos, _sourceId) is not { } posPart)
+                return default;
 
-            Hash128 languageId = LanguageReference.Emit(
-                builder, record.Language, _sourceId, _trust);
-            Hash128 posId = PosReference.Emit(
-                builder, record.Pos, PosReference.PosTagset.WordNet,
-                _sourceId, _trust);
-            AddRelation(predicateId.Value, PredicateMatrixSource.HasLanguageTypeId, languageId, builder);
-            AddRelation(predicateId.Value, PredicateMatrixSource.HasPosTypeId, posId, builder);
+            Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
+            OrderedComposition.StageBatch(
+                builder.ContentStage,
+                [new OrderedCompositionRequest(
+                    [predicatePart, languagePart, posPart],
+                    EntityTypeRegistry.PredicateMatrixPredicate,
+                    _sourceId,
+                    0)],
+                composed);
+            Hash128 predicateId = composed[0].Id;
+            Hash128 expected = Hash128.Merkle(
+                EntityTier.Document, [predicatePart.Id, languagePart.Id, posPart.Id]);
+            if (predicateId != expected)
+                throw new InvalidOperationException(
+                    "predicate-matrix identity diverged from [predicate, language, pos]");
 
             Hash128? predicateRoleId = EmitScopedRole(
-                RoleIdentityKind.PredicateMatrix, predicateId.Value, record.PredicateRoleKey,
-                EntityTypeRegistry.PredicateMatrixRole, builder);
+                RoleIdentityKind.PredicateMatrix, predicateId, composed[0].Tier,
+                record.PredicateRoleKey, EntityTypeRegistry.PredicateMatrixRole, builder);
 
             if (record.SynsetId is { } synset)
-                AddCorrespondence(predicateId.Value, synset, builder);
+                AddClaim(predicateId, "11_MCR_iliOffset", synset, builder);
             if (record.SenseId is { } sense)
-                AddCorrespondence(predicateId.Value, sense, builder);
+                AddClaim(predicateId, "10_WN_SENSE", sense, builder);
 
             Hash128? vnClassId = record.VerbNetClass is { } vnClass
                 ? EmitCategory(new CategoryCorrespondenceRecord(
-                    vnClass, VnClassTypeId, predicateId.Value), builder)
+                    vnClass, VnClassTypeId, predicateId, "4_VN_CLASS"), builder)
                 : null;
             Hash128? frameId = record.Frame is { } frame
                 ? EmitCategory(new CategoryCorrespondenceRecord(
-                    frame, FrameTypeId, predicateId.Value), builder)
+                    frame, FrameTypeId, predicateId, "12_FN_FRAME"), builder)
                 : null;
             // A lexical unit is FrameNet's composition [frame, lemma, UPOS], never "run.v".
             if (record.FrameLu is { } frameLu && record.Frame is { } luFrame)
                 _ = EmitCategory(new CategoryCorrespondenceRecord(
-                    $"{luFrame} {frameLu}", FrameLuTypeId, predicateId.Value,
+                    $"{luFrame} {frameLu}", FrameLuTypeId, predicateId, "13_FN_LE",
                     DeclareSubject: (b, source) =>
                         FrameNetLexicalUnit.Declare(b, luFrame, frameLu, source)), builder);
             Hash128? rolesetId = record.PropBankRoleset is { } roleset
                 ? EmitCategory(new CategoryCorrespondenceRecord(
-                    roleset, RolesetTypeId, predicateId.Value), builder)
+                    roleset, RolesetTypeId, predicateId, "15_PB_ROLESET"), builder)
                 : null;
 
             if (predicateRoleId is { } pmRole)
             {
                 if (vnClassId is { } vnParent && record.VerbNetRole is { } vnRole)
-                    AddRoleCorrespondence(pmRole, EmitScopedRole(
-                        RoleIdentityKind.VerbNet, vnParent, vnRole,
+                    AddClaim(pmRole, "9_VN_ROLE", EmitScopedRole(
+                        RoleIdentityKind.VerbNet, vnParent, ContentFloor(record.VerbNetClass), vnRole,
                         EntityTypeRegistry.VerbNetRole, builder), builder);
                 if (frameId is { } fnParent && record.FrameFe is { } frameFe)
-                    AddRoleCorrespondence(pmRole, EmitScopedRole(
-                        RoleIdentityKind.FrameNet, fnParent, frameFe,
+                    AddClaim(pmRole, "14_FN_FRAME_ELEMENT", EmitScopedRole(
+                        RoleIdentityKind.FrameNet, fnParent, ContentFloor(record.Frame), frameFe,
                         EntityTypeRegistry.FrameNetFe, builder), builder);
                 if (rolesetId is { } pbParent && NormalizePropBankRole(record.PropBankArg) is { } pbRole)
-                    AddRoleCorrespondence(pmRole, EmitScopedRole(
-                        RoleIdentityKind.PropBank, pbParent, pbRole,
+                    AddClaim(pmRole, "16_PB_ARG", EmitScopedRole(
+                        RoleIdentityKind.PropBank, pbParent, ContentFloor(record.PropBankRoleset), pbRole,
                         EntityTypeRegistry.PropBankRole, builder), builder);
             }
 
-            Hash128 propertySubject = record.SynsetId ?? predicateId.Value;
+            Hash128 propertySubject = record.SynsetId ?? predicateId;
             if (record.McrDomain is { } domain)
-            {
-                Hash128? domainId = EmitVocabulary(
-                    "mcr-domain", domain, EntityTypeRegistry.McrDomain, builder);
-                AddRelation(propertySubject, PredicateMatrixSource.HasDomainTopicTypeId, domainId, builder,
-                    PredicateMatrixSource.DomainTopic.Qualifier);
-            }
+                AddClaim(propertySubject, "19_MCR_DOMAIN", EmitValue(domain, builder), builder);
             if (record.McrSumo is { } sumo)
-                AddCorrespondence(propertySubject, EmitVocabulary(
-                    "mcr-sumo", sumo, EntityTypeRegistry.McrSumo, builder), builder);
+                AddClaim(propertySubject, "20_MCR_SUMO", EmitValue(sumo, builder), builder);
             foreach (string top in record.McrTopOntology)
-                AddCorrespondence(propertySubject, EmitVocabulary(
-                    "mcr-top", top, EntityTypeRegistry.McrTopOntology, builder), builder);
+                AddClaim(propertySubject, "21_MCR_TO", EmitValue(top, builder), builder);
             if (record.McrLexname is { } lexname)
-            {
-                Hash128? lexnameId = EmitVocabulary(
-                    "mcr-lexname", lexname, EntityTypeRegistry.McrLexname, builder);
-                AddRelation(propertySubject, PredicateMatrixSource.HasLexCategoryTypeId, lexnameId, builder);
-            }
+                AddClaim(propertySubject, "22_MCR_LEXNAME", EmitValue(lexname, builder), builder);
             if (record.McrBlcId is { } blc)
-                AddCorrespondence(propertySubject, blc, builder);
+                AddClaim(propertySubject, "23_MCR_BLC", blc, builder);
 
             Hash128 annotationSubject = record.SenseId ?? propertySubject;
-            AddAnnotation(
-                annotationSubject, PredicateMatrixSource.HasBaseConceptStatusTypeId,
-                "mcr-base-concept", record.McrBaseConcept, builder);
-            AddAnnotation(
-                annotationSubject, PredicateMatrixSource.HasSenseFrequencyTypeId,
-                "wn-sense-frequency", record.SenseFrequency, builder);
-            AddAnnotation(
-                propertySubject, PredicateMatrixSource.HasSynsetRelationCountTypeId,
-                "wn-synset-relation-count", record.SynsetRelationCount, builder);
+            AddClaim(annotationSubject, "18_MCR_BC", EmitValue(record.McrBaseConcept, builder), builder);
+            AddClaim(annotationSubject, "24_WN_SENSEFREC", EmitValue(record.SenseFrequency, builder), builder);
+            AddClaim(propertySubject, "25_WN_SYNSET_REL_NUM", EmitValue(record.SynsetRelationCount, builder), builder);
 
-            Hash128? esoClassId = record.EsoClass is { } esoClass
-                ? EmitVocabulary("eso-class", esoClass, EntityTypeRegistry.EsoClass, builder)
-                : null;
-            AddCorrespondence(predicateId.Value, esoClassId, builder);
+            Hash128? esoClassId = EmitValue(record.EsoClass, builder);
+            AddClaim(predicateId, "26_ESO_CLASS", esoClassId, builder);
             if (predicateRoleId is { } matrixRole
                 && esoClassId is { } esoParent
                 && record.EsoRole is { } esoRole)
             {
-                AddRoleCorrespondence(matrixRole, EmitScopedRole(
-                    RoleIdentityKind.Eso, esoParent, esoRole,
+                AddClaim(matrixRole, "27_ESO_ROLE", EmitScopedRole(
+                    RoleIdentityKind.Eso, esoParent, ContentFloor(record.EsoClass), esoRole,
                     EntityTypeRegistry.EsoRole, builder), builder);
             }
 
             foreach (var edge in record.Edges)
-            {
-                _ = edge.Category is { } category
-                    ? EmitCategory(category, builder)
-                    : EmitRole(edge.Role!.Value, builder);
-            }
-            return predicateId.Value;
+                if (edge.Category is { } category)
+                    _ = EmitCategory(category, builder);
+            return predicateId;
         }
 
-        private Hash128? EmitReference(
-            ReferenceIdentityKind kind,
-            string key,
-            Hash128 entityTypeId,
-            SubstrateChangeBuilder builder)
-        {
-            Hash128? id = ReferenceAnchor.Id(kind, key);
-            if (id is null) return null;
-            if (_declarations.Add(id.Value))
-                id = ReferenceAnchor.Emit(builder, kind, key, entityTypeId, _sourceId, _trust);
-            return id;
-        }
+        private static Hash128? EmitValue(string? value, SubstrateChangeBuilder builder) =>
+            string.IsNullOrEmpty(value) ? null : ContentEmitter.Emit(builder, value, Source);
 
-        private Hash128? EmitVocabulary(
-            string field, string value, Hash128 entityTypeId, SubstrateChangeBuilder builder) =>
-            EmitReference(
-                ReferenceIdentityKind.PredicateMatrixVocabulary,
-                $"{field}\0{value}", entityTypeId, builder);
+        private static byte ContentFloor(string? value) =>
+            value is not null && CompositionLaw.TryFace(value, out CompositionLaw.Face face)
+                ? face.Tier
+                : (byte)0;
 
         private Hash128? EmitScopedRole(
             RoleIdentityKind kind,
             Hash128 parentId,
+            byte parentTier,
             string roleKey,
             Hash128 entityTypeId,
             SubstrateChangeBuilder builder)
@@ -472,31 +456,14 @@ public static class PredicateMatrixIngest
             Hash128? id = RoleAnchor.Id(kind, parentId, roleKey);
             if (id is null) return null;
             if (_roleEntities.Add(id.Value))
-                id = RoleAnchor.Declare(builder, kind, parentId, roleKey, entityTypeId, _sourceId);
+                id = RoleAnchor.Declare(
+                    builder, kind, parentId, parentTier, roleKey, entityTypeId, _sourceId);
             return id;
         }
 
-        private void AddAnnotation(
-            Hash128 subjectId,
-            Hash128 relationTypeId,
-            string field,
-            string? value,
-            SubstrateChangeBuilder builder)
-        {
-            if (value is null) return;
-            Hash128? valueId = EmitReference(
-                ReferenceIdentityKind.PredicateMatrixAnnotationValue,
-                $"{field}\0{value}", EntityTypeRegistry.PredicateMatrixAnnotationValue, builder);
-            AddRelation(subjectId, relationTypeId, valueId, builder);
-        }
-
-        private void AddCorrespondence(
-            Hash128 subjectId, Hash128? objectId, SubstrateChangeBuilder builder) =>
-            AddRelation(subjectId, PredicateMatrixSource.CorrespondsToTypeId, objectId, builder);
-
-        private void AddRoleCorrespondence(
-            Hash128 subjectId, Hash128? objectId, SubstrateChangeBuilder builder) =>
-            AddRelation(subjectId, PredicateMatrixSource.RoleCorrespondsToTypeId, objectId, builder);
+        private void AddClaim(
+            Hash128 subjectId, string predicate, Hash128? objectId, SubstrateChangeBuilder builder) =>
+            AddRelation(subjectId, RelationTypeRegistry.RelationTypeId(predicate), objectId, builder);
 
         private void AddRelation(
             Hash128 subjectId,
@@ -551,36 +518,6 @@ public static class PredicateMatrixIngest
                 magnitude: record.Magnitude, arenaScale: 1.0, contextId: record.ContextId);
             if (_relations.Add(relation.Id)) builder.AddAttestation(relation);
             return subjectId.Value;
-        }
-
-        private Hash128? EmitRole(RoleCorrespondenceRecord record, SubstrateChangeBuilder builder)
-        {
-            Hash128? subjectParent = AnchorAdmission.Id(
-                record.SubjectParentKey, record.SubjectParentTypeId);
-            Hash128? objectParent = AnchorAdmission.Id(
-                record.ObjectParentKey, record.ObjectParentTypeId);
-            if (subjectParent is null || objectParent is null) return null;
-
-            RoleIdentityKind subjectKind = RoleAnchor.KindForParentType(record.SubjectParentTypeId);
-            RoleIdentityKind objectKind = RoleAnchor.KindForParentType(record.ObjectParentTypeId);
-            Hash128? subjectRole = RoleAnchor.Id(subjectKind, subjectParent.Value, record.SubjectRoleKey);
-            Hash128? objectRole = RoleAnchor.Id(objectKind, objectParent.Value, record.ObjectRoleKey);
-            if (subjectRole is null || objectRole is null) return null;
-
-            if (_roleEntities.Add(subjectRole.Value))
-                RoleAnchor.Declare(
-                    builder, subjectKind, subjectParent.Value, record.SubjectRoleKey,
-                    RoleAnchor.EntityTypeFor(subjectKind), _sourceId);
-            if (_roleEntities.Add(objectRole.Value))
-                RoleAnchor.Declare(
-                    builder, objectKind, objectParent.Value, record.ObjectRoleKey,
-                    RoleAnchor.EntityTypeFor(objectKind), _sourceId);
-
-            var relation = NativeAttestation.ResolvedScored(
-                subjectRole.Value, PredicateMatrixSource.RoleCorrespondsToTypeId, objectRole.Value,
-                _sourceId, null, _trust, record.Magnitude, arenaScale: 1.0);
-            if (_relations.Add(relation.Id)) builder.AddAttestation(relation);
-            return subjectRole.Value;
         }
 
         private sealed class Unit(

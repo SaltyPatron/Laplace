@@ -58,11 +58,12 @@ public sealed class CompoundIdentifierDecompositionTests
     }
 
     [Fact]
-    public void WordNetSynsetKey_VersionIsContext_NotASecondContentIdentity()
+    public void WordNetSynsetKey_IsPackaging_AndHasNoEntity()
     {
-        Assert.Equal(
-            ReferenceAnchor.WordNetSynsetKeyId("pwn30", "02084071-n"),
-            ReferenceAnchor.WordNetSynsetKeyId("pwn16", "02084071-n"));
+        Assert.Null(ReferenceAnchor.WordNetSynsetKeyId("pwn30", "02084071-n"));
+        Assert.Null(ReferenceAnchor.WordNetSynsetKeyId("pwn31", "02086723-n"));
+        Assert.Null(ReferenceAnchor.Id(ReferenceIdentityKind.WordNetExactSenseKey, "bank%1:14:00::"));
+        Assert.Null(ReferenceAnchor.Id(ReferenceIdentityKind.WordNetVerbFrame, "2"));
     }
 
     [Fact]

@@ -85,11 +85,14 @@ public static class SourceEntityIdConventions
 
 
 
-    public static string? WordNetIli(long byteOffset, char ssType) => WordNetIli(byteOffset, ssType, "pwn30");
-
-    public static string? WordNetIli(long byteOffset, char ssType, string version)
+    public static string? WordNetIli(long byteOffset, char ssType, string? version)
     {
-        IliMap? map = string.IsNullOrEmpty(version) || version == "pwn30"
+        if (string.IsNullOrEmpty(version))
+        {
+            Interlocked.Increment(ref _synsetMisses);
+            return null;
+        }
+        IliMap? map = version == "pwn30"
             ? _iliMap.Value
             : _versionMaps.GetOrAdd(version, static v => IliMap.LoadVersion(CiliDirectory(), v));
         string? ili = map?.Resolve(byteOffset, ssType);
@@ -187,6 +190,7 @@ public static class SourceEntityIdConventions
     private static string? McrVersionToPwn(ReadOnlySpan<char> mcrVersion) => mcrVersion switch
     {
         "30" => "pwn30",
+        "31" => "pwn31",
         "21" => "pwn21",
         "20" => "pwn20",
         "171" => "pwn171",
@@ -215,20 +219,72 @@ public static class SourceEntityIdConventions
         return (offset, ssType);
     }
 
-    public static Hash128? ResolveSynsetAnchor(string? raw, string version = "pwn30")
+    public static Hash128? ResolveSynsetAnchor(string? raw, string? version = null)
     {
-        if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
+        if (!TryParsedSynset(raw, version, out long offset, out char ssType, out string? wnVersion))
             return null;
+        return ConceptAnchor.SynsetId(offset, ssType, wnVersion);
+    }
+
+    public static bool TryWordNetIli(string? raw, out string? ili, string? version = null)
+    {
+        ili = null;
+        if (!TryParsedSynset(raw, version, out long offset, out char ssType, out string? wnVersion))
+            return false;
+        ili = WordNetIli(offset, ssType, wnVersion);
+        return ili is not null;
+    }
+
+    private static bool TryParsedSynset(
+        string? raw, string? version, out long offset, out char ssType, out string? wnVersion)
+    {
+        offset = 0;
+        ssType = default;
+        wnVersion = null;
+        if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
+            return false;
         string s = raw.Trim();
+        string? pathRelease = null;
         int slash = s.LastIndexOf('/');
         if (slash >= 0 && slash + 1 < s.Length)
+        {
+            int prev = slash == 0 ? -1 : s.LastIndexOf('/', slash - 1);
+            ReadOnlySpan<char> segment = prev >= 0
+                ? s.AsSpan(prev + 1, slash - (prev + 1))
+                : s.AsSpan(0, slash);
+            pathRelease = ReleaseOf(segment);
             s = s[(slash + 1)..];
+        }
         if (ParseMcrSynsetKey(s) is { } mcr)
-            return ConceptAnchor.SynsetId(mcr.Offset, mcr.SsType, mcr.WnVersion ?? version);
+        {
+            offset = mcr.Offset;
+            ssType = mcr.SsType;
+            wnVersion = mcr.WnVersion ?? pathRelease ?? EmptyToNull(version);
+            return wnVersion is not null;
+        }
         if (ParseMapNetSynsetKey(s) is { } mapNet)
-            return ConceptAnchor.SynsetId(mapNet.Offset, mapNet.SsType, version);
-        string? senseKey = NormalizeSenseKey(s);
-        return senseKey is null ? null : SenseAnchor.Id(senseKey);
+        {
+            offset = mapNet.Offset;
+            ssType = mapNet.SsType;
+            wnVersion = pathRelease ?? EmptyToNull(version);
+            return wnVersion is not null;
+        }
+        return false;
+    }
+
+    private static string? EmptyToNull(string? version) =>
+        string.IsNullOrEmpty(version) ? null : version;
+
+    private static string? ReleaseOf(ReadOnlySpan<char> segment)
+    {
+        if (segment.IsEmpty) return null;
+        if (segment.StartsWith("pwn", StringComparison.OrdinalIgnoreCase))
+            return McrVersionToPwn(segment[3..]);
+        if (segment.Length > 2
+            && segment.StartsWith("wn", StringComparison.OrdinalIgnoreCase)
+            && char.IsDigit(segment[2]))
+            return McrVersionToPwn(segment[2..]);
+        return McrVersionToPwn(segment);
     }
 
     public static string VerbNetClassFromSemLinkKey(string key)

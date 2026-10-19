@@ -62,13 +62,9 @@ public sealed class AgentTraceDecomposerTests
             var (entities, physicalities, attestations) = await RunAsync(dir);
 
             Hash128 sessionId = ConversationContent.SessionId("claude-code", SessionKey);
-            Hash128 appearsIn = RelationTypeRegistry.Resolve("APPEARS_IN").Id;
-            Hash128 hasRole = RelationTypeRegistry.Resolve("HAS_ROLE").Id;
-            Hash128 authoredBy = RelationTypeRegistry.Resolve("AUTHORED_BY").Id;
-            Hash128 calls = RelationTypeRegistry.Resolve("CALLS").Id;
-            Hash128 hasInput = RelationTypeRegistry.Resolve("HAS_INPUT").Id;
-            Hash128 hasResult = RelationTypeRegistry.Resolve("HAS_RESULT").Id;
-            Hash128 hasAttribute = RelationTypeRegistry.Resolve("HAS_ATTRIBUTE").Id;
+            Hash128 roleRel = RelationTypeRegistry.RelationTypeId("role");
+            Hash128 modelRel = RelationTypeRegistry.RelationTypeId("model");
+            Hash128 inputTokensRel = RelationTypeRegistry.RelationTypeId("input_tokens");
             Hash128 precedes = RelationTypeRegistry.Resolve("PRECEDES").Id;
 
             Assert.Contains(entities, e =>
@@ -83,12 +79,11 @@ public sealed class AgentTraceDecomposerTests
             Assert.Equal(3, orderedTurnIds.Length);
             Assert.NotEqual(sessionId, Hash128.Merkle(EntityTier.Document, orderedTurnIds));
 
-            var memberIds = attestations
-                .Where(a => a.TypeId == appearsIn && a.ObjectId == sessionId
-                            && a.ContextId == sessionId)
+            var roleSubjects = attestations
+                .Where(a => a.TypeId == roleRel && a.ContextId == sessionId)
                 .Select(a => a.SubjectId)
                 .ToHashSet();
-            foreach (var turnId in orderedTurnIds) Assert.Contains(turnId, memberIds);
+            foreach (var turnId in orderedTurnIds) Assert.Contains(turnId, roleSubjects);
 
             Hash128? promptRoot = ContentTierSpine.ResolveRoot("run the tests");
             Assert.NotNull(promptRoot);
@@ -96,8 +91,8 @@ public sealed class AgentTraceDecomposerTests
             long promptUs =
                 DateTimeOffset.Parse("2026-08-22T19:32:15.418Z").ToUnixTimeMilliseconds() * 1000;
             Assert.Contains(attestations, a =>
-                a.TypeId == appearsIn && a.SubjectId == promptRoot.Value
-                && a.ObjectId == sessionId && a.LastObservedAtUnixUs == promptUs);
+                a.TypeId == roleRel && a.SubjectId == promptRoot.Value
+                && a.ContextId == sessionId && a.LastObservedAtUnixUs == promptUs);
 
             var turn2 = Assert.Single(physicalities, p => p.EntityId == orderedTurnIds[1]);
             Assert.Equal(PhysicalityType.Content, turn2.Type);
@@ -109,24 +104,23 @@ public sealed class AgentTraceDecomposerTests
 
             // A role, a model id and a tool name are content, never keyed entities.
             Assert.Contains(attestations, a =>
-                a.TypeId == hasRole && a.SubjectId == orderedTurnIds[1]
+                a.TypeId == roleRel && a.SubjectId == orderedTurnIds[1]
                 && a.ObjectId == ContentTierSpine.ResolveRoot("assistant"));
             Assert.Contains(attestations, a =>
-                a.TypeId == authoredBy && a.SubjectId == orderedTurnIds[1]
+                a.TypeId == modelRel && a.SubjectId == orderedTurnIds[1]
                 && a.ObjectId == ContentTierSpine.ResolveRoot("claude-opus-5"));
-            Assert.Contains(attestations, a =>
-                a.TypeId == calls && a.SubjectId == orderedTurnIds[1]
-                && a.ObjectId == ContentTierSpine.ResolveRoot("Bash"));
-            Assert.Contains(attestations, a => a.TypeId == hasInput);
+            var invocationEntity = Assert.Single(entities, e => e.TypeId == EntityTypeRegistry.ToolInvocation);
+            var invocationPhys = Assert.Single(physicalities, p => p.EntityId == invocationEntity.Id);
+            var invocationParts = Trajectory.Constituents(invocationPhys.TrajectoryXyzm!);
+            Assert.Contains(ContentTierSpine.ResolveRoot("Bash")!.Value, invocationParts);
             Hash128? resultRoot = ContentTierSpine.ResolveRoot("all green");
             Assert.NotNull(resultRoot);
+            Assert.Contains(resultRoot!.Value, invocationParts);
+            Assert.Contains(resultRoot!.Value, turn2Children);
+            // Usage is the provider field name with its value root.
             Assert.Contains(attestations, a =>
-                a.TypeId == hasResult && a.ObjectId == resultRoot!.Value);
-            // Usage is the property value [input_tokens, 120] under HAS_ATTRIBUTE.
-            Hash128 inputTokens120 = PropertyValue("input_tokens", "120");
-            Assert.Contains(attestations, a =>
-                a.TypeId == hasAttribute && a.SubjectId == orderedTurnIds[1]
-                && a.ObjectId == inputTokens120);
+                a.TypeId == inputTokensRel && a.SubjectId == orderedTurnIds[1]
+                && a.ObjectId == ContentTierSpine.ResolveRoot("120"));
 
             Hash128? replyRoot = ContentTierSpine.ResolveRoot("Running the gate now.");
             Assert.NotNull(replyRoot);
@@ -142,11 +136,6 @@ public sealed class AgentTraceDecomposerTests
         }
     }
 
-    // [property, value]: the Merkle composition of the two content roots.
-    private static Hash128 PropertyValue(string property, string value) =>
-        Hash128.Merkle(EntityTier.Sentence,
-            [ContentTierSpine.ResolveRoot(property)!.Value, ContentTierSpine.ResolveRoot(value)!.Value]);
-
     [Fact]
     public async Task Session_Totals_Aggregate_Turn_Usage()
     {
@@ -160,11 +149,10 @@ public sealed class AgentTraceDecomposerTests
             var (_, _, attestations) = await RunAsync(dir);
 
             Hash128 sessionId = ConversationContent.SessionId("claude-code", SessionKey);
-            Hash128 hasAttribute = RelationTypeRegistry.Resolve("HAS_ATTRIBUTE").Id;
-            Hash128 total = PropertyValue("input_tokens", "320");
+            Hash128 inputTokensRel = RelationTypeRegistry.RelationTypeId("input_tokens");
             Assert.Contains(attestations, a =>
-                a.TypeId == hasAttribute && a.SubjectId == sessionId
-                && a.ObjectId == total);
+                a.TypeId == inputTokensRel && a.SubjectId == sessionId
+                && a.ObjectId == ContentTierSpine.ResolveRoot("320"));
         }
         finally
         {

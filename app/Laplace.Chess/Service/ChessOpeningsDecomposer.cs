@@ -117,7 +117,7 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         var moveIds = moves.Select(static move => move.Id).ToArray();
         var lineId = ChessCompose.LineId(line[0].Id, moveIds);
 
-        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
+        b.AddEntity(lineId, ChessCompose.LineFloor(moveIds.Length), ChessVocabulary.GameType);
         ChessGraph.AppendLineTrajectory(
             b, lineId, line[0], moves, ChessVocabulary.OpeningsSourceId, nowUs);
         ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);

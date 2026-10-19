@@ -22,7 +22,7 @@ internal static class OMWEmitter
         if (!TryAppendLemmaUtf8(b, valueUtf8, OMWDecomposer.Source, out var root))
             return;
 
-        Hash128? synAnchor = ConceptAnchor.EmitAnchor(b, row.Offset, row.SsType, OMWDecomposer.Source);
+        Hash128? synAnchor = ConceptAnchor.EmitAnchor(b, row.Offset, row.SsType, OMWDecomposer.Source, null);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
 
@@ -60,16 +60,6 @@ internal static class OMWEmitter
                 // so a reader scopes the attestation by the language that testified it.
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, MembershipRelation, synId, OMWDecomposer.Source, langId, TC.AcademicCurated));
-                // HAS_LANGUAGE keeps a null context: the object IS the language, so a
-                // language context would be circular.
-                b.AddAttestation(NativeAttestation.Categorical(
-                    root, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
-
-                // Part of speech is per-language too — the tagset is WordNet's, but
-                // the claim "this surface is a noun" holds in the language the file
-                // was written for, not universally.
-                PosReference.Attest(b, root, row.SsType.ToString(), PosReference.PosTagset.WordNet,
-                    OMWDecomposer.Source, langId, TC.AcademicCurated);
                 break;
             case OmwType.Def:
                 b.AddAttestation(NativeAttestation.Categorical(

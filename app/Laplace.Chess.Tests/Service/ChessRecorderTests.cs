@@ -86,7 +86,7 @@ public sealed class ChessRecorderTests
         var (_, change) = Record(pgn);
         var boardId = ChessCompose.PositionId(Board.FromFen(fen));
         Assert.Contains(change.Attestations, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SETUP") && a.ObjectId == boardId);
+            a.TypeId == ChessVocabulary.HasSetupType && a.ObjectId == boardId);
         Assert.Contains(change.Physicalities, p => p.EntityId == boardId);
         var fenId = ContentEmitter.RootId(fen);
         Assert.DoesNotContain(change.Entities, e => e.Id == fenId);

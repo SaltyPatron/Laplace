@@ -25,18 +25,18 @@ public readonly struct AgentTraceSource : ISeedSource
     /// </summary>
     public static IReadOnlyList<string> Relations { get; } =
     [
-        "APPEARS_IN",
-        "HAS_ATTRIBUTION",
-        "HAS_ROLE",
-        "AUTHORED_BY",
-        "CALLS",
-        "IS_INSTANCE_OF",
-        "HAS_INPUT",
-        "HAS_RESULT",
-        "HAS_ATTRIBUTE",
-        "HAS_NAME",
-        "HAS_CONTEXT",
-        "ON_DATE",
+        "role",
+        "model",
+        "title",
+        "user",
+        "stop_reason",
+        "is_error",
+        "gitBranch",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "cost_usd",
     ];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =

@@ -22,7 +22,7 @@ public sealed class Pwn16CiliIntegrationTests
         {
             CodepointPerfcache.LoadDefault();
             Hash128? syn16 = ConceptAnchor.SynsetId(2_814_860, 'n', SourceEntityIdConventions.MultiWordNetWnVersion);
-            Hash128? syn30 = ConceptAnchor.SynsetId(2_814_860, 'n');
+            Hash128? syn30 = ConceptAnchor.SynsetId(2_814_860, 'n', "pwn30");
             Assert.NotNull(syn16);
             Assert.NotNull(syn30);
             Assert.NotEqual(syn16, syn30);

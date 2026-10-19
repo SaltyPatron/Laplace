@@ -582,7 +582,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
         string? corpus = parsed.Corpus ?? ChessCorpus.FromSite(PgnGames.TagStr(gameText, "Site"));
         var src = sourceId ?? (corpus is null ? ChessVocabulary.PgnSourceId : ChessCorpus.SourceId(corpus));
-        if (src != ChessVocabulary.PgnSourceId)
+        if (sourceId is null && src != ChessVocabulary.PgnSourceId)
             b.DeclareSourcePrior(src, TC.StructuredCorpus);
 
         var (whiteElo, blackElo) = ParseElos(gameText);
@@ -593,7 +593,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var whitePlayer = EmitPlayer(b, whiteName, src);
         var blackPlayer = EmitPlayer(b, blackName, src);
 
-        EmitGame(b, lineId, eventId, playingId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
+        byte lineFloor = ChessCompose.LineFloor(parsed.MoveIds.Length);
+        string eventTag = PgnGames.TagStr(gameText, "Event");
+        string siteTag = PgnGames.TagStr(gameText, "Site");
+        string roundTag = PgnGames.TagStr(gameText, "Round");
+        EmitGame(
+            b, lineId, eventId, playingId, gameText, date, result,
+            whitePlayer, blackPlayer, whiteElo, blackElo, src,
+            lineFloor,
+            ChessVocabulary.PgnEventFloor(eventTag, siteTag, date),
+            ChessVocabulary.PgnPlayingFloor(
+                whiteName, blackName, date, eventTag, roundTag, siteTag, lineFloor, result.ResultToken));
         if (parsed.MoveIds.Length > 0 && initialWhiteToMove.HasValue)
             ChessMoveOutcomes.AppendGame(
                 b, lineId, parsed.MoveIds, result, initialWhiteToMove.Value,
@@ -601,7 +611,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
         RecordRetainedTags(b, lineId, playingId, gameText, src);
         RecordStartPosition(b, lineId, playingId, parsed.StartFen, src, parsed.Rules);
-        RecordOpeningHeaders(b, lineId, gameText, src);
         RecordPlayingTrajectory(b, parsed, src);
     }
 
@@ -614,15 +623,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         catch (FormatException) { return; }
         Hash128 positionId = ChessGraph.EmitPosition(b, board, src);
         b.AddAttestation(NativeAttestation.Categorical(
-            lineId, "HAS_SETUP", positionId, src, eventId, PgnWitnessWeight));
-    }
-
-    private static void RecordOpeningHeaders(SubstrateChangeBuilder b, Hash128 lineId, string gameText, Hash128 src)
-    {
-        string eco = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
-        if (eco.Length > 0) ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
-        string opening = ChessCanonical.OpeningName(PgnGames.TagStr(gameText, "Opening")) ?? "";
-        if (opening.Length > 0) ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
+            lineId, "FEN", positionId, src, eventId, PgnWitnessWeight));
     }
 
     private static void RecordPlayingTrajectory(
@@ -749,24 +750,23 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     }
 
     private const double PgnWitnessWeight = 0.7;
-    private const string HasEventRelation = "HAS_EVENT";
 
     private static void EmitGame(
         SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, Hash128 playingId,
         string gameText, string date,
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo,
-        Hash128 src)
+        Hash128 src, byte lineFloor, byte eventFloor, byte playingFloor)
     {
-        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
-        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType);
-        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType);
+        b.AddEntity(lineId, lineFloor, ChessVocabulary.GameType);
+        b.AddEntity(eventId, eventFloor, ChessVocabulary.EventType);
+        b.AddEntity(playingId, playingFloor, ChessVocabulary.PlayingType);
 
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             playingId, ChessVocabulary.PlaysLineType, lineId, src, null, PgnWitnessWeight));
-        b.AddAttestation(NativeAttestation.Categorical(
-            playingId, HasEventRelation, eventId, src, null, PgnWitnessWeight));
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            playingId, ChessVocabulary.HasEventType, eventId, src, null, PgnWitnessWeight));
 
-        // PGN's White/Black tags: the line HAS_PLAYER the player {side/white|black}.
+        // The tag name is the predicate. The object is the tag text, or the player it names.
         if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "White", wp, src, playingId, PgnWitnessWeight));
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "Black", bp, src, playingId, PgnWitnessWeight));
 
@@ -777,25 +777,25 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             ChessGraph.AppendPlayerResult(
                 b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId);
 
-        Meta(b, lineId, HasEventRelation, PgnGames.TagStr(gameText, "Event"), src, playingId);
-        Meta(b, lineId, "ON_DATE", date, src, playingId);
-        Meta(b, lineId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src, playingId);
-        Meta(b, lineId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src, playingId);
-        Meta(b, lineId, "HAS_RESULT", result.ResultToken, src, playingId);
+        Meta(b, lineId, "Event", PgnGames.TagStr(gameText, "Event"), src, playingId);
+        Meta(b, lineId, "Site", PgnGames.TagStr(gameText, "Site"), src, playingId);
+        Meta(b, lineId, "Date", date, src, playingId);
+        Meta(b, lineId, "Round", PgnGames.TagStr(gameText, "Round"), src, playingId);
+        Meta(b, lineId, "ECO", PgnGames.TagStr(gameText, "ECO"), src, playingId);
+        Meta(b, lineId, "Opening", PgnGames.TagStr(gameText, "Opening"), src, playingId);
+        Meta(b, lineId, "Termination", PgnGames.TagStr(gameText, "Termination"), src, playingId);
+        Meta(b, lineId, "Result", result.ResultToken, src, playingId);
+        Meta(b, lineId, "TimeControl", PgnGames.TagStr(gameText, "TimeControl"), src, playingId);
 
-        string tc = PgnGames.TagStr(gameText, "TimeControl");
-        Meta(b, lineId, "HAS_TIME_CONTROL", tc, src, playingId);
-        Meta(b, lineId, "HAS_TC_CLASS", TcClass(tc), src, playingId);
-
-        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, playingId, src);
-        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, playingId, src);
+        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, "WhiteElo", playingId, src);
+        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, "BlackElo", playingId, src);
     }
 
     private static void RecordRetainedTags(
         SubstrateChangeBuilder b, Hash128 lineId, Hash128 playingId, string gameText, Hash128 src)
     {
-        Keep("Site", "Site");
-        Keep("Round", "Round");
+        // Site and Round stay with the header pass on this tree. UTC time, titles, and
+        // FIDE ids are kept here so a game does not drop them.
         Keep("UTCDate", "UTCDate");
         Keep("UTCTime", "UTCTime");
         Keep("WhiteTitle", "WhiteTitle");
@@ -819,10 +819,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             b.AddAttestation(NativeAttestation.Categorical(line, rel, vid, src, eventId, PgnWitnessWeight));
     }
 
-    private static void Rating(SubstrateChangeBuilder b, Hash128 player, int elo, Hash128 eventId, Hash128 src)
+    private static void Rating(SubstrateChangeBuilder b, Hash128 player, int elo, string tag, Hash128 eventId, Hash128 src)
     {
         if (ContentEmitter.Emit(b, elo.ToString(), src) is { } rid)
-            b.AddAttestation(NativeAttestation.Categorical(player, "HAS_RATING", rid, src, eventId, PgnWitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(player, tag, rid, src, eventId, PgnWitnessWeight));
     }
 
     internal static string TcClass(string tc)

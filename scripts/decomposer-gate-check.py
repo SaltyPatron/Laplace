@@ -92,38 +92,45 @@ def check_source(
                 user=user,
             )
         )
-        if src.get("content_only"):
-            # Pillar-3a: content-only decomposers (documents) emit the content DAG — entities +
-            # physicalities + trajectory geometry — and ZERO distributional attestations (sequence
-            # is the trajectory geometry, containment is containers_of; PRECEDES is a MODEL relation).
-            # Assert exactly that, rather than the KB-source ">0 attestations" expectation.
-            # Layer and file completion are operational state in their own tables,
-            # never attestations, so every attestation here is content testimony.
+        if src.get("attestations") == "optional":
+            # A plain-text file is a composition. Title and author claims appear only
+            # when the file's own bytes state them, so a count of zero is a pass.
+            record("attestations", True, f"{att:,} attestations", count=att)
+        elif src.get("content_only"):
+            # Content-only decomposers emit the content DAG and no distributional
+            # attestations. Layer and file completion are operational state.
             record(
                 "attestations",
                 att == 0,
                 f"{att:,} attestations (content-only: expect 0)",
                 count=att,
             )
-        else:
+        elif src.get("attestations") in (None, "required"):
             record("attestations", att > 0, f"{att:,} attestations", count=att)
+        else:
+            record(
+                "attestations",
+                False,
+                f"unknown attestations rule {src.get('attestations')!r}",
+                count=att,
+            )
     except Exception as e:
         record("attestations", False, str(e), count=0)
 
     if src.get("content_only"):
         try:
-            # Content-only physicalities are source-agnostic (content-addressed: same content = same
-            # physicality regardless of witness) and there are no attestations to attribute them by,
-            # so verify the content DAG landed via content physicalities at the document tier.
+            # The completed unit is the file composition. Its floor is one boundary
+            # above its constituents, so the proof is that unit's content physicality,
+            # not an entity parked at tier 4.
             exists = psql(
                 dbname,
-                "SELECT EXISTS(SELECT 1 FROM laplace.physicalities p "
-                "JOIN laplace.entities e ON e.id = p.entity_id "
-                "WHERE e.tier = 4 AND p.type = 1 LIMIT 1);",
+                "SELECT EXISTS(SELECT 1 FROM laplace.ingest_unit_completion c "
+                "JOIN laplace.physicalities p ON p.entity_id = c.unit_id "
+                f"WHERE c.witness_id = {source_sql} AND p.type = 1 LIMIT 1);",
                 host=host,
                 user=user,
             ).lower() in ("t", "true")
-            record("layer_complete", exists, f"content physicalities present (document tier)={exists}")
+            record("layer_complete", exists, f"completed unit has a content physicality={exists}")
         except Exception as e:
             record("layer_complete", False, str(e))
     elif src.get("marker_entities"):

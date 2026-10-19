@@ -59,12 +59,16 @@ internal static class WiktionarySenseAnchor
         SubstrateChangeBuilder builder,
         string wordSurface,
         Hash128 wordId,
+        byte wordTier,
         Hash128? languageId,
+        byte languageTier,
         Hash128? posId,
+        byte posTier,
         WiktionaryEntry.Sense sense,
         Hash128 source,
         IReadOnlyDictionary<string, Hash128>? roots = null,
-        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords = null)
+        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords = null,
+        string? posTag = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(sense);
@@ -80,7 +84,7 @@ internal static class WiktionarySenseAnchor
             || resolvedWord != wordId)
             throw new InvalidOperationException("Wiktionary sense parent surface changed identity");
 
-        var pairs = new Dictionary<Hash128, (Hash128 Marker, Hash128 Value, WiktionarySurfaceTrees.RootCoord Coord)>();
+        var pairs = new Dictionary<Hash128, (Hash128 Marker, Hash128 Value, WiktionarySurfaceTrees.RootCoord Coord, byte Tier)>();
         foreach (var (kind, value) in values)
         {
             if (!TryResolveSurface(
@@ -90,17 +94,22 @@ internal static class WiktionarySenseAnchor
             Hash128 marker = Marker(kind);
             Span<Hash128> pair = stackalloc Hash128[2] { marker, valueRoot };
             Hash128 pairKey = Hash128.Merkle(EntityTier.Word, pair);
-            pairs.TryAdd(pairKey, (marker, valueRoot, valueCoord));
+            byte valueTier = CompositionLaw.TryFace(value, out CompositionLaw.Face face) ? face.Tier : (byte)0;
+            pairs.TryAdd(pairKey, (marker, valueRoot, valueCoord, valueTier));
         }
         if (pairs.Count == 0) return null;
 
         var ordered = pairs.OrderBy(static pair => pair.Key, Hash128BytewiseComparer.Instance)
-            .Select(static pair => (pair.Value.Marker, pair.Value.Value))
+            .Select(static pair => (pair.Value.Marker, pair.Value.Value, pair.Value.Tier))
             .ToArray();
-        Hash128[] flat = Flatten(wordId, languageId, posId, mode, ordered);
-        Hash128 id = Hash128.Merkle(EntityTier.Word, flat);
+        Hash128[] flat = Flatten(
+            wordId, languageId, posId, mode,
+            ordered.Select(static member => (member.Marker, member.Value)).ToArray());
+        byte[] floors = Floors(wordTier, languageId, languageTier, posId, posTier, ordered);
+        byte floor = CompositionLaw.ParentFloor(floors);
+        Hash128 id = Hash128.Merkle(floor, flat);
 
-        builder.AddEntity(id, EntityTier.Word, EntityTypeRegistry.WiktionarySense);
+        builder.AddEntity(id, floor, EntityTypeRegistry.WiktionarySense);
 
         var coordinateRows = new double[(pairs.Count + 1) * 4];
         wordCoord.CopyTo(coordinateRows.AsSpan(0, 4));
@@ -116,6 +125,10 @@ internal static class WiktionarySenseAnchor
             id, source, PhysicalityType.ParseStructure,
             coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
             Trajectory.Build(flat), flat.Length, null, null, 0));
+        if (!string.IsNullOrWhiteSpace(posTag))
+            PosReference.Deposit(
+                builder, id, coord[0], coord[1], coord[2], coord[3],
+                posTag, PosReference.PosTagset.Wiktionary);
         return id;
     }
 
@@ -172,6 +185,27 @@ internal static class WiktionarySenseAnchor
             .Select(static pair => pair.Value)
             .ToArray();
         return true;
+    }
+
+    private static byte[] Floors(
+        byte wordTier,
+        Hash128? languageId,
+        byte languageTier,
+        Hash128? posId,
+        byte posTier,
+        IReadOnlyList<(Hash128 Marker, Hash128 Value, byte Tier)> members)
+    {
+        var floors = new byte[5 + members.Count * 2];
+        floors[1] = wordTier;
+        floors[2] = languageId is null ? (byte)0 : languageTier;
+        floors[3] = posId is null ? (byte)0 : posTier;
+        int cursor = 5;
+        foreach (var member in members)
+        {
+            floors[cursor++] = 0;
+            floors[cursor++] = member.Tier;
+        }
+        return floors;
     }
 
     private static Hash128[] Flatten(

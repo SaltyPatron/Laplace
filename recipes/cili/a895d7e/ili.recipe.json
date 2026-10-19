@@ -8,11 +8,7 @@
       "syntaxPath": "record/@about",
       "propertyName": "ili",
       "valueKind": "Identity",
-      "disposition": "Identity, Testimony",
-      "relationName": "HAS_EXTERNAL_ID",
-      "qualifiers": [
-        "identifier/ili"
-      ]
+      "disposition": "Identity"
     },
     {
       "syntaxPath": "record/@about#ns",
@@ -25,7 +21,7 @@
       "propertyName": "kind",
       "valueKind": "Enumerated",
       "disposition": "Content, Testimony",
-      "relationName": "IS_TYPED_AS",
+      "relationName": "a",
       "sequenceSeparator": "\u001e",
       "contextField": "a#ns"
     },
@@ -40,7 +36,7 @@
       "propertyName": "definition",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "HAS_DEFINITION",
+      "relationName": "skos:definition",
       "contextField": "skos:definition#lang",
       "testimonyUnlessField": "dc:source"
     },
@@ -60,8 +56,7 @@
       "syntaxPath": "record/@dc:source#ns",
       "propertyName": "pwn30Namespace",
       "valueKind": "Text",
-      "disposition": "Content, Testimony",
-      "relationName": "HAS_ATTRIBUTION",
+      "disposition": "Excluded",
       "sequenceSeparator": "\u001e"
     },
     {
@@ -69,7 +64,7 @@
       "propertyName": "status",
       "valueKind": "Enumerated",
       "disposition": "Testimony",
-      "relationName": "HAS_ATTRIBUTE",
+      "relationName": "ili:status",
       "contextLiteral": "ILI_Status"
     },
     {
@@ -83,7 +78,7 @@
       "propertyName": "supersededBy",
       "valueKind": "Identity",
       "disposition": "Testimony",
-      "relationName": "SUPERSEDED_BY",
+      "relationName": "ili:supersededBy",
       "sequenceSeparator": "\u001e"
     },
     {
@@ -112,8 +107,5 @@
       "http://purl.org/vocommons/voaf#Vocabulary",
       "http://www.w3.org/2002/07/owl#Class"
     ]
-  },
-  "attributeVocabularies": {
-    "skos:definition#lang": "lang/iso639"
   }
 }

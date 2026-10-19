@@ -25,16 +25,6 @@ internal static class WiktionaryEmit
     /// single-grapheme tags exist), so a composition of them sits at 3. It is not an input to
     /// the id: <c>hash128_merkle</c> discards its tier argument by law (hash128.c:28).
     /// </summary>
-    private const byte CollectionTier = 3;
-
-    private static readonly HashSet<string> RegisterTags = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "archaic", "obsolete", "dated", "slang", "colloquial", "informal", "formal",
-        "vulgar", "offensive", "derogatory", "humorous", "euphemistic", "dialectal",
-        "regional", "literary", "poetic", "technical", "rare", "nonstandard",
-        "historical", "figurative",
-    };
-
     /// <summary>
     /// Every surface <see cref="Emit"/> would stage — collected so the deferred unit can
     /// <see cref="WiktionarySurfaceTrees.TryBuild"/> them on the compose fan before serial drain.
@@ -58,13 +48,8 @@ internal static class WiktionaryEmit
                     AddAll(into, s.LinkTargets);
                     AddAll(into, s.WikidataIds);
                 }
-                if (s.Tags is { } tags)
-                    foreach (var tag in tags)
-                        if (RegisterTags.Contains(tag))
-                        {
-                            Add(into, tag);
-                            Add(reusable, tag);
-                        }
+                AddAll(into, s.Tags);
+                AddAll(reusable, s.Tags);
             }
 
         if (e.Sounds is { } sounds)
@@ -91,7 +76,7 @@ internal static class WiktionaryEmit
         foreach (var t in templates)
         {
             if (t.Name is null || t.Args is not { } args) continue;
-            if (!TryEtymologyRule(t.Name, out _, out _, out string[] termArgs)) continue;
+            if (!TryEtymologyRule(t.Name, out _, out string[] termArgs)) continue;
             foreach (var arg in termArgs)
             {
                 if (!args.TryGetValue(arg, out var term)) continue;
@@ -147,6 +132,7 @@ internal static class WiktionaryEmit
         IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords)
     {
         if (!Stage(b, e.Word, roots, out Hash128 wordId)) return;
+        byte wordTier = CompositionLaw.TryFace(e.Word, out CompositionLaw.Face wordFace) ? wordFace.Tier : (byte)0;
 
         // langCtx scopes every word->word relation edge and the synset memberships
         // below. The language was already resolved here and then went NOWHERE except
@@ -155,43 +141,40 @@ internal static class WiktionaryEmit
         // edge, cross-language IS_SYNONYM_OF candidates compete as senses and a
         // reader cannot tell which language attested the claim.
         Hash128? langCtx = null;
+        byte languageTier = 0;
         if (e.LangCode is { Length: > 0 } lc)
         {
             Hash128 langEntity = LanguageReference.Resolve(lc);
+            languageTier = CompositionLaw.TryFace(lc.Trim(), out CompositionLaw.Face langFace)
+                ? langFace.Tier
+                : (byte)0;
             VocabularyNames.TrackLanguage(WiktionaryDecomposer.VocabularyNames, lc);
-            b.AddEntity(new EntityRow(langEntity, EntityTier.Word, LanguageTypeId));
-            // HAS_LANGUAGE keeps a null context: the object IS the language.
-            b.AddAttestation(NativeAttestation.Categorical(
-                wordId, "HAS_LANGUAGE", langEntity, WiktionaryDecomposer.Source, Trust));
+            b.AddEntity(new EntityRow(langEntity, languageTier, LanguageTypeId));
             langCtx = langEntity;
         }
 
         Hash128? posId = null;
+        byte posTier = 0;
         bool isVerb = false;
         if (e.Pos is { Length: > 0 } pos)
         {
             isVerb = pos.Equals("verb", StringComparison.OrdinalIgnoreCase);
-            posId = PosReference.Attest(
-                b, wordId, pos, PosReference.PosTagset.Wiktionary,
-                WiktionaryDecomposer.Source, langCtx, Trust,
+            posId = PosReference.Emit(
+                b, pos, PosReference.PosTagset.Wiktionary,
+                WiktionaryDecomposer.Source, Trust,
                 WiktionaryDecomposer.VocabularyNames);
+            posTier = PosReference.ResolveFace(pos, PosReference.PosTagset.Wiktionary).Tier;
         }
 
         if (e.Senses is { } senses)
             foreach (var s in senses)
             {
                 if (WiktionarySenseAnchor.Declare(
-                        b, e.Word, wordId, langCtx, posId, s, WiktionaryDecomposer.Source,
-                        roots, coords) is not { } senseId)
+                        b, e.Word, wordId, wordTier, langCtx, languageTier, posId, posTier,
+                        s, WiktionaryDecomposer.Source, roots, coords, e.Pos) is not { } senseId)
                     continue;
 
-                AttestResolved(b, wordId, WiktionarySource.HasSenseTypeId, senseId, langCtx);
-                b.AddAttestation(NativeAttestation.CategoricalResolved(
-                    senseId, WiktionarySource.HasNameTypeId, wordId,
-                    WiktionaryDecomposer.Source, langCtx, Trust)
-                    with { QualifierMask = WiktionarySource.AliasName });
-                if (langCtx is { } langId)
-                    AttestResolved(b, senseId, WiktionarySource.HasLanguageTypeId, langId, null);
+                AttestResolved(b, wordId, WiktionarySource.SensesTypeId, senseId, langCtx);
                 WalkSense(b, senseId, s, isVerb, langCtx, roots, coords);
                 RouteSynsetLinks(b, senseId, s, langCtx);
                 RouteWikidataLinks(b, senseId, s, langCtx);
@@ -221,52 +204,31 @@ internal static class WiktionaryEmit
     {
         if (s.Glosses is { } gl)
             foreach (var g in gl)
-                if (Stage(b, g, roots, out var gId)) Attest(b, senseId, "HAS_DEFINITION", gId, langCtx);
+                if (Stage(b, g, roots, out var gId)) Attest(b, senseId, "glosses", gId, langCtx);
 
         if (s.Examples is { } ex)
             foreach (var x in ex)
-                if (Stage(b, x, roots, out var xId)) Attest(b, senseId, "HAS_EXAMPLE", xId, langCtx);
+                if (Stage(b, x, roots, out var xId)) Attest(b, senseId, "examples", xId, langCtx);
 
         WalkRelations(b, senseId, in s.Relations, isVerb, langCtx, roots);
 
-        // A sense's register is one reading -- "archaic AND humorous" -- not two independent
-        // claims. Same shape as HAS_FEATURE and the same fix: one composition, one edge, one
-        // thing a second witness can corroborate or refute as a whole.
-        if (s.Tags is { } tags)
-        {
-            List<string>? register = null;
-            foreach (var tag in tags)
-                if (RegisterTags.Contains(tag)) (register ??= []).Add(tag);
-            if (TryStageSet(b, register, roots, coords, out var registerId))
-                Attest(b, senseId, "HAS_USAGE_REGISTER", registerId, langCtx);
-        }
+        EmitMembers(b, senseId, "tags", s.Tags, langCtx, roots);
     }
 
     private static void WalkRelations(
         SubstrateChangeBuilder b, Hash128 wordId, in WiktionaryEntry.RelationBlock r, bool isVerb,
         Hash128? context, IReadOnlyDictionary<string, Hash128>? roots)
     {
-        EmitWords(b, wordId, "IS_SYNONYM_OF", r.Synonyms, context, roots);
-        EmitWords(b, wordId, "IS_ANTONYM_OF", r.Antonyms, context, roots);
-        EmitWords(b, wordId, "HAS_HYPONYM", r.Hyponyms, context, roots);
-        EmitWords(b, wordId, "HAS_PART", r.Meronyms, context, roots);
-        EmitWords(b, wordId, "IS_PART_OF", r.Holonyms, context, roots);
-        EmitWords(b, wordId, "RELATED_TO", r.Related, context, roots);
-        EmitWords(b, wordId, isVerb ? "MANNER_OF" : "HAS_HYPERNYM", r.Hypernyms, context, roots);
-        EmitWords(b, wordId, "IS_COORDINATE_TERM_WITH", r.Coordinate, context, roots);
-
-        // Derived reverses direction: derived-word DERIVED_FROM this word.
-        if (r.Derived is { } derived)
-            foreach (var d in derived)
-            {
-                if (!Stage(b, d.Word, roots, out var dId)) continue;
-                if (d.Dis1 > 0.0)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        dId, DerivedRelation, wordId, WiktionaryDecomposer.Source, Trust,
-                        magnitude: d.Dis1, arenaScale: 1.0, contextId: context));
-                else
-                    Attest(b, dId, DerivedRelation, wordId, context);
-            }
+        _ = isVerb;
+        EmitWords(b, wordId, "synonyms", r.Synonyms, context, roots);
+        EmitWords(b, wordId, "antonyms", r.Antonyms, context, roots);
+        EmitWords(b, wordId, "hyponyms", r.Hyponyms, context, roots);
+        EmitWords(b, wordId, "meronyms", r.Meronyms, context, roots);
+        EmitWords(b, wordId, "holonyms", r.Holonyms, context, roots);
+        EmitWords(b, wordId, "related", r.Related, context, roots);
+        EmitWords(b, wordId, "hypernyms", r.Hypernyms, context, roots);
+        EmitWords(b, wordId, "coordinate_terms", r.Coordinate, context, roots);
+        EmitWords(b, wordId, "derived", r.Derived, context, roots);
     }
 
     private static void EmitWords(
@@ -298,13 +260,8 @@ internal static class WiktionaryEmit
         foreach (var snd in sounds)
         {
             if (!Stage(b, snd.Ipa, roots, out var ipaId)) continue;
-            // attestations.context_id is ONE bytea, so the previous shape took the first
-            // stageable dialect tag and dropped the rest — data loss across 5,192,208
-            // TRANSCRIBES_AS rows, forced by the schema rather than chosen. A set composition
-            // fits in the slot, so every tag survives.
-            Hash128? dialectCtx = TryStageSet(b, snd.Tags, roots, coords, out var dialectSetId)
-                ? dialectSetId : null;
-            Attest(b, wordId, "TRANSCRIBES_AS", ipaId, dialectCtx);
+            Attest(b, wordId, "ipa", ipaId, null);
+            EmitMembers(b, ipaId, "tags", snd.Tags, null, roots);
         }
     }
 
@@ -339,70 +296,9 @@ internal static class WiktionaryEmit
             // HAS_FEATURE below is still emitted: when the form IS the lemma its tags are
             // the lemma's own morphology, which is testimony about the headword.
             if (formId != wordId)
-                Attest(b, formId, "FORM_OF", wordId, null);
-            // A form's tags are ONE morphological analysis, not N independent claims. Emitting
-            // them as N edges gives the analysis no id, so nothing can rate, corroborate or
-            // refute it as a whole. One composition, one edge, one adjudicable claim.
-            if (TryStageSet(b, form.Tags, roots, coords, out var featureSetId))
-                Attest(b, formId, "HAS_FEATURE", featureSetId, null);
+                Attest(b, wordId, "forms", formId, null);
+            EmitMembers(b, formId, "tags", form.Tags, null, roots);
         }
-    }
-
-    /// <summary>
-    /// Compose a tag list into one set entity and return its id. False when nothing stageable
-    /// remains — the caller then emits no edge, which is the honest answer for an empty analysis.
-    /// </summary>
-    /// <remarks>
-    /// A ONE-tag list returns that tag's own id by the tier-floor collapse law, so the degenerate
-    /// case stays a direct edge to the tag and no wrapper entity is minted.
-    ///
-    /// Member coordinates come from each tag's own tier tree rather than from this builder,
-    /// because a tag emitted in an earlier batch is suppressed by the existence bitmap and has no
-    /// staged physicality here. A tag whose geometry is unavailable is dropped from the set
-    /// rather than substituted with the origin: forging a member coordinate would move the
-    /// centroid of every set that contains it.
-    /// </remarks>
-    private static bool TryStageSet(
-        SubstrateChangeBuilder b, List<string>? tags,
-        IReadOnlyDictionary<string, Hash128>? roots,
-        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? rootCoords,
-        out Hash128 setId)
-    {
-        setId = default;
-        if (tags is null || tags.Count == 0) return false;
-
-        var ids = new List<Hash128>(tags.Count);
-        var coords = new List<double>(tags.Count * 4);
-        Span<double> c = stackalloc double[4];
-        foreach (var tag in tags)
-        {
-            // A member that cannot be staged or placed FAILS THE WHOLE SET. Dropping it and
-            // composing the remainder is worse than emitting nothing: a partial set is a
-            // DIFFERENT set with a different merkle id, so the same analysis would land under
-            // two ids depending on cache state, and neither would be wrong on its face. No
-            // edge is recoverable -- the substrate can prove an absence (INVENTION §8) and
-            // cannot prove a silently truncated set.
-            Hash128 tagId;
-            WiktionarySurfaceTrees.RootCoord coord;
-            if (roots is not null)
-            {
-                if (!roots.TryGetValue(tag, out tagId)
-                    || rootCoords is null
-                    || !rootCoords.TryGetValue(tag, out coord)) return false;
-            }
-            else if (!WiktionarySurfaceTrees.TryStageWithCoord(
-                         b, tag, WiktionaryDecomposer.Source, retainForReuse: true,
-                         out tagId, out coord)) return false;
-            coord.CopyTo(c);
-            ids.Add(tagId);
-            for (int i = 0; i < 4; i++) coords.Add(c[i]);
-        }
-        if (ids.Count == 0) return false;
-
-        setId = b.StageCollection(
-            CollectionsMarshal.AsSpan(ids), CollectionsMarshal.AsSpan(coords),
-            CollectionTier, EntityTypeRegistry.Collection, WiktionaryDecomposer.Source);
-        return true;
     }
 
     private static void WalkEtymology(
@@ -410,49 +306,38 @@ internal static class WiktionaryEmit
         IReadOnlyDictionary<string, Hash128>? roots)
     {
         if (Stage(b, e.EtymologyText, roots, out var etyId))
-            Attest(b, wordId, "HAS_ETYMOLOGY", etyId, null);
+            Attest(b, wordId, "etymology_text", etyId, null);
 
         if (e.EtymologyTemplates is not { } templates) return;
         foreach (var t in templates)
         {
             if (t.Name is null || t.Args is not { } args) continue;
-            if (!TryEtymologyRule(t.Name, out string etymType, out string? kind, out string[] termArgs)) continue;
+            if (!TryEtymologyRule(t.Name, out string etymType, out string[] termArgs)) continue;
             foreach (var arg in termArgs)
             {
                 if (!args.TryGetValue(arg, out var term)) continue;
                 if (string.IsNullOrEmpty(term) || term == "-") continue;
                 if (!Stage(b, term, roots, out var termId)) continue;
-                var row = NativeAttestation.Categorical(
-                    wordId, etymType, termId, WiktionaryDecomposer.Source, Trust, contextId: null);
-                b.AddAttestation(kind is null ? row
-                    : row with { QualifierMask = row.QualifierMask | ClaimQualifiers.Of("etymology", kind) });
+                Attest(b, wordId, etymType, termId, null);
             }
         }
     }
 
-    // A template names how a word descends from its etymon: one element,
-    // ETYMOLOGICALLY_DERIVED_FROM, with the template's kind as the claim's qualifier.
-    // Cognates and doublets are relatives, not ancestors.
+    // The template name is the predicate. The argument index is where that template puts the etymon.
     private static bool TryEtymologyRule(
-        string name, out string etymType, out string? kind, out string[] termArgs)
+        string name, out string etymType, out string[] termArgs)
     {
-        const string Derived = "ETYMOLOGICALLY_DERIVED_FROM", Related = "ETYMOLOGICALLY_RELATED_TO";
-        (etymType, kind, termArgs) = name switch
+        etymType = name;
+        termArgs = name switch
         {
-            "bor" or "borrowed" => (Derived, "borrowed", new[] { "3" }),
-            "inh" or "inherited" => (Derived, "inherited", new[] { "3" }),
-            "der" or "derived" => (Derived, null, new[] { "3" }),
-            "cog" or "cognate" => (Related, null, new[] { "2" }),
-            "suffix" or "suf" => (Derived, "suffix", new[] { "2" }),
-            "prefix" or "pre" => (Derived, "prefix", new[] { "3" }),
-            "af" or "affix" => (Derived, "affix", new[] { "2", "3", "4" }),
-            "com" or "compound" => (Derived, "compound", new[] { "2", "3", "4" }),
-            "blend" => (Derived, "blend", new[] { "2", "3", "4" }),
-            "doublet" or "dbt" => (Related, null, new[] { "2" }),
-            "back-form" or "back-formation" or "bf" => (Derived, "back-formation", new[] { "2" }),
-            _ => (string.Empty, (string?)null, Array.Empty<string>()),
+            "bor" or "borrowed" or "inh" or "inherited" or "der" or "derived" => ["3"],
+            "cog" or "cognate" or "doublet" or "dbt" or "suffix" or "suf"
+                or "back-form" or "back-formation" or "bf" => ["2"],
+            "prefix" or "pre" => ["3"],
+            "af" or "affix" or "com" or "compound" or "blend" => ["2", "3", "4"],
+            _ => [],
         };
-        return etymType.Length > 0;
+        return termArgs.Length > 0;
     }
 
     private static void RouteSynsetLinks(
@@ -463,7 +348,7 @@ internal static class WiktionaryEmit
         foreach (var key in links)
             if (SourceEntityIdConventions.ResolveSynsetAnchor(key) is { } syn
                 && syn != default && seen.Add(syn))
-                AttestResolved(b, senseId, WiktionarySource.IsSenseOfTypeId, syn, langCtx);
+                AttestResolved(b, senseId, WiktionarySource.LinksTypeId, syn, langCtx);
     }
 
     private static void RouteWikidataLinks(
@@ -482,7 +367,7 @@ internal static class WiktionaryEmit
                     EntityTypeRegistry.WikidataItem, WiktionaryDecomposer.Source) is not { } itemId
                 || !seen.Add(itemId))
                 continue;
-            AttestResolved(b, senseId, WiktionarySource.CorrespondsToTypeId, itemId, langCtx);
+            AttestResolved(b, senseId, WiktionarySource.WikidataTypeId, itemId, langCtx);
         }
     }
 
@@ -498,8 +383,17 @@ internal static class WiktionaryEmit
     }
 
     // Spelled once: the scored and unscored arms must not drift onto different relations.
-    private const string TranslationRelation = "IS_TRANSLATION_OF";
-    private const string DerivedRelation = "DERIVED_FROM";
+    private const string TranslationRelation = "translations";
+
+    private static void EmitMembers(
+        SubstrateChangeBuilder b, Hash128 subject, string predicate, List<string>? members,
+        Hash128? context, IReadOnlyDictionary<string, Hash128>? roots)
+    {
+        if (members is null) return;
+        foreach (string member in members)
+            if (Stage(b, member, roots, out Hash128 id))
+                Attest(b, subject, predicate, id, context);
+    }
 
     private static void Attest(
         SubstrateChangeBuilder b, Hash128 subject, string typeName, Hash128 objectId, Hash128? context) =>

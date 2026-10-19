@@ -107,6 +107,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
                 Assert.Contains("b.id", p);
                 Assert.Contains("b.s", p);
                 Assert.DoesNotContain("Append", p);
+                Assert.DoesNotContain("_type_id_idx", p);
                 // One exact leaf per prior read, never the parent's union of leaves.
                 Assert.Single(System.Text.RegularExpressions.Regex.Matches(p, @"consensus_h[0-9a-f]{2}\b")
                     .Select(static m => m.Value).Distinct());

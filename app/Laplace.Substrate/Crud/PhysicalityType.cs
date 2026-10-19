@@ -38,6 +38,10 @@ public enum PhysicalityType : short
     // never enter text-continuation indexes.
     Range = 10,
 
+    // The entity's UPOS bank: one vertex whose flags hold the frozen slot. Not content
+    // of an English tag, and not a relation edge. Matches INTENT_STAGE_LEXICAL_UPOS.
+    LexicalBank = 11,
+
     // Sparse, ordinal-aligned source annotations (comments, glyphs) carried as parallel
     // sequences on a game trajectory. They are not testimony rows and not part of the
     // identity of the moves or positions they annotate.

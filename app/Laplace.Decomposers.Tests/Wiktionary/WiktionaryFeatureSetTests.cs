@@ -8,8 +8,7 @@ using Xunit;
 namespace Laplace.Decomposers.Tests.Wiktionary;
 
 /// <summary>
-/// A form's morphological analysis is one set composition, not one attestation per tag, so
-/// the analysis has an identity witnesses can confirm or refute as a whole.
+/// A form's tags are membership. Each tag the file lists is its own edge.
 /// </summary>
 public class WiktionaryFeatureSetTests
 {
@@ -18,10 +17,8 @@ public class WiktionaryFeatureSetTests
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
     }
 
-    private static readonly Hash128 HasFeature =
-        RelationTypeRegistry.RelationTypeId("HAS_FEATURE");
-    private static readonly Hash128 TranscribesAs =
-        RelationTypeRegistry.RelationTypeId("TRANSCRIBES_AS");
+    private static readonly Hash128 Tags = RelationTypeRegistry.RelationTypeId("tags");
+    private static readonly Hash128 Ipa = RelationTypeRegistry.RelationTypeId("ipa");
 
     private static SubstrateChange EmitEntry(WiktionaryEntry e)
     {
@@ -31,8 +28,14 @@ public class WiktionaryFeatureSetTests
         return b.Build();
     }
 
+    private static HashSet<Hash128> TagObjects(SubstrateChange change, Hash128 subject) =>
+        change.Attestations
+            .Where(a => a.TypeId == Tags && a.SubjectId == subject && a.ObjectId is not null)
+            .Select(a => a.ObjectId!.Value)
+            .ToHashSet();
+
     [Fact]
-    public void MultiTagFormEmitsOneFeatureEdgeAtASetPhysicality()
+    public void MultiTagFormEmitsOneEdgePerTag()
     {
         var change = EmitEntry(new WiktionaryEntry
         {
@@ -41,37 +44,37 @@ public class WiktionaryFeatureSetTests
             Forms = [new WiktionaryEntry.Form("wolves", ["plural", "nominative", "masculine"])],
         });
 
-        var feature = Assert.Single(change.Attestations, a => a.TypeId == HasFeature);
-        Assert.NotNull(feature.ObjectId);
-
-        var bundle = Assert.Single(
-            change.Physicalities, p => p.EntityId == feature.ObjectId!.Value);
-        Assert.Equal(PhysicalityType.Set, bundle.Type);
-        Assert.Equal(3, bundle.NConstituents);
+        Hash128 form = ContentEmitter.RootId("wolves")!.Value;
+        var objects = TagObjects(change, form);
+        Assert.Equal(3, objects.Count);
+        Assert.Contains(ContentEmitter.RootId("plural")!.Value, objects);
+        Assert.Contains(ContentEmitter.RootId("nominative")!.Value, objects);
+        Assert.Contains(ContentEmitter.RootId("masculine")!.Value, objects);
+        Assert.DoesNotContain(change.Physicalities, p => p.Type == PhysicalityType.Set);
     }
 
     [Fact]
-    public void SameTagsInAnyOrderProduceTheSameFeatureSetId()
+    public void SameTagsInAnyOrderNameTheSameMembers()
     {
-        Hash128 Emit(params string[] tags) =>
-            Assert.Single(
-                EmitEntry(new WiktionaryEntry
-                {
-                    Word = "wolf",
-                    LangCode = "en",
-                    Forms = [new WiktionaryEntry.Form("wolves", [.. tags])],
-                }).Attestations,
-                a => a.TypeId == HasFeature).ObjectId!.Value;
+        HashSet<Hash128> Emit(params string[] tags) 
+        {
+            var change = EmitEntry(new WiktionaryEntry
+            {
+                Word = "wolf",
+                LangCode = "en",
+                Forms = [new WiktionaryEntry.Form("wolves", [.. tags])],
+            });
+            return TagObjects(change, ContentEmitter.RootId("wolves")!.Value);
+        }
 
-        var forward = Emit("plural", "nominative", "masculine");
-        var reversed = Emit("masculine", "nominative", "plural");
-        Assert.Equal(forward, reversed);
+        Assert.Equal(
+            Emit("plural", "nominative", "masculine"),
+            Emit("masculine", "nominative", "plural"));
     }
 
     [Fact]
-    public void SingleTagFormStillPointsAtTheTagItself()
+    public void SingleTagFormPointsAtTheTag()
     {
-        // A one-member set is its member; a single tag gets no wrapper entity.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -79,14 +82,14 @@ public class WiktionaryFeatureSetTests
             Forms = [new WiktionaryEntry.Form("wolves", ["plural"])],
         });
 
-        var feature = Assert.Single(change.Attestations, a => a.TypeId == HasFeature);
-        Assert.DoesNotContain(
-            change.Physicalities, p => p.Type == PhysicalityType.Set);
-        Assert.NotNull(feature.ObjectId);
+        Hash128 form = ContentEmitter.RootId("wolves")!.Value;
+        AttestationRow feature = Assert.Single(change.Attestations, a => a.TypeId == Tags);
+        Assert.Equal(form, feature.SubjectId);
+        Assert.Equal(ContentEmitter.RootId("plural"), feature.ObjectId);
     }
 
     [Fact]
-    public void UntaggedFormEmitsNoFeatureEdge()
+    public void UntaggedFormEmitsNoTagEdge()
     {
         var change = EmitEntry(new WiktionaryEntry
         {
@@ -94,13 +97,12 @@ public class WiktionaryFeatureSetTests
             LangCode = "en",
             Forms = [new WiktionaryEntry.Form("wolves", null)],
         });
-        Assert.DoesNotContain(change.Attestations, a => a.TypeId == HasFeature);
+        Assert.DoesNotContain(change.Attestations, a => a.TypeId == Tags);
     }
 
     [Fact]
-    public void EveryDialectTagSurvivesAsTheTranscriptionContext()
+    public void EveryDialectTagIsMembershipOnTheTranscription()
     {
-        // context_id holds one id, so all dialect tags ride in it as one set composition.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -108,21 +110,18 @@ public class WiktionaryFeatureSetTests
             Sounds = [new WiktionaryEntry.Sound("/wʊlf/", ["US", "UK", "GA"])],
         });
 
-        var sound = Assert.Single(change.Attestations, a => a.TypeId == TranscribesAs);
-        Assert.NotNull(sound.ContextId);
-        var ctx = Assert.Single(
-            change.Physicalities, p => p.EntityId == sound.ContextId!.Value);
-        Assert.Equal(PhysicalityType.Set, ctx.Type);
-        Assert.Equal(3, ctx.NConstituents);
+        AttestationRow sound = Assert.Single(change.Attestations, a => a.TypeId == Ipa);
+        Assert.Null(sound.ContextId);
+        var tags = TagObjects(change, sound.ObjectId!.Value);
+        Assert.Equal(3, tags.Count);
+        Assert.Contains(ContentEmitter.RootId("US")!.Value, tags);
+        Assert.Contains(ContentEmitter.RootId("UK")!.Value, tags);
+        Assert.Contains(ContentEmitter.RootId("GA")!.Value, tags);
     }
 
-    private static readonly Hash128 HasUsageRegister =
-        RelationTypeRegistry.RelationTypeId("HAS_USAGE_REGISTER");
-
     [Fact]
-    public void MultipleRegisterTagsOnASenseComposeOneReading()
+    public void EverySenseTagIsItsOwnMembership()
     {
-        // "archaic and humorous" is one register reading, confirmed or refuted as a whole.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -130,16 +129,18 @@ public class WiktionaryFeatureSetTests
             Senses = [new WiktionaryEntry.Sense { Tags = ["archaic", "humorous", "poetic"] }],
         });
 
-        var reg = Assert.Single(change.Attestations, a => a.TypeId == HasUsageRegister);
-        var bundle = Assert.Single(change.Physicalities, p => p.EntityId == reg.ObjectId!.Value);
-        Assert.Equal(PhysicalityType.Set, bundle.Type);
-        Assert.Equal(3, bundle.NConstituents);
+        var senseEdges = change.Attestations.Where(a => a.TypeId == RelationTypeRegistry.RelationTypeId("senses")).ToArray();
+        Hash128 sense = Assert.Single(senseEdges).ObjectId!.Value;
+        var tags = TagObjects(change, sense);
+        Assert.Equal(3, tags.Count);
+        Assert.Contains(ContentEmitter.RootId("archaic")!.Value, tags);
+        Assert.Contains(ContentEmitter.RootId("humorous")!.Value, tags);
+        Assert.Contains(ContentEmitter.RootId("poetic")!.Value, tags);
     }
 
     [Fact]
-    public void NonRegisterTagsAreExcludedFromTheReading()
+    public void GrammaticalTagsStayInTheSameMembership()
     {
-        // Only RegisterTags members join the register set; grammatical tags stay out of it.
         var change = EmitEntry(new WiktionaryEntry
         {
             Word = "wolf",
@@ -147,20 +148,10 @@ public class WiktionaryFeatureSetTests
             Senses = [new WiktionaryEntry.Sense { Tags = ["archaic", "transitive", "humorous"] }],
         });
 
-        var reg = Assert.Single(change.Attestations, a => a.TypeId == HasUsageRegister);
-        var bundle = Assert.Single(change.Physicalities, p => p.EntityId == reg.ObjectId!.Value);
-        Assert.Equal(2, bundle.NConstituents);
-    }
-
-    [Fact]
-    public void SenseWithNoRegisterTagsEmitsNoRegisterEdge()
-    {
-        var change = EmitEntry(new WiktionaryEntry
-        {
-            Word = "wolf",
-            LangCode = "en",
-            Senses = [new WiktionaryEntry.Sense { Tags = ["transitive", "countable"] }],
-        });
-        Assert.DoesNotContain(change.Attestations, a => a.TypeId == HasUsageRegister);
+        Hash128 sense = Assert.Single(
+            change.Attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("senses")).ObjectId!.Value;
+        var tags = TagObjects(change, sense);
+        Assert.Contains(ContentEmitter.RootId("transitive")!.Value, tags);
+        Assert.Equal(3, tags.Count);
     }
 }

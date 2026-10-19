@@ -66,5 +66,44 @@ class SourceScopedGateBoundsTests(unittest.TestCase):
         self.assertIn("max 0", move["detail"])
 
 
+class DocumentCompositionGateTests(unittest.TestCase):
+    def test_optional_attestations_pass_at_zero_and_do_not_pin_a_tier(self) -> None:
+        config = {
+            "sources": {
+                "document": {
+                    "decomposer": "DocumentDecomposer",
+                    "layer": 2,
+                    "attestations": "optional",
+                }
+            }
+        }
+        seen: list[str] = []
+
+        def fake_psql(_dbname: str, sql: str, **_kwargs: object) -> str:
+            seen.append(sql)
+            if "substrate_health" in sql:
+                return "t"
+            if "evidence_count" in sql:
+                return "0"
+            if "layer_completed" in sql:
+                return "t"
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+        with patch.object(GATE, "load_gates", return_value=config), patch.object(
+            GATE, "psql", side_effect=fake_psql
+        ):
+            report = GATE.check_source(
+                "document", "laplace-mono", host="/tmp", user="laplace",
+                allow_health_tier=False,
+            )
+
+        self.assertTrue(report["passed"])
+        attestations = next(c for c in report["checks"] if c["check"] == "attestations")
+        self.assertTrue(attestations["passed"])
+        self.assertEqual(0, attestations["count"])
+        self.assertNotIn("tier = 4", "\n".join(seen))
+        self.assertNotIn("CONTAINS", "\n".join(seen))
+
+
 if __name__ == "__main__":
     unittest.main()

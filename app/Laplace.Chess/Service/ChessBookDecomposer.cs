@@ -184,7 +184,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             states.Add(state);
         }
 
-        b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType);
+        b.AddEntity(record.LineId, ChessCompose.LineFloor(record.Sans.Count), ChessVocabulary.GameType);
         var line = new List<ChessNode>(states.Count);
         foreach (var position in states)
             line.Add(ChessGraph.ComposePositionPoint(position.Board));

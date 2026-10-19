@@ -27,9 +27,10 @@ public sealed class ExploreDisplayLiveTests
                 """
                 SELECT encode(a.subject_id, 'hex')
                 FROM laplace.attestations a
-                JOIN laplace.entities e ON e.id = a.subject_id
+                JOIN laplace.consensus c ON c.subject_id = a.subject_id
                 WHERE a.type_id = laplace.relation_type_id('HAS_DEFINITION')
-                  AND e.type_id = laplace.entity_type_id('CILI_Concept')
+                  AND c.type_id = laplace.relation_type_id('IS_TYPED_AS')
+                  AND c.object_id IN (laplace.entity_type_id('CILI_Concept'), laplace.entity_type_id('CILI_Instance'))
                 ORDER BY a.subject_id
                 LIMIT 1
                 """, conn);
@@ -96,9 +97,10 @@ public sealed class ExploreDisplayLiveTests
             using var cmd = new NpgsqlCommand(
                 """
                 SELECT 1
-                FROM laplace.attestations a
-                JOIN laplace.entities e ON e.id = a.subject_id
+                FROM laplace.consensus c ON c.subject_id = a.subject_id
                 WHERE a.type_id = laplace.relation_type_id('HAS_DEFINITION')
+                  AND c.type_id = laplace.relation_type_id('IS_TYPED_AS')
+                  AND c.object_id IN (laplace.entity_type_id('CILI_Concept'), laplace.entity_type_id('CILI_Instance')ION')
                   AND e.type_id = laplace.entity_type_id('CILI_Concept')
                 LIMIT 1
                 """, conn);

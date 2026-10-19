@@ -13,41 +13,14 @@ public readonly struct WordNetSource : ISeedSource
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StandardsDerived");
 
-    public static readonly Dictionary<string, string> PointerTypes = new()
+    // wndb pointer symbols. The symbol is the predicate the data file wrote.
+    public static readonly HashSet<string> PointerSymbols = new(StringComparer.Ordinal)
     {
-        ["!"] = "IS_ANTONYM_OF",
-        ["@"] = "HAS_HYPERNYM",
-        ["@i"] = "IS_INSTANCE_OF",
-        ["~"] = "HAS_HYPONYM",
-        ["~i"] = "HAS_INSTANCE",
-        ["#m"] = "IS_MEMBER_OF",
-        ["#s"] = "IS_SUBSTANCE_OF",
-        ["#p"] = "IS_PART_OF",
-        ["%m"] = "mero_member",
-        ["%s"] = "mero_substance",
-        ["%p"] = "HAS_PART",
-        ["="] = "HAS_ATTRIBUTE",
-        ["+"] = "DERIVATIONALLY_RELATED",
-        [";c"] = "domain_topic",
-        ["-c"] = "IS_DOMAIN_TOPIC_MEMBER",
-        [";r"] = "domain_region",
-        ["-r"] = "IS_DOMAIN_REGION_MEMBER",
-        [";u"] = "exemplifies",
-        ["-u"] = "IS_DOMAIN_USAGE_MEMBER",
-        ["*"] = "ENTAILS",
-        [">"] = "CAUSES",
-        ["^"] = "ALSO_SEE",
-        ["$"] = "IN_VERB_GROUP_WITH",
-        ["&"] = "IS_SIMILAR_TO",
-        ["<"] = "IS_PARTICIPLE_OF",
-        ["\\"] = "PERTAINS_TO",
+        "!", "@", "@i", "~", "~i", "#m", "#s", "#p", "%m", "%s", "%p",
+        "=", "+", ";c", "-c", ";r", "-r", ";u", "-u", "*", ">", "^", "$", "&", "<", "\\",
     };
 
-    private static IReadOnlyList<string> DeclaredRelations { get; } = ["CORRESPONDS_TO"];
     public static IReadOnlyList<string> Relations { get; } = BuildRelations();
-
-    internal static readonly Hash128 CorrespondsToTypeId =
-        RelationTypeRegistry.RelationTypeId(DeclaredRelations[0]);
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["WordNet_Synset", "WordNet_Sense", "Source_Reference"];
@@ -60,18 +33,11 @@ public readonly struct WordNetSource : ISeedSource
     {
         var set = new HashSet<string>(StringComparer.Ordinal)
         {
-            "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
-            "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
-            "HAS_NAME", "MANNER_OF",
+            "HAS_POS", "Sense", "gloss", "example", "lex_filenum", "lemma",
         };
-        foreach (string name in DeclaredRelations)
-            set.Add(name);
-        // From the manifest's declared language scope, not a literal here: the source
-        // states the language, this only obliges the declaration to match what the
-        // decomposer emits. DecomposerArchitectureGateTests faults an undeclared emit.
+        foreach (string symbol in PointerSymbols)
+            set.Add(symbol);
         foreach (var name in EtlSource.LanguageScopeRelations)
-            set.Add(name);
-        foreach (var name in PointerTypes.Values)
             set.Add(name);
         return set.OrderBy(n => n, StringComparer.Ordinal).ToList();
     }

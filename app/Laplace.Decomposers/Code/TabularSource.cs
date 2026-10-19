@@ -13,11 +13,10 @@ public readonly struct TabularSource : ISeedSource
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StructuredCorpus");
 
-    public static IReadOnlyList<string> Relations { get; } =
-        ["PREDICTS", "IS_VALUE_IN", "IS_INSTANCE_OF"];
+    public static IReadOnlyList<string> Relations { get; } = [];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["TabularColumn", "TabularValue", "TabularOutcome"];
+        ["TabularColumn", "TabularValue"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

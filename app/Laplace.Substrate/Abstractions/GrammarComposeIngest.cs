@@ -26,7 +26,8 @@ public readonly record struct GrammarComposeRecord(
     // The ordinary full-source grammar/file admission remains the record owner.
     IGrammarWitness? StructureWitness = null,
     bool RequireSourceAst = false,
-    bool RawText = false) : IIngestResidentRecord
+    bool RawText = false,
+    string? Language = null) : IIngestResidentRecord
 {
     public long ResidentInputBytes => (Utf8?.LongLength ?? 0) + (ObservedPromptUtf8?.LongLength ?? 0);
 }
@@ -38,7 +39,6 @@ public readonly record struct GrammarComposeRecord(
 /// </summary>
 public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeRecord>
 {
-    private static readonly Hash128 ExampleRelation = RelationTypeRegistry.Resolve("HAS_EXAMPLE").Id;
     private readonly Hash128 _sourceId;
     private readonly double _trust;
     private readonly ISubstrateReader? _reader;
@@ -62,7 +62,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         GrammarComposeRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
         if (root == default) return;
-        EmitConceptLinks(builder, record, root, _sourceId, _trust);
+        EmitConceptLinks(builder, record, root, _sourceId, _trust, unit);
         if (record.StructureWitness is { } witness)
         {
             if (!string.Equals(record.Modality, witness.ModalityId, StringComparison.Ordinal))
@@ -74,22 +74,29 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     }
 
     private static void EmitConceptLinks(
-        SubstrateChangeBuilder builder, GrammarComposeRecord record, Hash128 rootId, Hash128 sourceId, double trust)
+        SubstrateChangeBuilder builder, GrammarComposeRecord record, Hash128 rootId,
+        Hash128 sourceId, double trust, IIngestDeferredUnit unit)
     {
-        if (record.ConceptAnchorKey is not { Length: > 0 }
+        // The relative path is the file's name in the tree. The named file is
+        // [path, content]. A container edge would restate that composition.
+        if (record.ConceptAnchorKey is not { Length: > 0 } key
             || record.ConceptCategoryTypeId is not { } ctype || ctype == default
-            || CategoryAnchor.Emit(builder, record.ConceptAnchorKey, sourceId) is not { } conceptId)
+            || CategoryAnchor.Emit(builder, key, sourceId) is not { } pathId)
             return;
 
-        if (record.ParentContainerId is { } parent && parent != default)
+        string path = key.Trim();
+        if (!CompositionLaw.TryFace(path, out CompositionLaw.Face pathFace) || pathFace.Id != pathId)
+            throw new InvalidOperationException("named-file path floor diverged from its content id");
+        byte rootTier = unit switch
         {
-            builder.AddAttestation(NativeAttestation.Categorical(
-                parent, "CONTAINS", conceptId, sourceId, trust));
-        }
-        builder.AddAttestation(NativeAttestation.CategoricalResolved(
-            conceptId, ExampleRelation, rootId, sourceId, null, trust));
-        builder.AddAttestation(NativeAttestation.Categorical(
-            rootId, "HAS_DEFINITION", conceptId, sourceId, trust));
+            Unit native => native.ReturnedTier,
+            RawFileUnit raw => raw.ReturnedTier,
+            _ => throw new InvalidOperationException("named-file root was staged without a floor"),
+        };
+        byte floor = CompositionLaw.ParentFloor([pathFace.Tier, rootTier]);
+        Hash128 named = Hash128.Merkle(floor, [pathId, rootId]);
+        builder.AddEntity(named, floor, ctype);
+        _ = trust;
     }
 
     private sealed class RawFileUnit : IIngestDeferredUnit
@@ -98,6 +105,11 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         private readonly Hash128 _sourceId;
         private readonly double _trust;
         private readonly IIngestDeferredUnit _content;
+        private byte _returnedTier;
+        private bool _returned;
+        internal byte ReturnedTier => _returned
+            ? _returnedTier
+            : throw new InvalidOperationException("raw source root was staged without a floor");
         public RawFileUnit(GrammarComposeRecord record, Hash128 sourceId, double trust)
         {
             if (record.Modality != "text" || record.FileMetadata is null || record.FileMetadata.Value.Modality != "text"
@@ -119,6 +131,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             if (content == default || content != file.ContentRootId)
                 throw new InvalidDataException("Raw source changed between native content and file composition.");
             builder.SetFileId(file.FileId);
+            _returnedTier = file.Tier;
+            _returned = true;
             return file.FileId;
         }
         public void Dispose() => _content.Dispose();
@@ -137,7 +151,12 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         private OrderedCompositionRequest? _observation;
         private OrderedCompositionComponent _root;
         private Hash128 _rootId;
+        private byte _returnedTier;
+        private bool _returned;
         private bool _disposed;
+        internal byte ReturnedTier => _returned
+            ? _returnedTier
+            : throw new InvalidOperationException("source root was staged without a floor");
 
         public Unit(GrammarComposeRecord record, Hash128 sourceId, double trust, ISubstrateReader? reader)
         {
@@ -177,6 +196,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             GrammarTagWitness.Emit(builder, _record.Utf8, _ast, _composer,
                 _record.Modality, _sourceId, _trust, _rootId);
 
+            byte stagedTier = _root.Tier;
             if (_observation is not null && _promptComposer is not null)
             {
                 _promptComposer.DrainInto(builder, witnessWeight);
@@ -187,50 +207,19 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 OrderedComposition.StageBatch(builder.ContentStage, [_observation], pair);
                 if (pair[0].Id != _rootId)
                     throw new InvalidOperationException("observed prompt/response identity changed during staging");
-                // Resolve the instruction exactly as conversation admission does.
-                // The context keeps the unnormalized source bytes and their
-                // ordered pairing; a grammar AST is not the query's text root.
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    prompt, ExampleRelation, emitted, _sourceId, _rootId, _trust));
-            }
-
-            if (_rootId != default && _record.ExampleSegments is { Count: > 0 })
-            {
-                foreach (var seg in _record.ExampleSegments)
-                {
-                    if (seg.Length < 3) continue;
-                    if (ContentTierSpine.TryStageIntoBuilder(
-                            builder, System.Text.Encoding.UTF8.GetBytes(seg), _sourceId, out var segRoot))
-                    {
-                        builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                            segRoot, ExampleRelation, _rootId, _sourceId, null, _trust));
-                    }
-                }
-            }
-
-            // Concept-anchor converse.links(repo CONTAINS this file, file HAS_DEFINITION this
-            // concept) moved to WalkWitness — the pipeline calls handler.WalkWitness
-            // right after DrainInto on every novel record (IngestDescentFlush.cs) AND
-            // on every content-already-known short-circuit (IngestExistenceGate.cs), so
-            // emitting them there instead of here covers both paths from one call site
-            // instead of duplicating the block (GH #592).
-
-            if (_rootId != default && _record.KeywordExamples is { Count: > 0 })
-            {
-                foreach (var kw in _record.KeywordExamples)
-                {
-                    if (kw.Length < 4) continue;
-                    if (ContentTierSpine.TryStageIntoBuilder(
-                            builder, System.Text.Encoding.UTF8.GetBytes(kw), _sourceId, out var kwRoot))
-                    {
-                        builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                            kwRoot, ExampleRelation, _rootId, _sourceId, null, _trust));
-                    }
-                }
+                stagedTier = pair[0].Tier;
+                if (!string.IsNullOrEmpty(_record.Language))
+                    ContentEmitter.Emit(builder, _record.Language, _sourceId);
+                _ = prompt;
+                _ = emitted;
             }
 
             if (_record.FileMetadata is not { } metadata)
+            {
+                _returnedTier = stagedTier;
+                _returned = true;
                 return _rootId;
+            }
             if (!string.Equals(metadata.Modality, _record.Modality, StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     "whole-source file metadata modality does not match its grammar recipe");
@@ -239,6 +228,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 throw new InvalidOperationException(
                     "whole-source file composition changed its grammar content identity");
             builder.SetFileId(file.FileId);
+            _returnedTier = file.Tier;
+            _returned = true;
             return file.FileId;
         }
 
@@ -264,8 +255,11 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                         "markdown", GrammarCompositionMode.FullSource);
                     _promptTree = ContentTierSpine.BuildTree(prompt)
                         ?? throw new InvalidOperationException("observed prompt cannot be resolved as conversation content");
+                    OrderedCompositionComponent[] parts = TryLanguage(_record.Language, out var language)
+                        ? [language, _promptComposer.RootComponent(), _root]
+                        : [_promptComposer.RootComponent(), _root];
                     _observation = new OrderedCompositionRequest(
-                        [_promptComposer.RootComponent(), _root], EntityTypeRegistry.Text, _sourceId, 0);
+                        parts, EntityTypeRegistry.Text, _sourceId, 0);
                     _rootId = OrderedComposition.ComposeBatch([_observation])[0].Id;
                 }
             }
@@ -278,6 +272,19 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 _promptTree?.Dispose();
                 throw;
             }
+        }
+
+        private static unsafe bool TryLanguage(string? language, out OrderedCompositionComponent component)
+        {
+            component = default;
+            if (string.IsNullOrEmpty(language)) return false;
+            using var tree = ContentTierSpine.BuildTree(System.Text.Encoding.UTF8.GetBytes(language));
+            if (tree is null) return false;
+            TierNodeView node = tree.GetNode(tree.NaturalUnitIndex());
+            component = new OrderedCompositionComponent(
+                node.Id, node.Tier, node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3],
+                node.Atom, node.Tier == 0);
+            return true;
         }
 
         public void Dispose()

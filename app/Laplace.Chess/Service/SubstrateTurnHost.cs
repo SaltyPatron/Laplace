@@ -103,7 +103,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var lineId = ChessCompose.LineId(
             line[0].Id, moves.Select(static n => n.Id).ToArray());
-        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
+        b.AddEntity(lineId, ChessCompose.LineFloor(moves.Count), ChessVocabulary.GameType);
         PlyOutcome whiteOutcome = WhiteOutcome(edges, adjudicated);
         string resultToken = whiteOutcome switch
         {

@@ -14,7 +14,9 @@
       "syntaxPath": "Lemma/@pos",
       "propertyName": "lemmaPos",
       "valueKind": "Enumerated",
-      "disposition": "Excluded"
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/framenet"
     },
     {
       "syntaxPath": "Lemma/@id",
@@ -57,7 +59,9 @@
       "syntaxPath": "LexemeEntry/@lexemepos",
       "propertyName": "lexemePos",
       "valueKind": "Enumerated",
-      "disposition": "Excluded"
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/framenet"
     },
     {
       "syntaxPath": "LexemeEntry/@id",

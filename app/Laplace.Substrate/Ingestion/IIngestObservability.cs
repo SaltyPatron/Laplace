@@ -14,6 +14,18 @@ public interface IIngestObservability
         IngestInventory? inventory,
         IngestArtifactGraph? artifactGraph) => OnRunStart(sourceName, layerOrder, inventory);
 
+    /// <summary>
+    /// The journal row's source id is the id attestations carry. For a recipe generation
+    /// that is the witness composition [authority, release], not <c>source_id(sourceName)</c>.
+    /// </summary>
+    void OnRunStart(
+        string sourceName,
+        Hash128 sourceId,
+        int layerOrder,
+        IngestInventory? inventory,
+        IngestArtifactGraph? artifactGraph) =>
+        OnRunStart(sourceName, layerOrder, inventory, artifactGraph);
+
     void OnIntentApplied(string sourceName, ApplyResult result);
 
     void OnIntentFailed(string sourceName, IngestFailure failure);
@@ -23,6 +35,9 @@ public interface IIngestObservability
     void OnRunFailed(string sourceName, string status, string error) { }
 
     void OnRunSkipped(string sourceName, int layerOrder) { }
+
+    void OnRunSkipped(string sourceName, Hash128 sourceId, int layerOrder) =>
+        OnRunSkipped(sourceName, layerOrder);
 
     void OnProgress(IngestProgress progress) { }
 

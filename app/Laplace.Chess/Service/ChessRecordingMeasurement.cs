@@ -211,12 +211,13 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
             && (row.TypeId == ChessVocabulary.PlaysLineType || row.TypeId == ChessVocabulary.HasEventType))
         || (row.ContextId is { } context && playings.Contains(context)
             && (row.TypeId == ChessVocabulary.RelTypeHasPlayer
+                || row.TypeId == ChessVocabulary.WhiteType || row.TypeId == ChessVocabulary.BlackType
                 || row.TypeId == ChessVocabulary.HasResultType || row.TypeId == ChessVocabulary.HasTerminationType
                 || row.TypeId == WitnessRelations.Setup));
 
     private static class WitnessRelations
     {
-        internal static readonly Hash128 Setup = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
+        internal static readonly Hash128 Setup = ChessVocabulary.HasSetupType;
     }
 
     internal async Task VerifyChunkAsync(NpgsqlDataSource ds, IReadOnlyList<ChessGameRecord> games,

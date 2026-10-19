@@ -191,7 +191,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 var lineId = ChessCompose.LineId(
                     session.PositionIds[0],
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.MoveIds));
-                b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
+                b.AddEntity(lineId, ChessCompose.LineFloor(session.MoveIds.Count), ChessVocabulary.GameType);
 
                 playingId = ChessVocabulary.LivePlayingId(
                     session.WhitePlayerId, session.BlackPlayerId, session.LearnContext,
@@ -579,7 +579,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         string token = result.ResultToken;
         if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
             b.AddAttestation(NativeAttestation.Categorical(
-                lineId, "HAS_RESULT", rid,
+                lineId, "Result", rid,
                 ChessVocabulary.SourceId, eventId, WitnessWeight));
     }
 
@@ -597,7 +597,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         if (eventName.Length > 0)
         {
             var eventId = ChessVocabulary.PgnEventId(eventName, site, date);
-            b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType);
+            b.AddEntity(eventId, ChessVocabulary.PgnEventFloor(eventName, site, date), ChessVocabulary.EventType);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 playingId, ChessVocabulary.HasEventType, eventId,
                 ChessVocabulary.SourceId, null, WitnessWeight));
@@ -608,14 +608,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
         string tc = Clean(meta.TimeControl);
         AddMeta(b, lineId, ChessVocabulary.HasTimeControlType, tc, playingId);
-        string tcClass = Clean(meta.TimeControlClass);
-        if (tcClass.Length == 0 && tc.Length > 0) tcClass = ChessPgnDecomposer.TcClass(tc);
-        AddMeta(b, lineId, ChessVocabulary.HasTcClassType, tcClass, playingId);
 
         if (session.WhitePlayerId is { } wp && meta.WhiteRating is > 0)
-            AddRating(b, wp, meta.WhiteRating.Value, playingId);
+            AddRating(b, wp, meta.WhiteRating.Value, "WhiteElo", playingId);
         if (session.BlackPlayerId is { } bp && meta.BlackRating is > 0)
-            AddRating(b, bp, meta.BlackRating.Value, playingId);
+            AddRating(b, bp, meta.BlackRating.Value, "BlackElo", playingId);
 
         string? startFen = NonStandardStartFen(meta.StartFen);
         if (startFen is not null)
@@ -647,11 +644,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     }
 
     private static void AddRating(
-        SubstrateChangeBuilder b, Hash128 playerId, int rating, Hash128 playingId)
+        SubstrateChangeBuilder b, Hash128 playerId, int rating, string tag, Hash128 playingId)
     {
         if (ContentEmitter.Emit(b, rating.ToString(CultureInfo.InvariantCulture), ChessVocabulary.SourceId) is { } ratingId)
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                playerId, ChessVocabulary.HasRatingType, ratingId,
+            b.AddAttestation(NativeAttestation.Categorical(
+                playerId, tag, ratingId,
                 ChessVocabulary.SourceId, playingId, WitnessWeight));
     }
 

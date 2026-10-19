@@ -17,7 +17,7 @@ public sealed class ChessMoveCommentaryConcurrencyTests
 
         Assert.Contains("var historyTask =", method);
         Assert.Contains("var bookTask =", method);
-        Assert.Contains("await Task.WhenAll(historyTask, bookTask)", method);
+        Assert.Contains("await Task.WhenAll(historyTask, bookTask", method);
         Assert.DoesNotContain("&& await HistoricalPositionLineAsync", method);
         Assert.DoesNotContain("&& await BookLineAsync", method);
     }

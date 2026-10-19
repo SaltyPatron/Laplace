@@ -347,10 +347,10 @@ public static class InspectCommand
         string playingPre = $"chess/playing/{white}|{black}|{date}|{ev}|{round}|{site}|{record.LineId}|{result}";
         string eventPre = $"chess/event/{ev}|{site}|{date}";
         var playing = new IdentityView("PLAYING (occurrence)", Hex(record.PlayingId),
-            "Hash128.OfCanonical: BLAKE3 of the UTF-8 string below (White|Black|Date|Event|Round|Site|LINE|Result)", playingPre,
-            Hash128.OfCanonical(playingPre) == record.PlayingId, null, "minted from a formatted string, not composed from content (#46.1)");
-        var eventView = new IdentityView("EVENT", Hex(record.EventId), "Hash128.OfCanonical: BLAKE3 of the UTF-8 string below (Event|Site|Date)",
-            eventPre, Hash128.OfCanonical(eventPre) == record.EventId, null, "minted from a formatted string (#46.1)");
+            "Hash128.Merkle: composed from content slots (White|Black|Date|Event|Round|Site|LINE|Result)", playingPre,
+            ChessVocabulary.PgnPlayingId(white, black, date, ev, round, site, record.LineId, result) == record.PlayingId, null, "minted from a formatted string, not composed from content (#46.1)");
+        var eventView = new IdentityView("EVENT", Hex(record.EventId), "Hash128.Merkle: composed from content slots (Event|Site|Date)",
+            eventPre, ChessVocabulary.PgnEventId(ev, site, date) == record.EventId, null, "minted from a formatted string (#46.1)");
         var players = new List<PlayerView>();
         foreach (var (side, name) in new[] { ("White", white), ("Black", black) })
         {

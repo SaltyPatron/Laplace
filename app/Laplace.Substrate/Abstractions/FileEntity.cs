@@ -172,7 +172,8 @@ public readonly record struct FileMetadata(
 public readonly record struct FileIdentity(
     Hash128 ContentRootId,
     Hash128 MetadataRootId,
-    Hash128 FileId);
+    Hash128 FileId,
+    byte Tier);
 
 /// <summary>
 /// A file is a real composition in the Merkle DAG:
@@ -271,7 +272,7 @@ public static class FileEntity
             OrderedComposition.StageBatch(stage, [request], results);
             result = results[0];
         }
-        return new FileIdentity(contentRoot.Id, metadataRoot.Id, result.Id);
+        return new FileIdentity(contentRoot.Id, metadataRoot.Id, result.Id, result.Tier);
     }
 
     /// <summary>Transport an already composed native tree root into the common file carrier.</summary>

@@ -37,6 +37,11 @@ public sealed class RoleCorrespondenceHandler : IIngestRecordHandler<RoleCorresp
         RoleCorrespondenceRecord record, Hash128 root,
         SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
 
+    private static byte ContentFloor(string? value) =>
+        value is not null && CompositionLaw.TryFace(value, out CompositionLaw.Face face)
+            ? face.Tier
+            : (byte)0;
+
     private sealed class Unit(
         RoleCorrespondenceRecord record, Hash128 sourceId,
         Hash128 relationTypeId, double trust) : IIngestDeferredUnit
@@ -58,11 +63,11 @@ public sealed class RoleCorrespondenceHandler : IIngestRecordHandler<RoleCorresp
             RoleIdentityKind subjectKind = RoleAnchor.KindForParentType(record.SubjectParentTypeId);
             RoleIdentityKind objectKind = RoleAnchor.KindForParentType(record.ObjectParentTypeId);
             Hash128? subjectRole = RoleAnchor.Declare(
-                builder, subjectKind, subjectParent.Value, record.SubjectRoleKey,
-                RoleAnchor.EntityTypeFor(subjectKind), sourceId);
+                builder, subjectKind, subjectParent.Value, ContentFloor(record.SubjectParentKey),
+                record.SubjectRoleKey, RoleAnchor.EntityTypeFor(subjectKind), sourceId);
             Hash128? objectRole = RoleAnchor.Declare(
-                builder, objectKind, objectParent.Value, record.ObjectRoleKey,
-                RoleAnchor.EntityTypeFor(objectKind), sourceId);
+                builder, objectKind, objectParent.Value, ContentFloor(record.ObjectParentKey),
+                record.ObjectRoleKey, RoleAnchor.EntityTypeFor(objectKind), sourceId);
             if (subjectRole is null || objectRole is null) return default;
 
             builder.AddAttestation(NativeAttestation.ResolvedScored(

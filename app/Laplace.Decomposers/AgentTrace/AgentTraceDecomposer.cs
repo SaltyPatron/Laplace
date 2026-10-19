@@ -43,8 +43,7 @@ public sealed class AgentTraceDecomposer
             var toolBoot = new BootstrapIntentBuilder(
                 scope.ToolSource, $"ToolResult@{provider}",
                 TrustClassRegistry.Id("ToolResultContent"));
-            foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(
-                         [AgentRelations.Surface(AgentRelation.AppearsIn)]))
+            foreach (var r in AgentTraceSource.Relations)
                 toolBoot.AddRelationType(r);
             var changes = ConversationContent.BuildTenantBootstrapChanges(scope.Tenant).ToList();
             changes.Add(toolBoot.Build());

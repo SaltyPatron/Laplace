@@ -191,41 +191,47 @@ public static class NativeRecipeCompiler
             if (!Enum.IsDefined(field.ValueKind) || !Enum.IsDefined(field.ReferenceCodec))
                 throw new InvalidDataException($"Unknown native recipe opcode at '{field.SyntaxPath}'.");
 
-            bool testimony = field.Disposition.HasFlag(SourceFieldDisposition.Testimony);
+            SourceFieldDisposition disposition = EffectiveDisposition(recipe, field);
+            bool testimony = disposition.HasFlag(SourceFieldDisposition.Testimony);
             // A key-value composition keeps the field's one governed relation; only the
             // relation-naming pair modes and relation fields resolve per item.
             bool dynamicRelation = (field.PairMode != SourcePairMode.None
                     && field.PairMode != SourcePairMode.KeyValueComposition)
                 || field.RelationField is not null;
+            string predicate = WitnessPredicate(field);
             var relation = testimony && !dynamicRelation
-                ? RelationTypeRegistry.Resolve(field.RelationName ?? field.PropertyName)
+                ? RelationTypeRegistry.Resolve(predicate)
                 : default;
-            // A static field emits (record subject, relation, value). A name that resolves
-            // with a flip (an inverse alias or a flipped retirement) states the claim in the
-            // inverse direction: the field program carries the flip and the stream emits
-            // (value, relation, record subject).
-            bool flip = testimony && !dynamicRelation && relation.Flip;
-            double rank = field.RelationRank ?? (testimony && !dynamicRelation ? relation.Rank : 1);
+            // An alias ("antonym", "holo_member") is the file's token. Baking the manifest
+            // canonical, its flip, or its qualifier stores a different predicate.
+            bool alias = testimony && !dynamicRelation && SurfaceAlias(relation, predicate);
+            Hash128 relationId = !testimony || dynamicRelation
+                ? Hash128.Zero
+                : alias ? RelationTypeRegistry.RelationTypeId(predicate) : relation.Id;
+            bool flip = false;
+            double rank = field.RelationRank ?? (testimony && !dynamicRelation ? (alias ? 1 : relation.Rank) : 1);
             if (!double.IsFinite(rank) || rank is < 0 or > 1)
                 throw new InvalidDataException($"Invalid relation rank at '{field.SyntaxPath}'.");
+            bool witnessNamed = predicate != (field.RelationName ?? field.PropertyName);
             Hash128 parent = !testimony || dynamicRelation ? Hash128.Zero : field.RelationParent is { } parentName
-                ? RelationTypeRegistry.Resolve(parentName).Id : relation.ParentId ?? Hash128.Zero;
+                ? RelationTypeRegistry.RelationTypeId(parentName)
+                : witnessNamed || alias ? Hash128.Zero : relation.ParentId ?? Hash128.Zero;
             Hash128 lexical = Hash128.Zero;
             if (testimony && field.PreserveLexicalValue)
             {
                 if (string.IsNullOrEmpty(field.LexicalRelationName))
                     throw new InvalidDataException($"Missing lexical relation at '{field.SyntaxPath}'.");
-                lexical = RelationTypeRegistry.Resolve(field.LexicalRelationName).Id;
+                lexical = TokenOrCanonical(field.LexicalRelationName);
             }
 
             WriteText(writer, field.SyntaxPath);
             writer.Write((uint)field.ValueKind);
-            writer.Write((uint)field.Disposition);
+            writer.Write((uint)disposition);
             writer.Write((uint)field.ReferenceCodec);
             WriteText(writer, field.AbsentSentinel);
             WriteText(writer, field.SequenceSeparator);
             WriteText(writer, field.ObjectNamespace ?? $"recipe/value/{field.PropertyName}");
-            WriteHash(writer, relation.Id);
+            WriteHash(writer, relationId);
             WriteHash(writer, parent);
             // An empty object entity type declares no classification testimony.
             WriteHash(writer, string.IsNullOrEmpty(field.ObjectEntityType)
@@ -276,15 +282,15 @@ public static class NativeRecipeCompiler
                 WriteText(writer, field.SpanEndField);
                 WriteParts(writer, field.ObjectParts);
                 writer.Write(flip ? 1u : 0u);
-                int surfaceQualifier = testimony && !dynamicRelation
-                    ? NativeInterop.RelationSurfaceQualifier(field.RelationName ?? field.PropertyName) : -1;
+                int surfaceQualifier = testimony && !dynamicRelation && !alias
+                    ? NativeInterop.RelationSurfaceQualifier(predicate) : -1;
                 writer.Write(surfaceQualifier >= 0 ? checked((uint)surfaceQualifier + 1) : 0u);
                 WriteText(writer, field.OutcomeField);
                 WriteText(writer, field.RefuteValue);
                 WriteText(writer, field.DrawPrefix);
                 WriteText(writer, field.ValueListSeparator);
                 WriteHash(writer, field.FlagRelation is null
-                    ? Hash128.Zero : RelationTypeRegistry.Resolve(field.FlagRelation).Id);
+                    ? Hash128.Zero : TokenOrCanonical(field.FlagRelation));
                 writer.Write(field.SignedValues ? 1u : 0u);
                 writer.Write(field.RequireContext ? 1u : 0u);
                 WriteText(writer, field.UnlessField);
@@ -403,7 +409,7 @@ public static class NativeRecipeCompiler
                     WriteParts(writer, element.Parts);
                     WriteHash(writer, EntityTypeRegistry.Id(element.EntityType));
                     WriteHash(writer, element.Relation is null
-                        ? Hash128.Zero : RelationTypeRegistry.Resolve(element.Relation).Id);
+                        ? Hash128.Zero : TokenOrCanonical(element.Relation));
                     WriteText(writer, element.ObservationField);
                     WriteText(writer, element.WhenField);
                     WriteText(writer, element.WhenValue);
@@ -418,14 +424,25 @@ public static class NativeRecipeCompiler
                     WriteText(writer, child.IdentityField);
                     // The parent relation is a governed surface: an inverse alias reverses
                     // the link and carries its qualifier (IS_MEMBER_OF -> HAS_PART {member}).
-                    RelationTypeRegistry.RelationTypeResolution? link = child.ParentRelation is null
-                        ? null : RelationTypeRegistry.Resolve(child.ParentRelation);
-                    WriteHash(writer, link?.Id ?? Hash128.Zero);
+                    // A manifest name with no inverse is the recipe's invention; the child
+                    // element is the witness's own word.
+                    string? parentName = child.ParentRelation;
+                    if (parentName is not null && ManifestCanonical.Value.Contains(parentName)
+                        && child.ChildPath.Length > 0)
+                    {
+                        RelationTypeRegistry.RelationTypeResolution probed = RelationTypeRegistry.Resolve(parentName);
+                        if (!probed.Flip) parentName = child.ChildPath;
+                    }
+                    RelationTypeRegistry.RelationTypeResolution? link = parentName is null
+                        ? null : RelationTypeRegistry.Resolve(parentName);
+                    bool linkAlias = link is { } resolved && SurfaceAlias(resolved, parentName!);
+                    WriteHash(writer, link is null ? Hash128.Zero
+                        : linkAlias ? RelationTypeRegistry.RelationTypeId(parentName!) : link.Value.Id);
                     WriteHash(writer, EntityTypeRegistry.Id(child.EntityType));
-                    writer.Write((child.ChildIsSubject ^ (link?.Flip ?? false) ? 1u : 0u) | (child.Standalone ? 2u : 0u));
+                    writer.Write((child.ChildIsSubject ^ (!linkAlias && (link?.Flip ?? false)) ? 1u : 0u) | (child.Standalone ? 2u : 0u));
                     WriteParts(writer, child.IdentityParts);
-                    int linkQualifier = child.ParentRelation is null
-                        ? -1 : NativeInterop.RelationSurfaceQualifier(child.ParentRelation);
+                    int linkQualifier = parentName is null || linkAlias
+                        ? -1 : NativeInterop.RelationSurfaceQualifier(parentName);
                     writer.Write(linkQualifier >= 0 ? checked((uint)linkQualifier + 1) : 0u);
                     WriteText(writer, child.OutcomeField);
                     WriteText(writer, child.RefuteValue);
@@ -569,4 +586,86 @@ public static class NativeRecipeCompiler
             WriteText(writer, pair.Value);
         }
     }
+
+    /// <summary>Packaging is recorded nowhere. The record identity is the subject entity, not an edge.</summary>
+    public static bool EmitsTestimony(SemanticSourceRecipe recipe, SourceRecipeField field) =>
+        EffectiveDisposition(recipe, field).HasFlag(SourceFieldDisposition.Testimony);
+
+    /// <summary>
+    /// The predicate is the source's own field token when the recipe named a manifest relation instead.
+    /// A name the manifest does not govern is already the witness's word and is kept.
+    /// An attribute token wins; an element or column with no attribute uses its own name.
+    /// </summary>
+    public static string WitnessPredicate(SourceRecipeField field)
+    {
+        string configured = field.RelationName ?? field.PropertyName;
+        if (!ManifestCanonical.Value.Contains(configured))
+            return configured;
+        string? token = AttributeToken(field.SyntaxPath) ?? ElementToken(field.SyntaxPath);
+        if (string.IsNullOrEmpty(token) || token == configured)
+            return configured;
+        return token;
+    }
+
+    private static SourceFieldDisposition EffectiveDisposition(SemanticSourceRecipe recipe, SourceRecipeField field)
+    {
+        SourceFieldDisposition disposition = field.Disposition;
+        if (disposition.HasFlag(SourceFieldDisposition.Packaging))
+            return disposition & ~(SourceFieldDisposition.Testimony | SourceFieldDisposition.Content);
+        if (disposition.HasFlag(SourceFieldDisposition.Identity) && IsRecordIdentity(recipe, field))
+            return disposition & ~SourceFieldDisposition.Testimony;
+        return disposition;
+    }
+
+    private static bool IsRecordIdentity(SemanticSourceRecipe recipe, SourceRecipeField field)
+    {
+        foreach (SourceRecipeProviderRoute route in recipe.ProviderRoutes)
+        {
+            if (NamesAttribute(field.SyntaxPath, route.FieldPrefix, route.Subject.IdentityField)) return true;
+            foreach (SourceChildSubject child in route.ChildSubjects ?? [])
+                if (NamesAttribute(field.SyntaxPath, child.ChildPath, child.IdentityField)) return true;
+        }
+        return false;
+    }
+
+    private static bool NamesAttribute(string path, string? prefix, string? field)
+    {
+        if (string.IsNullOrEmpty(prefix) || string.IsNullOrEmpty(field)) return false;
+        return path == prefix + "/@" + field || path == prefix + "/@" + field + "#ns";
+    }
+
+    private static string? AttributeToken(string path)
+    {
+        int at = path.LastIndexOf('@');
+        if (at < 0 || at + 1 >= path.Length) return null;
+        string token = path[(at + 1)..];
+        int hash = token.IndexOf('#');
+        if (hash >= 0) token = token[..hash];
+        return token.Length == 0 ? null : token;
+    }
+
+    private static string? ElementToken(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        int slash = path.LastIndexOf('/');
+        string token = slash < 0 ? path : path[(slash + 1)..];
+        int hash = token.IndexOf('#');
+        if (hash >= 0) token = token[..hash];
+        if (token.Length == 0 || token[0] == '@') return null;
+        return token;
+    }
+
+    private static bool SurfaceAlias(RelationTypeRegistry.RelationTypeResolution resolved, string name) =>
+        resolved.Flip || !string.Equals(resolved.Canonical, name, StringComparison.Ordinal);
+
+    private static Hash128 TokenOrCanonical(string name)
+    {
+        var resolved = RelationTypeRegistry.Resolve(name);
+        return SurfaceAlias(resolved, name)
+            ? RelationTypeRegistry.RelationTypeId(name)
+            : resolved.Id;
+    }
+
+    private static readonly Lazy<HashSet<string>> ManifestCanonical = new(static () =>
+        RelationTypeRegistry.AllCanonical().Select(static r => r.Canonical).ToHashSet(StringComparer.Ordinal));
 }

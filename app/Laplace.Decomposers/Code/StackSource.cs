@@ -13,8 +13,7 @@ public readonly struct StackSource : ISeedSource
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StructuredCorpus");
 
-    public static IReadOnlyList<string> Relations { get; } =
-        ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"];
+    public static IReadOnlyList<string> Relations { get; } = [];
 
     public static IReadOnlyList<string>? TypeNodeNames => null;
 

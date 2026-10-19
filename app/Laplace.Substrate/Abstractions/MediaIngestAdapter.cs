@@ -33,6 +33,7 @@ public abstract record VideoIngestRecord
 internal interface IResolvedRootCoordinateUnit
 {
     bool TryGetRootCoordinate(out double x, out double y, out double z, out double m);
+    bool TryGetRootTier(out byte tier);
 }
 
 public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
@@ -107,6 +108,14 @@ public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
                 z = root.Coord[2];
                 m = root.Coord[3];
             }
+            return true;
+        }
+
+        public bool TryGetRootTier(out byte tier)
+        {
+            tier = 0;
+            if (_tree is null || _tree.NodeCount == 0) return false;
+            tier = _tree.GetNode(_tree.NaturalUnitIndex()).Tier;
             return true;
         }
 
@@ -227,10 +236,11 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
                     root, builder, unit);
                 if (root == default) return;
                 if (unit is not IResolvedRootCoordinateUnit coordinate
-                    || !coordinate.TryGetRootCoordinate(out double x, out double y, out double z, out double m))
+                    || !coordinate.TryGetRootCoordinate(out double x, out double y, out double z, out double m)
+                    || !coordinate.TryGetRootTier(out byte tier))
                     throw new InvalidOperationException(
                         $"video frame {frame.FrameIndex} composed without a recoverable root coordinate");
-                _frames[frame.FrameIndex] = new FramePlacement(root, x, y, z, m);
+                _frames[frame.FrameIndex] = new FramePlacement(root, x, y, z, m, tier);
                 break;
 
             case VideoIngestRecord.SequenceEnd:
@@ -247,6 +257,7 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
         if (frames.Count == 0) return default;
 
         var roots = new Hash128[frames.Count];
+        var tiers = new byte[frames.Count];
         var coords = new double[frames.Count * 4];
         int expected = 0;
         foreach (var (ordinal, frame) in frames.OrderBy(static p => p.Key))
@@ -255,6 +266,7 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
                 throw new InvalidOperationException(
                     $"video trajectory is not contiguous: expected frame {expected}, found {ordinal}");
             roots[expected] = frame.Root;
+            tiers[expected] = frame.Tier;
             coords[expected * 4 + 0] = frame.X;
             coords[expected * 4 + 1] = frame.Y;
             coords[expected * 4 + 2] = frame.Z;
@@ -263,6 +275,7 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
         }
 
         Hash128 videoRoot = HashVideoRoot(roots);
+        byte floor = CompositionLaw.ParentFloor(tiers);
         double[] center = Math4d.KarcherMean(coords);
         var physicality = new PhysicalityRow(
             Id: PhysicalityId.Compute(videoRoot, PhysicalityType.Content),
@@ -277,7 +290,7 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
             SourceDim: null,
             ObservedAtUnixUs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000);
 
-        builder.AddEntity(videoRoot, EntityTier.Document, EntityTypeRegistry.Video);
+        builder.AddEntity(videoRoot, floor, EntityTypeRegistry.Video);
         builder.AddPhysicality(physicality);
         return videoRoot;
     }
@@ -296,7 +309,7 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
     }
 
     internal readonly record struct FramePlacement(
-        Hash128 Root, double X, double Y, double Z, double M);
+        Hash128 Root, double X, double Y, double Z, double M, byte Tier);
 
     private sealed class SequenceEndUnit : IIngestDeferredUnit
     {

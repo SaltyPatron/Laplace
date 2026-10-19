@@ -14,19 +14,16 @@ public sealed class TabularDecomposer
 
     private static readonly Hash128 ColumnTypeId = EntityTypeRegistry.TabularColumn;
     private static readonly Hash128 ValueTypeId = EntityTypeRegistry.TabularValue;
-    private static readonly Hash128 OutcomeTypeId = EntityTypeRegistry.TabularOutcome;
 
     private static readonly HashSet<string> IdLike =
         new(StringComparer.OrdinalIgnoreCase) { "id", "customerid", "rownumber" };
 
-    private readonly string _targetColumn;
-    private readonly string _positiveValue;
-    private Hash128 _outcomeId;
-
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {
-        _targetColumn = targetColumn;
-        _positiveValue = positiveValue;
+        // A target column and a positive label are an analysis of the table. The file's
+        // cells are recorded either way; these arguments are not predicates.
+        _ = targetColumn;
+        _ = positiveValue;
         _ = numBins;
     }
 
@@ -37,26 +34,11 @@ public sealed class TabularDecomposer
     // Dynamic table values are content, not canonical-name registry payloads.
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
-    private Hash128 OutcomeId => _outcomeId;
-    private static readonly Hash128 PredictsTypeId = RelationTypeRegistry.RelationTypeId("PREDICTS");
-
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/tabular-vocab", null,
-            entityCapacity: 8, physicalityCapacity: 8, attestationCapacity: 2)
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0)
             .DeclareSourcePrior(SourceTrust);
-
-        OrderedCompositionComponent target = RequireComponent(seed, _targetColumn);
-        OrderedCompositionComponent positive = RequireComponent(seed, _positiveValue);
-        Span<OrderedCompositionResult> outcome = stackalloc OrderedCompositionResult[1];
-        OrderedComposition.StageBatch(seed.ContentStage,
-            [new OrderedCompositionRequest([target, positive], OutcomeTypeId, Source, 0)], outcome);
-        _outcomeId = outcome[0].Id;
-
-        seed.AddAttestation(NativeAttestation.Categorical(
-            OutcomeId, "IS_INSTANCE_OF", target.Id, Source, TC.StructuredCorpus));
-        seed.AddAttestation(NativeAttestation.Categorical(
-            OutcomeId, "IS_INSTANCE_OF", positive.Id, Source, TC.StructuredCorpus));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -73,42 +55,27 @@ public sealed class TabularDecomposer
         string[]? header = await ReadHeaderAsync([filePath], ct);
         if (header is null || header.Length == 0) yield break;
 
-        var featureCols = header
-            .Where(c => !c.Equals(_targetColumn, StringComparison.Ordinal) && !IdLike.Contains(c))
-            .ToList();
-        if (featureCols.Count == 0) yield break;
+        var columns = header.Where(c => !IdLike.Contains(c)).ToList();
+        if (columns.Count == 0) yield break;
 
-        int targetIdx = Array.IndexOf(header, _targetColumn);
-        if (targetIdx < 0) yield break;
-
-        await foreach (var row in StreamRowsAsync([filePath], header, featureCols, targetIdx, ct))
+        await foreach (var row in StreamRowsAsync([filePath], header, columns, ct))
             yield return row;
     }
 
     protected override void Compose(RowRecord rec, SubstrateChangeBuilder b)
     {
-        double witnessWeight = RelationTypeRank.Associative * TC.StructuredCorpus;
-        long score = rec.Positive ? checked(2 * Glicko2.FpScale) : 0;
-
         foreach (var (col, raw) in rec.Cells)
         {
             string tok = raw.Trim();
             if (tok.Length == 0) continue;
 
+            // The cell is the ordered composition [column, value]. The column name and the
+            // cell text are its constituents; a second edge would only restate them.
             OrderedCompositionComponent column = EnsureColumn(b, col);
             OrderedCompositionComponent value = RequireComponent(b, tok);
             Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
             OrderedComposition.StageBatch(b.ContentStage,
                 [new OrderedCompositionRequest([column, value], ValueTypeId, Source, 0)], composed);
-            Hash128 valueId = composed[0].Id;
-
-            b.AddAttestation(NativeAttestation.Aggregated(
-                valueId, PredictsTypeId, OutcomeId, Source, contextId: column.Id,
-                games: 1, sumScoreFp1e9: score, witnessWeight: witnessWeight));
-            b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_VALUE_IN", column.Id, Source, TC.StructuredCorpus));
-            b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_INSTANCE_OF", value.Id, Source, TC.StructuredCorpus));
         }
     }
 
@@ -157,8 +124,7 @@ public sealed class TabularDecomposer
     private async IAsyncEnumerable<RowRecord> StreamRowsAsync(
         IReadOnlyList<string> files,
         string[] header,
-        IReadOnlyList<string> featureCols,
-        int targetIdx,
+        IReadOnlyList<string> columns,
         [EnumeratorCancellation] CancellationToken ct)
     {
         foreach (var f in files)
@@ -171,16 +137,15 @@ public sealed class TabularDecomposer
                 if (!skippedHeader) { skippedHeader = true; continue; }
                 if (fields.Length != header.Length) continue;
 
-                var rec = new Dictionary<string, string>(featureCols.Count, StringComparer.Ordinal);
+                var rec = new Dictionary<string, string>(columns.Count, StringComparer.Ordinal);
                 for (int i = 0; i < header.Length; i++)
                 {
                     string col = header[i];
-                    if (col.Equals(_targetColumn, StringComparison.Ordinal) || IdLike.Contains(col)) continue;
+                    if (IdLike.Contains(col)) continue;
                     rec[col] = fields[i];
                 }
 
-                bool positive = fields[targetIdx].Trim() == _positiveValue;
-                yield return new RowRecord(rec, positive);
+                yield return new RowRecord(rec);
             }
         }
     }
@@ -194,5 +159,5 @@ public sealed class TabularDecomposer
         return IngestInput.ResolveFiles(root, "*.csv").OrderBy(p => p, StringComparer.Ordinal);
     }
 
-    public readonly record struct RowRecord(IReadOnlyDictionary<string, string> Cells, bool Positive);
+    public readonly record struct RowRecord(IReadOnlyDictionary<string, string> Cells);
 }

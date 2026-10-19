@@ -28,10 +28,10 @@ public class ConceptAnchorTests
             entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
 
 
-        Hash128? id = ConceptAnchor.EmitSynset(b, 10676319, 'n', source, SourceTrust.StandardsDerived);
+        Hash128? id = ConceptAnchor.EmitSynset(b, 10676319, 'n', source, SourceTrust.StandardsDerived, "pwn30");
 
         Assert.NotNull(id);
-        Assert.Equal(id, ConceptAnchor.SynsetId(10676319, 'n'));
+        Assert.Equal(id, ConceptAnchor.SynsetId(10676319, 'n', "pwn30"));
 
 
 
@@ -79,8 +79,8 @@ public class ConceptAnchorTests
 
 
 
-        var asS = ConceptAnchor.SynsetId(satOffset, 's');
-        var asA = ConceptAnchor.SynsetId(satOffset, 'a');
+        var asS = ConceptAnchor.SynsetId(satOffset, 's', "pwn30");
+        var asA = ConceptAnchor.SynsetId(satOffset, 'a', "pwn30");
         Assert.NotNull(asS);
         Assert.NotNull(asA);
         Assert.Equal(asS, asA);

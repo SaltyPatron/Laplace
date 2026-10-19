@@ -100,7 +100,7 @@ public sealed class IngestRunner
                 "{Source}: already ingested (completion marker present and physicality contract satisfied) — "
                 + "short-circuiting; a re-ingest would double-count testimony into consensus.",
                 decomposer.SourceName);
-            _obs.OnRunSkipped(decomposer.SourceName, decomposer.LayerOrder);
+            _obs.OnRunSkipped(decomposer.SourceName, decomposer.SourceId, decomposer.LayerOrder);
             sw.Stop();
             return new IngestRunResult(
                 decomposer.SourceId, decomposer.SourceName,
@@ -149,7 +149,7 @@ public sealed class IngestRunner
             pathIsDir ? "dir" : pathIsFile ? "file" : "missing");
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, artifactGraph, options, ct);
-        _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory, artifactGraph);
+        _obs.OnRunStart(decomposer.SourceName, decomposer.SourceId, decomposer.LayerOrder, inventory, artifactGraph);
         using var obsScope = IngestObservabilityScope.Begin(_obs, decomposer.SourceName);
         log.LogInformation(
             "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",

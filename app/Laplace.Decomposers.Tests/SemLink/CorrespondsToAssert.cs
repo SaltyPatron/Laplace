@@ -8,9 +8,9 @@ namespace Laplace.Decomposers.SemLink.Tests;
 internal static class CorrespondsToAssert
 {
     internal static void Contains(
-        IEnumerable<AttestationRow> attestations, Hash128 categoryId, Hash128 synsetId)
+        IEnumerable<AttestationRow> attestations, Hash128 categoryId, Hash128 synsetId, string relation)
     {
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+        var corr = RelationTypeRegistry.RelationTypeId(relation);
         bool match(AttestationRow a) =>
             a.TypeId == corr &&
             ((a.SubjectId == categoryId && a.ObjectId == synsetId) ||

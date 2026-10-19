@@ -88,6 +88,20 @@ int intent_stage_add_physicality(
     int32_t             source_dim,
     int64_t             observed_at_unix_us);
 
+/* Physicality type of an entity's UPOS bank. One scalar slot, not a relation edge
+ * and not the content of an English tag. */
+#define INTENT_STAGE_LEXICAL_UPOS 11
+
+/* Deposit UPOS slot (0-based frozen bank slot) on an entity carrier that already
+ * has a coordinate. A second deposit of the same carrier is the same face.
+ * 0 placed or already placed; -1 invalid. */
+int intent_stage_deposit_lexical_upos(
+    intent_stage_t*     stage,
+    const hash128_t*    entity_id,
+    const double        coord[4],
+    const hilbert128_t* hilbert_index,
+    int32_t             slot);
+
 int intent_stage_add_attestation(
     intent_stage_t*  stage,
     const hash128_t* id,

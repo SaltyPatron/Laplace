@@ -17,7 +17,7 @@ public sealed class UnicodeSourceSemanticsTests
     {
         var rows = Read(Recipes + "link-formatting-test.recipe.json",
             "# comment\nhttps://example.com/#%CE%B1\n\n# between pair\nhttps://example.com/#α\n", chunk);
-        AssertClaim(rows, "https://example.com/#%CE%B1", "NORMALIZES_TO", "https://example.com/#α", "UTS58/LinkFormatting");
+        AssertClaim(rows, "https://example.com/#%CE%B1", "result", "https://example.com/#α", "UTS58/LinkFormatting");
     }
 
     [Fact]
@@ -40,12 +40,13 @@ public sealed class UnicodeSourceSemanticsTests
         foreach (var span in new[] { first, second })
         {
             Assert.Contains(rows, r => r.SubjectId == Root(text) && r.ObjectId == span
-                && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PARSE"));
+                && r.TypeId == RelationTypeRegistry.RelationTypeId("span"));
             Assert.Contains(rows, r => r.SubjectId == span && r.ObjectId == Root("a.com#x")
+                && r.TypeId == RelationTypeRegistry.RelationTypeId("text")
                 && r.ContextId == Root("Link_Text"));
         }
-        AssertClaim(rows, text, "HAS_ATTRIBUTE", "2", "Link_Count");
-        AssertClaim(rows, "no link here", "HAS_ATTRIBUTE", "0", "Link_Count");
+        AssertClaim(rows, text, "spanCount", "2", "Link_Count");
+        AssertClaim(rows, "no link here", "spanCount", "0", "Link_Count");
     }
 
     [Theory]
@@ -61,7 +62,7 @@ public sealed class UnicodeSourceSemanticsTests
         var bracket = Read(Recipes + "link-bracket.recipe.json", "0029 ; 0028 # closing to opening\n");
         Hash128 bracketProperty = Hash128.Merkle(EntityTier.Document, [Root("Link_Bracket"), Root("(")]);
         Assert.Contains(bracket, r => r.SubjectId == Root(")") && r.ObjectId == bracketProperty
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY"));
+            && r.TypeId == RelationTypeRegistry.RelationTypeId("pair"));
         var email = Read(Recipes + "link-email.recipe.json", "0041..0042 # range\n");
         Hash128 emailProperty = Hash128.Merkle(EntityTier.Document, [Root("Link_Email"), Root("Yes")]);
         Assert.Contains(email, r => r.SubjectId == Root("A") && r.ObjectId == emailProperty);

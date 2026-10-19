@@ -9,35 +9,18 @@ internal static class ConceptNetRelations
     // allocation (a byte[]-keyed dictionary would need a per-row string or custom comparer).
     private static readonly (byte[] RelUtf8, string TypeName, bool Negated)[]?[] ByLength = BuildByLength();
 
-    /*
-     * ConceptNet's /r/dbpedia/* lane, mapped onto GENERIC manifest relations rather than
-     * minted as DBPEDIA_<REL>. consensus.id is blake3(subject‖type‖object): a source-scoped
-     * type would give the same fact a private cell, so dbpedia's "Paris is France's capital"
-     * would never merge with the AT_LOCATION edge ConceptNet's own AtLocation lane emits.
-     * Mapped, both land on one cell and witness_count actually climbs -- which is the whole
-     * point of a fold. Provenance stays where it belongs, on AttestationRow.SourceId.
-     *
-     * TARGETS ARE RESTRICTED to types ConceptNetSource.BuildRelations already declares
-     * (AT_LOCATION, IS_A, RELATED_TO via RelMap; HAS_LANGUAGE from the fixed set). A
-     * decomposer emitting an undeclared relation faults the native attestation path, so
-     * widening this table means widening the declaration in the same commit.
-     *
-     * Flip is per-entry because dbpedia's subject order is not the manifest's. dbpedia says
-     * (France, capital, Paris); AT_LOCATION reads "subject is located at object", so the
-     * edge is emitted as (Paris, AT_LOCATION, France). Relations left out of this table
-     * still return false -- an uncertain mapping is worse than a dropped edge, because a
-     * wrong one silently corrupts a cell that other sources are also voting in.
-     */
+    // /r/dbpedia/* keeps dbpedia's token and dbpedia's direction. capital is
+    // (country, dbpedia/capital, city) because that is the row.
     private static readonly (byte[] RelUtf8, string TypeName, bool Flip)[] DbpediaMap =
     [
-        ("dbpedia/capital"u8.ToArray(),      "AT_LOCATION",  true),
-        ("dbpedia/language"u8.ToArray(),     "HAS_LANGUAGE", false),
-        ("dbpedia/genus"u8.ToArray(),        "IS_A",         false),
-        ("dbpedia/genre"u8.ToArray(),        "IS_A",         false),
-        ("dbpedia/occupation"u8.ToArray(),   "IS_A",         false),
-        ("dbpedia/knownFor"u8.ToArray(),     "RELATED_TO",   false),
-        ("dbpedia/influencedBy"u8.ToArray(), "RELATED_TO",   false),
-        ("dbpedia/field"u8.ToArray(),        "RELATED_TO",   false),
+        ("dbpedia/capital"u8.ToArray(),      "dbpedia/capital",      false),
+        ("dbpedia/language"u8.ToArray(),     "dbpedia/language",     false),
+        ("dbpedia/genus"u8.ToArray(),        "dbpedia/genus",        false),
+        ("dbpedia/genre"u8.ToArray(),        "dbpedia/genre",        false),
+        ("dbpedia/occupation"u8.ToArray(),   "dbpedia/occupation",   false),
+        ("dbpedia/knownFor"u8.ToArray(),     "dbpedia/knownFor",     false),
+        ("dbpedia/influencedBy"u8.ToArray(), "dbpedia/influencedBy", false),
+        ("dbpedia/field"u8.ToArray(),        "dbpedia/field",        false),
     ];
 
     public static bool TryResolveType(ReadOnlySpan<byte> relationUri, out string typeName)
@@ -47,12 +30,6 @@ internal static class ConceptNetRelations
         ReadOnlySpan<byte> relationUri, out string typeName, out bool flip)
         => TryResolveType(relationUri, out typeName, out flip, out _);
 
-    /// <summary>
-    /// <paramref name="negated"/> is set for the Not* relations, which map onto the
-    /// relation they deny; the caller negates the row's magnitude so it folds as a
-    /// refutation into that relation's cell. The flag sits in the lookup table, so it
-    /// costs no second comparison.
-    /// </summary>
     public static bool TryResolveType(
         ReadOnlySpan<byte> relationUri, out string typeName, out bool flip, out bool negated)
     {

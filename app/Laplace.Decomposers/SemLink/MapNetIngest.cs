@@ -38,6 +38,7 @@ internal static class MapNetIngest
                                    : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
                                        FnLuSynsetBridgeIngest.MultiWordNetVersion) ?? default;
                            },
+                           relationType: Path.GetFileNameWithoutExtension(path),
                            maxInputUnits: maxInputUnits,
                            ct: ct))
         {

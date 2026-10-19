@@ -194,12 +194,13 @@ try {
             $schemas=@('app')
             $owners=@($owner,$access.admin_role)
         }else{
+            $null=Query "GRANT pg_read_all_stats, pg_signal_backend TO `"$role`";"
             $schemas=(Query "SELECT nspname FROM pg_namespace WHERE nspname !~ '^pg_' AND nspname NOT IN ('information_schema','app') ORDER BY nspname;" $selected) -split "`n"
             $owners=@($access.admin_role)
         }
         foreach($schema in $schemas){
             if($schema -notmatch '^[A-Za-z0-9_]+$'){throw 'Unexpected schema identifier.'}
-            $permissions=if($schema -eq 'public'){'SELECT'}else{'SELECT,INSERT,UPDATE,DELETE'}
+            $permissions=if($schema -eq 'public'){'SELECT'}elseif($Database -eq 'substrate'){'SELECT,INSERT,UPDATE,DELETE,MAINTAIN'}else{'SELECT,INSERT,UPDATE,DELETE'}
             $null=Query "GRANT USAGE ON SCHEMA `"$schema`" TO `"$role`"; GRANT $permissions ON ALL TABLES IN SCHEMA `"$schema`" TO `"$role`"; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA `"$schema`" TO `"$role`";" $selected
             if($Database -eq 'substrate'){$null=Query "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA `"$schema`" TO `"$role`";" $selected}
             foreach($owner in $owners){$null=Query "ALTER DEFAULT PRIVILEGES FOR ROLE `"$owner`" IN SCHEMA `"$schema`" GRANT $permissions ON TABLES TO `"$role`"; ALTER DEFAULT PRIVILEGES FOR ROLE `"$owner`" IN SCHEMA `"$schema`" GRANT USAGE,SELECT ON SEQUENCES TO `"$role`";" $selected}

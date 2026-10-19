@@ -24,6 +24,22 @@
       "disposition": "Excluded"
     },
     {
+      "syntaxPath": "Alias/@pos",
+      "propertyName": "aliasPos",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/propbank"
+    },
+    {
+      "syntaxPath": "ArgAlias/@pos",
+      "propertyName": "argumentAliasPos",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/propbank"
+    },
+    {
       "syntaxPath": "ArgAlias",
       "propertyName": "argumentAlias",
       "valueKind": "Text",
@@ -70,8 +86,6 @@
       "objectParts": [
         {
           "path": "@class",
-          "splitLast": "-.",
-          "side": "Each",
           "nested": true,
           "scopeEntityType": "VerbNet_Class"
         },
@@ -108,9 +122,7 @@
       "contextField": "version",
       "objectParts": [
         {
-          "path": "value()",
-          "splitLast": "-.",
-          "side": "Each"
+          "path": "value()"
         }
       ]
     },
@@ -1825,15 +1837,7 @@
         "entityType": "PropBank_Roleset",
         "identityParts": [
           {
-            "path": "@id",
-            "splitLast": ".-",
-            "side": "Before",
-            "spaceMark": "_"
-          },
-          {
-            "path": "@id",
-            "splitLast": ".-",
-            "side": "After"
+            "path": "@id"
           }
         ]
       },
@@ -2387,7 +2391,7 @@
       "childSubjects": [
         {
           "childPath": "aliases/alias",
-          "identityField": "pos",
+          "identityField": "",
           "entityType": "Lexeme",
           "standalone": true,
           "parentRelation": "EVOKES_FRAME",
@@ -2398,14 +2402,13 @@
               "spaceMark": "_"
             },
             {
-              "path": "@pos",
-              "vocabulary": "pos/propbank"
+              "path": "@pos"
             }
           ]
         },
         {
           "childPath": "aliases/argalias",
-          "identityField": "pos",
+          "identityField": "",
           "entityType": "Lexeme",
           "standalone": true,
           "identityParts": [
@@ -2414,8 +2417,7 @@
               "spaceMark": "_"
             },
             {
-              "path": "@pos",
-              "vocabulary": "pos/propbank"
+              "path": "@pos"
             }
           ]
         },

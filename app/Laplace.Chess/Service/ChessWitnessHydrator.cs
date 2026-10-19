@@ -22,25 +22,30 @@ namespace Laplace.Chess.Service;
 internal static class ChessWitnessHydrator
 {
     private static readonly Hash128 RelPlaysLine = RelationTypeRegistry.RelationTypeId("PLAYS_LINE");
-    private static readonly Hash128 RelHasResult = RelationTypeRegistry.RelationTypeId("HAS_RESULT");
-    // A line's players are HAS_PLAYER; which side is the claim's side qualifier.
+    private static readonly Hash128 RelHasResult = ChessVocabulary.HasResultType;
+    // A line's players are HAS_PLAYER or direct PGN White/Black.
     private static readonly Hash128 RelHasPlayer = ChessVocabulary.RelTypeHasPlayer;
+    private static readonly Hash128 RelWhite = ChessVocabulary.WhiteType;
+    private static readonly Hash128 RelBlack = ChessVocabulary.BlackType;
 
     private enum Side : byte { None, White, Black }
 
-    private static Side SideOf(byte[]? qualifiers)
+    private static Side SideOf(Hash128 type, byte[]? qualifiers)
     {
-        if (qualifiers is not { Length: 32 }) return Side.None;
+        if (type == RelWhite) return Side.White;
+        if (type == RelBlack) return Side.Black;
+        if (type != RelHasPlayer || qualifiers is not { Length: 32 }) return Side.None;
         Mask256 mask = Mask256.FromByteArray(qualifiers);
         return !(mask & ChessVocabulary.WhiteSide).IsZero ? Side.White
              : !(mask & ChessVocabulary.BlackSide).IsZero ? Side.Black
              : Side.None;
     }
-    private static readonly Hash128 RelHasSetup = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
+    private static readonly Hash128 RelHasSetup = ChessVocabulary.HasSetupType;
 
     private static readonly byte[][] GameRelationTypes =
     [
-        RelHasPlayer.ToBytes(), RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
+        RelHasPlayer.ToBytes(), RelWhite.ToBytes(), RelBlack.ToBytes(),
+        RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
     ];
 
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
@@ -357,7 +362,8 @@ internal static class ChessWitnessHydrator
             if (lineByPlaying[playing] != line)
                 throw new InvalidDataException("Recorded playing header names a competing line.");
             Hash128 type = Hash128.FromBytes(row.Type);
-            var key = (playing, type, type == RelHasPlayer ? SideOf(row.Qualifiers) : Side.None);
+            Side side = SideOf(type, row.Qualifiers);
+            var key = (playing, side != Side.None ? RelHasPlayer : type, side);
             var value = Hash128.FromBytes(row.Object);
             if (values.TryGetValue(key, out var previous) && previous != value)
                 throw new InvalidDataException("Recorded playing has competing header values.");
@@ -502,12 +508,9 @@ internal static class ChessWitnessHydrator
             if (!groups.TryGetValue(key, out var gm)) groups[key] = gm = new GameMeta();
             var type = Hash128.FromBytes(row.TypeId);
             var obj = row.ObjectId is null ? default : Hash128.FromBytes(row.ObjectId);
-            if (type == RelHasPlayer)
-            {
-                Side side = SideOf(row.QualifierMask);
-                if (side == Side.White) gm.White = obj;
-                else if (side == Side.Black) gm.Black = obj;
-            }
+            Side side = SideOf(type, row.QualifierMask);
+            if (side == Side.White) gm.White = obj;
+            else if (side == Side.Black) gm.Black = obj;
             else if (type == RelHasSetup) gm.SetupObj = obj;
             else if (type == RelHasResult) gm.ResultObj = obj;
         }

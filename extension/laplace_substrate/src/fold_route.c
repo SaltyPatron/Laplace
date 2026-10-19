@@ -157,50 +157,31 @@ typed_plan(HTAB **slot, const char *name, const uint8_t *type16,
     return entry->plan;
 }
 
-static HTAB *
-prior_route_htab(void)
-{
-    if (upsert_prior_routes == NULL)
-    {
-        HASHCTL ctl;
+static PriorRouteEntry shared_prior_route = {{0}, NULL, NULL, NULL};
 
-        memset(&ctl, 0, sizeof(ctl));
-        ctl.keysize = 16;
-        ctl.entrysize = sizeof(PriorRouteEntry);
-        ctl.hcxt = TopMemoryContext;
-        upsert_prior_routes = hash_create("consensus exact prior routes", 256,
-                                          &ctl,
-                                          HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    }
-    return upsert_prior_routes;
-}
-
-/* Consensus is HASH(subject_id); a relation type owns no partition of its own.
- * The per-type entry carries that type's prepared leaf plans. */
+/* Consensus is HASH(subject_id); a relation type owns no partition of its own,
+ * and cell id = blake3(subject || type || object) already binds the relation
+ * type, so all relation types share one set of 64 per-leaf prior and update plans. */
 static PriorRouteEntry *
 prior_route(const uint8_t *type16, Datum type_datum, const char *label)
 {
-    PriorRouteEntry *entry;
-    bool             found;
-
+    (void) type16;
     (void) type_datum;
-    entry = (PriorRouteEntry *) hash_search(prior_route_htab(), type16,
-                                             HASH_ENTER, &found);
-    if (!found)
+    if (shared_prior_route.leaf_plans == NULL)
     {
-        entry->leaves = laplace_hash_leaves("consensus", label);
-        entry->leaf_plans = MemoryContextAllocZero(
-            TopMemoryContext, sizeof(SPIPlanPtr) * entry->leaves->count);
-        entry->update_plans = MemoryContextAllocZero(
-            TopMemoryContext, sizeof(SPIPlanPtr) * entry->leaves->count);
+        shared_prior_route.leaves = laplace_hash_leaves("consensus", label);
+        shared_prior_route.leaf_plans = MemoryContextAllocZero(
+            TopMemoryContext, sizeof(SPIPlanPtr) * shared_prior_route.leaves->count);
+        shared_prior_route.update_plans = MemoryContextAllocZero(
+            TopMemoryContext, sizeof(SPIPlanPtr) * shared_prior_route.leaves->count);
     }
     else
     {
         /* A swapped leaf keeps its name, so the prepared per-leaf plans stay valid; the
          * leaf oids they were named from are resolved again. */
-        entry->leaves = laplace_hash_leaves("consensus", label);
+        shared_prior_route.leaves = laplace_hash_leaves("consensus", label);
     }
-    return entry;
+    return &shared_prior_route;
 }
 
 /* The physical consensus leaf that owns (type, subject), so SQL that mutates
@@ -232,15 +213,14 @@ prior_leaf_plan(PriorRouteEntry *route, int remainder,
 {
     SPIPlanPtr plan = route->leaf_plans[remainder];
 
+    (void) type16;
     if (plan == NULL)
     {
         static const Oid argtypes[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
-        char             hex[33];
         char            *namespace_name;
         char            *relation_name;
         char            *qualified_name;
         StringInfoData   sql;
-        int              i;
 
         namespace_name = get_namespace_name(
             get_rel_namespace(route->leaves->leaf_oids[remainder]));
@@ -251,22 +231,19 @@ prior_leaf_plan(PriorRouteEntry *route, int remainder,
                      errmsg("%s: consensus HASH leaf disappeared", label)));
         qualified_name = quote_qualified_identifier(namespace_name,
                                                      relation_name);
-        for (i = 0; i < 16; i++)
-            snprintf(hex + i * 2, 3, "%02x", type16[i]);
 
         initStringInfo(&sql);
         appendStringInfo(&sql,
             "WITH locked AS MATERIALIZED ("
             "  SELECT c.id, c.subject_id, c.rating, c.rd, c.volatility "
             "  FROM ONLY %s c "
-            "  WHERE c.type_id = '\\x%s'::bytea "
-            "    AND c.id = ANY($1::bytea[]) "
+            "  WHERE c.id = ANY($1::bytea[]) "
             "  FOR UPDATE OF c) "
             "SELECT b.ord, locked.rating, locked.rd, locked.volatility "
             "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY "
             "     AS b(id, s, ord) "
             "JOIN locked ON locked.subject_id = b.s AND locked.id = b.id",
-            qualified_name, hex);
+            qualified_name);
         plan = SPI_prepare(sql.data, 2, (Oid *) argtypes);
         if (plan == NULL)
             ereport(ERROR,
@@ -900,18 +877,18 @@ fold_run_states(const InArray *phis, const InArray *opps,
                              errmsg("%s: native rating-period update failed", label),
                              errdetail("result=%d cell_index=%d matched=%s "
                                        "exact_period=%s period_start=%d "
-                                       "prior_rating=%ld prior_rd=%ld prior_volatility=%ld "
-                                       "opponent_rating=%ld opponent_rd=%ld "
-                                       "games=%ld sum_score=%ld tau=%ld "
+                                       "prior_rating=%" PRId64 " prior_rd=%" PRId64 " prior_volatility=%" PRId64 " "
+                                       "opponent_rating=%" PRId64 " opponent_rd=%" PRId64 " "
+                                       "games=%" PRId64 " sum_score=%" PRId64 " tau=%" PRId64 " "
                                        "backend_pid=%d core_address=%" PRIxPTR
                                        " core_mapping=[%s] route_address=%" PRIxPTR
                                        " route_mapping=[%s]",
                                        fold_result, run_start + i,
                                        matched[i] ? "true" : "false",
                                        periods->exact ? "true" : "false", period_start,
-                                       (long) input[0], (long) input[1], (long) input[2],
-                                       (long) input[3], (long) input[4], (long) input[5],
-                                       (long) input[6], (long) LAPLACE_GLICKO2_DEFAULT_TAU,
+                                       (int64_t) input[0], (int64_t) input[1], (int64_t) input[2],
+                                       (int64_t) input[3], (int64_t) input[4], (int64_t) input[5],
+                                       (int64_t) input[6], (int64_t) LAPLACE_GLICKO2_DEFAULT_TAU,
                                        MyProcPid, core_address, core_mapping,
                                        route_address, route_mapping)));
                 }
@@ -1780,10 +1757,10 @@ write_evidence_states(const uint8_t *type16, ArrayType *ids,
 /* One set write per run: existing cells by keyed UPDATE per HASH leaf, novel
  * cells by native COPY. */
 static void
-write_run(const uint8_t *type16, Datum type, ArrayType *ids,
-               const InArray *subjects, const InArray *objects,
-               const FoldEvidenceStates *evidence, const FoldStateArrays *folds,
-               const FoldPriorStates *priors, int64 *affected, const char *label)
+write_run(const uint8_t *type16, Datum type, const Datum *types, ArrayType *ids,
+          const InArray *subjects, const InArray *objects,
+          const FoldEvidenceStates *evidence, const FoldStateArrays *folds,
+          const FoldPriorStates *priors, int64 *affected, const char *label)
 {
     int n = subjects->n;
     uint64 matched_n = priors->matched_n;
@@ -1848,7 +1825,8 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
                 PointerGetDatum(folds->rating_array), PointerGetDatum(folds->rd_array),
                 PointerGetDatum(folds->volatility_array)};
             uint64 inserted = 0;
-            if (!laplace_consensus_copy_novel(type, write_vals, n, &inserted))
+            if (!laplace_consensus_copy_novel_batch(types, type, priors->leaves,
+                                                    write_vals, n, &inserted))
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("%s: consensus relation refuses native bulk insert", label)));
             if (inserted != (uint64) n - matched_n)
@@ -1904,14 +1882,22 @@ validate_evidence_delta(const InArray *phis, const InArray *games,
 }
 
 /* Fold a complete mixed-type working set of evidence deltas in one call. Type
- * runs must be bytewise sorted; each run is folded onto its locked priors and
- * written with write_run. */
+ * runs must be bytewise sorted; priors are read once per HASH leaf across the
+ * batch, any matched cells read their durable evidence per type run, and the
+ * entire batch is folded and written in one pass. */
 Datum
 pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
 {
     const char *label = "consensus_merge_evidence";
     InArray subjects, types, objects, phis, games, sums, ts, opps;
     PeriodArrays periods;
+    Datum *cell_ids;
+    ArrayType *ids;
+    FoldPriorStates *priors;
+    FoldEvidenceStates *evidence;
+    FoldStateArrays folds;
+    HTAB *seen;
+    HASHCTL ctl;
     int64 affected = 0;
     int run_start = 0;
 
@@ -1942,163 +1928,211 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                  errmsg("%s: retry the evidence transaction at READ COMMITTED", label)));
-    if (SPI_connect() != SPI_OK_CONNECT)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("%s: SPI_connect failed", label)));
+
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(CellSeen);
+    seen = hash_create("consensus_merge_evidence cell guard", subjects.n, &ctl,
+                       HASH_ELEM | HASH_BLOBS);
+    cell_ids = (Datum *) palloc(sizeof(Datum) * subjects.n);
 
     while (run_start < subjects.n)
     {
         const uint8_t *type16 = bytea16(types.elems[run_start], label);
-        int run_end = run_start + 1;
-        InArray run_subjects, run_objects, run_games, run_ts;
-        Datum *cell_ids;
-        ArrayType *ids;
-        FoldPriorStates *priors;
-        FoldEvidenceStates *evidence;
-        FoldStateArrays folds;
+        int run_end = run_start;
+        uint64 key;
 
         while (run_end < subjects.n &&
                memcmp(bytea16(types.elems[run_end], label), type16, 16) == 0)
+        {
+            uint8_t   buf[48];
+            hash128_t h;
+            bytea    *out;
+            bool      found;
+
+            memcpy(buf, bytea16(subjects.elems[run_end], label), 16);
+            memcpy(buf + 16, type16, 16);
+            if (objects.nulls[run_end])
+                memset(buf + 32, 0, 16);
+            else
+                memcpy(buf + 32, bytea16(objects.elems[run_end], label), 16);
+            hash128_blake3(buf, sizeof(buf), &h);
+            hash_search(seen, &h, HASH_ENTER, &found);
+            if (found)
+                ereport(ERROR,
+                        (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                         errmsg("%s: duplicate cell in one call "
+                                "(client-dedup contract violated)", label)));
+            out = (bytea *) palloc(VARHDRSZ + 16);
+            SET_VARSIZE(out, VARHDRSZ + 16);
+            memcpy(VARDATA(out), &h, 16);
+            cell_ids[run_end] = PointerGetDatum(out);
             ++run_end;
+        }
         if (run_end < subjects.n &&
             memcmp(type16, bytea16(types.elems[run_end], label), 16) > 0)
             ereport(ERROR,
                     (errcode(ERRCODE_DATA_EXCEPTION),
                      errmsg("%s: type ids must be bytewise sorted", label)));
 
-        run_subjects = in_array_window(&subjects, run_start,
-                                       run_end - run_start,
-                                       BYTEAOID, -1, false, 'i');
-        run_objects = in_array_window(&objects, run_start,
-                                      run_end - run_start,
-                                      BYTEAOID, -1, false, 'i');
-        run_games = in_array_window(&games, run_start,
-                                    run_end - run_start,
-                                    INT8OID, 8, true, 'd');
-        run_ts = in_array_window(&ts, run_start,
-                                 run_end - run_start,
-                                 TIMESTAMPTZOID, 8, true, 'd');
-
-        cell_ids = typed_cell_ids(type16, &run_subjects, &run_objects, label);
-        ids = construct_array(cell_ids, run_subjects.n,
-                              BYTEAOID, -1, false, 'i');
-
         /* Writers of one relation type serialize here for the rest of their
          * transaction. Runs arrive in ascending type order, so the locks are
          * taken in one global order, and the prior read below sees every
          * committed cell of this type: a cell read as novel is novel. */
-        {
-            uint64 key;
-            memcpy(&key, type16, sizeof(key));
-            DirectFunctionCall1(pg_advisory_xact_lock_int8, Int64GetDatum((int64) key));
-        }
-
-        /* A cell's standing is one rating period over all of its durable
-         * evidence from the neutral prior (laplace.consensus_fold). This
-         * transaction's testimony is already durable here, so every cell with
-         * retained evidence is recomputed from it; a cell without retained
-         * evidence (consensus-only admission) folds the delta onto its prior.
-         * When periods.exact is supplied, a novel cell has no prior testimony
-         * beyond this working set's exact grouped periods, so fold_run_states
-         * computes the identical standing directly without scanning
-         * laplace.attestations for novel cells. */
-        priors = read_run_priors(type16, types.elems[run_start], cell_ids,
-                                 &run_subjects, 0, run_subjects.n, label);
-        if (periods.exact && priors->matched_n == 0)
-        {
-            evidence = palloc(sizeof(*evidence));
-            evidence->recomputed = palloc0(sizeof(bool) * run_subjects.n);
-            evidence->counts = palloc(sizeof(Datum) * run_subjects.n);
-            evidence->timestamps = palloc(sizeof(Datum) * run_subjects.n);
-            memcpy(evidence->counts, run_games.elems,
-                   sizeof(Datum) * run_subjects.n);
-            memcpy(evidence->timestamps, run_ts.elems,
-                   sizeof(Datum) * run_subjects.n);
-        }
-        else if (periods.exact && priors->matched_n < (uint64) run_subjects.n)
-        {
-            int m = (int) priors->matched_n;
-            int *matched_idx = palloc(sizeof(int) * m);
-            Datum *msub = palloc(sizeof(Datum) * m);
-            Datum *mobj = palloc(sizeof(Datum) * m);
-            bool *mobj_nulls = palloc(sizeof(bool) * m);
-            Datum *mgames = palloc(sizeof(Datum) * m);
-            Datum *mts = palloc(sizeof(Datum) * m);
-            InArray sub_subjects, sub_objects, sub_games, sub_ts;
-            FoldPriorStates *sub_priors = fold_prior_states_create(m);
-            FoldEvidenceStates *sub_ev;
-            int k = 0;
-
-            for (int i = 0; i < run_subjects.n; ++i)
-            {
-                if (!priors->matched[i]) continue;
-                matched_idx[k] = i;
-                msub[k] = run_subjects.elems[i];
-                mobj[k] = run_objects.elems[i];
-                mobj_nulls[k] = run_objects.nulls[i];
-                mgames[k] = run_games.elems[i];
-                mts[k] = run_ts.elems[i];
-                sub_priors->matched[k] = true;
-                sub_priors->ratings[k] = priors->ratings[i];
-                sub_priors->rds[k] = priors->rds[i];
-                sub_priors->volatilities[k] = priors->volatilities[i];
-                ++k;
-            }
-            sub_priors->matched_n = (uint64) m;
-            memset(&sub_subjects, 0, sizeof(sub_subjects));
-            sub_subjects.array = construct_array(msub, m, BYTEAOID, -1, false, 'i');
-            sub_subjects.elems = msub;
-            sub_subjects.n = m;
-            memset(&sub_objects, 0, sizeof(sub_objects));
-            sub_objects.array = construct_md_array(
-                mobj, mobj_nulls, 1, &m, (int[]){1}, BYTEAOID, -1, false, 'i');
-            sub_objects.elems = mobj;
-            sub_objects.nulls = mobj_nulls;
-            sub_objects.n = m;
-            memset(&sub_games, 0, sizeof(sub_games));
-            sub_games.elems = mgames;
-            sub_games.n = m;
-            memset(&sub_ts, 0, sizeof(sub_ts));
-            sub_ts.elems = mts;
-            sub_ts.n = m;
-
-            sub_ev = read_evidence_states(type16, &sub_subjects, &sub_objects,
-                                          &sub_games, &sub_ts, sub_priors, label,
-                                          false, false);
-            evidence = palloc(sizeof(*evidence));
-            evidence->recomputed = palloc0(sizeof(bool) * run_subjects.n);
-            evidence->counts = palloc(sizeof(Datum) * run_subjects.n);
-            evidence->timestamps = palloc(sizeof(Datum) * run_subjects.n);
-            memcpy(evidence->counts, run_games.elems,
-                   sizeof(Datum) * run_subjects.n);
-            memcpy(evidence->timestamps, run_ts.elems,
-                   sizeof(Datum) * run_subjects.n);
-            for (k = 0; k < m; ++k)
-            {
-                int i = matched_idx[k];
-                evidence->recomputed[i] = sub_ev->recomputed[k];
-                evidence->counts[i] = sub_ev->counts[k];
-                evidence->timestamps[i] = sub_ev->timestamps[k];
-                priors->ratings[i] = sub_priors->ratings[k];
-                priors->rds[i] = sub_priors->rds[k];
-                priors->volatilities[i] = sub_priors->volatilities[k];
-            }
-        }
-        else
-        {
-            evidence = read_evidence_states(type16, &run_subjects, &run_objects,
-                                            &run_games, &run_ts, priors, label,
-                                            false, false);
-        }
-        fold_run_states(&phis, &opps, &games, &sums, &periods,
-                        run_start, run_subjects.n, priors, label,
-                        &folds, evidence->recomputed);
-        write_run(type16, types.elems[run_start], ids, &run_subjects,
-                  &run_objects, evidence, &folds, priors, &affected, label);
+        memcpy(&key, type16, sizeof(key));
+        DirectFunctionCall1(pg_advisory_xact_lock_int8, Int64GetDatum((int64) key));
         run_start = run_end;
-        CHECK_FOR_INTERRUPTS();
     }
+    hash_destroy(seen);
+    ids = construct_array(cell_ids, subjects.n, BYTEAOID, -1, false, 'i');
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: SPI_connect failed", label)));
+
+    /* Route the whole batch once across the 64 HASH leaves and lock any
+     * existing prior cells in at most 64 SPI queries total. */
+    priors = read_run_priors(bytea16(types.elems[0], label), types.elems[0],
+                             cell_ids, &subjects, 0, subjects.n, label);
+
+    evidence = palloc(sizeof(*evidence));
+    evidence->recomputed = palloc0(sizeof(bool) * subjects.n);
+    evidence->counts = palloc(sizeof(Datum) * subjects.n);
+    evidence->timestamps = palloc(sizeof(Datum) * subjects.n);
+    memcpy(evidence->counts, games.elems, sizeof(Datum) * subjects.n);
+    memcpy(evidence->timestamps, ts.elems, sizeof(Datum) * subjects.n);
+
+    if (!periods.exact || priors->matched_n > 0)
+    {
+        run_start = 0;
+        while (run_start < subjects.n)
+        {
+            const uint8_t *type16 = bytea16(types.elems[run_start], label);
+            int run_end = run_start + 1;
+            int run_n;
+            int m = 0;
+
+            while (run_end < subjects.n &&
+                   memcmp(bytea16(types.elems[run_end], label), type16, 16) == 0)
+                ++run_end;
+            run_n = run_end - run_start;
+            for (int i = 0; i < run_n; ++i)
+                if (priors->matched[run_start + i])
+                    ++m;
+
+            if (periods.exact && m == 0)
+            {
+                run_start = run_end;
+                continue;
+            }
+            if (periods.exact && m < run_n)
+            {
+                int *matched_idx = palloc(sizeof(int) * m);
+                Datum *msub = palloc(sizeof(Datum) * m);
+                Datum *mobj = palloc(sizeof(Datum) * m);
+                bool *mobj_nulls = palloc(sizeof(bool) * m);
+                Datum *mgames = palloc(sizeof(Datum) * m);
+                Datum *mts = palloc(sizeof(Datum) * m);
+                InArray sub_subjects, sub_objects, sub_games, sub_ts;
+                FoldPriorStates *sub_priors = fold_prior_states_create(m);
+                FoldEvidenceStates *sub_ev;
+                int k = 0;
+
+                for (int i = 0; i < run_n; ++i)
+                {
+                    int pos = run_start + i;
+                    if (!priors->matched[pos]) continue;
+                    matched_idx[k] = pos;
+                    msub[k] = subjects.elems[pos];
+                    mobj[k] = objects.elems[pos];
+                    mobj_nulls[k] = objects.nulls[pos];
+                    mgames[k] = games.elems[pos];
+                    mts[k] = ts.elems[pos];
+                    sub_priors->matched[k] = true;
+                    sub_priors->ratings[k] = priors->ratings[pos];
+                    sub_priors->rds[k] = priors->rds[pos];
+                    sub_priors->volatilities[k] = priors->volatilities[pos];
+                    ++k;
+                }
+                sub_priors->matched_n = (uint64) m;
+                memset(&sub_subjects, 0, sizeof(sub_subjects));
+                sub_subjects.array = construct_array(msub, m, BYTEAOID, -1, false, 'i');
+                sub_subjects.elems = msub;
+                sub_subjects.n = m;
+                memset(&sub_objects, 0, sizeof(sub_objects));
+                sub_objects.array = construct_md_array(
+                    mobj, mobj_nulls, 1, &m, (int[]){1}, BYTEAOID, -1, false, 'i');
+                sub_objects.elems = mobj;
+                sub_objects.nulls = mobj_nulls;
+                sub_objects.n = m;
+                memset(&sub_games, 0, sizeof(sub_games));
+                sub_games.elems = mgames;
+                sub_games.n = m;
+                memset(&sub_ts, 0, sizeof(sub_ts));
+                sub_ts.elems = mts;
+                sub_ts.n = m;
+
+                sub_ev = read_evidence_states(type16, &sub_subjects, &sub_objects,
+                                              &sub_games, &sub_ts, sub_priors, label,
+                                              false, false);
+                for (k = 0; k < m; ++k)
+                {
+                    int pos = matched_idx[k];
+                    evidence->recomputed[pos] = sub_ev->recomputed[k];
+                    evidence->counts[pos] = sub_ev->counts[k];
+                    evidence->timestamps[pos] = sub_ev->timestamps[k];
+                    priors->ratings[pos] = sub_priors->ratings[k];
+                    priors->rds[pos] = sub_priors->rds[k];
+                    priors->volatilities[pos] = sub_priors->volatilities[k];
+                }
+            }
+            else
+            {
+                InArray run_subjects = in_array_window(&subjects, run_start, run_n,
+                                                       BYTEAOID, -1, false, 'i');
+                InArray run_objects = in_array_window(&objects, run_start, run_n,
+                                                      BYTEAOID, -1, false, 'i');
+                InArray run_games = in_array_window(&games, run_start, run_n,
+                                                    INT8OID, 8, true, 'd');
+                InArray run_ts = in_array_window(&ts, run_start, run_n,
+                                                 TIMESTAMPTZOID, 8, true, 'd');
+                FoldPriorStates *sub_priors = fold_prior_states_create(run_n);
+                FoldEvidenceStates *sub_ev;
+
+                for (int i = 0; i < run_n; ++i)
+                {
+                    int pos = run_start + i;
+                    sub_priors->matched[i] = priors->matched[pos];
+                    sub_priors->ratings[i] = priors->ratings[pos];
+                    sub_priors->rds[i] = priors->rds[pos];
+                    sub_priors->volatilities[i] = priors->volatilities[pos];
+                }
+                sub_priors->matched_n = (uint64) m;
+                sub_ev = read_evidence_states(type16, &run_subjects, &run_objects,
+                                              &run_games, &run_ts, sub_priors, label,
+                                              false, false);
+                for (int i = 0; i < run_n; ++i)
+                {
+                    int pos = run_start + i;
+                    evidence->recomputed[pos] = sub_ev->recomputed[i];
+                    evidence->counts[pos] = sub_ev->counts[i];
+                    evidence->timestamps[pos] = sub_ev->timestamps[i];
+                    priors->ratings[pos] = sub_priors->ratings[i];
+                    priors->rds[pos] = sub_priors->rds[i];
+                    priors->volatilities[pos] = sub_priors->volatilities[i];
+                }
+            }
+            run_start = run_end;
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+
+    fold_run_states(&phis, &opps, &games, &sums, &periods,
+                    0, subjects.n, priors, label,
+                    &folds, evidence->recomputed);
+    write_run(bytea16(types.elems[0], label), types.elems[0], types.elems,
+              ids, &subjects, &objects, evidence, &folds, priors, &affected, label);
 
     SPI_finish();
     PG_RETURN_INT64(affected);

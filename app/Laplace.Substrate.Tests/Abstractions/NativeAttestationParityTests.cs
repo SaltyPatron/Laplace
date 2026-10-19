@@ -94,7 +94,7 @@ public class NativeAttestationParityTests
         Assert.Empty(change.Entities);
         var att = Assert.Single(change.Attestations);
         var expected = NativeAttestation.Categorical(
-            form, "HAS_UPOS", PosReference.CanonicalId("NOUN"), src, null, SourceTrust.AcademicCurated);
+            form, "HAS_POS", PosReference.CanonicalId("NOUN"), src, null, SourceTrust.AcademicCurated);
         Assert.Equal(expected.Id, att.Id);
         Assert.Equal(expected.TypeId, att.TypeId);
     }

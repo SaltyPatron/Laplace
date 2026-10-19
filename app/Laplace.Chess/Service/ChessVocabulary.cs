@@ -62,8 +62,8 @@ public static class ChessVocabulary
 
 
 
-    public static readonly Hash128 OpeningNameType = RelationTypeRegistry.RelationTypeId("OPENING_NAME");
-    public static readonly Hash128 EcoCodeType = RelationTypeRegistry.RelationTypeId("HAS_ECO");
+    public static readonly Hash128 OpeningNameType = RelationTypeRegistry.RelationTypeId("Opening");
+    public static readonly Hash128 EcoCodeType = RelationTypeRegistry.RelationTypeId("ECO");
 
 
 
@@ -75,7 +75,7 @@ public static class ChessVocabulary
     public static readonly Hash128 EventType = EntityTypeRegistry.Id("Chess_Event");
     public static readonly Hash128 PlayingType = EntityTypeRegistry.Id("Chess_Playing");
     public static readonly Hash128 PlaysLineType = RelationTypeRegistry.RelationTypeId("PLAYS_LINE");
-    public static readonly Hash128 HasSetupType = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
+    public static readonly Hash128 HasSetupType = RelationTypeRegistry.RelationTypeId("FEN");
     public static readonly Hash128 AnalysisVersionMetaTypeId =
         SubstrateCanonicalIds.OfVersioned("type", "HasAnalysisVersion");
     public static readonly Hash128 AnalyzedAtType = RelationTypeRegistry.RelationTypeId("ANALYZED_AT");
@@ -88,29 +88,34 @@ public static class ChessVocabulary
 
     public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
         => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
-    // A line's player is HAS_PLAYER; which side is the claim's side/{white,black} qualifier.
+    // A line's player is HAS_PLAYER; which side is the claim's side/{white,black} qualifier,
+    // or the direct PGN tag relation ("White" / "Black").
     public static readonly Hash128 RelTypeHasPlayer =
         RelationTypeRegistry.RelationTypeId(RelationSymbol.CanonicalFromField(nameof(RelTypeHasPlayer)));
+    public static readonly Hash128 WhiteType = RelationTypeRegistry.RelationTypeId("White");
+    public static readonly Hash128 BlackType = RelationTypeRegistry.RelationTypeId("Black");
     public static readonly Mask256 WhiteSide = ClaimQualifiers.Of("side", "white");
     public static readonly Mask256 BlackSide = ClaimQualifiers.Of("side", "black");
 
     /// <summary>Whether a player claim states that side.</summary>
     public static bool IsSide(AttestationRow row, Mask256 side) =>
-        row.TypeId == RelTypeHasPlayer && !(row.QualifierMask & side).IsZero;
-    public static readonly Hash128 HasEventType = RelationTypeRegistry.RelationTypeId("HAS_EVENT");
-    public static readonly Hash128 OnDateType = RelationTypeRegistry.RelationTypeId("ON_DATE");
-    public static readonly Hash128 HasTimeControlType = RelationTypeRegistry.RelationTypeId("HAS_TIME_CONTROL");
+        (row.TypeId == RelTypeHasPlayer && !(row.QualifierMask & side).IsZero)
+        || (side == WhiteSide && row.TypeId == WhiteType)
+        || (side == BlackSide && row.TypeId == BlackType);
+    public static readonly Hash128 HasEventType = RelationTypeRegistry.RelationTypeId("Event");
+    public static readonly Hash128 OnDateType = RelationTypeRegistry.RelationTypeId("Date");
+    public static readonly Hash128 HasTimeControlType = RelationTypeRegistry.RelationTypeId("TimeControl");
     public static readonly Hash128 HasTcClassType = RelationTypeRegistry.RelationTypeId("HAS_TC_CLASS");
-    public static readonly Hash128 HasTerminationType = RelationTypeRegistry.RelationTypeId("HAS_TERMINATION");
-    public static readonly Hash128 HasResultType = RelationTypeRegistry.RelationTypeId("HAS_RESULT");
+    public static readonly Hash128 HasTerminationType = RelationTypeRegistry.RelationTypeId("Termination");
+    public static readonly Hash128 HasResultType = RelationTypeRegistry.RelationTypeId("Result");
     public static readonly Hash128 HasEvalType = RelationTypeRegistry.RelationTypeId("HAS_EVAL");
     public static readonly Hash128 HasEvalObject = EntityTypeRegistry.Id("Chess_Eval");
     public static readonly Hash128 MoveQualityType = RelationTypeRegistry.RelationTypeId("MOVE_QUALITY");
     public static readonly Hash128 HasWdlType = RelationTypeRegistry.RelationTypeId("HAS_WDL");
     public static readonly Hash128 HasDtzType = RelationTypeRegistry.RelationTypeId("HAS_DTZ");
     public static readonly Hash128 HasThinkClassType = RelationTypeRegistry.RelationTypeId("HAS_THINK_CLASS");
-    public static readonly Hash128 GameHasOpeningType = RelationTypeRegistry.RelationTypeId("GAME_HAS_OPENING");
-    public static readonly Hash128 GameHasEcoType = RelationTypeRegistry.RelationTypeId("GAME_HAS_ECO");
+    public static readonly Hash128 GameHasOpeningType = RelationTypeRegistry.RelationTypeId("Opening");
+    public static readonly Hash128 GameHasEcoType = RelationTypeRegistry.RelationTypeId("ECO");
     public static readonly Hash128 GameHasMotifType = RelationTypeRegistry.RelationTypeId("GAME_HAS_MOTIF");
     public static readonly Hash128 BookLineType = EntityTypeRegistry.Id("Chess_BookLine");
     public static Hash128 BookLineMarkerId(Hash128 bookTitleContentId, Hash128 lineId)
@@ -120,13 +125,40 @@ public static class ChessVocabulary
     public static readonly Hash128 DefinesType = RelationTypeRegistry.RelationTypeId("HAS_DEFINITION");
 
     public static Hash128 PgnEventId(string @event, string site, string date)
-        => Hash128.OfCanonical($"chess/event/{@event}|{site}|{date}");
+        => Hash128.Merkle(EntityTier.Document, [ContentSlot(@event), ContentSlot(site), ContentSlot(date)]);
+
+    public static byte PgnEventFloor(string? @event, string? site, string? date) =>
+        CompositionLaw.ParentFloor([SlotTier(@event), SlotTier(site), SlotTier(date)]);
+
+    public static byte PgnPlayingFloor(
+        string? white, string? black, string? date, string? @event, string? round, string? site,
+        byte lineTier, string? resultToken) =>
+        CompositionLaw.ParentFloor(
+        [
+            SlotTier(white), SlotTier(black), SlotTier(date), SlotTier(@event),
+            SlotTier(round), SlotTier(site), lineTier, SlotTier(resultToken),
+        ]);
+
+    private static byte SlotTier(string? text) =>
+        !string.IsNullOrEmpty(text) && CompositionLaw.TryFace(text, out CompositionLaw.Face face)
+            ? face.Tier
+            : (byte)0;
 
     public static Hash128 PgnPlayingId(
         string white, string black, string date, string @event, string round, string site,
         Hash128 lineId, string resultToken)
-        => Hash128.OfCanonical(
-            $"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{lineId}|{resultToken}");
+        => Hash128.Merkle(EntityTier.Document,
+        [
+            ContentSlot(white), ContentSlot(black), ContentSlot(date), ContentSlot(@event),
+            ContentSlot(round), ContentSlot(site), lineId, ContentSlot(resultToken),
+        ]);
+
+    /// <summary>
+    /// A tag the file left blank is a hole in the composition. It is not an entity,
+    /// and it keeps its slot so a missing site does not trade places with a date.
+    /// </summary>
+    private static Hash128 ContentSlot(string? text) =>
+        string.IsNullOrEmpty(text) ? default : ContentEmitter.RootId(text) ?? default;
 
     public static Hash128 LivePlayingId(
         Hash128? whitePlayer, Hash128? blackPlayer, string learnContext,

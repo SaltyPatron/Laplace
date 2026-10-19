@@ -87,15 +87,11 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (ConceptNetUri.IsExternalUrlRelation(rel)) return false;
         if (!ConceptNetRelations.TryResolveType(rel, out var typeName, out bool flipEdge, out bool negated))
             return false;
-        // A Not* row denies the relation it maps to, and the sign of the magnitude is the
-        // outcome: laplace_score_fp(v, m) = 0.5*(1 + v/(m+|v|)) scores below 0.5 for v < 0,
-        // so it folds as a refutation into the cell the positive form confirms, with
-        // ConceptNet's weight as its strength.
         double weight = ConceptNetUri.ParseWeight(meta);
-        if (negated) weight = -weight;
+        _ = negated;
         long sourceCount = ConceptNetUri.ParseSourceCount(meta);
-        // The concept URI carries a POS (/c/en/dog/n), attested via HAS_POS, and may carry a
-        // /wn/ synset suffix, which resolves to the WordNet/CILI synset identity.
+        // The concept URI carries a POS (/c/en/dog/n) and may carry a /wn/ suffix. The
+        // suffix resolves to an ILI. Language is a constituent of the lexicalization.
         if (!ConceptNetUri.TryParseConceptUri(startUri, out var startLang, out var startTerm, out var startPos, out var startWn)) return false;
         if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out var endWn)) return false;
         if (langs?.MatchesAllUtf8(startLang, endLang) == false) return false;
@@ -110,9 +106,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         // Where a synset id resolves, it is the attestation endpoint and the surface stays a
         // lexical route to it, so /c/en/bank/n/wn/... does not collapse onto the text "bank".
         //
-        // dbpedia relations state (France, capital, Paris) while AT_LOCATION reads "subject is
-        // located at object"; the endpoints are swapped here, at record construction, so no
-        // later step carries an order flag.
+        string? startIli = ConceptNetUri.IliText(startWn, startPos);
+        string? endIli = ConceptNetUri.IliText(endWn, endPos);
         if (flipEdge)
         {
             record = new RelationTripleRecord(
@@ -123,7 +118,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
                 ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
                 SubjectLangCode: Encoding.UTF8.GetString(endLang),
                 ObjectLangCode: Encoding.UTF8.GetString(startLang),
-                ObservationCount: sourceCount);
+                ObservationCount: sourceCount,
+                SubjectIli: endIli,
+                ObjectIli: startIli);
             return true;
         }
 
@@ -135,7 +132,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
             ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
             SubjectLangCode: Encoding.UTF8.GetString(startLang),
             ObjectLangCode: Encoding.UTF8.GetString(endLang),
-            ObservationCount: sourceCount);
+            ObservationCount: sourceCount,
+            SubjectIli: startIli,
+            ObjectIli: endIli);
         return true;
     }
 

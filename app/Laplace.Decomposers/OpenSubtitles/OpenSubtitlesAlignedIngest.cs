@@ -18,9 +18,6 @@ public sealed record AlignedSubtitleBlock(
 internal sealed class OpenSubtitlesAlignedHandler
     : IIngestRecordHandler<AlignedSubtitleBlock>
 {
-    private static readonly Hash128 HasLanguageTypeId =
-        RelationTypeRegistry.Resolve(EtlSource.LanguageScopeRelation).Id;
-
     private readonly Hash128 _source;
     private readonly double _trust;
 
@@ -82,86 +79,80 @@ internal sealed class OpenSubtitlesAlignedHandler
         {
             var leftIds = new Hash128[_block.Count];
             var rightIds = new Hash128[_block.Count];
+            var leftTiers = new byte[_block.Count];
+            var rightTiers = new byte[_block.Count];
             var leftCoords = new double[_block.Count * 4];
             var rightCoords = new double[_block.Count * 4];
             for (int i = 0; i < _block.Count; i++)
             {
-                EmitTree(builder, i, perTreeBitmaps, out leftIds[i], leftCoords.AsSpan(i * 4, 4));
+                EmitTree(builder, i, perTreeBitmaps, out leftIds[i], out leftTiers[i], leftCoords.AsSpan(i * 4, 4));
                 EmitTree(
                     builder, _block.Count + i, perTreeBitmaps,
-                    out rightIds[i], rightCoords.AsSpan(i * 4, 4));
+                    out rightIds[i], out rightTiers[i], rightCoords.AsSpan(i * 4, 4));
             }
 
-            Hash128 alignmentSchema = ContentEmitter.Emit(
-                builder, "opensubtitles/alignment-block512/schema/v1", _source)
-                ?? throw new InvalidOperationException("OpenSubtitles alignment schema could not be composed");
-
-            Hash128 pairReference = ContentEmitter.Emit(builder, _block.PairLabel, _source)
-                ?? throw new InvalidOperationException(
-                    $"OpenSubtitles pair label could not be composed: {_block.PairLabel}");
-
+            // The zip name and the 512-line batch are how the file is read. One alignment
+            // is one pair of utterances. An utterance is [language, sentence], with the
+            // language tag spelled as the archive named it.
             Hash128 leftLanguage = LanguageReference.Emit(
                 builder, _block.LeftLanguageCode, _source, _trust);
             Hash128 rightLanguage = LanguageReference.Emit(
                 builder, _block.RightLanguageCode, _source, _trust);
+            byte leftLanguageTier = LanguageTier(_block.LeftLanguageCode);
+            byte rightLanguageTier = LanguageTier(_block.RightLanguageCode);
 
-            (Hash128 leftSequence, double[] leftSequenceCoord) =
-                StageSequence(builder, leftIds, leftCoords);
-            (Hash128 rightSequence, double[] rightSequenceCoord) =
-                StageSequence(builder, rightIds, rightCoords);
-
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                leftSequence, HasLanguageTypeId, leftLanguage,
-                _source, null, _trust));
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                rightSequence, HasLanguageTypeId, rightLanguage,
-                _source, null, _trust));
-
-            Hash128 start = AdmitOrdinal(builder, _block.StartOrdinal);
-            Hash128 end = AdmitOrdinal(builder, _block.StartOrdinal + _block.Count - 1);
-            Hash128[] alignmentConstituents =
-            [
-                alignmentSchema,
-                pairReference,
-                leftLanguage,
-                leftSequence,
-                rightLanguage,
-                rightSequence,
-                start,
-                end,
-            ];
-            Hash128 alignmentId = Hash128.Merkle(EntityTier.Document, alignmentConstituents);
-            builder.AddEntity(
-                alignmentId, EntityTier.Document,
-                EntityTypeRegistry.OpenSubtitlesAlignment);
-
-            double[] pairCoords = new double[8];
-            leftSequenceCoord.CopyTo(pairCoords, 0);
-            rightSequenceCoord.CopyTo(pairCoords, 4);
-            double[] alignmentCoord = Math4d.KarcherMean(pairCoords);
-            // This trajectory mixes exact sentence-sequence content with governed
-            // schema/language/source-ordinal references. It is an ordered structural
-            // record, not a recursively closed Content DAG.
-            StagePhysicality(
-                builder, alignmentId, alignmentConstituents, alignmentCoord,
-                PhysicalityType.ParseStructure);
-            return alignmentId;
+            Hash128 first = default;
+            for (int i = 0; i < _block.Count; i++)
+            {
+                (Hash128 leftUtterance, double[] leftCoord, byte leftTier) = StageUtterance(
+                    builder, leftLanguage, leftLanguageTier, leftIds[i], leftTiers[i], leftCoords.AsSpan(i * 4, 4));
+                (Hash128 rightUtterance, double[] rightCoord, byte rightTier) = StageUtterance(
+                    builder, rightLanguage, rightLanguageTier, rightIds[i], rightTiers[i], rightCoords.AsSpan(i * 4, 4));
+                Hash128 alignmentId = StageAlignment(
+                    builder, leftUtterance, leftTier, leftCoord, rightUtterance, rightTier, rightCoord);
+                if (i == 0) first = alignmentId;
+            }
+            return first;
         }
 
-        private (Hash128 Id, double[] Coord) StageSequence(
-            SubstrateChangeBuilder builder, Hash128[] sentenceIds, double[] sentenceCoords)
+        private static byte LanguageTier(string? code)
         {
-            // Sequence identity is content only: the Merkle preimage is the ordered
-            // sentence ids, so any source admitting the same sentences in the same order
-            // reaches the same entity and trajectory. Source and language stay on the
-            // entity rows and attestations.
-            Hash128[] constituents = sentenceIds;
-            Hash128 id = Hash128.Merkle(EntityTier.Document, constituents);
+            string? resolved = LanguageReference.ResolveCode(code) ?? "und";
+            return CompositionLaw.TryFace(resolved, out CompositionLaw.Face face) ? face.Tier : (byte)0;
+        }
+
+        private (Hash128 Id, double[] Coord, byte Tier) StageUtterance(
+            SubstrateChangeBuilder builder, Hash128 language, byte languageTier,
+            Hash128 sentenceId, byte sentenceTier, ReadOnlySpan<double> sentenceCoord)
+        {
+            Hash128[] constituents = [language, sentenceId];
+            byte floor = CompositionLaw.ParentFloor([languageTier, sentenceTier]);
+            Hash128 id = Hash128.Merkle(floor, constituents);
             builder.AddEntity(
-                id, EntityTier.Document, EntityTypeRegistry.OpenSubtitlesSequence);
-            double[] coord = Math4d.KarcherMean(sentenceCoords);
+                id, floor, EntityTypeRegistry.OpenSubtitlesSequence);
+            double[] coord = new double[4];
+            sentenceCoord.CopyTo(coord);
             StagePhysicality(builder, id, constituents, coord, PhysicalityType.Content);
-            return (id, coord);
+            return (id, coord, floor);
+        }
+
+        private Hash128 StageAlignment(
+            SubstrateChangeBuilder builder,
+            Hash128 leftUtterance, byte leftTier, double[] leftCoord,
+            Hash128 rightUtterance, byte rightTier, double[] rightCoord)
+        {
+            Hash128[] constituents = [leftUtterance, rightUtterance];
+            byte floor = CompositionLaw.ParentFloor([leftTier, rightTier]);
+            Hash128 id = Hash128.Merkle(floor, constituents);
+            builder.AddEntity(
+                id, floor, EntityTypeRegistry.OpenSubtitlesAlignment);
+            double[] pairCoords = new double[8];
+            leftCoord.CopyTo(pairCoords, 0);
+            rightCoord.CopyTo(pairCoords, 4);
+            StagePhysicality(
+                builder, id, constituents, Math4d.KarcherMean(pairCoords),
+                PhysicalityType.ParseStructure);
+            return id;
         }
 
         private void StagePhysicality(
@@ -178,7 +169,7 @@ internal sealed class OpenSubtitlesAlignedHandler
 
         private void EmitTree(
             SubstrateChangeBuilder builder, int index,
-            ReadOnlySpan<byte[]?> bitmaps, out Hash128 rootId, Span<double> coord)
+            ReadOnlySpan<byte[]?> bitmaps, out Hash128 rootId, out byte rootTier, Span<double> coord)
         {
             TierTree tree = _trees[index]
                 ?? throw new InvalidDataException("subtitle sentence did not produce a content tree");
@@ -187,24 +178,12 @@ internal sealed class OpenSubtitlesAlignedHandler
                     builder, tree, _source, bitmap ?? ReadOnlySpan<byte>.Empty, out rootId))
                 throw new InvalidDataException("subtitle sentence content emission failed");
             TierNodeView root = tree.GetNode(tree.NaturalUnitIndex());
+            rootTier = root.Tier;
             unsafe
             {
                 for (int axis = 0; axis < 4; axis++) coord[axis] = root.Coord[axis];
             }
         }
-
-        private Hash128 AdmitOrdinal(SubstrateChangeBuilder builder, long ordinal)
-        {
-            string content = ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            Hash128 id = ContentEmitter.Emit(builder, content, _source)
-                ?? throw new InvalidOperationException(
-                    $"OpenSubtitles ordinal could not be composed: {content}");
-            return id;
-        }
-
-        internal static Hash128 OrdinalId(long ordinal) =>
-            ContentEmitter.RootId(ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            ?? throw new InvalidOperationException($"OpenSubtitles ordinal could not be composed: {ordinal}");
 
         public void Dispose()
         {

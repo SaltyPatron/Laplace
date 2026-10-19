@@ -157,9 +157,7 @@
         "entityType": "U_Source_Ideograph",
         "identityParts": [
           {
-            "path": "@id",
-            "splitLast": "-",
-            "side": "Each"
+            "path": "@id"
           }
         ]
       }

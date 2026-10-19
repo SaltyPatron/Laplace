@@ -55,10 +55,7 @@ public sealed class Atomic2020Decomposer
                 "Atomic_Split",
             };
             foreach (var name in Atomic2020Source.RelPairs.Select(r => r.Type).Distinct())
-            {
-                names.Add(VocabularyNames.RelationType(
-                    RelationTypeRegistry.Resolve(name).Canonical));
-            }
+                names.Add(name);
             return names;
         }
     }
@@ -109,9 +106,7 @@ public sealed class Atomic2020Decomposer
         string rel = Encoding.UTF8.GetString(relBytes);
         if (!RelTypeId.TryGetValue(rel, out var relType)) return false;
 
-        // Sign is the outcome: a negated relation folds as a refutation into the cell its
-        // positive form confirms (laplace_score_fp scores v < 0 below 0.5).
-        double magnitude = Atomic2020Source.NegatedRelations.Contains(rel) ? -1.0 : 1.0;
+        double magnitude = 1.0;
 
         // ATOMIC2020 spells "this head has no tail under this relation" as the literal
         // tail "none". That tail becomes a null object, which the shared fold scores as an

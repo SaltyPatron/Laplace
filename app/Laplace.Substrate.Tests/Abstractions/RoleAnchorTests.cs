@@ -36,7 +36,7 @@ public sealed class RoleAnchorTests
 
         Hash128 role = RoleAnchor.Emit(
             builder, RoleIdentityKind.PropBank, parent, "ARG0",
-            EntityTypeRegistry.PropBankRole, source, SourceTrust.AcademicCurated)!.Value;
+            EntityTypeRegistry.PropBankRole, source, SourceTrust.AcademicCurated, parentTier: 0)!.Value;
         SubstrateChange change = builder.Build();
 
         EntityRow entity = Assert.Single(change.Entities, e => e.Id == role);

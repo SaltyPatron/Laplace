@@ -76,8 +76,6 @@ public sealed class RecipeExtractor
         return b.Build();
     }
 
-    private static readonly string[] DeclaredRelations = ["HAS_ATTRIBUTE"];
-
     public static void StageRecipe(
         SubstrateChangeBuilder b,
         RecipeInfo recipe,
@@ -89,20 +87,14 @@ public sealed class RecipeExtractor
         // Recipe JSON is source content, not a canonical-name side channel. Stage the
         // canonical bytes through the same tier/content spine as every other textual
         // artifact, then witness that this Model_Recipe encodes that content root.
-        Hash128 recipeContentId = ContentEmitter.Emit(b, recipe.CanonicalJson, sourceId)
-            ?? throw new InvalidOperationException("canonical laplace.recipe has no content root");
-        b.AddAttestation(NativeAttestation.CategoricalResolved(
-            recipe.RecipeEntityId, RelationTypeRegistry.RelationTypeId("ENCODES"),
-            recipeContentId, sourceId, null, 1.0));
+        ContentEmitter.Emit(b, recipe.CanonicalJson, sourceId);
 
-        // A dimension is the property value [key, value] under HAS_ATTRIBUTE, with the
-        // key as the recipe states it; composed content, never a relation per property.
         void AddProperty(string key, string value)
         {
-            Hash128 fact = ContentEmitter.StagePropertyValue(b, key, value, sourceId)
-                ?? throw new InvalidOperationException($"recipe value {key}={value} has no content root");
+            if (ContentEmitter.Emit(b, value, sourceId) is not { } valueId)
+                throw new InvalidOperationException($"recipe value {key}={value} has no content root");
             b.AddAttestation(NativeAttestation.Categorical(
-                recipe.RecipeEntityId, DeclaredRelations[0], fact, sourceId, null, 1.0));
+                recipe.RecipeEntityId, key, valueId, sourceId, null, 1.0));
         }
 
         AddProperty("hidden_size", recipe.HiddenSize);

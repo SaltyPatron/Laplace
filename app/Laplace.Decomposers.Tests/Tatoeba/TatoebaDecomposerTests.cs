@@ -63,19 +63,17 @@ public sealed class TatoebaDecomposerTests
 
             var (attestations, entities, physicalities, physicalityCount) = await RunAsync(dir);
 
-            Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
-            Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
+            Hash128 translationType = RelationTypeRegistry.RelationTypeId("translation");
+            Hash128 languageType = RelationTypeRegistry.RelationTypeId("lang");
 
             Hash128 enRoot = ContentTierSpine.ResolveRoot(EnText)!.Value;
             Hash128 frRoot = ContentTierSpine.ResolveRoot(FrText)!.Value;
 
-            // The translation joins the sentence roots. IS_TRANSLATION_OF is symmetric and
-            // its endpoints canonicalize by hash order, so the endpoint set is asserted.
+            // links.csv lists sentence 1 then sentence 2. The predicate is the file's.
             var edges = attestations.Where(a => a.TypeId == translationType).ToList();
-            Assert.Single(edges);
-            var endpoints = new HashSet<Hash128> { edges[0].SubjectId };
-            if (edges[0].ObjectId is { } o) endpoints.Add(o);
-            Assert.Equal(new HashSet<Hash128> { enRoot, frRoot }, endpoints);
+            AttestationRow translation = Assert.Single(edges);
+            Assert.Equal(enRoot, translation.SubjectId);
+            Assert.Equal(frRoot, translation.ObjectId);
 
             // Language sits on the content root, once per sentence.
             var langSubjects = attestations.Where(a => a.TypeId == languageType)
@@ -95,6 +93,8 @@ public sealed class TatoebaDecomposerTests
             // sentences, with no tree for ids, language fields, tabs or rows.
             var expectedBuilder = new SubstrateChangeBuilder(
                 TatoebaDecomposer.Source, "tatoeba-expected-content");
+            ContentEmitter.StageComponent(expectedBuilder, "eng", TatoebaDecomposer.Source);
+            ContentEmitter.StageComponent(expectedBuilder, "fra", TatoebaDecomposer.Source);
             Assert.True(ContentTierSpine.TryStageIntoBuilder(
                 expectedBuilder, Encoding.UTF8.GetBytes(EnText), TatoebaDecomposer.Source, out _));
             Assert.True(ContentTierSpine.TryStageIntoBuilder(

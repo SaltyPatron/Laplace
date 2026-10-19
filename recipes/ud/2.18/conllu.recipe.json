@@ -160,8 +160,5 @@
     "groupAttributeSeparator": "=",
     "skipKeyColumn": "id",
     "skipKeyCharacters": "-."
-  },
-  "attributeVocabularies": {
-    "language": "lang/iso639"
   }
 }

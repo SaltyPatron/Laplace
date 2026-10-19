@@ -91,16 +91,8 @@ public static class NativeAttestation
                 0,
                 &staged);
             if (rc != 0) throw new InvalidOperationException($"attestation build failed: {rc}");
-            return WithSurfaceQualifier(ToRow(staged), surfaceRelation);
+            return ToRow(staged);
         }
-    }
-
-    // A relation surface may state a qualifier as well as an element and a direction
-    // ("holo_member" is HAS_PART read backwards with meronymy/member); the claim keeps it.
-    private static AttestationRow WithSurfaceQualifier(AttestationRow row, string surfaceRelation)
-    {
-        int bit = NativeInterop.RelationSurfaceQualifier(surfaceRelation);
-        return bit < 0 ? row : row with { QualifierMask = row.QualifierMask.Set((byte)bit) };
     }
 
     public static AttestationRow CategoricalResolved(
@@ -442,7 +434,7 @@ public static class NativeAttestation
                 0,
                 &staged);
             if (rc != 0) throw new InvalidOperationException($"attestation build failed: {rc}");
-            return WithSurfaceQualifier(ToRow(staged), surfaceRelation);
+            return ToRow(staged);
         }
     }
 

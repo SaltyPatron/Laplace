@@ -19,10 +19,14 @@ public static class TabBridgeHelpers
             if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
             if (!TryParseTwoColumn(lineMem.Span, out var col0, out var col1)) continue;
             if (col0.IsEmpty || col1.IsEmpty) continue;
+            string lu = System.Text.Encoding.UTF8.GetString(col1);
+            Hash128? luId = ContentEmitter.RootId(lu);
+            if (luId is null) continue;
             yield return new CategoryCorrespondenceRecord(
                 System.Text.Encoding.UTF8.GetString(col0),
                 EntityTypeRegistry.FrameNetFrame,
-                Hash128.OfCanonical($"framenet/lu/{System.Text.Encoding.UTF8.GetString(col1)}/v1"));
+                luId.Value,
+                Path.GetFileNameWithoutExtension(path));
             consumed++;
         }
     }
@@ -32,7 +36,7 @@ public static class TabBridgeHelpers
         Func<ReadOnlySpan<byte>, string> subjectKey,
         Hash128 subjectTypeId,
         Func<ReadOnlySpan<byte>, Hash128> objectId,
-        string relationType = "CORRESPONDS_TO",
+        string relationType,
         long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {

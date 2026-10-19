@@ -4,6 +4,7 @@ using System.Linq;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.Tests.Wiktionary;
@@ -15,11 +16,11 @@ public sealed class WiktionarySenseIdentityTests
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
     }
 
-    private static readonly Hash128 HasSense = RelationTypeRegistry.RelationTypeId("HAS_SENSE");
-    private static readonly Hash128 HasDefinition = RelationTypeRegistry.RelationTypeId("HAS_DEFINITION");
-    private static readonly Hash128 HasExample = RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE");
-    private static readonly Hash128 IsSynonymOf = RelationTypeRegistry.RelationTypeId("IS_SYNONYM_OF");
-    private static readonly Hash128 CorrespondsTo = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+    private static readonly Hash128 HasSense = RelationTypeRegistry.RelationTypeId("senses");
+    private static readonly Hash128 HasDefinition = RelationTypeRegistry.RelationTypeId("glosses");
+    private static readonly Hash128 HasExample = RelationTypeRegistry.RelationTypeId("examples");
+    private static readonly Hash128 IsSynonymOf = RelationTypeRegistry.RelationTypeId("synonyms");
+    private static readonly Hash128 CorrespondsTo = RelationTypeRegistry.RelationTypeId("wikidata");
 
     private static SubstrateChange EmitEntry(WiktionaryEntry entry)
     {
@@ -32,16 +33,12 @@ public sealed class WiktionarySenseIdentityTests
     [Fact]
     public void CachedRelationIdsFollowTheDeclaredSourceRoster()
     {
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_LANGUAGE"),
-            WiktionarySource.HasLanguageTypeId);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"),
-            WiktionarySource.CorrespondsToTypeId);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_SENSE"),
-            WiktionarySource.HasSenseTypeId);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("IS_SENSE_OF"),
-            WiktionarySource.IsSenseOfTypeId);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_NAME"),
-            WiktionarySource.HasNameTypeId);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("senses"), WiktionarySource.SensesTypeId);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("links"), WiktionarySource.LinksTypeId);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("wikidata"), WiktionarySource.WikidataTypeId);
+        Assert.DoesNotContain("pos", WiktionarySource.Relations);
+        Assert.Contains("glosses", WiktionarySource.Relations);
+        Assert.Contains("tags", WiktionarySource.Relations);
     }
 
     [Fact]
@@ -126,11 +123,22 @@ public sealed class WiktionarySenseIdentityTests
             a => a.SubjectId == riverSense && a.TypeId == HasExample && a.ObjectId == financeEx);
         Assert.DoesNotContain(change.Attestations,
             a => a.SubjectId == word && (a.TypeId == HasDefinition || a.TypeId == HasExample));
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == RelationTypeRegistry.RelationTypeId("pos"));
+        var banks = CopyTupleParser.ParsePhysicalities(change.IntentStages
+            .Where(static stage => !stage.IsInvalid)
+            .Select(static stage => stage.TupleBuffer(IntentStageTable.Physicalities))
+            .ToList());
+        var carriers = new HashSet<Hash128>();
+        for (int i = 0; i < banks.Types.Count; i++)
+            if (banks.Types[i] == (short)PhysicalityType.LexicalBank)
+                carriers.Add(banks.EntityIds[i]);
+        Assert.Contains(financeSense, carriers);
+        Assert.Contains(riverSense, carriers);
+        Assert.DoesNotContain(word, carriers);
         Assert.Equal(2, change.Attestations.Count(a => a.TypeId == IsSynonymOf));
         Assert.All(change.Attestations.Where(a => a.TypeId == IsSynonymOf),
-            a => Assert.True(
-                a.SubjectId == financeSense || a.SubjectId == riverSense
-                || a.ObjectId == financeSense || a.ObjectId == riverSense));
+            a => Assert.True(a.SubjectId == financeSense || a.SubjectId == riverSense));
     }
 
     [Fact]
@@ -221,8 +229,6 @@ public sealed class WiktionarySenseIdentityTests
         Assert.DoesNotContain(change.Entities, e => e.Id == item);
         Hash128 sense = Assert.Single(change.Attestations, a => a.TypeId == HasSense).ObjectId!.Value;
         Assert.Contains(change.Attestations, a =>
-            a.TypeId == CorrespondsTo
-            && ((a.SubjectId == sense && a.ObjectId == item)
-                || (a.SubjectId == item && a.ObjectId == sense)));
+            a.TypeId == CorrespondsTo && a.SubjectId == sense && a.ObjectId == item);
     }
 }

@@ -303,6 +303,10 @@ public static unsafe partial class NativeInterop
     internal static partial int IntentStageAddEntity(
         IntPtr stage, Hash128* id, short tier, Hash128* typeId);
 
+    [LibraryImport(Library, EntryPoint = "intent_stage_deposit_lexical_upos")]
+    internal static partial int IntentStageDepositLexicalUpos(
+        IntPtr stage, Hash128* entityId, double* coord, Hilbert128* hilbertIndex, int slot);
+
     [LibraryImport(Library, EntryPoint = "intent_stage_add_physicality")]
     internal static partial int IntentStageAddPhysicality(
         IntPtr stage,

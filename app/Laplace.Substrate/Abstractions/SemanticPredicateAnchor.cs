@@ -58,7 +58,8 @@ public static class SemanticPredicateAnchor
         OrderedCompositionComponent label,
         IReadOnlyList<SemanticPredicateArgument> arguments,
         Hash128 entityTypeId,
-        Hash128 source)
+        Hash128 source,
+        byte ownerTier)
     {
         ArgumentNullException.ThrowIfNull(builder);
         Validate(kind, ownerId, frameOrdinal, predicateOrdinal, label.Id, arguments);
@@ -97,8 +98,12 @@ public static class SemanticPredicateAnchor
             placed.Add(value);
         }
 
-        Hash128 id = Hash128.Merkle(EntityTier.Word, flat);
-        builder.AddEntity(id, EntityTier.Word, entityTypeId);
+        byte max = ownerTier;
+        for (int i = 0; i < placed.Count; i++)
+            if (placed[i].Tier > max) max = placed[i].Tier;
+        byte floor = (byte)(max + 1);
+        Hash128 id = Hash128.Merkle(floor, flat);
+        builder.AddEntity(id, floor, entityTypeId);
 
         var coords = new double[placed.Count * 4];
         for (int i = 0; i < placed.Count; i++)

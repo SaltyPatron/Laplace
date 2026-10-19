@@ -43,11 +43,13 @@ internal sealed class TatoebaEmitter
         if (record.Language is not { Length: > 0 } lang || record.TextUtf8 is not { Length: > 0 } text)
             return;
 
-        // Resolve the language code once; id + readback tracking both reuse it.
+        // The tag as the row wrote it. Its floor is the content face of that tag.
         string? iso3 = LanguageReference.ResolveCode(lang);
-        Hash128 langId = LanguageReference.IdForResolvedCode(iso3);
+        if (iso3 is null || ContentEmitter.StageComponent(b, iso3, TatoebaDecomposer.Source) is not { } language)
+            return;
         VocabularyNames.TrackResolvedLanguage(TatoebaDecomposer.LanguageNames, iso3);
-        b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId));
+        Hash128 langId = language.Id;
+        b.AddEntity(new EntityRow(langId, language.Tier, TatoebaDecomposer.LanguageTypeId));
 
         // The content root is the sentence entity: content-addressed, UAX-tiered, and the
         // same entity any other source reaches for the same text.
@@ -57,7 +59,7 @@ internal sealed class TatoebaEmitter
         // A sentence row testifies that this text is in this language, attested once on
         // the root. The row number is not attested.
         b.AddAttestation(NativeAttestation.Categorical(
-            emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+            emitted, "lang", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
 
         // Record row id → root for link resolution; the root is already composed here.
         _ids.Set(record.FirstId, emitted);
@@ -80,7 +82,7 @@ internal sealed class TatoebaEmitter
         if (rootA.Equals(rootB)) return;  // identical text on both sides is not a translation
 
         b.AddAttestation(NativeAttestation.Categorical(
-            rootA, "IS_TRANSLATION_OF", rootB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+            rootA, "translation", rootB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }
 
 }

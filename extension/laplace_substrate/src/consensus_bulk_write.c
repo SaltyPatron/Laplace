@@ -30,7 +30,10 @@ typedef struct ConsensusCopyInput
 {
     Datum *columns[9];
     bool *nulls[9];
+    const Datum *types;
     Datum type;
+    const int *order;
+    int order_count;
     int count;
     int row;
     bool trailer;
@@ -317,19 +320,29 @@ send_identity(StringInfo buffer, Datum value, bool isnull)
     }
 }
 
+static int
+cmp_novel_by_id(const void *a, const void *b, void *arg)
+{
+    const Datum *ids = (const Datum *) arg;
+    int ra = *(const int *) a;
+    int rb = *(const int *) b;
+
+    return memcmp(consensus_id16(ids[ra]), consensus_id16(ids[rb]), 16);
+}
+
 static bool
 next_copy_row(ConsensusCopyInput *input)
 {
     StringInfo buffer = &input->buffer;
     resetStringInfo(buffer);
-    while (input->row < input->count)
+    while (input->row < (input->order != NULL ? input->order_count : input->count))
     {
-        int row = input->row++;
-        if (DatumGetBool(input->columns[5][row])) continue;
+        int row = input->order != NULL ? input->order[input->row++] : input->row++;
+        if (input->order == NULL && DatumGetBool(input->columns[5][row])) continue;
         pq_sendint16(buffer, 9);
         send_identity(buffer, input->columns[0][row], false);
         send_identity(buffer, input->columns[1][row], false);
-        send_identity(buffer, input->type, false);
+        send_identity(buffer, input->types != NULL ? input->types[row] : input->type, false);
         send_identity(buffer, input->columns[2][row], input->nulls[2][row]);
         /* rating, deviation, volatility, witness_count, PostgreSQL timestamp */
         static const int integer_columns[] = {6, 7, 8, 3, 4};
@@ -372,6 +385,14 @@ bool
 laplace_consensus_copy_novel(Datum type, Datum *values, int count,
                             uint64 *processed)
 {
+    return laplace_consensus_copy_novel_batch(NULL, type, NULL, values, count, processed);
+}
+
+bool
+laplace_consensus_copy_novel_batch(const Datum *types, Datum single_type,
+                                   const int *leaves, Datum *values,
+                                   int count, uint64 *processed)
+{
     Oid oid = get_relname_relid("consensus", get_namespace_oid("laplace", false));
     Relation relation = table_open(oid, RowExclusiveLock);
     if (relation->rd_rules || check_enable_rls(oid, InvalidOid, true) == RLS_ENABLED)
@@ -400,7 +421,8 @@ laplace_consensus_copy_novel(Datum type, Datum *values, int count,
     ExecCheckPermissions(parse->p_rtable, parse->p_rteperminfos, true);
 
     ConsensusCopyInput input = {0};
-    input.type = type;
+    input.types = types;
+    input.type = single_type;
     input.count = count;
     for (int column = 0; column < 9; ++column)
     {
@@ -416,6 +438,57 @@ laplace_consensus_copy_novel(Datum type, Datum *values, int count,
         if (n != count)
             elog(ERROR, "consensus bulk insert: folded column length mismatch");
     }
+
+    int *order_buf = NULL;
+    if (count > 1 && relation->trigdesc == NULL)
+    {
+        int novel_n = 0;
+        for (int r = 0; r < count; ++r)
+            if (!DatumGetBool(input.columns[5][r]))
+                ++novel_n;
+        if (novel_n > 1)
+        {
+            const LaplaceHashLeaves *hl = laplace_hash_leaves("consensus", "consensus bulk insert");
+            int nleaves = hl->count;
+            int *routed_leaves = NULL;
+            const int *use_leaves = leaves;
+            if (use_leaves == NULL)
+            {
+                routed_leaves = (int *) palloc(sizeof(int) * count);
+                laplace_hash_leaf_route(hl, input.columns[1], count, routed_leaves, "consensus bulk insert");
+                use_leaves = routed_leaves;
+            }
+            int *leaf_counts = (int *) palloc0(sizeof(int) * nleaves);
+            int *leaf_offsets = (int *) palloc0(sizeof(int) * (nleaves + 1));
+            int *leaf_fill = (int *) palloc0(sizeof(int) * nleaves);
+            order_buf = (int *) palloc(sizeof(int) * novel_n);
+            for (int r = 0; r < count; ++r)
+                if (!DatumGetBool(input.columns[5][r]))
+                    leaf_counts[use_leaves[r]]++;
+            for (int l = 0; l < nleaves; ++l)
+                leaf_offsets[l + 1] = leaf_offsets[l] + leaf_counts[l];
+            for (int r = 0; r < count; ++r)
+            {
+                if (DatumGetBool(input.columns[5][r])) continue;
+                int l = use_leaves[r];
+                order_buf[leaf_offsets[l] + leaf_fill[l]++] = r;
+            }
+            for (int l = 0; l < nleaves; ++l)
+            {
+                if (leaf_counts[l] > 1)
+                    qsort_arg(order_buf + leaf_offsets[l], leaf_counts[l],
+                              sizeof(int), cmp_novel_by_id, input.columns[0]);
+            }
+            pfree(leaf_counts);
+            pfree(leaf_offsets);
+            pfree(leaf_fill);
+            if (routed_leaves != NULL)
+                pfree(routed_leaves);
+            input.order = order_buf;
+            input.order_count = novel_n;
+        }
+    }
+
     initStringInfo(&input.buffer);
     pq_sendbytes(&input.buffer, "PGCOPY\n\377\r\n\0", 11);
     pq_sendint32(&input.buffer, 0);
@@ -439,6 +512,8 @@ laplace_consensus_copy_novel(Datum type, Datum *values, int count,
     }
     PG_END_TRY();
     CommandCounterIncrement();
+    if (order_buf != NULL)
+        pfree(order_buf);
     pfree(input.buffer.data);
     for (int column = 0; column < 9; ++column)
     {

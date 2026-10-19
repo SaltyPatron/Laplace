@@ -14,7 +14,9 @@
       "syntaxPath": "LexUnit/@POS",
       "propertyName": "lexicalUnitPos",
       "valueKind": "Enumerated",
-      "disposition": "Excluded"
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/framenet"
     },
     {
       "syntaxPath": "LexUnit/@frame",

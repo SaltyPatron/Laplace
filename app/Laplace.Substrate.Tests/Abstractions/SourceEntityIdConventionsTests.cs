@@ -285,19 +285,21 @@ public class SourceEntityIdConventionsTests
         {
             File.WriteAllText(Path.Combine(dir, IliMap.MapFileName),
                 "i23456\t02244956-v\n");
+            File.WriteAllText(Path.Combine(dir, "ili-map-pwn31.tab"),
+                "i99999\t02244956-v\n");
             CodepointPerfcache.LoadDefault();
             Hash128? ili = SourceEntityIdConventions.ResolveSynsetAnchor("30-02244956-v");
             Assert.NotNull(ili);
-            Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v'), ili);
+            Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v', "pwn30"), ili);
+            Assert.Null(SourceEntityIdConventions.ResolveSynsetAnchor("02244956-v"));
             Assert.Equal(
-                ConceptAnchor.SynsetId(2244956, 'v'),
+                ConceptAnchor.SynsetId(2244956, 'v', "pwn31"),
                 SourceEntityIdConventions.ResolveSynsetAnchor(
                     "http://wordnet-rdf.princeton.edu/wn31/02244956-v"));
         });
 
-        Hash128? sense = SourceEntityIdConventions.ResolveSynsetAnchor("give%2:40:03::");
-        Assert.NotNull(sense);
-        Assert.Equal(SenseAnchor.Id("give%2:40:03"), sense);
+        Assert.Null(SourceEntityIdConventions.ResolveSynsetAnchor("give%2:40:03::"));
+        Assert.Null(SenseAnchor.Id("give%2:40:03"));
 
         Assert.Null(SourceEntityIdConventions.ResolveSynsetAnchor("communication"));
     }
@@ -341,7 +343,7 @@ public class SourceEntityIdConventionsTests
             File.WriteAllText(SourceEntityIdConventions.CiliMapPath(),
                 "i46531\t10676319-n\n");
             SourceEntityIdConventions.EnsureCiliMapForIngest(NullLogger.Instance, "OMWDecomposer");
-            Assert.NotNull(SourceEntityIdConventions.WordNetIli(10676319, 'n'));
+            Assert.NotNull(SourceEntityIdConventions.WordNetIli(10676319, 'n', "pwn30"));
         });
     }
 

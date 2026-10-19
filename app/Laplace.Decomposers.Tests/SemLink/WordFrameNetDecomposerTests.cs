@@ -117,16 +117,16 @@ public sealed class WordFrameNetDecomposerTests
 
         var atts = await CollectAttestationsAsync();
         var luId = FrameNetLexicalUnit.Id("Giving", "give.v")!.Value;
-        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
+        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v', "pwn30");
         Assert.NotNull(synId);
-        CorrespondsToAssert.Contains(atts, luId, synId.Value);
+        CorrespondsToAssert.Contains(atts, luId, synId.Value, "WordFrameNet");
     }
 
     [Fact]
     public async Task Attestations_Are_CorrespondsTo_Only()
     {
         var atts = await CollectAttestationsAsync();
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+        var corr = RelationTypeRegistry.RelationTypeId("WordFrameNet");
         Assert.All(atts, a => Assert.Equal(corr, a.TypeId));
         Assert.NotEmpty(atts);
     }
@@ -134,8 +134,7 @@ public sealed class WordFrameNetDecomposerTests
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()
     {
         var (_, atts) = await CollectAllAsync();
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
-        return atts.Where(a => a.TypeId == corr).ToList();
+        return atts;
     }
 
     private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectAllAsync()

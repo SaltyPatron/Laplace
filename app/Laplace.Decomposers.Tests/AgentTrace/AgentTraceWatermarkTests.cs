@@ -121,22 +121,21 @@ public sealed class AgentTraceWatermarkTests
             var second = await RunAsync(dir, new SeededReader(present));
 
             Hash128 sessionId = ConversationContent.SessionId("claude-code", SessionKey);
-            Hash128 appearsIn = RelationTypeRegistry.Resolve(
-                AgentRelations.Surface(AgentRelation.AppearsIn)).Id;
+            Hash128 roleRel = RelationTypeRegistry.RelationTypeId("role");
             Hash128? oldPrompt = ContentTierSpine.ResolveRoot("please check the fold");
             Hash128? oldReply = ContentTierSpine.ResolveRoot("the fold looks healthy");
             Hash128? newPrompt = ContentTierSpine.ResolveRoot("now check the journals");
             Assert.NotNull(oldPrompt);
             Assert.NotNull(newPrompt);
 
-            var membership = second.Attestations
-                .Where(a => a.TypeId == appearsIn && a.ObjectId == sessionId)
+            var witnessedTurns = second.Attestations
+                .Where(a => a.TypeId == roleRel && a.ContextId == sessionId)
                 .Select(a => a.SubjectId)
                 .ToHashSet();
-            // Only the NEW turn re-witnesses membership; the prefix is watermark-skipped.
-            Assert.Contains(newPrompt!.Value, membership);
-            Assert.DoesNotContain(oldPrompt!.Value, membership);
-            Assert.DoesNotContain(oldReply!.Value, membership);
+            // Only the NEW turn re-witnesses role; the prefix is watermark-skipped.
+            Assert.Contains(newPrompt!.Value, witnessedTurns);
+            Assert.DoesNotContain(oldPrompt!.Value, witnessedTurns);
+            Assert.DoesNotContain(oldReply!.Value, witnessedTurns);
 
             // And the deeper watermark (3 turns) is deposited for the next growth.
             var session = await ParseSessionAsync(dir);

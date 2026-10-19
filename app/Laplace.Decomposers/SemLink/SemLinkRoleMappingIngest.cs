@@ -97,7 +97,7 @@ internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RoleCorresponden
 
     protected override IIngestRecordHandler<RoleCorrespondenceRecord> CreateHandler() =>
         new RoleCorrespondenceHandler(
-            SourceId, SemLinkSource.RoleCorrespondsToTypeId, SourceTrust);
+            SourceId, SemLinkSource.VnFnRoleTypeId, SourceTrust);
 
     protected override IAsyncEnumerable<RoleCorrespondenceRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>

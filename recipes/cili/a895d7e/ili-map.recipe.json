@@ -14,17 +14,13 @@
       "syntaxPath": "record/@offset",
       "propertyName": "offset",
       "valueKind": "Identity",
-      "disposition": "Testimony",
-      "relationName": "HAS_EXTERNAL_ID",
-      "qualifierFamily": "identifier",
-      "qualifierField": "version"
+      "disposition": "Packaging"
     },
     {
       "syntaxPath": "record/@confidence",
       "propertyName": "confidence",
       "valueKind": "Text",
-      "disposition": "Testimony",
-      "scoreOf": "record/@offset"
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "record/@version",

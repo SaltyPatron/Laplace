@@ -29,8 +29,6 @@ public static class AgentTraceEmitter
 {
     private static readonly Hash128 LaneSource = AgentTraceSource.SourceId;
 
-    private static string Rel(AgentRelation relation) => AgentRelations.Surface(relation);
-
     public readonly record struct ProviderScope(
         ConversationContent.TenantScope Tenant,
         Hash128 ToolSource)
@@ -78,8 +76,14 @@ public static class AgentTraceEmitter
         return Hash128.Blake3(buf);
     }
 
-    internal static Hash128 WatermarkId(Hash128 sessionId, int k, Hash128 chain) =>
-        Hash128.OfCanonical($"agent/watermark/{sessionId}/{k}/{chain}/v1");
+    internal static Hash128 WatermarkId(Hash128 sessionId, int k, Hash128 chain)
+    {
+        // The chain is the session folded through each witnessed turn. The turn
+        // count and a path template are not a second identity.
+        _ = sessionId;
+        _ = k;
+        return chain;
+    }
 
     public static IReadOnlyList<Hash128> WatermarkCandidates(
         Hash128 sessionId, IReadOnlyList<Hash128> composedTurnIds)
@@ -126,24 +130,25 @@ public static class AgentTraceEmitter
                 _ => scope.Tenant.PromptSource,
             };
 
-            var members = new List<Hash128>(4);
+            var members = new List<Witnessed>(4);
             Witness(b, turn.Text, roleSource, coords, members);
             Witness(b, turn.Thinking, scope.Tenant.ResponseSource, coords, members);
 
             var invocations = new List<(AgentToolCall Call, Hash128? Id, Hash128? Input, Hash128? Result)>();
             foreach (var call in turn.ToolCalls)
             {
-                Hash128? inputRoot = Witness(b, call.InputJson, scope.Tenant.ResponseSource, coords, members);
-                Hash128? resultRoot = Witness(b, call.ResultText, scope.ToolSource, coords, members);
+                Witnessed? nameRoot = Witness(b, call.Name, LaneSource, coords, members: null);
+                Witnessed? inputRoot = Witness(b, call.InputJson, scope.Tenant.ResponseSource, coords, members);
+                Witnessed? resultRoot = Witness(b, call.ResultText, scope.ToolSource, coords, members);
                 Hash128? invocationId = ComposeOrdered(
-                    b, Roots(inputRoot, resultRoot), EntityTier.Document,
+                    b, Roots(nameRoot, inputRoot, resultRoot),
                     EntityTypeRegistry.ToolInvocation, LaneSource, coords,
                     call.TimestampUnixUs > 0 ? call.TimestampUnixUs : ts);
-                invocations.Add((call, invocationId, inputRoot, resultRoot));
+                invocations.Add((call, invocationId, inputRoot?.Id, resultRoot?.Id));
             }
 
             Hash128? turnId = ComposeOrdered(
-                b, members, EntityTier.Document, EntityTypeRegistry.ConversationTurn,
+                b, members, EntityTypeRegistry.ConversationTurn,
                 roleSource, coords, ts);
             if (turnId is not { } tid) continue;
 
@@ -158,16 +163,11 @@ public static class AgentTraceEmitter
                 continue;
             }
 
-            Attest(b, ts, NativeAttestation.Categorical(
-                tid, Rel(AgentRelation.AppearsIn), sessionId, roleSource, sessionId,
-                TC.AppDerived));
-
-            // A role, a model id and a tool name are content: the text is the entity,
-            // and the attestation that uses it says what it is.
+            // The turn is already a constituent of the session trajectory.
             if (ContentEmitter.Emit(b, turn.Role, LaneSource) is { } role)
-                AttestCanonical(b, ts, tid, Rel(AgentRelation.HasRole), role, sessionId);
+                AttestCanonical(b, ts, tid, "role", role, sessionId);
             if (IsRealModelId(turn.Model) && ContentEmitter.Emit(b, turn.Model!, LaneSource) is { } model)
-                AttestCanonical(b, ts, tid, Rel(AgentRelation.AuthoredBy), model, sessionId);
+                AttestCanonical(b, ts, tid, "model", model, sessionId);
             if (!string.IsNullOrEmpty(turn.StopReason))
                 AttestProperty(b, ts, tid, sessionId, "stop_reason", turn.StopReason);
 
@@ -177,22 +177,9 @@ public static class AgentTraceEmitter
                 EmitUsage(b, ts, tid, sessionId, usage, coords);
             }
 
-            foreach (var (call, invocationId, inputRoot, resultRoot) in invocations)
+            foreach (var (call, invocationId, _, _) in invocations)
             {
-                if (ContentEmitter.Emit(b, call.Name, LaneSource) is not { } toolEntity) continue;
-                Attest(b, ts, NativeAttestation.Categorical(
-                    tid, Rel(AgentRelation.Calls), toolEntity, LaneSource, sessionId, TC.AppDerived));
                 if (invocationId is not { } inv) continue;
-                Attest(b, ts, NativeAttestation.Categorical(
-                    inv, Rel(AgentRelation.IsInstanceOf), toolEntity, LaneSource, sessionId, TC.AppDerived));
-                Attest(b, ts, NativeAttestation.Categorical(
-                    inv, Rel(AgentRelation.AppearsIn), sessionId, LaneSource, sessionId, TC.AppDerived));
-                if (inputRoot is { } ir && ir != inv)
-                    Attest(b, ts, NativeAttestation.Categorical(
-                        inv, Rel(AgentRelation.HasInput), ir, LaneSource, sessionId, TC.AppDerived));
-                if (resultRoot is { } rr && rr != inv)
-                    Attest(b, ts, NativeAttestation.Categorical(
-                        inv, Rel(AgentRelation.HasResult), rr, LaneSource, sessionId, TC.AppDerived));
                 if (call.IsError)
                     AttestProperty(b, ts, inv, sessionId, "is_error", "true");
             }
@@ -236,41 +223,37 @@ public static class AgentTraceEmitter
 
         if (Witness(b, session.Title, scope.Tenant.PromptSource, coords, members: null) is { } title)
             Attest(b, endUs, NativeAttestation.Categorical(
-                sessionId, Rel(AgentRelation.HasName), title, LaneSource, sessionId, TC.AppDerived));
-        if (Witness(b, session.Cwd, scope.Tenant.PromptSource, coords, members: null) is { } cwd)
-            Attest(b, endUs, NativeAttestation.Categorical(
-                sessionId, Rel(AgentRelation.HasContext), cwd, LaneSource, sessionId, TC.AppDerived));
+                sessionId, "title", title.Id, LaneSource, sessionId, TC.AppDerived));
         if (session.GitBranch is { Length: > 0 } branch)
             AttestProperty(b, endUs, sessionId, sessionId, "gitBranch", branch);
         if (session.UserKey is { Length: > 0 } user
             && Witness(b, user, scope.Tenant.PromptSource, coords, members: null) is { } userRoot)
             Attest(b, endUs, NativeAttestation.Categorical(
-                sessionId, Rel(AgentRelation.HasAttribution), userRoot, scope.Tenant.PromptSource, null,
+                sessionId, "user", userRoot.Id, scope.Tenant.PromptSource, null,
                 TC.UserPrompt));
-        if (sessionUs > 0)
-        {
-            string date = DateTimeOffset.FromUnixTimeMilliseconds(sessionUs / 1000)
-                .UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            if (Witness(b, date, scope.Tenant.PromptSource, coords, members: null) is { } dateRoot)
-                Attest(b, endUs, NativeAttestation.Categorical(
-                    sessionId, Rel(AgentRelation.OnDate), dateRoot, LaneSource, sessionId, TC.AppDerived));
-        }
         foreach (var (k, v) in session.Meta)
             AttestProperty(b, endUs, sessionId, sessionId, k, v);
         if (!totals.IsEmpty)
             EmitUsage(b, endUs, sessionId, sessionId, totals.ToUsage(), coords);
     }
 
-    private static Hash128? Witness(
+    private readonly record struct Witnessed(Hash128 Id, byte Tier);
+
+    private static Witnessed? Witness(
         SubstrateChangeBuilder b, string? text, Hash128 sourceId,
-        Dictionary<Hash128, double[]> coords, List<Hash128>? members)
+        Dictionary<Hash128, double[]> coords, List<Witnessed>? members)
     {
         if (string.IsNullOrEmpty(text)) return null;
         if (!TextEntityBuilder.TryBuildContentWitness(
                 Encoding.UTF8.GetBytes(text), sourceId, 1.0,
                 out var entities, out var physicalities, out _, out var root, out _))
             return null;
-        foreach (var e in entities) b.AddEntity(e);
+        byte tier = 0;
+        foreach (var e in entities)
+        {
+            b.AddEntity(e);
+            if (e.Id == root) tier = e.Tier;
+        }
         foreach (var p in physicalities)
         {
             b.AddPhysicality(p);
@@ -279,8 +262,9 @@ public static class AgentTraceEmitter
         }
         if (!coords.ContainsKey(root) && TryCodepointCoord(root, out var floor))
             coords[root] = floor;
-        if (members is not null && coords.ContainsKey(root)) members.Add(root);
-        return root;
+        var witnessed = new Witnessed(root, tier);
+        if (members is not null && coords.ContainsKey(root)) members.Add(witnessed);
+        return witnessed;
     }
 
     private static bool TryCodepointCoord(Hash128 id, out double[] coord)
@@ -300,23 +284,30 @@ public static class AgentTraceEmitter
     }
 
     private static Hash128? ComposeOrdered(
-        SubstrateChangeBuilder b, List<Hash128> members, byte tier, Hash128 typeId,
+        SubstrateChangeBuilder b, List<Witnessed> members, Hash128 typeId,
         Hash128 sourceId, Dictionary<Hash128, double[]> coords, long observedAtUs)
     {
         if (members.Count == 0) return null;
-        if (members.Count == 1) return members[0];
+        if (members.Count == 1) return members[0].Id;
 
-        Hash128 id = Hash128.Merkle(tier, System.Runtime.InteropServices.CollectionsMarshal
-            .AsSpan(members));
+        var ids = new Hash128[members.Count];
+        var tiers = new byte[members.Count];
+        for (int i = 0; i < members.Count; i++)
+        {
+            ids[i] = members[i].Id;
+            tiers[i] = members[i].Tier;
+        }
+        byte floor = CompositionLaw.ParentFloor(tiers);
+        Hash128 id = Hash128.Merkle(floor, ids);
         if (!coords.ContainsKey(id))
         {
             var flat = new double[members.Count * 4];
-            for (int i = 0; i < members.Count; i++) coords[members[i]].CopyTo(flat, i * 4);
+            for (int i = 0; i < members.Count; i++) coords[members[i].Id].CopyTo(flat, i * 4);
             coords[id] = Math4d.KarcherMean(flat);
         }
         double[] centroid = coords[id];
 
-        b.AddEntity(id, tier, typeId);
+        b.AddEntity(id, floor, typeId);
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
         b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: id, SourceId: sourceId,
@@ -324,19 +315,18 @@ public static class AgentTraceEmitter
                 CoordX: centroid[0], CoordY: centroid[1],
                 CoordZ: centroid[2], CoordM: centroid[3],
                 HilbertIndex: Hilbert128.Encode(centroid),
-                TrajectoryXyzm: Trajectory.Build(System.Runtime.InteropServices.CollectionsMarshal
-                    .AsSpan(members)),
+                TrajectoryXyzm: Trajectory.Build(ids),
                 NConstituents: members.Count,
                 AlignmentResidual: null, SourceDim: null,
                 ObservedAtUnixUs: observedAtUs));
         return id;
     }
 
-    private static List<Hash128> Roots(params Hash128?[] roots)
+    private static List<Witnessed> Roots(params Witnessed?[] roots)
     {
-        var list = new List<Hash128>(roots.Length);
+        var list = new List<Witnessed>(roots.Length);
         foreach (var r in roots)
-            if (r is { } id) list.Add(id);
+            if (r is { } part) list.Add(part);
         return list;
     }
 
@@ -346,14 +336,14 @@ public static class AgentTraceEmitter
         Attest(b, ts, NativeAttestation.Categorical(
             subject, relation, obj, LaneSource, sessionId, TC.AppDerived));
 
-    // A property the log states about a turn, invocation or session: the property value
-    // [key, value] under HAS_ATTRIBUTE, never "key=value" text and never a relation per key.
+    // The log's field name is the predicate. The object is the field text.
     private static void AttestProperty(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId, string key, string value)
     {
-        if (ContentEmitter.StagePropertyValue(b, key, value, LaneSource) is { } fact)
+        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(value)) return;
+        if (ContentEmitter.Emit(b, value, LaneSource) is { } valueId)
             Attest(b, ts, NativeAttestation.Categorical(
-                subject, Rel(AgentRelation.HasAttribute), fact, LaneSource, sessionId, TC.AppDerived));
+                subject, key, valueId, LaneSource, sessionId, TC.AppDerived));
     }
 
     // Token usage and cost under the provider API's own field names, so every agent's

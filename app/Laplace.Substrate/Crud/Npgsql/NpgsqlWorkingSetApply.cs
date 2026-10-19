@@ -755,6 +755,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     copyTransactions.StartControl();
                 if (keptEnts.Count > 0)
                 {
+                    SortKeptByLeafAndOrder(keptEnts, _leafModulus);
                     await CopyKeptAsync(conn, "entities", IntentStageTable.Entities,
                         entBlobs, keptEnts, 0, keptEnts.Count, ct);
                     eIns = keptEnts.Count;
@@ -762,6 +763,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 if (keptPhys.Count > 0)
                 {
+                    SortKeptByLeafAndOrder(keptPhys, _leafModulus);
                     await CopyKeptAsync(conn, "physicalities", IntentStageTable.Physicalities,
                         physBlobs, keptPhys, 0, keptPhys.Count, ct);
                     pIns = keptPhys.Count;
@@ -769,6 +771,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 if (keptAtts.Count > 0)
                 {
+                    SortKeptByLeafAndOrder(keptAtts, _leafModulus);
                     await CopyKeptAsync(conn, "attestations", IntentStageTable.Attestations,
                         attBlobs, keptAtts, 0, keptAtts.Count, ct);
                     aIns = keptAtts.Count;
@@ -815,6 +818,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (keptAtts.Count > 0)
                     {
                         copyTransactions.StartControl();
+                        SortKeptByLeafAndOrder(keptAtts, _leafModulus);
                         await CopyKeptAsync(conn, "attestations", IntentStageTable.Attestations,
                             attBlobs, keptAtts, 0, keptAtts.Count, ct);
                         aIns = keptAtts.Count;
@@ -1536,6 +1540,21 @@ public sealed partial class NpgsqlSubstrateWriter
         });
         rowsByLane = counts;
         return payloads;
+    }
+
+    private static void SortKeptByLeafAndOrder(List<KeptRow> kept, int modulus)
+    {
+        int rowCount = kept.Count;
+        if (rowCount <= 1 || modulus <= 1) return;
+        var span = CollectionsMarshal.AsSpan(kept);
+        var routes = new Hash128[rowCount];
+        for (int i = 0; i < rowCount; i++) routes[i] = span[i].RouteKey;
+        var leafOf = new int[rowCount];
+        PartitionRoute.Remainders(routes, modulus, leafOf);
+        var keys = new LeafOrderKey[rowCount];
+        for (int i = 0; i < rowCount; i++)
+            keys[i] = new LeafOrderKey(leafOf[i], CopySortKey.FromWire(span[i].OrderKey.Wire));
+        MemoryExtensions.Sort(keys.AsSpan(), span);
     }
 
     private static byte[][] BuildSortedCopyPayloads(

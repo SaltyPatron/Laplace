@@ -15,31 +15,32 @@ public static class ChessSeedManifest
 
     // Relation surfaces other chess code must name. Each literal is spelled once, here in
     // the declared list, and callers reference the constant rather than retype it.
-    internal const string OpeningName    = "OPENING_NAME";
-    internal const string HasEco         = "HAS_ECO";
-    internal const string GameHasOpening = "GAME_HAS_OPENING";
-    internal const string GameHasEco     = "GAME_HAS_ECO";
+    internal const string OpeningName    = "Opening";
+    internal const string HasEco         = "ECO";
+    internal const string GameHasOpening = "Opening";
+    internal const string GameHasEco     = "ECO";
     public static readonly IReadOnlyList<string> Relations =
     [
-        "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", OpeningName, HasEco,
-        // Event → line: every source that records playings attests it.
+        "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", "WhiteElo", "BlackElo", OpeningName, HasEco,
+        // Playing → line is the stored binding of a playing to the line it played.
         "PLAYS_LINE",
-        "HAS_SETUP", "ANALYZED_AT",
-        // PGN White/Black are its surfaces: HAS_PLAYER {side/white|black}.
-        "HAS_PLAYER", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
-        "HAS_TERMINATION", "HAS_RESULT", "HAS_EVAL", "MOVE_QUALITY",
-        "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
+        "FEN", "ANALYZED_AT",
+        "White", "Black", "Event", "Site", "Date", "Round", "TimeControl",
+        "Termination", "Result", "HAS_EVAL", "MOVE_QUALITY",
+        "HAS_THINK_CLASS",
         // Exact tablebase verdicts on witnessed positions: five-valued WDL token (side to
         // move's view) and distance-to-zeroing scalar.
         "HAS_WDL", "HAS_DTZ",
         // HAS_MOTIF is the position-grain child of GAME_HAS_MOTIF. Declaring a child pulls
         // its root through ExpandRelationsWithFamily but not the converse, so both are listed.
         "GAME_HAS_MOTIF", "HAS_MOTIF", "EXPLAINS", "IS_EXAMPLE_OF", "HAS_DEFINITION",
+        // PGN tags kept on the game: clock of the playing, titles, and FIDE ids.
+        // Site and Round are declared above.
+        "UTCDate", "UTCTime", "WhiteTitle", "BlackTitle", "WhiteFideId", "BlackFideId",
         // Attested by ChessPgnDecomposer (CORRESPONDS_TO game ↔ lichess id) and
         // ChessVocabulary.EmitPlayer (HAS_NAME {name/alias}). Both are family roots, which
         // family expansion never pulls, so they are declared explicitly.
         "HAS_EXTERNAL_ID", "HAS_FEATURE", "CORRESPONDS_TO", "HAS_NAME",
-        "Site", "Round", "UTCDate", "UTCTime", "WhiteTitle", "BlackTitle", "WhiteFideId", "BlackFideId",
     ];
 
     public static ISourceManifest ForLane(Hash128 sourceId, string sourceName, Hash128 trustClass) =>

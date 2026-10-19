@@ -4,6 +4,7 @@ using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.ConceptNet.Tests;
@@ -17,7 +18,7 @@ public sealed class ConceptNetDecomposerTests
     }
 
     [Fact]
-    public async Task Extract_Emits_HasPos_And_CorrespondsTo_For_Wn_Suffixed_Concepts()
+    public async Task Extract_DepositsUposOnTheLexicalization_For_Wn_Suffixed_Concepts()
     {
         string cili = TestInstall.ResolveCiliOrFallback();
         if (!TestInstall.HasFullCiliMap(cili)) return;
@@ -35,31 +36,49 @@ public sealed class ConceptNetDecomposerTests
             var dec = new ConceptNetDecomposer();
             var ctx = new FakeContext(dir, new NullWriter());
 
-            Hash128 hasPos = RelationTypeRegistry.Resolve("HAS_POS").Id;
-            Hash128 correspondsTo = RelationTypeRegistry.Resolve("CORRESPONDS_TO").Id;
-            Hash128 relatedTo = RelationTypeRegistry.Resolve("RELATED_TO").Id;
+            Hash128 hasPos = RelationTypeRegistry.RelationTypeId("HAS_POS");
+            Hash128 sense = RelationTypeRegistry.RelationTypeId("Sense");
+            Hash128 relatedTo = RelationTypeRegistry.RelationTypeId("RelatedTo");
             Hash128? dogRoot = ContentTierSpine.ResolveRoot("dog");
             Hash128? petRoot = ContentTierSpine.ResolveRoot("pet");
-            Hash128? synId = ConceptAnchor.SynsetId(1313093, 'n');
+            Hash128? synId = ConceptAnchor.SynsetId(1313093, 'n', "pwn30");
+            string? dogIli = SourceEntityIdConventions.WordNetIli(1313093, 'n', "pwn30");
+            Hash128? iliId = dogIli is null ? null : ContentEmitter.RootId(dogIli);
+            Hash128? english = ContentEmitter.RootId("en");
 
             Assert.NotNull(dogRoot);
             Assert.NotNull(petRoot);
             Assert.NotNull(synId);
+            Assert.NotNull(iliId);
+            Assert.NotNull(english);
 
-            var hasPosSubjects = new HashSet<Hash128>();
-            var synSubjects = new HashSet<Hash128>();
+            Hash128 lexicalization = Hash128.Merkle(
+                (byte)(EntityTier.Word + 1),
+                [dogRoot.Value, english.Value, iliId.Value]);
+            var senseSubjects = new HashSet<Hash128>();
             var relatedEdges = new List<AttestationRow>();
+            var bankCarriers = new HashSet<Hash128>();
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default).WithoutWriter())
             {
                 foreach (var a in change.Attestations)
                 {
-                    if (a.TypeId == hasPos && a.SubjectId is { } s)
-                        hasPosSubjects.Add(s);
-                    if (a.TypeId == correspondsTo && a.SubjectId is { } cs)
-                        synSubjects.Add(cs);
+                    Assert.NotEqual(hasPos, a.TypeId);
+                    if (a.TypeId == sense && a.SubjectId is { } cs)
+                        senseSubjects.Add(cs);
                     if (a.TypeId == relatedTo)
                         relatedEdges.Add(a);
+                }
+                if (!change.IntentStages.IsDefaultOrEmpty)
+                {
+                    var parsed = CopyTupleParser.ParsePhysicalities(
+                        change.IntentStages
+                            .Where(static stage => !stage.IsInvalid)
+                            .Select(static stage => stage.TupleBuffer(IntentStageTable.Physicalities))
+                            .ToList());
+                    for (int i = 0; i < parsed.Types.Count; i++)
+                        if (parsed.Types[i] == (short)PhysicalityType.LexicalBank)
+                            bankCarriers.Add(parsed.EntityIds[i]);
                 }
             }
 
@@ -72,10 +91,12 @@ public sealed class ConceptNetDecomposerTests
             Assert.Contains(synId.Value, endpoints);
             Assert.Contains(petRoot.Value, endpoints);
             Assert.DoesNotContain(dogRoot.Value, endpoints);
-            Assert.Contains(dogRoot.Value, hasPosSubjects);
-            Assert.Contains(petRoot.Value, hasPosSubjects);
-            Assert.Contains(dogRoot.Value, synSubjects);
-            Assert.DoesNotContain(petRoot.Value, synSubjects);
+            Assert.Contains(lexicalization, bankCarriers);
+            Assert.Contains(iliId.Value, bankCarriers);
+            Assert.DoesNotContain(dogRoot.Value, bankCarriers);
+            Assert.DoesNotContain(petRoot.Value, bankCarriers);
+            Assert.Contains(dogRoot.Value, senseSubjects);
+            Assert.DoesNotContain(petRoot.Value, senseSubjects);
         }
         finally
         {
@@ -106,9 +127,7 @@ public sealed class ConceptNetDecomposerTests
                 attestations.AddRange(change.Attestations);
 
             Hash128 dog = ContentTierSpine.ResolveRoot("dog")!.Value;
-            Hash128 noun = PosReference.Resolve("n", PosReference.PosTagset.WordNet);
-            Hash128 english = LanguageReference.Resolve("en");
-            Hash128 synset = ConceptAnchor.SynsetId(1313093, 'n')!.Value;
+            Hash128 english = ContentEmitter.RootId("en")!.Value;
 
             static AttestationRow One(
                 IEnumerable<AttestationRow> rows, Hash128 subject, string relation, Hash128 obj) =>
@@ -117,9 +136,13 @@ public sealed class ConceptNetDecomposerTests
                     && a.TypeId == RelationTypeRegistry.RelationTypeId(relation)
                     && a.ObjectId == obj);
 
-            Assert.Equal(1, One(attestations, dog, "HAS_POS", noun).ObservationCount);
-            Assert.Equal(1, One(attestations, dog, "HAS_LANGUAGE", english).ObservationCount);
-            Assert.Equal(1, One(attestations, dog, "CORRESPONDS_TO", synset).ObservationCount);
+            Assert.DoesNotContain(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_POS"));
+            Hash128 lexicalization = Hash128.Merkle(
+                (byte)(EntityTier.Word + 1),
+                [dog, english, ContentEmitter.RootId(
+                    SourceEntityIdConventions.WordNetIli(1313093, 'n', "pwn30")!)!.Value]);
+            Assert.Equal(1, One(attestations, dog, "Sense", lexicalization).ObservationCount);
+            Assert.DoesNotContain(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_LANGUAGE"));
         }
         finally
         {
@@ -127,22 +150,20 @@ public sealed class ConceptNetDecomposerTests
         }
     }
 
-    // Each Not* relation resolves to the relation it denies and is flagged negated; the
-    // caller flips the sign of the weight, so laplace_score_fp scores it below 0.5 and it
-    // folds as a refutation into the same consensus cell the positive form confirms.
+    // NotDesires is ConceptNet's predicate. A negative weight is not how the file denies.
     [Theory]
-    [InlineData("/r/NotDesires", "DESIRES")]
-    [InlineData("/r/NotUsedFor", "USED_FOR")]
-    [InlineData("/r/NotCapableOf", "CAPABLE_OF")]
-    [InlineData("/r/NotHasProperty", "HAS_PROPERTY")]
-    public void NotRelations_ResolveToTheRelationTheyDeny_AndAreNegated(
+    [InlineData("/r/NotDesires", "NotDesires")]
+    [InlineData("/r/NotUsedFor", "NotUsedFor")]
+    [InlineData("/r/NotCapableOf", "NotCapableOf")]
+    [InlineData("/r/NotHasProperty", "NotHasProperty")]
+    public void NotRelations_KeepTheSourcePredicate(
         string relationUri, string expectedType)
     {
         Assert.True(ConceptNetRelations.TryResolveType(
             System.Text.Encoding.UTF8.GetBytes(relationUri), out var typeName,
             out _, out bool negated));
         Assert.Equal(expectedType, typeName);
-        Assert.True(negated, $"{relationUri} must be negated or it asserts what it denies");
+        Assert.False(negated);
     }
 
     [Theory]

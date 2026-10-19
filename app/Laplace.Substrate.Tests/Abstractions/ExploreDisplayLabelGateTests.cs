@@ -87,4 +87,22 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.DoesNotContain("r.Label ?? r.IdHex", source, StringComparison.Ordinal);
         Assert.DoesNotContain("NpgsqlSubstrateReads.LabelOrHexAsync", source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void EntityFacets_AndSynsetLemma_PreferAttestedSemanticTypeAndSingleWordLemmas()
+    {
+        var root = TypeIdLawTests.FindRepoRootPublic();
+        var catalog = File.ReadAllText(Path.Combine(root, "engine", "core", "src", "sql_catalog.def"));
+        var facetsSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
+            "functions", "inspect", "entity_facets.sql.in"));
+        var realizeBatch = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src",
+            "realize_batch.c"));
+        var synsetLemmaSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
+            "functions", "realize", "realize_synset_lemma.sql.in"));
+
+        Assert.Contains("relation_type_id('IS_TYPED_AS')", catalog, StringComparison.Ordinal);
+        Assert.Contains("relation_family_ids('IS_TYPED_AS')", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("COALESCE(w.tier, 32767) ASC, cand.word_id", realizeBatch, StringComparison.Ordinal);
+        Assert.Contains("COALESCE(w.tier, 32767) ASC", synsetLemmaSql, StringComparison.Ordinal);
+    }
 }

@@ -174,10 +174,7 @@
       "syntaxPath": "Lemma/@partOfSpeech",
       "propertyName": "partOfSpeech",
       "valueKind": "Enumerated",
-      "disposition": "Testimony",
-      "relationName": "HAS_POS",
-      "contextField": "language",
-      "vocabulary": "pos/wordnet"
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "Lemma/@script",
@@ -246,10 +243,8 @@
       "syntaxPath": "Sense/@synset",
       "propertyName": "sense",
       "valueKind": "Identity",
-      "disposition": "Testimony",
-      "relationName": "CORRESPONDS_TO",
-      "identityTable": "concept",
-      "contextField": "language"
+      "disposition": "Packaging",
+      "identityTable": "concept"
     },
     {
       "syntaxPath": "Sense/@n",
@@ -317,8 +312,7 @@
       "syntaxPath": "Count",
       "propertyName": "count",
       "valueKind": "Integer",
-      "disposition": "Occurrence",
-      "observationOf": "Sense/@synset"
+      "disposition": "Excluded"
     },
     {
       "syntaxPath": "Example",
@@ -631,8 +625,5 @@
       },
       "structurePaths": []
     }
-  ],
-  "attributeVocabularies": {
-    "language": "lang/iso639"
-  }
+  ]
 }

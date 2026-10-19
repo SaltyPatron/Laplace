@@ -365,7 +365,9 @@ public sealed class LlamaTokenizerParser
             coords[i * 4 + 2] = c.Z; coords[i * 4 + 3] = c.M;
         }
         double[] center = Math4d.KarcherMean(coords);
-        return (Hash128.Merkle(EntityTier.Word, ids), EntityTier.Word,
+        // Each byte is a tier-0 atom. The opaque token is one boundary above those atoms.
+        byte floor = 1;
+        return (Hash128.Merkle(floor, ids), floor,
             center[0], center[1], center[2], center[3]);
     }
 

@@ -71,7 +71,7 @@ public sealed class GrammarCompositionTests
         var first = Compose("int first(void) { return helper(); }", "c");
         var second = Compose("int second(void) { return helper(); }", "c");
         var replay = Compose("int first(void) { return helper(); }", "c");
-        Hash128 calls = RelationTypeRegistry.Resolve("CALLS").Id;
+        Hash128 calls = RelationTypeRegistry.RelationTypeId(nameof(TagType.RefCall));
         var a = Assert.Single(first.Atts.Where(a => a.TypeId == calls));
         var b = Assert.Single(second.Atts.Where(a => a.TypeId == calls));
         var again = Assert.Single(replay.Atts.Where(a => a.TypeId == calls));
@@ -99,8 +99,8 @@ public sealed class GrammarCompositionTests
         var (_, _, attestations, root) = Compose(src, "python");
 
         Assert.NotEqual(default, root);
-        Assert.Contains(attestations, a => a.TypeId == RelationTypeRegistry.Resolve("DEFINES").Id);
-        Assert.Contains(attestations, a => a.TypeId == RelationTypeRegistry.Resolve("CALLS").Id);
+        Assert.Contains(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId(nameof(TagType.DefFunction)));
+        Assert.Contains(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId(nameof(TagType.RefCall)));
     }
 
     [Fact]
@@ -159,9 +159,8 @@ public sealed class GrammarCompositionTests
         var (_, _, atts, root) = Compose(src, "sql");
 
         Assert.NotEqual(default, root);
-        // DEFINES is an alias of HAS_DEFINITION — Resolve, not RelationTypeId(literal).
-        var defines = RelationTypeRegistry.Resolve("DEFINES").Id;
-        var calls = RelationTypeRegistry.Resolve("CALLS").Id;
+        var defines = RelationTypeRegistry.RelationTypeId(nameof(TagType.DefFunction));
+        var calls = RelationTypeRegistry.RelationTypeId(nameof(TagType.RefCall));
         Assert.Contains(atts, a => a.TypeId == defines);
         Assert.Contains(atts, a => a.TypeId == calls);
     }

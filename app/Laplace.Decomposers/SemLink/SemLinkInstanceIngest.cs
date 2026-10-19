@@ -16,12 +16,11 @@ internal static class SemLinkInstanceIngest
 {
     internal const string FileName = "semlink-2";
 
-    private static readonly Hash128 AppearsIn = SemLinkSource.AppearsInTypeId;
-    private static readonly Hash128 HasRole = SemLinkSource.HasRoleTypeId;
-    private static readonly Hash128 HasSense = SemLinkSource.HasSenseTypeId;
-    private static readonly Hash128 InstanceOf = SemLinkSource.InstanceOfTypeId;
-    private static readonly Hash128 EvokesFrame = SemLinkSource.EvokesFrameTypeId;
-    private static readonly Hash128 RoleCorrespondsTo = SemLinkSource.RoleCorrespondsToTypeId;
+    private static readonly Hash128 VnClassRel = SemLinkSource.VnClassTypeId;
+    private static readonly Hash128 FrameRel = SemLinkSource.FrameTypeId;
+    private static readonly Hash128 RolesetRel = SemLinkSource.RolesetTypeId;
+    private static readonly Hash128 OntoNotesRel = SemLinkSource.OntoNotesSenseTypeId;
+    private static readonly Hash128 PairRel = SemLinkSource.InstancePairTypeId;
 
     internal readonly record struct Dependency(
         string Span, string? PropBankRole, string? VerbNetRole, string? FrameNetRole);
@@ -164,10 +163,6 @@ internal static class SemLinkInstanceIngest
             EntityTypeRegistry.SourceReference,
             source);
         Hash128 occurrence = occurrenceResult.Id;
-        Hash128 sourceFile = sourceFileComponent.Id;
-
-        Add(builder, occurrence, AppearsIn, sourceFile, occurrence);
-        Add(builder, lemmaComponent.Id, AppearsIn, occurrence, occurrence);
 
         Hash128? vnClass = EmitCategory(
             builder, record.VerbNetClass, EntityTypeRegistry.VerbNetClass);
@@ -176,59 +171,43 @@ internal static class SemLinkInstanceIngest
         Hash128? roleset = EmitCategory(
             builder, record.PropBankRoleset, EntityTypeRegistry.PropBankRoleset);
         Hash128? onSense = record.OntoNotesSenseGroup is { } group
-            ? EmitReference(builder, $"ontonotes-sense\0{record.Lemma}\0{group}")
+            ? StageStructure(
+                builder,
+                [lemmaComponent, RequireContent(builder, group, source)],
+                EntityTypeRegistry.SourceReference,
+                source).Id
             : null;
 
-        // These fields annotate this predicate occurrence, so they are attested on the
-        // occurrence entity, not on the shared lemma; the lemma reaches the occurrence
-        // through APPEARS_IN. Word-level standing is derived from occurrences, not attested
-        // at ingest.
         if (vnClass is { } verbNetClass)
-            Add(builder, occurrence, InstanceOf, verbNetClass, occurrence);
+            Add(builder, occurrence, VnClassRel, verbNetClass, occurrence);
         if (frame is { } frameId)
-            Add(builder, occurrence, EvokesFrame, frameId, occurrence);
+            Add(builder, occurrence, FrameRel, frameId, occurrence);
         if (roleset is { } rolesetId)
-            Add(builder, occurrence, HasSense, rolesetId, occurrence);
+            Add(builder, occurrence, RolesetRel, rolesetId, occurrence);
         if (onSense is { } ontoNotesSenseId)
-            Add(builder, occurrence, HasSense, ontoNotesSenseId, occurrence);
+            Add(builder, occurrence, OntoNotesRel, ontoNotesSenseId, occurrence);
 
-        OrderedCompositionComponent occurrenceComponent = Component(occurrenceResult);
-        for (int i = 0; i < record.Dependencies.Length; i++)
+        foreach (Dependency dep in record.Dependencies)
         {
-            Dependency dep = record.Dependencies[i];
-            OrderedCompositionComponent argumentOrdinal =
-                RequireContent(builder,
-                    i.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    source);
-            OrderedCompositionComponent span =
-                RequireContent(builder, dep.Span, source);
-            OrderedCompositionResult argumentResult = StageStructure(
-                builder,
-                [occurrenceComponent, argumentOrdinal, span],
-                EntityTypeRegistry.SourceReference,
-                source);
-            Hash128 argument = argumentResult.Id;
-            Add(builder, argument, AppearsIn, occurrence, occurrence);
-
             Hash128? pbRole = roleset is { } pbParent && dep.PropBankRole is { } pb
                 ? RoleAnchor.Declare(
-                    builder, RoleIdentityKind.PropBank, pbParent, NormalizePropBankRole(pb),
+                    builder, RoleIdentityKind.PropBank, pbParent,
+                    ContentFloor(record.PropBankRoleset), NormalizePropBankRole(pb),
                     EntityTypeRegistry.PropBankRole, source)
                 : null;
             Hash128? vnRole = vnClass is { } vnParent && dep.VerbNetRole is { } vn
                 ? RoleAnchor.Declare(
-                    builder, RoleIdentityKind.VerbNet, vnParent, vn,
+                    builder, RoleIdentityKind.VerbNet, vnParent,
+                    ContentFloor(record.VerbNetClass), vn,
                     EntityTypeRegistry.VerbNetRole, source)
                 : null;
             Hash128? fnRole = frame is { } fnParent && dep.FrameNetRole is { } fn
                 ? RoleAnchor.Declare(
-                    builder, RoleIdentityKind.FrameNet, fnParent, fn,
+                    builder, RoleIdentityKind.FrameNet, fnParent,
+                    ContentFloor(record.FrameNetFrame), fn,
                     EntityTypeRegistry.FrameNetFe, source)
                 : null;
 
-            Add(builder, argument, HasRole, pbRole, occurrence);
-            Add(builder, argument, HasRole, vnRole, occurrence);
-            Add(builder, argument, HasRole, fnRole, occurrence);
             AddPair(builder, pbRole, vnRole, occurrence);
             AddPair(builder, pbRole, fnRole, occurrence);
             AddPair(builder, vnRole, fnRole, occurrence);
@@ -265,6 +244,11 @@ internal static class SemLinkInstanceIngest
         ContentEmitter.StageComponent(builder, value, source)
         ?? throw new InvalidOperationException(
             $"SemLink structural constituent could not be admitted: {value}");
+
+    private static byte ContentFloor(string? value) =>
+        value is not null && CompositionLaw.TryFace(value, out CompositionLaw.Face face)
+            ? face.Tier
+            : (byte)0;
 
     private static Hash128 RequiredRoot(string value) =>
         ContentEmitter.RootId(value)
@@ -312,7 +296,7 @@ internal static class SemLinkInstanceIngest
         SubstrateChangeBuilder builder, Hash128? left, Hash128? right, Hash128 context)
     {
         if (left is null || right is null) return;
-        Add(builder, left.Value, RoleCorrespondsTo, right, context);
+        Add(builder, left.Value, PairRel, right, context);
     }
 
     private static void Add(

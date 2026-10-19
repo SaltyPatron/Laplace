@@ -13,31 +13,20 @@ public readonly struct Atomic2020Source : ISeedSource
     public static Hash128 TrustClass { get; } =
         TrustClassRegistry.Id("StructuredCorpus");
 
-    // Spelled once: the assertion and the denial that refutes it share one relation.
-
-    private const string Desires = "DESIRES";
-
-
+    // The TSV column is the predicate. NotDesires stays NotDesires.
     public static readonly (string Rel, string Type)[] RelPairs =
     [
-        // xEffect/oEffect, xReact/oReact, xWant/oWant: one element each, qualified by whose.
         ("oEffect", "oEffect"), ("oReact", "oReact"), ("oWant", "oWant"),
-        ("xAttr", "X_ATTR"), ("xEffect", "xEffect"), ("xIntent", "X_INTENT"),
-        ("xNeed", "X_NEED"), ("xReact", "xReact"), ("xWant", "xWant"), ("xReason", "X_REASON"),
-        ("HinderedBy", "OBSTRUCTED_BY"), ("isAfter", "isAfter"), ("isBefore", "IS_BEFORE"),
-        ("isFilledBy", "X_FILLED_BY"), ("Causes", "CAUSES"), ("ObjectUse", "OBJECT_USE"),
-        ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"),
-        ("CapableOf", "CAPABLE_OF"), ("Desires", Desires), ("HasProperty", "HAS_PROPERTY"),
-        // A denial is an outcome, not a different relation: NotDesires maps onto DESIRES
-        // and folds with a negative magnitude, refuting the cell the positive form confirms.
-        ("MadeUpOf", "MadeUpOf"), ("NotDesires", Desires),
+        ("xAttr", "xAttr"), ("xEffect", "xEffect"), ("xIntent", "xIntent"),
+        ("xNeed", "xNeed"), ("xReact", "xReact"), ("xWant", "xWant"), ("xReason", "xReason"),
+        ("HinderedBy", "HinderedBy"), ("isAfter", "isAfter"), ("isBefore", "isBefore"),
+        ("isFilledBy", "isFilledBy"), ("Causes", "Causes"), ("ObjectUse", "ObjectUse"),
+        ("AtLocation", "AtLocation"), ("HasSubEvent", "HasSubEvent"),
+        ("CapableOf", "CapableOf"), ("Desires", "Desires"), ("HasProperty", "HasProperty"),
+        ("MadeUpOf", "MadeUpOf"), ("NotDesires", "NotDesires"),
     ];
 
-    /// <summary>Relations whose assertion DENIES the relation they map to.</summary>
-    public static readonly HashSet<string> NegatedRelations = new(StringComparer.Ordinal)
-    {
-        "NotDesires",
-    };
+    public static readonly HashSet<string> NegatedRelations = new(StringComparer.Ordinal);
 
     public static IReadOnlyList<string> Relations { get; } =
         RelPairs.Select(r => r.Type).Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();

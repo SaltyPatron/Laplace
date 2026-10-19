@@ -488,10 +488,10 @@ public sealed class LabCommandTests : IDisposable
         Assert.Equal("90 a0 b0 a0 b0", g.Plies[0].MoveAtoms[0].Bytes);
         Assert.Equal(g.Plies[0].To, InspectCommand.Run(ChessCommandLine.Parse(["inspect", "d4"])).Games[0].Plies[0].To); // one position, whatever spelled it
         HeaderView H(string tag) => g.Headers.Single(h => h.Tag == tag);
-        Assert.Equal("hashed only", H("Site").Summary);
+        Assert.Equal("content + hashed", H("Site").Summary);
         Assert.Equal("hashed only", H("Round").Summary);
         Assert.Equal("dropped", H("Link").Summary);
-        Assert.Equal("dropped", H("UTCDate").Summary);
+        Assert.Equal("content", H("UTCDate").Summary);
         Assert.Equal("content", H("ECO").Summary);
         Assert.Equal("content + hashed", H("Event").Summary);
         Assert.Contains(H("White").Dispositions, d => d.Contains("\"fabianocaruana\" (folded)"));

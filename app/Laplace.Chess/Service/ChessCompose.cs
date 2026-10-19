@@ -32,6 +32,14 @@ public static class ChessCompose
     public const byte LineTier = 4;
 
     /// <summary>
+    /// Floor of a line entity. No moves collapses to the start position. A played
+    /// line is one boundary above the position and the move, which both sit at
+    /// <see cref="PositionTier"/>.
+    /// </summary>
+    public static byte LineFloor(int moveCount) =>
+        moveCount <= 0 ? PositionTier : (byte)(PositionTier + 1);
+
+    /// <summary>
     /// Line identity: Merkle over the start position then the ordered move ids. Replayed boards
     /// are not constituents. Identical play is one line whatever its SAN/PGN spelling or source.
     /// </summary>

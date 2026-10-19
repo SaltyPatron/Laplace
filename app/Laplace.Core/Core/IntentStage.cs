@@ -110,6 +110,27 @@ public sealed partial class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>
+    /// UPOS slot on this entity's lexical-bank face. <paramref name="slot"/> is the
+    /// frozen 0-based bank slot. A second call for the same entity is the same face.
+    /// </summary>
+    public void DepositUpos(Hash128 entityId, ReadOnlySpan<double> coord, Hilbert128 hilbert, int slot)
+    {
+        ThrowIfDisposed();
+        if (coord.Length < 4) throw new ArgumentException("coord must have 4 elements", nameof(coord));
+        if (slot < 0 || slot > 30) throw new ArgumentOutOfRangeException(nameof(slot));
+        unsafe
+        {
+            fixed (double* pCoord = coord)
+            {
+                Hilbert128 h = hilbert;
+                int rc = NativeInterop.IntentStageDepositLexicalUpos(
+                    handle, &entityId, pCoord, &h, slot);
+                if (rc != 0) throw new InvalidOperationException("intent_stage_deposit_lexical_upos failed");
+            }
+        }
+    }
+
     public void AddPhysicality(
         Hash128 id,
         Hash128 entityId,

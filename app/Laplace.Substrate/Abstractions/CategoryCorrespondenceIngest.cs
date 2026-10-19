@@ -4,14 +4,14 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Extracted category key → fixed object id attestation (CORRESPONDS_TO by default, with
-/// an optional context id). Staging runs through the shared pipeline.
+/// Extracted category key → fixed object id attestation. RelationType is the
+/// witness's own predicate. Staging runs through the shared pipeline.
 /// </summary>
 public readonly record struct CategoryCorrespondenceRecord(
     string SubjectKey,
     Hash128 SubjectTypeId,
     Hash128 ObjectId,
-    string RelationType = "CORRESPONDS_TO",
+    string RelationType,
     Hash128? ContextId = null,
     double Magnitude = 1.0,
     // A structured subject (a composition such as a FrameNet lexical unit) declares

@@ -71,12 +71,6 @@ public sealed class ParquetDecomposer
             Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
             OrderedComposition.StageBatch(b.ContentStage,
                 [new OrderedCompositionRequest([column, value], ValueTypeId, Source, 0)], composed);
-            Hash128 valueId = composed[0].Id;
-
-            b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_VALUE_IN", column.Id, Source, TC.StructuredCorpus));
-            b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_INSTANCE_OF", value.Id, Source, TC.StructuredCorpus));
         }
     }
 

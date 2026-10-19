@@ -71,35 +71,38 @@ public sealed record AgentUsage(
 /// </summary>
 public enum AgentRelation
 {
-    AppearsIn,
-    HasAttribution,
-    HasRole,
-    AuthoredBy,
-    Calls,
-    IsInstanceOf,
-    HasInput,
-    HasResult,
-    HasAttribute,
-    HasName,
-    HasContext,
-    OnDate,
+    Role,
+    Model,
+    Title,
+    User,
+    StopReason,
+    IsError,
+    GitBranch,
+    InputTokens,
+    OutputTokens,
+    CacheReadInputTokens,
+    CacheCreationInputTokens,
+    CostUsd,
 }
 
 public static class AgentRelations
 {
-    private static readonly string[] Canonical = BuildCanonical();
-
-    public static string Surface(AgentRelation relation) => Canonical[(int)relation];
-
-    // The member-name → surface-name conversion is shared; it lives in RelationSymbol.
-    private static string[] BuildCanonical()
+    public static string Surface(AgentRelation relation) => relation switch
     {
-        var names = Enum.GetNames<AgentRelation>();
-        var result = new string[names.Length];
-        for (int i = 0; i < names.Length; i++)
-            result[i] = RelationSymbol.Canonical(names[i]);
-        return result;
-    }
+        AgentRelation.Role => "role",
+        AgentRelation.Model => "model",
+        AgentRelation.Title => "title",
+        AgentRelation.User => "user",
+        AgentRelation.StopReason => "stop_reason",
+        AgentRelation.IsError => "is_error",
+        AgentRelation.GitBranch => "gitBranch",
+        AgentRelation.InputTokens => "input_tokens",
+        AgentRelation.OutputTokens => "output_tokens",
+        AgentRelation.CacheReadInputTokens => "cache_read_input_tokens",
+        AgentRelation.CacheCreationInputTokens => "cache_creation_input_tokens",
+        AgentRelation.CostUsd => "cost_usd",
+        _ => throw new ArgumentOutOfRangeException(nameof(relation), relation, null),
+    };
 }
 
 /// <summary>Canonical role vocabulary; adapters normalize provider-local names into these.</summary>

@@ -72,8 +72,10 @@ public sealed class WordNetDecomposerTests
             SourceEntityIdConventions.NormalizeExactSenseKey(uninhibited));
         Assert.Null(SourceEntityIdConventions.NormalizeExactSenseKey("abandoned%5:00:00"));
 
-        Assert.NotEqual(SenseAnchor.ExactId(uninhabited), SenseAnchor.ExactId(uninhibited));
-        Assert.Equal(SenseAnchor.Id(uninhabited), SenseAnchor.Id(uninhibited));
+        Assert.Null(SenseAnchor.ExactId(uninhabited));
+        Assert.Null(SenseAnchor.ExactId(uninhibited));
+        Assert.Null(SenseAnchor.Id(uninhabited));
+        Assert.Null(SenseAnchor.Id(uninhibited));
     }
 
     [SkippableFact]
@@ -100,30 +102,14 @@ public sealed class WordNetDecomposerTests
                 attestations.AddRange(change.AllAttestations());
             }
 
-            Hash128 exactA = SenseAnchor.ExactId(uninhabited)!.Value;
-            Hash128 exactB = SenseAnchor.ExactId(uninhibited)!.Value;
-            Hash128 compatibility = SenseAnchor.Id(uninhabited)!.Value;
             Hash128 correspondsTo = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
             Hash128 hasSense = RelationTypeRegistry.RelationTypeId("HAS_SENSE");
-
-            Assert.NotEqual(exactA, exactB);
-            Assert.Equal(compatibility, SenseAnchor.Id(uninhibited));
-            // Sense keys are content entities; the attestations below say what each one is.
-            Assert.Contains(typed, e => e.Id == exactA);
-            Assert.Contains(typed, e => e.Id == exactB);
-            Assert.Contains(typed, e => e.Id == compatibility);
-            Assert.Contains(attestations, a =>
-                a.TypeId == correspondsTo
-                && ((a.SubjectId == compatibility && a.ObjectId == exactA)
-                    || (a.SubjectId == exactA && a.ObjectId == compatibility)));
-            Assert.Contains(attestations, a =>
-                a.TypeId == correspondsTo
-                && ((a.SubjectId == compatibility && a.ObjectId == exactB)
-                    || (a.SubjectId == exactB && a.ObjectId == compatibility)));
-            Assert.Contains(attestations, a => a.TypeId == hasSense && a.ObjectId == exactA);
-            Assert.Contains(attestations, a => a.TypeId == hasSense && a.ObjectId == exactB);
-            Assert.DoesNotContain(attestations, a =>
-                a.TypeId == hasSense && a.ObjectId == compatibility);
+            Assert.Null(SenseAnchor.ExactId(uninhabited));
+            Assert.Null(SenseAnchor.Id(uninhabited));
+            Assert.DoesNotContain(typed, e => e.Id == ContentEmitter.RootId(uninhabited));
+            Assert.DoesNotContain(typed, e => e.Id == ContentEmitter.RootId(uninhibited));
+            Assert.DoesNotContain(attestations, a => a.TypeId == correspondsTo);
+            Assert.DoesNotContain(attestations, a => a.TypeId == hasSense);
         }
         finally
         {
@@ -155,16 +141,19 @@ public sealed class WordNetDecomposerTests
                 attestations.AddRange(change.AllAttestations());
 
             Hash128 lemma = ContentEmitter.RootId("able")!.Value;
-            Hash128 sense = SenseAnchor.ExactId(senseKey)!.Value;
-            Hash128 synset = ConceptAnchor.SynsetId(1740, 'a')!.Value;
-            Hash128 hasSense = RelationTypeRegistry.RelationTypeId("HAS_SENSE");
-            Hash128 isSenseOf = RelationTypeRegistry.RelationTypeId("IS_SENSE_OF");
+            Assert.Null(SenseAnchor.ExactId(senseKey));
+            Hash128 synset = ConceptAnchor.SynsetId(1740, 'a', "pwn30")!.Value;
+            Hash128 lexicalization = Hash128.Merkle(
+                (byte)(EntityTier.Word + 1), [lemma, ContentEmitter.RootId("eng")!.Value, synset]);
+            Hash128 sense = RelationTypeRegistry.RelationTypeId("Sense");
             Hash128 synonym = RelationTypeRegistry.RelationTypeId("IS_SYNONYM_OF");
 
             Assert.Contains(attestations, a =>
-                a.SubjectId == lemma && a.TypeId == hasSense && a.ObjectId == sense);
-            Assert.Contains(attestations, a =>
-                a.SubjectId == sense && a.TypeId == isSenseOf && a.ObjectId == synset);
+                a.SubjectId == lemma && a.TypeId == sense && a.ObjectId == lexicalization
+                && a.ContextId == ContentEmitter.RootId("eng"));
+            Assert.DoesNotContain(attestations, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
+                || a.TypeId == RelationTypeRegistry.RelationTypeId("IS_SENSE_OF"));
             Assert.DoesNotContain(attestations, a =>
                 a.TypeId == synonym
                 && ((a.SubjectId == lemma && a.ObjectId == synset)

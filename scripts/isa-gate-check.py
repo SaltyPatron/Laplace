@@ -128,7 +128,12 @@ CEILINGS = {
     # named is now the line/playing trajectory. Lowered by exactly the 7 cleaned.
     # Shared grammar examples, including complete prompt/response observations,
     # resolve the relation once instead of repeating it at each staging site.
-    "g3_csharp_vocabulary_literalism": 429,
+    # 429 -> 389: WordNet no longer spells manifest names for wndb pointers, glosses,
+    # examples, lex files, or exception lemmas. The pointer symbol is the predicate.
+    # 389 -> 301: ConceptNet, Atomic, Tatoeba, Wiktionary, SemLink, and the shared
+    # triple and bridge writers no longer spell manifest names. The file token is
+    # the predicate.
+    "g3_csharp_vocabulary_literalism": 301,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3

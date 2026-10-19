@@ -47,7 +47,7 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
             byte[] semanticValue = NormalizeValue(valueUtf8);
             if (semanticValue.Length > 0
                 && expected.TryAddContentWitness(semanticValue, OMWDecomposer.Source, out _)
-                && ConceptAnchor.EmitAnchor(oracle, row.Offset, row.SsType, OMWDecomposer.Source) is not null)
+                && ConceptAnchor.EmitAnchor(oracle, row.Offset, row.SsType, OMWDecomposer.Source, null) is not null)
             {
                 LanguageReference.Emit(oracle, row.Lang, OMWDecomposer.Source, SourceTrust.AcademicCurated);
                 if (row.Type == OmwType.Lemma && !row.Removed)

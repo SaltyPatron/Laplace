@@ -13,11 +13,9 @@ public sealed class CrossSourceLinkingTests
         const string raw = "?lend%2:40:00";
         string? norm = SourceEntityIdConventions.NormalizeSenseKey(raw);
         Assert.NotNull(norm);
-        Assert.Equal(SenseAnchor.Id(raw), SenseAnchor.IdNormalized(norm!));
-        Assert.Equal(
-            ReferenceAnchor.Id(ReferenceIdentityKind.WordNetSenseKey, norm!),
-            SenseAnchor.Id(raw));
-        Assert.Equal(CategoryAnchor.Id(norm!), SenseAnchor.Id(raw));
+        Assert.Null(SenseAnchor.Id(raw));
+        Assert.Null(SenseAnchor.IdNormalized(norm!));
+        Assert.Null(ReferenceAnchor.Id(ReferenceIdentityKind.WordNetSenseKey, norm!));
     }
 
     [Fact]
@@ -66,7 +64,7 @@ public sealed class CrossSourceLinkingTests
         Skip.IfNot(File.Exists(Path.Combine(cili, IliMap.MapFileName)), "CILI map not present");
 
         CodepointPerfcache.LoadDefault();
-        Hash128? iliAnchor = ConceptAnchor.SynsetId(10676319, 'n');
+        Hash128? iliAnchor = ConceptAnchor.SynsetId(10676319, 'n', "pwn30");
         Assert.NotNull(iliAnchor);
     }
 
@@ -88,6 +86,6 @@ public sealed class CrossSourceLinkingTests
 
         Assert.Equal(wnOffset, omwRow.Offset);
         Assert.Equal(wnSsType, omwRow.SsType);
-        Assert.Equal(ConceptAnchor.SynsetId(wnOffset, wnSsType), ConceptAnchor.SynsetId(omwRow.Offset, omwRow.SsType));
+        Assert.Equal(ConceptAnchor.SynsetId(wnOffset, wnSsType, "pwn30"), ConceptAnchor.SynsetId(omwRow.Offset, omwRow.SsType, "pwn30"));
     }
 }

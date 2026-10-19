@@ -14,7 +14,9 @@
       "syntaxPath": "Lexeme/@POS",
       "propertyName": "lexemePos",
       "valueKind": "Enumerated",
-      "disposition": "Excluded"
+      "disposition": "Testimony",
+      "relationName": "HAS_POS",
+      "vocabulary": "pos/framenet"
     },
     {
       "syntaxPath": "Lexeme/@ID",

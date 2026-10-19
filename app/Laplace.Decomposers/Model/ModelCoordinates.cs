@@ -79,7 +79,7 @@ public static class ModelCoordinates
     {
         OrderedCompositionComponent name = TextComponent(witnessName);
         return new OrderedCompositionComponent(
-            witness, EntityTier.Word, name.CoordX, name.CoordY, name.CoordZ, name.CoordM);
+            witness, name.Tier, name.CoordX, name.CoordY, name.CoordZ, name.CoordM);
     }
 
     public static Hash128 CircuitId(

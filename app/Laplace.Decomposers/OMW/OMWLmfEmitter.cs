@@ -167,18 +167,10 @@ internal static class OMWLmfEmitter
             Attest(b, entryId, OmwRelation.HasName, lemmaId, Language(b, entry.LanguageCode),
                 qualifiers: AliasName);
             AttestLanguage(b, lemmaId, entry.LanguageCode);
-            if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
-                PosReference.Attest(
-                    b, lemmaId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
-                    OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
         }
         AttestContent(b, entryId, OmwRelation.HasName, entry.Index, qualifiers: AliasName);
         AttestContent(b, entryId, OmwRelation.HasFeature, entry.LemmaType);
         AttestLanguage(b, entryId, entry.LanguageCode);
-        if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
-            PosReference.Attest(
-                b, entryId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
-                OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
 
         foreach (OmwLmfForm form in entry.Forms)
         {
@@ -211,10 +203,6 @@ internal static class OMWLmfEmitter
                 Attest(b, senseId, OmwRelation.HasName, nameId, Language(b, entry.LanguageCode),
                     qualifiers: AliasName);
             AttestLanguage(b, senseId, entry.LanguageCode);
-            if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
-                PosReference.Attest(
-                    b, senseId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
-                    OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
             AttestContent(b, senseId, OmwRelation.HasProperty, sense.Number);
             AttestContent(b, senseId, OmwRelation.HasSenseFrequency, sense.Count);
             AttestContent(b, senseId, OmwRelation.HasFeature, sense.AdjectivePosition);
@@ -238,23 +226,20 @@ internal static class OMWLmfEmitter
         if (string.IsNullOrWhiteSpace(synset.Id)) return;
         Hash128 synsetId = Synset(b, synset.Lexicon, synset.Id);
         AttestLanguage(b, synsetId, synset.LanguageCode);
-        if (!string.IsNullOrWhiteSpace(synset.PartOfSpeech))
-            PosReference.Attest(
-                b, synsetId, synset.PartOfSpeech, PosReference.PosTagset.WordNet,
-                OMWDecomposer.Source, Language(b, synset.LanguageCode), TC.AcademicCurated);
+        // "in" is OMW's marker for no ILI. The local synset id is packaging.
+        // The UPOS slot sits on the ILI's own coordinate.
+        OrderedCompositionComponent? iliFace = IliCarrier(b, synset.Ili);
+        if (iliFace is { } face && !string.IsNullOrWhiteSpace(synset.PartOfSpeech))
+            PosReference.Deposit(
+                b, face.Id, face.CoordX, face.CoordY, face.CoordZ, face.CoordM,
+                synset.PartOfSpeech, PosReference.PosTagset.WordNet);
         AttestContent(b, synsetId, OmwRelation.HasLexCategory, synset.Lexfile);
         // The synset's dc:identifier is an identifier bound to the synset, not a name.
         AttestContent(b, synsetId, OmwRelation.HasExternalId, synset.Identifier);
         AttestContent(b, synsetId, OmwRelation.HasFeature, synset.Lexicalized);
 
-        if (!string.IsNullOrWhiteSpace(synset.Ili)
-            && ReferenceAnchor.Emit(
-                b, ReferenceIdentityKind.CiliIli, synset.Ili,
-                EntityTypeRegistry.WordNetSynset, OMWDecomposer.Source,
-                TC.AcademicCurated) is { } iliId)
-        {
-            Attest(b, synsetId, OmwRelation.CorrespondsTo, iliId);
-        }
+        if (iliFace is { } ili)
+            Attest(b, synsetId, OmwRelation.CorrespondsTo, ili.Id);
 
         foreach (string member in synset.Members)
             Attest(b, synsetId, OmwRelation.HasMember, Sense(b, synset.Lexicon, member),
@@ -315,6 +300,14 @@ internal static class OMWLmfEmitter
         Hash128? languageId = Language(b, language);
         if (languageId is null) return;
         Attest(b, subject, OmwRelation.HasLanguage, languageId.Value);
+    }
+
+    // "in" is the release's own empty marker, not an ILI.
+    private static OrderedCompositionComponent? IliCarrier(SubstrateChangeBuilder b, string ili)
+    {
+        if (string.IsNullOrWhiteSpace(ili) || string.Equals(ili, "in", StringComparison.Ordinal))
+            return null;
+        return ContentEmitter.StageComponent(b, ili, OMWDecomposer.Source);
     }
 
     private static Hash128? Language(SubstrateChangeBuilder b, string language)

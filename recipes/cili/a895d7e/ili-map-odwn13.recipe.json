@@ -20,12 +20,7 @@
       "syntaxPath": "record/@owl:sameAs",
       "propertyName": "odwn13",
       "valueKind": "Identity",
-      "disposition": "Testimony",
-      "relationName": "HAS_EXTERNAL_ID",
-      "qualifiers": [
-        "identifier/odwn13-synset"
-      ],
-      "sequenceSeparator": "\u001e"
+      "disposition": "Packaging"
     },
     {
       "syntaxPath": "record/@owl:sameAs#ns",

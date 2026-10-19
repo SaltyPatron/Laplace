@@ -42,7 +42,7 @@ public sealed class MapNetDecomposerTests
         var luId = FrameNetLexicalUnit.Id("Accoutrements", "helmet.n")!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n', SourceEntityIdConventions.MultiWordNetWnVersion);
         Assert.NotNull(synId);
-        CorrespondsToAssert.Contains(atts, luId, synId.Value);
+        CorrespondsToAssert.Contains(atts, luId, synId.Value, "mapping_lus_synsets");
     }
 
     [Fact]
@@ -55,24 +55,23 @@ public sealed class MapNetDecomposerTests
         var frameId = CategoryAnchor.Id("Accoutrements")!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n', SourceEntityIdConventions.MultiWordNetWnVersion);
         Assert.NotNull(synId);
-        CorrespondsToAssert.Contains(atts, frameId, synId.Value);
+        CorrespondsToAssert.Contains(atts, frameId, synId.Value, "mapping_frame_synsets");
     }
 
     [Fact]
     public async Task Attestations_Are_CorrespondsTo_Only()
     {
         var atts = await CollectAttestationsAsync();
-        var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
-        Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
-        Assert.All(atts, a => Assert.Equal(RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"), a.TypeId));
+        Hash128 frame = RelationTypeRegistry.RelationTypeId("mapping_frame_synsets");
+        Hash128 lu = RelationTypeRegistry.RelationTypeId("mapping_lus_synsets");
+        Assert.All(atts, a => Assert.True(a.TypeId == frame || a.TypeId == lu));
         Assert.NotEmpty(atts);
     }
 
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()
     {
         var (_, atts) = await CollectAllAsync();
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
-        return atts.Where(a => a.TypeId == corr).ToList();
+        return atts;
     }
 
     private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectAllAsync()

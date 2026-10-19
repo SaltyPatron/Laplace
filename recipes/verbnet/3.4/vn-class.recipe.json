@@ -47,20 +47,7 @@
       "disposition": "Content, Testimony",
       "relationName": "CORRESPONDS_TO",
       "sequenceSeparator": " ",
-      "objectEntityType": "PropBank_Roleset",
-      "objectParts": [
-        {
-          "path": "value()",
-          "splitLast": ".-",
-          "side": "Before",
-          "spaceMark": "_"
-        },
-        {
-          "path": "value()",
-          "splitLast": ".-",
-          "side": "After"
-        }
-      ]
+      "objectEntityType": "PropBank_Roleset"
     },
     {
       "syntaxPath": "Member/@fn_mapping",
@@ -189,9 +176,7 @@
         "entityType": "VerbNet_Class",
         "identityParts": [
           {
-            "path": "@ID",
-            "splitLast": "-.",
-            "side": "Each"
+            "path": "@ID"
           }
         ]
       },
@@ -5082,9 +5067,7 @@
           "standalone": true,
           "identityParts": [
             {
-              "path": "@ID",
-              "splitLast": "-.",
-              "side": "Each"
+              "path": "@ID"
             }
           ]
         },
@@ -5152,9 +5135,7 @@
           "standalone": true,
           "identityParts": [
             {
-              "path": "@ID",
-              "splitLast": "-.",
-              "side": "Each"
+              "path": "@ID"
             }
           ]
         },
@@ -5222,9 +5203,7 @@
           "standalone": true,
           "identityParts": [
             {
-              "path": "@ID",
-              "splitLast": "-.",
-              "side": "Each"
+              "path": "@ID"
             }
           ]
         }

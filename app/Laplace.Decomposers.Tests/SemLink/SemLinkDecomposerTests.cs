@@ -38,9 +38,9 @@ public sealed class SemLinkDecomposerTests
     public async Task Attestations_Are_Only_RegistryRouted_CorrespondsTo()
     {
         var atts = await CollectAttestationsAsync();
-        var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
-        Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
-        Assert.All(atts, a => Assert.Equal(RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"), a.TypeId));
+        Hash128 pbVn = RelationTypeRegistry.RelationTypeId("pb-vn2");
+        Hash128 vnFn = RelationTypeRegistry.RelationTypeId("vn-fn2");
+        Assert.All(atts, a => Assert.True(a.TypeId == pbVn || a.TypeId == vnFn));
         Assert.NotEmpty(atts);
     }
 
@@ -60,7 +60,7 @@ public sealed class SemLinkDecomposerTests
     {
         var (_, allAtts) = await CollectAllAsync();
         var atts = allAtts.Where(
-            a => a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")).ToList();
+            a => a.TypeId == RelationTypeRegistry.RelationTypeId("pb-vn2")).ToList();
         var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
         var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         var argId = RoleAnchor.Id(RoleIdentityKind.PropBank, rsId, "ARG0")!.Value;
@@ -75,16 +75,18 @@ public sealed class SemLinkDecomposerTests
     public async Task PredicateMatrix_RoleMapping_BindsBothClassAndFrameIntoEndpoints()
     {
         var (_, atts) = await CollectPredicateMatrixAsync();
-        Hash128 vnClass = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 vnClass = AnchorAdmission.Id("give-13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         Hash128 frame = AnchorAdmission.Id("Giving", EntityTypeRegistry.FrameNetFrame)!.Value;
         Hash128 vnRole = RoleAnchor.Id(RoleIdentityKind.VerbNet, vnClass, "Agent")!.Value;
         Hash128 frameRole = RoleAnchor.Id(RoleIdentityKind.FrameNet, frame, "Donor")!.Value;
 
+        AttestationRow vnEdge = Assert.Single(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("9_VN_ROLE")
+            && a.ObjectId == vnRole);
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
-            && a.ContextId is null
-            && (a.SubjectId == vnRole || a.ObjectId == vnRole)
-            && (a.SubjectId == frameRole || a.ObjectId == frameRole));
+            a.TypeId == RelationTypeRegistry.RelationTypeId("14_FN_FRAME_ELEMENT")
+            && a.SubjectId == vnEdge.SubjectId
+            && a.ObjectId == frameRole);
     }
 
     [Fact]
@@ -100,11 +102,7 @@ public sealed class SemLinkDecomposerTests
         Assert.Contains(entities, e => e.Id == predicate);
         Assert.Contains(entities, e => e.Id == matrixRole);
         Assert.Contains(atts, a =>
-            a.SubjectId == predicate
-            && a.TypeId == PredicateMatrixSource.HasLanguageTypeId
-            && a.ObjectId == LanguageReference.Resolve("eng"));
-        Assert.Contains(atts, a =>
-            a.TypeId == PredicateMatrixSource.RoleCorrespondsToTypeId
+            a.TypeId == RelationTypeRegistry.RelationTypeId("16_PB_ARG")
             && (a.SubjectId == matrixRole || a.ObjectId == matrixRole)
             && (a.SubjectId == propBankRole || a.ObjectId == propBankRole));
         Assert.NotEqual(
@@ -118,22 +116,21 @@ public sealed class SemLinkDecomposerTests
         var (entities, atts) = await CollectPredicateMatrixAsync();
         // MCR and ESO values are content the source states, each staged with its claims.
         var staged = entities.Select(static e => e.Id).ToHashSet();
-        Hash128 Vocabulary(string field, string value) => ReferenceAnchor.Id(
-            ReferenceIdentityKind.PredicateMatrixVocabulary, $"{field}\0{value}")!.Value;
-        Assert.Contains(Vocabulary("mcr-domain", "factotum"), staged);
-        Assert.Contains(Vocabulary("mcr-sumo", "Motion"), staged);
-        Assert.Contains(Vocabulary("mcr-top", "Dynamic"), staged);
-        Assert.Contains(Vocabulary("mcr-top", "Location"), staged);
-        Assert.Contains(Vocabulary("mcr-lexname", "motion"), staged);
-        Hash128 esoClass = Vocabulary("eso-class", "Transfer");
+        Hash128 Value(string value) => ContentEmitter.RootId(value)!.Value;
+        Assert.Contains(Value("factotum"), staged);
+        Assert.Contains(Value("Motion"), staged);
+        Assert.Contains(Value("Dynamic"), staged);
+        Assert.Contains(Value("Location"), staged);
+        Assert.Contains(Value("motion"), staged);
+        Hash128 esoClass = Value("Transfer");
         Assert.Contains(esoClass, staged);
         Assert.Contains(RoleAnchor.Id(RoleIdentityKind.Eso, esoClass, "source")!.Value, staged);
 
-        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasDomainTopicTypeId);
-        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasLexCategoryTypeId);
-        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasBaseConceptStatusTypeId);
-        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasSenseFrequencyTypeId);
-        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasSynsetRelationCountTypeId);
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("19_MCR_DOMAIN"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("22_MCR_LEXNAME"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("18_MCR_BC"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("24_WN_SENSEFREC"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("25_WN_SYNSET_REL_NUM"));
     }
 
     [Fact]
@@ -152,7 +149,7 @@ public sealed class SemLinkDecomposerTests
                 records.Add(record);
 
             var only = Assert.Single(records);
-            Assert.Equal(7, only.Edges.Length);
+            Assert.Equal(3, only.Edges.Length);
             Assert.Equal(2L, await PredicateMatrixIngest.EstimateRecordCountAsync(path, null, default));
         }
         finally { try { File.Delete(path); } catch { } }
@@ -251,19 +248,12 @@ public sealed class SemLinkDecomposerTests
                 atts.AddRange(StagedChangeRows.Attestations(change));
             }
 
-            // The annotated corpus file is named by its content; the occurrence appears in it.
-            Hash128 appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
-            AttestationRow appearance = Assert.Single(atts, a =>
-                a.TypeId == appearsIn
-                && a.ContextId is { } ctx
-                && a.SubjectId == ctx
-                && a.ObjectId is not null);
-            Hash128 occurrence = appearance.SubjectId;
-            Assert.Contains(entities, e => e.Id == appearance.ObjectId);
             Hash128 lemma = ContentEmitter.RootId("join")!.Value;
+            Assert.Contains(entities, e => e.Id == lemma);
+            Hash128 occurrence = Assert.Single(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("vn-class")).SubjectId;
 
-            foreach (string relation in new[]
-                     { "IS_INSTANCE_OF", "EVOKES_FRAME", "HAS_SENSE" })
+            foreach (string relation in new[] { "vn-class", "frame", "roleset" })
             {
                 Hash128 type = RelationTypeRegistry.RelationTypeId(relation);
                 Assert.Contains(atts, a =>
@@ -274,20 +264,8 @@ public sealed class SemLinkDecomposerTests
                     && a.ContextId == occurrence);
             }
             Assert.Contains(atts, a =>
-                a.TypeId == RelationTypeRegistry.RelationTypeId("IS_INSTANCE_OF")
-                && a.ContextId is not null);
-            Assert.Contains(atts, a =>
-                a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME")
-                && a.ContextId is not null);
-            Assert.Contains(atts, a =>
-                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
-                && a.ContextId is not null);
-            Assert.Contains(atts, a =>
-                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_ROLE")
-                && a.ContextId is not null);
-            Assert.Contains(atts, a =>
-                a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
-                && a.ContextId is not null);
+                a.TypeId == RelationTypeRegistry.RelationTypeId("semlink-2")
+                && a.ContextId == occurrence);
         }
         finally { try { File.Delete(path); } catch { } }
     }
@@ -422,14 +400,14 @@ public sealed class SemLinkDecomposerTests
 
         var atts = await CollectPredicateMatrixAttestationsAsync();
         var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
-        var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
+        var vnId = AnchorAdmission.Id("give-13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         var fnId = CategoryAnchor.Id("Giving")!.Value;
-        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
+        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v', "pwn30");
         Assert.NotNull(synId);
 
-        CorrespondsToAssert.Contains(atts, rsId, synId.Value);
-        CorrespondsToAssert.Contains(atts, vnId, synId.Value);
-        CorrespondsToAssert.Contains(atts, fnId, synId.Value);
+        CorrespondsToAssert.Contains(atts, rsId, synId.Value, "11_MCR_iliOffset");
+        CorrespondsToAssert.Contains(atts, vnId, synId.Value, "11_MCR_iliOffset");
+        CorrespondsToAssert.Contains(atts, fnId, synId.Value, "11_MCR_iliOffset");
     }
 
     [Fact]
@@ -440,30 +418,27 @@ public sealed class SemLinkDecomposerTests
 
         var atts = await CollectPbWnAttestationsAsync();
         var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
-        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
+        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v', "pwn30");
         Assert.NotNull(synId);
-        CorrespondsToAssert.Contains(atts, rsId, synId.Value);
+        CorrespondsToAssert.Contains(atts, rsId, synId.Value, "pb-wn");
     }
 
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()
     {
         var (_, atts) = await CollectAllAsync();
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
-        return atts.Where(a => a.TypeId == corr).ToList();
+        return atts;
     }
 
     private static async Task<List<AttestationRow>> CollectPredicateMatrixAttestationsAsync()
     {
         var (_, atts) = await CollectPredicateMatrixAsync();
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
-        return atts.Where(a => a.TypeId == corr).ToList();
+        return atts;
     }
 
     private static async Task<List<AttestationRow>> CollectPbWnAttestationsAsync()
     {
         var (_, atts) = await CollectPbWnAsync();
-        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
-        return atts.Where(a => a.TypeId == corr).ToList();
+        return atts;
     }
 
     private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectAllAsync()
