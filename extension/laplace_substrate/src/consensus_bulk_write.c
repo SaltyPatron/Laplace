@@ -320,14 +320,32 @@ send_identity(StringInfo buffer, Datum value, bool isnull)
     }
 }
 
-static int
-cmp_novel_by_id(const void *a, const void *b, void *arg)
+typedef struct NovelSortCtx
 {
-    const Datum *ids = (const Datum *) arg;
+    const Datum *ids;
+    const Datum *subjects;
+    const Datum *types;
+} NovelSortCtx;
+
+static int
+cmp_novel_by_subject_type_id(const void *a, const void *b, void *arg)
+{
+    const NovelSortCtx *ctx = (const NovelSortCtx *) arg;
     int ra = *(const int *) a;
     int rb = *(const int *) b;
-
-    return memcmp(consensus_id16(ids[ra]), consensus_id16(ids[rb]), 16);
+    int c = memcmp(consensus_id16(ctx->subjects[ra]),
+                   consensus_id16(ctx->subjects[rb]), 16);
+    if (c != 0)
+        return c;
+    if (ctx->types != NULL)
+    {
+        c = memcmp(consensus_id16(ctx->types[ra]),
+                   consensus_id16(ctx->types[rb]), 16);
+        if (c != 0)
+            return c;
+    }
+    return memcmp(consensus_id16(ctx->ids[ra]),
+                  consensus_id16(ctx->ids[rb]), 16);
 }
 
 static bool
@@ -473,11 +491,12 @@ laplace_consensus_copy_novel_batch(const Datum *types, Datum single_type,
                 int l = use_leaves[r];
                 order_buf[leaf_offsets[l] + leaf_fill[l]++] = r;
             }
+            NovelSortCtx sort_ctx = {input.columns[0], input.columns[1], types};
             for (int l = 0; l < nleaves; ++l)
             {
                 if (leaf_counts[l] > 1)
                     qsort_arg(order_buf + leaf_offsets[l], leaf_counts[l],
-                              sizeof(int), cmp_novel_by_id, input.columns[0]);
+                              sizeof(int), cmp_novel_by_subject_type_id, &sort_ctx);
             }
             pfree(leaf_counts);
             pfree(leaf_offsets);
