@@ -189,7 +189,12 @@ internal sealed class LichessController : BackgroundService
                             activationFailures++;
                             var wait = ActivationRetryDelay(activationFailures);
                             nextActivationUtc = DateTimeOffset.UtcNow + wait;
-                            var detail = ex is UciEngineException ? ex.Message : $"{ex.GetType().Name}: profile initialization failed; inspect the controller journal.";
+                            var detail = ex switch
+                            {
+                                UciEngineException => ex.Message,
+                                Npgsql.PostgresException pg => $"PostgresException ({pg.SqlState}): {pg.MessageText}",
+                                _ => $"{ex.GetType().Name}: profile initialization failed; inspect the controller journal.",
+                            };
                             failure = $"{detail} Retrying in {wait.TotalSeconds:0}s.";
                             phase = "failed";
                             log.LogError(ex, "Lichess profile {Profile} failed to initialize; retrying in {Seconds}s", desired.Profile, wait.TotalSeconds);

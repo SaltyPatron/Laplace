@@ -14,10 +14,32 @@ public static class OpeningSeed
             if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
             var dataRoot = ChessRuntimeConfiguration.Read("LAPLACE_DATA")
                 ?? ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT");
-            var gamesDir = !string.IsNullOrWhiteSpace(dataRoot)
-                ? Path.Combine(dataRoot.Trim(), "Games", "Chess")
-                : LaplaceInstall.ResolveChessGamesDir();
-            return ResolveDefaultDir(gamesDir);
+            string gamesDir;
+            if (!string.IsNullOrWhiteSpace(dataRoot))
+            {
+                gamesDir = Path.Combine(dataRoot.Trim(), "Games", "Chess");
+            }
+            else
+            {
+                try { gamesDir = LaplaceInstall.ResolveChessGamesDir(); }
+                catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
+                {
+                    gamesDir = Path.Combine(ChessLabPaths.LabDir, "Games", "Chess");
+                }
+            }
+            var resolved = ResolveDefaultDir(gamesDir);
+            if (Directory.Exists(resolved)
+                && Directory.EnumerateFiles(resolved, "*.tsv", SearchOption.AllDirectories).Any())
+                return resolved;
+            var prefix = ChessRuntimeConfiguration.InstallPrefix;
+            if (!string.IsNullOrWhiteSpace(prefix))
+            {
+                var bundled = Path.Combine(prefix.Trim(), "share", "laplace", "chess-openings");
+                if (Directory.Exists(bundled)
+                    && Directory.EnumerateFiles(bundled, "*.tsv", SearchOption.AllDirectories).Any())
+                    return bundled;
+            }
+            return resolved;
         }
     }
 

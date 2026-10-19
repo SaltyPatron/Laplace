@@ -26,7 +26,16 @@ public static class ChessGameFetcher
     internal readonly record struct ProviderResponse(string Body, string? ETag, bool NotModified);
 
     internal static string ArchiveDirectory(string user)
-        => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "chesscom", Sanitize(user));
+    {
+        try
+        {
+            return Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "chesscom", Sanitize(user));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
+        {
+            return Path.Combine(ChessLabPaths.LabDir, "chesscom", Sanitize(user));
+        }
+    }
 
     internal static bool TryParseArchiveMonth(string archiveUrl, out int year, out int month)
     {
@@ -53,7 +62,16 @@ public static class ChessGameFetcher
     }
 
     public static string DefaultOut(string user, string site)
-        => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), $"{Sanitize(user)}_{site}.pgn");
+    {
+        try
+        {
+            return Path.Combine(LaplaceInstall.ResolveChessGamesDir(), $"{Sanitize(user)}_{site}.pgn");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
+        {
+            return Path.Combine(ChessLabPaths.LabDir, $"{Sanitize(user)}_{site}.pgn");
+        }
+    }
 
     public static Task<int> FetchAsync(
         string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log,

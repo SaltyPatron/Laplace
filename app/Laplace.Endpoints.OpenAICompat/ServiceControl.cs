@@ -80,21 +80,114 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
             var values = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2)
                 .ToDictionary(pair => pair[0], pair => pair[1].TrimEnd('\r'), StringComparer.Ordinal);
-            return new(name, expectedUnit, verb, false,
+            var statusResult = new ServiceControlResult(name, expectedUnit, verb, false,
                 values.GetValueOrDefault("LoadState", "unknown"), values.GetValueOrDefault("ActiveState", "unknown"),
                 values.GetValueOrDefault("SubState", "unknown"), values.GetValueOrDefault("Result", "unknown"),
                 int.TryParse(values.GetValueOrDefault("MainPID"), out var pid) ? pid : 0,
                 values.GetValueOrDefault("UnitFileState", "unknown"), ManagedServiceState.OperatorStopped(name));
+            if (statusResult.LoadState == "not-found")
+            {
+                var alternateUnit = service == ManagedService.Lichess ? "laplace-mono-lichess.service" : "laplace-modular-mcp.service";
+                if (await TryQuerySystemdUnitAsync(name, alternateUnit, verb, ct) is { LoadState: not "not-found" } alt)
+                    return alt;
+                if (await SharedServiceProbe.TryProbeWhenLocalUnitMissingAsync(service, ct) is { } remote)
+                    return remote;
+            }
+            return statusResult;
         }
         var payload = JsonNode.Parse(stdout) as JsonObject
             ?? throw new InvalidOperationException("service control returned an invalid response");
         var unit = (string?)payload["unit"] ?? "";
-        if (unit != expectedUnit) throw new InvalidOperationException("service control returned the wrong unit");
+        if (unit != expectedUnit && !(service == ManagedService.Lichess && unit == "laplace-mono-lichess.service"))
+            throw new InvalidOperationException("service control returned the wrong unit");
         return new(name, unit, verb, action != ServiceAction.Status,
             (string?)payload["load_state"] ?? "unknown", (string?)payload["active_state"] ?? "unknown",
             (string?)payload["sub_state"] ?? "unknown", (string?)payload["result"] ?? "unknown",
             (int?)payload["main_pid"] ?? 0, (string?)payload["enabled"] ?? "unknown",
             (bool?)payload["operator_stopped"] ?? false);
+    }
+
+    private static async Task<ServiceControlResult?> TryQuerySystemdUnitAsync(
+        string name, string unit, string verb, CancellationToken ct)
+    {
+        try
+        {
+            var info = new ProcessStartInfo("/usr/bin/systemctl")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (var arg in new[] { "show", unit, "--no-pager", "--property=LoadState,ActiveState,SubState,Result,MainPID,UnitFileState" })
+                info.ArgumentList.Add(arg);
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(TimeSpan.FromSeconds(10));
+            using var process = Process.Start(info);
+            if (process is null) return null;
+            var stdout = await process.StandardOutput.ReadToEndAsync(budget.Token);
+            await process.WaitForExitAsync(budget.Token);
+            if (process.ExitCode != 0) return null;
+            var values = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2)
+                .ToDictionary(pair => pair[0], pair => pair[1].TrimEnd('\r'), StringComparer.Ordinal);
+            return new(name, unit, verb, false,
+                values.GetValueOrDefault("LoadState", "unknown"), values.GetValueOrDefault("ActiveState", "unknown"),
+                values.GetValueOrDefault("SubState", "unknown"), values.GetValueOrDefault("Result", "unknown"),
+                int.TryParse(values.GetValueOrDefault("MainPID"), out var pid) ? pid : 0,
+                values.GetValueOrDefault("UnitFileState", "unknown"), ManagedServiceState.OperatorStopped(name));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+internal static class SharedServiceProbe
+{
+    private static readonly HttpClient ProbeHttp = new() { Timeout = TimeSpan.FromSeconds(4) };
+
+    public static async Task<ServiceControlResult?> TryProbeWhenLocalUnitMissingAsync(
+        ManagedService service, CancellationToken ct)
+    {
+        if (service == ManagedService.Lichess)
+            return await LichessControlClient.TryProbeServiceControlAsync(ct);
+
+        // When MCP runs on the shared database host rather than a local unit on this machine,
+        // probe the configured MCP gateway when a shared environment is declared.
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTROL_CLIENT"))
+            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_MCP_ORIGIN"))
+            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_MCP_UPSTREAM")))
+            return null;
+
+        foreach (var candidate in new[]
+        {
+            Environment.GetEnvironmentVariable("LAPLACE_MCP_UPSTREAM") is { Length: > 0 } u ? u.TrimEnd('/') + "/health/live" : null,
+            "http://127.0.0.1:8080/mcp",
+            Environment.GetEnvironmentVariable("LAPLACE_MCP_ORIGIN") is { Length: > 0 } o ? o.TrimEnd('/') + "/mcp" : "https://mcp.hartonomous.com/mcp",
+        })
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            try
+            {
+                using var req = candidate.EndsWith("/health/live", StringComparison.Ordinal)
+                    ? new HttpRequestMessage(HttpMethod.Get, candidate)
+                    : new HttpRequestMessage(HttpMethod.Post, candidate)
+                    {
+                        Content = new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}", System.Text.Encoding.UTF8, "application/json")
+                    };
+                using var resp = await ProbeHttp.SendAsync(req, ct);
+                if (resp.IsSuccessStatusCode || resp.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    return new("mcp", $"laplace-mcp.service ({new Uri(candidate).Host})", "status", false,
+                        "loaded", "active", "running", "success", 0, "enabled", false);
+                }
+            }
+            catch
+            {
+            }
+        }
+        return null;
     }
 }
 

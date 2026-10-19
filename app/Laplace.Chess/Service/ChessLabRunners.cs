@@ -775,7 +775,10 @@ public static class ChessLabRunners
         try { full = Path.GetFullPath(path); }
         catch (Exception) { return false; }
         if (!full.EndsWith(".pgn", StringComparison.OrdinalIgnoreCase)) return false;
-        foreach (var root in new[] { LabDir, LaplaceInstall.ResolveChessGamesDir() })
+        string? gamesDir = null;
+        try { gamesDir = LaplaceInstall.ResolveChessGamesDir(); }
+        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException) { }
+        foreach (var root in new[] { LabDir, gamesDir })
         {
             if (string.IsNullOrWhiteSpace(root)) continue;
             var rooted = Path.GetFullPath(root);

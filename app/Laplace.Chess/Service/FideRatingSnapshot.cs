@@ -46,9 +46,9 @@ internal static class FideRatingSnapshot
                     "fide",
                     SnapshotFileName);
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
             {
-                // Developer/test machines are not required to mount /vault/Data. Keep the
+                // Developer/test and hosting-only machines are not required to mount /vault/Data. Keep the
                 // derived cache outside the checkout rather than turning a missing corpus
                 // mount into an unrelated FIDE read failure.
                 string state = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);

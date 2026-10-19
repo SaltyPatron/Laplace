@@ -214,6 +214,14 @@ phase_install() {
   local missing
   missing="$(find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -exec env LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" ldd {} + 2>/dev/null | grep 'not found' | sort -u || true)"
   [[ -z "$missing" ]] || fail "unresolved libraries under $LAPLACE_INSTALL_PREFIX/lib: $missing"
+  local openings_src
+  for openings_src in "${LAPLACE_CHESS_OPENINGS:-}" "$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings" "$LAPLACE_DATA_ROOT/Games/Chess/openings"; do
+    if [[ -n "$openings_src" && -f "$openings_src/a.tsv" ]]; then
+      mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings"
+      cp -f "$openings_src"/{a,b,c,d,e}.tsv "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings/" 2>/dev/null || true
+      break
+    fi
+  done
   git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
 }
 

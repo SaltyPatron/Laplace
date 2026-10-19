@@ -13,7 +13,9 @@ internal sealed record LichessProfileSelectionRequest(string? Profile, long Expe
 internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<LichessControlClient> log)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static LichessControlClientConfiguration? Configuration()
+    private static readonly HttpClient SharedProbeHttp = new() { Timeout = TimeSpan.FromSeconds(5) };
+
+    internal static LichessControlClientConfiguration? Configuration()
     {
         var path = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTROL_CLIENT");
         if (string.IsNullOrWhiteSpace(path)) return null;
@@ -26,6 +28,47 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
         if (!string.IsNullOrEmpty(uri.UserInfo) || !Path.IsPathFullyQualified(c.TokenFile) || c.Operators is null)
             throw new InvalidDataException("Invalid Lichess control client credential or operator declarations.");
         return c;
+    }
+
+    internal static async Task<ServiceControlResult?> TryProbeServiceControlAsync(CancellationToken ct)
+    {
+        try
+        {
+            var c = Configuration();
+            if (c is null) return null;
+            var token = (await File.ReadAllTextAsync(c.TokenFile, ct)).Trim();
+            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(c.Url.TrimEnd('/') + "/"), "status"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await SharedProbeHttp.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            var control = await response.Content.ReadFromJsonAsync<JsonElement>(Json, ct);
+            var host = control.TryGetProperty("controller", out var h) && h.ValueKind == JsonValueKind.String
+                ? h.GetString() ?? "remote" : "remote";
+            var phase = control.TryGetProperty("phase", out var p) && p.ValueKind == JsonValueKind.String
+                ? p.GetString() ?? "unknown" : "unknown";
+            var error = control.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String
+                ? e.GetString() : null;
+            bool connected = control.TryGetProperty("bot", out var b) && b.ValueKind == JsonValueKind.Object
+                && b.TryGetProperty("connected", out var conn) && conn.ValueKind == JsonValueKind.True;
+            var (active, sub, res, stopped) = phase switch
+            {
+                "running" when connected => ("active", "running", "success", false),
+                "running" => ("activating", "connecting", "success", false),
+                "verifying" => ("activating", "verifying", "success", false),
+                "draining" => ("deactivating", "draining", "success", false),
+                "off" => ("inactive", "off", "success", true),
+                "failed" => ("failed", "failed", error ?? "failed", false),
+                _ => ("active", phase, "success", false),
+            };
+            return new("lichess", $"laplace-mono-lichess.service ({host})", "status", false,
+                "loaded", active, sub, res, 0, "enabled", stopped);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or HttpRequestException
+            or JsonException or UriFormatException or InvalidDataException
+            || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     private static Guid? User(ClaimsPrincipal principal) => principal.Identity?.IsAuthenticated == true

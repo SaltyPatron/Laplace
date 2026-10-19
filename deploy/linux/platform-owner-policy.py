@@ -164,7 +164,7 @@ def apply_api_environment(path, values):
     try:
         with os.fdopen(fd, 'wb') as stream:
             if os.name != 'nt':
-                os.fchmod(stream.fileno(), 0o600)
+                os.fchmod(stream.fileno(), 0o600 if POLICY_ENV in values else 0o644)
                 current = os.fstat(stream.fileno())
                 if (current.st_uid, current.st_gid) != (info.st_uid, info.st_gid):
                     os.fchown(stream.fileno(), info.st_uid, info.st_gid)

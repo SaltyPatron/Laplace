@@ -12,6 +12,7 @@ BEGIN
     FOR candidate IN
         SELECT rolname FROM pg_roles
         WHERE rolname = 'laplace_runtime'
+           OR rolname IN ('laplace_staging_db', 'laplace_desktop_db', 'laplace_mcp_runtime', 'laplace_mono_lichess')
            OR rolname LIKE 'laplace_mono_uci\_%' ESCAPE '\'
            OR rolname LIKE 'laplace_mono_lichess\_%' ESCAPE '\'
         ORDER BY rolname
