@@ -187,6 +187,7 @@ functions/readback/render_bytes.sql.in
 functions/readback/reconstruct_content.sql.in
 functions/converse/resolve_ref.sql.in
 functions/lexical/word_case_variants.sql.in
+functions/lexical/lexical_peers.sql.in
 functions/converse/word_segment.sql.in
 functions/converse/word_segment_resolved.sql.in
 functions/converse/label_is_content.sql.in
@@ -269,7 +270,6 @@ functions/lexical/drop_retired_case_surface.sql.in
 functions/converse/drop_retired_english_router.sql.in
 functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
-functions/lexical/lexical_peers.sql.in
 functions/inspect/consensus_out_labeled.sql.in
 functions/lexical/define.sql.in
 functions/lexical/define_with_context.sql.in
