@@ -81,6 +81,20 @@ public sealed class InstalledOpInvokerTests
         Assert.Equal("p_name", ps[1].Name);
     }
 
+    [Fact]
+    public void ParseSignature_IgnoresOutParameters()
+    {
+        var ps = InstalledOpInvoker.ParseSignature(
+            "p_prompt text, p_session bytea DEFAULT NULL::bytea, OUT reply text, OUT session_id bytea, OUT topic_id bytea");
+        Assert.Equal(2, ps.Count);
+        Assert.Equal("p_prompt", ps[0].Name);
+        Assert.Equal("text", ps[0].Type);
+        Assert.False(ps[0].Optional);
+        Assert.Equal("p_session", ps[1].Name);
+        Assert.Equal("bytea", ps[1].Type);
+        Assert.True(ps[1].Optional);
+    }
+
     // GH #843 alleged that the splitter's quote toggle mis-handles a doubled quote
     // and splits `DEFAULT 'a''b, c'` at the inner comma. It does not — the pair
     // toggles twice with no character in between, so the comma is still seen as

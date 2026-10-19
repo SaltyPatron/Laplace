@@ -1,18 +1,70 @@
 #include "postgres.h"
 
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "nodes/makefuncs.h"
+#include "parser/parse_func.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 
+#include "content_trajectory_read.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "trajectory_wkb.h"
+#include "laplace/core/mantissa.h"
 #include "laplace/core/qualifier_law.h"
 #include "laplace/core/sql_catalog.h"
 
 #include <string.h>
+
+static SPIPlanPtr case_mappings_plan = NULL;
+static SPIPlanPtr scalar_constituents_plan = NULL;
+static SPIPlanPtr scalar_render_plan = NULL;
+static SPIPlanPtr scalar_word_id_plan = NULL;
+static SPIPlanPtr scalar_entity_exists_plan = NULL;
+static SPIPlanPtr batch_traj_fallback_plan = NULL;
+static SPIPlanPtr batch_render_plan = NULL;
+static SPIPlanPtr batch_word_id_plan = NULL;
+static SPIPlanPtr batch_exists_bitmap_plan = NULL;
+static SPIPlanPtr peers_exact_one_plan = NULL;
+static SPIPlanPtr peers_exact_batch_plan = NULL;
+static SPIPlanPtr peers_widen_plan = NULL;
+static Oid        lexical_st_asbinary_oid = InvalidOid;
+
+static SPIPlanPtr
+ensure_lexical_plan(SPIPlanPtr *slot, const char *sql, int nargs, Oid *argtypes, const char *label)
+{
+	if (*slot == NULL)
+	{
+		SPIPlanPtr p = SPI_prepare_cursor(sql, nargs, argtypes, CURSOR_OPT_PARALLEL_OK);
+
+		if (p == NULL)
+			elog(ERROR, "%s: SPI_prepare failed: %s", label, SPI_result_code_string(SPI_result));
+		if (SPI_keepplan(p) != 0)
+			elog(ERROR, "%s: SPI_keepplan failed", label);
+		*slot = p;
+	}
+	return *slot;
+}
+
+static Oid
+ensure_lexical_asbinary_oid(void)
+{
+	if (!OidIsValid(lexical_st_asbinary_oid))
+	{
+		Oid phys_rel = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+		Oid geom_type = get_atttype(phys_rel, get_attnum(phys_rel, "trajectory"));
+
+		lexical_st_asbinary_oid = LookupFuncName(
+			list_make2(makeString("public"), makeString("st_asbinary")),
+			1, &geom_type, false);
+	}
+	return lexical_st_asbinary_oid;
+}
 
 /*
  * Case peers of a word, read from its trajectory. Each constituent grapheme's
@@ -127,8 +179,10 @@ fetch_case_mappings(HTAB *cm, Datum *subjects, int n_subjects, const char *calle
 	av[0] = PointerGetDatum(subject_array);
 	av[1] = PointerGetDatum(bit_array);
 
-	rc = SPI_execute_with_args(laplace_sql_query_text("lexical.case_mappings"),
-							   2, at, av, NULL, true, 0);
+	rc = SPI_execute_plan(ensure_lexical_plan(&case_mappings_plan,
+											  laplace_sql_query_text("lexical.case_mappings"),
+											  2, at, caller),
+						  av, NULL, true, 0);
 	if (rc != SPI_OK_SELECT)
 		elog(ERROR, "%s: case-map fetch failed: %s", caller, SPI_result_code_string(rc));
 
@@ -341,10 +395,13 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		Oid   at[1] = { BYTEAOID };
 		Datum av[1] = { p_word };
 
-		rc = SPI_execute_with_args(
-			"SELECT ordinal, child_id, run_length "
-			"FROM realize.constituents($1) ORDER BY ordinal",
-			1, at, av, NULL, true, 0);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&scalar_constituents_plan,
+				"SELECT ordinal, child_id, run_length "
+				"FROM realize.constituents($1) ORDER BY ordinal",
+				1, at, "word_case_variants"),
+			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "word_case_variants: constituents failed: %s",
 				 SPI_result_code_string(rc));
@@ -463,10 +520,13 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		Oid        at[1] = { BYTEAARRAYOID };
 		Datum      av[1] = { PointerGetDatum(rid_arr) };
 
-		rc = SPI_execute_with_args(
-			"SELECT u.id, realize.render_text(u.id) "
-			"FROM unnest($1::bytea[]) AS u(id)",
-			1, at, av, NULL, true, 0);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&scalar_render_plan,
+				"SELECT u.id, realize.render_text(u.id) "
+				"FROM unnest($1::bytea[]) AS u(id)",
+				1, at, "word_case_variants"),
+			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "word_case_variants: render batch failed: %s",
 				 SPI_result_code_string(rc));
@@ -519,9 +579,12 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		Oid        at[1] = { TEXTARRAYOID };
 		Datum      av[1] = { PointerGetDatum(surf_arr) };
 
-		rc = SPI_execute_with_args(
-			"SELECT laplace.word_id(u.s) FROM unnest($1::text[]) AS u(s)",
-			1, at, av, NULL, true, 0);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&scalar_word_id_plan,
+				"SELECT laplace.word_id(u.s) FROM unnest($1::text[]) AS u(s)",
+				1, at, "word_case_variants"),
+			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "word_case_variants: word_id batch failed: %s",
 				 SPI_result_code_string(rc));
@@ -562,10 +625,13 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		Oid        at[1] = { BYTEAARRAYOID };
 		Datum      av[1] = { PointerGetDatum(vid_arr) };
 
-		rc = SPI_execute_with_args(
-			"SELECT u.id, consensus.entity_exists(u.id) "
-			"FROM unnest($1::bytea[]) AS u(id)",
-			1, at, av, NULL, true, 0);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&scalar_entity_exists_plan,
+				"SELECT u.id, consensus.entity_exists(u.id) "
+				"FROM unnest($1::bytea[]) AS u(id)",
+				1, at, "word_case_variants"),
+			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "word_case_variants: entity_exists batch failed: %s",
 				 SPI_result_code_string(rc));
@@ -632,6 +698,54 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 	PG_RETURN_ARRAYTYPE_P(result);
 }
 
+typedef struct WordCaseTrajCtx
+{
+	Oid           as_binary;
+	HTAB         *word_lookup;
+	BatchWord    *words;
+	bool         *resolved_word;
+	int          *total_graphemes;
+	MemoryContext owner;
+} WordCaseTrajCtx;
+
+static void
+word_case_consume_trajectory(Datum physicality, Datum entity, Datum geometry, void *opaque)
+{
+	WordCaseTrajCtx *ctx = (WordCaseTrajCtx *) opaque;
+	char             wkey[16];
+	BatchWordLookup *entry;
+
+	(void) physicality;
+	if (!datum_key16(entity, wkey))
+		return;
+	entry = (BatchWordLookup *) hash_search(ctx->word_lookup, wkey, HASH_FIND, NULL);
+	if (entry == NULL || ctx->resolved_word[entry->index])
+		return;
+	ctx->resolved_word[entry->index] = true;
+	{
+		MemoryContext        prev = MemoryContextSwitchTo(ctx->owner);
+		bytea               *wkb = DatumGetByteaP(OidFunctionCall1(ctx->as_binary, geometry));
+		uint32               npoints = 0;
+		const unsigned char *points = laplace_trajectory_wkb_points(wkb, &npoints);
+
+		for (uint32 i = 0; i < npoints; ++i)
+		{
+			double             vertex[4];
+			mantissa_payload_t payload;
+			int32              run;
+
+			memcpy(vertex, points + (Size) i * 32, sizeof(vertex));
+			mantissa_unpack(vertex, &payload);
+			run = payload.run_length ? (int32) payload.run_length : 1;
+			batch_word_add_grapheme(&ctx->words[entry->index],
+									(const char *) &payload.entity_id, run);
+			(*ctx->total_graphemes)++;
+		}
+		pfree(wkb);
+		MemoryContextSwitchTo(prev);
+	}
+}
+
 /*
  * Set form over a whole frontier of words: one trajectory unpack, one mapping
  * read over every distinct grapheme, one render, one mint and one existence
@@ -659,6 +773,7 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 	int              n_grapheme_ids = 0;
 	Datum           *render_ids;
 	int              n_render = 0;
+	MemoryContext    owner = CurrentMemoryContext;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR, (errmsg("word_case_variants_batch: words must not be NULL")));
@@ -697,60 +812,85 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 		}
 	}
 
-	if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
-		elog(ERROR, "word_case_variants_batch: SPI_connect failed");
-
-	/* One trajectory unpack for every input word. DISTINCT ON takes the lowest
-	 * physicality id per entity, the same trajectory realize.constituents() reads. */
+	/* One trajectory unpack for every input word: first probe the canonical
+	 * (entity_id, type=1) primary-key address on the owning HASH(id) leaf via
+	 * laplace_content_trajectory_read, and fall back to the entity_id-indexed
+	 * query only for any word not found at its canonical physicality id. */
 	{
-		Datum     *word_datums = (Datum *) palloc(sizeof(Datum) * n_words);
-		ArrayType *word_array;
-		Oid        at[1] = { BYTEAARRAYOID };
-		Datum      av[1];
+		Datum          *word_datums = (Datum *) palloc(sizeof(Datum) * n_words);
+		bool           *resolved_word = (bool *) palloc0(sizeof(bool) * n_words);
+		ArrayType      *word_array;
+		WordCaseTrajCtx traj_ctx;
+		int             rem_n = 0;
 
 		for (int i = 0; i < n_words; i++)
 			word_datums[i] = make_bytea16(words[i].key);
 		word_array = construct_array(word_datums, n_words, BYTEAOID,
 								 -1, false, TYPALIGN_INT);
-		av[0] = PointerGetDatum(word_array);
-		rc = SPI_execute_with_args(
-			"SELECT q.entity_id, c.entity_id, c.run_length "
-			"FROM (SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory "
-			"      FROM laplace.physicalities p "
-			"      WHERE p.type = 1 AND p.trajectory IS NOT NULL "
-			"        AND p.entity_id = ANY($1) "
-			"      ORDER BY p.entity_id, p.id) q "
-			"CROSS JOIN LATERAL public.laplace_trajectory_constituents(q.trajectory) c "
-			"ORDER BY q.entity_id, c.ordinal",
-			1, at, av, NULL, true, 0);
-		if (rc != SPI_OK_SELECT)
-			elog(ERROR, "word_case_variants_batch: constituents failed: %s",
-				 SPI_result_code_string(rc));
+		traj_ctx.as_binary = ensure_lexical_asbinary_oid();
+		traj_ctx.word_lookup = word_lookup;
+		traj_ctx.words = words;
+		traj_ctx.resolved_word = resolved_word;
+		traj_ctx.total_graphemes = &total_graphemes;
+		traj_ctx.owner = owner;
+		laplace_content_trajectory_read(word_array, word_case_consume_trajectory, &traj_ctx);
 
-		for (uint64 rr = 0; rr < SPI_processed; rr++)
+		if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
+			elog(ERROR, "word_case_variants_batch: SPI_connect failed");
+
+		for (int i = 0; i < n_words; i++)
+			if (!resolved_word[i])
+				word_datums[rem_n++] = make_bytea16(words[i].key);
+
+		if (rem_n > 0)
 		{
-			HeapTuple        tup = SPI_tuptable->vals[rr];
-			TupleDesc        td = SPI_tuptable->tupdesc;
-			bool             isnull;
-			Datum            wd = SPI_getbinval(tup, td, 1, &isnull);
-			char             wkey[16], gkey[16];
-			BatchWordLookup *entry;
-			Datum            gd;
-			int32            run;
+			ArrayType *rem_array = construct_array(word_datums, rem_n, BYTEAOID,
+											   -1, false, TYPALIGN_INT);
+			Oid        at[1] = { BYTEAARRAYOID };
+			Datum      av[1] = { PointerGetDatum(rem_array) };
 
-			if (isnull || !datum_key16(wd, wkey))
-				continue;
-			entry = (BatchWordLookup *) hash_search(word_lookup, wkey,
-												HASH_FIND, NULL);
-			if (entry == NULL)
-				continue;
-			gd = SPI_getbinval(tup, td, 2, &isnull);
-			if (isnull || !datum_key16(gd, gkey))
-				continue;
-			run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
-			batch_word_add_grapheme(&words[entry->index], gkey,
-								 isnull ? 1 : run);
-			total_graphemes++;
+			rc = SPI_execute_plan(
+				ensure_lexical_plan(
+					&batch_traj_fallback_plan,
+					"SELECT q.entity_id, c.entity_id, c.run_length "
+					"FROM (SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory "
+					"      FROM laplace.physicalities p "
+					"      WHERE p.type = 1 AND p.trajectory IS NOT NULL "
+					"        AND p.entity_id = ANY($1) "
+					"      ORDER BY p.entity_id, p.id) q "
+					"CROSS JOIN LATERAL public.laplace_trajectory_constituents(q.trajectory) c "
+					"ORDER BY q.entity_id, c.ordinal",
+					1, at, "word_case_variants_batch"),
+				av, NULL, true, 0);
+			if (rc != SPI_OK_SELECT)
+				elog(ERROR, "word_case_variants_batch: constituents failed: %s",
+					 SPI_result_code_string(rc));
+
+			for (uint64 rr = 0; rr < SPI_processed; rr++)
+			{
+				HeapTuple        tup = SPI_tuptable->vals[rr];
+				TupleDesc        td = SPI_tuptable->tupdesc;
+				bool             isnull;
+				Datum            wd = SPI_getbinval(tup, td, 1, &isnull);
+				char             wkey[16], gkey[16];
+				BatchWordLookup *entry;
+				Datum            gd;
+				int32            run;
+
+				if (isnull || !datum_key16(wd, wkey))
+					continue;
+				entry = (BatchWordLookup *) hash_search(word_lookup, wkey,
+													HASH_FIND, NULL);
+				if (entry == NULL)
+					continue;
+				gd = SPI_getbinval(tup, td, 2, &isnull);
+				if (isnull || !datum_key16(gd, gkey))
+					continue;
+				run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
+				batch_word_add_grapheme(&words[entry->index], gkey,
+									 isnull ? 1 : run);
+				total_graphemes++;
+			}
 		}
 	}
 
@@ -845,8 +985,11 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 		Oid        at[1] = { BYTEAARRAYOID };
 		Datum      av[1] = { PointerGetDatum(render_array) };
 
-		rc = SPI_execute_with_args("SELECT realize.render_text_batch($1)",
-								   1, at, av, NULL, true, 1);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(&batch_render_plan,
+								"SELECT realize.render_text_batch($1)",
+								1, at, "word_case_variants_batch"),
+			av, NULL, true, 1);
 		if (rc != SPI_OK_SELECT || SPI_processed != 1)
 			elog(ERROR, "word_case_variants_batch: render batch failed: %s",
 				 SPI_result_code_string(rc));
@@ -925,10 +1068,13 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 			int       *candidate_words = (int *) palloc(sizeof(int) * n_surfaces);
 			int        n_candidates = 0;
 
-			rc = SPI_execute_with_args(
-				"SELECT laplace.word_id(u.s) FROM unnest($1::text[]) "
-				"WITH ORDINALITY AS u(s, ord) ORDER BY u.ord",
-				1, at, av, NULL, true, 0);
+			rc = SPI_execute_plan(
+				ensure_lexical_plan(
+					&batch_word_id_plan,
+					"SELECT laplace.word_id(u.s) FROM unnest($1::text[]) "
+					"WITH ORDINALITY AS u(s, ord) ORDER BY u.ord",
+					1, at, "word_case_variants_batch"),
+				av, NULL, true, 0);
 			if (rc != SPI_OK_SELECT)
 				elog(ERROR, "word_case_variants_batch: word-id batch failed: %s",
 					 SPI_result_code_string(rc));
@@ -953,8 +1099,11 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 				Oid        eat[1] = { BYTEAARRAYOID };
 				Datum      eav[1] = { PointerGetDatum(candidate_array) };
 
-				rc = SPI_execute_with_args("SELECT laplace.entities_exist_bitmap($1)",
-									   1, eat, eav, NULL, true, 1);
+				rc = SPI_execute_plan(
+					ensure_lexical_plan(&batch_exists_bitmap_plan,
+										"SELECT laplace.entities_exist_bitmap($1)",
+										1, eat, "word_case_variants_batch"),
+					eav, NULL, true, 1);
 				if (rc != SPI_OK_SELECT || SPI_processed != 1)
 					elog(ERROR, "word_case_variants_batch: existence batch failed: %s",
 						 SPI_result_code_string(rc));
@@ -1103,11 +1252,14 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 		bool  isnull;
 		bool  exists;
 
-		rc = SPI_execute_with_args(
-			"SELECT EXISTS (SELECT 1 FROM laplace.consensus c "
-			"WHERE c.subject_id = $1 "
-			"AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE')))",
-			1, at, av, NULL, true, 1);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&peers_exact_one_plan,
+				"SELECT EXISTS (SELECT 1 FROM laplace.consensus c "
+				"WHERE c.subject_id = $1 "
+				"AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE')))",
+				1, at, "lexical_peers_batch"),
+			av, NULL, true, 1);
 		if (rc != SPI_OK_SELECT || SPI_processed != 1)
 			elog(ERROR, "lexical_peers_batch: exact probe failed: %s",
 				 SPI_result_code_string(rc));
@@ -1127,11 +1279,14 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 			ids[i] = make_bytea16(words[i].key);
 		id_array = construct_array(ids, n_words, BYTEAOID, -1, false, TYPALIGN_INT);
 		av[0] = PointerGetDatum(id_array);
-		rc = SPI_execute_with_args(
-			"SELECT DISTINCT c.subject_id FROM laplace.consensus c "
-			"WHERE c.subject_id = ANY($1) "
-			"AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))",
-			1, at, av, NULL, true, 0);
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&peers_exact_batch_plan,
+				"SELECT DISTINCT c.subject_id FROM laplace.consensus c "
+				"WHERE c.subject_id = ANY($1) "
+				"AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))",
+				1, at, "lexical_peers_batch"),
+			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "lexical_peers_batch: exact batch probe failed: %s",
 				 SPI_result_code_string(rc));
@@ -1163,10 +1318,13 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 			Oid        at[1] = { BYTEAARRAYOID };
 			Datum      av[1] = { PointerGetDatum(miss_array) };
 
-			rc = SPI_execute_with_args(
-				"SELECT word_id, variant_id "
-				"FROM lexical.word_case_variants_batch($1)",
-				1, at, av, NULL, true, 0);
+			rc = SPI_execute_plan(
+				ensure_lexical_plan(
+					&peers_widen_plan,
+					"SELECT word_id, variant_id "
+					"FROM lexical.word_case_variants_batch($1)",
+					1, at, "lexical_peers_batch"),
+				av, NULL, true, 0);
 			if (rc != SPI_OK_SELECT)
 				elog(ERROR, "lexical_peers_batch: case widening failed: %s",
 					 SPI_result_code_string(rc));

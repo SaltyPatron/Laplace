@@ -205,7 +205,13 @@ public static class InstalledOpInvoker
             var d = text.IndexOf(" DEFAULT ", StringComparison.OrdinalIgnoreCase);
             if (d >= 0) { optional = true; text = text[..d].Trim(); }
 
-            foreach (var mode in (string[])["VARIADIC ", "INOUT ", "OUT ", "IN "])
+            // pg_get_function_arguments includes OUT parameters on single-row
+            // OUT-parameter functions (e.g. converse.firmware, laplace_mantissa_unpack);
+            // they are result columns, not input arguments.
+            if (text.StartsWith("OUT ", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var mode in (string[])["VARIADIC ", "INOUT ", "IN "])
                 if (text.StartsWith(mode, StringComparison.OrdinalIgnoreCase))
                     text = text[mode.Length..].TrimStart();
 

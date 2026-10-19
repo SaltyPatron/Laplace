@@ -171,8 +171,9 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
      * read in one set query. */
     bool spi_top=false;
     if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT) elog(ERROR,"text containment: connect failed");
+    static SPIPlanPtr text_facets_plan=NULL;
     Oid argtypes[]={BYTEAARRAYOID};Datum args[]={PointerGetDatum(set_array(match.ids))};
-    if(SPI_execute_with_args(laplace_sql_query_text("entity.facets"),1,argtypes,args,NULL,true,0)!=SPI_OK_SELECT)
+    if(SPI_execute_plan(spi_common_ensure_plan(&text_facets_plan,laplace_sql_query_text("entity.facets"),1,argtypes),args,NULL,true,0)!=SPI_OK_SELECT)
         elog(ERROR,"text containment: facet read failed");
     hash128_t *out=palloc(Max(total,1)*sizeof(hash128_t));*count=0;
     for(uint64 i=0;i<SPI_processed;++i)

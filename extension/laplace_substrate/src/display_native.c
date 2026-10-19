@@ -189,13 +189,14 @@ record_labels(DisplayItem **items,int n,bool shallow_only)
         bool found;PartLabel *pl=hash_search(parts,&kids[i][k],HASH_ENTER,&found);
         if(!found){pl->label=NULL;values[unique++]=hash128_to_datum(&kids[i][k]);}
     }
+    static SPIPlanPtr record_parts_plan=NULL;
     Oid argtypes[1]={BYTEAARRAYOID};
     Datum args[1]={PointerGetDatum(construct_array(values,unique,BYTEAOID,-1,false,TYPALIGN_INT))};
     volatile int rc=0;
     record_depth++;
     PG_TRY();
     {
-        rc=SPI_execute_with_args("SELECT id,label FROM realize.display_label_batch($1)",1,argtypes,args,NULL,true,0);
+        rc=SPI_execute_plan(spi_common_ensure_plan(&record_parts_plan,"SELECT id,label FROM realize.display_label_batch($1)",1,argtypes),args,NULL,true,0);
     }
     PG_FINALLY();
     {

@@ -18,6 +18,50 @@
 -- ORDERING IS PER TERM. row_number() OVER (PARTITION BY term ORDER BY the complete
 -- evidence order) applies an explicit p_k independently to each term. This file owns
 -- that order; the scalar is only a one-element adapter and cannot drift from it.
+CREATE OR REPLACE FUNCTION taxonomy._bubble_domain_scores(
+    p_synsets bytea[],
+    p_domain_context bytea[]
+)
+RETURNS TABLE(synset_id bytea, domain_hits bigint)
+LANGUAGE plpgsql STABLE PARALLEL SAFE
+AS $$
+BEGIN
+    IF COALESCE(cardinality(p_synsets), 0) = 0
+       OR COALESCE(cardinality(p_domain_context), 0) = 0 THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH synsets AS (
+        SELECT DISTINCT s AS synset_id
+        FROM unnest(p_synsets) AS s
+        WHERE s IS NOT NULL
+    ),
+    domain AS (
+        SELECT DISTINCT d AS id
+        FROM unnest(p_domain_context) AS d
+        WHERE d IS NOT NULL
+    ),
+    members AS (
+        SELECT s.synset_id, m.object_id AS member_id
+        FROM synsets s
+        JOIN laplace.consensus m ON m.subject_id = s.synset_id
+        WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+        UNION
+        SELECT s.synset_id, m.subject_id AS member_id
+        FROM synsets s
+        JOIN laplace.consensus m ON m.object_id = s.synset_id
+        WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+    )
+    SELECT m.synset_id, count(*)::bigint AS domain_hits
+    FROM members m
+    JOIN domain d ON true
+    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
+      ON gn.neighbour_id = d.id
+    GROUP BY m.synset_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up_batch(
     p_terms bytea[],
     p_domain_context bytea[] DEFAULT NULL,
@@ -42,25 +86,15 @@ WITH terms AS (
     FROM unnest(COALESCE(p_terms, ARRAY[]::bytea[])) AS t
     WHERE t IS NOT NULL
 ),
-direct_terms AS MATERIALIZED (
-    SELECT DISTINCT t.term
-    FROM terms t
-    JOIN laplace.consensus c ON c.subject_id = t.term
-    WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-),
-unresolved AS MATERIALIZED (
-    SELECT t.term FROM terms t
-    LEFT JOIN direct_terms d USING (term)
-    WHERE d.term IS NULL
-),
 peers AS MATERIALIZED (
     -- Exact identity is the fast path. Only terms with no witnessed sense enter
-    -- orthographic widening, and all of those widen in one native pass.
-    SELECT d.term, d.term AS id FROM direct_terms d
-    UNION ALL
-    SELECT v.word_id, v.variant_id
-    FROM lexical.word_case_variants_batch(
-        ARRAY(SELECT u.term FROM unresolved u ORDER BY u.term)) v
+    -- orthographic widening, and all of those widen in one native pass inside
+    -- lexical.lexical_peers_batch.
+    SELECT lp.word_id AS term, u.id
+    FROM lexical.lexical_peers_batch(
+        ARRAY(SELECT t.term FROM terms t ORDER BY t.term)) lp
+    CROSS JOIN LATERAL unnest(lp.peers) AS u(id)
+    WHERE u.id IS NOT NULL
 ),
 family_out AS (
     SELECT p.term,
@@ -176,23 +210,8 @@ term_lang AS MATERIALIZED (
 -- the candidate, or the languages agree. Only the last one moves, from "the synset's
 -- ONE language IS this" to "the synset ATTESTS this". Language stays a constraint and
 -- never becomes a score, which is what the note above requires.
---
--- Both probes keep the = ANY(ARRAY(SELECT ...)) form the header measured: one bounded
--- ScalarArrayOp per partition, never a per-candidate nested loop. cand_lang_hit is
--- additionally bounded to the languages the terms actually use (at most one per term),
--- so it reads far less than the old argmax, which had to aggregate every language on
--- every candidate to find a maximum. The entities join is unnecessary there -- those
--- ids come from term_lang and are Language entities by construction.
-cand_lang_hit AS MATERIALIZED (
+cand_langs AS MATERIALIZED (
     SELECT DISTINCT a.subject_id AS id, a.context_id AS lang
-    FROM laplace.attestations a
-        CROSS JOIN language_filter lf
-    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
-      AND a.context_id = ANY (ARRAY(SELECT tl.id FROM term_lang tl WHERE tl.id IS NOT NULL))
-            AND lf.requested
-),
-cand_lang_any AS MATERIALIZED (
-    SELECT DISTINCT a.subject_id AS id
     FROM laplace.attestations a
         CROSS JOIN language_filter lf
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
@@ -205,39 +224,20 @@ scoped AS (
         CROSS JOIN language_filter lf
         WHERE NOT lf.requested
              OR tl.id IS NULL
-       OR NOT EXISTS (SELECT 1 FROM cand_lang_any ca WHERE ca.id = r.synset_id)
-       OR EXISTS (SELECT 1 FROM cand_lang_hit ch
+       OR NOT EXISTS (SELECT 1 FROM cand_langs ca WHERE ca.id = r.synset_id)
+       OR EXISTS (SELECT 1 FROM cand_langs ch
                    WHERE ch.id = r.synset_id AND ch.lang = tl.id)
 ),
-domain AS (
-    SELECT DISTINCT d AS id
-    FROM unnest(COALESCE(p_domain_context, ARRAY[]::bytea[])) AS d
-    WHERE d IS NOT NULL
-),
--- Feeds domain_scores ONLY. The cardinality gate keeps the geometry_neighbours
--- lateral from ever being evaluated on the no-domain path.
--- Keyed by synset, not by term: a synset's domain hits do not depend on which
--- term reached it.
-members AS (
-    SELECT r.synset_id, m.object_id AS member_id
-    FROM scoped r
-    JOIN laplace.consensus m ON m.subject_id = r.synset_id
-    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-      AND COALESCE(cardinality(p_domain_context), 0) > 0
-    UNION
-    SELECT r.synset_id, m.subject_id AS member_id
-    FROM scoped r
-    JOIN laplace.consensus m ON m.object_id = r.synset_id
-    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-      AND COALESCE(cardinality(p_domain_context), 0) > 0
-),
+-- Feeds domain_scores ONLY. Delegated to a non-inlined helper so the no-domain
+-- path never plans or executes the 256-partition consensus + geometry_neighbours
+-- cascade.
 domain_scores AS (
-    SELECT m.synset_id, count(*)::bigint AS domain_hits
-    FROM members m
-    JOIN domain d ON true
-    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
-      ON gn.neighbour_id = d.id
-    GROUP BY m.synset_id
+    SELECT ds.synset_id, ds.domain_hits
+    FROM taxonomy._bubble_domain_scores(
+        ARRAY(SELECT DISTINCT r.synset_id FROM scoped r WHERE r.synset_id IS NOT NULL),
+        p_domain_context
+    ) ds
+    WHERE COALESCE(cardinality(p_domain_context), 0) > 0
 ),
 ranked AS (
     SELECT DISTINCT ON (r.term, r.synset_id)

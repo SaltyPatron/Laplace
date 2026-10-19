@@ -2224,7 +2224,7 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, string query, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT name, args, returns, kind FROM ops.api(@q) ORDER BY name
+            SELECT name, args, returns, kind FROM ops.api(@q) ORDER BY name, args
             """,
             static r => new ApiCatalogRow(
                 r.GetString(0),

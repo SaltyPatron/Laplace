@@ -77,6 +77,7 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
 
     /* ---- the prompt's entities, at whatever tier they resolved to ---- */
     {
+        static SPIPlanPtr pl_words_plan = NULL;
         Oid    argtypes[1] = { TEXTOID };
         Datum  args[1];
         int    rc;
@@ -87,9 +88,12 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
          * recurse without end.
          */
         args[0] = PointerGetDatum(prompt);
-        rc = SPI_execute_with_args(
-            "SELECT p.id FROM converse.prompt_words($1) p WHERE p.id IS NOT NULL",
-            1, argtypes, args, NULL, true, 0);
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(
+                &pl_words_plan,
+                "SELECT p.id FROM converse.prompt_words($1) p WHERE p.id IS NOT NULL",
+                1, argtypes),
+            args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "prompt_language: prompt_words read failed: %s",
                  SPI_result_code_string(rc));
@@ -138,6 +142,7 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
 
     /* ---- one indexed range read; O(1) hash probe per edge ---- */
     {
+        static SPIPlanPtr pl_edges_plan = NULL;
         Oid        argtypes[1] = { BYTEAARRAYOID };
         Datum      args[1];
         ArrayType *arr;
@@ -148,13 +153,16 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
         MemoryContextSwitchTo(old);
 
         args[0] = PointerGetDatum(arr);
-        portal = SPI_cursor_open_with_args(
+        portal = SPI_cursor_open(
             "pl_edges",
-            "SELECT c.object_id, c.rating, c.rd FROM laplace.consensus c "
-            "WHERE c.subject_id = ANY($1) "
-            "  AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-            "  AND c.object_id IS NOT NULL",
-            1, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
+            spi_common_ensure_plan(
+                &pl_edges_plan,
+                "SELECT c.object_id, c.rating, c.rd FROM laplace.consensus c "
+                "WHERE c.subject_id = ANY($1) "
+                "  AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
+                "  AND c.object_id IS NOT NULL",
+                1, argtypes),
+            args, NULL, true);
 
         for (;;)
         {

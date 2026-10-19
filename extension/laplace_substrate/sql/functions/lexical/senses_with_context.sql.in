@@ -93,7 +93,7 @@ BEGIN ATOMIC
           ON ss.subject_id = s.sense_id
          AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
     ),
-    candidate_nodes AS (
+    candidate_nodes AS MATERIALIZED (
         SELECT c.synset_id AS sid, c.synset_id AS node_id FROM cand c
         UNION
         SELECT c.synset_id, c.sense_id FROM cand c
@@ -104,16 +104,30 @@ BEGIN ATOMIC
     band_2_4_7 AS MATERIALIZED (
         SELECT laplace.relation_band_types(ARRAY[2, 4, 7]) AS types
     ),
+    cand_edges AS MATERIALIZED (
+        SELECT c.subject_id, c.type_id, c.object_id,
+               consensus.eff_mu(c.rating, c.rd) AS w
+        FROM (SELECT DISTINCT node_id FROM candidate_nodes) n
+        JOIN @extschema@.consensus c ON c.subject_id = n.node_id
+    ),
+    ctx_syn_edges AS MATERIALIZED (
+        SELECT c.subject_id, c.type_id, c.object_id,
+               consensus.eff_mu(c.rating, c.rd) AS w
+        FROM ctx_syn s
+        CROSS JOIN band_2_4_7 b
+        JOIN @extschema@.consensus c
+          ON c.subject_id = s.sid
+         AND c.type_id = ANY (b.types || consensus.relation_family_ids('EVOKES_FRAME'))
+    ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier realize.constituents include a context token.
     own_sent AS (
-        SELECT DISTINCT n.sid, c.object_id AS gid,
-               consensus.eff_mu(c.rating, c.rd) AS w
+        SELECT DISTINCT n.sid, ce.object_id AS gid, ce.w
         FROM candidate_nodes n
         CROSS JOIN band_1_7 b
-        JOIN @extschema@.consensus c
-          ON c.subject_id = n.node_id
-         AND c.type_id = ANY (b.types)
+        JOIN cand_edges ce
+          ON ce.subject_id = n.node_id
+         AND ce.type_id = ANY (b.types)
     ),
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
@@ -125,35 +139,34 @@ BEGIN ATOMIC
     ),
     -- FRAME: shared frame between a context sense and the candidate.
     ctx_frame AS (
-        SELECT DISTINCT c.object_id AS fid, consensus.eff_mu(c.rating, c.rd) AS w
-        FROM ctx_syn s
-        JOIN @extschema@.consensus c ON c.subject_id = s.sid
-        WHERE c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
+        SELECT DISTINCT cse.object_id AS fid, cse.w
+        FROM ctx_syn_edges cse
+        WHERE cse.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
     ),
     lane_frame AS (
-        SELECT c.subject_id AS sid, sum(cf.w) AS boost
-        FROM @extschema@.consensus c
-        JOIN ctx_frame cf ON cf.fid = c.object_id
-        WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
-        GROUP BY c.subject_id
+        SELECT ce.subject_id AS sid, sum(cf.w) AS boost
+        FROM (SELECT DISTINCT synset_id FROM cand) cd
+        JOIN cand_edges ce ON ce.subject_id = cd.synset_id
+        JOIN ctx_frame cf ON cf.fid = ce.object_id
+        WHERE ce.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
+        GROUP BY ce.subject_id
     ),
     -- TAXON: candidate meets a context sense within one hop, either direction.
     lane_taxon AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
-            SELECT c.subject_id AS sid, consensus.eff_mu(c.rating, c.rd) AS w
-            FROM band_2_4_7 b
-            CROSS JOIN @extschema@.consensus c
-            WHERE c.subject_id IN (SELECT synset_id FROM cand)
-              AND c.object_id IN (SELECT sid FROM ctx_syn)
-              AND c.type_id = ANY (b.types)
+            SELECT ce.subject_id AS sid, ce.w
+            FROM (SELECT DISTINCT synset_id FROM cand) cd
+            CROSS JOIN band_2_4_7 b
+            JOIN cand_edges ce
+              ON ce.subject_id = cd.synset_id
+             AND ce.type_id = ANY (b.types)
+            WHERE ce.object_id IN (SELECT sid FROM ctx_syn)
             UNION ALL
-            SELECT c.object_id, consensus.eff_mu(c.rating, c.rd)
+            SELECT cse.object_id AS sid, cse.w
             FROM band_2_4_7 b
-            CROSS JOIN @extschema@.consensus c
-            WHERE c.object_id IN (SELECT synset_id FROM cand)
-              AND c.subject_id IN (SELECT sid FROM ctx_syn)
-              AND c.type_id = ANY (b.types)
+            JOIN ctx_syn_edges cse
+              ON cse.type_id = ANY (b.types)
+            WHERE cse.object_id IN (SELECT synset_id FROM cand)
         ) x
         GROUP BY x.sid
     ),
@@ -164,13 +177,13 @@ BEGIN ATOMIC
     -- the explicit discourse prior and works when the gloss spelling differs
     -- from the prompt token. Weighted by the domain edge's consensus.eff_mu.
     lane_domain AS (
-        SELECT c.subject_id AS sid, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
-        FROM @extschema@.consensus c
-        WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND c.type_id = consensus.relation_type_resolve('HAS_DOMAIN')
-          AND (c.object_id IN (SELECT id FROM ctx)
-               OR c.object_id IN (SELECT sid FROM ctx_syn))
-        GROUP BY c.subject_id
+        SELECT ce.subject_id AS sid, sum(ce.w) AS boost
+        FROM (SELECT DISTINCT synset_id FROM cand) cd
+        JOIN cand_edges ce ON ce.subject_id = cd.synset_id
+        WHERE ce.type_id = consensus.relation_type_resolve('HAS_DOMAIN')
+          AND (ce.object_id IN (SELECT id FROM ctx)
+               OR ce.object_id IN (SELECT sid FROM ctx_syn))
+        GROUP BY ce.subject_id
     ),
     -- DIRECT: a context ENTITY has an attested edge to a candidate synset, either
     -- direction, any relation. This is the lane the previous implementation had, and
@@ -195,14 +208,14 @@ BEGIN ATOMIC
     lane_direct AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
             SELECT c.object_id AS sid, consensus.eff_mu(c.rating, c.rd) AS w
-            FROM @extschema@.consensus c
-            WHERE c.subject_id IN (SELECT id FROM ctx)
-              AND c.object_id IN (SELECT synset_id FROM cand)
+            FROM ctx ct
+            JOIN @extschema@.consensus c ON c.subject_id = ct.id
+            WHERE c.object_id IN (SELECT synset_id FROM cand)
             UNION ALL
-            SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
-            FROM @extschema@.consensus c
-            WHERE c.object_id IN (SELECT id FROM ctx)
-              AND c.subject_id IN (SELECT synset_id FROM cand)
+            SELECT ce.subject_id AS sid, ce.w
+            FROM (SELECT DISTINCT synset_id FROM cand) cd
+            JOIN cand_edges ce ON ce.subject_id = cd.synset_id
+            WHERE ce.object_id IN (SELECT id FROM ctx)
         ) x
         GROUP BY x.sid
     )

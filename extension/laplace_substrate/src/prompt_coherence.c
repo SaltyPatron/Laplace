@@ -188,6 +188,30 @@ pc_syn_add(HTAB *h, const uint8 *syn, int idx, MemoryContext cxt)
     e->idx[e->n_idx++] = idx;
 }
 
+static SPIPlanPtr pc_edges_fwd_plan = NULL;
+static SPIPlanPtr pc_edges_rev_plan = NULL;
+static SPIPlanPtr pc_cand_plan = NULL;
+static SPIPlanPtr pc_single_mass_plan = NULL;
+static SPIPlanPtr pc_lemma_plan = NULL;
+static SPIPlanPtr pc_rel_plan = NULL;
+
+static SPIPlanPtr
+ensure_pc_plan(SPIPlanPtr *slot, const char *sql, int nargs, Oid *argtypes, const char *label)
+{
+    if (*slot == NULL)
+    {
+        SPIPlanPtr p = SPI_prepare_cursor(sql, nargs, argtypes, CURSOR_OPT_PARALLEL_OK);
+
+        if (p == NULL)
+            elog(ERROR, "prompt_coherence: SPI_prepare(%s) failed: %s",
+                 label, SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(p) != 0)
+            elog(ERROR, "prompt_coherence: SPI_keepplan(%s) failed", label);
+        *slot = p;
+    }
+    return *slot;
+}
+
 /* One direction of the edge scan. `forward` selects which column carries the
  * candidate being credited. Each direction is a plain index range read on the
  * subject or object btree; one OR over both directions would not be. */
@@ -203,9 +227,12 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
           "FROM laplace.consensus c WHERE c.subject_id = ANY($1)"
         : "SELECT c.object_id, c.subject_id, c.type_id, c.rating, c.rd "
           "FROM laplace.consensus c WHERE c.object_id = ANY($1)";
+    SPIPlanPtr *slot = forward ? &pc_edges_fwd_plan : &pc_edges_rev_plan;
 
     args[0] = PointerGetDatum(syn_arr);
-    portal = SPI_cursor_open_with_args("pc_edges", sql, 1, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
+    portal = SPI_cursor_open("pc_edges",
+                             ensure_pc_plan(slot, sql, 1, argtypes, "pc_edges"),
+                             args, NULL, true);
 
     for (;;)
     {
@@ -366,24 +393,27 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         Portal portal;
 
         args[0] = PointerGetDatum(prompt);
-        portal = SPI_cursor_open_with_args(
+        portal = SPI_cursor_open(
             "pc_cand",
-            /* b.sense_id is batched through word_language_candidates_batch once
-             * instead of calling scalar converse.word_language(b.sense_id) per row. */
-            "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
-            "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
-            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)), "
-            "     s AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT b.sense_id "
-            "         FROM b WHERE b.sense_id IS NOT NULL ORDER BY b.sense_id) AS ids), "
-            "     lr AS MATERIALIZED (SELECT l.word, l.lang, "
-            "         row_number() OVER (PARTITION BY l.word ORDER BY l.mu DESC, l.lang) AS rn "
-            "         FROM s CROSS JOIN LATERAL converse.word_language_candidates_batch(s.ids) l) "
-            "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
-            "       b.witnesses::bigint, p.language, lr.lang "
-            "FROM p JOIN b ON b.term = p.id "
-            "LEFT JOIN lr ON lr.word = b.sense_id AND lr.rn = 1 "
-            "WHERE p.id IS NOT NULL AND b.synset_id IS NOT NULL",
-            1, argtypes, args, NULL, true, 0);
+            ensure_pc_plan(
+                &pc_cand_plan,
+                /* b.sense_id is batched through word_language_candidates_batch once
+                 * instead of calling scalar converse.word_language(b.sense_id) per row. */
+                "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
+                "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
+                "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)), "
+                "     s AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT b.sense_id "
+                "         FROM b WHERE b.sense_id IS NOT NULL ORDER BY b.sense_id) AS ids), "
+                "     lr AS MATERIALIZED (SELECT l.word, l.lang, "
+                "         row_number() OVER (PARTITION BY l.word ORDER BY l.mu DESC, l.lang) AS rn "
+                "         FROM s CROSS JOIN LATERAL converse.word_language_candidates_batch(s.ids) l) "
+                "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
+                "       b.witnesses::bigint, p.language, lr.lang "
+                "FROM p JOIN b ON b.term = p.id "
+                "LEFT JOIN lr ON lr.word = b.sense_id AND lr.rn = 1 "
+                "WHERE p.id IS NOT NULL AND b.synset_id IS NOT NULL",
+                1, argtypes, "pc_cand"),
+            args, NULL, true);
 
         for (;;)
         {
@@ -535,19 +565,22 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         {
             Oid   argtypes[1] = { BYTEAARRAYOID };
             Datum args[1] = { PointerGetDatum(syn_arr) };
-            int   rc = SPI_execute_with_args(
-                "SELECT m.id, sum(m.mass)::float8 FROM ("
-                "  SELECT c.subject_id AS id, "
-                "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
-                "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
-                "  FROM laplace.consensus c WHERE c.subject_id = ANY($1) GROUP BY c.subject_id "
-                "  UNION ALL "
-                "  SELECT c.object_id AS id, "
-                "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
-                "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
-                "  FROM laplace.consensus c WHERE c.object_id = ANY($1) GROUP BY c.object_id"
-                ") m GROUP BY m.id",
-                1, argtypes, args, NULL, true, 0);
+            int   rc = SPI_execute_plan(
+                ensure_pc_plan(
+                    &pc_single_mass_plan,
+                    "SELECT m.id, sum(m.mass)::float8 FROM ("
+                    "  SELECT c.subject_id AS id, "
+                    "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
+                    "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
+                    "  FROM laplace.consensus c WHERE c.subject_id = ANY($1) GROUP BY c.subject_id "
+                    "  UNION ALL "
+                    "  SELECT c.object_id AS id, "
+                    "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
+                    "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
+                    "  FROM laplace.consensus c WHERE c.object_id = ANY($1) GROUP BY c.object_id"
+                    ") m GROUP BY m.id",
+                    1, argtypes, "pc_single_mass"),
+                args, NULL, true, 0);
 
             if (rc == SPI_OK_SELECT)
             {
@@ -737,11 +770,14 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             MemoryContextSwitchTo(old);
 
             args[0] = PointerGetDatum(nw_arr);
-            rc = SPI_execute_with_args(
-                "SELECT l.subject_id, l.object_id FROM laplace.consensus l "
-                "WHERE l.subject_id = ANY($1) "
-                "  AND l.type_id = laplace.relation_type_id('IS_LEMMA_OF')",
-                1, argtypes, args, NULL, true, 0);
+            rc = SPI_execute_plan(
+                ensure_pc_plan(
+                    &pc_lemma_plan,
+                    "SELECT l.subject_id, l.object_id FROM laplace.consensus l "
+                    "WHERE l.subject_id = ANY($1) "
+                    "  AND l.type_id = laplace.relation_type_id('IS_LEMMA_OF')",
+                    1, argtypes, "pc_lemma"),
+                args, NULL, true, 0);
             if (rc == SPI_OK_SELECT)
             {
                 for (uint64 r = 0; r < SPI_processed; r++)
@@ -823,23 +859,26 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             args[0] = PointerGetDatum(syn_arr);
             args[1] = PointerGetDatum(type_arr);
             args[2] = PointerGetDatum(laplace_symmetric_relation_types());
-            portal = SPI_cursor_open_with_args(
+            portal = SPI_cursor_open(
                 "pc_rel",
-                /* A symmetric type is stored once in canonical orientation, so
-                 * the candidate may be its object; both ends are read. Column 1
-                 * is the candidate endpoint in both arms. Asymmetric types are
-                 * read from the subject only. */
-                "SELECT c.subject_id, c.type_id, c.rating, c.rd "
-                "FROM laplace.consensus c "
-                "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
-                "UNION ALL "
-                "SELECT c.object_id, c.type_id, c.rating, c.rd "
-                "FROM laplace.consensus c "
-                "WHERE c.object_id = ANY($1) AND c.type_id = ANY($2) "
-                "  AND c.object_id IS NOT NULL "
-                "  AND c.subject_id <> c.object_id "
-                "  AND c.type_id = ANY($3)",
-                3, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
+                ensure_pc_plan(
+                    &pc_rel_plan,
+                    /* A symmetric type is stored once in canonical orientation, so
+                     * the candidate may be its object; both ends are read. Column 1
+                     * is the candidate endpoint in both arms. Asymmetric types are
+                     * read from the subject only. */
+                    "SELECT c.subject_id, c.type_id, c.rating, c.rd "
+                    "FROM laplace.consensus c "
+                    "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
+                    "UNION ALL "
+                    "SELECT c.object_id, c.type_id, c.rating, c.rd "
+                    "FROM laplace.consensus c "
+                    "WHERE c.object_id = ANY($1) AND c.type_id = ANY($2) "
+                    "  AND c.object_id IS NOT NULL "
+                    "  AND c.subject_id <> c.object_id "
+                    "  AND c.type_id = ANY($3)",
+                    3, argtypes, "pc_rel"),
+                args, NULL, true);
 
             for (;;)
             {

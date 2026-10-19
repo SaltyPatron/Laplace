@@ -173,9 +173,27 @@ rel_type_id(const char *name)
 
 
 
+static inline SPIPlanPtr
+spi_common_ensure_plan(SPIPlanPtr *slot, const char *sql, int nargs, Oid *argtypes)
+{
+    if (*slot == NULL)
+    {
+        SPIPlanPtr p = SPI_prepare_cursor(sql, nargs, argtypes, CURSOR_OPT_PARALLEL_OK);
+
+        if (p == NULL)
+            elog(ERROR, "laplace_substrate: SPI_prepare(%s) failed: %s",
+                 sql, SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(p) != 0)
+            elog(ERROR, "laplace_substrate: SPI_keepplan(%s) failed", sql);
+        *slot = p;
+    }
+    return *slot;
+}
+
 static inline Datum
 spi_realize(Datum id, Datum lang)
 {
+    static SPIPlanPtr plan = NULL;
     Oid     argtypes[2] = { BYTEAOID, BYTEAOID };
     Datum   args[2] = { id, lang };
     char    nulls[3] = "  ";
@@ -184,8 +202,9 @@ spi_realize(Datum id, Datum lang)
 
     if (lang == (Datum) 0)
         nulls[1] = 'n';
-    rc = SPI_execute_with_args(
-        "SELECT realize.realize($1, $2)", 2, argtypes, args, nulls, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT realize.realize($1, $2)", 2, argtypes),
+        args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -197,6 +216,7 @@ spi_realize(Datum id, Datum lang)
 static inline Datum
 spi_realize_batch(Datum ids_arr, Datum lang)
 {
+    static SPIPlanPtr plan = NULL;
     Oid     argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
     Datum   args[2] = { ids_arr, lang };
     char    nulls[3] = "  ";
@@ -206,8 +226,9 @@ spi_realize_batch(Datum ids_arr, Datum lang)
 
     if (lang == (Datum) 0)
         nulls[1] = 'n';
-    rc = SPI_execute_with_args(
-        "SELECT realize.batch($1, $2)", 2, argtypes, args, nulls, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT realize.batch($1, $2)", 2, argtypes),
+        args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -219,13 +240,15 @@ spi_realize_batch(Datum ids_arr, Datum lang)
 static inline Datum
 spi_label(Datum id)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { id };
     bool  isnull;
     int   rc;
 
-    rc = SPI_execute_with_args(
-        "SELECT realize.label($1)", 1, argtypes, args, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT realize.label($1)", 1, argtypes),
+        args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -234,13 +257,15 @@ spi_label(Datum id)
 static inline Datum
 spi_type_label(Datum type_id)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { type_id };
     bool  isnull;
     int   rc;
 
-    rc = SPI_execute_with_args(
-        "SELECT lexical.type_label($1)", 1, argtypes, args, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT lexical.type_label($1)", 1, argtypes),
+        args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -249,14 +274,16 @@ spi_type_label(Datum type_id)
 static inline Datum
 spi_word_language(Datum word)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { word };
     bool  isnull;
     int   rc;
     Datum d;
 
-    rc = SPI_execute_with_args(
-        "SELECT converse.word_language($1)", 1, argtypes, args, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT converse.word_language($1)", 1, argtypes),
+        args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     
@@ -272,13 +299,15 @@ spi_word_language(Datum word)
 static inline Datum
 spi_render_text(Datum id)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { id };
     bool  isnull;
     int   rc;
 
-    rc = SPI_execute_with_args(
-        "SELECT realize.render_text($1)", 1, argtypes, args, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT realize.render_text($1)", 1, argtypes),
+        args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -308,15 +337,16 @@ spi_emit_all_rows(ReturnSetInfo *rsinfo)
 static inline int
 spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { word };
     int   rc;
 
     *out_ids = NULL;
     *out_n = 0;
-    rc = SPI_execute_with_args(
-        "SELECT sn.synset_id FROM lexical.senses($1) sn",
-        1, argtypes, args, NULL, true, 0);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT sn.synset_id FROM lexical.senses($1) sn", 1, argtypes),
+        args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "laplace_substrate: senses query failed: %s",
              SPI_result_code_string(rc));

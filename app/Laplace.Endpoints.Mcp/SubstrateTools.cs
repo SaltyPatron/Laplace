@@ -74,7 +74,7 @@ internal sealed class SubstrateTools : IMcpTools
     private static readonly ToolSpec[] ToolCatalog =
     [
         new("api", "Search the installed SQL function catalog by substring.",
-            "Search the substrate's installed SQL function catalog (ops.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
+            "Search the substrate's installed SQL function catalog (ops.api). Returns name, args, returns, kind for every callable function or procedure matching the substring. Use before assuming a helper doesn't exist.",
             () => Schema(("query", "string", "substring to match, '' lists everything", true)),
             (s, a) => s.Api(a)),
         new("recall", "Ask the substrate about a topic (default read, session-carried).",
@@ -91,7 +91,7 @@ internal sealed class SubstrateTools : IMcpTools
                          ("lang", "string", "target language for translate", false)),
             (s, a) => s.Query(a)),
         new("taxonomy", "The IS_A tree around a topic (up to root, or child kinds).",
-            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. dir='child' is the closest thing to a \"bubble down\" the substrate has today (there is no general sense/synset -> every-surface primitive symmetric with bubble's surface -> sense -> synset climb) -- it is IS_A-specific, not a reverse of bubble. Rows use converse.label_or_hex(a cleaned display name), not realize.render(the actual content) -- see the bubble tool's note on that distinction.",
+            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. For concept -> surface realizations use taxonomy.bubble_down via `op`; dir='child' here is IS_A sub-kinds. Rows use converse.label_or_hex(a cleaned display name), not realize.render(the actual content) -- see the bubble tool's note on that distinction.",
             () => Schema(("term", "string", "the topic (omit if entity given)", false),
                          ("entity", "string", "hex entity id to root at", false)),
             (s, a) => s.Taxonomy(a)),
@@ -132,7 +132,7 @@ internal sealed class SubstrateTools : IMcpTools
                          ("tokens", "string", "chain mode: comma-separated tokens (2+)", false)),
             (s, a) => s.Feedback(a)),
         new("walk", "Beam-walk the consensus graph from a prompt or entity.",
-            "Beam-walk the consensus graph from a prompt (consensus.walk_branches), ranked by relation rank times the signed Glicko expectation of the folded rating/RD state, gated by the highway mask when relation_type narrows it. UNFILTERED consensus.walk_branches(no relation_type) Append-scans every relation-type partition -- measured ~24s -- so pass relation_type whenever you have one; the `query` tool's `beam` shape falls back to the cheaper consensus.walk_strongest greedy chain when neither a relation type nor a band lens is given, and this tool should get the same treatment when speed matters. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize.path(label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
+            "Beam-walk the consensus graph from a prompt (consensus.walk_branches), ranked by relation rank times the signed Glicko expectation of the folded rating/RD state, gated by the highway mask when relation_type narrows it. Pass relation_type whenever you want to constrain the walk to a single relation family. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize.path(label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
             () => Schema(("prompt", "string", "starting content (omit if entity given)", false),
                          ("entity", "string", "hex entity id to start from, e.g. from bubble", false),
                          ("relation_type", "string", "canonical relation name to constrain the walk", false),
@@ -154,7 +154,7 @@ internal sealed class SubstrateTools : IMcpTools
             () => Schema(("prompt", "string", "the prompt", true)),
             (s, a) => s.PromptLanguage(a)),
         new("bubble", "Bubble a surface term to its sense/synset frontier.",
-            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing content. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use realize.render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use converse.label_or_hex() instead (resolve_name, else realize.render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
+            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id, or downward to surface realizations via `op` (`taxonomy.bubble_down`). Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing content. Note the render/label split: this tool's rows use realize.render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use converse.label_or_hex() instead (resolve_name, else realize.render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
                          ("k", "integer", "sense frontier width, default 5", false)),
             (s, a) => s.Bubble(a)),
@@ -174,7 +174,7 @@ internal sealed class SubstrateTools : IMcpTools
             (_, _) => McpRuntime()),
         new("source_status", "Is a source ingested, and how do we know.",
             "Ingest state per source (ops.source_status): known, ingested, approximate evidence, the last run, and the substrate-owned throughput verdict/rate/baseline/slowdown. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. `throughput_compared=false` is not green. Absence is an answer here, never an empty result set.",
-            () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
+            () => Schema(("source", "string", "declared source name, e.g. WordNet or Unicode; omit for every source", false)),
             (s, a) => s.SourceStatus(a)),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
             "Run a corpus ingest through the CLI's own tested pipeline (unpack -> records -> client-side dedup/fold -> COPY) -- the exact 'laplace ingest <source> <path>' entrypoint a terminal run uses, so results are identical either way. Substrate-wide only one ingest runs at a time (a global advisory lock); if another is active this call waits for it rather than fighting the lock, up to timeout_seconds, and is killed (not left running) on timeout. Returns the process exit code and captured output so a stalled or failed run is visible, never silently swallowed. For the live source list run `laplace ingest` with no arguments, or pass an unknown source here -- the CLI answers with its own registry rather than a copy kept in this process.",
@@ -183,9 +183,9 @@ internal sealed class SubstrateTools : IMcpTools
                          ("timeout_seconds", "integer", "max seconds to wait before killing the child process, default 600", false)),
             (_, a) => Ingest(a)),
         new("op", "Call an installed SQL operation by name, with bound arguments.",
-            "Call any operation in the installed catalog BY NAME (ops.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten (358 installed functions, 358 chances), and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: ops.api('<substring>') first.",
+            "Call any operation in the installed catalog BY NAME (ops.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten, and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: ops.api('<substring>') first.",
             () => Schema(("name", "string", "installed function name, exactly as ops.api() reports it", true),
-                         ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNetDecomposer\"}", false),
+                         ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNet\"}", false),
                          ("max_rows", "integer", "row cap, default 200", false),
                          ("timeout_seconds", "integer", "exact command timeout; defaults to 15 for reads and 0 (unbounded, cancellable) for allow-listed writes", false)),
             (s, a) => s.Op(a)),
@@ -580,7 +580,7 @@ internal sealed class SubstrateTools : IMcpTools
             // 'procedure' means CALL, not SELECT — the op tool switches on this, and
             // a caller reading the catalog by hand needs the same warning.
             ["kind"] = r.Kind,
-        }));
+        }), int.MaxValue);
     }
 
     /// <summary>
@@ -735,17 +735,17 @@ internal sealed class SubstrateTools : IMcpTools
         }));
     }
 
-    private static (string, bool) JsonRows(IEnumerable<JsonObject> rows)
+    private static (string, bool) JsonRows(IEnumerable<JsonObject> rows, int cap = DefaultRowCap)
     {
         var arr = new JsonArray();
         var truncated = false;
         foreach (var row in rows)
         {
-            if (arr.Count >= DefaultRowCap) { truncated = true; break; }
+            if (arr.Count >= cap) { truncated = true; break; }
             arr.Add(row);
         }
         var result = new JsonObject { ["rows"] = arr };
-        if (truncated) result["truncated_at"] = DefaultRowCap;
+        if (truncated) result["truncated_at"] = cap;
         return (result.ToJsonString(), false);
     }
 
