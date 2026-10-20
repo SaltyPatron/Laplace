@@ -64,8 +64,9 @@ datum_to_hash128(Datum d)
     bytea    *b = DatumGetByteaPP(d);
     hash128_t h;
 
-    if (VARSIZE_ANY_EXHDR(b) < (int) sizeof(hash128_t))
-        ereport(ERROR, (errmsg("laplace_substrate: expected 16-byte entity id")));
+    if (VARSIZE_ANY_EXHDR(b) != (int) sizeof(hash128_t))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("laplace_substrate: expected exactly 16-byte entity id")));
     memcpy(&h, VARDATA_ANY(b), sizeof(hash128_t));
     return h;
 }

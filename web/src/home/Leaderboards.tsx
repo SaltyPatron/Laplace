@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Muted } from '@ui';
+import { Muted, ReadStatus, useReadResource } from '@ui';
 import { queryHomeLeaders } from '../query/api';
-import type { BandLeaders } from '../query/types';
+import { useAppStore } from '../store';
 import styles from './Leaderboards.module.css';
 
 /** Salience bands whose leaders the landing shows. */
@@ -17,16 +16,12 @@ const HOME_BANDS = [1, 2, 4, 5];
  * from any admitted source or modality.
  */
 export function Leaderboards() {
-  const [bands, setBands] = useState<BandLeaders[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    queryHomeLeaders()
-      .then((r) => setBands(r.bands ?? []))
-      .catch(() => setFailed(true));
-  }, []);
-
-  if (failed) return null; // the landing renders without leaders
+  const { tenant, authUser } = useAppStore();
+  const leaders = useReadResource({
+    key: JSON.stringify(['home-leaders', tenant, authUser?.id]),
+    read: (signal) => queryHomeLeaders({ tenant, signal }),
+  });
+  const bands = leaders.data?.bands;
 
   return (
     <section className={styles.leaders} aria-label="League leaders">
@@ -34,9 +29,10 @@ export function Leaderboards() {
         <span className={styles.title}>League leaders</span>
         <Muted className={styles.sub}>strongest consensus per arena — conservative standing and witnesses, live</Muted>
       </div>
-
+      <ReadStatus label="League leaders" resource={leaders} />
+      {bands?.length === 0 ? <Muted>No leaders were returned.</Muted> : null}
       <div className={styles.grid}>
-        {(bands ?? HOME_BANDS.map(() => null)).map((band, i) => (
+        {(bands ?? (leaders.busy ? HOME_BANDS.map(() => null) : [])).map((band, i) => (
           <div key={band?.band ?? i} className={styles.arena}>
             <div className={styles.arenaName}>{band ? band.name.replace(/_/g, ' ') : ' '}</div>
             {band ? (

@@ -12,6 +12,7 @@
 #include "spi_nested.h"
 #include "trajectory_wkb.h"
 #include "opaque_surface.h"
+#include "perfcache_native.h"
 
 /* Labels a set of ids for REALIZE. Stages run in a fixed order as set reads;
  * an id leaves once a stage gives it a non-opaque label, so only unlabeled ids
@@ -35,10 +36,11 @@ typedef struct {
 static const char *query_keys[] = {
     "display.facets", "display.names", "display.text", "display.metadata_labels",
     "display.file_metadata", "display.definition_types", "display.definitions",
-    "display.definition_owners", "display.heads", "entity.facets", "display.lexical", "display.parts"
+    "display.definition_owners", "display.heads", "entity.facets", "display.lexical", "display.parts",
+    "entity.stored_facets"
 };
 static SPIPlanPtr plans[lengthof(query_keys)];
-enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS,LEXICAL,PARTS };
+enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS,LEXICAL,PARTS,STORED_FACETS };
 
 static int
 run_query(int which, ArrayType *ids, ArrayType *types)
@@ -62,6 +64,77 @@ item_ids(DisplayItem **items, int n, bool targets)
     Datum *values = palloc(Max(n,1)*sizeof(Datum));
     for (int i=0;i<n;++i) values[i]=hash128_to_datum(targets?&items[i]->target:&items[i]->id);
     return construct_array(values,n,BYTEAOID,-1,false,TYPALIGN_INT);
+}
+
+/* The Unicode floor is recorded in the native cache, not necessarily in an
+ * entity partition. Facets and display must agree with existence and rendering
+ * on that floor. Stored rows retain their structural/attested type semantics. */
+static void
+read_facets(int which, DisplayItem **items, int n, HTAB *lookup)
+{
+    run_query(which,item_ids(items,n,false),NULL);
+    for(uint64 i=0;i<SPI_processed;++i) {
+        bool isnull;HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;
+        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
+        DisplayItem *item=hash_search(lookup,&id,HASH_FIND,NULL);
+        if(!item)continue;
+        item->exists=true;item->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
+        Datum type=SPI_getbinval(t,d,3,&isnull);
+        item->has_type=!isnull;if(!isnull)item->type=datum_to_hash128(type);
+        if(which==FACETS) {
+            Datum name=SPI_getbinval(t,d,4,&isnull);
+            if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
+        }
+    }
+    SPI_freetuptable(SPI_tuptable);
+    for(int i=0;i<n;++i) {
+        DisplayItem *item=items[i];uint32_t cp;
+        if(!item->exists && laplace_perfcache_codepoint_for_id((const uint8_t*)&item->id,&cp)) {
+            if(laplace_entity_type_id("Codepoint",&item->type)!=0)
+                elog(ERROR,"facets: Codepoint type is not registered");
+            item->exists=true;item->tier=0;item->has_type=true;
+        }
+        item->record=item->exists && item->has_type && item->tier>=2 && laplace_entity_type_is_text(&item->type)==0;
+        item->text=item->exists && item->has_type && laplace_entity_type_is_text(&item->type)==1;
+    }
+}
+
+static int
+facet_id_compare(const void *a,const void *b)
+{
+    const DisplayItem *left=*(DisplayItem *const*)a,*right=*(DisplayItem *const*)b;
+    return memcmp(&left->id,&right->id,sizeof(hash128_t));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_entity_facets_batch);
+Datum
+pg_laplace_entity_facets_batch(PG_FUNCTION_ARGS)
+{
+    InitMaterializedSRF(fcinfo,0);ReturnSetInfo *r=(ReturnSetInfo*)fcinfo->resultinfo;
+    if(PG_ARGISNULL(0))return (Datum)0;
+    Datum *ids;bool *nulls;int n;
+    deconstruct_array(PG_GETARG_ARRAYTYPE_P(0),BYTEAOID,-1,false,TYPALIGN_INT,&ids,&nulls,&n);
+    if(n==0)return (Datum)0;
+    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(DisplayItem);
+    HTAB *lookup=hash_create("entity facet items",n,&ctl,HASH_ELEM|HASH_BLOBS);
+    DisplayItem **items=palloc(n*sizeof(DisplayItem*));int unique=0;
+    for(int i=0;i<n;++i) {
+        if(nulls[i])continue;
+        hash128_t id=datum_to_hash128(ids[i]);bool found;
+        DisplayItem *item=hash_search(lookup,&id,HASH_ENTER,&found);
+        if(!found){memset(item,0,sizeof(*item));item->id=id;items[unique++]=item;}
+    }
+    bool spi_top=false;
+    if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT)elog(ERROR,"facets: SPI connect failed");
+    read_facets(STORED_FACETS,items,unique,lookup);
+    qsort(items,unique,sizeof(DisplayItem*),facet_id_compare);
+    for(int i=0;i<unique;++i) {
+        DisplayItem *item=items[i];if(!item->exists)continue;
+        Datum values[]={hash128_to_datum(&item->id),Int16GetDatum(item->tier),hash128_to_datum(&item->type)};
+        bool out_nulls[]={false,false,!item->has_type};
+        tuplestore_putvalues(r->setResult,r->setDesc,values,out_nulls);
+    }
+    hash_destroy(lookup);laplace_spi_finish(spi_top);return (Datum)0;
 }
 
 static char **
@@ -354,19 +427,7 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         if(!found){memset(item,0,sizeof(*item));item->id=id;all[unique++]=item;}
     }
     bool spi_top=false;if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT)elog(ERROR,"display: SPI connect failed");
-    run_query(FACETS,item_ids(all,unique,false),NULL);
-    for(uint64 i=0;i<SPI_processed;++i) {
-        bool isnull;HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;
-        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));DisplayItem *item=hash_search(lookup,&id,HASH_FIND,NULL);
-        if(!item)continue;
-        item->exists=true;item->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
-        Datum type=SPI_getbinval(t,d,3,&isnull);item->has_type=!isnull;if(!isnull)item->type=datum_to_hash128(type);
-        item->record=item->has_type && item->tier>=2 && laplace_entity_type_is_text(&item->type)==0;
-        item->text=item->has_type && laplace_entity_type_is_text(&item->type)==1;
-        /* display.facets: id, tier, type_id, canonical name. An entity row names no source. */
-        Datum name=SPI_getbinval(t,d,4,&isnull);if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
-    }
-    SPI_freetuptable(SPI_tuptable);
+    read_facets(FACETS,all,unique,lookup);
     /* Text is its own surface: a Word or Sentence at or below sentence tier is
      * shown as what it writes, before any stage relabels it as the lemma a
      * source binds to it (word HAS_SENSE entity). An opaque surface (an ILI

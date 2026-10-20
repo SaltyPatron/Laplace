@@ -890,11 +890,7 @@ public static partial class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<ConsensusOutLabeledRow>> ConsensusOutLabeledAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT c.type_label, c.object_label, encode(c.object_id, 'hex'),
-                   c.eff_mu, c.witnesses
-            FROM ops.consensus_out_labeled(@id, @limit) c
-            """,
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("consensus.out_labeled"),
             static r => new ConsensusOutLabeledRow(
                 r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetInt64(4)),
             p =>
@@ -1963,21 +1959,9 @@ public static partial class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<ConsensusInLabeledRow>> ConsensusInLabeledAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        // Subject labels are tier-gated: a witnessed name if one exists, else rendered
-        // text only for tier <= 3. A high-tier subject is a whole composition (e.g. a
-        // game line), and rendering its constituent closure per row is not a label.
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT encode(c.subject_id, 'hex'),
-                   lexical.type_label(c.type_id),
-                   COALESCE(
-                       NULLIF(realize.resolve_name(c.subject_id), ''),
-                       CASE WHEN e.tier <= 3
-                            THEN NULLIF(realize.render_text_fast(c.subject_id, 3), '') END,
-                       'Unrealized entity'),
-                   consensus.eff_mu_display(c.rating, c.rd), c.witness_count
-            FROM consensus.consensus_in(@id, @limit) c
-            JOIN laplace.entities e ON e.id = c.subject_id
-            """,
+        // The shared native display pipeline bounds high-tier previews and renders
+        // source-defined relation content as well as its subjects, in one batch.
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("consensus.in_labeled"),
             static r => new ConsensusInLabeledRow(
                 r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetInt64(4)),
             p =>

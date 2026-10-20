@@ -40,7 +40,7 @@ export class PaymentRequiredError extends Error {
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly requestId?: string) {
-    super(message);
+    super(requestId ? `${message} (request ${requestId})` : message);
     this.name = 'ApiError';
   }
 }
@@ -69,7 +69,8 @@ async function parseError(res: Response): Promise<never> {
   const message = [error?.message, record?.detail, record?.message, record?.title]
     .find((value): value is string => typeof value === 'string' && value.length > 0) ?? fallback;
   if (res.status === 402 && error) throw new PaymentRequiredError(body as PaymentRequiredResponse);
-  throw new ApiError(res.status, message, res.headers.get('x-request-id') ?? undefined);
+  throw new ApiError(res.status, message,
+    res.headers.get('x-correlation-id') ?? res.headers.get('x-request-id') ?? undefined);
 }
 
 /** Shared web transport to the machine's operations: same-origin credentials, typed failures, caller-owned cancellation, no implicit retries. */

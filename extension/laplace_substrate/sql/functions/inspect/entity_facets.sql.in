@@ -8,36 +8,15 @@ BEGIN
         DROP FUNCTION ops.entity_facets(bytea);
     END IF;
 END $upgrade_shape$;
-CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
-    RETURNS TABLE(tier smallint, type_id bytea)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
-    SELECT e.tier,
-           COALESCE((
-               SELECT c.object_id
-               FROM laplace.consensus c
-               WHERE c.subject_id = e.id
-                 AND c.type_id = ANY(consensus.relation_family_ids('IS_TYPED_AS'))
-               ORDER BY c.rating DESC, c.object_id ASC
-               LIMIT 1
-           ), e.type_id) AS type_id
-    FROM laplace.entities e
-    WHERE e.id = p_id;
-END;
-
--- LIVE-UPGRADE DROP ORDER. These BEGIN-ATOMIC functions pin the exact OIDs of
--- bases that are recompiled later in manifest.upgrade:
+-- LIVE-UPGRADE DEPENDENCIES. Parsed SQL bodies pin these exact OIDs:
 --
 --   consensus.browse_named_entities
 --       -> structural.word_containers_containing_all
 --       -> ops.entity_facets_batch
---       -> consensus.relation_family_ids
 --
--- ops.entity_facets_batch is the first base encountered by the upgrade. Drop
--- the installed dependents here, in dependent-first order, so every later base
--- can be replaced with RESTRICT semantics intact. Their normal modules recreate
--- them later after all bases exist. Do not use CASCADE: an unlisted dependent is
--- a contract change that scripts/check-upgrade-drop-order.py must expose.
+-- Preserve current shapes/OIDs; retire incompatible legacy shapes in dependent-
+-- first order. The native batch now owns the stored-row query through the SQL
+-- catalog, and the scalar wrapper below depends on the batch. Do not use CASCADE.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -57,7 +36,7 @@ BEGIN
     END IF;
 END $upgrade_shape$;
 
--- Batch form for serving/browse paths over canonical entity rows.
+-- Stored entities and cache-resident Unicode atoms share one native facet read.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -69,19 +48,12 @@ BEGIN
 END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_entity_facets_batch'
+    LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
+    RETURNS TABLE(tier smallint, type_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.id,
-           e.tier,
-           COALESCE((
-               SELECT c.object_id
-               FROM laplace.consensus c
-               WHERE c.subject_id = e.id
-                 AND c.type_id = ANY(consensus.relation_family_ids('IS_TYPED_AS'))
-               ORDER BY c.rating DESC, c.object_id ASC
-               LIMIT 1
-           ), e.type_id) AS type_id
-    FROM laplace.entities e
-    WHERE e.id = ANY(COALESCE(p_ids, '{}'::bytea[]))
-    ORDER BY e.id;
+    SELECT f.tier, f.type_id FROM ops.entity_facets_batch(ARRAY[p_id]) f;
 END;

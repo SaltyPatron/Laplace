@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useRouteText } from '../../layout/useRouteText';
 import {
+  Button,
   ErrorText,
   LoadingText,
   Muted,
@@ -116,7 +117,7 @@ export function EntityDetail() {
   }, [idHex, setBreadcrumb]);
 
   useEffect(() => {
-    if (!preview || unlocked || detailLoading || needsGate) return;
+    if (!preview || unlocked || detailLoading || needsGate || err) return;
     setDetailLoading(true);
     void exploreEntity(idHex, { tenant, quoteId: quote })
       .then((res) => {
@@ -132,9 +133,11 @@ export function EntityDetail() {
         setErr(e instanceof Error ? e.message : String(e));
       })
       .finally(() => setDetailLoading(false));
-  }, [preview, unlocked, detailLoading, needsGate, idHex, tenant, quote]);
+  }, [preview, unlocked, detailLoading, needsGate, err, idHex, tenant, quote]);
 
   async function loadFull() {
+    if (detailLoading) return;
+    setDetailLoading(true);
     setErr(null);
     try {
       const res = await exploreEntity(idHex, { tenant, quoteId: quote });
@@ -143,6 +146,8 @@ export function EntityDetail() {
       setUnlocked(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDetailLoading(false);
     }
   }
 
@@ -299,6 +304,8 @@ export function EntityDetail() {
               receipt={inspectReceipt}
               onReady={() => void loadFull()}
             />
+          ) : err ? (
+            <Button onClick={() => void loadFull()}>Retry entity detail</Button>
           ) : detailLoading ? null : (
             <Muted>Loading entity detail…</Muted>
           )}

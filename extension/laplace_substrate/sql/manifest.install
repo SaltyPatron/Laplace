@@ -269,7 +269,6 @@ functions/converse/compile_prompt.sql.in
 functions/lexical/word_case_variant_ids.sql.in
 functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
-functions/inspect/consensus_out_labeled.sql.in
 functions/lexical/define.sql.in
 functions/lexical/define_with_context.sql.in
 functions/lexical/examples.sql.in
@@ -343,6 +342,7 @@ functions/realize/realize_translation.sql.in
 functions/realize/realize_defines.sql.in
 functions/readback/render.sql.in
 functions/converse/label.sql.in
+functions/inspect/consensus_out_labeled.sql.in
 functions/converse/label_or_hex.sql.in
 views/v_attestation_readable.sql.in
 functions/lexical/type_label.sql.in

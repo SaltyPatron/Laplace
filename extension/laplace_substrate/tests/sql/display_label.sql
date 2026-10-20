@@ -4,6 +4,53 @@
 -- High-tier text preview is containment-owned (#804).
 \set ECHO none
 BEGIN;
+-- Cache-resident atoms are usable without a duplicated entity row. Exercise the
+-- same native operations as the entity API, including set and positional forms.
+DO $atom_floor$
+DECLARE
+    atom bytea := laplace.word_id('b');
+    absent bytea := public.laplace_hash128_blake3('test/display/absent-atom');
+    f record;
+    labels text[];
+BEGIN
+    DELETE FROM laplace.entities WHERE id = atom;
+    IF NOT consensus.entity_exists(atom) OR realize.render_text(atom) IS DISTINCT FROM 'b' THEN
+        RAISE EXCEPTION 'FAIL: atom fixture is unavailable in the native floor';
+    END IF;
+    SELECT * INTO f FROM ops.entity_facets(atom);
+    IF NOT FOUND OR f.tier IS DISTINCT FROM 0::smallint
+       OR f.type_id IS DISTINCT FROM laplace.entity_type_id('Codepoint') THEN
+        RAISE EXCEPTION 'FAIL: scalar facets lost a cache-resident atom';
+    END IF;
+    IF (SELECT count(*) FROM ops.entity_facets_batch(ARRAY[atom,NULL,atom,absent])) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: facet set duplicated an atom or admitted an absent identity';
+    END IF;
+    IF EXISTS (SELECT FROM ops.entity_facets_batch(NULL))
+       OR EXISTS (SELECT FROM ops.entity_facets_batch('{}'::bytea[])) THEN
+        RAISE EXCEPTION 'FAIL: empty facet request returned entities';
+    END IF;
+    BEGIN
+        PERFORM ops.entity_facets(atom || decode('00','hex'));
+        RAISE EXCEPTION 'FAIL: oversized identity was silently truncated to an atom';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+    BEGIN
+        PERFORM realize.display_label_batch(ARRAY[substring(atom FROM 1 FOR 15)]);
+        RAISE EXCEPTION 'FAIL: undersized identity was accepted';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+    SELECT array_agg(d.label ORDER BY d.ord) INTO labels
+    FROM realize.display_label_batch(ARRAY[atom,absent,atom])
+         WITH ORDINALITY d(id,label,tier,ord);
+    IF labels[1] IS DISTINCT FROM 'b' OR labels[3] IS DISTINCT FROM 'b'
+       OR labels[2] IS DISTINCT FROM ('Entity · ' || left(encode(absent,'hex'),12))
+       OR (SELECT d.tier FROM realize.display_label_batch(ARRAY[atom]) d) IS DISTINCT FROM 0::smallint THEN
+        RAISE EXCEPTION 'FAIL: display disagrees with cache-resident atom facets: %',labels;
+    END IF;
+END
+$atom_floor$;
 DO $display_label$
 DECLARE
     src      bytea := public.laplace_hash128_blake3('test/display/source');
@@ -113,6 +160,22 @@ BEGIN
     END IF;
     IF labels[5] IS DISTINCT FROM '狼' THEN
         RAISE EXCEPTION 'FAIL: tier-0 codepoint did not render Unicode exactly: %', labels[5];
+    END IF;
+
+    -- A source-defined relation is content rather than a registry enum. The
+    -- relation and object can share an id without multiplying the result set.
+    IF lexical.type_label(sent1) IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: relation fixture unexpectedly belongs to the registry';
+    END IF;
+    INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,
+                                   rating,rd,volatility,witness_count,last_observed_at)
+    VALUES(laplace.consensus_id(missing,sent1,sent1),missing,sent1,sent1,
+           1700000000000,30000000000,60000000,1,now());
+    IF (SELECT count(*) FROM ops.consensus_out_labeled(missing,40)) <> 1
+       OR NOT EXISTS (SELECT FROM ops.consensus_out_labeled(missing,40) c
+           WHERE c.type_id=sent1 AND c.object_id=sent1
+             AND c.type_label='狼。' AND c.object_label='狼。') THEN
+        RAISE EXCEPTION 'FAIL: consensus inspection did not render source-defined relation content';
     END IF;
     IF labels[6] IS NULL OR btrim(labels[6]) = ''
        OR strpos(labels[6], left(encode(opaque,'hex'),12)) = 0 THEN

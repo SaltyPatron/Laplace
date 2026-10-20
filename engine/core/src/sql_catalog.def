@@ -5,11 +5,24 @@ SQL_QUERY("browse.names", "bytea[]",
     "WHERE object_id = ANY($1) AND type_id = ANY("
     "consensus.relation_family_ids('HAS_NAME'))")
 SQL_QUERY("entity.facets", "bytea[]",
+    "SELECT entity_id,tier,type_id FROM ops.entity_facets_batch($1)")
+SQL_QUERY("entity.stored_facets", "bytea[]",
     "SELECT e.id, e.tier, COALESCE(("
     "SELECT c.object_id FROM laplace.consensus c "
-    "WHERE c.subject_id = e.id AND c.type_id = laplace.relation_type_id('IS_TYPED_AS') "
+    "WHERE c.subject_id = e.id AND c.type_id = ANY(consensus.relation_family_ids('IS_TYPED_AS')) "
     "ORDER BY c.rating DESC, c.object_id ASC LIMIT 1"
     "), e.type_id) AS type_id FROM laplace.entities e WHERE e.id = ANY($1)")
+SQL_QUERY("consensus.out_labeled", "bytea,int4",
+    "SELECT c.type_label,c.object_label,encode(c.object_id,'hex'),c.eff_mu,c.witnesses "
+    "FROM ops.consensus_out_labeled($1,$2) c")
+SQL_QUERY("consensus.in_labeled", "bytea,int4",
+    "WITH edges AS MATERIALIZED (SELECT c.*,row_number() OVER ("
+    "ORDER BY consensus.edge_rank(c.type_id,consensus.eff_mu(c.rating,c.rd)) DESC,c.type_id,c.subject_id) AS ord "
+    "FROM consensus.consensus_in($1,$2) c), ids AS ("
+    "SELECT type_id AS id FROM edges UNION SELECT subject_id FROM edges), labels AS MATERIALIZED ("
+    "SELECT d.id,d.label FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d) "
+    "SELECT encode(e.subject_id,'hex'),t.label,s.label,consensus.eff_mu_display(e.rating,e.rd),e.witness_count "
+    "FROM edges e JOIN labels t ON t.id=e.type_id JOIN labels s ON s.id=e.subject_id ORDER BY e.ord")
 SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,a.outcome,a.observation_count "
     "FROM laplace.attestations a JOIN unnest($1::bytea[],$2::bytea[],$3::bytea[],$4::bytea[]) "

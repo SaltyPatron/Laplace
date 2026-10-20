@@ -28,24 +28,27 @@ BEGIN ATOMIC
         FROM laplace.v_consensus_resolved c
         WHERE c.subject_id = p_id
           AND c.object_id IS NOT NULL
-        ORDER BY consensus.edge_rank(c.type_id, c.eff_mu_raw) DESC
+        ORDER BY consensus.edge_rank(c.type_id, c.eff_mu_raw) DESC, c.type_id, c.object_id
         LIMIT GREATEST(p_limit, 0)
     )
     , ordered AS (
-        SELECT r.*, row_number() OVER (ORDER BY r.rnk DESC) AS ord
+        SELECT r.*, row_number() OVER (ORDER BY r.rnk DESC, r.type_id, r.object_id) AS ord
         FROM ranked r
-    ), labels AS (
-        SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
-                             converse.word_language(p_id)) AS l,
-               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
-        FROM ordered o
+    ), ids AS (
+        SELECT type_id AS id FROM ordered UNION SELECT object_id FROM ordered
+    ), labels AS MATERIALIZED (
+        -- A source-defined relation is content, too. The immutable registry lookup
+        -- lexical.type_label cannot render it. Label each distinct endpoint once
+        -- through the shared native display pipeline, retaining unresolved identity.
+        SELECT d.id, d.label
+        FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d
     )
     SELECT o.type_id, o.object_id,
-           labels.types[o.ord],
-           COALESCE(NULLIF(labels.l[o.ord], ''),
-                    'Unrealized entity'),
+           t.label, v.label,
            o.eff_mu,
            o.witness_count
-    FROM ordered o, labels
+    FROM ordered o
+    JOIN labels t ON t.id = o.type_id
+    JOIN labels v ON v.id = o.object_id
     ORDER BY o.ord;
 END;
