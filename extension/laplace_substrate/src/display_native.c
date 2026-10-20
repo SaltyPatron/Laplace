@@ -5,6 +5,7 @@
 #include "utils/hsearch.h"
 #include "utils/timestamp.h"
 #include "lib/stringinfo.h"
+#include "laplace/core/attestation_engine.h"
 #include "laplace/core/entity_type_law.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/sql_catalog.h"
@@ -29,6 +30,7 @@ typedef struct {
     hash128_t id, type, target, chosen_evidence;
     int16 tier, target_tier;
     bool exists, has_type, has_target, record, text;
+    bool content_checked, content_present; /* this call's statement snapshot only */
     int64 chosen_time;
     char *label;
 } DisplayItem;
@@ -48,7 +50,7 @@ run_query(int which, ArrayType *ids, ArrayType *types)
     int n = which == DEF_TYPES ? 0 : which == DEF_OWNED || which == DEF_INVERSE ? 2 : 1;
     Oid oids[] = {BYTEAARRAYOID,BYTEAARRAYOID};
     if (plans[which] == NULL) {
-        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(query_keys[which]),n,oids,CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(query_keys[which]),n,oids,CURSOR_OPT_PARALLEL_OK);
         if (plans[which] == NULL || SPI_keepplan(plans[which]) != 0)
             elog(ERROR,"display: cannot retain %s",query_keys[which]);
     }
@@ -226,17 +228,25 @@ static void
 record_labels(DisplayItem **items,int n,bool shallow_only)
 {
     if(n==0 || record_depth>=RECORD_DEPTH) return;
+    int eligible=0;
+    for(int i=0;i<n;++i)
+        if(!items[i]->content_checked || items[i]->content_present)
+            items[eligible++]=items[i];
+    n=eligible;
+    if(n==0) return;
     HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(RecordSlot);
     HTAB *slots=hash_create("display record items",n,&ctl,HASH_ELEM|HASH_BLOBS);
     for(int i=0;i<n;++i){bool found;RecordSlot *s=hash_search(slots,&items[i]->id,HASH_ENTER,&found);s->at=i;}
     hash128_t **kids=palloc0(n*sizeof(hash128_t*));uint16 **runs=palloc0(n*sizeof(uint16*));
     int *nk=palloc0(n*sizeof(int));bool *more=palloc0(n*sizeof(bool));
     int total=0;
+    for(int i=0;i<n;++i){items[i]->content_checked=true;items[i]->content_present=false;}
     run_query(PARTS,item_ids(items,n,false),NULL);
     for(uint64 r=0;r<SPI_processed;++r) {
         bool isnull;HeapTuple t=SPI_tuptable->vals[r];TupleDesc d=SPI_tuptable->tupdesc;
         hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
         RecordSlot *s=hash_search(slots,&id,HASH_FIND,NULL);if(s==NULL)continue;
+        items[s->at]->content_present=true;
         Datum wkb=SPI_getbinval(t,d,2,&isnull);if(isnull)continue;
         uint32 points;const unsigned char *p=laplace_trajectory_wkb_points(DatumGetByteaPP(wkb),&points);
         int keep=points>RECORD_PARTS?RECORD_PARTS:(int)points;bool text=true,deep=false;
@@ -305,6 +315,15 @@ typedef struct {hash128_t id,physicality,child;int16 tier;bool found;} SpineHead
 static void
 preview(DisplayItem **items,int n)
 {
+    if(n==0) return;
+    /* A missing own Content manifest was already proved by the parts read.
+     * A different (for example definition) target still needs its own lookup. */
+    int eligible=0;
+    for(int i=0;i<n;++i)
+        if(!items[i]->content_checked || items[i]->content_present ||
+           memcmp(&items[i]->target,&items[i]->id,sizeof(hash128_t))!=0)
+            items[eligible++]=items[i];
+    n=eligible;
     if(n==0) return;
     HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(SpineHead);
     HTAB *nodes=hash_create("display preview nodes",n,&ctl,HASH_ELEM|HASH_BLOBS);
@@ -379,9 +398,21 @@ metadata_labels(DisplayItem **items, int n)
 {
     char **labels = palloc0(Max(n, 1) * sizeof(char *));
     if (n == 0) return labels;
+    DisplayItem **unresolved = palloc(n * sizeof(DisplayItem *));
+    int unresolved_count = 0;
+    for (int i = 0; i < n; ++i) {
+        const char *canonical = laplace_relation_canonical_for_type_id(&items[i]->id);
+        if (canonical == NULL && laplace_entity_type_lookup(&items[i]->id, &canonical) != 0)
+            canonical = NULL;
+        if (canonical != NULL) labels[i] = pstrdup(canonical);
+        else unresolved[unresolved_count++] = items[i];
+    }
+    /* Governed metadata is already realized by the native registry. Do not
+     * acquire entity facets or walk content for labels we will discard. */
+    if (unresolved_count == 0) return labels;
     HASHCTL ctl = {0}; ctl.keysize = sizeof(hash128_t); ctl.entrysize = sizeof(SpineHead);
     HTAB *tiers = hash_create("display metadata tiers", n, &ctl, HASH_ELEM | HASH_BLOBS);
-    run_query(NODE_TIERS, item_ids(items,n,false), NULL);
+    run_query(NODE_TIERS, item_ids(unresolved,unresolved_count,false), NULL);
     for (uint64 i=0; i<SPI_processed; ++i) {
         bool isnull; HeapTuple t=SPI_tuptable->vals[i]; TupleDesc d=SPI_tuptable->tupdesc;
         hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
@@ -392,6 +423,7 @@ metadata_labels(DisplayItem **items, int n)
     DisplayItem **short_items=palloc(n*sizeof(DisplayItem*)); int *positions=palloc(n*sizeof(int));
     DisplayItem **compositions=palloc(n*sizeof(DisplayItem*)); int short_count=0, composition_count=0;
     for (int i=0; i<n; ++i) {
+        if (labels[i] != NULL) continue;
         SpineHead *node=hash_search(tiers,&items[i]->id,HASH_FIND,NULL);
         if (node && node->tier>3) {
             items[i]->target=items[i]->id; items[i]->has_target=true;

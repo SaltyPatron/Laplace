@@ -147,6 +147,7 @@ set(EXT_C_SOURCES
     src/containers_of.c
     src/browse_native.c
     src/band_leaders.c
+    src/consensus_scan.c
     src/chess_roster.c
     src/chess_rating_repair.c
     src/display_native.c

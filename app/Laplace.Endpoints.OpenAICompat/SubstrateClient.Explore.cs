@@ -29,33 +29,8 @@ internal sealed partial class SubstrateClient
         if (cached is not null && DateTimeOffset.UtcNow - _catalogCachedAt < CatalogTtl)
             return cached;
 
-        if (cached is not null)
-        {
-            // Past the TTL the stale catalog is returned at once and a single
-            // background load refreshes it.
-            if (_catalogGate.Wait(0))
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        _catalogCache = await LoadCatalogAsync(CancellationToken.None);
-                        _catalogCachedAt = DateTimeOffset.UtcNow;
-                    }
-                    catch
-                    {
-                        // The stale catalog stays; the next expiry retries.
-                    }
-                    finally
-                    {
-                        _catalogGate.Release();
-                    }
-                });
-            }
-
-            return cached;
-        }
-
+        // Expired counts need a successful refresh. A failed load must reach
+        // the caller's error path, rather than silently returning stale data.
         await _catalogGate.WaitAsync(ct);
         try
         {
@@ -302,32 +277,27 @@ internal sealed partial class SubstrateClient
 
         try
         {
-            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            // Every section describes the same entity under one read snapshot.
+            // Borrowing eight more pooled connections while retaining this one
+            // both exhausted small pools and let concurrent ingestion make the
+            // count, evidence and graph sections disagree.
+            await using var conn = await _dataSourceReadOnly.OpenConnectionAsync(ct);
+            await using var transaction = await conn.BeginTransactionAsync(
+                System.Data.IsolationLevel.RepeatableRead, ct);
             var (label, tier, type, exists) = await ReadEntityFacetsAsync(conn, id, ct);
             if (label is null) return null;
 
             var evidenceCount = await ReadEvidenceCountAsync(conn, id, ct);
 
-            async Task<T> OnConn<T>(Func<NpgsqlConnection, Task<T>> fn)
-            {
-                await using var c = await _dataSource.OpenConnectionAsync(ct);
-                return await fn(c);
-            }
-
-            var physicalitiesTask = OnConn(c => ReadPhysicalitiesAsync(c, id, ct));
-            var consensusOutTask = OnConn(c => ReadConsensusAsync(c, id, "out", consensusLimit, ct));
-            var consensusInTask = OnConn(c => ReadConsensusAsync(c, id, "in", consensusLimit, ct));
-            var sensesTask = OnConn(c => ReadSensesAsync(c, id, ct));
-            var constituentsTask = OnConn(c => ReadConstituentsAsync(c, id, ct));
-            var packedTask = OnConn(c => ReadPackedVerticesAsync(c, id, ct));
-            var realizedTask = OnConn(c => ReadRealizedVerticesAsync(c, id, ct));
-            var evidenceTask = OnConn(c => ReadEvidenceItemsAsync(c, id, evidenceLimit, ct));
-
-            await Task.WhenAll(
-                physicalitiesTask, consensusOutTask, consensusInTask,
-                sensesTask, constituentsTask, packedTask, realizedTask, evidenceTask);
-
-            var consensusOut = await consensusOutTask;
+            var physicalities = await ReadPhysicalitiesAsync(conn, id, ct);
+            var consensusOut = await ReadConsensusAsync(conn, id, "out", consensusLimit, ct);
+            var consensusIn = await ReadConsensusAsync(conn, id, "in", consensusLimit, ct);
+            var senses = await ReadSensesAsync(conn, id, ct);
+            var constituents = await ReadConstituentsAsync(conn, id, ct);
+            var packed = await ReadPackedVerticesAsync(conn, id, ct);
+            var realized = await ReadRealizedVerticesAsync(conn, id, ct);
+            var evidence = await ReadEvidenceItemsAsync(conn, id, evidenceLimit, ct);
+            await transaction.CommitAsync(ct);
             IReadOnlyList<SalientFactRow> exactFacts =
             [
                 .. consensusOut.Take(24).Select(c =>
@@ -341,15 +311,15 @@ internal sealed partial class SubstrateClient
                 Type: type,
                 Exists: exists,
                 EvidenceCount: evidenceCount,
-                Physicalities: await physicalitiesTask,
+                Physicalities: physicalities,
                 SalientFacts: exactFacts,
                 ConsensusOut: consensusOut,
-                ConsensusIn: await consensusInTask,
-                Senses: await sensesTask,
-                Constituents: await constituentsTask,
-                PackedVertices: await packedTask,
-                RealizedVertices: await realizedTask,
-                Evidence: await evidenceTask);
+                ConsensusIn: consensusIn,
+                Senses: senses,
+                Constituents: constituents,
+                PackedVertices: packed,
+                RealizedVertices: realized,
+                Evidence: evidence);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {

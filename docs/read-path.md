@@ -233,6 +233,21 @@ Callers should therefore:
 
 Historical audit numbers are evidence for why these rules exist, not permanent performance constants.
 
+Prepared SQL reads leave custom/generic selection to PostgreSQL and honor
+`plan_cache_mode`. The API's read-only pool preserves configured startup options
+and appends its read-only setting. The native indexed set readers retain their explicit key,
+snapshot and authorization contracts. Array-sized facet results use the existing
+array-cardinality planner support; their estimate is not an arbitrary 1,000 rows.
+
+`converse.relation_bands()` exposes exact registered consensus-cell counts from
+`ops.relation_band_census()` under the statement snapshot. Missing planner MCVs
+are not zero counts. Approximate operations remain explicitly named as estimates.
+Entity detail acquires one read-only connection and one repeatable-read snapshot
+for its sections, so concurrent ingestion cannot mix their counts and graph rows
+and a one-connection pool remains usable.
+An expired Explore catalog is refreshed under its existing single-flight gate;
+refresh errors propagate instead of being hidden behind stale successful counts.
+
 ---
 
 ## 8. Realization is downstream of semantic selection
@@ -240,6 +255,13 @@ Historical audit numbers are evidence for why these rules exist, not permanent p
 Read/cognition operates on canonical ids and typed state. Human text/notation is produced afterward.
 
 A selected semantic identity does not need a precomputed text label to be valid. `realize.batch`, text renderers and other codec/domain realizers supply the requested surface.
+
+Registry labels already selected by the native law do not enter semantic SQL or
+content rendering. Empty name/lexicalization/translation frontiers are pruned by
+the existing native consensus reader before ranked SQL is planned; SQL retains
+authorization when direct native reading is unavailable or RLS applies. A missing
+Content manifest is reused only within the same display call and snapshot;
+a definition that names another target still receives its own content lookup.
 
 The handoff carries canonical identities, typed operands, scores, ordering and provenance. Human-readable labels are output, never replacement keys for admission, equality, joins, traversal or ranking. Source bytes and Unicode input still have to be decoded as data; this does not authorize re-rendering internal identities into strings for semantic decisions. Resolving packed child coordinates for geometry is also typed computation, not human-facing rendering.
 

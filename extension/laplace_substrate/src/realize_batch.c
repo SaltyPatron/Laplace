@@ -19,21 +19,28 @@
  */
 #include "postgres.h"
 
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "fmgr.h"
+#include "miscadmin.h"
+#include "utils/acl.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "utils/lsyscache.h"
+#include "utils/rls.h"
 
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "perfcache_native.h"
 #include "opaque_surface.h"
+#include "consensus_scan.h"
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/entity_type_law.h"
+#include "laplace/core/glicko2.h"
 #include "laplace/core/sql_catalog.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_realize_batch);
@@ -221,6 +228,76 @@ render_union_add(HTAB *render_ids, Datum **union_ids, int32 *n, int32 *cap,
     (*union_ids)[(*n)++] = cand;
 }
 
+typedef struct ArmFrontier
+{
+    HTAB *owners;
+    bool incoming;
+} ArmFrontier;
+
+static void
+arm_frontier_visit(const LaplaceConsensusRow *row, void *context)
+{
+    ArmFrontier *frontier = context;
+    if (!row->object_is_null && !laplace_glicko2_refuted(row->rating, row->rd))
+        hash_search(frontier->owners,
+            frontier->incoming ? &row->object : &row->subject, HASH_ENTER, NULL);
+}
+
+/* Prune empty semantic branches using the shared native indexed set reader.
+ * The subsequent ranked SQL keeps its language/tier/tie rules, but only sees
+ * owners with a possible unrefuted candidate. In particular, a missing name
+ * or lexicalization must not plan a multi-partition join just to return zero.
+ * This probe uses the same MVCC snapshot, ACL/RLS checks and refutation law as
+ * the actual arm; it does not infer absence from labels or planner statistics. */
+static ArrayType *
+arm_frontier(SPIPlanPtr plan, ArrayType *input)
+{
+    Oid relation = get_relname_relid("consensus", get_namespace_oid("laplace", false));
+    /* Views/column grants and RLS retain their SQL authorization semantics.
+     * The native optimization is used only when a direct set read is allowed. */
+    if (!OidIsValid(relation) ||
+        pg_class_aclcheck(relation, GetUserId(), ACL_SELECT) != ACLCHECK_OK ||
+        check_enable_rls(relation, InvalidOid, true) == RLS_ENABLED)
+        return input;
+    const char *names[2];
+    int count = 1;
+    bool incoming = false;
+    if (plan == plan_synset_lemma)
+    {
+        names[0] = "HAS_SENSE"; names[1] = "IS_SENSE_OF";
+        count = 2; incoming = true;
+    }
+    else if (plan == plan_has_name) names[0] = "HAS_NAME";
+    else if (plan == plan_translation) names[0] = "IS_TRANSLATION_OF";
+    else return input;
+    Datum type_ids[2];
+    for (int i = 0; i < count; ++i)
+    {
+        hash128_t type;
+        if (laplace_relation_type_id(names[i], &type) != 0) return input;
+        type_ids[i] = hash128_to_datum(&type);
+    }
+    ArrayType *types = construct_array(type_ids, count, BYTEAOID, -1, false, TYPALIGN_INT);
+    ArmFrontier frontier = {make_id_htab("realization candidate frontier", sizeof(IdKey), 64), incoming};
+    laplace_consensus_scan(incoming ? NULL : input, incoming ? input : NULL,
+        types, arm_frontier_visit, &frontier, NULL);
+    ArrayBuildState *selected = NULL;
+    HASH_SEQ_STATUS scan;
+    IdKey *id;
+    hash_seq_init(&scan, frontier.owners);
+    while ((id = hash_seq_search(&scan)) != NULL)
+    {
+        hash128_t owner;
+        memcpy(&owner, id, sizeof(owner));
+        selected = accumArrayResult(selected, hash128_to_datum(&owner), false,
+            BYTEAOID, CurrentMemoryContext);
+    }
+    ArrayType *result = selected ? DatumGetArrayTypeP(makeArrayResult(selected, CurrentMemoryContext))
+        : construct_empty_array(BYTEAOID);
+    hash_destroy(frontier.owners);
+    return result;
+}
+
 /* Run one candidate arm and decode it into ArmData + the render union. */
 static void
 run_arm(SPIPlanPtr plan, Datum ids_arr, Datum lang, bool lang_null,
@@ -231,7 +308,12 @@ run_arm(SPIPlanPtr plan, Datum ids_arr, Datum lang, bool lang_null,
     char  nulls[3] = "  ";
     int   rc;
 
-    args[0] = ids_arr;
+    ArrayType *selected = arm_frontier(plan, DatumGetArrayTypeP(ids_arr));
+    arm->by_id = make_id_htab(what, sizeof(ArmEntry), 256);
+    arm->cands = NULL;
+    arm->n = arm->cap = 0;
+    if (ArrayGetNItems(ARR_NDIM(selected), ARR_DIMS(selected)) == 0) return;
+    args[0] = PointerGetDatum(selected);
     args[1] = lang;
     if (lang_null)
         nulls[1] = 'n';
@@ -241,7 +323,6 @@ run_arm(SPIPlanPtr plan, Datum ids_arr, Datum lang, bool lang_null,
         elog(ERROR, "realize_batch: %s arm failed: %s",
              what, SPI_result_code_string(rc));
 
-    arm->by_id = make_id_htab(what, sizeof(ArmEntry), 256);
     arm->cap = Max(64, (int32) SPI_processed);
     arm->cands = (Datum *) palloc(sizeof(Datum) * arm->cap);
     arm->n = 0;
@@ -878,6 +959,8 @@ render_or_label_batch_internal(ArrayType *in_arr, int mode, const char *what)
     Datum        *in_elems;
     bool         *in_nulls;
     int           n;
+    Datum        *semantic_ids;
+    int           semantic_count = 0;
     bool          need_finish = false;
     HTAB         *render_ids;
     Datum        *union_ids;
@@ -900,14 +983,11 @@ render_or_label_batch_internal(ArrayType *in_arr, int mode, const char *what)
     if (n == 0)
         return construct_empty_array(TEXTOID);
 
-    if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
-        elog(ERROR, "%s: SPI_connect failed", what);
-    ensure_name_plans();
-
     render_ids = make_id_htab("render_batch union",
                               sizeof(RenderEntry), Max(256, n * 2));
     ucap = Max(64, n * 2);
     union_ids = (Datum *) palloc(sizeof(Datum) * ucap);
+    semantic_ids = (Datum *) palloc(sizeof(Datum) * n);
 
     primary_val = (const char **) palloc0(sizeof(const char *) * n);
     for (int i = 0; i < n; i++)
@@ -927,6 +1007,7 @@ render_or_label_batch_internal(ArrayType *in_arr, int mode, const char *what)
             primary_val[i] = canon;
             continue;
         }
+        semantic_ids[semantic_count++] = in_elems[i];
         if (laplace_perfcache_codepoint_for_id(
                 (const uint8_t *) VARDATA_ANY(DatumGetByteaPP(in_elems[i])), &cp) &&
             cp != 0 && (cp < 0xD800 || cp > 0xDFFF))
@@ -946,8 +1027,26 @@ render_or_label_batch_internal(ArrayType *in_arr, int mode, const char *what)
         render_union_add(render_ids, &union_ids, &un, &ucap, in_elems[i]);
     }
 
-    run_arm(plan_synset_lemma, PointerGetDatum(in_arr), (Datum) 0, true,
-            &arm_lemma, render_ids, &union_ids, &un, &ucap, "lexicalization");
+    /* Registry identities already have their final value. Their alternatives
+     * cannot affect the result, so neither query nor render them. A mixed batch
+     * sends only unresolved identities to PostgreSQL; an all-registry batch
+     * needs no SPI connection, planning, or constituent hydration at all. */
+    if (semantic_count > 0)
+    {
+        ArrayType *semantic_arr = construct_array(semantic_ids, semantic_count,
+            BYTEAOID, -1, false, TYPALIGN_INT);
+        if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
+            elog(ERROR, "%s: SPI_connect failed", what);
+        ensure_name_plans();
+        run_arm(plan_synset_lemma, PointerGetDatum(semantic_arr), (Datum) 0, true,
+                &arm_lemma, render_ids, &union_ids, &un, &ucap, "lexicalization");
+    }
+    else
+    {
+        arm_lemma.by_id = make_id_htab("lexicalization empty", sizeof(ArmEntry), 32);
+        arm_lemma.cands = NULL;
+        arm_lemma.n = arm_lemma.cap = 0;
+    }
 
     input_render_count = un;
     input_rendered = render_union(union_ids, un, what);

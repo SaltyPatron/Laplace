@@ -7,11 +7,12 @@ SQL_QUERY("browse.names", "bytea[]",
 SQL_QUERY("entity.facets", "bytea[]",
     "SELECT entity_id,tier,type_id FROM ops.entity_facets_batch($1)")
 SQL_QUERY("entity.stored_facets", "bytea[]",
-    "SELECT e.id, e.tier, COALESCE(("
-    "SELECT c.object_id FROM laplace.consensus c "
-    "WHERE c.subject_id = e.id AND c.type_id = ANY(consensus.relation_family_ids('IS_TYPED_AS')) "
-    "ORDER BY c.rating DESC, c.object_id ASC LIMIT 1"
-    "), e.type_id) AS type_id FROM laplace.entities e WHERE e.id = ANY($1)")
+    "WITH typed AS MATERIALIZED ("
+    "SELECT DISTINCT ON (c.subject_id) c.subject_id,c.object_id FROM laplace.consensus c "
+    "WHERE c.subject_id=ANY($1) AND c.type_id=ANY(consensus.relation_family_ids('IS_TYPED_AS')) "
+    "ORDER BY c.subject_id,c.rating DESC,c.object_id ASC) "
+    "SELECT e.id,e.tier,COALESCE(t.object_id,e.type_id) AS type_id "
+    "FROM laplace.entities e LEFT JOIN typed t ON t.subject_id=e.id WHERE e.id=ANY($1)")
 SQL_QUERY("consensus.out_labeled", "bytea,int4",
     "SELECT c.type_label,c.object_label,encode(c.object_id,'hex'),c.eff_mu,c.witnesses "
     "FROM ops.consensus_out_labeled($1,$2) c")

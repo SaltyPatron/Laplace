@@ -22,8 +22,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             dsb.ConnectionStringBuilder.CommandTimeout =
                 InstalledOpInvoker.DefaultCommandTimeoutSeconds;
-            dsb.ConnectionStringBuilder.Options =
-                "-c default_transaction_read_only=on";
+            var options = dsb.ConnectionStringBuilder.Options;
+            dsb.ConnectionStringBuilder.Options = string.IsNullOrWhiteSpace(options)
+                ? "-c default_transaction_read_only=on"
+                : options + " -c default_transaction_read_only=on";
         });
     }
 

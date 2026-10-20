@@ -4,10 +4,10 @@
 -- precomputed highway mask. Selecting bands is how a caller narrows a read
 -- without naming a single relation and without naming a language.
 --
--- relation_band_catalog() is immutable naming. relation_bands() reads band membership
--- from the relation registry and estimates each band's consensus rows from the hash
--- leaves' planner statistics, so an interactive catalog request never aggregates the
--- partitioned consensus tree. ops.relation_band_census() is the exact, explicit count.
+-- relation_band_catalog() is immutable naming. Counts exposed as consensus_rows
+-- are exact statement-snapshot counts, shared with ops.relation_band_census().
+-- Planner MCV lists omit uncommon relation types and must never decide whether
+-- a populated band is available to query.
 DROP FUNCTION IF EXISTS laplace.relation_band_catalog();
 CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
     RETURNS TABLE(band integer, name text, rank double precision)
@@ -29,46 +29,8 @@ BEGIN ATOMIC
       (12, 'probationary',         0.05);
 END;
 
-DROP FUNCTION IF EXISTS laplace.relation_bands();
-CREATE OR REPLACE FUNCTION converse.relation_bands()
-    RETURNS TABLE(band integer, name text, rank double precision,
-                  relation_types bigint, consensus_rows bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    WITH members AS MATERIALIZED (
-        SELECT r.band::integer AS band, r.type_id
-        FROM laplace.relation_registry() r
-    ), estimated AS MATERIALIZED (
-        -- Most-common-value frequency x leaf row estimate, summed over the hash
-        -- leaves. A relation outside a leaf's MCV list contributes nothing, so this
-        -- is a statistics estimate, not a census.
-        SELECT u.type_id, sum(u.freq * c.reltuples)::bigint AS rows
-        FROM pg_catalog.pg_stats s
-        JOIN pg_catalog.pg_class c
-          ON c.relname = s.tablename
-         AND c.relnamespace = 'laplace'::regnamespace
-        CROSS JOIN LATERAL unnest(s.most_common_vals::text::bytea[], s.most_common_freqs)
-            AS u(type_id, freq)
-        WHERE s.schemaname = 'laplace'
-          AND s.tablename LIKE 'consensus\_h%'
-          AND s.attname = 'type_id'
-          AND c.reltuples > 0
-        GROUP BY u.type_id
-    )
-    SELECT b.band,
-           b.name,
-           b.rank,
-           count(m.type_id)::bigint,
-           COALESCE(sum(e.rows), 0)::bigint
-    FROM converse.relation_band_catalog() AS b
-    LEFT JOIN members m ON m.band = b.band
-    LEFT JOIN estimated e ON e.type_id = m.type_id
-    GROUP BY b.band, b.name, b.rank
-    ORDER BY b.band;
-END;
-
--- Exact per-band consensus rows. Aggregates every consensus leaf; an explicit
--- operator census, never an interactive read.
+-- One aggregate over the registered consensus types. Do not replace absent
+-- planner statistics with zero or execute a separate count for each type/band.
 CREATE OR REPLACE FUNCTION ops.relation_band_census()
     RETURNS TABLE(band integer, name text, relation_types bigint, consensus_rows bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -88,4 +50,16 @@ BEGIN ATOMIC
     LEFT JOIN counted k ON k.type_id = m.type_id
     GROUP BY b.band, b.name
     ORDER BY b.band;
+END;
+
+DROP FUNCTION IF EXISTS laplace.relation_bands();
+CREATE OR REPLACE FUNCTION converse.relation_bands()
+    RETURNS TABLE(band integer, name text, rank double precision,
+                  relation_types bigint, consensus_rows bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT c.band, c.name, b.rank, c.relation_types, c.consensus_rows
+    FROM ops.relation_band_census() c
+    JOIN converse.relation_band_catalog() b ON b.band = c.band
+    ORDER BY c.band;
 END;

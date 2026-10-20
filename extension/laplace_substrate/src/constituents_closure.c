@@ -34,7 +34,8 @@ static const char *CLOSURE_LEVEL_QUERY =
     "WHERE p.entity_id = ANY($1::bytea[]) AND p.type = 1 AND p.trajectory IS NOT NULL "
     "ORDER BY p.entity_id, p.id, public.ST_NPoints(p.trajectory) DESC";
 
-/* Prepared once per backend; every fallback level reuses the generic plan. */
+/* Prepared once per backend; PostgreSQL chooses custom/generic plans for the
+ * actual frontier and honors the operator's plan_cache_mode. */
 static SPIPlanPtr closure_level_plan = NULL;
 static Oid closure_st_asbinary_oid = InvalidOid;
 
@@ -60,7 +61,7 @@ ensure_closure_level_plan(void)
     {
         Oid argtypes[1] = {BYTEAARRAYOID};
         SPIPlanPtr plan = SPI_prepare_cursor(CLOSURE_LEVEL_QUERY, 1, argtypes,
-                                              CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+                                              CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "constituents_closure: SPI_prepare(level) failed: %s",
                  SPI_result_code_string(SPI_result));

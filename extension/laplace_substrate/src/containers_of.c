@@ -36,7 +36,7 @@ bindings_query(void)
     if (bindings_plan == NULL) {
         Oid types[] = {BYTEAOID, BYTEAOID};
         bindings_plan = SPI_prepare_cursor(laplace_sql_query_text("containers.bound_surfaces"),
-                                           2, types, CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+                                           2, types, CURSOR_OPT_PARALLEL_OK);
         if (bindings_plan == NULL || SPI_keepplan(bindings_plan) != 0)
             elog(ERROR, "containers_of: cannot prepare the bound-surface read");
     }
@@ -48,7 +48,7 @@ container_plan(SPIPlanPtr *slot, const char *key)
 {
     if (*slot == NULL) {
         Oid types[] = {BYTEAARRAYOID};
-        *slot = SPI_prepare_cursor(laplace_sql_query_text(key), 1, types, CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        *slot = SPI_prepare_cursor(laplace_sql_query_text(key), 1, types, CURSOR_OPT_PARALLEL_OK);
         if (*slot == NULL || SPI_keepplan(*slot) != 0)
             elog(ERROR, "containers_of: cannot prepare %s", key);
     }

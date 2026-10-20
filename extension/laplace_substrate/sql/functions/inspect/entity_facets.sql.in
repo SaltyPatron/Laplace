@@ -49,7 +49,8 @@ END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_entity_facets_batch'
-    LANGUAGE C STABLE PARALLEL SAFE;
+    LANGUAGE C STABLE PARALLEL SAFE
+    SUPPORT @extschema@.array_length_rows_support;
 
 CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)
