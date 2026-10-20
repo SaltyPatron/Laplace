@@ -401,7 +401,7 @@ public sealed class LichessBot : IAsyncDisposable
                     final?.Pv is { Count: > 0 } line ? line.Select(static m => m.Text).ToList() : [decision.Move.Text]);
 
                 _log.LogDebug("game {Id}: play {Move} ({Engine}, depth {D}, score {S}cp, engine {Ms}ms)",
-                    lichessGameId, mv.ToUci(), _engine.Name, plyAnalysis.Depth, plyAnalysis.ScoreCpSideToMove,
+                    lichessGameId, mv.ToUci(), provider.Identity.Via?.Name ?? provider.Identity.Name, plyAnalysis.Depth, plyAnalysis.ScoreCpSideToMove,
                     decision.Analysis.Receipt.EngineMs);
 
                 var pending = replay.BeginSubmission(mv, plyAnalysis);

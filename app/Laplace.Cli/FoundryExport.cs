@@ -589,7 +589,7 @@ internal static class FoundryExport
                 ds, vocab, trajCap, maxGap, timeoutSeconds: 600);
             return MapWeightedEdges(
                 tokenSlots, rows, degreeCap,
-                transform: adj => { if (FoundryDefaults.Ppmi) ApplyPpmi(adj); });
+                transform: FoundryDefaults.Ppmi ? ApplyPpmi : null);
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {

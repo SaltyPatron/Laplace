@@ -325,6 +325,7 @@ internal sealed class ExploreDecomposeService
 
         bool merkleRecomposition = true;
         int recomposedNodes = 0;
+        Span<double> recomposedCoord = stackalloc double[4];
         foreach (var row in rows)
         {
             if (row.RealizedVertices.Count == 0) continue;
@@ -340,7 +341,6 @@ internal sealed class ExploreDecomposeService
                 childCoords[i * 4 + 3] = vertex.M;
             }
 
-            Span<double> recomposedCoord = stackalloc double[4];
             var recomposed = HashComposer.ComposeNode(row.Tier, childIds, childCoords, recomposedCoord);
             recomposedNodes++;
             if (!Convert.ToHexStringLower(recomposed.Id.ToBytes()).Equals(row.IdHex, StringComparison.Ordinal)

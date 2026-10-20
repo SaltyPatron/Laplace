@@ -64,6 +64,7 @@ public sealed class TabularDecomposer
 
     protected override void Compose(RowRecord rec, SubstrateChangeBuilder b)
     {
+        Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
         foreach (var (col, raw) in rec.Cells)
         {
             string tok = raw.Trim();
@@ -73,7 +74,6 @@ public sealed class TabularDecomposer
             // cell text are its constituents; a second edge would only restate them.
             OrderedCompositionComponent column = EnsureColumn(b, col);
             OrderedCompositionComponent value = RequireComponent(b, tok);
-            Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
             OrderedComposition.StageBatch(b.ContentStage,
                 [new OrderedCompositionRequest([column, value], ValueTypeId, Source, 0)], composed);
         }

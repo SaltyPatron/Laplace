@@ -54,9 +54,15 @@ public static class Conductor
     public static (List<string> Args, JsonObject Receipt) BookArgs(IReadOnlyDictionary<string, string> cfg, string book, long seed, int plies)
     {
         var lock_ = LabLocks.Ladder["books"]!;
-        string root = cfg.GetValueOrDefault("LAPLACE_CHESS_BOOKS")
-            ?? Path.Combine(ChessLabConfig.DataRoot(cfg), lock_["directory"]!.GetValue<string>().Replace('/', Path.DirectorySeparatorChar));
-        string path = Path.IsPathRooted(book) ? book : Path.Combine(root, book);
+        string path = book;
+        if (!Path.IsPathRooted(path))
+        {
+            string root = cfg.GetValueOrDefault("LAPLACE_CHESS_BOOKS")
+                ?? Path.Combine(ChessLabConfig.DataRoot(cfg)
+                    ?? throw new ArgumentException("A relative opening suite requires LAPLACE_CHESS_BOOKS or LAPLACE_DATA."),
+                    lock_["directory"]!.GetValue<string>().Replace('/', Path.DirectorySeparatorChar));
+            path = Path.Combine(root, book);
+        }
         if (!File.Exists(path)) throw new ArgumentException($"opening suite {path} is missing (LAPLACE_CHESS_BOOKS)");
         string format = Path.GetExtension(path).Equals(".pgn", StringComparison.OrdinalIgnoreCase) ? "pgn" : "epd";
         var args = new List<string> { "-openings", $"file={path}", $"format={format}", "order=random" };

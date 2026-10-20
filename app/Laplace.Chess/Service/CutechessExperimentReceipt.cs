@@ -39,7 +39,7 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
             case ChessLabCommandEvent command:
                 Command = command;
                 MatchState = ChessLabJobState.Running;
-                Artifacts[options.Conductor] = await IdentifyAsync(command.FileName, ct);
+                Artifacts[RequestedOptions.Conductor] = await IdentifyAsync(command.FileName, ct);
                 string engine = "engine";
                 string flag = "";
                 foreach (var arg in command.Arguments)

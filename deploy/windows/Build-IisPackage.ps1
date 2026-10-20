@@ -87,4 +87,13 @@ try {
     Copy-Item -Path 'dist/*' -Destination (Join-Path $published 'wwwroot') -Recurse -Force
 }finally{Pop-Location}
 & "$PSScriptRoot/New-IisPackage.ps1" -Published $published -Destination $package -Revision $revision
-if($Publish){& "$PSScriptRoot/Publish-IisRuntime.ps1" -Installation $Installation -Package $package}
+if($Publish){
+    # Use the staged release's migration runtime before selecting its IIS binary.
+    # A failed migration must not activate an application requiring the new SQL.
+    $migrationRuntime=Join-Path $package 'migrations/Laplace.Migrations.dll'
+    foreach($database in @('application','substrate')){
+        & pwsh -NoProfile -File "$PSScriptRoot/Invoke-IisDatabase.ps1" -Installation $Installation -MigrationRuntime $migrationRuntime -Database $database -Operation migrate
+        if($LASTEXITCODE){throw "The $database migration failed; the staged IIS package was not activated."}
+    }
+    & "$PSScriptRoot/Publish-IisRuntime.ps1" -Installation $Installation -Package $package
+}

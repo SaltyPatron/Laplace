@@ -64,11 +64,11 @@ public sealed class ParquetDecomposer
 
     protected override void Compose(RowRecord rec, SubstrateChangeBuilder b)
     {
+        Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
         foreach (var (col, tok) in rec.Cells)
         {
             OrderedCompositionComponent column = EnsureColumn(b, col);
             OrderedCompositionComponent value = RequireComponent(b, tok);
-            Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
             OrderedComposition.StageBatch(b.ContentStage,
                 [new OrderedCompositionRequest([column, value], ValueTypeId, Source, 0)], composed);
         }

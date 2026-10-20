@@ -393,7 +393,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         "intermediate_size", "vocab_size",
     ];
 
-    private static readonly string[] DeclaredRelations = ConfigFacts;
+    public override IReadOnlyList<string> DeclaredRelations => ConfigFacts;
 
     private int StageConfigFacts(
         SubstrateChangeBuilder b, Hash128 checkpoint, IReadOnlyDictionary<string, long> config)

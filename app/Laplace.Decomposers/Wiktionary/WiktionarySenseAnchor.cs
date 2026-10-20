@@ -85,6 +85,7 @@ internal static class WiktionarySenseAnchor
             throw new InvalidOperationException("Wiktionary sense parent surface changed identity");
 
         var pairs = new Dictionary<Hash128, (Hash128 Marker, Hash128 Value, WiktionarySurfaceTrees.RootCoord Coord, byte Tier)>();
+        Span<Hash128> pairKeyParts = stackalloc Hash128[2];
         foreach (var (kind, value) in values)
         {
             if (!TryResolveSurface(
@@ -92,8 +93,9 @@ internal static class WiktionarySenseAnchor
                     out Hash128 valueRoot, out WiktionarySurfaceTrees.RootCoord valueCoord))
                 return null;
             Hash128 marker = Marker(kind);
-            Span<Hash128> pair = stackalloc Hash128[2] { marker, valueRoot };
-            Hash128 pairKey = Hash128.Merkle(EntityTier.Word, pair);
+            pairKeyParts[0] = marker;
+            pairKeyParts[1] = valueRoot;
+            Hash128 pairKey = Hash128.Merkle(EntityTier.Word, pairKeyParts);
             byte valueTier = CompositionLaw.TryFace(value, out CompositionLaw.Face face) ? face.Tier : (byte)0;
             pairs.TryAdd(pairKey, (marker, valueRoot, valueCoord, valueTier));
         }
@@ -164,14 +166,16 @@ internal static class WiktionarySenseAnchor
         }
 
         var unique = new Dictionary<Hash128, (Hash128 Marker, Hash128 Value)>();
+        Span<Hash128> pairKeyParts = stackalloc Hash128[2];
         foreach (var (kind, value) in values)
         {
             Hash128? root = ContentEmitter.RootId(value);
             if (root is null) continue;
             Hash128 marker = Marker(kind);
-            Span<Hash128> pair = stackalloc Hash128[2] { marker, root.Value };
+            pairKeyParts[0] = marker;
+            pairKeyParts[1] = root.Value;
             unique.TryAdd(
-                Hash128.Merkle(EntityTier.Word, pair),
+                Hash128.Merkle(EntityTier.Word, pairKeyParts),
                 (marker, root.Value));
         }
         if (unique.Count == 0)
