@@ -30,8 +30,9 @@ public sealed class LeaderBandCatalogGateTests
         Assert.Contains("SqlCatalog.Get(\"leaders.named\")", text);
         Assert.DoesNotContain("SELECT ", text);
         Assert.Contains("SQL_QUERY(\"leaders.named\"", catalog);
-        Assert.Contains("FROM ops.band_leaders($1,$2) AS l", catalog);
-        Assert.Contains("JOIN converse.relation_band_catalog() AS b", catalog);
+        Assert.Contains("FROM ops.band_leaders($1,$2) WITH ORDINALITY", catalog);
+        Assert.Contains("FROM converse.relation_band_catalog() AS b", catalog);
+        Assert.Contains("LEFT JOIN leaders AS l ON l.band=b.band", catalog);
         Assert.DoesNotContain("FROM converse.relation_bands()", catalog);
         Assert.DoesNotContain("JOIN converse.relation_bands()", catalog);
     }

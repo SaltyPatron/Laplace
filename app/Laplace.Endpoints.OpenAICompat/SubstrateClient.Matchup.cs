@@ -21,7 +21,8 @@ internal sealed partial class SubstrateClient
         return rows.GroupBy(r => new { r.Band, r.BandName })
             .OrderBy(g => g.Key.Band)
             .Select(g => new BandLeaders(g.Key.Band, g.Key.BandName,
-                [.. g.Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
+                [.. g.Where(r => r.Leader.HasValue).Select(r => r.Leader!.Value)
+                    .Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
             .ToList();
     }
 

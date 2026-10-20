@@ -35,7 +35,9 @@ export function Leaderboards() {
         {(bands ?? (leaders.busy ? HOME_BANDS.map(() => null) : [])).map((band, i) => (
           <div key={band?.band ?? i} className={styles.arena}>
             <div className={styles.arenaName}>{band ? band.name.replace(/_/g, ' ') : ' '}</div>
-            {band ? (
+            {band?.rows.length === 0 ? (
+              <Muted>No eligible consensus edges in this arena.</Muted>
+            ) : band ? (
               <ol className={styles.rows}>
                 {band.rows.map((row, rank) => (
                   <li key={`${row.subject_id}-${rank}`} className={styles.row}>

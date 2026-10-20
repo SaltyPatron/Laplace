@@ -190,11 +190,13 @@ SQL_QUERY("leaders.page", "int4[],int4",
     "SELECT band,encode(subject_id,'hex'),subject,relation,encode(object_id,'hex'),object,eff_mu,witnesses "
     "FROM ops.band_leaders($1,$2)")
 SQL_QUERY("leaders.named", "int4[],int4",
-    "SELECT l.band,b.name,encode(l.subject_id,'hex'),l.subject,l.relation,"
+    "WITH leaders AS MATERIALIZED ("
+    "SELECT * FROM ops.band_leaders($1,$2) WITH ORDINALITY) "
+    "SELECT b.band,b.name,encode(l.subject_id,'hex'),l.subject,l.relation,"
     "encode(l.object_id,'hex'),l.object,l.eff_mu,l.witnesses "
-    "FROM ops.band_leaders($1,$2) AS l "
-    "JOIN converse.relation_band_catalog() AS b ON b.band=l.band "
-    "ORDER BY l.band,l.eff_mu DESC,l.subject_id,l.object_id")
+    "FROM converse.relation_band_catalog() AS b "
+    "LEFT JOIN leaders AS l ON l.band=b.band WHERE b.band=ANY($1) "
+    "ORDER BY b.band,l.ordinality")
 /* Each relation contributes at most the requested page. A global top-N item
  * must be in its own relation's top-N, including the complete tie order. One
  * typed set handoff bounds the final merge to relation_count * page_size and
