@@ -2,3 +2,11 @@
 -- canonical_names. Names are attested content; nothing reads that key form.
 DROP FUNCTION IF EXISTS realize._canonical(bytea);
 DROP FUNCTION IF EXISTS laplace._realize_canonical(bytea);
+
+-- Native batch owners replaced these independent scalar bodies. This module
+-- runs after resolve_name is replaced, releasing its parsed dependency on
+-- _has_name. Never CASCADE away an unclassified external dependent.
+DROP FUNCTION IF EXISTS realize._has_name(bytea, bytea);
+DROP FUNCTION IF EXISTS laplace._realize_has_name(bytea, bytea);
+DROP FUNCTION IF EXISTS realize._translation(bytea, bytea);
+DROP FUNCTION IF EXISTS laplace._realize_translation(bytea, bytea);

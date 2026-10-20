@@ -113,12 +113,11 @@ functions/readback/render_text_batch.sql.in
 functions/identity/relation_type_id.sql.in
 generated/relation_set_ids.sql.in
 generated/relation_family_ids.sql.in
-functions/realize/realize_synset_lemma.sql.in
-functions/realize/realize_has_name.sql.in
-functions/realize/resolve_name.sql.in
 functions/realize/realize_batch.sql.in
 functions/realize/resolve_name_batch.sql.in
 functions/realize/lexicalize_batch.sql.in
+functions/realize/realize_synset_lemma.sql.in
+functions/realize/resolve_name.sql.in
 functions/readback/render_batch.sql.in
 functions/converse/label_batch.sql.in
 functions/lexical/type_label_batch.sql.in
@@ -341,7 +340,6 @@ functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
 functions/consensus/consensus_step_edge.sql.in
 functions/consensus/entity_exists.sql.in
-functions/realize/realize_translation.sql.in
 functions/realize/realize_defines.sql.in
 functions/readback/render.sql.in
 functions/converse/label.sql.in

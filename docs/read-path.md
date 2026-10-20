@@ -241,11 +241,31 @@ Read/cognition operates on canonical ids and typed state. Human text/notation is
 
 A selected semantic identity does not need a precomputed text label to be valid. `realize.batch`, text renderers and other codec/domain realizers supply the requested surface.
 
+The handoff carries canonical identities, typed operands, scores, ordering and provenance. Human-readable labels are output, never replacement keys for admission, equality, joins, traversal or ranking. Source bytes and Unicode input still have to be decoded as data; this does not authorize re-rendering internal identities into strings for semantic decisions. Resolving packed child coordinates for geometry is also typed computation, not human-facing rendering.
+
+The existing surfaces have different contracts:
+
+| Contract | Current implementation |
+|---|---|
+| Reconstruct an entity's own Unicode content | `render_text_batch` / `render_bytes_batch`, one native UTF-8 kernel in `generate_walk.c`; byte output preserves Unicode NUL |
+| Choose a witnessed language surface as an identity | `taxonomy.bubble_down_batch`; its output remains `surface_id` until materialization |
+| Materialize completed forward selections | `realize.forward_text_batch`; surface selection precedes rendering, and successful slots do not enter compatibility fallbacks |
+| Present a bounded preview while retaining identity | `realize.display_label_batch` in `display_native.c` |
+| Existing name/lexicalization compatibility policies | `realize_batch.c`; scalar adapters share their batch owner |
+
+`realize.render_batch` is a compatibility name/lexicalization policy, despite its name. It is not the exact content codec. `render_text_fast` is a preview with a positive default depth, not a different exact renderer. Aliases that enter one native implementation are not evidence of independent implementations.
+
+Other media and export formats require their own grammar/codec materialization at the same boundary. The text codec is not a universal formatter for every domain.
+
+The compatibility owner still renders candidate sets before first-nonempty selection, and the context-conditioned name resolver retains a separate policy. Those are remaining consolidation work, not exemptions from the identity-space contract. Batching a rendered candidate set does not make it final selection.
+
 Realization must not:
 
 - decide what the selected object “really was” after selection;
 - convert an unresolved frontier into an answer simply because its ids can be rendered;
-- execute one avoidable high-level call per constituent when the output can be materialized in a coarse native/batch operation.
+- execute one avoidable high-level call per constituent when the output can be materialized in a coarse native/batch operation;
+- silently discard an admitted relation because its rendered spelling matches a prose regex or contains a space;
+- choose a different semantic result merely because the selected result could not be materialized. Report the selected identity and the missing output obligation instead.
 
 ---
 

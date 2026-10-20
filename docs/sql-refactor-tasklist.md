@@ -60,15 +60,19 @@ identical md5: per-row **487 ms**, batch **106 ms** (4.6×). `render_text` fans 
 `model/model_factor`, `readback/render_text`, `realize/realize_translation`,
 `realize/realize_defines`, `readback/render`, `realize/realize_synset_lemma`.
 
-- [x] **CLOSED.** 6 of 13 hits were comments or the definition itself; 2 more render a
-      single id and correctly stay scalar. The 5 real sites are fixed:
+- [ ] **Batching completed; semantic boundary cleanup remains.** The historical
+      sweep removed per-candidate scalar calls, not render-dependent election:
       - `realize._defines` and `taxonomy.synset_gloss` order by `eff_mu`, not by the text, so
         the winner is picked in id space and rendered **once**. They were also
         byte-identical bodies of each other (§15); `synset_gloss` now delegates.
-      - `realize._has_name`, `realize._synset_lemma`, `realize._translation` filter on the
-        rendered text, so they rank ids and take ONE `render_text_batch`.
-      Parity 15 ids x 5 functions, 0 mismatches; the same five-call sweep took over
-      120 s before and 10.9 s after.
+      - Independent `_has_name` and `_translation` SQL bodies are retired from both
+        manifests. `_synset_lemma` and empty-context `resolve_name` delegate to the
+        native batch owner. Late retirement SQL removes old installed bodies after
+        their parsed callers have been replaced, without CASCADE.
+      - The native compatibility owner and context-conditioned name branch still
+        render candidate sets before first-nonempty selection. This remains debt
+        under [the current boundary contract](read-path.md#8-realization-is-downstream-of-semantic-selection).
+      Historical timings above are not current runtime acceptance.
 
 ## C. Per-row scalars with no batch form — 37 call sites
 

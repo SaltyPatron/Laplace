@@ -1,53 +1,8 @@
--- realize._synset_lemma — GH #862 / #860. No SET, real schema names.
+-- Singleton lexicalization delegates to the native batch owner.
 DROP FUNCTION IF EXISTS laplace._realize_synset_lemma(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize._synset_lemma(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    -- RANK FIRST, THEN RENDER ONCE FOR ALL CANDIDATES.
-    -- The `s <> ''` filter means an unrenderable candidate must fall through to the
-    -- next, so the surface cannot be dropped from the decision -- but it does not have
-    -- to be produced one candidate at a time. realize.render_text_batch runs ONE
-    -- constituents closure over every id (generate_walk.c fetch_constituents_closure
-    -- with n_roots); the scalar form ran one closure per candidate. Measured on 40 ids,
-    -- identical md5: 487 ms per-row, 106 ms batched.
-    -- Ranked in full, not capped: the render filter can reject any prefix, and a LIMIT
-    -- here would turn "unrenderable" into "no name".
-    WITH cand AS (
-        -- 1-hop direct KEY_BINDING (word HAS_SENSE concept)
-        SELECT hs.subject_id AS id, hs.type_id, hs.object_id, hs.rating, hs.rd
-        FROM laplace.v_consensus_unrefuted hs
-        WHERE hs.object_id = p_id
-          AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
-        UNION ALL
-        -- 2-hop WordNet sense binding (word HAS_SENSE sense IS_SENSE_OF synset)
-        SELECT hs.subject_id AS id, hs.type_id, hs.object_id, hs.rating, hs.rd
-        FROM laplace.v_consensus_unrefuted ss
-        JOIN laplace.v_consensus_unrefuted hs
-          ON hs.object_id = ss.subject_id
-         AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
-        WHERE ss.object_id = p_id
-          AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
-    ),
-    ranked AS MATERIALIZED (
-        SELECT hs.id,
-               row_number() OVER (ORDER BY EXISTS (
-                            SELECT 1 FROM laplace.attestations a
-                            WHERE a.subject_id = hs.id AND a.type_id = hs.type_id
-                              AND a.object_id = hs.object_id AND a.context_id = p_lang) DESC,
-                        consensus.eff_mu(hs.rating, hs.rd) DESC,
-                        COALESCE(w.tier, 32767) ASC,
-                        hs.id) AS rn
-        FROM cand hs
-        LEFT JOIN laplace.entities w ON w.id = hs.id
-    ),
-    lbl AS MATERIALIZED (
-        SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s
-        FROM ranked r
-    )
-    SELECT l.s[r.rn]
-    FROM ranked r CROSS JOIN lbl l
-    WHERE l.s[r.rn] IS NOT NULL AND l.s[r.rn] <> ''
-    ORDER BY r.rn
-    LIMIT 1;
+    SELECT (realize.lexicalize_batch(ARRAY[p_id], p_lang))[1];
 END;

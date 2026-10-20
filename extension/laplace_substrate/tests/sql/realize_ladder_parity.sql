@@ -1,33 +1,7 @@
--- realize.realize() and realize.batch() are TWO implementations of one COALESCE ladder:
--- the scalar one in SQL (realize.sql.in) and the batched one in C
--- (src/realize_batch.c), whose header states it "Reproduces the scalar COALESCE
--- ladder exactly" and points at parity notes. Prose was the parity mechanism.
--- This binds them, the same way walk_edge_weight_parity.sql binds the two
--- expressions of the Glicko-complete weight.
---
--- WHY BOTH STILL EXIST, measured 2026-07-28 on the foundation substrate
--- (4.34M entities), 2000 sampled ids:
---
---   realize.realize(id) per row                13.9 s   (7 ms/row)   <- scalar path
---   realize.batch(ARRAY[id]) per row   44.8 s   (22 ms/row)
---   realize.batch(all 2000 ids)         0.56 s  (0.3 ms/row) <- set path
---
--- So collapsing realize.realize() into a realize.batch() wrapper -- the obvious
--- "one implementation per fact" move, and what docs/specs/37 originally
--- prescribed -- would make every remaining scalar caller 3.2x SLOWER. The C
--- function pays SPI setup per call; the SQL ladder inlines. Two bodies is the
--- correct answer here, because they answer two different questions (one id vs a
--- set), and the 25x that matters comes from moving CALLERS off the per-row shape,
--- not from deleting a body.
---
--- DETERMINISTIC BY CONSTRUCTION. The first cut of this file sampled `entities`
--- with TABLESAMPLE, which is wrong twice over: pg_regress diffs output text
--- exactly, so a sampled row count is not reproducible; and on the near-empty
--- regress database the sample returned nothing, making `bool_and(...)` NULL over
--- zero rows -- an assertion that passes by asserting nothing. Every id below is
--- minted through laplace.word_id(), so the set is fixed on any database, and every
--- assertion is guarded by a cardinality check so an empty input FAILS instead of
--- vacuously succeeding.
+-- Scalar and batch compatibility adapters share the native owner in
+-- realize_batch.c. These checks cover positional alignment, NULL/duplicate
+-- inputs and adapter parity; they do not prove identity-space selection or
+-- application-level runtime behavior.
 BEGIN;
 
 -- A fixed, deterministic id set spanning the ladder's arms: ordinary words that

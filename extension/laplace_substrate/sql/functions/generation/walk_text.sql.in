@@ -241,12 +241,13 @@ RETURNS text[]
 LANGUAGE plpgsql VOLATILE
 AS $forward_realize$
 DECLARE
-    direct_text text[];
     concepts bytea[];
     down_concepts bytea[];
     down_surfaces bytea[];
     surface_text text[];
-    surface_labels text[];
+    pending_ids bytea[];
+    pending_positions integer[];
+    pending_text text[];
     realized text[];
     idx integer;
 BEGIN
@@ -256,10 +257,14 @@ BEGIN
     IF cardinality(p_ids) = 0 THEN
         RETURN ARRAY[]::text[];
     END IF;
-    direct_text := realize.batch(p_ids);
-    IF direct_text IS NULL OR cardinality(direct_text) <> cardinality(p_ids) THEN
-        RAISE EXCEPTION 'forward realization: realize.batch violated positional cardinality';
+    IF array_ndims(p_ids) <> 1 THEN
+        RAISE EXCEPTION 'forward realization: ids must be one-dimensional';
     END IF;
+    p_ids := ARRAY(SELECT id FROM unnest(p_ids) AS id);
+
+    -- Select witnessed language surfaces entirely in identity space before
+    -- reconstructing any text. A bound surface can make the original body's
+    -- rendering unnecessary.
     SELECT array_agg(DISTINCT p_ids[g.i] ORDER BY p_ids[g.i])
     INTO concepts
     FROM generate_subscripts(p_ids, 1) AS g(i)
@@ -270,18 +275,50 @@ BEGIN
     FROM taxonomy.bubble_down_batch(concepts, p_lang, 1, NULL, 0) d;
     IF down_surfaces IS NOT NULL THEN
         surface_text := realize.render_text_batch(down_surfaces);
-        surface_labels := realize.batch(down_surfaces);
+        IF surface_text IS NULL OR cardinality(surface_text) <> cardinality(down_surfaces) THEN
+            RAISE EXCEPTION 'forward realization: render_text_batch violated positional cardinality';
+        END IF;
+        -- The existing name/lexicalization compatibility policy applies only
+        -- to selected surfaces whose exact reconstruction is unavailable.
+        SELECT array_agg(down_surfaces[g.i] ORDER BY g.i), array_agg(g.i ORDER BY g.i)
+        INTO pending_ids, pending_positions
+        FROM generate_subscripts(down_surfaces, 1) AS g(i)
+        WHERE surface_text[g.i] IS NULL;
+        IF pending_ids IS NOT NULL THEN
+            pending_text := realize.batch(pending_ids, p_lang);
+            IF pending_text IS NULL OR cardinality(pending_text) <> cardinality(pending_ids) THEN
+                RAISE EXCEPTION 'forward realization: realize.batch violated positional cardinality';
+            END IF;
+            FOR idx IN 1..cardinality(pending_positions) LOOP
+                surface_text[pending_positions[idx]] := pending_text[idx];
+            END LOOP;
+        END IF;
     END IF;
     WITH down_map AS (
-        SELECT dc.concept_id,
-               COALESCE(surface_text[dc.ord], surface_labels[dc.ord]) AS txt
+        SELECT dc.concept_id, surface_text[dc.ord] AS txt
         FROM unnest(COALESCE(down_concepts, ARRAY[]::bytea[]))
              WITH ORDINALITY AS dc(concept_id, ord)
     )
-    SELECT array_agg(COALESCE(dm.txt, direct_text[g.i]) ORDER BY g.i)
+    SELECT array_agg(dm.txt ORDER BY g.i)
     INTO realized
     FROM generate_subscripts(p_ids, 1) AS g(i)
     LEFT JOIN down_map dm ON dm.concept_id = p_ids[g.i];
+
+    -- Original identities enter the compatibility realizer only when their
+    -- selected surface has not supplied output. Never re-render successful slots.
+    SELECT array_agg(p_ids[g.i] ORDER BY g.i), array_agg(g.i ORDER BY g.i)
+    INTO pending_ids, pending_positions
+    FROM generate_subscripts(p_ids, 1) AS g(i)
+    WHERE p_ids[g.i] IS NOT NULL AND realized[g.i] IS NULL;
+    IF pending_ids IS NOT NULL THEN
+        pending_text := realize.batch(pending_ids, p_lang);
+        IF pending_text IS NULL OR cardinality(pending_text) <> cardinality(pending_ids) THEN
+            RAISE EXCEPTION 'forward realization: realize.batch violated positional cardinality';
+        END IF;
+        FOR idx IN 1..cardinality(pending_positions) LOOP
+            realized[pending_positions[idx]] := pending_text[idx];
+        END LOOP;
+    END IF;
     FOR idx IN 1..cardinality(p_ids) LOOP
         IF p_ids[idx] IS NOT NULL AND realized[idx] IS NULL THEN
             RAISE EXCEPTION

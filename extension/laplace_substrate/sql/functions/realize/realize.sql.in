@@ -1,9 +1,5 @@
--- NO `SET search_path` (GH #860, #617 item 6). realize.realize() is the per-row labeling
--- scalar of the entire read path -- every arrow realize.render, every relation listing,
--- every reply. The clause made SQL inlining impossible, so each row paid a full
--- function execution for what is a COALESCE over four cheap resolvers.
---
--- GH #862: realize.realize, with its five resolvers as same-schema siblings.
+-- Singleton adapter to the same native implementation as realize.batch.
+-- Candidate sets use the batch entry point at their display/export boundary.
 DROP FUNCTION IF EXISTS laplace.realize(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
