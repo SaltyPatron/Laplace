@@ -224,7 +224,7 @@ try {
         Grant-IisPostgresLogReader $apiLogDirectory $env:LAPLACE_PG_SERVICE_ACCOUNT
         $sqlLogDirectory=$apiLogDirectory.Replace("'","''")
         $null=Query "SELECT ops.repoint_app_log('api','$sqlLogDirectory');" $selected
-        $null=Query ('SET ROLE "'+$role+'"; DO $log_read$ BEGIN IF NOT EXISTS(SELECT FROM ops.app_log()) THEN RAISE EXCEPTION ''Published API has no readable application log events''; END IF; END $log_read$; RESET ROLE;') $selected
+        $null=Query ('SET ROLE "'+$role+'"; DO $log_read$ BEGIN IF NOT EXISTS(SELECT FROM ops.app_log(''api'',CURRENT_TIMESTAMP - INTERVAL ''10 minutes'',NULL,1)) THEN RAISE EXCEPTION ''Published API has no readable recent application log events''; END IF; END $log_read$; RESET ROLE;') $selected
         $receipt.api_log_directory=$apiLogDirectory
         $receipt.api_log_source_verified=$true
     }

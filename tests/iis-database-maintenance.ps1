@@ -129,7 +129,7 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
     & $command @invoke -Database substrate -Operation status -ConfigureLogs
     $events=Get-Content $env:TEST_EVENTS
     Assert (@($events | Where-Object {$_ -like "sql:SELECT ops.repoint_app_log('api',*"}).Count -eq 1) 'Post-publication IIS application log source was not configured.'
-    Assert (@($events | Where-Object {$_ -like 'sql:SET ROLE*Published API has no readable*'}).Count -eq 1) 'Published API log source was not verified as the runtime role.'
+    Assert (@($events | Where-Object {$_ -like "sql:SET ROLE*ops.app_log('api',CURRENT_TIMESTAMP - INTERVAL '10 minutes',NULL,1)*Published API has no readable recent*"}).Count -eq 1) 'A recent event from the API source was not verified as the runtime role.'
     Write-Host 'PASS explicit post-publication logging configuration binds and verifies API logs'
     $access.identity_reference='kv/identity';$access.client=$env:COMPUTERNAME.ToLowerInvariant();$access.bao_address='https://fixture.invalid'
     $access | ConvertTo-Json | Set-Content "$work/access.json"

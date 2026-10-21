@@ -55,6 +55,30 @@ BEGIN
     RETURN format('repointed %s role tables at %s', n, p_dir);
 END $repoint$;
 
+-- Select a source before applying a transport row cap. The historical combined
+-- reader emits CLI rows first, which can otherwise hide every API event.
+CREATE OR REPLACE FUNCTION ops.app_log(p_role text, p_since timestamptz DEFAULT NULL,
+    p_contains text DEFAULT NULL, p_limit integer DEFAULT 200)
+    RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
+                  category text, message text, detail text)
+    LANGUAGE plpgsql STABLE AS $source_logs$
+BEGIN
+    IF p_role IS NULL OR p_role NOT IN ('cli','mcp','uci','migrations','api','lichess') THEN
+        RAISE EXCEPTION 'Unknown application log role: %', p_role USING ERRCODE='22023';
+    END IF;
+    IF p_limit IS NULL OR p_limit < 0 THEN
+        RAISE EXCEPTION 'Application log limit must be zero or positive' USING ERRCODE='22023';
+    END IF;
+    RETURN QUERY EXECUTE format(
+        'SELECT log_time,application_name,error_severity,category,message,detail FROM ops.%I
+         WHERE ($1 IS NULL OR log_time >= $1)
+           AND ($2 IS NULL OR strpos(message,$2) > 0 OR strpos(detail,$2) > 0)
+         ORDER BY log_time DESC LIMIT $3', 'app_log_' || p_role)
+        USING p_since,p_contains,p_limit;
+    -- Missing files, unreadable files and malformed records propagate. Another
+    -- role's log cannot make the selected source appear healthy.
+END $source_logs$;
+
 CREATE OR REPLACE FUNCTION ops.app_log()
     RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
                   category text, message text, detail text)
