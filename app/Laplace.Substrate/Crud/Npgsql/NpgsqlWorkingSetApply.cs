@@ -901,7 +901,10 @@ public sealed partial class NpgsqlSubstrateWriter
         catch
         {
             try { await tx.RollbackAsync(CancellationToken.None); }
-            catch { }
+            catch (Exception failure)
+            {
+                _log.LogWarning(failure, "Working-set control transaction rollback failed; retaining the primary failure.");
+            }
             throw;
         }
         int rt = rtLock + rtJournal + rtEpoch + rtProbe + rtCopy + rtMerge;

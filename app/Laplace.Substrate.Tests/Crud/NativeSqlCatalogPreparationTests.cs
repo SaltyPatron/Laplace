@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -12,6 +13,43 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
 {
     private LocalPgFixture? _fixture;
     private NpgsqlDataSource _source = null!;
+
+    [Fact]
+    public async Task BrokenBackendLogsRollbackFailureAndPreservesThePrimaryDatabaseException()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        var log = new CleanupLog();
+        var failure = await Assert.ThrowsAnyAsync<NpgsqlException>(() => AdvisoryTxLock.BeginWithLockAsync(
+            connection, "laplace_apply_batch", "SELECT pg_terminate_backend(pg_backend_pid());", log,
+            CancellationToken.None));
+        Assert.NotNull(failure);
+        Assert.Contains(log.Errors, x => x.Exception is not null
+            && x.Message.Contains("rollback failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectedTransactionSettingRollsBackAndLeavesTheConnectionReusable()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        var log = new CleanupLog();
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => AdvisoryTxLock.BeginWithLockAsync(
+            connection, "laplace_apply_batch", "SET LOCAL work_mem='invalid-setting';", log,
+            CancellationToken.None));
+        Assert.Equal(PostgresErrorCodes.InvalidParameterValue, failure.SqlState);
+        Assert.Empty(log.Errors);
+        await using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT 1";
+        Assert.Equal(1, await probe.ExecuteScalarAsync());
+    }
+
+    private sealed class CleanupLog : ILogger
+    {
+        public List<(Exception? Exception, string Message)> Errors { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Errors.Add((exception, formatter(state, exception)));
+    }
 
     public async Task InitializeAsync()
     {

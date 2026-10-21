@@ -91,6 +91,9 @@ int laplace_grammar_row_iter_parse_row(laplace_grammar_row_iter_t* it,
 
 void laplace_grammar_row_iter_free_lines(laplace_raw_row_t* rows, size_t count);
 
+/* A framing or parse failure rejects this feed call, including its earlier rows.
+ * Nonzero status leaves the output batch empty; successful batches transfer AST
+ * and row-buffer ownership to the caller until laplace_grammar_row_iter_free_rows. */
 int laplace_grammar_row_iter_feed_parsed(laplace_grammar_row_iter_t* it,
                                          const uint8_t* chunk, size_t len,
                                          laplace_parsed_row_t** out_rows, size_t* out_count);

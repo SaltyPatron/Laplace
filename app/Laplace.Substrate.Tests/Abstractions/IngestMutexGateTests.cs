@@ -439,8 +439,8 @@ public sealed class IngestMutexGateTests
         Assert.Contains("guc.Transaction = tx;", body);
         Assert.Contains("SET LOCAL lock_timeout = 0", body);
         Assert.Contains("return tx;", body);
-        Assert.Contains("tx.RollbackAsync(CancellationToken.None)", body);
-        Assert.Contains("tx.DisposeAsync()", body);
+        // Rollback/disposal failure behavior is exercised against PostgreSQL in
+        // NativeSqlCatalogPreparationTests; this gate owns only lock placement.
         Assert.DoesNotMatch(DatabaseAdvisoryLock, body);
         Assert.DoesNotContain("HoldMeasurementLaneAsync(", body);
         Assert.Matches(DatabaseAdvisoryLock, source[named..]);
