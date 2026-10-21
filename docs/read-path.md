@@ -275,6 +275,15 @@ The existing surfaces have different contracts:
 | Present a bounded preview while retaining identity | `realize.display_label_batch` in `display_native.c` |
 | Existing name/lexicalization compatibility policies | `realize_batch.c`; scalar adapters share their batch owner |
 
+CLI inspection uses the same display boundary for elected consensus and evidence
+rows through the `inspection.*` catalog statements. It does not call the content
+renderer once per type, peer or source. A relation with no renderable content
+still has an identity and must not turn into a NULL required label. The readable
+consensus projection also retains unary rows with a NULL object. Its deterministic
+rank and limit are applied before the distinct display-id set is materialized.
+Inspection facets reuse `NpgsqlDisplayLabels.FacetAsync`; the duplicate facet
+query that reconstructed the entity just to read its tier/type has been removed.
+
 `realize.render_batch` is a compatibility name/lexicalization policy, despite its name. It is not the exact content codec. `render_text_fast` is a preview with a positive default depth, not a different exact renderer. Aliases that enter one native implementation are not evidence of independent implementations.
 
 Other media and export formats require their own grammar/codec materialization at the same boundary. The text codec is not a universal formatter for every domain.

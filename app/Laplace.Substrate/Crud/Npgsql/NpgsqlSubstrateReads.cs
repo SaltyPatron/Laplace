@@ -1083,72 +1083,56 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("lim", perId);
             }, ct: ct, label: "consensus_out_readable_batch", onError: onError);
 
-    public readonly record struct ConsensusEdgeRenderedRow(
+    public readonly record struct ConsensusEdgeDisplayRow(
         string TypeLabel, string? PeerLabel, long Rating, long Rd, long Volatility, long WitnessCount);
 
-    /// <summary><c>consensus.consensus_out(id)</c> with rendered type/object labels.</summary>
-    public static Task<IReadOnlyList<ConsensusEdgeRenderedRow>> ConsensusOutRenderedAsync(
+    /// <summary><c>consensus.consensus_out(id)</c> with bounded display labels after edge election.</summary>
+    public static Task<IReadOnlyList<ConsensusEdgeDisplayRow>> ConsensusOutDisplayAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT realize.render(c.type_id), realize.render(c.object_id),
-                   c.rating, c.rd, c.volatility, c.witness_count
-            FROM consensus.consensus_out(@id) c
-            """,
-            static r => new ConsensusEdgeRenderedRow(
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("inspection.consensus_out"),
+            static r => new ConsensusEdgeDisplayRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
                 r.GetInt64(2), r.GetInt64(3), r.GetInt64(4), r.GetInt64(5)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "consensus_out_rendered", onError: onError);
+            ct: ct, label: "consensus_out_display", onError: onError);
 
-    /// <summary><c>consensus.consensus_in(id)</c> with rendered subject/type labels.</summary>
-    public static Task<IReadOnlyList<ConsensusEdgeRenderedRow>> ConsensusInRenderedAsync(
+    /// <summary><c>consensus.consensus_in(id)</c> with bounded display labels after edge election.</summary>
+    public static Task<IReadOnlyList<ConsensusEdgeDisplayRow>> ConsensusInDisplayAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT realize.render(c.type_id), realize.render(c.subject_id),
-                   c.rating, c.rd, c.volatility, c.witness_count
-            FROM consensus.consensus_in(@id) c
-            """,
-            static r => new ConsensusEdgeRenderedRow(
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("inspection.consensus_in"),
+            static r => new ConsensusEdgeDisplayRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
                 r.GetInt64(2), r.GetInt64(3), r.GetInt64(4), r.GetInt64(5)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "consensus_in_rendered", onError: onError);
+            ct: ct, label: "consensus_in_display", onError: onError);
 
-    public readonly record struct AttestationRenderedRow(
+    public readonly record struct AttestationDisplayRow(
         string TypeLabel, string? PeerLabel, string SourceLabel, byte[]? ContextId,
         short Outcome, long ObservationCount);
 
-    /// <summary><c>ops.attestations_out(id)</c> with rendered labels.</summary>
-    public static Task<IReadOnlyList<AttestationRenderedRow>> AttestationsOutRenderedAsync(
+    /// <summary><c>ops.attestations_out(id)</c> with bounded display labels after evidence election.</summary>
+    public static Task<IReadOnlyList<AttestationDisplayRow>> AttestationsOutDisplayAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT realize.render(a.type_id), realize.render(a.object_id),
-                   realize.render(a.source_id), a.context_id, a.outcome, a.observation_count
-            FROM ops.attestations_out(@id) a
-            """,
-            static r => new AttestationRenderedRow(
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("inspection.attestations_out"),
+            static r => new AttestationDisplayRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetString(2),
                 r.IsDBNull(3) ? null : (byte[])r[3], r.GetInt16(4), r.GetInt64(5)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "attestations_out_rendered", onError: onError);
+            ct: ct, label: "attestations_out_display", onError: onError);
 
-    /// <summary><c>ops.attestations_in(id)</c> with rendered labels (peer = subject).</summary>
-    public static Task<IReadOnlyList<AttestationRenderedRow>> AttestationsInRenderedAsync(
+    /// <summary><c>ops.attestations_in(id)</c> with bounded display labels (peer = subject).</summary>
+    public static Task<IReadOnlyList<AttestationDisplayRow>> AttestationsInDisplayAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT realize.render(a.type_id), realize.render(a.subject_id),
-                   realize.render(a.source_id), a.context_id, a.outcome, a.observation_count
-            FROM ops.attestations_in(@id) a
-            """,
-            static r => new AttestationRenderedRow(
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("inspection.attestations_in"),
+            static r => new AttestationDisplayRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetString(2),
                 r.IsDBNull(3) ? null : (byte[])r[3], r.GetInt16(4), r.GetInt64(5)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "attestations_in_rendered", onError: onError);
+            ct: ct, label: "attestations_in_display", onError: onError);
 
     /// <summary><c>converse.resolve_ref(text)</c> — word, concept, or hex → entity id.</summary>
     public static Task<byte[]?> ResolveRefAsync(
@@ -1822,30 +1806,6 @@ public static partial class NpgsqlSubstrateReads
             """,
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "label_or_hex", onError: onError);
-
-    public readonly record struct EntityFacetRow(short Tier, string Type, string Label, bool Exists);
-
-    /// <summary>
-    /// <c>ops.entity_facets(id)</c> with tier, type label, label and existence; null for an
-    /// id with no facets. The reader is drained and disposed before returning, so the
-    /// caller can follow up with <see cref="LabelOrHexAsync"/> on the same connection.
-    /// </summary>
-    public static async Task<EntityFacetRow?> EntityFacetsAsync(
-        NpgsqlConnection conn, byte[] id, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null)
-    {
-        var rows = await NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT f.tier,
-                   COALESCE(NULLIF(realize.render_text_fast(f.type_id, 4), ''), converse.label_or_hex(f.type_id)),
-                   COALESCE(NULLIF(realize.render_text_fast(@id, 8), ''), converse.label_or_hex(@id)),
-                   consensus.entity_exists(@id)
-            FROM ops.entity_facets(@id) f
-            """,
-            static r => new EntityFacetRow(r.GetInt16(0), r.GetString(1), r.GetString(2), r.GetBoolean(3)),
-            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "entity_facets", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? null : rows[0];
-    }
 
     public readonly record struct MatchupSenseRow(
         string SenseIdHex, string SynsetIdHex, string SynsetLabel, decimal EffMu, long Witnesses);

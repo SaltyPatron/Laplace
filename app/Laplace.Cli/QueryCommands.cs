@@ -370,7 +370,7 @@ internal static class QueryCommands
 
         bool exists = false;
         {
-            var facet = await NpgsqlSubstrateReads.EntityFacetsAsync(conn, id.ToBytes(), default);
+            var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id.ToBytes(), default);
             if (facet is { } f)
             {
                 exists = true;
@@ -450,7 +450,7 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  OUTGOING consensus (this → object), Glicko-2 μ over all witnesses:");
             int n = 0;
-            foreach (var c in await NpgsqlSubstrateReads.ConsensusOutRenderedAsync(conn, id.ToBytes(), default))
+            foreach (var c in await NpgsqlSubstrateReads.ConsensusOutDisplayAsync(conn, id.ToBytes(), default))
             {
                 n++;
                 string obj = c.PeerLabel ?? "(unary)";
@@ -463,7 +463,7 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  INCOMING consensus (subject → this), Glicko-2 μ over all witnesses:");
             int n = 0;
-            foreach (var c in await NpgsqlSubstrateReads.ConsensusInRenderedAsync(conn, id.ToBytes(), default))
+            foreach (var c in await NpgsqlSubstrateReads.ConsensusInDisplayAsync(conn, id.ToBytes(), default))
             {
                 n++;
                 string subj = c.PeerLabel ?? "?";
@@ -477,7 +477,7 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  OUTGOING evidence (provenance — who witnessed):");
             int n = 0;
-            foreach (var a in await NpgsqlSubstrateReads.AttestationsOutRenderedAsync(conn, id.ToBytes(), default))
+            foreach (var a in await NpgsqlSubstrateReads.AttestationsOutDisplayAsync(conn, id.ToBytes(), default))
             {
                 n++;
                 string obj = a.PeerLabel ?? "(unary)";
@@ -491,7 +491,7 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  INCOMING evidence (provenance — who witnessed):");
             int n = 0;
-            foreach (var a in await NpgsqlSubstrateReads.AttestationsInRenderedAsync(conn, id.ToBytes(), default))
+            foreach (var a in await NpgsqlSubstrateReads.AttestationsInDisplayAsync(conn, id.ToBytes(), default))
             {
                 n++;
                 string subj = a.PeerLabel ?? "?";

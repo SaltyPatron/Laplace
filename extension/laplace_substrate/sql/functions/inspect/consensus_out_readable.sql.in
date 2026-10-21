@@ -13,14 +13,18 @@ BEGIN ATOMIC
                consensus.edge_rank(c.type_id, c.eff_mu_raw) AS er
         FROM laplace.v_consensus_resolved c
         WHERE c.subject_id = p_id
-        ORDER BY er DESC
-        LIMIT p_limit
+        ORDER BY er DESC, c.type_id, c.object_id
+        LIMIT GREATEST(p_limit, 0)
     ), numbered AS MATERIALIZED (
       SELECT s.*, row_number() OVER (ORDER BY s.er DESC,s.type_id,s.object_id) AS rn FROM ranked s
-    ), batch AS MATERIALIZED (
-      SELECT realize.render_batch(array_agg(type_id ORDER BY rn)) AS types,
-             realize.render_batch(array_agg(object_id ORDER BY rn)) AS objects FROM numbered
+    ), ids AS (
+      SELECT type_id AS id FROM numbered
+      UNION SELECT object_id FROM numbered WHERE object_id IS NOT NULL
+    ), labels AS MATERIALIZED (
+      SELECT d.id, d.label
+      FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d
     )
-    SELECT b.types[s.rn], b.objects[s.rn], s.eff_mu, s.witness_count
-    FROM numbered s CROSS JOIN batch b ORDER BY s.rn;
+    SELECT t.label, o.label, s.eff_mu, s.witness_count
+    FROM numbered s JOIN labels t ON t.id=s.type_id
+    LEFT JOIN labels o ON o.id=s.object_id ORDER BY s.rn;
 END;
