@@ -689,7 +689,10 @@ public sealed class LichessBot : IAsyncDisposable
             // The session already failed explicitly; a late successful transport
             // result must still release its socket and cannot become a new stream.
             try { DisposeResult(task); }
-            catch (Exception) { }
+            catch (Exception failure)
+            {
+                System.Diagnostics.Trace.TraceWarning("LICHESS_LATE_RESPONSE_DISPOSE_FAILED: {0}", failure);
+            }
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     private static void DisposeResult<T>(Task<T> pending)

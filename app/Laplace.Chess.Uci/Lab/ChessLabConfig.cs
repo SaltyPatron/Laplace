@@ -172,6 +172,14 @@ public sealed class ProcessToolRunner : IToolRunner
 
     public ToolResult Run(ToolRun run)
     {
+        // Validate the transcript destination before launching the child.
+        using var transcript = run.TranscriptFile is null ? null
+            : new StreamWriter(run.TranscriptFile, false, new UTF8Encoding(false));
+        return Run(run, transcript);
+    }
+
+    internal ToolResult Run(ToolRun run, TextWriter? transcript)
+    {
         var psi = new ProcessStartInfo(run.Exe)
         {
             UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
@@ -182,38 +190,54 @@ public sealed class ProcessToolRunner : IToolRunner
         if (run.Environment is not null)
             foreach (var (k, v) in run.Environment)
                 if (v is null) psi.Environment.Remove(k); else psi.Environment[k] = v;
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"could not start {run.Exe}");
-        process.StandardInput.Close();
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
-        var transcript = run.TranscriptFile is null ? null : new StreamWriter(run.TranscriptFile, false, new UTF8Encoding(false));
         var gate = new object();
-        void Sink(StringBuilder target, string? line)
+        bool acceptingOutput = true;
+        var process = Laplace.Ops.CapturedProcess.Start(psi, output: (stream, text) =>
         {
-            if (line is null) return;
             lock (gate)
             {
-                if (transcript is not null) transcript.WriteLine(line);
-                else target.AppendLine(line);
+                if (!acceptingOutput) return;
+                if (transcript is not null) transcript.Write(text);
+                else (stream == "stdout" ? stdout : stderr).Append(text);
             }
-        }
-        process.OutputDataReceived += (_, e) => Sink(stdout, e.Data);
-        process.ErrorDataReceived += (_, e) => Sink(stderr, e.Data);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        });
         try
         {
-            if (run.Timeout is { } timeout && !process.WaitForExit(timeout))
+            process.CloseStandardInput();
+            var result = run.Timeout is { } timeout
+                ? process.Completion.WaitAsync(timeout).GetAwaiter().GetResult()
+                : process.Completion.GetAwaiter().GetResult();
+            if (result.OutputIncomplete)
+                throw new IOException($"{Path.GetFileName(run.Exe)} exited before its output streams closed.");
+            return new ToolResult(result.ExitCode, stdout.ToString(), stderr.ToString());
+        }
+        catch
+        {
+            if (!process.Completion.IsCompleted)
             {
-                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-                throw new TimeoutException($"{Path.GetFileName(run.Exe)} did not finish within {timeout.TotalSeconds:F0} s");
+                try { process.TerminateAsync().GetAwaiter().GetResult(); }
+                catch (Exception cleanupFailure)
+                {
+                    Laplace.Ops.LaplaceLogging.LogWarning(typeof(ProcessToolRunner), cleanupFailure,
+                        "Tool process termination failed: executable={Executable} process={ChildProcessId}", run.Exe, process.Id);
+                }
             }
-            process.WaitForExit();
+            throw;
         }
         finally
         {
-            lock (gate) transcript?.Dispose();
+            lock (gate) acceptingOutput = false;
+            if (process.Completion.IsCompleted) process.Dispose();
+            else
+                // Retain ownership if termination could not settle the child. A late
+                // callback must never write through the caller's disposed transcript.
+                _ = process.Completion.ContinueWith(task =>
+                {
+                    _ = task.Exception;
+                    process.Dispose();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
-        return new ToolResult(process.ExitCode, stdout.ToString(), stderr.ToString());
     }
 }

@@ -215,11 +215,17 @@ public static unsafe class ChessTransitionFloor
                     if (File.Exists(cand)) path = cand;
                 }
             }
-            catch { /* optional */ }
+            catch (Exception failure)
+            {
+                System.Diagnostics.Trace.TraceWarning("CHESS_TRANSITION_PATH_FAILED: {0}", failure);
+            }
         }
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
         try { Load(path); }
-        catch { /* optional until emit configured */ }
+        catch (Exception failure)
+        {
+            System.Diagnostics.Trace.TraceWarning("CHESS_TRANSITION_LOAD_FAILED path={0}: {1}", path, failure);
+        }
     }
 
     public static void Unload()

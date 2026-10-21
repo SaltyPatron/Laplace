@@ -201,9 +201,12 @@ public static class SearchContinuationSeed
             if (horizonSteps.Count > 0)
                 ApplyHorizonSteps(table, current, boards, horizonSteps, DefaultHorizonPlies);
         }
-        catch
+        catch (Exception failure)
         {
             // Horizon trajectory expansion is an optimization; never fail search setup.
+            System.Diagnostics.Trace.TraceWarning(
+                "CHESS_HORIZON_READ_FAILED position={0}; continuing with local continuations: {1}",
+                ChessPositionIdentity.PositionId(current), failure);
         }
 
         var raw = new byte[boards.Count][];

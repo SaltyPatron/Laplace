@@ -175,7 +175,11 @@ public static class CutechessProbe
         }
         finally
         {
-            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException failure)
+            {
+                System.Diagnostics.Trace.TraceWarning("CHESS_GUI_PROBE_CLEANUP_FAILED directory={0}: {1}", root, failure);
+            }
         }
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"CuteChess GUI initialization failed ({result.ExitCode}): {Tail(result.Stderr, 2000)}");

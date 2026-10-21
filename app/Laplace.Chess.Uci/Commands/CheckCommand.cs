@@ -185,7 +185,11 @@ public static class CheckCommand
         }
         finally
         {
-            try { Directory.Delete(logs, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { Directory.Delete(logs, recursive: true); }
+            catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Trace.TraceWarning("CHESS_ENGINE_CHECK_CLEANUP_FAILED directory={0}: {1}", logs, failure);
+            }
         }
     }
 

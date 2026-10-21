@@ -257,7 +257,11 @@ internal static class ChessInput
                 return zip.Entries.Sum(e => e.Length);
             }
         }
-        catch (InvalidDataException) { /* corrupt archive — fall through to file size */ }
+        catch (InvalidDataException failure)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "CHESS_ARCHIVE_LENGTH_FAILED path={0}; using compressed file size for inventory: {1}", path, failure);
+        }
         return new FileInfo(path).Length;
     }
 

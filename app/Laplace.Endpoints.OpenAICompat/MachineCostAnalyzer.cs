@@ -338,7 +338,12 @@ internal static partial class MachineCostAnalyzer
                 throw;
             }
 
-            try { await stdoutTask; } catch when (timedOut) { }
+            try { await stdoutTask; }
+            catch (Exception failure) when (timedOut)
+            {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(MachineCostAnalyzer), failure,
+                    "Tool output could not drain after timeout: process={ChildProcessId}", process.Id);
+            }
             string stderr = await stderrTask;
             await output.FlushAsync(CancellationToken.None);
             return new ProcessReceipt(

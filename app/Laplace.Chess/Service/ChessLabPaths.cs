@@ -367,8 +367,10 @@ public static class ChessLabPaths
                 if (File.Exists(path) && (File.GetUnixFileMode(path) & executable) != 0) return true;
             }
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning("CHESS_QT_PROBE_FAILED directory={0}: {1}", directory, failure);
+        }
         return false;
     }
 
@@ -425,9 +427,10 @@ public static class ChessLabPaths
                     }
                 }
             }
-            catch
+            catch (Exception failure)
             {
                 // ignore — fall through to missing probe
+                Trace.TraceWarning("CHESS_EXECUTABLE_PROBE_FAILED name={0}: {1}", name, failure);
             }
         }
 

@@ -45,6 +45,15 @@ public sealed class CapturedProcess : IDisposable
         await Completion.WaitAsync(CleanupTimeout).ConfigureAwait(false);
     }
 
+    public void CloseStandardInput()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _process.StandardInput.Close();
+        }
+    }
+
     private async Task<Result> CompleteAsync(int limit, Action<string, string>? output)
     {
         var stdout = new BoundedText(limit);
