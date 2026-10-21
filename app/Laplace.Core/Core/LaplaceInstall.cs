@@ -290,6 +290,22 @@ public static class LaplaceInstall
 
     public static string ResolveDataRoot() => ResolveIngestRoot();
 
+    /// <summary>
+    /// Resolves the model/code corpus root: uses <c>LAPLACE_MODELS</c> when declared in
+    /// the process environment or <c>machine.env</c>; otherwise resolves to the <c>models</c>
+    /// directory beside <c>LAPLACE_DATA</c> (<c>/vault/models</c> beside <c>/vault/Data</c>).
+    /// </summary>
+    public static string ResolveModelsRoot()
+    {
+        var configured = TryGetProcessOrMachineSetting("LAPLACE_MODELS");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return ExistingDirectory(configured, "LAPLACE_MODELS");
+        return ResolvePathUnderIngest("..", "models");
+    }
+
+    public static string ResolvePathUnderModels(params string[] relative)
+        => Path.GetFullPath(Path.Combine(ResolveModelsRoot(), Path.Combine(relative)));
+
     public static string ResolveIso639Dir() => ResolvePathUnderIngest("ISO639");
 
     public static string ResolveCiliDir() => ResolvePathUnderIngest("CILI");

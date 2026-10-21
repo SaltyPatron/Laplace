@@ -195,6 +195,14 @@ internal static class IngestDispatchTable
 
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {
+        var originalKey = sourceKey;
+        sourceKey = NormalizeLegacySourceAlias(sourceKey);
+        if (string.IsNullOrWhiteSpace(cli.Path)
+            && !string.Equals(originalKey, sourceKey, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(originalKey, "workspace-code", StringComparison.OrdinalIgnoreCase))
+        {
+            cli = cli with { Path = IngestDataPaths.Resolve(originalKey) };
+        }
         if (CliRuntime.Decomposers.TryResolveGeneration(sourceKey, cli.Path, out var configured, out var sourceRoot))
         {
             Laplace.Decomposers.Composition.SeedDecomposerResolver.RequireGenerationRoot(sourceKey, sourceRoot);
@@ -220,6 +228,36 @@ internal static class IngestDispatchTable
         task = default!;
         return false;
     }
+
+    internal static string NormalizeLegacySourceAlias(string sourceKey) =>
+        sourceKey.ToLowerInvariant() switch
+        {
+            "princeton-wordnet" => "wordnet",
+            "predicate-matrix" => "semlink",
+            "verbatlas"
+                or "universal-dependencies-tools"
+                or "wsd-evaluation-framework"
+                or "framebase"
+                or "atomic-10x"
+                or "geonames"
+                or "hatecheck"
+                or "sghatecheck"
+                or "xstest"
+                or "social-bias-frames"
+                or "social-chemistry-101"
+                or "prosocial-dialog"
+                or "real-toxicity-prompts"
+                or "toxigen"
+                or "measuring-hate-speech"
+                or "civil-comments" => "tabular",
+            "universal-dependencies-documentation" => "document",
+            "atomic-2020" => "atomic2020",
+            "wiktionary-kaikki" => "wiktionary",
+            "chess-com" or "twic" or "lumbras-gigabase" => "chess",
+            "workspace-code" => "repo",
+            "tokenizers" => "safetensors",
+            _ => sourceKey,
+        };
 
     /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
     private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
