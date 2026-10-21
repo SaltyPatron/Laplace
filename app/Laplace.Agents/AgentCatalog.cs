@@ -92,14 +92,18 @@ public sealed class AgentCatalog
     public static AgentCatalog Load(string? configPath, Func<string, string?> env)
     {
         string? json = null;
-        if (configPath is not null && File.Exists(configPath))
+        if (configPath is not null)
         {
-            try { json = File.ReadAllText(configPath); }
-            catch (IOException ex) { throw new AgentException($"agents config unreadable at {configPath}: {ex.Message}", ex); }
-        }
-        else
-        {
-            configPath = null;
+            try
+            {
+                using var stream = new FileStream(configPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                json = reader.ReadToEnd();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new AgentException($"agents config unreadable at {configPath}: {ex.Message}", ex);
+            }
         }
 
         return Parse(MergeWithInstalledConfig(json, configPath), configPath, env);
@@ -232,7 +236,7 @@ public sealed class AgentCatalog
         if (!string.IsNullOrWhiteSpace(explicitPath))
         {
             var full = Path.GetFullPath(explicitPath.Trim());
-            return File.Exists(full)
+            return ConfigFileExists(full)
                 ? full
                 : throw new AgentException(
                     $"LAPLACE_AGENTS_CONFIG points at {full}, which does not exist. Unset it to fall back to " +
@@ -240,9 +244,24 @@ public sealed class AgentCatalog
         }
 
         foreach (var candidate in ConfigCandidates(env))
-            if (File.Exists(candidate))
+            if (ConfigFileExists(candidate))
                 return candidate;
         return null;
+    }
+
+    private static bool ConfigFileExists(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.Directory) != 0)
+                throw new AgentException($"agents config path is a directory: {path}");
+            return true;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new AgentException($"agents config cannot be inspected at {path}: {ex.Message}", ex);
+        }
     }
 
     public static IEnumerable<string> ConfigCandidates() =>

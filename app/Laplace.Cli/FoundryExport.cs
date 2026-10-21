@@ -28,6 +28,9 @@ internal static class FoundryExport
 {
     internal const double BiasValue = 1.0;
 
+    private static InvalidOperationException RequiredQueryUnavailable(string operation, PostgresException cause)
+        => new($"Model export refused: required query '{operation}' is unavailable [{cause.SqlState}].", cause);
+
     internal sealed record PlaneCoo(int[] Rows, int[] Cols, double[] Vals)
     {
         public int Nnz => Rows.Length;
@@ -68,8 +71,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (plane {spec} unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
+            throw RequiredQueryUnavailable($"relation_plane/{spec}", ex);
         }
     }
 
@@ -92,9 +94,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine(
-                $"  (consensus plane [{string.Join(",", relNames)}] unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
+            throw RequiredQueryUnavailable("entity_relation_plane", ex);
         }
     }
 
@@ -117,9 +117,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine(
-                $"  (layer plane [{rankLo:F2}-{rankHi:F2}] unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
+            throw RequiredQueryUnavailable("consensus_layer_plane", ex);
         }
     }
 
@@ -141,8 +139,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (layer plane [masked band] unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
+            throw RequiredQueryUnavailable("consensus_layer_plane_masked", ex);
         }
     }
 
@@ -182,8 +179,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (consensus_type_plane unavailable: {ex.SqlState} — skipped)");
-            return new List<TypePlane>();
+            throw RequiredQueryUnavailable("consensus_type_plane", ex);
         }
 
         var result = new List<TypePlane>(byType.Count);
@@ -397,7 +393,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (entity_hilbert_keys unavailable: {ex.SqlState} — content-PE skipped)");
+            throw RequiredQueryUnavailable("entity_hilbert_keys", ex);
         }
         return keys;
     }
@@ -432,8 +428,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (trajectory ladder unavailable: {ex.SqlState} — skipped)");
-            return Enumerable.Range(0, maxGap).Select(_ => PlaneCoo.Empty).ToArray();
+            throw RequiredQueryUnavailable("entity_trajectory_plane", ex);
         }
         var planes = new PlaneCoo[maxGap];
         for (int g = 0; g < maxGap; g++) planes[g] = CooFromAdj(adj[g], degreeCap);
@@ -563,8 +558,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (sentence_order_word_bridge unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
+            throw RequiredQueryUnavailable("sentence_order_word_bridge", ex);
         }
     }
 
@@ -578,7 +572,7 @@ internal static class FoundryExport
         var vocab = VocabArray(tokenSlots);
 
         // Same read as ReadWordOrderAsync, but this path warms the relation-type lookup,
-        // bounds the corpus, uses a 600 s timeout, tolerates the function being absent,
+        // bounds the corpus, uses a 600 s timeout,
         // and PPMI-reweights when FoundryDefaults.Ppmi is set.
         try
         {
@@ -593,8 +587,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (trajectory pairs unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
+            throw RequiredQueryUnavailable("word_order", ex);
         }
     }
 
@@ -1591,7 +1584,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            Console.WriteLine($"  (entity_highway_masks unavailable: {ex.SqlState} — banded gate falls back to constant)");
+            throw RequiredQueryUnavailable("entity_highway_masks", ex);
         }
 
         // All-zero masks: consensus.highway_mask_refresh derives them over this vocab,
@@ -1609,8 +1602,7 @@ internal static class FoundryExport
             }
             catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
             {
-                Console.WriteLine($"  (highway_mask_refresh unavailable: {ex.SqlState} — banded gate falls back to constant)");
-                return masks;
+                throw RequiredQueryUnavailable("highway_mask_refresh", ex);
             }
 
             if (refreshed > 0)

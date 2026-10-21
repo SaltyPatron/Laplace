@@ -375,6 +375,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Exact multi-source health count exceeded its query budget; the count is unavailable.");
             return null;
         }
     }

@@ -178,11 +178,13 @@ internal static partial class CodeToolchain
     [GeneratedRegex(@"\bpublic\s+(?:class|interface|record|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b", RegexOptions.CultureInvariant)]
     private static partial Regex PublicJavaType();
 
-    private sealed record ProcessReceipt(bool ToolAvailable, bool TimedOut, int ExitCode, string Stdout, string Stderr);
+    internal sealed record ProcessReceipt(bool ToolAvailable, bool TimedOut, int ExitCode, string Stdout, string Stderr);
 
-    private static async Task<ProcessReceipt> RunAsync(
-        string tool, IReadOnlyList<string> arguments, string workingDirectory, CancellationToken ct)
+    internal static async Task<ProcessReceipt> RunAsync(
+        string tool, IReadOnlyList<string> arguments, string workingDirectory, CancellationToken ct,
+        TimeSpan? compileTimeout = null)
     {
+        ct.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo(tool)
         {
             WorkingDirectory = workingDirectory,
@@ -196,33 +198,45 @@ internal static partial class CodeToolchain
         start.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         start.Environment["DOTNET_NOLOGO"] = "1";
 
-        Process? process;
-        try { process = Process.Start(start); }
-        catch (Win32Exception)
+        Laplace.Ops.CapturedProcess process;
+        try { process = Laplace.Ops.CapturedProcess.Start(start, DiagnosticLimit); }
+        catch (Win32Exception ex) when (ex.NativeErrorCode is 2 or 3)
         {
             return new ProcessReceipt(false, false, 127, "", $"Tool '{tool}' is not installed or not on PATH.");
         }
-        if (process is null)
-            return new ProcessReceipt(false, false, 127, "", $"Tool '{tool}' did not start.");
-
-        using (process)
-        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        catch (Exception ex)
         {
-            timeout.CancelAfter(CompileTimeout);
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            try { await process.WaitForExitAsync(timeout.Token); }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                try { process.Kill(entireProcessTree: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(CodeToolchain), cleanupFailure, "Tool work/process cleanup failed."); }
-                await Task.WhenAll(stdoutTask, stderrTask);
-                return new ProcessReceipt(true, true, 124,
-                    Trim(await stdoutTask), Trim(await stderrTask));
-            }
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(CodeToolchain), ex,
+                "Tool start failed: {Tool}", tool);
+            throw;
+        }
 
-            await Task.WhenAll(stdoutTask, stderrTask);
-            return new ProcessReceipt(true, false, process.ExitCode,
-                Trim(await stdoutTask), Trim(await stderrTask));
+        try
+        {
+            Laplace.Ops.CapturedProcess.Result result;
+            bool timedOut = false;
+            try { result = await process.Completion.WaitAsync(compileTimeout ?? CompileTimeout, ct); }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            {
+                await process.TerminateAsync();
+                ct.ThrowIfCancellationRequested();
+                timedOut = true;
+                result = await process.Completion;
+            }
+            if (result.OutputIncomplete)
+                throw new IOException($"Tool '{tool}' exited but its output pipes did not close within the drain deadline.");
+            return new ProcessReceipt(true, timedOut, timedOut ? 124 : result.ExitCode,
+                Trim(result.Stdout), Trim(result.Stderr));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(CodeToolchain), ex,
+                "Tool execution failed: {Tool} process={ChildProcessId}", tool, process.Id);
+            throw;
+        }
+        finally
+        {
+            if (process.Completion.IsCompleted) process.Dispose();
         }
     }
 

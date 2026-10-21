@@ -62,9 +62,6 @@ internal static class FideRatingSnapshot
         string path,
         CancellationToken ct)
     {
-        if (!File.Exists(path))
-            return null;
-
         Envelope? envelope;
         try
         {
@@ -75,30 +72,38 @@ internal static class FideRatingSnapshot
             envelope = await JsonSerializer.DeserializeAsync<Envelope>(gzip, cancellationToken: ct)
                 .ConfigureAwait(false);
         }
-        catch (InvalidDataException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return null; }
+        catch (Exception ex) when (ex is InvalidDataException or JsonException)
         {
-            return null;
-        }
-        catch (JsonException)
-        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingSnapshot), ex,
+                "FIDE_SNAPSHOT_READ_FAILED path={SnapshotPath}; the derived snapshot will be rebuilt.", path);
             return null;
         }
 
         if (envelope is null
             || envelope.Version != SnapshotVersion
-            || !envelope.SourceUrl.Equals(FideRatingList.XmlArchiveUrl, StringComparison.Ordinal)
+            || !string.Equals(envelope.SourceUrl, FideRatingList.XmlArchiveUrl, StringComparison.Ordinal)
             || !ValidSha256(envelope.ArchiveSha256)
             || !ValidSha256(envelope.PlayersSha256)
+            || envelope.Players is null
             || envelope.Players.Length == 0
             || envelope.Players.Any(static p =>
-                p.FideId.Length is < 4 or > 12
+                p is null || p.FideId is null || p.FideId.Length is < 4 or > 12
                 || !p.FideId.All(char.IsDigit)
                 || string.IsNullOrWhiteSpace(p.Name)))
+        {
+            Serilog.Log.ForContext(typeof(FideRatingSnapshot)).Warning(
+                "FIDE_SNAPSHOT_REJECTED path={SnapshotPath} reason=invalid-envelope; rebuilding derived state.", path);
             return null;
+        }
 
         string actualPlayersSha = PlayerPayloadSha256(envelope.Players);
         if (!actualPlayersSha.Equals(envelope.PlayersSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            Serilog.Log.ForContext(typeof(FideRatingSnapshot)).Warning(
+                "FIDE_SNAPSHOT_REJECTED path={SnapshotPath} reason=payload-digest-mismatch; rebuilding derived state.", path);
             return null;
+        }
 
         return new Loaded(envelope.Players, envelope.FetchedAt, envelope.ArchiveSha256);
     }
@@ -161,21 +166,19 @@ internal static class FideRatingSnapshot
     private static string PlayerPayloadSha256(FideRatingList.Player[] players)
         => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(players)));
 
-    private static bool ValidSha256(string value)
-        => value.Length == 64 && value.All(Uri.IsHexDigit);
+    private static bool ValidSha256(string? value)
+        => value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     private static void TryDelete(string path)
     {
         try
         {
-            if (File.Exists(path)) File.Delete(path);
+            File.Delete(path);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Temp cleanup is best-effort. Active snapshot validation never trusts temp files.
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingSnapshot), ex,
+                "FIDE snapshot temporary file cleanup failed for {TemporaryPath}.", path);
         }
     }
 }

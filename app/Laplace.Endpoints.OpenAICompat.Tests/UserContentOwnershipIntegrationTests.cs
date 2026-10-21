@@ -31,6 +31,26 @@ public sealed class UserContentEndpointPgCollection : ICollectionFixture<UserCon
 public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFixture pg)
 {
     [Fact]
+    public async Task CorruptConfirmedFileIsAnErrorInsteadOfAnUnloggedNotFound()
+    {
+        await using var factory = new UserContentEndpointFactory();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost") });
+        string suffix = Guid.NewGuid().ToString("N");
+        string tenant = "corrupt-own-file-" + suffix;
+        var admitted = await AdmitAsync(client, tenant, new UserTextArtifactWriteRequest(
+            "corrupt-" + suffix + ".txt", "proof/corrupt-" + suffix + ".txt",
+            "unique owned file " + suffix, null, null, DateTimeOffset.UnixEpoch));
+        await using (var remove = pg.DataSource.CreateCommand("DELETE FROM laplace.physicalities WHERE entity_id=$1"))
+        {
+            remove.Parameters.AddWithValue(Convert.FromHexString(admitted.FileId));
+            Assert.True(await remove.ExecuteNonQueryAsync() > 0);
+        }
+        using var export = await ExportAsync(client, tenant, admitted.FileId);
+        Assert.Equal(HttpStatusCode.InternalServerError, export.StatusCode);
+        Assert.True(export.Headers.Contains("X-Correlation-Id"));
+    }
+
+    [Fact]
     public async Task SelectedModelCode_IngestsThroughGrammarStructure_AndReadsBackExactly()
     {
         const string selectedPath =

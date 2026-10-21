@@ -588,7 +588,8 @@ internal static partial class IngestCommands
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory,
-            new NpgsqlIngestObservability(ds, persistEvidence));
+            new NpgsqlIngestObservability(ds, persistEvidence,
+                loggerFactory.CreateLogger<NpgsqlIngestObservability>()));
 
         string destination = dec is RepoDecomposer { VerifiedRepository: not null }
             ? "configured PostgreSQL (verified Git corpus)" : LaplaceInstall.RedactConnectionString(ConnString);

@@ -1,6 +1,8 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using System.Globalization;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
@@ -31,6 +33,14 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private readonly NpgsqlDataSource _ds;
     private readonly bool _evidencePersisted;
     private readonly int _fileJournalFlushRows;
+    private readonly ILogger? _log;
+    private long _failureCount;
+    private long _lostFileEvents;
+    private Exception? _lastFailure;
+
+    public long FailureCount => Interlocked.Read(ref _failureCount);
+    public long LostFileEvents => Interlocked.Read(ref _lostFileEvents);
+    public Exception? LastFailure => Volatile.Read(ref _lastFailure);
 
     private Guid _runId;
     private volatile bool _active;
@@ -63,10 +73,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     /// <summary>The ingest_run_journal key of the current run; <see cref="Guid.Empty"/> before OnRunStart.</summary>
     public Guid RunId => _runId;
 
-    public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true)
+    public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true, ILogger? logger = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _evidencePersisted = evidencePersisted;
+        _log = logger;
         _fileJournalFlushRows = IngestSizing.ResolveTransitBatchRows(
             MemoryTopology.FileJournalTransitBytesPerEvent);
     }
@@ -222,8 +233,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"INGEST_RUN_RECEIPT_WRITE_FAILED run={_runId} error=[{ex.GetType().Name}] {ex.Message}");
+            LogFailure(ex, "INGEST_RUN_RECEIPT_WRITE_FAILED");
         }
     }
 
@@ -305,9 +315,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"INGEST_ARTIFACT_INVENTORY_WRITE_FAILED run={_runId} "
-                + $"error=[{ex.GetType().Name}] {ex.Message}");
+            LogFailure(ex, "INGEST_ARTIFACT_INVENTORY_WRITE_FAILED");
         }
     }
 
@@ -333,9 +341,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"INGEST_RUN_LIVENESS_LOCK_FAILED run={_runId} — {ex.Message}; the run "
-                + "proceeds, but wait-for-quiet-substrate.sh will read it as orphaned");
+            LogFailure(ex, "INGEST_RUN_LIVENESS_LOCK_FAILED");
             _livenessConn?.Dispose();
             _livenessConn = null;
         }
@@ -526,8 +532,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
             {
-                Console.Error.WriteLine(
-                    $"INGEST_THROUGHPUT_READ_FAILED source={sourceName} run={_runId} error=journal-row-missing");
+                LogFailure(new InvalidOperationException("The ingest journal row is missing."),
+                    "INGEST_THROUGHPUT_READ_FAILED");
                 return;
             }
 
@@ -555,9 +561,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"INGEST_THROUGHPUT_READ_FAILED source={sourceName} run={_runId} "
-                + $"error=[{ex.GetType().Name}] {ex.Message}");
+            LogFailure(ex, "INGEST_THROUGHPUT_READ_FAILED");
         }
     }
 
@@ -712,6 +716,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception ex) { LogFailure(ex, "INGEST_FILE_JOURNAL_PUMP_FAILED"); }
         }, CancellationToken.None);
     }
 
@@ -727,9 +732,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             try { pump?.GetAwaiter().GetResult(); }
             catch (Exception ex)
             {
-                Console.Error.WriteLine(
-                    $"INGEST_FILE_JOURNAL_WRITE_FAILED run={_runId} "
-                    + $"error=[{ex.GetType().Name}] {ex.Message}");
+                LogFailure(ex, "INGEST_FILE_JOURNAL_PUMP_FAILED");
             }
             cts.Dispose();
         }
@@ -875,9 +878,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine(
-                    $"INGEST_FILE_JOURNAL_WRITE_FAILED run={_runId} "
-                    + $"error=[{ex.GetType().Name}] {ex.Message}");
+                Interlocked.Add(ref _lostFileEvents, events.Count);
+                LogFailure(ex, "INGEST_FILE_JOURNAL_WRITE_FAILED");
             }
         }
     }
@@ -898,9 +900,23 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"{failTag} run={_runId} error=[{ex.GetType().Name}] {ex.Message}");
+            LogFailure(ex, failTag);
             return false;
         }
+    }
+
+    private void LogFailure(Exception exception, string eventName)
+    {
+        Volatile.Write(ref _lastFailure, exception);
+        long count = Interlocked.Increment(ref _failureCount);
+        if (_log is not null)
+            _log.LogError(exception,
+                "{FailureEvent} run={RunId} failure_count={FailureCount} file_events_lost={LostFileEvents}",
+                eventName, _runId, count, LostFileEvents);
+        else
+            // Library consumers without a logger still retain the complete causal stack.
+            // Process hosts bridge Trace into their persistent structured sinks.
+            Trace.TraceError("{0} run={1} failure_count={2} file_events_lost={3}: {4}",
+                eventName, _runId, count, LostFileEvents, exception);
     }
 }
