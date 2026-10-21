@@ -21,6 +21,8 @@ public static class IngestProcessRunner
         public CapturedProcess Process { get; } = process;
         public StartReceipt Receipt { get; } = receipt;
         public Serilog.ILogger Log { get; } = log;
+        public TaskCompletionSource<CompletionReceipt> Observed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int StopRequested;
     }
     private static readonly ConcurrentDictionary<int, OwnedProcess> OwnedProcesses = new();
@@ -38,7 +40,13 @@ public static class IngestProcessRunner
     }
 
     public sealed record CompletionReceipt(StartReceipt Start, DateTimeOffset EndedAt,
-        string Status, int? ExitCode, bool OutputIncomplete);
+        string Status, int? ExitCode, bool OutputIncomplete)
+    {
+        // Bounded by CapturedProcess, including for a caller that starts waiting
+        // after the child leaves the active list.
+        public string Stdout { get; init; } = "";
+        public string Stderr { get; init; } = "";
+    }
 
     public sealed record StopReceipt(
         int ProcessId,
@@ -132,6 +140,18 @@ public static class IngestProcessRunner
     public static IReadOnlyList<CompletionReceipt> CompletedProcesses() => Completed.ToArray()
         .OrderByDescending(receipt => receipt.EndedAt).ToArray();
 
+    public static async Task<CompletionReceipt> WaitForCompletionAsync(Guid runId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var completed = Completed.FirstOrDefault(item => item.Start.ProcessRunId == runId);
+        if (completed is not null) return completed;
+        var owned = OwnedProcesses.Values.FirstOrDefault(item => item.Receipt.ProcessRunId == runId);
+        if (owned is not null) return await owned.Observed.Task.WaitAsync(ct).ConfigureAwait(false);
+        // Completion can move from active ownership to retained history between reads.
+        return Completed.FirstOrDefault(item => item.Start.ProcessRunId == runId)
+            ?? throw new KeyNotFoundException($"Ingest process run {runId} is not retained.");
+    }
+
     public static StopReceipt Stop(int processId)
     {
         if (processId <= 0)
@@ -166,7 +186,8 @@ public static class IngestProcessRunner
             string status = result.OutputIncomplete ? "observation_failed"
                 : Volatile.Read(ref owned.StopRequested) != 0 ? "stopped"
                 : result.ExitCode == 0 ? "completed" : "failed";
-            completed = new(owned.Receipt, DateTimeOffset.UtcNow, status, result.ExitCode, result.OutputIncomplete);
+            completed = new(owned.Receipt, DateTimeOffset.UtcNow, status, result.ExitCode, result.OutputIncomplete)
+                { Stdout = result.Stdout, Stderr = result.Stderr };
             owned.Log.Write(status is "failed" or "observation_failed" ? Serilog.Events.LogEventLevel.Error
                 : Serilog.Events.LogEventLevel.Information,
                 "INGEST_CHILD_EXITED run={ProcessRunId} status={ChildStatus} exit_code={ExitCode} output_incomplete={OutputIncomplete} stderr={ChildStderr}",
@@ -180,7 +201,12 @@ public static class IngestProcessRunner
         Completed.Enqueue(completed);
         while (Completed.Count > 128) Completed.TryDequeue(out _);
         OwnedProcesses.TryRemove(new KeyValuePair<int, OwnedProcess>(owned.Receipt.ProcessId, owned));
-        owned.Process.Dispose();
+        try { owned.Process.Dispose(); }
+        catch (Exception ex)
+        {
+            owned.Log.Error(ex, "INGEST_CHILD_RELEASE_FAILED run={ProcessRunId}", owned.Receipt.ProcessRunId);
+        }
+        finally { owned.Observed.TrySetResult(completed); }
     }
 
     public static string? ResolveCliBinary()
