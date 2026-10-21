@@ -101,12 +101,12 @@ public static class IngestProcessRunner
             {
                 log.Write(stream == "stderr" ? Serilog.Events.LogEventLevel.Warning
                     : Serilog.Events.LogEventLevel.Information,
-                    "INGEST_CHILD_OUTPUT stream={ChildStream} {ChildOutput}", stream, text);
+                    "INGEST_CHILD_OUTPUT run={ProcessRunId} stream={ChildStream} {ChildOutput}", runId, stream, text);
             });
         }
         catch (Exception ex)
         {
-            log.Error(ex, "INGEST_CHILD_START_FAILED cli={CliPath}", start.FileName);
+            log.Error(ex, "INGEST_CHILD_START_FAILED run={ProcessRunId} cli={CliPath}", runId, start.FileName);
             throw;
         }
         var receipt = new StartReceipt(process.Id, source, path, start.FileName,
@@ -117,10 +117,10 @@ public static class IngestProcessRunner
             // Retain observation even if a previous exit's terminal receipt is being finalized.
             _ = ObserveAsync(owned);
             try { process.TerminateAsync().GetAwaiter().GetResult(); }
-            catch (Exception ex) { owned.Log.Error(ex, "INGEST_CHILD_REGISTRATION_CLEANUP_FAILED"); }
+            catch (Exception ex) { owned.Log.Error(ex, "INGEST_CHILD_REGISTRATION_CLEANUP_FAILED run={ProcessRunId}", runId); }
             throw new InvalidOperationException($"Ingest process {process.Id} could not be registered for operator control.");
         }
-        owned.Log.Information("INGEST_CHILD_STARTED cli={CliPath}", receipt.CliPath);
+        owned.Log.Information("INGEST_CHILD_STARTED run={ProcessRunId} cli={CliPath}", runId, receipt.CliPath);
         _ = ObserveAsync(owned);
         return receipt;
     }
@@ -146,13 +146,13 @@ public static class IngestProcessRunner
                 return new StopReceipt(processId, Found: true, WasRunning: false, StopRequested: false);
             Interlocked.Exchange(ref owned.StopRequested, 1);
             owned.Process.TerminateAsync().GetAwaiter().GetResult();
-            owned.Log.Information("INGEST_CHILD_STOP_CONFIRMED");
+            owned.Log.Information("INGEST_CHILD_STOP_CONFIRMED run={ProcessRunId}", owned.Receipt.ProcessRunId);
             return new StopReceipt(processId, Found: true, WasRunning: true, StopRequested: true);
         }
         catch (Exception ex)
         {
             // Keep ownership while alive so a failed termination remains observable and retryable.
-            owned.Log.Error(ex, "INGEST_CHILD_STOP_FAILED");
+            owned.Log.Error(ex, "INGEST_CHILD_STOP_FAILED run={ProcessRunId}", owned.Receipt.ProcessRunId);
             throw;
         }
     }
@@ -169,12 +169,12 @@ public static class IngestProcessRunner
             completed = new(owned.Receipt, DateTimeOffset.UtcNow, status, result.ExitCode, result.OutputIncomplete);
             owned.Log.Write(status is "failed" or "observation_failed" ? Serilog.Events.LogEventLevel.Error
                 : Serilog.Events.LogEventLevel.Information,
-                "INGEST_CHILD_EXITED status={ChildStatus} exit_code={ExitCode} output_incomplete={OutputIncomplete} stderr={ChildStderr}",
-                status, result.ExitCode, result.OutputIncomplete, result.Stderr);
+                "INGEST_CHILD_EXITED run={ProcessRunId} status={ChildStatus} exit_code={ExitCode} output_incomplete={OutputIncomplete} stderr={ChildStderr}",
+                owned.Receipt.ProcessRunId, status, result.ExitCode, result.OutputIncomplete, result.Stderr);
         }
         catch (Exception ex)
         {
-            owned.Log.Error(ex, "INGEST_CHILD_OBSERVATION_FAILED");
+            owned.Log.Error(ex, "INGEST_CHILD_OBSERVATION_FAILED run={ProcessRunId}", owned.Receipt.ProcessRunId);
             completed = new(owned.Receipt, DateTimeOffset.UtcNow, "observation_failed", null, true);
         }
         Completed.Enqueue(completed);

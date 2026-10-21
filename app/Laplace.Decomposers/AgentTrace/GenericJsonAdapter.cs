@@ -36,8 +36,7 @@ public sealed class GenericJsonAdapter : IAgentTraceAdapter
         }
         else
         {
-            using var doc = JsonAstDocument.TryParse(await File.ReadAllBytesAsync(filePath, ct));
-            if (doc is null) yield break;
+            using var doc = await AdapterJson.ReadDocumentAsync(filePath, ct);
             var root = doc.Root;
             if (root.IsArray)
             {

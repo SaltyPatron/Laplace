@@ -40,11 +40,16 @@ public sealed class CapturedProcessTests
     public async Task ChildFailureHasTerminalReceiptAndCorrelatedErrorAfterLeavingActiveList()
     {
         var previous = Log.Logger;
+        string? previousDirectory = Environment.GetEnvironmentVariable("LAPLACE_OPS_LOG_DIR");
+        string directory = Path.Combine(Path.GetTempPath(), "laplace-child-log-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
         var sink = new Events();
-        using var logger = new LoggerConfiguration().Enrich.FromLogContext().WriteTo.Sink(sink).CreateLogger();
-        Log.Logger = logger;
         try
         {
+            Environment.SetEnvironmentVariable("LAPLACE_OPS_LOG_DIR", directory);
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("child-test", console: false,
+                health: new PersistentLogHealth()).WriteTo.Sink(sink).CreateLogger();
+            Log.Logger = logger;
             IngestProcessRunner.StartReceipt started;
             using (LogContext.PushProperty("CorrelationId", "ingest-child-regression"))
                 started = IngestProcessRunner.Start(Shell(
@@ -58,8 +63,25 @@ public sealed class CapturedProcessTests
             Assert.Equal(LogEventLevel.Error, terminal.Level);
             Assert.Equal("\"ingest-child-regression\"", terminal.Properties["CorrelationId"].ToString());
             Assert.Contains("loader-fixture-failed", terminal.Properties["ChildStderr"].ToString());
+            Assert.All(sink.Rows.Where(row => row.MessageTemplate.Text.StartsWith("INGEST_CHILD_", StringComparison.Ordinal)),
+                row => Assert.Contains(started.ProcessRunId.ToString(), row.RenderMessage()));
+            using var stream = new FileStream(Path.Combine(directory, "laplace-child-test.csv"), FileMode.Open,
+                FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            string persisted = await reader.ReadToEndAsync();
+            Assert.Contains(started.ProcessRunId.ToString(), persisted);
+            Assert.Contains("INGEST_CHILD_STARTED", persisted);
+            Assert.Contains("INGEST_CHILD_OUTPUT", persisted);
+            Assert.Contains("INGEST_CHILD_EXITED", persisted);
+            Assert.Contains("loader-fixture-failed", persisted);
         }
-        finally { Log.Logger = previous; }
+        finally
+        {
+            Log.Logger = previous;
+            Serilog.Debugging.SelfLog.Disable();
+            Environment.SetEnvironmentVariable("LAPLACE_OPS_LOG_DIR", previousDirectory);
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]

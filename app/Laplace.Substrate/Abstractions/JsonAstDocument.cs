@@ -64,11 +64,12 @@ public sealed class JsonAstDocument : IDisposable
     public static JsonAstDocument? TryParse(byte[] utf8)
     {
         if (utf8.Length == 0) return null;
-        GrammarAst ast;
-        try { ast = GrammarDecomposer.Parse(utf8, "json"); }
-        catch (InvalidOperationException) { return null; }
-        catch (ArgumentException) { return null; }
-        var doc = new JsonAstDocument(ast, utf8);
+        // Recovery syntax is represented by AST diagnostics. Missing grammars and
+        // native parser failures are execution errors, not invalid source JSON.
+        var ast = GrammarDecomposer.Parse(utf8, "json");
+        JsonAstDocument doc;
+        try { doc = new JsonAstDocument(ast, utf8); }
+        catch { ast.Dispose(); throw; }
         if (doc._rootIndex < 0) { doc.Dispose(); return null; }
         return doc;
     }

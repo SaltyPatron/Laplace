@@ -22,15 +22,7 @@ public sealed class CursorAdapter : IAgentTraceAdapter
     {
         if (Path.GetFileName(filePath) != "store.db") return false;
         if (!File.Exists(Path.Combine(Path.GetDirectoryName(filePath)!, "meta.json"))) return false;
-        try
-        {
-            using var fs = File.OpenRead(filePath);
-            Span<byte> magic = stackalloc byte[16];
-            return fs.Read(magic) == 16
-                && Encoding.ASCII.GetString(magic[..15]) == "SQLite format 3";
-        }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
+        return SqliteSniff.IsSqlite(filePath);
     }
 
     public IEnumerable<string> DefaultRoots(string homeDir)
@@ -48,7 +40,7 @@ public sealed class CursorAdapter : IAgentTraceAdapter
 
         string metaPath = Path.Combine(dir, "meta.json");
         if (File.Exists(metaPath)
-            && JsonAstDocument.TryParse(await File.ReadAllBytesAsync(metaPath, ct)) is { } metaDoc)
+            && await AdapterJson.ReadDocumentAsync(metaPath, ct) is { } metaDoc)
         {
             using (metaDoc)
             {

@@ -32,7 +32,7 @@ public sealed class ZedAdapter : IAgentTraceAdapter
     {
         await Task.CompletedTask;
         using var conn = SqliteSniff.OpenReadOnly(filePath);
-        if (conn is null || !SqliteSniff.HasTable(conn, "threads")) yield break;
+        SqliteSniff.RequireTable(conn, "threads", filePath);
 
         var rows = new List<(string Id, string? Summary, string? UpdatedAt, string? DataType, byte[] Data)>();
         using (var cmd = conn.CreateCommand())
@@ -54,21 +54,26 @@ public sealed class ZedAdapter : IAgentTraceAdapter
             byte[] json;
             try
             {
-                json = row.DataType == "zstd"
-                    ? new ZstdSharp.Decompressor().Unwrap(row.Data).ToArray()
-                    : row.Data;
+                if (row.DataType == "zstd")
+                {
+                    using var decompressor = new ZstdSharp.Decompressor();
+                    json = decompressor.Unwrap(row.Data).ToArray();
+                }
+                else json = row.Data;
             }
-            catch (ZstdSharp.ZstdException) { continue; }
+            catch (ZstdSharp.ZstdException ex)
+            {
+                throw new InvalidDataException($"Agent thread decompression failed: {filePath} thread={row.Id}", ex);
+            }
 
-            if (Parse(row.Id, row.Summary, row.UpdatedAt, json) is { } session)
+            if (Parse(row.Id, row.Summary, row.UpdatedAt, json, filePath) is { } session)
                 yield return session;
         }
     }
 
-    private AgentSession? Parse(string threadId, string? summary, string? updatedAt, byte[] json)
+    private AgentSession? Parse(string threadId, string? summary, string? updatedAt, byte[] json, string path)
     {
-        using var doc = JsonAstDocument.TryParse(json);
-        if (doc is null) return null;
+        using var doc = AdapterJson.ParseRequired(json, $"{path} thread={threadId}");
         var root = doc.Root;
         var messages = root.Property("messages");
         if (!messages.IsArray) return null;

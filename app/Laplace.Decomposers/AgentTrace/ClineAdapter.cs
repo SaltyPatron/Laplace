@@ -46,8 +46,8 @@ public sealed class ClineAdapter : IAgentTraceAdapter
         string provider = filePath.Contains("roo-cline", StringComparison.OrdinalIgnoreCase)
             ? "roo-code" : ProviderKey;
 
-        using var doc = JsonAstDocument.TryParse(await File.ReadAllBytesAsync(filePath, ct));
-        if (doc is null || !doc.Root.IsArray) yield break;
+        using var doc = await AdapterJson.ReadDocumentAsync(filePath, ct);
+        if (!doc.Root.IsArray) throw new InvalidDataException($"Agent transcript must be an array: {filePath}");
 
         // Sidecars: per-request usage (ui_messages api_req_started) and model ids.
         var usageQueue = await ReadUsageAsync(Path.Combine(taskDir, "ui_messages.json"), ct);
@@ -148,14 +148,13 @@ public sealed class ClineAdapter : IAgentTraceAdapter
     {
         var result = new List<AgentUsage>();
         if (!File.Exists(uiPath)) return result;
-        using var doc = JsonAstDocument.TryParse(await File.ReadAllBytesAsync(uiPath, ct));
-        if (doc is null || !doc.Root.IsArray) return result;
+        using var doc = await AdapterJson.ReadDocumentAsync(uiPath, ct);
+        if (!doc.Root.IsArray) throw new InvalidDataException($"Agent usage transcript must be an array: {uiPath}");
         foreach (var m in doc.Root.Items())
         {
             if (m.String("say") != "api_req_started") continue;
             if (m.String("text") is not { } payload) continue;
-            using var info = JsonAstDocument.TryParse(payload);
-            if (info is null) continue;
+            using var info = AdapterJson.ParseRequired(payload, uiPath);
             var u = info.Root;
             var usage = new AgentUsage(
                 u.Int64("tokensIn"), u.Int64("tokensOut"),
@@ -169,8 +168,7 @@ public sealed class ClineAdapter : IAgentTraceAdapter
     private static async Task<string?> ReadModelAsync(string metaPath, CancellationToken ct)
     {
         if (!File.Exists(metaPath)) return null;
-        using var doc = JsonAstDocument.TryParse(await File.ReadAllBytesAsync(metaPath, ct));
-        if (doc is null) return null;
+        using var doc = await AdapterJson.ReadDocumentAsync(metaPath, ct);
         var usage = doc.Root.Property("model_usage");
         if (!usage.IsArray) return null;
         string? model = null;

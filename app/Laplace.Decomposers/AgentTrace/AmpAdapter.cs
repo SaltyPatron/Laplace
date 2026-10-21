@@ -36,8 +36,7 @@ public sealed class AmpAdapter : IAgentTraceAdapter
     public async IAsyncEnumerable<AgentSession> ParseAsync(
         string filePath, [EnumeratorCancellation] CancellationToken ct)
     {
-        using var doc = JsonAstDocument.TryParse(await File.ReadAllBytesAsync(filePath, ct));
-        if (doc is null) yield break;
+        using var doc = await AdapterJson.ReadDocumentAsync(filePath, ct);
         var root = doc.Root;
         var messages = root.Property("messages");
         if (!messages.IsArray) yield break;

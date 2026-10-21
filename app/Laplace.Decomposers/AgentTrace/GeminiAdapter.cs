@@ -35,9 +35,7 @@ public sealed class GeminiAdapter : IAgentTraceAdapter
     public async IAsyncEnumerable<AgentSession> ParseAsync(
         string filePath, [EnumeratorCancellation] CancellationToken ct)
     {
-        byte[] bytes = await File.ReadAllBytesAsync(filePath, ct);
-        using var doc = JsonAstDocument.TryParse(bytes);
-        if (doc is null) yield break;
+        using var doc = await AdapterJson.ReadDocumentAsync(filePath, ct);
         var root = doc.Root;
         var messages = root.Property("messages");
         if (!root.IsObject || !messages.IsArray) yield break;
