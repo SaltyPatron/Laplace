@@ -808,23 +808,13 @@ candidate_can_output(const Candidate *candidate, const LaplacePromptIntent *inte
     if (intent && intent->explicit_invocation)
         return candidate_is_intent_result(candidate, intent);
 
-    /* An explicit invocation outputs only its bound result. Otherwise a
-     * candidate may be selected when it has a trajectory continuation, a
-     * positive output projection, a bound intent result, or a positive typed
-     * traversal channel. Binding channels (naming, sense, frame) stay routing
-     * state and contract relations stay invocation metadata; neither makes a
-     * candidate outputtable. Obligation closure in the cognition program still
-     * decides whether REALIZE is allowed. */
-    bool semantic_result =
-        candidate->query_traversal.has_positive &&
-        !laplace_prompt_binding_channel(&candidate->query_traversal.positive) &&
-        !laplace_prompt_contract_relation(
-            &candidate->query_traversal.positive.relation);
-
+    /* A typed traversal nominates internal routing state, including relations
+     * outside the caller's output projection. It is not itself permission to
+     * emit that identity. Semantic output needs a positive declared projection
+     * or an exact bound intent result; physical continuations remain eligible. */
     return candidate->sequence_occurrences > 0 ||
            candidate->projection.has_positive ||
-           candidate_is_intent_result(candidate, intent) ||
-           semantic_result;
+           candidate_is_intent_result(candidate, intent);
 }
 
 static bool

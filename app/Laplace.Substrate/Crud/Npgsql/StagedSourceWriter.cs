@@ -741,7 +741,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
 
     // A lane is its own transaction: a deadlock or serialization failure rolls back only
     // that lane, which then runs again from unchanged staging.
-    private static async Task RetryAsync(Func<CancellationToken, Task> lane, CancellationToken ct)
+    private async Task RetryAsync(Func<CancellationToken, Task> lane, CancellationToken ct)
     {
         var policy = Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry;
         for (int attempt = 0; ; attempt++)
@@ -754,6 +754,9 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             catch (Exception ex) when (attempt + 1 < policy.MaxAttempts && policy.IsTransient(ex))
             {
                 TimeSpan delay = policy.DelayBeforeAttempt(attempt, Random.Shared);
+                _log.LogWarning(ex,
+                    "STAGED_LOAD_RETRY stage={Stage} failed_attempt={FailedAttempt} next_attempt={NextAttempt} max_attempts={MaxAttempts} delay_ms={DelayMs}",
+                    _stage, attempt + 1, attempt + 2, policy.MaxAttempts, delay.TotalMilliseconds);
                 if (delay > TimeSpan.Zero) await Task.Delay(delay, ct).ConfigureAwait(false);
             }
         }

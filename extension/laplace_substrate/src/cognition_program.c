@@ -593,7 +593,6 @@ record_semantic_channel(LaplaceCognitionProgram *program,
         return;
 
     if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
-        !walk_relation_salient(channel->relation) ||
         !semantic_channel_traversable(channel) ||
         laplace_prompt_contract_relation(&channel->relation))
         return;
@@ -601,12 +600,11 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     anchor = semantic_origin_get(program, &channel->anchor, false);
     if (!anchor || !anchor->origins)
         return;
-    candidate = semantic_origin_get(program, &channel->candidate, true);
-    candidate->origins = bms_add_members(candidate->origins, anchor->origins);
-
     /* A channel of a declared operation's result relation, anchored at one of
      * its exact inputs, marks the candidate as answering that input. The mark
-     * counts only when the candidate is emitted. */
+     * counts only when the candidate is emitted. A witnessed operation is
+     * bound by identity; its result does not require a compiled salience rank. */
+    bool declared_result = false;
     for (int i = 0; i < program->operation_relation_count; ++i)
     {
         const LaplacePromptRelationRead *operation = &program->operations[i];
@@ -619,7 +617,12 @@ record_semantic_channel(LaplaceCognitionProgram *program,
         result = hash_search(program->invocation_results, &channel->candidate, HASH_ENTER, &found);
         if (!found) result->origins = NULL;
         result->origins = bms_add_member(result->origins, input->requirement);
+        declared_result = true;
     }
+    if (!declared_result && !walk_relation_salient(channel->relation))
+        return;
+    candidate = semantic_origin_get(program, &channel->candidate, true);
+    candidate->origins = bms_add_members(candidate->origins, anchor->origins);
 }
 
 bool

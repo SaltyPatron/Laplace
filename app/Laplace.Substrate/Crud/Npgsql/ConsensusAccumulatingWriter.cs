@@ -231,6 +231,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             catch (Exception ex) when (attempt + 1 < retry.MaxAttempts && retry.IsTransient(ex))
             {
                 TimeSpan delay = retry.DelayBeforeAttempt(attempt, Random.Shared);
+                _log.LogWarning(ex,
+                    "CONVERSATION_APPEND_RETRY session={SessionId} intent={IntentId} failed_attempt={FailedAttempt} next_attempt={NextAttempt} max_attempts={MaxAttempts} delay_ms={DelayMs}",
+                    sessionId, change.Metadata.IntentId, attempt + 1, attempt + 2,
+                    retry.MaxAttempts, delay.TotalMilliseconds);
                 if (delay > TimeSpan.Zero)
                     await Task.Delay(delay, ct).ConfigureAwait(false);
             }

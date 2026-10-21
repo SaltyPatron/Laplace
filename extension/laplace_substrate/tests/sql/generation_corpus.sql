@@ -146,9 +146,9 @@ $routing_state$;
 DO $$
 DECLARE
     type_t    bytea := public.laplace_hash128_blake3('Type');
-    type_word bytea := public.laplace_hash128_blake3('Word');
-    type_sent bytea := public.laplace_hash128_blake3('Sentence');
-    type_doc  bytea := public.laplace_hash128_blake3('Document');
+    type_word bytea := laplace.entity_type_id('Word');
+    type_sent bytea := laplace.entity_type_id('Sentence');
+    type_doc  bytea := laplace.entity_type_id('Document');
     src       bytea := public.laplace_hash128_blake3('test/corpus/source');
     w_the     bytea := public.laplace_hash128_blake3('test/corpus/word-the');
     w_capital bytea := public.laplace_hash128_blake3('test/corpus/word-capital');
@@ -365,7 +365,7 @@ BEGIN
     -- Consensus floor: a dead-end context continues through COMPLETES_TO with
     -- stride_used = 0.
     INSERT INTO laplace.entities (id, tier, type_id)
-    VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'), src)
+    VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'))
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)

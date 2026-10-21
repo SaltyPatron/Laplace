@@ -8,8 +8,7 @@ RETURNS void LANGUAGE sql AS $admit$
     SELECT DISTINCT p.id,p.tier,
            laplace.entity_type_id(CASE p.tier
                WHEN 0 THEN 'Codepoint' WHEN 1 THEN 'Grapheme'
-               WHEN 2 THEN 'Word' WHEN 3 THEN 'Sentence' ELSE 'Document' END),
-           p_source
+               WHEN 2 THEN 'Word' WHEN 3 THEN 'Sentence' ELSE 'Document' END)
       FROM converse.prompt_tree(p_prompt,false) p
     ON CONFLICT (id) DO NOTHING;
 $admit$;
@@ -34,6 +33,8 @@ BEGIN
         (laplace.consensus_id(p_subject,p_type,p_object),p_subject,p_type,p_object,
          2000000000000,30000000000,60000000,5,now())
     ON CONFLICT (id,type_id,subject_id) DO NOTHING;
+    -- Direct fixture writes must maintain the same mask contract as the writer.
+    PERFORM consensus.highway_mask_deposit(ARRAY[p_subject,p_object],ARRAY[p_type,p_type]);
 END
 $cell$;
 
@@ -102,13 +103,13 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id) VALUES
-        (source_id,2,laplace.entity_type_id('Source'),source_id),
-        (other_source,2,laplace.entity_type_id('Source'),other_source),
-        (context_id,2,laplace.entity_type_id('Source_Reference'),source_id),
-        (other_context,2,laplace.entity_type_id('Source_Reference'),source_id),
-        (answer_id,2,laplace.entity_type_id('CodeConcept'),source_id),
-        (changed_answer,2,laplace.entity_type_id('CodeConcept'),source_id),
-        (definition_id,2,laplace.entity_type_id('CodeConcept'),source_id);
+        (source_id,2,laplace.entity_type_id('Source')),
+        (other_source,2,laplace.entity_type_id('Source')),
+        (context_id,2,laplace.entity_type_id('Source_Reference')),
+        (other_context,2,laplace.entity_type_id('Source_Reference')),
+        (answer_id,2,laplace.entity_type_id('CodeConcept')),
+        (changed_answer,2,laplace.entity_type_id('CodeConcept')),
+        (definition_id,2,laplace.entity_type_id('CodeConcept'));
     PERFORM pg_temp.admit_operational_prompt(prompt,source_id);
     SELECT p.root_id INTO prompt_root FROM converse.prompt_tree(prompt) p LIMIT 1;
 
@@ -258,10 +259,10 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id) VALUES
-        (source_id,2,laplace.entity_type_id('Source'),source_id),
-        (context_id,2,laplace.entity_type_id('Source_Reference'),source_id),
-        (first_answer,2,laplace.entity_type_id('CodeConcept'),source_id),
-        (second_answer,2,laplace.entity_type_id('CodeConcept'),source_id);
+        (source_id,2,laplace.entity_type_id('Source')),
+        (context_id,2,laplace.entity_type_id('Source_Reference')),
+        (first_answer,2,laplace.entity_type_id('CodeConcept')),
+        (second_answer,2,laplace.entity_type_id('CodeConcept'));
     PERFORM pg_temp.admit_operational_prompt(prompt,source_id);
     SELECT p.root_id INTO prompt_root FROM converse.prompt_tree(prompt) p LIMIT 1;
     PERFORM pg_temp.operation_cell(prompt_root,calls_id,causes_id,source_id,context_id);
@@ -310,10 +311,10 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id) VALUES
-        (source_id,2,laplace.entity_type_id('Source'),source_id),
-        (context_id,2,laplace.entity_type_id('Source_Reference'),source_id),
-        (operation_id,2,laplace.entity_type_id('RelationType'),source_id),
-        (answer_id,2,laplace.entity_type_id('CodeConcept'),source_id);
+        (source_id,2,laplace.entity_type_id('Source')),
+        (context_id,2,laplace.entity_type_id('Source_Reference')),
+        (operation_id,2,laplace.entity_type_id('RelationType')),
+        (answer_id,2,laplace.entity_type_id('CodeConcept'));
     PERFORM pg_temp.admit_operational_prompt(prompt,source_id);
     SELECT p.root_id INTO prompt_root FROM converse.prompt_tree(prompt) p LIMIT 1;
     PERFORM pg_temp.operation_cell(prompt_root,calls_id,operation_id,source_id,context_id);
@@ -352,14 +353,14 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id) VALUES
-        (source_id,2,laplace.entity_type_id('Source'),source_id),
-        (first_context,2,laplace.entity_type_id('Source_Reference'),source_id),
-        (second_context,2,laplace.entity_type_id('Source_Reference'),source_id),
-        (semantic_input,2,laplace.entity_type_id('CodeConcept'),source_id),
-        (alternate_source,2,laplace.entity_type_id('Source'),alternate_source),
-        (alternate_input,2,laplace.entity_type_id('CodeConcept'),alternate_source),
-        (alternate_answer,2,laplace.entity_type_id('CodeConcept'),alternate_source),
-        (answer_id,2,laplace.entity_type_id('CodeConcept'),source_id);
+        (source_id,2,laplace.entity_type_id('Source')),
+        (first_context,2,laplace.entity_type_id('Source_Reference')),
+        (second_context,2,laplace.entity_type_id('Source_Reference')),
+        (semantic_input,2,laplace.entity_type_id('CodeConcept')),
+        (alternate_source,2,laplace.entity_type_id('Source')),
+        (alternate_input,2,laplace.entity_type_id('CodeConcept')),
+        (alternate_answer,2,laplace.entity_type_id('CodeConcept')),
+        (answer_id,2,laplace.entity_type_id('CodeConcept'));
     PERFORM pg_temp.admit_operational_prompt(first_prompt,source_id);
     PERFORM pg_temp.admit_operational_prompt(second_prompt,source_id);
     SELECT p.root_id INTO first_root FROM converse.prompt_tree(first_prompt) p LIMIT 1;
@@ -474,7 +475,7 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT id,2,laplace.entity_type_id('Source_Reference'),source
+    SELECT id,2,laplace.entity_type_id('Source_Reference')
       FROM unnest(ARRAY[source,scope,occurrence,lang,schema,none_id,root_marker,
           features_end,enhanced_end,misc_end,tokens_end,ref_one,ref_two,pos_id,dep_id,answer]) id
     ON CONFLICT (id) DO NOTHING;
@@ -497,7 +498,7 @@ BEGIN
         tokens_end];
     parse_id := public.laplace_hash128_merkle(4::smallint,manifest);
     INSERT INTO laplace.entities(id,tier,type_id)
-    VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'),source);
+    VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'));
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
     VALUES(public.laplace_hash128_blake3(parse_id || decode('0800','hex')),
@@ -517,7 +518,7 @@ BEGIN
         metadata := public.laplace_hash128_blake3(convert_to(
             'test/structure/metadata/' || i::text,'UTF8'));
         INSERT INTO laplace.entities(id,tier,type_id)
-        VALUES(metadata,2,laplace.entity_type_id('CodeConcept'),source);
+        VALUES(metadata,2,laplace.entity_type_id('CodeConcept'));
         PERFORM pg_temp.operation_cell(lemma,laplace.relation_type_id('RELATED_TO'),metadata,source,scope);
     END LOOP;
     UPDATE laplace.consensus SET rating=3000000000000

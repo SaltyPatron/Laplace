@@ -598,15 +598,18 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     static SPIPlanPtr frechet_plan = NULL;
     if (!angular_plan || !hilbert_plan || !frechet_plan)
     {
+        /* Retain parameterized plans using PostgreSQL's normal plan policy.
+         * Forcing custom plans here prevents automatic reuse of a generic plan
+         * and replans the partitioned geometry joins on every prompt in auto mode. */
         SPIPlanPtr angular = SPI_prepare_cursor(
             angular_sql, 7, angular_types,
-            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_PARALLEL_OK);
         SPIPlanPtr hilbert = SPI_prepare_cursor(
             hilbert_sql, 4, hilbert_types,
-            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_PARALLEL_OK);
         SPIPlanPtr frechet = SPI_prepare_cursor(
             frechet_sql, 6, frechet_types,
-            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_PARALLEL_OK);
         if (!angular || !hilbert || !frechet ||
             SPI_keepplan(angular) != 0 ||
             SPI_keepplan(hilbert) != 0 ||
