@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { AppHeader, Input, LoadingText, NavTabs, Panel, TenantField } from '@ui';
+import { AppHeader, Button, Input, LoadingText, NavTabs, Panel, TenantField } from '@ui';
 import { ChessSection } from './chess/ChessSection';
 import { HomeView } from './home/HomeView';
 import { DataActivity, UploadProvider } from './data/UploadProvider';
@@ -9,7 +9,7 @@ import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { ViewErrorBoundary } from './layout/ViewErrorBoundary';
 import { AccountControls } from './auth/AccountControls';
-import { apiGet, setApiWorkspace } from './api/client';
+import { apiGet, describeFailure, setApiWorkspace } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
@@ -72,17 +72,21 @@ function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const viewScope = JSON.stringify([tenant, authUser?.id]);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authAttempt, setAuthAttempt] = useState(0);
   useEffect(() => {
     let live = true;
-    void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[]; devPrincipal?: string | null }>('/v1/auth/me')
+    const controller = new AbortController();
+    setAuthError(null);
+    void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[]; devPrincipal?: string | null }>('/v1/auth/me', { signal: controller.signal })
       .then((result) => {
         if (!live) return;
         setApiWorkspace(result.authenticated ? result.user?.tenantId ?? null : null);
         setAuth(result.authenticated ? result.user : null, result.providers ?? [], result.devPrincipal ?? null);
       })
-      .catch(() => { if (live) setAuth(null, []); });
-    return () => { live = false; };
-  }, [setAuth]);
+      .catch((error: unknown) => { if (live) setAuthError(describeFailure(error).message); });
+    return () => { live = false; controller.abort(); };
+  }, [setAuth, authAttempt]);
   return <UploadProvider><div className={styles.shell}>
     <a className={styles.skipLink} href="#main-content">Skip to workspace</a>
     <AppHeader title={<RouterLink to="/" className={styles.title}>Laplace</RouterLink>} tagline="witnessed consensus, not weights"
@@ -98,6 +102,10 @@ function Shell() {
           <RouterLink to="/settings">Settings</RouterLink>
         </nav>
       </div>} />
+    {authError && <Panel title="Account information could not be loaded">
+      <p role="alert">{authError}</p>
+      <Button onClick={() => setAuthAttempt((attempt) => attempt + 1)}>Retry account information</Button>
+    </Panel>}
     <SubstrateStatusBanner />
     <DataActivity />
     <main id="main-content" tabIndex={-1} className={styles.main}>

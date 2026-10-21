@@ -67,6 +67,8 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
             or JsonException or UriFormatException or InvalidDataException
             || ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
+            Serilog.Log.ForContext<LichessControlClient>().Warning(ex,
+                "Shared Lichess service-control probe failed; service state is unknown.");
             return null;
         }
     }

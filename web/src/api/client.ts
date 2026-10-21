@@ -1,4 +1,5 @@
 import type { components } from './types.gen';
+import { reportClientFailure } from '../diagnostics/client';
 
 export type Schemas = components['schemas'];
 export type ErrorResponse = Schemas['ErrorResponse'];
@@ -75,6 +76,7 @@ async function parseError(res: Response): Promise<never> {
 
 /** Shared web transport to the machine's operations: same-origin credentials, typed failures, caller-owned cancellation, no implicit retries. */
 async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Promise<T> {
+  try {
   const headers = new Headers(laplaceHeaders(opts));
   if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
   const res = await fetch(path, {
@@ -83,12 +85,27 @@ async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Pr
   if (!res.ok) await parseError(res);
   if (res.status === 204) return undefined as T;
   return await res.json() as T;
+  } catch (error) {
+    reportClientFailure('api.' + (init.method ?? 'GET'), error, {
+      path, status: error instanceof ApiError ? error.status : undefined,
+      requestId: error instanceof ApiError ? error.requestId : undefined,
+    });
+    throw error;
+  }
 }
 
 export async function apiGetArrayBuffer(path: string, opts: ApiOptions = {}): Promise<ArrayBuffer> {
+  try {
   const res = await fetch(path, { headers: laplaceHeaders(opts), signal: opts.signal, credentials: 'same-origin' });
   if (!res.ok) await parseError(res);
   return await res.arrayBuffer();
+  } catch (error) {
+    reportClientFailure('api.GET.binary', error, {
+      path, status: error instanceof ApiError ? error.status : undefined,
+      requestId: error instanceof ApiError ? error.requestId : undefined,
+    });
+    throw error;
+  }
 }
 
 const inflightGets = new Map<string, Promise<unknown>>();

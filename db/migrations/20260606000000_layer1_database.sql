@@ -73,7 +73,7 @@ SELECT ops.repoint_pg_log();
 DO $$
 DECLARE r text;
 BEGIN
-    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api'] LOOP
+    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
         IF to_regclass('ops.app_log_' || r) IS NULL THEN
             EXECUTE format($ddl$
                 CREATE FOREIGN TABLE ops.%I (
@@ -90,47 +90,7 @@ BEGIN
     END LOOP;
 END $$;
 
-CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_dir text)
-    RETURNS text
-    LANGUAGE plpgsql AS $$
-DECLARE
-    r text;
-    n int := 0;
-BEGIN
-    IF p_dir IS NULL OR btrim(p_dir) = '' THEN
-        RAISE EXCEPTION 'ops.repoint_app_log: a log directory is required';
-    END IF;
-    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api'] LOOP
-        EXECUTE format('ALTER FOREIGN TABLE ops.%I OPTIONS (SET filename %L)',
-                       'app_log_' || r, rtrim(p_dir, '/') || '/laplace-' || r || '.csv');
-        n := n + 1;
-    END LOOP;
-    RETURN format('repointed %s role tables at %s', n, p_dir);
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION ops.app_log()
-    RETURNS TABLE(
-        log_time         timestamptz,
-        application_name text,
-        error_severity   text,
-        category         text,
-        message          text,
-        detail           text)
-    LANGUAGE plpgsql STABLE AS $$
-DECLARE r text;
-BEGIN
-    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api'] LOOP
-        BEGIN
-            RETURN QUERY EXECUTE
-                'SELECT log_time, application_name, error_severity, category, message, detail '
-                || 'FROM ops.' || quote_ident('app_log_' || r);
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
-        END;
-    END LOOP;
-END;
-$$;
+-- ops.repoint_app_log(text) and ops.app_log() are owned by the versioned substrate extension.
 
 -- ops.chess_drops exposes laplace-chess-drops.csv (LaplaceInstall.OpsLogDirectory), one row
 -- per CHESS_DROPPED reason written by ChessDropLedger, through the ops_log_files server.
@@ -164,28 +124,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION ops.chess_drops()
-    RETURNS TABLE(
-        log_time     timestamptz,
-        source_name  text,
-        reason       text,
-        dropped      bigint,
-        kept         bigint,
-        seen         bigint,
-        drop_pct     double precision)
-    LANGUAGE plpgsql
-    STABLE
-AS $$
-BEGIN
-    BEGIN
-        RETURN QUERY
-            SELECT f.log_time, f.source_name, f.reason, f.dropped, f.kept, f.seen, f.drop_pct
-            FROM ops.chess_drops_ft f;
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
-END;
-$$;
+-- ops.chess_drops() is owned by the versioned substrate extension.
 
 -- =============================================================================
 -- Schema & Table Grants

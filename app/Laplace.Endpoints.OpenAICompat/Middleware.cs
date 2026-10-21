@@ -1,5 +1,6 @@
 using global::Npgsql;
 using Laplace.Api.Contracts;
+using Serilog.Context;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -14,12 +15,11 @@ internal sealed class CorrelationIdMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var correlationId = context.Request.Headers["X-Correlation-Id"].ToString();
-        if (string.IsNullOrWhiteSpace(correlationId))
-            correlationId = Guid.NewGuid().ToString("N");
+        var correlationId = Laplace.Ops.LaplaceLogging.CorrelationId(context.Request.Headers["X-Correlation-Id"]);
 
         context.Items["correlation_id"] = correlationId;
         context.Response.Headers["X-Correlation-Id"] = correlationId;
+        using var scope = LogContext.PushProperty("CorrelationId", correlationId);
         await _next(context);
     }
 }
@@ -41,6 +41,16 @@ internal sealed class ExceptionEnvelopeMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogInformation("HTTP request aborted by the caller.");
+            if (!context.Response.HasStarted) context.Response.StatusCode = 499;
+        }
+        catch (Exception ex) when (context.Response.HasStarted)
+        {
+            _logger.LogError(ex, "HTTP request failed after the response started; the response cannot be replaced.");
+            throw;
+        }
         catch (Auth.ApiKeyTenantNotFoundException ex)
         {
             await Results.Json(
@@ -51,7 +61,7 @@ internal sealed class ExceptionEnvelopeMiddleware
         {
             if (IsTimeoutFailure(ex))
             {
-                _logger.LogError(ex, "Substrate query exceeded time budget.");
+                _logger.LogError(ex, "Substrate operation timed out.");
                 await WriteTimeoutAsync(context);
                 return;
             }
@@ -65,7 +75,7 @@ internal sealed class ExceptionEnvelopeMiddleware
         {
             if (IsTimeoutFailure(ex))
             {
-                _logger.LogError(ex, "Substrate query exceeded time budget.");
+                _logger.LogError(ex, "Substrate operation timed out.");
                 await WriteTimeoutAsync(context);
                 return;
             }
@@ -81,7 +91,7 @@ internal sealed class ExceptionEnvelopeMiddleware
             // a connectivity failure merely because an intermediate layer wrapped it.
             if (IsTimeoutFailure(ex))
             {
-                _logger.LogError(ex, "Substrate query exceeded time budget.");
+                _logger.LogError(ex, "Substrate operation timed out.");
                 await WriteTimeoutAsync(context);
                 return;
             }
@@ -115,7 +125,7 @@ internal sealed class ExceptionEnvelopeMiddleware
     private static Task WriteTimeoutAsync(HttpContext context) =>
         EndpointJson.ServiceUnavailable(
             "substrate_timeout",
-            $"Substrate query exceeded the API time budget ({SubstrateClient.DefaultCommandTimeoutSeconds}s).")
+            "Substrate operation timed out. Use the request correlation ID to locate the server diagnostics.")
         .ExecuteAsync(context);
 
     private static bool IsTimeoutFailure(Exception failure)

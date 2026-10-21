@@ -8,6 +8,9 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { TooltipProvider } from '@ui';
+import { installClientDiagnostics } from './diagnostics/client';
+
+installClientDiagnostics();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

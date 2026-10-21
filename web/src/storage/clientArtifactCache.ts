@@ -1,3 +1,5 @@
+import { reportClientFailure } from '../diagnostics/client';
+
 const DB_NAME = 'laplace-client-artifacts';
 const DB_VERSION = 1;
 const STORE = 'artifacts';
@@ -84,7 +86,9 @@ export async function clientArtifactPut(
     });
 
     // Best-effort request: browsers may decline persistent storage without affecting correctness.
-    if (navigator.storage?.persist) void navigator.storage.persist().catch(() => false);
+    if (navigator.storage?.persist) void navigator.storage.persist().catch((error: unknown) => {
+      reportClientFailure('artifact.storage.persist', error);
+    });
   } finally {
     db?.close();
   }
@@ -98,7 +102,8 @@ export async function clientStorageEstimate(): Promise<{ usage: number; quota: n
       usage: estimate.usage ?? 0,
       quota: estimate.quota ?? 0,
     };
-  } catch {
+  } catch (error) {
+    reportClientFailure('storage.estimate', error);
     return null;
   }
 }
@@ -123,21 +128,22 @@ export async function clientArtifactGetOrLoad(
   try {
     const hit = await readValid();
     if (hit) return { value: hit, source: 'cache' };
-  } catch {
-    // Storage is an accelerator; network correctness remains available.
+  } catch (error) {
+    reportClientFailure('storage.artifact.read', error);
   }
 
   const loadAndStore = async (): Promise<ClientArtifactLoadResult> => {
     try {
       const secondHit = await readValid();
       if (secondHit) return { value: secondHit, source: 'cache' };
-    } catch { /* fall through */ }
+    } catch (error) { reportClientFailure('storage.artifact.read-after-lock', error); }
 
     const value = await loader();
     if (value.byteLength !== expectedBytes) {
       throw new Error(`Artifact size mismatch for ${kind}: expected ${expectedBytes}, received ${value.byteLength}`);
     }
-    try { await clientArtifactPut(kind, receipt, value); } catch { /* network result remains valid */ }
+    try { await clientArtifactPut(kind, receipt, value); }
+    catch (error) { reportClientFailure('storage.artifact.write', error); }
     return { value, source: 'network' };
   };
 

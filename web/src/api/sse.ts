@@ -1,3 +1,4 @@
+import { reportClientFailure } from '../diagnostics/client';
 import type { ForwardPassProof } from './forwardProof';
 import { laplaceHeaders, PaymentRequiredError, ApiError, type ApiOptions, type ErrorResponse, type PaymentRequiredResponse } from './client';
 
@@ -68,6 +69,8 @@ export async function* streamChat(
   signal?: AbortSignal,
   onSession?: (sessionKey: string) => void,
 ): AsyncGenerator<ChatChunk> {
+  let requestId: string | undefined;
+  try {
   const res = await fetch(path, {
     method: 'POST',
     headers: laplaceHeaders(opts),
@@ -76,6 +79,7 @@ export async function* streamChat(
   });
   // The session key is in the response headers, before any body frame; the
   // caller keeps it so its next turn is admitted into the same session.
+  requestId = res.headers.get('x-correlation-id') ?? res.headers.get('x-request-id') ?? undefined;
   const sessionKey = res.headers.get('X-Laplace-Session');
   if (sessionKey && onSession) onSession(sessionKey);
   if (!res.ok) {
@@ -87,7 +91,7 @@ export async function* streamChat(
     }
     if (res.status === 402 && body) throw new PaymentRequiredError(body as PaymentRequiredResponse);
     const error = (body as { error?: { message?: string } } | null)?.error;
-    throw new ApiError(res.status, error?.message ?? `${res.status} ${res.statusText}`);
+    throw new ApiError(res.status, error?.message ?? `${res.status} ${res.statusText}`, res.headers.get('x-correlation-id') ?? undefined);
   }
   if (!res.body) throw new ApiError(res.status, 'Response has no body to stream.');
 
@@ -144,5 +148,10 @@ export async function* streamChat(
     // or [DONE] is seen before the server closes its side of the connection.
     try { await reader.cancel(); } catch { /* Preserve the original result/error. */ }
     reader.releaseLock();
+  }
+  } catch (error) {
+    reportClientFailure('api.stream', error, { path, status: error instanceof ApiError ? error.status : undefined,
+      requestId: error instanceof ApiError ? error.requestId ?? requestId : requestId });
+    throw error;
   }
 }

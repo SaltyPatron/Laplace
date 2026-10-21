@@ -11,13 +11,35 @@ using Microsoft.Extensions.Logging;
 // conductor starts it with no arguments; the other commands print JSON. stdout is the wire protocol in UCI mode, so
 // diagnostics go only to the ops file sink (read back through ops.app_log), and engine messages ride the protocol as
 // `info string` lines.
-using var loggerFactory = LaplaceLogging.FileOnly("uci");
+return await RunAsync(args);
+
+static async Task<int> RunAsync(string[] args)
+{
+    ILoggerFactory? loggerFactory = null;
+    try
+    {
+        loggerFactory = LaplaceLogging.FileOnly("uci");
+        return await RunCommandAsync(args, loggerFactory);
+    }
+    catch (Exception ex)
+    {
+        loggerFactory?.CreateLogger("session").LogCritical(ex, "UCI process terminated unexpectedly.");
+        Console.Error.WriteLine($"laplace-uci: {ex}");
+        return 1;
+    }
+    finally { loggerFactory?.Dispose(); }
+}
+
+static async Task<int> RunCommandAsync(string[] args, ILoggerFactory loggerFactory)
+{
+Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(loggerFactory, parameterLoggingEnabled: false);
 var log = loggerFactory.CreateLogger("session");
 
 ChessCommandLine cmd;
 try { cmd = ChessCommandLine.Parse(args); }
 catch (ArgumentException ex)
 {
+    log.LogWarning(ex, "UCI command arguments are invalid.");
     Console.Error.WriteLine(ex.Message);
     Console.Error.WriteLine(ChessCommands.Usage);
     return 64;
@@ -34,6 +56,7 @@ if (cmd.Verb == "uci")
             try { spec = ChessEngineCatalog.Resolve(cmd.Engine, cmd.Value("profile")); }
             catch (UciEngineException ex)
             {
+                log.LogError(ex, "UCI engine selection failed.");
                 Console.Out.WriteLine($"info string laplace-uci: {ex.Message}");
                 return 2;
             }
@@ -139,7 +162,9 @@ try
 catch (Exception ex) when (ex is UciEngineException or ArgumentException or FormatException or IOException or InvalidOperationException
                                or KeyNotFoundException or TimeoutException or UnauthorizedAccessException)
 {
+    loggerFactory.CreateLogger("command").LogError(ex, "UCI command {Command} failed.", cmd.Verb);
     if (textOutput) Console.Error.WriteLine($"laplace-uci {cmd.Verb}: {ex.Message}");
     else Console.Out.WriteLine(JsonSerializer.Serialize(new { error = CommandError.From(ex) }, json));
     return 2;
+}
 }

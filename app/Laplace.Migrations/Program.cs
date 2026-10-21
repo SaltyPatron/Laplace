@@ -16,6 +16,27 @@ internal static class Program
     // command takes constructor dependencies.
     public static int Main(string[] args)
     {
+        ILoggerFactory? logs = null;
+        try
+        {
+            logs = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
+            NpgsqlLoggingConfiguration.InitializeLogging(logs, parameterLoggingEnabled: false);
+            var exitCode = Run(args, logs);
+            if (exitCode != 0) logs.CreateLogger("migrations")
+                .LogWarning("Migration command {Command} ended with exit code {ExitCode}.", args.FirstOrDefault() ?? "up", exitCode);
+            return exitCode;
+        }
+        catch (Exception ex)
+        {
+            logs?.CreateLogger("migrations").LogCritical(ex, "Migration process terminated unexpectedly.");
+            Console.Error.WriteLine(ex);
+            return 1;
+        }
+        finally { logs?.Dispose(); }
+    }
+
+    private static int Run(string[] args, ILoggerFactory logs)
+    {
         if (args.Length > 0 && !args[0].StartsWith('-') && !Verbs.Contains(args[0].ToLowerInvariant()))
         {
             Console.Error.WriteLine($"Unknown migration command: {args[0]}");
@@ -38,6 +59,7 @@ internal static class Program
             config.AddCommand<NukeCommand>("nuke");
             config.SetExceptionHandler((ex, _) =>
             {
+                logs.CreateLogger("migrations").LogError(ex, "Migration command failed.");
                 if (ex is NpgsqlException nex)
                 {
                     Console.Error.WriteLine($"[NpgsqlException] {nex.Message}");
@@ -210,8 +232,7 @@ internal static class Program
         var owners = selected.Any(item => IncludesApplication(item.filter)) ? PlatformOwnerPolicy.Load() : null;
         // File sink only: the human-facing report goes to stdout below; this is the
         // queryable record of which migration applied when, read through ops.app_log.
-        using var loggerFactory = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
-        var log = loggerFactory.CreateLogger("up");
+        var log = Laplace.Ops.LaplaceLogging.CreateLogger("migrations.up");
 
         var applied = new List<DbUp.Engine.SqlScript>();
 

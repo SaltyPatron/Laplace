@@ -43,7 +43,12 @@ internal static class CliRuntime
     public static string ConnString
         => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);
 
-    public static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
+    public static int Fail(string m)
+    {
+        LoggerFactory.CreateLogger("cli").LogError("CLI command failed: {Failure}", m);
+        Console.Error.WriteLine(m);
+        return 2;
+    }
 
     public static string Hex(Hash128 h) => Convert.ToHexString(h.ToBytes()).ToLowerInvariant();
 

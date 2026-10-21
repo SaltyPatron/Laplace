@@ -238,9 +238,10 @@ public static class ChessMoveCommentary
                     ?? FormatUndated(mover, nextSan, playedSan);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Commentary is decoration; a failed historical lookup must never affect play.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(ChessMoveCommentary), ex,
+                "Historical commentary lookup failed; game play continues without commentary.");
         }
         return null;
     }

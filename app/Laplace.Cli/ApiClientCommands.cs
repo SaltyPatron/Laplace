@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Laplace.Engine.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Laplace.Cli;
 
@@ -50,6 +51,7 @@ internal static class ApiClientCommands
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException)
         {
+            CliRuntime.LoggerFactory.CreateLogger("api-client").LogError(ex, "API client command failed.");
             await Console.Error.WriteLineAsync("laplace-mono: " + ex.Message);
             return 1;
         }
@@ -104,6 +106,7 @@ internal static class ApiClientCommands
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException or JsonException)
         {
+            CliRuntime.LoggerFactory.CreateLogger("api-client").LogError(ex, "API operation failed.");
             await error.WriteLineAsync("laplace-mono: " + ex.Message);
             return 1;
         }

@@ -140,6 +140,7 @@ functions/consensus/walk_strongest.sql.in
 functions/consensus/consensus_stats.sql.in
 functions/chess/chess_learned_moves.sql.in
 functions/consensus/consensus_stats_approx.sql.in
+functions/converse/label.sql.in
 functions/inspect/consensus_out_readable.sql.in
 functions/inspect/top_relations_readable.sql.in
 functions/inspect/attestation_response.sql.in
@@ -342,7 +343,6 @@ functions/consensus/consensus_step_edge.sql.in
 functions/consensus/entity_exists.sql.in
 functions/realize/realize_defines.sql.in
 functions/readback/render.sql.in
-functions/converse/label.sql.in
 functions/inspect/consensus_out_labeled.sql.in
 functions/converse/label_or_hex.sql.in
 views/v_attestation_readable.sql.in
@@ -437,6 +437,7 @@ functions/ops/ingest_completion.sql.in
 functions/ops/activity.sql.in
 functions/ops/backend_signal.sql.in
 functions/ops/repair.sql.in
+functions/ops/log_readers.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
 views/v_word_senses.sql.in

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@ui';
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
+import { describeFailure } from '../../api/client';
 import { chessPlayer } from '../../chess/db/api';
 import type { ChessPlayerResponse } from '../../chess/db/types';
 import { entityRecord } from '../../query/api';
@@ -17,25 +18,33 @@ export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse 
   const [record, setRecord] = useState<EntityRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [career, setCareer] = useState<ChessPlayerResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let stale = false;
     setLoading(true);
     setRecord(null);
     setCareer(null);
+    setError(null);
     if (preview.type === 'Chess_Player') {
       chessPlayer(preview.id_hex, 0)
         .then((r) => { if (!stale) setCareer(r); })
-        .catch(() => { /* show unavailable values after a failed read */ })
+        .catch((failure: unknown) => { if (!stale) setError(describeFailure(failure).message); })
         .finally(() => { if (!stale) setLoading(false); });
     } else {
       entityRecord(preview.id_hex)
         .then((r) => { if (!stale) setRecord(r); })
-        .catch(() => { /* show unavailable values after a failed read */ })
+        .catch((failure: unknown) => { if (!stale) setError(describeFailure(failure).message); })
         .finally(() => { if (!stale) setLoading(false); });
     }
     return () => { stale = true; };
-  }, [preview.id_hex, preview.type]);
+  }, [preview.id_hex, preview.type, attempt]);
+
+  if (error) return <div role="alert">
+    <p>Standing could not be loaded: {error}</p>
+    <Button onClick={() => setAttempt((value) => value + 1)}>Retry standing</Button>
+  </div>;
 
   const pending = loading ? '…' : '—';
   if (preview.type === 'Chess_Player') {

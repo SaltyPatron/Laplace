@@ -188,7 +188,7 @@ internal static partial class MachineCostAnalyzer
         }
         finally
         {
-            try { Directory.Delete(job, recursive: true); } catch { }
+            try { Directory.Delete(job, recursive: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(MachineCostAnalyzer), cleanupFailure, "Tool work/process cleanup failed."); }
         }
     }
 
@@ -280,7 +280,7 @@ internal static partial class MachineCostAnalyzer
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { process.Kill(entireProcessTree: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(MachineCostAnalyzer), cleanupFailure, "Tool work/process cleanup failed."); }
                 await Task.WhenAll(stdoutTask, stderrTask);
                 return new CapturedReceipt(
                     true, true, 124,
@@ -288,7 +288,7 @@ internal static partial class MachineCostAnalyzer
             }
             catch
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { process.Kill(entireProcessTree: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(MachineCostAnalyzer), cleanupFailure, "Tool work/process cleanup failed."); }
                 throw;
             }
 
@@ -330,11 +330,11 @@ internal static partial class MachineCostAnalyzer
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 timedOut = true;
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { process.Kill(entireProcessTree: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(MachineCostAnalyzer), cleanupFailure, "Tool work/process cleanup failed."); }
             }
             catch
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { process.Kill(entireProcessTree: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(MachineCostAnalyzer), cleanupFailure, "Tool work/process cleanup failed."); }
                 throw;
             }
 

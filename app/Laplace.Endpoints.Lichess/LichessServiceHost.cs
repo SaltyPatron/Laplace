@@ -41,6 +41,7 @@ internal static class LichessServiceHost
         options.Validate();
         var database = connection is null ? ManagedServiceDatabase.Resolve() : null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        builder.Logging.ClearProviders().AddProvider(Laplace.Ops.LaplaceLogging.SharedProvider());
         builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, options.Port));
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(failed ?? (() => Environment.ExitCode = 1));
@@ -92,7 +93,7 @@ internal sealed class LichessWorker(ILichessConnection bot, LichessOptions optio
         catch (Exception ex)
         {
             var reason = bot.Status().Error;
-            log.LogError("Lichess service failed: {ErrorType}: {Reason}", ex.GetType().Name, reason ?? ex.Message);
+            log.LogError(ex, "Lichess service failed: {Reason}", reason ?? ex.Message);
             failed();
             // Keep answering /status for a while with the failure, so the API and the panel can show why the
             // service is restarting instead of only seeing it vanish (systemd RestartSec / NSSM AppRestartDelay follow).

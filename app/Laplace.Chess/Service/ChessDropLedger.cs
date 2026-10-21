@@ -168,9 +168,10 @@ internal static class ChessDropLedger
                     dropPct.ToString("F2", CultureInfo.InvariantCulture)));
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Ops ledger is diagnostic; stdout CHESS_DROPPED remains the primary signal.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(ChessDropLedger), ex,
+                "Chess drop ledger could not be persisted; CHESS_DROPPED console diagnostics remain available.");
         }
     }
 

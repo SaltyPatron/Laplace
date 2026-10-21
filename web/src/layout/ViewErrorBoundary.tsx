@@ -1,4 +1,5 @@
-import { Component, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { reportClientFailure } from '../diagnostics/client';
 import { Link } from 'react-router-dom';
 import { Button, Panel } from '@ui';
 
@@ -9,6 +10,9 @@ interface State { error: Error | null; resetKey: string }
 export class ViewErrorBoundary extends Component<Props, State> {
   state: State = { error: null, resetKey: this.props.resetKey };
   static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    reportClientFailure('view.render', error, { stack: `${error.stack ?? ''}\n${info.componentStack ?? ''}` });
+  }
   static getDerivedStateFromProps(props: Props, state: State) {
     return props.resetKey !== state.resetKey ? { error: null, resetKey: props.resetKey } : null;
   }

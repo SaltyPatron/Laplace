@@ -25,10 +25,13 @@ internal sealed class WitnessCatalog
                 var root = JsonSerializer.Deserialize(json, WitnessManifestJsonContext.Default.WitnessManifestRoot);
                 if (root?.Cadence is { Count: > 0 })
                     return new WitnessCatalog(root);
+                Serilog.Log.ForContext<WitnessCatalog>().Warning(
+                    "Witness catalog {Path} has no cadence entries; checking remaining declared sources.", path);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
-                // fall through
+                Serilog.Log.ForContext("SourceContext", typeof(WitnessCatalog).FullName)
+                    .Warning(ex, "Cannot load witness catalog {Path}; checking remaining declared sources.", path);
             }
         }
 
@@ -43,7 +46,7 @@ internal sealed class WitnessCatalog
                 return new WitnessCatalog(root);
         }
 
-        return new WitnessCatalog(new WitnessManifestRoot { Cadence = [] });
+        throw new InvalidOperationException("No valid witness catalog is available in the declared paths or embedded resource.");
     }
 
     public IReadOnlyList<string> FeaturedRefsList() => FeaturedRefs;

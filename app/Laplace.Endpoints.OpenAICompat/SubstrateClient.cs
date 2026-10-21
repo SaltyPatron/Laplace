@@ -338,7 +338,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
-            // The exact read timed out; the planner estimate answers below.
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Exact consensus health read timed out; falling back to planner estimates.");
         }
 
         try
@@ -348,6 +349,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Estimated consensus health read also timed out; health statistics are unavailable.");
             return null;
         }
     }
@@ -602,6 +605,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // an op error carrying the function's message, not as unavailability.
         catch (PostgresException pg) when (!IsAvailabilitySqlState(pg.SqlState))
         {
+            Serilog.Log.ForContext<SubstrateClient>().Error(pg,
+                "Installed operation {Operation} failed with SQLSTATE {SqlState}.", name, pg.SqlState);
             return new InstalledOpInvoker.OpResult(
                 [], null, $"op '{name}' failed [{pg.SqlState}] {pg.MessageText}");
         }

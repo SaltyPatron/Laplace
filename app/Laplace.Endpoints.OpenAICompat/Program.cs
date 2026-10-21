@@ -14,7 +14,12 @@ using Npgsql;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
+using Serilog.Events;
 
+try
+{
+Log.Logger = new LoggerConfiguration().MinimumLevel.Information()
+    .ApplyLaplaceSinks("api", console: true, consoleToStdErr: false).CreateBootstrapLogger();
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -59,6 +64,9 @@ builder.Services.AddRateLimiter(options =>
         limiter.PermitLimit = 16;
         limiter.QueueLimit = 0;
     });
+    options.AddPolicy("client-diagnostics", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
     {
         var path = ctx.Request.Path.Value ?? string.Empty;
@@ -94,6 +102,7 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing.AddAspNetCoreInstrumentation().AddNpgsql());
 
 var app = builder.Build();
+NpgsqlLoggingConfiguration.InitializeLogging(app.Services.GetRequiredService<ILoggerFactory>(), parameterLoggingEnabled: false);
 
 var laplaceAuth = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Laplace.Endpoints.OpenAICompat.Auth.LaplaceAuthOptions>>().Value;
 if (laplaceAuth.DevPrincipalActive)
@@ -132,6 +141,21 @@ if (publicOrigin is not null)
         return next(context);
     });
 }
+// Correlation and request completion cover proxy, static, authorization and rate-limit
+// failures as well as endpoint handlers. No query strings, headers or bodies are logged.
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (http, _, exception) => exception is not null || http.Response.StatusCode >= 500
+        ? LogEventLevel.Error : http.Response.StatusCode >= 400 && http.Response.StatusCode != 499
+            ? LogEventLevel.Warning : LogEventLevel.Information;
+    options.EnrichDiagnosticContext = (diagnostic, http) =>
+    {
+        diagnostic.Set("CorrelationId", http.Items["correlation_id"] ?? http.TraceIdentifier);
+        diagnostic.Set("Operation", http.GetEndpoint()?.DisplayName ?? "unmatched");
+    };
+});
+app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 app.UseMiddleware<RefactorProxyMiddleware>();
 app.UseResponseCompression();
 
@@ -148,8 +172,6 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.UseRateLimiter();
-app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.BillingAccountBoundaryMiddleware>();
@@ -160,6 +182,7 @@ app.UseMiddleware<CodeModelChatMiddleware>();
 app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
 app.MapCoreEndpoints();
+app.MapClientDiagnostics();
 app.MapQueryEndpoints();
 app.MapOpEndpoints();
 app.MapAdminEndpoints();
@@ -187,5 +210,16 @@ app.MapFallback("/v1/{*path}", () => Results.Json(
 app.MapFallbackToFile("index.html");
 
 app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "API host terminated unexpectedly.");
+    Console.Error.WriteLine($"Laplace API startup/runtime failure: {ex}");
+    Environment.ExitCode = 1;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 public partial class Program;

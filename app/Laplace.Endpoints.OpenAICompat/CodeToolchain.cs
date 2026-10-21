@@ -108,7 +108,7 @@ internal static partial class CodeToolchain
         }
         finally
         {
-            try { Directory.Delete(work, recursive: true); } catch { }
+            try { Directory.Delete(work, recursive: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(CodeToolchain), cleanupFailure, "Tool work/process cleanup failed."); }
         }
     }
 
@@ -214,7 +214,7 @@ internal static partial class CodeToolchain
             try { await process.WaitForExitAsync(timeout.Token); }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { process.Kill(entireProcessTree: true); } catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(CodeToolchain), cleanupFailure, "Tool work/process cleanup failed."); }
                 await Task.WhenAll(stdoutTask, stderrTask);
                 return new ProcessReceipt(true, true, 124,
                     Trim(await stdoutTask), Trim(await stderrTask));

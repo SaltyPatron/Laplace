@@ -11,6 +11,30 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        ILoggerFactory? logging = null;
+        try
+        {
+            logging = CliRuntime.LoggerFactory;
+            using var scope = logging.CreateLogger("cli").BeginScope(
+                new Dictionary<string, object> { ["OperationId"] = Guid.NewGuid().ToString("N"),
+                    ["Command"] = args.FirstOrDefault() ?? "help" });
+            Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(logging, parameterLoggingEnabled: false);
+            var exitCode = await RunAsync(args);
+            if (exitCode != 0) CliRuntime.LoggerFactory.CreateLogger("cli")
+                .LogWarning("CLI command ended with exit code {ExitCode}.", exitCode);
+            return exitCode;
+        }
+        catch (Exception ex)
+        {
+            logging?.CreateLogger("cli").LogCritical(ex, "CLI terminated unexpectedly.");
+            Console.Error.WriteLine($"laplace-mono: {ex}");
+            return 1;
+        }
+        finally { logging?.Dispose(); }
+    }
+
+    private static async Task<int> RunAsync(string[] args)
+    {
         if (args.Length > 0 && args[0] == "--api-client")
             return await ApiClientCommands.RunAsync(args[1..]);
 
@@ -70,6 +94,7 @@ internal static class Program
             // exits 1, for both parse errors and runtime command exceptions.
             config.SetExceptionHandler((ex, _) =>
             {
+                CliRuntime.LoggerFactory.CreateLogger("cli").LogError(ex, "CLI command failed.");
                 Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
                 for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
                     Console.Error.WriteLine($"  inner: {inner.GetType().Name}: {inner.Message}");

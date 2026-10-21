@@ -360,6 +360,8 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
             }
             catch (StripeException ex)
             {
+                Serilog.Log.ForContext<StripeCatalogSync>().Error(ex,
+                    "Stripe catalog sync failed for {ServiceId} / {LookupKey}.", price.ServiceId, price.LookupKey);
                 entries.Add(new(price.ServiceId, price.LookupKey, null, null, $"error:{ex.StripeError?.Code ?? "stripe_error"}"));
             }
         }
@@ -382,8 +384,9 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
             var (priceId, _, _) = await EnsurePriceInternalAsync(price, ct);
             return priceId;
         }
-        catch (StripeException)
+        catch (StripeException ex)
         {
+            Serilog.Log.ForContext<StripeCatalogSync>().Error(ex, "Stripe price resolution failed for {LookupKey}.", price.LookupKey);
             return null;
         }
     }
@@ -460,8 +463,11 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
             if (search.Data.Count > 0)
                 return search.Data[0].Id;
         }
-        catch (StripeException)
+        catch (StripeException ex)
         {
+            Serilog.Log.ForContext<StripeCatalogSync>().Error(ex,
+                "Stripe product search failed for {ProductKey}; refusing to create a possible duplicate.", productKey);
+            throw;
         }
 
         var createdProduct = await productService.CreateAsync(new ProductCreateOptions
@@ -675,6 +681,7 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
         }
         catch (StripeException ex)
         {
+            Serilog.Log.ForContext<StripeCheckoutGateway>().Error(ex, "Stripe checkout creation failed for {QuoteId}.", quote.QuoteId);
             return new StripeCheckoutSessionResult(false, null, null, $"stripe_error:{ex.StripeError?.Code ?? "stripe_error"}");
         }
     }
@@ -703,9 +710,15 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
                 CustomerId: session.CustomerId,
                 SubscriptionId: session.SubscriptionId);
         }
-        catch (StripeException)
+        catch (StripeException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
         {
+            Serilog.Log.ForContext<StripeCheckoutGateway>().Information("Stripe checkout session {SessionId} does not exist.", sessionId);
             return new StripeSessionDetails(false, false, null, null, null, null, null);
+        }
+        catch (StripeException ex)
+        {
+            Serilog.Log.ForContext<StripeCheckoutGateway>().Error(ex, "Stripe checkout session lookup failed for {SessionId}.", sessionId);
+            throw;
         }
     }
 }

@@ -1,6 +1,13 @@
 using Laplace.Endpoints.Lichess;
 using Laplace.SubstrateCRUD.Npgsql;
 using Laplace.Chess.Service;
+using Laplace.Ops;
+
+Microsoft.Extensions.Logging.ILoggerFactory? processLogging = null;
+try
+{
+processLogging = LaplaceLogging.ConsoleAndFile("lichess");
+Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(processLogging, parameterLoggingEnabled: false);
 
 if (args.Length is 2 or 4 && args[0] == "--verify-routing")
 {
@@ -47,3 +54,11 @@ await using var app = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTRO
     : LichessServiceHost.Build(LichessOptions.FromEnvironment());
 await app.RunAsync();
 return Environment.ExitCode;
+}
+catch (Exception ex)
+{
+    processLogging?.CreateLogger("lichess").LogCritical(ex, "Lichess process terminated unexpectedly.");
+    Console.Error.WriteLine($"laplace-lichess: {ex}");
+    return 1;
+}
+finally { processLogging?.Dispose(); }

@@ -21,6 +21,7 @@ internal static class ControlledLichessHost
         var token = File.ReadAllText(config.TokenFile).Trim();
         if (token.Length < 32 || token.Any(char.IsWhiteSpace)) throw new InvalidDataException("Invalid Lichess control credential.");
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        builder.Logging.ClearProviders().AddProvider(Laplace.Ops.LaplaceLogging.SharedProvider());
         builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, config.Port));
         builder.Services.AddSingleton(config);
         builder.Services.AddSingleton<LichessController>();

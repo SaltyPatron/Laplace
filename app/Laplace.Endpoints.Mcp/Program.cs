@@ -9,6 +9,24 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        ILoggerFactory? loggerFactory = null;
+        try
+        {
+            loggerFactory = LaplaceLogging.FileOnly("mcp");
+            Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(loggerFactory, parameterLoggingEnabled: false);
+            return await RunAsync(args, loggerFactory);
+        }
+        catch (Exception ex)
+        {
+            loggerFactory?.CreateLogger("server").LogCritical(ex, "MCP process terminated unexpectedly.");
+            Console.Error.WriteLine($"laplace-mcp: {ex}");
+            return 1;
+        }
+        finally { loggerFactory?.Dispose(); }
+    }
+
+    private static async Task<int> RunAsync(string[] args, ILoggerFactory loggerFactory)
+    {
         // No arguments: stdio transport. --http: the Streamable HTTP host, run as its own
         // process.
         if (args.SequenceEqual(new[] { "--http" }))
@@ -19,6 +37,7 @@ internal static class Program
         }
         if (args.Length != 0)
         {
+            loggerFactory.CreateLogger("server").LogWarning("MCP started with unsupported command arguments.");
             Console.Error.WriteLine("usage: laplace-mcp [--http]");
             return 2;
         }
@@ -28,7 +47,6 @@ internal static class Program
         // calls. stdout carries protocol frames only; diagnostics go to the CSV ops sink
         // (ops.app_log), and a fault reaches the caller as a JSON-RPC error reply.
 
-        using var loggerFactory = LaplaceLogging.FileOnly("mcp");
         var log = loggerFactory.CreateLogger("server");
 
         Console.Error.WriteLine($"[mcp] starting server — binary={Environment.ProcessPath ?? AppContext.BaseDirectory}");

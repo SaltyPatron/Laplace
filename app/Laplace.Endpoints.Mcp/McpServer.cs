@@ -21,6 +21,7 @@ internal sealed class McpServer(IMcpTools tools)
 
     public string? Handle(string line)
     {
+        using var operation = Serilog.Context.LogContext.PushProperty("OperationId", Guid.NewGuid().ToString("N"));
         JsonNode? msg;
         try
         {
@@ -74,6 +75,7 @@ internal sealed class McpServer(IMcpTools tools)
                     return ErrorReply(id, -32602, "tool arguments must be an object");
                 var args = msg?["params"]?["arguments"] as JsonObject;
                 var (text, isError) = tools.Call(name, args);
+                if (isError) Serilog.Log.ForContext<McpServer>().Warning("MCP tool {Tool} returned an error result.", name);
                 return Reply(id, new JsonObject
                 {
                     ["content"] = new JsonArray(new JsonObject
@@ -98,11 +100,15 @@ internal sealed class McpServer(IMcpTools tools)
             ["result"] = result,
         }.ToJsonString(JsonSerializerOptions.Default);
 
-    public static string ErrorReply(JsonNode? id, int code, string message) =>
-        new JsonObject
+    public static string ErrorReply(JsonNode? id, int code, string message)
+    {
+        // Record the protocol outcome without copying caller payloads into logs.
+        Serilog.Log.ForContext<McpServer>().Warning("MCP protocol request failed with code {ErrorCode}.", code);
+        return new JsonObject
         {
             ["jsonrpc"] = "2.0",
             ["id"] = id,
             ["error"] = new JsonObject { ["code"] = code, ["message"] = message },
         }.ToJsonString(JsonSerializerOptions.Default);
+    }
 }

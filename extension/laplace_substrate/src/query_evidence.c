@@ -166,6 +166,9 @@ query_highway_registry_ready(void)
         FlushErrorState();
         if (error->sqlerrcode != ERRCODE_CONFIG_FILE_ERROR)
             ReThrowError(error);
+        ereport(LOG,
+                (errmsg("Query highway registry unavailable; using the recorded relation path"),
+                 errdetail_internal("%s", error->message)));
         FreeErrorData(error);
         ready = false;
     }

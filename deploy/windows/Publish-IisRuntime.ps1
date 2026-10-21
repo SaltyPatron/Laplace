@@ -28,10 +28,12 @@ if(-not $operatorToken -and (Test-Path -LiteralPath $devInstallation -PathType L
             $operatorToken=(Invoke-DevelopmentBao $devConfig GET $path $token).data.data.operator_token
             if($operatorToken){$apiKey=''}
         } finally {
-            try { if($token){ $null=Invoke-DevelopmentBao $devConfig POST 'auth/token/revoke-self' $token @{} } } catch {}
+            try { if($token){ $null=Invoke-DevelopmentBao $devConfig POST 'auth/token/revoke-self' $token @{} } }
+            catch { Write-Warning ('Temporary publication credential-read token could not be revoked: '+$_.Exception.GetType().Name) }
         }
     } catch {
         if(-not $apiKey){throw}
+        Write-Warning ('Enrolled publication identity failed; using the explicitly supplied API key. Failure: '+$_.Exception.GetType().Name)
     }
 }
 if(-not $apiKey -and -not $operatorToken){throw 'Authenticated publication verification requires an enrolled desktop identity, LAPLACE_OPERATOR_TOKEN, or LAPLACE_API_KEY.'}

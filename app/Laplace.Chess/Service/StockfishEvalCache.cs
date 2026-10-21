@@ -114,9 +114,9 @@ public static class StockfishEvalCache
                 stream.Flush();
             }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // A failed derived-cache append costs future engine time, never testimony.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(StockfishEvalCache), ex, "Derived evaluation cache append failed for {Path}; accepted testimony is unchanged.", path);
         }
     }
 
@@ -167,9 +167,9 @@ public static class StockfishEvalCache
                 TryDelete(JournalPath(full));
             }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // A failed cache save costs future engine time, never correctness.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(StockfishEvalCache), ex, "Derived evaluation cache snapshot save failed for {Path}; journal recovery remains available.", path);
         }
         finally
         {
@@ -187,12 +187,12 @@ public static class StockfishEvalCache
             using var stream = File.OpenRead(path);
             using var r = new BinaryReader(stream);
             if (!HeaderMatches(r, Magic, censusVersion, depth, nodes, recipeId)) return;
-            if (stream.Length - stream.Position < sizeof(int)) return;
+            if (stream.Length - stream.Position < sizeof(int)) throw new EndOfStreamException("Evaluation cache has no record count.");
             int count = r.ReadInt32();
-            if (count < 0) return;
+            if (count < 0) throw new InvalidDataException("Evaluation cache record count is negative.");
             for (int i = 0; i < count; i++)
             {
-                if (stream.Length - stream.Position < JournalRecordBytes) return;
+                if (stream.Length - stream.Position < JournalRecordBytes) throw new EndOfStreamException("Evaluation cache snapshot is truncated.");
                 var id = Hash128.FromBytes(r.ReadBytes(16));
                 bool has = r.ReadBoolean();
                 int cp = r.ReadInt32();
@@ -201,10 +201,9 @@ public static class StockfishEvalCache
                 if (has) memo[id] = cp;
             }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException)
         {
-            // Snapshot corruption is isolated from the append journal. The journal may still
-            // contain completed searches worth retaining.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(StockfishEvalCache), ex, "Derived evaluation cache snapshot read failed for {Path}; retaining recovered entries and trying the journal.", path);
         }
     }
 
@@ -226,10 +225,9 @@ public static class StockfishEvalCache
                 if (has) memo[id] = cp;
             }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            // Fixed-width records before a bad/torn tail remain usable; any exception here
-            // leaves the values already inserted into memo intact.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(StockfishEvalCache), ex, "Derived evaluation cache journal read failed for {Path}; retaining recovered entries.", journal);
         }
     }
 
@@ -254,8 +252,11 @@ public static class StockfishEvalCache
                 && r.ReadInt64() == nodes
                 && (recipeId is null || r.ReadBytes(32).AsSpan().SequenceEqual(Convert.FromHexString(recipeId)));
         }
-        catch (EndOfStreamException)
+        catch (EndOfStreamException ex)
         {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(StockfishEvalCache), ex,
+                "Derived evaluation cache header is truncated for {Path}; rejecting the cached data.",
+                (r.BaseStream as FileStream)?.Name);
             return false;
         }
     }
@@ -282,7 +283,9 @@ public static class StockfishEvalCache
         {
             if (File.Exists(path)) File.Delete(path);
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(StockfishEvalCache), ex, "Derived evaluation cache cleanup failed for {Path}.", path);
+        }
     }
 }

@@ -167,9 +167,9 @@ public static class MemoryTopology
                 return available;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
-            // A failed OS probe falls through to the GC view; sizing never throws.
+            System.Diagnostics.Trace.TraceWarning("Physical-memory probe failed; using the GC memory view. {0}", ex);
         }
 
         // The runtime's available-memory view: container limit or heap ceiling.

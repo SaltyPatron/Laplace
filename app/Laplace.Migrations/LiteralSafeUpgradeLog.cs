@@ -1,5 +1,7 @@
 using System.Globalization;
 using DbUp.Engine.Output;
+using Laplace.Engine.Core;
+using Serilog.Events;
 
 namespace Laplace.Migrations;
 
@@ -21,7 +23,9 @@ internal sealed class LiteralSafeUpgradeLog : IUpgradeLog
 
     public void LogError(Exception ex, string format, params object[] args)
     {
-        Write("ERROR", Console.Error, format, args);
+        var message = SafeMessage(Render(format, args));
+        Serilog.Log.ForContext<LiteralSafeUpgradeLog>().Error(ex, "Migration failed: {MigrationMessage}", message);
+        Console.Error.WriteLine(message);
         Console.Error.WriteLine(ex);
     }
 
@@ -44,5 +48,25 @@ internal sealed class LiteralSafeUpgradeLog : IUpgradeLog
     }
 
     private static void Write(string level, TextWriter writer, string format, object[] args)
-        => writer.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {Render(format, args)}");
+    {
+        var message = SafeMessage(Render(format, args));
+        var severity = level switch
+        {
+            "TRACE" => LogEventLevel.Verbose,
+            "DEBUG" => LogEventLevel.Debug,
+            "WARN" => LogEventLevel.Warning,
+            "ERROR" => LogEventLevel.Error,
+            _ => LogEventLevel.Information
+        };
+        Serilog.Log.ForContext<LiteralSafeUpgradeLog>().Write(severity, "{MigrationMessage}", message);
+        writer.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {message}");
+    }
+
+    private static string SafeMessage(string message)
+    {
+        const string marker = "ConnectionString => ";
+        var start = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return start < 0 ? message : message[..(start + marker.Length)]
+            + LaplaceInstall.RedactConnectionString(message[(start + marker.Length)..]);
+    }
 }

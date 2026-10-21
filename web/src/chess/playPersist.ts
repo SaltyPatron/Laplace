@@ -3,6 +3,7 @@ import {
   initialPositions,
   type PositionSnapshot,
 } from './gameHistory';
+import { reportClientFailure } from '../diagnostics/client';
 
 const STORAGE_KEY = 'laplace.chess.play.v1';
 
@@ -25,7 +26,8 @@ export function loadSavedPlayGame(): SavedPlayGame | null {
     const parsed = JSON.parse(raw) as SavedPlayGame;
     if (!Array.isArray(parsed.positions) || parsed.positions.length === 0) return null;
     return parsed;
-  } catch {
+  } catch (error) {
+    reportClientFailure('chess.saved-game.read', error);
     return null;
   }
 }
@@ -34,16 +36,16 @@ export function savePlayGame(game: Omit<SavedPlayGame, 'savedAt'>): void {
   try {
     const payload: SavedPlayGame = { ...game, savedAt: Date.now() };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  } catch {
-    /* quota / private mode — ignore */
+  } catch (error) {
+    reportClientFailure('chess.saved-game.write', error);
   }
 }
 
 export function clearSavedPlayGame(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* ignore */
+  } catch (error) {
+    reportClientFailure('chess.saved-game.clear', error);
   }
 }
 

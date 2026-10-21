@@ -127,6 +127,7 @@ internal sealed class StripeWebhookProvisioner : IStripeWebhookProvisioner
         }
         catch (StripeException ex)
         {
+            Serilog.Log.ForContext<StripeWebhookProvisioner>().Error(ex, "Stripe webhook provisioning failed.");
             return new($"error:{ex.StripeError?.Code ?? "stripe_error"}", null, url);
         }
     }

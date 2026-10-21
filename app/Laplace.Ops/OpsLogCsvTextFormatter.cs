@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Serilog.Events;
 using Serilog.Formatting;
+using Serilog.Formatting.Json;
 
 namespace Laplace.Ops;
 
@@ -12,6 +13,7 @@ namespace Laplace.Ops;
 /// </summary>
 public sealed class OpsLogCsvTextFormatter : ITextFormatter
 {
+    private static readonly JsonFormatter Detail = new(renderMessage: true, formatProvider: CultureInfo.InvariantCulture);
     private readonly string _role;
     public OpsLogCsvTextFormatter(string role) => _role = role;
 
@@ -31,16 +33,18 @@ public sealed class OpsLogCsvTextFormatter : ITextFormatter
         string category = "";
         if (logEvent.Properties.TryGetValue("SourceContext", out var src) && src is ScalarValue { Value: string sc })
         {
-            int dot = sc.LastIndexOf('.');
-            category = dot >= 0 ? sc[(dot + 1)..] : sc;
+            category = sc;
         }
 
-        string? detail = logEvent.Exception is { } ex ? $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}" : null;
+        // Keep scopes, operation IDs, trace context and the complete exception chain.
+        // The six-column file_fdw contract stays unchanged; detail is structured JSON.
+        using var detail = new StringWriter(CultureInfo.InvariantCulture);
+        Detail.Format(logEvent, detail);
 
         var sb = new StringBuilder(128);
         OpsLogCsvFormatter.Write(
             sb, logEvent.Timestamp, _role, severity, category,
-            logEvent.RenderMessage(CultureInfo.InvariantCulture), detail);
+            logEvent.RenderMessage(CultureInfo.InvariantCulture), detail.ToString().TrimEnd('\r', '\n'));
         output.Write(sb.ToString());
     }
 }

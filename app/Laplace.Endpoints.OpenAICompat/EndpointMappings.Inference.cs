@@ -177,6 +177,7 @@ internal static class InferenceEndpoints
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    Serilog.Log.ForContext("SourceContext", "Laplace.Inference").Error(ex, "Inference stream failed after the HTTP response started.");
                     await ServerSentEvents.WriteErrorAsync(response, "stream_failed", ex.Message, ct);
                 }
                 await ServerSentEvents.WriteDoneAsync(response, ct);
@@ -385,6 +386,7 @@ internal static class InferenceEndpoints
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    Serilog.Log.ForContext("SourceContext", "Laplace.Inference").Error(ex, "Inference stream failed after the HTTP response started.");
                     await ServerSentEvents.WriteErrorAsync(response, "stream_failed", ex.Message, ct);
                 }
                 await ServerSentEvents.WriteDoneAsync(response, ct);

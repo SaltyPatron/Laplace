@@ -16,7 +16,7 @@ if($Publish){
                 $devConfig=Read-DevelopmentConfig $devInstallation
                 $credPath=Get-DevelopmentCredentialPath $devConfig
                 if($credPath -and (Test-Path -LiteralPath $credPath -PathType Leaf)){$hasDevIdentity=$true}
-            } catch {}
+            } catch { Write-Warning ('Development identity preflight failed: '+$_.Exception.GetType().Name+'. Check the declared enrollment and configuration.') }
         }
     }
     if(-not $env:LAPLACE_API_KEY -and -not $env:LAPLACE_OPERATOR_TOKEN -and -not $hasDevIdentity){throw 'Set LAPLACE_API_KEY for authenticated publication verification.'}

@@ -5,6 +5,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Ops;
+using Serilog;
+using Serilog.Context;
 
 namespace Laplace.Endpoints.Mcp;
 
@@ -45,6 +48,10 @@ internal static class McpHttpHost
         options.Validate();
         var database = toolsFactory is null || readiness is null ? ManagedServiceDatabase.Resolve() : null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSerilog(new LoggerConfiguration().MinimumLevel.Information()
+            .Enrich.WithProperty("Transport", "http")
+            .ApplyLaplaceSinks("mcp", console: true).CreateLogger(), dispose: true);
         // Kestrel binds loopback explicitly, so no ASPNETCORE_URLS override can expose
         // it; TLS terminates in front of it.
         builder.WebHost.ConfigureKestrel(k =>
@@ -54,6 +61,32 @@ internal static class McpHttpHost
         });
         builder.Services.AddSingleton(_ => new McpSessions(options, toolsFactory ?? (() => new SubstrateTools(database))));
         var app = builder.Build();
+        Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(app.Services.GetRequiredService<ILoggerFactory>(), parameterLoggingEnabled: false);
+        app.Use(async (context, next) =>
+        {
+            var id = LaplaceLogging.CorrelationId(context.Request.Headers["X-Correlation-Id"]);
+            context.Response.Headers["X-Correlation-Id"] = id;
+            using var scope = LogContext.PushProperty("CorrelationId", id);
+            try { await next(context); }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                if (!context.Response.HasStarted) context.Response.StatusCode = 499;
+                app.Logger.LogInformation("MCP request was cancelled by the caller.");
+            }
+            catch (Exception ex)
+            {
+                if (!context.Response.HasStarted) context.Response.StatusCode = 500;
+                app.Logger.LogError(ex, "MCP HTTP request failed; response started: {ResponseStarted}.", context.Response.HasStarted);
+                throw;
+            }
+            finally
+            {
+                app.Logger.Log(context.Response.StatusCode >= 500 ? LogLevel.Error
+                    : context.Response.StatusCode >= 400 && context.Response.StatusCode != 499 ? LogLevel.Warning : LogLevel.Information,
+                    "MCP HTTP {RequestMethod} {RequestPath} returned {StatusCode}.",
+                    context.Request.Method, context.Request.Path.Value, context.Response.StatusCode);
+            }
+        });
         var checkReady = readiness ?? (ct => ReadyAsync(database!, ct));
         app.MapGet("/health/live", () => Results.Json(new { service = "laplace-mcp", live = true }));
         app.MapGet("/health/ready", async (CancellationToken ct) =>
@@ -67,7 +100,7 @@ internal static class McpHttpHost
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                app.Logger.LogWarning("MCP readiness failed: {ErrorType}", ex.GetType().Name);
+                app.Logger.LogWarning(ex, "MCP readiness failed.");
                 return Results.Json(new { service = "laplace-mcp", ready = false }, statusCode: 503);
             }
         });
@@ -206,7 +239,7 @@ internal static class McpHttpHost
             catch (Exception ex)
             {
                 context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("mcp")
-                    .LogError("MCP handler failed: {ErrorType}", ex.GetType().Name);
+                    .LogError(ex, "MCP handler failed.");
                 reply = McpServer.ErrorReply(message["id"]?.DeepClone(), -32603, "tool dispatch failed");
             }
             if (reply is null) { context.Response.StatusCode = 202; return; }

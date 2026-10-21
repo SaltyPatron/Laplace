@@ -11,6 +11,14 @@ public static unsafe class ChessPositionFloor
     // Native lookup owns a concurrent reader guard through the complete geometry copy.
     private static long _lookupHits;
     private static long _lookupMisses;
+    private static int _missingNativeReported;
+    private static int _missingFileReported;
+
+    private static void MissingNative(EntryPointNotFoundException exception)
+    {
+        if (Interlocked.Exchange(ref _missingNativeReported, 1) == 0)
+            System.Diagnostics.Trace.TraceWarning("Chess position cache native ABI is unavailable; lookups cannot use the cache. {0}", exception);
+    }
 
     public readonly record struct Observation(
         bool IsLoaded, long RecordCount, long LookupHits, long LookupMisses);
@@ -24,7 +32,7 @@ public static unsafe class ChessPositionFloor
             ulong count = 0;
             bool loaded;
             try { loaded = NativeInterop.ChessPositionTableRecordCount(&count) == 0; }
-            catch (EntryPointNotFoundException) { loaded = false; }
+            catch (EntryPointNotFoundException ex) { MissingNative(ex); loaded = false; }
             return new(loaded, checked((long)count),
                 Interlocked.Read(ref _lookupHits), Interlocked.Read(ref _lookupMisses));
         }
@@ -62,8 +70,9 @@ public static unsafe class ChessPositionFloor
             {
                 if (IsLoadedUnlocked()) return;
             }
-            catch (EntryPointNotFoundException)
+            catch (EntryPointNotFoundException ex)
             {
+                MissingNative(ex);
                 // A native library without chess_position_table_* leaves the map unloaded.
                 return;
             }
@@ -71,13 +80,18 @@ public static unsafe class ChessPositionFloor
             if (string.IsNullOrEmpty(path))
                 path = ResolveBesideT0();
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
-                return; // no blob present: every lookup reports a miss
+            {
+                if (Interlocked.Exchange(ref _missingFileReported, 1) == 0)
+                    System.Diagnostics.Trace.TraceWarning("Chess position cache file is unavailable at '{0}'; lookups cannot use the cache.", path ?? "(unresolved)");
+                return;
+            }
             try
             {
-                _ = NativeInterop.ChessPositionTableLoad(path);
+                Load(path); // A corrupt or incompatible file must not become an ordinary cache miss.
             }
-            catch (EntryPointNotFoundException)
+            catch (EntryPointNotFoundException ex)
             {
+                MissingNative(ex);
                 // Native library lacks the load entry point: the map stays unloaded.
             }
         }
@@ -99,7 +113,7 @@ public static unsafe class ChessPositionFloor
         {
             ulong n = 0;
             try { return NativeInterop.ChessPositionTableRecordCount(&n) == 0 ? (long)n : 0; }
-            catch (EntryPointNotFoundException) { return 0; }
+            catch (EntryPointNotFoundException ex) { MissingNative(ex); return 0; }
         }
     }
 
@@ -120,7 +134,7 @@ public static unsafe class ChessPositionFloor
         byte tierLocal = 0;
         int result;
         try { result = NativeInterop.ChessPositionTableLookupGeom(&id, coord, &hbLocal, &nLocal, &tierLocal); }
-        catch (EntryPointNotFoundException) { result = -1; }
+        catch (EntryPointNotFoundException ex) { MissingNative(ex); result = -1; }
         if (result != 0)
         {
             Interlocked.Increment(ref _lookupMisses);
@@ -140,7 +154,7 @@ public static unsafe class ChessPositionFloor
     private static bool IsLoadedUnlockedSafe()
     {
         try { return IsLoadedUnlocked(); }
-        catch (EntryPointNotFoundException) { return false; }
+        catch (EntryPointNotFoundException ex) { MissingNative(ex); return false; }
     }
 
     private static string? ResolveBesideT0()
@@ -153,8 +167,9 @@ public static unsafe class ChessPositionFloor
             string candidate = Path.Combine(dir, "laplace_chess_position_perfcache.bin");
             return File.Exists(candidate) ? candidate : null;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            System.Diagnostics.Trace.TraceWarning("Cannot resolve chess cache beside the Unicode cache. {0}", ex);
             return null;
         }
     }

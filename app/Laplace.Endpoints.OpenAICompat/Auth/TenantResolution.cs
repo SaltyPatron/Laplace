@@ -239,7 +239,7 @@ internal sealed class ApiKeyEnforcementMiddleware
         context.GetEndpoint() is RouteEndpoint endpoint
         && endpoint.RoutePattern.RawText?.StartsWith("/chess/", StringComparison.OrdinalIgnoreCase) == true;
 
-    private static bool SameOrigin(HttpRequest request)
+    internal static bool SameOrigin(HttpRequest request)
     {
         var origin = request.Headers.Origin.ToString();
         if (!string.IsNullOrWhiteSpace(origin))

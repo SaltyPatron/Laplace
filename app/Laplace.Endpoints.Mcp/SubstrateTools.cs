@@ -253,18 +253,22 @@ internal sealed class SubstrateTools : IMcpTools
         }
         catch (PostgresException ex)
         {
+            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP tool database query failed.");
             return ($"substrate error [{ex.SqlState}]: {ex.MessageText}", true);
         }
         catch (NpgsqlException ex)
         {
+            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP tool database connection failed.");
             return ($"substrate unavailable: {ex.Message}", true);
         }
         catch (AgentException ex)
         {
+            Serilog.Log.ForContext<SubstrateTools>().Warning(ex, "MCP agent operation failed.");
             return (ex.Message, true);
         }
         catch (ArgumentException ex)
         {
+            Serilog.Log.ForContext<SubstrateTools>().Warning(ex, "MCP tool rejected its arguments.");
             return (ex.Message, true);
         }
     }
@@ -1008,6 +1012,7 @@ internal sealed class SubstrateTools : IMcpTools
         catch (Exception ex)
         {
             _plainWriterBroken = true;
+            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP writer initialization failed.");
             Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
         }
     }
@@ -1443,9 +1448,9 @@ internal sealed class SubstrateTools : IMcpTools
                     }
                     row["meaning"] = meaningArr;
                 }
-                catch (NpgsqlException)
+                catch (NpgsqlException ex)
                 {
-                    row["witnessed_in_substrate"] = null;
+                    throw new NpgsqlException("Requested embedding meaning lookup failed; no complete result is available.", ex);
                 }
             }
 
@@ -1591,9 +1596,9 @@ internal sealed class SubstrateTools : IMcpTools
                     combined.Add(item.Row);
                 }
             }
-            catch (NpgsqlException)
+            catch (NpgsqlException ex)
             {
-                // Substrate DB lookup is optional when workspace index satisfies code search
+                throw new NpgsqlException("Code search substrate lookup failed; combined results are incomplete.", ex);
             }
         }
 

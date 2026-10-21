@@ -1,0 +1,70 @@
+-- Adopt the historical migration-owned readers once, so existing installations
+-- receive the same corrected failure contract as fresh databases.
+DO $adopt_logs$
+DECLARE signature text;
+BEGIN
+    FOREACH signature IN ARRAY ARRAY['ops.app_log()', 'ops.chess_drops()', 'ops.repoint_app_log(text)'] LOOP
+        IF to_regprocedure(signature) IS NOT NULL AND NOT EXISTS (
+            SELECT FROM pg_depend d JOIN pg_extension e ON e.oid=d.refobjid
+            WHERE d.classid='pg_proc'::regclass AND d.objid=to_regprocedure(signature)
+              AND d.refclassid='pg_extension'::regclass AND d.deptype='e'
+              AND e.extname='laplace_substrate') THEN
+            EXECUTE 'ALTER EXTENSION laplace_substrate ADD FUNCTION ' || signature;
+        END IF;
+    END LOOP;
+END $adopt_logs$;
+
+-- Fresh installs create the server/tables in the application migration. Existing
+-- installations need the newly instrumented Lichess role added during upgrade.
+DO $lichess_log$
+BEGIN
+    IF EXISTS (SELECT FROM pg_foreign_server WHERE srvname='ops_log_files')
+       AND to_regclass('ops.app_log_lichess') IS NULL THEN
+        CREATE FOREIGN TABLE ops.app_log_lichess (
+            log_time timestamptz, application_name text, error_severity text,
+            category text, message text, detail text
+        ) SERVER ops_log_files OPTIONS (filename 'ops_app_log_lichess_awaiting_repoint.csv', format 'csv');
+    END IF;
+END $lichess_log$;
+
+CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_dir text)
+    RETURNS text LANGUAGE plpgsql AS $repoint$
+DECLARE r text; n int := 0;
+BEGIN
+    IF p_dir IS NULL OR btrim(p_dir) = '' THEN
+        RAISE EXCEPTION 'ops.repoint_app_log: a log directory is required';
+    END IF;
+    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
+        EXECUTE format('ALTER FOREIGN TABLE ops.%I OPTIONS (SET filename %L)',
+            'app_log_' || r, rtrim(p_dir, '/') || '/laplace-' || r || '.csv');
+        n := n + 1;
+    END LOOP;
+    RETURN format('repointed %s role tables at %s', n, p_dir);
+END $repoint$;
+
+CREATE OR REPLACE FUNCTION ops.app_log()
+    RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
+                  category text, message text, detail text)
+    LANGUAGE plpgsql STABLE AS $logs$
+DECLARE r text;
+BEGIN
+    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
+        BEGIN
+            RETURN QUERY EXECUTE 'SELECT log_time,application_name,error_severity,category,message,detail FROM ops.'
+                || quote_ident('app_log_' || r);
+        EXCEPTION WHEN undefined_file OR undefined_table THEN
+            RAISE WARNING 'Application log for role % is unavailable [%]: %', r, SQLSTATE, SQLERRM;
+        END;
+    END LOOP;
+END $logs$;
+
+CREATE OR REPLACE FUNCTION ops.chess_drops()
+    RETURNS TABLE(log_time timestamptz, source_name text, reason text, dropped bigint,
+                  kept bigint, seen bigint, drop_pct double precision)
+    LANGUAGE plpgsql STABLE AS $drops$
+BEGIN
+    RETURN QUERY SELECT f.log_time,f.source_name,f.reason,f.dropped,f.kept,f.seen,f.drop_pct
+        FROM ops.chess_drops_ft f;
+EXCEPTION WHEN undefined_file OR undefined_table THEN
+    RAISE WARNING 'Chess drop log is unavailable [%]: %', SQLSTATE, SQLERRM;
+END $drops$;

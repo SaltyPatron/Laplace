@@ -22,8 +22,10 @@ internal sealed class LichessStatusClient(HttpClient client) : ILichessStatusCli
             var status = await client.GetFromJsonAsync<LichessConnectivityStatus>("/status", Json, ct);
             return status is null ? new(null, "empty status response") : new(status, null);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when ((ex is HttpRequestException or JsonException)
+            || ex is TaskCanceledException && !ct.IsCancellationRequested)
         {
+            Serilog.Log.ForContext<LichessStatusClient>().Warning(ex, "Lichess status probe failed.");
             return new(null, ex is TaskCanceledException ? "status request timed out" : ex.GetType().Name);
         }
     }
@@ -35,7 +37,11 @@ internal sealed class LichessStatusClient(HttpClient client) : ILichessStatusCli
         {
             return await client.GetFromJsonAsync<LichessChatLine[]>($"/games/{gameId}/chat", Json, ct) ?? [];
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { return []; }
+        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            Serilog.Log.ForContext<LichessStatusClient>().Warning(ex, "Lichess chat read failed for {GameId}.", gameId);
+            throw new SubstrateUnavailableException("Lichess chat is unavailable.", ex);
+        }
     }
 }
 

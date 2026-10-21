@@ -232,11 +232,23 @@ public static class LaplaceInstall
     /// Mask the password in a connection string for safe logging. Covers both the
     /// `Password=` and `Pwd=` spellings.
     /// </summary>
-    public static string RedactConnectionString(string conn) =>
-        string.IsNullOrEmpty(conn)
-            ? conn
-            : System.Text.RegularExpressions.Regex.Replace(
-                conn, "(?i)(password|pwd)=[^;]*", "$1=***");
+    public static string RedactConnectionString(string conn)
+    {
+        if (string.IsNullOrEmpty(conn)) return conn;
+        try
+        {
+            var parsed = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = conn };
+            foreach (var key in parsed.Keys.Cast<string>().ToArray())
+                if (key.Contains("password", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("pwd", StringComparison.OrdinalIgnoreCase)) parsed[key] = "***";
+            return parsed.ConnectionString;
+        }
+        catch (ArgumentException)
+        {
+            // A malformed quoted password cannot safely be redacted with a regex.
+            return "(invalid connection string; contents withheld)";
+        }
+    }
 
     public static string ResolveT0Perfcache()
     {

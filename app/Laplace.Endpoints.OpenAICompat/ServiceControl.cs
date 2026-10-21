@@ -124,9 +124,17 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
             budget.CancelAfter(TimeSpan.FromSeconds(10));
             using var process = Process.Start(info);
             if (process is null) return null;
-            var stdout = await process.StandardOutput.ReadToEndAsync(budget.Token);
+            var output = process.StandardOutput.ReadToEndAsync(budget.Token);
+            var errors = process.StandardError.ReadToEndAsync(budget.Token);
             await process.WaitForExitAsync(budget.Token);
-            if (process.ExitCode != 0) return null;
+            var stdout = await output;
+            var stderr = await errors;
+            if (process.ExitCode != 0)
+            {
+                Serilog.Log.ForContext<ServiceControl>().Warning(
+                    "Systemd query for {Unit} failed with exit {ExitCode}: {Diagnostic}", unit, process.ExitCode, stderr);
+                return null;
+            }
             var values = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2)
                 .ToDictionary(pair => pair[0], pair => pair[1].TrimEnd('\r'), StringComparer.Ordinal);
@@ -136,8 +144,10 @@ internal sealed class ServiceControl(ILogger<ServiceControl> log) : IServiceCont
                 int.TryParse(values.GetValueOrDefault("MainPID"), out var pid) ? pid : 0,
                 values.GetValueOrDefault("UnitFileState", "unknown"), ManagedServiceState.OperatorStopped(name));
         }
-        catch
+        catch (Exception ex) when (ex is IOException or Win32Exception or InvalidOperationException
+            || ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
+            Serilog.Log.ForContext<ServiceControl>().Warning(ex, "Systemd query for {Unit} failed.", unit);
             return null;
         }
     }
@@ -183,8 +193,11 @@ internal static class SharedServiceProbe
                         "loaded", "active", "running", "success", 0, "enabled", false);
                 }
             }
-            catch
+            catch (Exception ex) when (ex is HttpRequestException or UriFormatException
+                || ex is OperationCanceledException && !ct.IsCancellationRequested)
             {
+                Serilog.Log.ForContext("SourceContext", typeof(SharedServiceProbe).FullName)
+                    .Warning(ex, "Shared MCP service probe failed.");
             }
         }
         return null;
@@ -222,15 +235,16 @@ internal sealed class WindowsServiceControl(ILogger<WindowsServiceControl> log) 
         using var sc = new ServiceController(unit);
         ServiceControllerStatus status;
         try { status = sc.Status; }
-        catch (InvalidOperationException) when (action == ServiceAction.Status)
+        catch (InvalidOperationException ex) when (action == ServiceAction.Status
+            && ex.InnerException is Win32Exception { NativeErrorCode: 1060 })
         {
-            // not installed, or the pool identity may not query it: both are "not found" to the caller
+            log.LogInformation("Managed service {Unit} is not installed.", unit);
             return new(name, unit, verb, false, "not-found", "inactive", "dead", "unknown", 0, "unknown",
                 ManagedServiceState.OperatorStopped(name));
         }
         catch (InvalidOperationException ex)
         {
-            log.LogError("managed service {Unit} cannot be queried ({Error}); run scripts/win/ensure-managed-services.cmd elevated", unit, ex.InnerException?.Message ?? ex.Message);
+            log.LogError(ex, "Managed service {Unit} cannot be queried.", unit);
             throw new ServiceControlUnavailableException();
         }
         if (action != ServiceAction.Status)
@@ -274,8 +288,11 @@ internal sealed class WindowsServiceControl(ILogger<WindowsServiceControl> log) 
                     if (previouslyStopped) await File.WriteAllTextAsync(marker, DateTimeOffset.UtcNow.ToString("O"), CancellationToken.None);
                     else File.Delete(marker);
                 }
-                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException) { }
-                log.LogError("managed service action failed: service={Service} action={Action} ({Error})", name, verb, ex.InnerException?.Message ?? ex.Message);
+                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException)
+                {
+                    log.LogError(restore, "Cannot restore the operator-stop marker for {Service}.", name);
+                }
+                log.LogError(ex, "Managed service action failed: service={Service} action={Action}.", name, verb);
                 throw new ServiceControlUnavailableException();
             }
             sc.Refresh();
@@ -299,7 +316,7 @@ internal sealed class WindowsServiceControl(ILogger<WindowsServiceControl> log) 
                 ServiceStartMode.Disabled => "disabled", _ => "unknown",
             };
         }
-        catch (InvalidOperationException) { }
+        catch (InvalidOperationException ex) { log.LogWarning(ex, "Cannot read start mode for {Service}.", name); }
         return new(name, unit, verb, action != ServiceAction.Status, "loaded", active, sub,
             status == ServiceControllerStatus.Paused ? "exit-code" : "success", 0, enabled,
             ManagedServiceState.OperatorStopped(name));
