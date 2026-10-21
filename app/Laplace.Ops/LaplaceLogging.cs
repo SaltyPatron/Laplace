@@ -223,14 +223,17 @@ public static class LaplaceLogging
         public override void Write(string? message) => Log.Information("{TraceMessage}", message);
         public override void WriteLine(string? message) => Write(message);
         public override void TraceEvent(TraceEventCache? cache, string source, TraceEventType type, int id, string? message)
+            => WriteEvent(source, type, id, message, null);
+        private static void WriteEvent(string source, TraceEventType type, int id, string? message, Exception? failure)
             => Log.ForContext("SourceContext", source).ForContext("EventId", id).Write(
                 type is TraceEventType.Critical ? LogEventLevel.Fatal : type is TraceEventType.Error
                     ? LogEventLevel.Error : type is TraceEventType.Warning ? LogEventLevel.Warning : LogEventLevel.Information,
-                "{TraceMessage}", message);
+                failure, "{TraceMessage}", message);
         public override void TraceEvent(TraceEventCache? cache, string source, TraceEventType type, int id,
             string? format, params object?[]? args)
-            => TraceEvent(cache, source, type, id, args is null ? format
-                : string.Format(System.Globalization.CultureInfo.InvariantCulture, format ?? "", args));
+            => WriteEvent(source, type, id, args is null ? format
+                : string.Format(System.Globalization.CultureInfo.InvariantCulture, format ?? "", args),
+                args?.OfType<Exception>().FirstOrDefault());
     }
 
     public static string CorrelationId(string? value) => !string.IsNullOrWhiteSpace(value)

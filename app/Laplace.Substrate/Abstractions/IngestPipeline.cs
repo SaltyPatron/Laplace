@@ -673,13 +673,18 @@ public static class IngestBatchPipeline
             : change;
     }
 
-    public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex) =>
-        BindFileLabel(
+    public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex)
+    {
+        // The receipt carries a concise display message. Keep the full exception
+        // chain and stack in the host's persistent Trace bridge before isolation.
+        System.Diagnostics.Trace.TraceError("INGEST_FILE_FAILED source={0} file={1}: {2}", sourceId, fileLabel, ex);
+        return BindFileLabel(
             new SubstrateChangeBuilder(
                 sourceId, $"{FileFailedUnitPrefix}{fileLabel}: [{ex.GetType().Name}] {ex.Message}", null,
                 entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0)
             .Build() with { CountsAsUnit = false },
             fileLabel);
+    }
 
     internal sealed class AllAbsentSubstrateReader : ISubstrateReader
     {

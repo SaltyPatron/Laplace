@@ -17,6 +17,31 @@ public sealed class PersistentLoggingCollection;
 public sealed class PersistentLogSinkTests
 {
     [Fact]
+    public void TraceBridgeRetainsTypedExceptionAndCorrelationInRealPersistentEvents()
+    {
+        WithLogDirectory(directory =>
+        {
+            var previous = Log.Logger;
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("trace-test", false,
+                health: new PersistentLogHealth()).CreateLogger();
+            try
+            {
+                Log.Logger = logger;
+                using (Serilog.Context.LogContext.PushProperty("CorrelationId", "isolated-input-request"))
+                    Trace.TraceError("INPUT_FAILURE file={0}: {1}", "input-fixture",
+                        new InvalidDataException("input-outer", new IOException("storage-inner")));
+                string path = Assert.Single(Directory.GetFiles(directory, "laplace-trace-test-*.jsonl"));
+                using var json = JsonDocument.Parse(ReadShared(path));
+                Assert.Equal("Error", json.RootElement.GetProperty("Level").GetString());
+                Assert.Contains("storage-inner", json.RootElement.GetProperty("Exception").GetString());
+                Assert.Equal("isolated-input-request", json.RootElement.GetProperty("Properties").GetProperty("CorrelationId").GetString());
+                Assert.Contains("input-fixture", ReadShared(Path.Combine(directory, "laplace-trace-test.csv")));
+            }
+            finally { Log.Logger = previous; }
+        });
+    }
+
+    [Fact]
     public void RealFilesRetainExceptionAndCorrelationAndSinkFailuresBecomeUnready()
     {
         WithLogDirectory(directory =>

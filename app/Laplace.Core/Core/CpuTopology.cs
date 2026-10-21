@@ -234,10 +234,14 @@ public static class CpuTopology
 
 
     public static void RunPinnedParallel(int count, int workers, Action<int> body)
+        => RunPinnedParallel(count, workers, body, PinWorkerThread);
+
+    internal static void RunPinnedParallel(int count, int workers, Action<int> body, Action<int> initializeWorker)
 
     {
 
         ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(initializeWorker);
 
         if (count <= 0) return;
 
@@ -249,7 +253,7 @@ public static class CpuTopology
 
         {
 
-            PinWorkerThread(0);
+            initializeWorker(0);
 
             for (int i = 0; i < count; i++) body(i);
 
@@ -263,7 +267,7 @@ public static class CpuTopology
 
         var next = -1;
 
-        Exception? failure = null;
+        var errors = new Exception?[workers];
 
         for (int w = 0; w < workers; w++)
 
@@ -275,19 +279,13 @@ public static class CpuTopology
 
             {
 
-                PinWorkerThread(workerId);
-
-                int i;
-
-                while ((i = Interlocked.Increment(ref next)) < count)
-
+                try
                 {
-
-                    try { body(i); }
-
-                    catch (Exception ex) { Interlocked.CompareExchange(ref failure, ex, null); return; }
-
+                    initializeWorker(workerId);
+                    int i;
+                    while ((i = Interlocked.Increment(ref next)) < count) body(i);
                 }
+                catch (Exception ex) { errors[workerId] = ex; }
 
             })
             { IsBackground = true, Name = $"laplace-pcore-{w}" };
@@ -298,7 +296,7 @@ public static class CpuTopology
 
         foreach (var t in threads) t.Join();
 
-        if (failure is not null) throw failure;
+        ThrowWorkerFailures(errors);
 
     }
 
@@ -347,14 +345,21 @@ public static class CpuTopology
 
         foreach (var t in threads) t.Join();
 
+        ThrowWorkerFailures(errors, ct);
         ct.ThrowIfCancellationRequested();
-
-        foreach (var ex in errors)
-
-            if (ex is not null) throw ex;
 
         await Task.CompletedTask;
 
+    }
+
+    private static void ThrowWorkerFailures(IEnumerable<Exception?> errors, CancellationToken caller = default)
+    {
+        var failures = errors.OfType<Exception>()
+            .Where(error => error is not OperationCanceledException || !caller.IsCancellationRequested)
+            .Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+        if (failures.Length > 1) throw new AggregateException("Multiple pinned workers failed.", failures);
+        if (failures.Length == 1)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
     }
 
 

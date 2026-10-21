@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 
 namespace Laplace.Decomposers.Abstractions;
@@ -29,6 +29,7 @@ public static class ParallelLineParse
         [EnumeratorCancellation] CancellationToken ct = default)
         where T : class
     {
+        ct.ThrowIfCancellationRequested();
         int workers = Math.Max(1, workerCount);
         var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(workers)
         {
@@ -45,6 +46,23 @@ public static class ParallelLineParse
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var runCt = linked.Token;
+        ExceptionDispatchInfo? failure = null;
+        void Failed(Exception error)
+        {
+            if (error is OperationCanceledException)
+            {
+                if (runCt.IsCancellationRequested) return;
+                error = new InvalidOperationException("Line parser cancelled without caller cancellation.", error);
+            }
+            if (Interlocked.CompareExchange(ref failure, ExceptionDispatchInfo.Capture(error), null) is null)
+            {
+                parsed.Writer.TryComplete(error);
+                linked.Cancel();
+            }
+            else if (error is not ChannelClosedException
+                && !ReferenceEquals(error, Volatile.Read(ref failure)?.SourceException))
+                System.Diagnostics.Trace.TraceWarning("Additional line parser failure for {0}: {1}", filePath, error);
+        }
 
         var feeder = Task.Run(async () =>
         {
@@ -55,28 +73,16 @@ public static class ParallelLineParse
                     if (lineMem.IsEmpty) continue;
                     await rawLines.Writer.WriteAsync(lineMem.ToArray(), runCt);
                 }
-                rawLines.Writer.TryComplete();
             }
-            catch (OperationCanceledException)
-            {
-                rawLines.Writer.TryComplete();
-            }
-            catch (Exception ex)
-            {
-                // An IO fault must ride the channel chain: completing rawLines WITH the
-                // fault makes every worker's WaitToReadAsync throw it, which completes
-                // `parsed` faulted and fails the consumer. Completing clean here (the
-                // old `finally`) made a truncated or unreadable file look like a
-                // successful ingest of its readable prefix.
-                rawLines.Writer.TryComplete(ex);
-            }
-        }, runCt);
+            catch (Exception ex) { Failed(ex); }
+            finally { rawLines.Writer.TryComplete(); }
+        }, CancellationToken.None);
 
-        var errors = new ConcurrentQueue<Exception>();
+        var workerTasks = new Task[workers];
         int workersLeft = workers;
         for (int w = 0; w < workers; w++)
         {
-            _ = Task.Run(async () =>
+            workerTasks[w] = Task.Run(async () =>
             {
                 try
                 {
@@ -91,33 +97,33 @@ public static class ParallelLineParse
                         }
                     }
                 }
-                catch (OperationCanceledException) { }
-                catch (Exception ex)
-                {
-                    errors.Enqueue(ex);
-                    linked.Cancel();
-                }
+                catch (Exception ex) { Failed(ex); }
                 finally
                 {
                     if (Interlocked.Decrement(ref workersLeft) == 0)
-                        parsed.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
+                        parsed.Writer.TryComplete(Volatile.Read(ref failure)?.SourceException);
                 }
-            }, runCt);
+            }, CancellationToken.None);
         }
 
         try
         {
-            await foreach (var record in parsed.Reader.ReadAllAsync(runCt))
+            // Internal sibling cancellation must not replace the original failure.
+            await foreach (var record in parsed.Reader.ReadAllAsync(ct))
+            {
+                Volatile.Read(ref failure)?.Throw();
                 yield return record;
+            }
+            ct.ThrowIfCancellationRequested();
         }
         finally
         {
-            // A consumer that stops enumerating early leaves the feeder blocked on a
-            // full channel no one drains; awaiting it without cancelling first is a
-            // deadlock. Cancel unblocks feeder and workers; faults on the normal path
-            // have already propagated through the channel completions above.
+            // The cancellation source outlives every worker using it, including when
+            // the consumer stops early. Observe all owned tasks before returning.
             linked.Cancel();
-            try { await feeder; } catch { }
+            await feeder.ConfigureAwait(false);
+            await Task.WhenAll(workerTasks).ConfigureAwait(false);
+            Volatile.Read(ref failure)?.Throw();
         }
     }
 }
