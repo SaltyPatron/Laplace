@@ -127,7 +127,10 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
 
                 if (!deposited)
                 {
-                    _log.LogWarning("turn-witness could not commit turn");
+                    if (closer.LastFailure is { } failure)
+                        _log.LogError(failure, "turn-witness could not commit turn");
+                    else
+                        _log.LogWarning("turn-witness could not commit turn");
                     continue;
                 }
 

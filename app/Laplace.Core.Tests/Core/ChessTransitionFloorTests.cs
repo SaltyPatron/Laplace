@@ -29,7 +29,16 @@ public sealed class ChessTransitionFloorTests
     private static string TempBlob() =>
         Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}.bin");
 
-    [Fact]
+    private static void CreateSymlink(string path, string target)
+    {
+        try { File.CreateSymbolicLink(path, target); }
+        catch (IOException error) when (OperatingSystem.IsWindows() && (error.HResult & 0xffff) == 1314)
+        {
+            Skip.If(true, "Windows identity lacks symbolic-link creation privilege (ERROR_PRIVILEGE_NOT_HELD). Linux and privileged Windows hosts run this assertion.");
+        }
+    }
+
+    [SkippableFact]
     public void RelativeSymlinkLoadsTheSamePersistentTransitionsAsItsTarget()
     {
         string directory = Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}");
@@ -40,7 +49,7 @@ public sealed class ChessTransitionFloorTests
         try
         {
             ChessTransitionFloor.WriteBlob(target, pairs);
-            File.CreateSymbolicLink(selected, Path.GetFileName(target));
+            CreateSymlink(selected, Path.GetFileName(target));
             ChessTransitionFloor.Load(target);
             var direct = ChessTransitionFloor.Observe();
             ChessTransitionFloor.Unload();
@@ -66,7 +75,7 @@ public sealed class ChessTransitionFloorTests
         }
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData(0)]
     [InlineData(79)]
     public void SymlinkToShortTargetPreservesThePublishedMapAndNovelGeneration(int length)
@@ -83,7 +92,7 @@ public sealed class ChessTransitionFloorTests
             ChessTransitionFloor.Load(valid);
             ChessTransitionFloor.Remember(K("computed"), V("computed"));
             File.WriteAllBytes(shortTarget, new byte[length]);
-            File.CreateSymbolicLink(selected, Path.GetFileName(shortTarget));
+            CreateSymlink(selected, Path.GetFileName(shortTarget));
 
             foreach (string path in new[] { shortTarget, selected })
             {

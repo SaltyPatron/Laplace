@@ -43,6 +43,7 @@ public sealed class TurnCloser : IAsyncDisposable
     /// lane; one transient failure must not permanently disable session learning.
     /// </summary>
     public bool Broken { get; private set; }
+    public Exception? LastFailure { get; private set; }
 
     public TurnCloser(NpgsqlDataSource db, Action<string>? warn = null)
     {
@@ -102,6 +103,7 @@ public sealed class TurnCloser : IAsyncDisposable
             // beyond the next prompt and cannot close a live conversation turn.
             await _writer.ApplyConversationTurnAsync(turnChange, sessionId, turns, ct);
             Broken = false;
+            LastFailure = null;
             return true;
         }
         catch (OperationCanceledException)
@@ -111,6 +113,20 @@ public sealed class TurnCloser : IAsyncDisposable
         catch (Exception ex)
         {
             Broken = true;
+            LastFailure = ex;
+            // Every process installs the shared Trace-to-structured-log bridge.
+            // Retain the cause even when the caller supplies no console callback.
+            System.Diagnostics.Trace.TraceError("Conversation turn deposit failed: {0}", ex);
+            var failedWriter = _writer;
+            _writer = null;
+            if (failedWriter is not null)
+            {
+                try { await failedWriter.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception cleanupError)
+                {
+                    System.Diagnostics.Trace.TraceError("Conversation writer retirement failed: {0}", cleanupError);
+                }
+            }
             _warn?.Invoke($"turn deposit failed: {ex.Message}");
             return false;
         }

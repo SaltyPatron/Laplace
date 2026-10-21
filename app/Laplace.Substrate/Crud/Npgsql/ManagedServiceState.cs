@@ -19,8 +19,20 @@ public static class ManagedServiceState
     public static string StopMarker(string service) => Path.Combine(Directory, service + ".stopped");
 
     public static bool OperatorStopped(string service)
+        => OperatorStoppedAtPath(StopMarker(service));
+
+    internal static bool OperatorStoppedAtPath(string marker)
     {
-        try { return File.Exists(StopMarker(service)); }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { return false; }
+        try
+        {
+            // File.Exists also returns false on access and IO failures. Starting
+            // in that state would silently undo an operator's persisted stop.
+            var attributes = File.GetAttributes(marker);
+            if ((attributes & FileAttributes.Directory) != 0)
+                throw new InvalidDataException("The managed-service stop marker is a directory: " + marker);
+            return true;
+        }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
     }
 }

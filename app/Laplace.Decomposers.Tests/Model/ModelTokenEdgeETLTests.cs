@@ -272,7 +272,7 @@ public sealed class ModelTokenEdgeETLTests
     }
 
     [Fact]
-    public async Task CorroborationWorkingSet_RechecksBothHeldSnapshotsBeforeApplyCommit()
+    public async Task CorroborationWorkingSet_PreventsOrDetectsMutationBeforeApplyCommit()
     {
         string leftDir = WriteEmbeddingFixture([1, 0, 1, 0, 0, 1]);
         string rightDir = WriteEmbeddingFixture([2, 0, 1, 0, 0, 1]);
@@ -294,17 +294,32 @@ public sealed class ModelTokenEdgeETLTests
                 etl.AnalyzeAsync(1, new PairProposalReader([proposal]))));
 
             string changedPath = Path.Combine(rightDir, "model.safetensors");
-            using (var changed = new FileStream(
-                       changedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+            Exception? mutationError = Record.Exception(() =>
             {
+                using var changed = new FileStream(changedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
                 changed.Position = changed.Length - 1;
                 int previous = changed.ReadByte();
                 changed.Position--;
                 changed.WriteByte((byte)(previous ^ 0xff));
-            }
+            });
 
-            await Assert.ThrowsAsync<InvalidDataException>(
-                () => set.ApplyAsync(new PrecommitVerifyingWriter()));
+            var writer = new PrecommitVerifyingWriter();
+            if (OperatingSystem.IsWindows())
+            {
+                // Held read handles deny writes on Windows. Check the exact sharing
+                // violation, then verify that the unchanged snapshots can commit.
+                Assert.Equal(32, Assert.IsType<IOException>(mutationError).HResult & 0xffff);
+                leftSnapshot.VerifySourceId();
+                rightSnapshot.VerifySourceId();
+                await set.ApplyAsync(writer);
+                Assert.True(writer.Committed);
+            }
+            else
+            {
+                Assert.Null(mutationError);
+                await Assert.ThrowsAsync<InvalidDataException>(() => set.ApplyAsync(writer));
+                Assert.False(writer.Committed);
+            }
         }
         finally
         {
@@ -642,6 +657,7 @@ public sealed class ModelTokenEdgeETLTests
 
     private sealed class PrecommitVerifyingWriter : ISubstrateWriter
     {
+        public bool Committed { get; private set; }
         public Task<ApplyResult> ApplyAsync(
             SubstrateChange change, CancellationToken ct = default) =>
             throw new NotSupportedException();
@@ -652,6 +668,7 @@ public sealed class ModelTokenEdgeETLTests
             CancellationToken ct = default)
         {
             await precommitVerifier(ct);
+            Committed = true;
             return new ApplyResult(
                 0, 0, 0, 0,
                 changes.Sum(static change => change.Attestations.Length), 0,

@@ -638,50 +638,16 @@ SQL_QUERY("maintenance.database_identity", "",
     "SELECT current_database(), "
     "    (SELECT oid::text FROM pg_database WHERE datname=current_database()), "
     "    (SELECT system_identifier::text FROM pg_control_system()) ")
-SQL_QUERY("source.observation_contexts", "bytea,bytea,bytea,bytea[]",
-    "SELECT DISTINCT context_id FROM laplace.attestations "
-    "WHERE source_id=$1 AND type_id=$2 AND object_id=$3 AND context_id=ANY($4) ")
-SQL_QUERY("source.observation_inventory", "bytea,bytea,bytea",
-    "SELECT count(*), "
-    "       count(*) FILTER (WHERE type_id=$2 AND object_id=$3 AND context_id IS NULL), "
-    "       count(*) FILTER (WHERE type_id=$2 AND object_id=$3 AND context_id IS NOT NULL), "
-    "       coalesce(sum(observation_count) FILTER (WHERE type_id=$2 AND object_id=$3),0)::bigint, "
-    "       count(DISTINCT context_id) FILTER (WHERE type_id=$2 AND object_id=$3) "
-    "       current_database(), current_setting('server_version') "
-    "FROM laplace.attestations WHERE source_id=$1 ")
-SQL_QUERY("source.migration_retention", "bytea",
-    "WITH owned_receipts AS MATERIALIZED ( "
-    "    SELECT receipt.* FROM laplace.ingest_flush_journal receipt "
-    "    WHERE receipt.source_id=$1 OR EXISTS ( "
-    "        SELECT FROM laplace.ingest_flush_journal_sources owner "
-    "        WHERE owner.working_set_id=receipt.working_set_id AND owner.source_id=$1) "
-    "), rows AS ( "
-    "    SELECT 'source_evidence' AS section, to_jsonb(a) AS body "
-    "    FROM laplace.attestations a WHERE a.source_id=$1 "
-    "    UNION ALL "
-    "    SELECT 'affected_standing',to_jsonb(c) FROM laplace.consensus c "
-    "    WHERE EXISTS (SELECT FROM laplace.attestations a WHERE a.source_id=$1 "
-    "        AND a.type_id=c.type_id AND a.subject_id=c.subject_id "
-    "        AND a.object_id IS NOT DISTINCT FROM c.object_id) "
-    "    UNION ALL "
-    "    SELECT 'surviving_evidence',to_jsonb(a) FROM laplace.attestations a "
-    "    WHERE a.source_id<>$1 AND EXISTS ( "
-    "        SELECT FROM laplace.attestations old WHERE old.source_id=$1 "
-    "        AND old.type_id=a.type_id AND old.subject_id=a.subject_id "
-    "        AND old.object_id IS NOT DISTINCT FROM a.object_id) "
-    "    UNION ALL "
-    "    SELECT 'flush_receipts',to_jsonb(r) FROM owned_receipts r "
-    "    UNION ALL "
-    "    SELECT 'flush_receipt_sources',to_jsonb(s) FROM laplace.ingest_flush_journal_sources s "
-    "    WHERE EXISTS (SELECT FROM owned_receipts r WHERE r.working_set_id=s.working_set_id) "
-    "    UNION ALL "
-    "    SELECT 'unit_completions',to_jsonb(u) FROM laplace.ingest_unit_completion u "
-    "    WHERE u.witness_id=$1 "
-    "    UNION ALL "
-    "    SELECT 'layer_completions',to_jsonb(l) FROM laplace.ingest_layer_completion l "
-    "    WHERE l.witness_id=$1 "
-    ") "
-    "SELECT convert_to(jsonb_build_object('section',section,'row',body)::text || E'\\n','UTF8') FROM rows ")
+/* A failed completion read must not authorize an unverified testimony replay. */
+SQL_QUERY("ingest.layer_completed", "int4",
+    "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE layer=$1)")
+SQL_QUERY("ingest.source_completed", "bytea,int4",
+    "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE witness_id=$1 AND layer=$2)")
+SQL_QUERY("ingest.sources_completed", "bytea[],int4",
+    "SELECT witness_id FROM laplace.ingest_layer_completion WHERE witness_id=ANY($1) AND layer=$2")
+SQL_QUERY("ingest.files_completed", "bytea,bytea[],int4",
+    "SELECT DISTINCT unit_id FROM laplace.ingest_unit_completion "
+    "WHERE witness_id=$1 AND unit_id=ANY($2) AND layer=$3 AND digest IS NULL")
 SQL_QUERY("chess.witness_inputs", "bytea[],bytea[],bytea[],bytea[],int4",
     "SELECT subject_id,type_id, "
     "       CASE WHEN octet_length(object_id)=16 THEN object_id END, "
