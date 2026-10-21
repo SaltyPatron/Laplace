@@ -23,6 +23,8 @@ public static class UciProxy
         try { session = EngineSession.Open(spec, overrides); }
         catch (UciEngineException ex)
         {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProxy), ex,
+                "UCI proxy could not open selected engine {Engine}.", spec.Name);
             // Still a UCI engine to the GUI: answer the handshake with the reason, never another engine.
             Write($"info string laplace-uci: {spec.Name} {ex.Failure.ToString().ToLowerInvariant()}: {ex.Message}");
             return 2;
@@ -113,9 +115,28 @@ public static class UciProxy
                 Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProxy), error, "UCI proxy could not request engine shutdown.");
                 exitCode = 2;
             }
-            if (!engine.WaitForExit(TimeSpan.FromSeconds(5)) || !relay.Wait(TimeSpan.FromSeconds(2)))
+            if (!engine.WaitForExit(TimeSpan.FromSeconds(5)))
             {
-                Laplace.Ops.LaplaceLogging.CreateLogger(typeof(UciProxy).FullName!).LogWarning("UCI proxy engine or output relay did not stop within its cleanup budget.");
+                Laplace.Ops.LaplaceLogging.CreateLogger(typeof(UciProxy).FullName!).LogWarning("UCI proxy engine or stderr reader did not stop within its cleanup budget.");
+                exitCode = 2;
+            }
+            else if (engine.ExitCode is not 0)
+            {
+                Laplace.Ops.LaplaceLogging.CreateLogger(typeof(UciProxy).FullName!).LogWarning(
+                    "UCI proxy engine exited with code {ExitCode}.", engine.ExitCode);
+                exitCode = 2;
+            }
+            try
+            {
+                if (!relay.Wait(TimeSpan.FromSeconds(2)))
+                {
+                    Laplace.Ops.LaplaceLogging.CreateLogger(typeof(UciProxy).FullName!).LogWarning("UCI proxy output relay did not stop within its cleanup budget.");
+                    exitCode = 2;
+                }
+            }
+            catch (AggregateException error)
+            {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProxy), error, "UCI proxy output relay failed.");
                 exitCode = 2;
             }
         }
