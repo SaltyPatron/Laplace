@@ -37,18 +37,18 @@ public sealed class ChessRecordingDiagnosticsTests
         }
         measurement.Complete("failed", "expected native identity rejection");
         const string expectedPhase = "managed-staging";
-        var failed = Assert.Single(measurement.WriterLog.Entries.Where(entry =>
+        var failed = Assert.Single(measurement.WriterLog.Entries, entry =>
             entry.Fields.TryGetValue("Phase", out var phase) && Equals(phase, expectedPhase)
-            && Equals(entry.Fields.GetValueOrDefault("Boundary"), "exited")));
-        var entered = Assert.Single(measurement.WriterLog.Entries.Where(entry =>
+            && Equals(entry.Fields.GetValueOrDefault("Boundary"), "exited"));
+        var entered = Assert.Single(measurement.WriterLog.Entries, entry =>
             Equals(entry.Fields.GetValueOrDefault("Phase"), expectedPhase)
-            && Equals(entry.Fields.GetValueOrDefault("Boundary"), "entered")));
+            && Equals(entry.Fields.GetValueOrDefault("Boundary"), "entered"));
         Assert.True(entered.AdmissionElapsedSeconds <= failed.AdmissionElapsedSeconds);
         Assert.False(entered.Fields.ContainsKey("Returned"));
         Assert.Equal(false, failed.Fields["Returned"]);
         Assert.True(Convert.ToDouble(failed.Fields["ElapsedMs"]) >= 0);
-        var failedAggregate = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(
-            value => value.Phase == expectedPhase));
+        var failedAggregate = Assert.Single(measurement.WriterLog.PhaseAggregates,
+            value => value.Phase == expectedPhase);
         Assert.Equal(1, failedAggregate.ObservedExits);
         Assert.Equal(0, failedAggregate.ReturnedExits);
         Assert.Equal(1, failedAggregate.InterruptedExits);
@@ -115,13 +115,13 @@ public sealed class ChessRecordingDiagnosticsTests
         // Nested/parallel child totals are observations, never charged again to
         // the enclosing window or interpreted as exclusive writer time.
         Assert.Equal(3, measurement.WriterLog.PhaseAggregates.Count);
-        var enclosing = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(p => p.Phase == parent));
+        var enclosing = Assert.Single(measurement.WriterLog.PhaseAggregates, p => p.Phase == parent);
         Assert.Equal(1, enclosing.ObservedExits);
         Assert.Equal(1234, enclosing.TotalMilliseconds);
         Assert.Equal(1, enclosing.ReturnedExits);
         Assert.Equal(0, enclosing.InterruptedExits);
-        var entity = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(p => p.Phase == entities));
-        var physicality = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(p => p.Phase == physicalities));
+        var entity = Assert.Single(measurement.WriterLog.PhaseAggregates, p => p.Phase == entities);
+        var physicality = Assert.Single(measurement.WriterLog.PhaseAggregates, p => p.Phase == physicalities);
         foreach (var child in new[] { entity, physicality })
         {
             Assert.Equal(512, child.ObservedExits);
@@ -145,10 +145,10 @@ public sealed class ChessRecordingDiagnosticsTests
         // Immutable snapshots stay coherent while later observations accumulate.
         LogPhaseExit(logger, entities, 7, returned: true);
         Assert.Equal(512, entity.ObservedExits);
-        Assert.Equal(513, Assert.Single(measurement.WriterLog.PhaseAggregates.Where(
-            p => p.Phase == entities)).ObservedExits);
-        Assert.Equal(1234, Assert.Single(measurement.WriterLog.PhaseAggregates.Where(
-            p => p.Phase == parent)).TotalMilliseconds);
+        Assert.Equal(513, Assert.Single(measurement.WriterLog.PhaseAggregates,
+            p => p.Phase == entities).ObservedExits);
+        Assert.Equal(1234, Assert.Single(measurement.WriterLog.PhaseAggregates,
+            p => p.Phase == parent).TotalMilliseconds);
         Assert.Equal(0, measurement.Writer.ApplyCalls);
         Assert.Equal(0, measurement.ReadbackGames);
         Assert.Null(measurement.Durability);

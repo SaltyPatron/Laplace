@@ -674,7 +674,7 @@ public sealed class UnicodeDecomposerTests
         Assert.DoesNotContain(Parse("N"), row => row.TypeId == relation
             && (row.ObjectId == alphabeticYes || row.ObjectId == alphabeticNo));
         AttestationRow positive = Assert.Single(
-            Parse("Y").Where(row => row.TypeId == relation && row.ObjectId == alphabeticYes));
+            Parse("Y"), row => row.TypeId == relation && row.ObjectId == alphabeticYes);
         Assert.Equal(AttestationOutcome.Confirm, positive.Outcome);
     }
 

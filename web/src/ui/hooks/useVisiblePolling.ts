@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { reportClientFailure } from '../../diagnostics/client';
 
 export interface VisiblePollingOptions {
   intervalMs: number;
@@ -43,9 +44,8 @@ export function useVisiblePolling(
       running = true;
       try {
         await taskRef.current();
-      } catch {
-        // Polling consumers own error presentation. A failed tick must not
-        // terminate the cadence or become an unhandled rejection.
+      } catch (error) {
+        reportClientFailure('polling.tick', error);
       } finally {
         running = false;
         schedule();

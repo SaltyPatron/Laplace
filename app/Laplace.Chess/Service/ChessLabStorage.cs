@@ -53,14 +53,12 @@ internal static class ChessLabStorage
     {
         try
         {
-            if (File.Exists(path)) File.Delete(path);
+            File.Delete(path);
         }
-        catch (IOException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            // A failed cleanup must not turn a completed/recorded chess job into a false failure.
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(ChessLabStorage), error,
+                "Chess spool file cleanup failed for {Path}.", path);
         }
     }
 
@@ -68,14 +66,14 @@ internal static class ChessLabStorage
     {
         try
         {
-            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+            if (!Directory.EnumerateFileSystemEntries(path).Any())
                 Directory.Delete(path);
         }
-        catch (IOException)
+        catch (DirectoryNotFoundException) { /* Already removed. */ }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(ChessLabStorage), error,
+                "Chess spool directory cleanup failed for {Path}.", path);
         }
     }
 }

@@ -134,7 +134,7 @@ public sealed class ChessRecordedSelectionTests : IDisposable
         Assert.Equal(154, selection.Plies);
         Assert.Equal(At("source.pgn"), selection.Source.Path);
         var prepared = ChessCorpusPreparation.FromRecordedSelection(selection);
-        Assert.Equal(1, prepared.Selected.Count);
+        Assert.Single(prepared.Selected);
         Assert.Equal(selection.PlayingIds[0].ToBytes(), Convert.FromHexString(prepared.Selected[0].PlayingId));
         var text = Assert.Single(prepared.ReadSelected(Ct));
         var game = Assert.IsType<ChessGameRecord>(

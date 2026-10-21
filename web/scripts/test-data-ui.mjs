@@ -15,7 +15,7 @@ const server = await createServer({ server: { host: '127.0.0.1', port: 0, strict
 } }] });
 let browser, context, passed = false;
 try {
-  await server.listen(); browser = await chromium.launch(); context = await browser.newContext({ acceptDownloads: true });
+  await server.listen(); browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || undefined }); context = await browser.newContext({ acceptDownloads: true });
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage(); const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const original = Buffer.from('\ufeff King != king\r\ne\u0301\n'); const calls = []; let held;

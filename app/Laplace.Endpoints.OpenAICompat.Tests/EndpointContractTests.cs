@@ -61,6 +61,28 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     }
 
     [Fact]
+    public async Task UnavailablePersistentLoggingCannotReportReadyOrAcceptBrowserDiagnostics()
+    {
+        using var host = _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<Laplace.Ops.PersistentLogHealth>();
+            services.AddSingleton(new Laplace.Ops.PersistentLogHealth());
+            services.RemoveAll<ISubstrateClient>();
+            services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
+        }));
+        using var client = host.CreateClient(new() { BaseAddress = new Uri("http://localhost") });
+        using var readiness = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, readiness.StatusCode);
+        using var status = JsonDocument.Parse(await readiness.Content.ReadAsStringAsync());
+        Assert.True(status.RootElement.GetProperty("substrate_reachable").GetBoolean());
+        Assert.False(status.RootElement.GetProperty("logging_ready").GetBoolean());
+        client.DefaultRequestHeaders.Add("Origin", "http://localhost");
+        using var diagnostic = await client.PostAsJsonAsync("/diagnostics/client",
+            new { kind = "acceptance-check", operation = "unavailable-log-test", message = "Controlled logger precondition." });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, diagnostic.StatusCode);
+    }
+
+    [Fact]
     public async Task Capabilities_ExposeLiveAndPendingStatus()
     {
         using var response = await _client.GetAsync("/v1/capabilities");

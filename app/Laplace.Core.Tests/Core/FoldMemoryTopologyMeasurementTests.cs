@@ -55,6 +55,7 @@ public sealed class FoldMemoryTopologyMeasurementTests
             {
                 FirstPeriod = new PeriodKey(Glicko2.DefaultRatingFp1e9, 30_000_000_000L, i),
                 FirstAggregate = new PeriodAggregate { Games = 1, SumScoreFp1e9 = i },
+                AdditionalPeriods = null,
                 Games = 1,
                 SumScoreFp1e9 = i,
                 MaxTsUnixUs = i,

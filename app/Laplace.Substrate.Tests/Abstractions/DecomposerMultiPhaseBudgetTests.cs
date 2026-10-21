@@ -72,7 +72,7 @@ public sealed class DecomposerMultiPhaseBudgetTests
             () => DrainAsync(decomposer.DecomposeAsync(
                 new Context(selected), DecomposerOptions.Default)));
 
-        Assert.Contains(selected[1].Path, error.Message, StringComparison.Ordinal);
+        Assert.Contains(Path.GetFullPath(selected[1].Path), error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

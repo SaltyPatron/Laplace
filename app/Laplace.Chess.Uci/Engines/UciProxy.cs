@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Laplace.Chess.Service.Uci;
 
 namespace Laplace.Chess.Uci.Engines;
@@ -27,6 +28,7 @@ public static class UciProxy
             return 2;
         }
 
+        var exitCode = 0;
         using (session)
         {
             var engine = session.Process;
@@ -98,13 +100,26 @@ public static class UciProxy
                     }
                 }
                 try { engine.SendRaw(trimmed); }
-                catch (UciEngineException) { break; }
+                catch (UciEngineException error)
+                {
+                    Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProxy), error, "UCI proxy could not send a command to the selected engine.");
+                    exitCode = 2;
+                    break;
+                }
             }
-            try { engine.SendRaw("quit"); } catch (UciEngineException) { }
-            engine.WaitForExit(TimeSpan.FromSeconds(5));
-            relay.Wait(TimeSpan.FromSeconds(2));
+            try { engine.SendRaw("quit"); }
+            catch (UciEngineException error)
+            {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProxy), error, "UCI proxy could not request engine shutdown.");
+                exitCode = 2;
+            }
+            if (!engine.WaitForExit(TimeSpan.FromSeconds(5)) || !relay.Wait(TimeSpan.FromSeconds(2)))
+            {
+                Laplace.Ops.LaplaceLogging.CreateLogger(typeof(UciProxy).FullName!).LogWarning("UCI proxy engine or output relay did not stop within its cleanup budget.");
+                exitCode = 2;
+            }
         }
-        return 0;
+        return exitCode;
     }
 
     private static ChessPosition? TryPosition(string command)

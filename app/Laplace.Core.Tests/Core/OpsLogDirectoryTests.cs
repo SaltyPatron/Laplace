@@ -5,10 +5,8 @@ using Xunit;
 namespace Laplace.Core.Tests;
 
 /// <summary>
-/// LaplaceInstall.OpsLogDirectory never resolves inside a working tree, since the CSV sink
-/// creates it owned by whichever user ran the binary. In-tree hosts resolve outside the
-/// tree; out-of-tree hosts (build output redirected by LAPLACE_BUILD_ROOT) keep
-/// $InstallRoot/logs. Both branches are asserted because the host location picks one.
+/// Default logs belong to per-user mutable state; installed and build binaries
+/// must remain immutable. A service can explicitly select its state directory.
 /// </summary>
 public sealed class OpsLogDirectoryTests
 {
@@ -39,10 +37,9 @@ public sealed class OpsLogDirectoryTests
             var dir = LaplaceInstall.OpsLogDirectory;
             Assert.True(Path.IsPathRooted(dir), $"must be absolute, was '{dir}'");
 
-            if (IsUnderWorkingTree(AppContext.BaseDirectory))
-                Assert.False(IsUnderWorkingTree(dir), $"resolved inside the working tree: '{dir}'");
-            else
-                Assert.Equal(Path.Combine(LaplaceInstall.InstallRoot, "logs"), dir);
+            Assert.False(IsUnderWorkingTree(dir), $"resolved inside the working tree: '{dir}'");
+            Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "laplace", "logs"), dir);
         }
         finally
         {

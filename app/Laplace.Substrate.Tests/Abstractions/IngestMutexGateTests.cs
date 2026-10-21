@@ -358,10 +358,10 @@ public sealed class IngestMutexGateTests
             StringComparison.Ordinal);
         Assert.Contains("LANGUAGE C VOLATILE", installer,
             StringComparison.Ordinal);
-        Assert.Contains("SET plan_cache_mode = force_custom_plan", installer,
-            StringComparison.Ordinal);
-        Assert.Contains("SET plan_cache_mode = force_custom_plan", refresher,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("SET plan_cache_mode", installer,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SET plan_cache_mode", refresher,
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("LANGUAGE plpgsql", installer,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains("laplace_entity_masks_apply(deposits, n_deposits)", native,

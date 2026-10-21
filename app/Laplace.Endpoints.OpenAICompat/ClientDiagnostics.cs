@@ -11,7 +11,7 @@ internal static class ClientDiagnostics
     {
         // An account/bootstrap failure must still be reportable. This route admits
         // diagnostics only; it has no substrate/account actions or credential access.
-        app.MapPost("/diagnostics/client", async (HttpContext http, ILoggerFactory logs) =>
+        app.MapPost("/diagnostics/client", async (HttpContext http, ILoggerFactory logs, Laplace.Ops.PersistentLogHealth logHealth) =>
         {
             if (!Auth.ApiKeyEnforcementMiddleware.SameOrigin(http.Request))
                 return Results.StatusCode(403);
@@ -22,6 +22,8 @@ internal static class ClientDiagnostics
             catch (JsonException) { return Results.BadRequest(); }
             catch (IOException) { return Results.StatusCode(413); }
             if (failure is null || string.IsNullOrWhiteSpace(failure.Kind)) return Results.BadRequest();
+            if (!logHealth.Snapshot().Ready)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             using var scope = logs.CreateLogger("Laplace.Browser").BeginScope(new Dictionary<string, object?>
             {
                 ["FailedPath"] = Bound(failure.Path?.Split('?', '#')[0], 512),
@@ -33,7 +35,8 @@ internal static class ClientDiagnostics
             logs.CreateLogger("Laplace.Browser").LogWarning(new EventId(1100, "ClientFailure"),
                 "Browser {Kind} failure during {Operation}: {ClientMessage}",
                 Bound(failure.Kind, 64), Bound(failure.Operation, 128), Bound(failure.Message, 1024));
-            return Results.NoContent();
+            return logHealth.Snapshot().Ready ? Results.NoContent()
+                : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
         }).RequireRateLimiting("client-diagnostics").ExcludeFromDescription();
     }
 

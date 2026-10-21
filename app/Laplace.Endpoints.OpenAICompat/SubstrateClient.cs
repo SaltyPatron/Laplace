@@ -488,6 +488,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             }
             catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState)
             {
+                Serilog.Log.ForContext<SubstrateClient>().Warning(pg,
+                    "Readiness failed during the PostgreSQL perfcache probe.");
                 postgresPerfcacheReady = false;
                 detail = pg.MessageText;
             }
@@ -504,6 +506,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 }
                 catch (Exception ex)
                 {
+                    Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                        "Readiness failed while loading the process T0 perfcache.");
                     processPerfcacheReady = false;
                     detail = string.IsNullOrEmpty(detail)
                         ? ex.Message
@@ -526,6 +530,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Readiness failed while reading substrate inventory.");
             return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}", chessPerfcache);
         }
     }

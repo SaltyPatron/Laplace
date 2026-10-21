@@ -39,7 +39,16 @@ public static class TokenCommand
 
         if (!process.WaitForExit((int)Timeout.TotalMilliseconds))
         {
-            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                if (!process.WaitForExit(5000))
+                    throw new AgentException($"token_command '{argv[0]}' timed out and its process did not stop after termination was requested.");
+            }
+            catch (Exception cleanup) when (cleanup is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                throw new AgentException($"token_command '{argv[0]}' timed out and process termination failed.", cleanup);
+            }
             throw new AgentException(
                 $"token_command '{argv[0]}' did not finish within {Timeout.TotalSeconds:0}s and was killed. " +
                 "An interactive login prompt will hang here — authenticate once outside Laplace first.");

@@ -1,5 +1,6 @@
 using Laplace.Chess.Service.Uci;
 using Laplace.Chess.Uci.Backends;
+using Microsoft.Extensions.Logging;
 
 namespace Laplace.Chess.Uci;
 
@@ -146,6 +147,7 @@ public sealed class UciEngine
             }
             catch (Exception ex)
             {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciEngine), ex, "UCI search failed.");
                 lock (_outputLock)
                 {
                     output.WriteLine($"info string search failed ({FirstLine(ex.Message)})");
@@ -159,7 +161,19 @@ public sealed class UciEngine
     private void StopSearch()
     {
         _searchCts?.Cancel();
-        try { _searchTask?.Wait(2000); } catch { /* best-effort; don't hang the UCI loop on a stuck search */ }
+        if (_searchTask is { } pending)
+        {
+            try
+            {
+                if (!pending.Wait(2000))
+                    throw new TimeoutException("The previous UCI search did not stop; another search cannot safely start.");
+            }
+            catch (Exception error) when (error is AggregateException or TimeoutException)
+            {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciEngine), error, "UCI search shutdown failed.");
+                throw;
+            }
+        }
         if (_searchTask?.IsCompleted == true)
         {
             // Infinite analysis may have allocated the token's wait handle. Its worker is
@@ -175,6 +189,16 @@ public sealed class UciEngine
     /// harness, a non-interactive CLI use — needs this hook.
     public void WaitForIdle(int timeoutMs = 5000)
     {
-        try { _searchTask?.Wait(timeoutMs); } catch { /* best-effort */ }
+        try
+        {
+            if (_searchTask?.Wait(timeoutMs) == false)
+                Laplace.Ops.LaplaceLogging.CreateLogger(typeof(UciEngine).FullName!).LogWarning(
+                    "UCI search remained active after the {TimeoutMs}ms idle wait.", timeoutMs);
+        }
+        catch (AggregateException error)
+        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciEngine), error, "UCI search worker failed while waiting for completion.");
+            throw;
+        }
     }
 }

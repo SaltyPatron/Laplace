@@ -130,16 +130,16 @@ public sealed class WorkingSetQueryShapeTests
             .OfType<MethodDeclarationSyntax>()
             .Single(method => method.Identifier.ValueText == "ApplyStagesCoreAsync");
         var calls = owner.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
-        var acquire = Assert.Single(calls.Where(call =>
-            call.Expression.ToString() == "AdvisoryTxLock.BeginWithLockAsync"));
+        var acquire = Assert.Single(calls, call =>
+            call.Expression.ToString() == "AdvisoryTxLock.BeginWithLockAsync");
         var arguments = acquire.ArgumentList.Arguments;
         Assert.Equal("connection", arguments[0].Expression.ToString());
         Assert.Equal("laplace_apply_batch",
             Assert.IsType<LiteralExpressionSyntax>(arguments[1].Expression).Token.ValueText);
         Assert.Equal("TransactionGucs(Durability)", arguments[2].Expression.ToString());
 
-        var applyPrepared = Assert.Single(calls.Where(call =>
-            call.Expression.ToString() == "ApplyPreparedStagesCoreAsync"));
+        var applyPrepared = Assert.Single(calls, call =>
+            call.Expression.ToString() == "ApplyPreparedStagesCoreAsync");
         Assert.True(acquire.SpanStart < applyPrepared.SpanStart);
         Assert.Equal("connection", applyPrepared.ArgumentList.Arguments[0].Expression.ToString());
         Assert.Equal("transaction", applyPrepared.ArgumentList.Arguments[1].Expression.ToString());

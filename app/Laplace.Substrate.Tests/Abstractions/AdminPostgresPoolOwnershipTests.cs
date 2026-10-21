@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -27,10 +29,10 @@ public sealed class AdminPostgresPoolOwnershipTests
         Assert.Contains("dataSources.Ingest", endpoint);
         Assert.Contains("AddSingleton<AdminPostgresDataSources>()", program);
 
-        Assert.Equal(1, Regex.Matches(owner,
-            @"LaplaceDataSource\.Create\(SubstrateAccess\.Serving\)").Count);
-        Assert.Equal(1, Regex.Matches(owner,
-            @"LaplaceDataSource\.Create\(SubstrateAccess\.Ingest\)").Count);
+        Assert.Single(Regex.Matches(owner,
+            @"LaplaceDataSource\.Create\(SubstrateAccess\.Serving\)"));
+        Assert.Single(Regex.Matches(owner,
+            @"LaplaceDataSource\.Create\(SubstrateAccess\.Ingest\)"));
     }
 
     [Fact]
@@ -40,19 +42,17 @@ public sealed class AdminPostgresPoolOwnershipTests
         var endpoint = File.ReadAllText(Path.Combine(
             repoRoot, "app", "Laplace.Endpoints.OpenAICompat", "EndpointMappings.Admin.cs"));
 
-        var routeAt = endpoint.IndexOf("/v1/admin/maintenance/vacuum", StringComparison.Ordinal);
-        var tryAt = endpoint.IndexOf("try\n            {", routeAt, StringComparison.Ordinal);
-        var resolveAt = endpoint.IndexOf("ResolveSubstrateTableAsync", routeAt, StringComparison.Ordinal);
-        var vacuumAt = endpoint.IndexOf("NpgsqlMaintenance.VacuumAsync", routeAt, StringComparison.Ordinal);
-        var unavailableAt = endpoint.IndexOf(
-            "ServiceUnavailable(\"substrate_unavailable\"", routeAt, StringComparison.Ordinal);
-
-        Assert.True(routeAt >= 0);
-        Assert.True(tryAt > routeAt);
-        Assert.True(resolveAt > tryAt);
-        Assert.True(vacuumAt > resolveAt);
-        Assert.True(unavailableAt > vacuumAt);
-        Assert.Contains("catch (NpgsqlException ex)", endpoint[routeAt..]);
-        Assert.Contains("catch (TimeoutException ex)", endpoint[routeAt..]);
+        var route = Assert.Single(CSharpSyntaxTree.ParseText(endpoint).GetRoot()
+            .DescendantNodes().OfType<InvocationExpressionSyntax>(), call =>
+            call.ArgumentList.Arguments.FirstOrDefault()?.Expression is LiteralExpressionSyntax literal
+                && literal.Token.ValueText == "/v1/admin/maintenance/vacuum");
+        var guarded = Assert.Single(route.DescendantNodes().OfType<TryStatementSyntax>(), statement =>
+            statement.Block.ToString().Contains("NpgsqlMaintenance.VacuumAsync", StringComparison.Ordinal));
+        Assert.Contains("ResolveSubstrateTableAsync", guarded.Block.ToString());
+        foreach (string type in new[] { "NpgsqlException", "TimeoutException" })
+        {
+            var handler = Assert.Single(guarded.Catches, handler => handler.Declaration?.Type.ToString() == type);
+            Assert.Contains("ServiceUnavailable(\"substrate_unavailable\"", handler.Block.ToString());
+        }
     }
 }

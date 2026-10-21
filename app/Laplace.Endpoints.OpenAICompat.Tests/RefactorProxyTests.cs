@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -42,7 +43,7 @@ public sealed class RefactorProxyTests
     {
         using var handler = new Handler((_, _) => throw new InvalidOperationException("Must not forward."));
         using var proxy = Proxy(handler);
-        using var client = proxy.CreateClient();
+        using var client = proxy.GetTestClient();
         using var redirect = await client.GetAsync("/refactor?scope=a%2Fb");
         Assert.Equal(HttpStatusCode.PermanentRedirect, redirect.StatusCode);
         Assert.Equal("/refactor/?scope=a%2Fb", redirect.Headers.Location?.OriginalString);
@@ -185,7 +186,7 @@ public sealed class RefactorProxyTests
             await context.Response.WriteAsync(authorized ? "allowed" : "denied");
         });
         using var proxy = Proxy(upstream);
-        using var client = proxy.CreateClient();
+        using var client = proxy.GetTestClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/refactor/api/v1/state");
         if (authorization is not null) request.Headers.TryAddWithoutValidation("Authorization", authorization);
         using var response = await client.SendAsync(request);
@@ -207,7 +208,7 @@ public sealed class RefactorProxyTests
             await context.Response.WriteAsync("\"tick\"}\n\n", context.RequestAborted);
         });
         using var proxy = Proxy(upstream);
-        using var client = proxy.CreateClient();
+        using var client = proxy.GetTestClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/refactor/api/v1/events");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "test-only");
         request.Headers.TryAddWithoutValidation("Last-Event-ID", "event-8");
@@ -244,7 +245,7 @@ public sealed class RefactorProxyTests
             await context.Response.WriteAsync("received");
         });
         using var proxy = Proxy(upstream);
-        using var client = proxy.CreateClient();
+        using var client = proxy.GetTestClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/refactor/api/v1/query")
         {
             Content = new StreamContent(pipe.Reader.AsStream())
@@ -345,12 +346,13 @@ public sealed class RefactorProxyTests
         Assert.Equal(502, context.Response.StatusCode);
     }
 
-    private static TestServer Proxy(HttpMessageHandler handler) => Proxy(services =>
+    private static IHost Proxy(HttpMessageHandler handler) => Proxy(services =>
         services.AddHttpClient(RefactorProxyMiddleware.ClientName).ConfigurePrimaryHttpMessageHandler(() => handler));
 
-    private static TestServer Proxy(LoopbackUpstream upstream) => Proxy(services => RouteToLoopback(services, upstream));
+    private static IHost Proxy(LoopbackUpstream upstream) => Proxy(services => RouteToLoopback(services, upstream));
 
-    private static TestServer Proxy(Action<IServiceCollection> configure) => new(new WebHostBuilder()
+    private static IHost Proxy(Action<IServiceCollection> configure) => new HostBuilder()
+        .ConfigureWebHost(web => web.UseTestServer()
         .ConfigureServices(services =>
         {
             services.AddRefactorProxy();
@@ -360,7 +362,7 @@ public sealed class RefactorProxyTests
         {
             app.UseMiddleware<RefactorProxyMiddleware>();
             app.Run(context => { context.Response.StatusCode = 418; return Task.CompletedTask; });
-        }));
+        })).Start();
 
     private static void RouteToLoopback(IServiceCollection services, LoopbackUpstream upstream) =>
         services.AddHttpClient(RefactorProxyMiddleware.ClientName)

@@ -25,6 +25,7 @@ namespace Laplace.Ops;
 public static class LaplaceLogging
 {
     private static readonly object TraceGate = new();
+    public static PersistentLogHealth PersistentHealth { get; } = new();
     /// <summary>Failure diagnostics from static adapters use the process-owned logger.</summary>
     public static void LogWarning(Type source, Exception exception, string message, params object?[] values)
         => Log.ForContext("SourceContext", source.FullName).Warning(exception, message, values);
@@ -71,10 +72,21 @@ public static class LaplaceLogging
     /// </summary>
     public static LoggerConfiguration ApplyLaplaceSinks(
         this LoggerConfiguration config, string role, bool console, bool consoleToStdErr = true,
-        LogEventLevel consoleMinLevel = LogEventLevel.Verbose)
+        LogEventLevel consoleMinLevel = LogEventLevel.Verbose, PersistentLogHealth? health = null)
     {
+        var persistent = health ?? PersistentHealth;
         // Serilog sink failures must reach stderr, never recursively enter a failed sink.
-        SelfLog.Enable(TextWriter.Synchronized(Console.Error));
+        var errorOutput = TextWriter.Synchronized(Console.Error);
+        SelfLog.Enable(message =>
+        {
+            persistent.Failed();
+            try { errorOutput.WriteLine(message); }
+            catch (Exception error) when (error is IOException or ObjectDisposedException)
+            {
+                // The failed diagnostic output is already counted. Writing it
+                // back through Serilog would recurse into the same failed sink.
+            }
+        });
         lock (TraceGate)
             if (Trace.Listeners["LaplaceStructured"] is null) Trace.Listeners.Add(new StructuredTraceListener());
         Directory.CreateDirectory(LaplaceInstall.OpsLogDirectory);
@@ -83,6 +95,9 @@ public static class LaplaceLogging
         // File sinks otherwise report an inaccessible path only to SelfLog and can
         // leave the process running with a disabled persistent sink.
         using (File.Open(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { }
+        var jsonPath = Path.Combine(LaplaceInstall.OpsLogDirectory,
+            $"laplace-{role}-{DateTime.Now:yyyyMMdd}.jsonl");
+        using (File.Open(jsonPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { }
 
         config = config.Enrich.FromLogContext()
             .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Warning)
@@ -115,6 +130,7 @@ public static class LaplaceLogging
                     outputTemplate: tmpl);
         }
 
+        persistent.Initialized();
         return config;
     }
 

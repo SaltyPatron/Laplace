@@ -61,7 +61,7 @@ public sealed class LichessBot : IAsyncDisposable
         _botUsername = botUsername;
         _onChatLine = onChatLine;
         _policy = policy ?? new LichessChallengePolicy();
-        _log = log ?? NullLogger.Instance;
+        _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(LichessBot).FullName!);
         _onConnectionChanged = onConnectionChanged;
         _http = new HttpClient { BaseAddress = new Uri(Base), Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);

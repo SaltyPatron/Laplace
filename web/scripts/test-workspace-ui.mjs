@@ -23,7 +23,7 @@ let browser, context;
 let passed = false;
 try {
   await server.listen();
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || undefined });
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage();

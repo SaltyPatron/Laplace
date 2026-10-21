@@ -14,16 +14,16 @@ public class PhysicalityViewReceiptTests
     }
 
     [Fact]
-    public void AvailableAndMissingViewsPreserveDescriptorsOrderAndSharedFrontier()
+    public void AvailableAndMissingViewsPreservePhysicalitiesOrderAndSharedFrontier()
     {
-        byte[][] descriptors = [Id(10), Id(20), Id(20)];
+        byte[][] physicalities = [Id(10), Id(20), Id(20)];
         byte[]?[] views = [Id(30), null, null];
         byte[][] missing = [Id(1, 255), Id(2)];
         long bytes = PhysicalityViewReceipts.RetainedPayloadBytes(3, 2);
-        var result = PhysicalityViewReceipts.Decode(descriptors, views, [0, 1, 1], [0, 0, 0],
+        var result = PhysicalityViewReceipts.Decode(physicalities, views, [0, 1, 1], [0, 0, 0],
             [0, 2, 2], missing, bytes, 4);
         Assert.Equal(3, result.Forms.Length);
-        Assert.Equal(Hash128.FromBytes(descriptors[0]), result.Forms[0].DescriptorId);
+        Assert.Equal(Hash128.FromBytes(physicalities[0]), result.Forms[0].PhysicalityId);
         Assert.Equal(Hash128.FromBytes(views[0]!), result.Forms[0].ViewId);
         Assert.Equal(PhysicalityViewState.Available, result.Forms[0].ViewState);
         Assert.Equal(result.Forms[1], result.Forms[2]);
@@ -32,10 +32,10 @@ public class PhysicalityViewReceiptTests
         Assert.Equal(2, result.Forms[1].MissingCount);
         Assert.Equal(missing.Select(id => Hash128.FromBytes(id)), result.Missing);
 
-        descriptors[0][0] = 99;
+        physicalities[0][0] = 99;
         views[0]![0] = 99;
         missing[0][0] = 99;
-        Assert.Equal(Hash128.FromBytes(Id(10)), result.Forms[0].DescriptorId);
+        Assert.Equal(Hash128.FromBytes(Id(10)), result.Forms[0].PhysicalityId);
         Assert.Equal(Hash128.FromBytes(Id(30)), result.Forms[0].ViewId);
         Assert.Equal(Hash128.FromBytes(Id(1, 255)), result.Missing[0]);
     }

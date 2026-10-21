@@ -40,7 +40,7 @@ public sealed class MiddlewareTimeoutTests
         using var json = await ReadResponseAsync(context);
         var error = json.RootElement.GetProperty("error");
         Assert.Equal("substrate_timeout", error.GetProperty("code").GetString());
-        Assert.Contains("time budget", error.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("timed out", error.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("unreachable", error.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 

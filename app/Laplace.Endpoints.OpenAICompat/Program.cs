@@ -16,10 +16,13 @@ using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Events;
 
+Serilog.ILogger? processLogger = null;
+var logHealth = new PersistentLogHealth();
 try
 {
-Log.Logger = new LoggerConfiguration().MinimumLevel.Information()
-    .ApplyLaplaceSinks("api", console: true, consoleToStdErr: false).CreateBootstrapLogger();
+processLogger = new LoggerConfiguration().MinimumLevel.Information()
+    .ApplyLaplaceSinks("api", console: true, consoleToStdErr: false, health: logHealth).CreateLogger();
+Log.Logger = processLogger;
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -33,8 +36,8 @@ builder.WebHost.ConfigureKestrel(options =>
             ? devPort
             : LaplaceInstall.EndpointPort));
 
-builder.Host.UseSerilog((_, lc) =>
-    lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true, consoleToStdErr: false));
+builder.Host.UseSerilog(processLogger, dispose: false);
+builder.Services.AddSingleton(logHealth);
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddSingleton<AdminPostgresDataSources>();
@@ -219,7 +222,8 @@ catch (Exception ex)
 }
 finally
 {
-    Log.CloseAndFlush();
+    if (ReferenceEquals(Log.Logger, processLogger)) Log.CloseAndFlush();
+    else (processLogger as IDisposable)?.Dispose();
 }
 
 public partial class Program;

@@ -311,9 +311,11 @@ public static class ChessMoveCommentary
             if (rendered is { Length: > 0 } texts && IsSalientBook(texts[0]))
                 return "Book: " + texts[0].Trim();
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error)
         {
-            // Commentary is decoration; a failed lookup must never affect play.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(ChessMoveCommentary), error,
+                "Chess book commentary lookup failed.");
         }
         return null;
     }

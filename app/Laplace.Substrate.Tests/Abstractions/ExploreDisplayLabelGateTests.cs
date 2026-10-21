@@ -61,7 +61,7 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.True(lexical > textFirst, "display: lexicalization must run after a text entity's own surface");
         Assert.True(shallowRows >= 0 && spine > shallowRows,
             "display: word-grain rows must be labelled by their parts before the first-child spine preview");
-        Assert.Contains("laplace_entity_type_is_text(&item->type)==1", body, StringComparison.Ordinal);
+        Assert.Contains("item->text=item->exists && item->has_type && laplace_entity_type_is_text(&item->type)==1", native, StringComparison.Ordinal);
         Assert.Contains("e2e_display_label_text_over_lemma", File.ReadAllText(Path.Combine(root,
             "extension", "laplace_substrate", "tests", "sql", "display_label.sql")), StringComparison.Ordinal);
     }
@@ -100,9 +100,13 @@ public sealed class ExploreDisplayLabelGateTests
         var synsetLemmaSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "realize", "realize_synset_lemma.sql.in"));
 
-        Assert.Contains("relation_type_id('IS_TYPED_AS')", catalog, StringComparison.Ordinal);
-        Assert.Contains("relation_family_ids('IS_TYPED_AS')", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("relation_family_ids('IS_TYPED_AS')", catalog, StringComparison.Ordinal);
+        Assert.Contains("pg_laplace_entity_facets_batch", facetsSql, StringComparison.Ordinal);
+        var display = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
+        Assert.Contains("\"entity.stored_facets\"", display, StringComparison.Ordinal);
+        Assert.DoesNotContain("laplace.consensus", facetsSql, StringComparison.Ordinal);
         Assert.Contains("COALESCE(w.tier, 32767) ASC, cand.word_id", realizeBatch, StringComparison.Ordinal);
-        Assert.Contains("COALESCE(w.tier, 32767) ASC", synsetLemmaSql, StringComparison.Ordinal);
+        Assert.Contains("realize.lexicalize_batch(ARRAY[p_id], p_lang)", synsetLemmaSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("ORDER BY", synsetLemmaSql, StringComparison.OrdinalIgnoreCase);
     }
 }

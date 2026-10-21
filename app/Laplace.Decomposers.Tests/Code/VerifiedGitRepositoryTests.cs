@@ -247,5 +247,18 @@ public sealed class VerifiedGitRepositoryTests : IDisposable
         string output = process.StandardOutput.ReadToEnd(), error = process.StandardError.ReadToEnd();
         process.WaitForExit(); Assert.True(process.ExitCode == 0, error); return output.Trim();
     }
-    public void Dispose() => Directory.Delete(root, recursive: true);
+    public void Dispose()
+    {
+        string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        string fixture = Path.GetFullPath(root);
+        Assert.StartsWith(temp, fixture, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("verified-git-test-", Path.GetFileName(fixture), StringComparison.Ordinal);
+        // Git marks loose objects read-only on Windows. Clear that flag only
+        // inside this owned fixture; do not follow links into another tree.
+        foreach (string file in Directory.EnumerateFiles(fixture, "*", new EnumerationOptions
+                 { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
+            File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+        Directory.Delete(fixture, recursive: true);
+    }
 }

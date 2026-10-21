@@ -86,7 +86,7 @@ public sealed class ModelTokenEdgeETLTests
                 etl.EmitAsync(1, reader: null, DecomposerOptions.Default));
 
             SubstrateChange circuit = Assert.Single(
-                changes.Where(change => change.Physicalities.Length == 1));
+                changes, change => change.Physicalities.Length == 1);
             PhysicalityRow physicality = Assert.Single(circuit.Physicalities);
             Assert.Equal(PhysicalityType.Projection, physicality.Type);
             Assert.Equal(

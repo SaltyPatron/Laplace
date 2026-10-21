@@ -92,8 +92,8 @@ public sealed class SqlVolatilityGateTests
 
         var bodies = StableRoutineBodies(sql).ToDictionary(x => x.Name, x => x.Body);
         Assert.Equal(2, bodies.Count);
-        Assert.Equal(1, VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.bad"])).Count);
-        Assert.Equal(0, VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.good"])).Count);
+        Assert.Single(VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.bad"])));
+        Assert.Empty(VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.good"])));
     }
 
     private static IEnumerable<(string Name, string Body)> StableRoutineBodies(string sql)

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { loadSourceModule } from './test-source-module.mjs';
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
 // Identify the actual bytes executed by the runner; a checkout label alone is
@@ -14,13 +15,7 @@ for (const path of ['test-read-resource.mjs', '../src/ui/lib/readResource.ts', '
   console.log(`WORKSPACE_TEST_INPUT ${path} sha256=${createHash('sha256').update(bytes).digest('hex')}`);
 }
 async function load(relative) {
-  const source = await readFile(new URL(relative, import.meta.url), 'utf8');
-  const output = ts.transpileModule(source, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-    reportDiagnostics: true,
-  });
-  assert.equal(output.diagnostics?.filter((d) => d.category === ts.DiagnosticCategory.Error).length ?? 0, 0);
-  return import(`data:text/javascript;base64,${Buffer.from(output.outputText).toString('base64')}`);
+  return loadSourceModule(new URL(relative, import.meta.url));
 }
 const { ReadResource } = await load('../src/ui/lib/readResource.ts');
 const { apiGet, apiPost, apiPostJson, apiPutText, ApiError, PaymentRequiredError } = await load('../src/api/client.ts');
@@ -107,8 +102,21 @@ test('stopping a refresh retains its last successful body', async () => {
 
 // Tests run serially: each substituted fetch is restored even when an assertion fails.
 async function withFetch(fetcher, exercise) {
-  const original = globalThis.fetch; globalThis.fetch = fetcher;
-  try { await exercise(); } finally { globalThis.fetch = original; }
+  const original = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousConsoleError = console.error;
+  const reports = [];
+  globalThis.window = { location: { origin: 'https://test.laplace.invalid', pathname: '/transport-test' } };
+  console.error = () => {};
+  globalThis.fetch = async (path, init) => {
+    if (path === '/diagnostics/client') {
+      reports.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    }
+    return fetcher(path, init);
+  };
+  try { await exercise(reports); }
+  finally { globalThis.fetch = original; globalThis.window = previousWindow; console.error = previousConsoleError; }
 }
 test('all JSON transports forward AbortSignal and declared request scope', async () => {
   const signal = new AbortController().signal; const calls = [];
@@ -128,7 +136,18 @@ test('204 is a completed no-body response rather than a JSON parsing failure', a
 });
 test('Problem Details and request identifier survive transport errors', async () => {
   await withFetch(async () => Response.json({ detail: 'A required field is missing.' }, { status: 400, headers: { 'x-request-id': 'receipt-1' } }), async () => {
-    await assert.rejects(apiGet('/bad'), (error) => error instanceof ApiError && error.status === 400 && error.requestId === 'receipt-1' && error.message === 'A required field is missing.');
+    await assert.rejects(apiGet('/bad'), (error) => error instanceof ApiError && error.status === 400 && error.requestId === 'receipt-1' && error.message.includes('A required field is missing.'));
+  });
+});
+test('transport failure reaches the production diagnostic reporter with correlation and a path without query data', async () => {
+  await withFetch(async () => Response.json({ error: { message: 'Query failed.' } }, {
+    status: 500, headers: { 'x-correlation-id': 'read-failure-123' },
+  }), async (reports) => {
+    await assert.rejects(apiGet('/v1/read?private=value'), ApiError);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].requestId, 'read-failure-123');
+    assert.equal(reports[0].path, '/v1/read');
+    assert.equal(reports[0].status, 500);
   });
 });
 test('malformed 402 body is an ApiError, not a secondary TypeError', async () => {
