@@ -13,9 +13,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     private readonly NpgsqlDataSource _dataSource;
     private readonly NpgsqlDataSource _dataSourceReadOnly;
 
-    public SubstrateClient()
+    public SubstrateClient() : this(null) { }
+
+    internal SubstrateClient(string? baseConnectionString)
     {
-        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving, baseConnectionString);
         // Read-only is enforced by the server session. Each command sets its own
         // timeout; a datasource-wide statement_timeout would override it.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
@@ -26,7 +28,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             dsb.ConnectionStringBuilder.Options = string.IsNullOrWhiteSpace(options)
                 ? "-c default_transaction_read_only=on"
                 : options + " -c default_transaction_read_only=on";
-        });
+        }, baseConnectionString);
     }
 
     internal NpgsqlDataSource DataSource => _dataSource;
