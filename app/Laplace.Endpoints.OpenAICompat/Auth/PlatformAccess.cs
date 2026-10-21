@@ -39,6 +39,8 @@ internal static class PlatformPolicy
     }
     public static string? ForOperation(string name)
     {
+        if (name is "ops.app_log" or "ops.chess_drops") return Read;
+        if (name is "ops.repoint_app_log" or "ops.repoint_chess_drops" or "ops.repoint_pg_log") return Maintain;
         if (name == "ops.ingest_run_close") return Ingest;
         if (Laplace.SubstrateCRUD.Npgsql.InstalledOpInvoker.IsWritable(name)) return Maintain;
         if (name.StartsWith("ops.ingest_", StringComparison.Ordinal) || name.StartsWith("ops.activity", StringComparison.Ordinal)) return Read;

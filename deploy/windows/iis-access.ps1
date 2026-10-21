@@ -1,6 +1,26 @@
-# Public runtime consumers retain read access across setup and publication.
-# Credential/state directories never use this policy.
+# Code readers retain access across publication; PostgreSQL reads only declared
+# log directories. Credentials and other private state use neither reader policy.
 $ErrorActionPreference='Stop'
+function Grant-IisPostgresLogReader([string]$Path,[string]$Account) {
+    if([string]::IsNullOrWhiteSpace($Account)){throw 'Declare LAPLACE_PG_SERVICE_ACCOUNT before configuring application log access.'}
+    $sid=if($Account -in @('LocalSystem','NT AUTHORITY\SYSTEM')){
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    }elseif($Account -match '^S-1-'){[Security.Principal.SecurityIdentifier]::new($Account)}else{
+        ([Security.Principal.NTAccount]::new($Account)).Translate([Security.Principal.SecurityIdentifier])
+    }
+    $null=New-Item -ItemType Directory -Path $Path -Force
+    $acl=Get-Acl -LiteralPath $Path
+    $rights=[Security.AccessControl.FileSystemRights]::ReadAndExecute
+    $inheritance=[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+    foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){
+        if($rule.IdentityReference.Value -eq $sid.Value -and $rule.AccessControlType -eq 'Allow' -and
+            ($rule.FileSystemRights -band $rights) -eq $rights -and
+            ($rule.InheritanceFlags -band $inheritance) -eq $inheritance -and
+            $rule.PropagationFlags -eq 'None'){return}
+    }
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,$rights,$inheritance,'None','Allow'))
+    Set-IisFileAccess $Path $acl
+}
 function Set-IisFileAccess([string]$Path,$Acl) {
     $access=[Security.AccessControl.AccessControlSections]::Access
     if(Test-Path -LiteralPath $Path -PathType Container) {

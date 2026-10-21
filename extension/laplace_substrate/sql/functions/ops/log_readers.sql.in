@@ -27,6 +27,20 @@ BEGIN
     END IF;
 END $lichess_log$;
 
+CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_role text, p_dir text)
+    RETURNS text LANGUAGE plpgsql AS $repoint_role$
+BEGIN
+    IF p_role IS NULL OR p_role NOT IN ('cli','mcp','uci','migrations','api','lichess') THEN
+        RAISE EXCEPTION 'Unknown application log role: %', p_role;
+    END IF;
+    IF p_dir IS NULL OR btrim(p_dir) = '' THEN
+        RAISE EXCEPTION 'ops.repoint_app_log: a log directory is required';
+    END IF;
+    EXECUTE format('ALTER FOREIGN TABLE ops.%I OPTIONS (SET filename %L)',
+        'app_log_' || p_role, rtrim(replace(p_dir, chr(92), '/'), '/') || '/laplace-' || p_role || '.csv');
+    RETURN format('repointed %s log at %s', p_role, p_dir);
+END $repoint_role$;
+
 CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_dir text)
     RETURNS text LANGUAGE plpgsql AS $repoint$
 DECLARE r text; n int := 0;
@@ -35,8 +49,7 @@ BEGIN
         RAISE EXCEPTION 'ops.repoint_app_log: a log directory is required';
     END IF;
     FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
-        EXECUTE format('ALTER FOREIGN TABLE ops.%I OPTIONS (SET filename %L)',
-            'app_log_' || r, rtrim(p_dir, '/') || '/laplace-' || r || '.csv');
+        PERFORM ops.repoint_app_log(r, p_dir);
         n := n + 1;
     END LOOP;
     RETURN format('repointed %s role tables at %s', n, p_dir);
@@ -46,16 +59,21 @@ CREATE OR REPLACE FUNCTION ops.app_log()
     RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
                   category text, message text, detail text)
     LANGUAGE plpgsql STABLE AS $logs$
-DECLARE r text;
+DECLARE r text; available integer := 0;
 BEGIN
     FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
         BEGIN
             RETURN QUERY EXECUTE 'SELECT log_time,application_name,error_severity,category,message,detail FROM ops.'
                 || quote_ident('app_log_' || r);
+            available := available + 1;
         EXCEPTION WHEN undefined_file OR undefined_table THEN
             RAISE WARNING 'Application log for role % is unavailable [%]: %', r, SQLSTATE, SQLERRM;
         END;
     END LOOP;
+    IF available = 0 THEN
+        RAISE EXCEPTION USING ERRCODE='55000',
+            MESSAGE='No application log source is readable. Configure its log directory and PostgreSQL file access.';
+    END IF;
 END $logs$;
 
 CREATE OR REPLACE FUNCTION ops.chess_drops()

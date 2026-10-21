@@ -70,6 +70,9 @@ if($Publish){
 $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid().ToString('N'))
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'
 $null=New-Item -ItemType Directory -Path $published -Force
+$previousLogDirectory=$env:LAPLACE_OPS_LOG_DIR
+try {
+$env:LAPLACE_OPS_LOG_DIR=Join-Path $work 'logs'
 if(-not $ManagedBuild){$ManagedBuild=Join-Path $env:LAPLACE_BUILD_ROOT 'iis-publish'}
 $ManagedBuild=[IO.Path]::GetFullPath($ManagedBuild)
 foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplace.Cli',(Join-Path $published 'cli')),@('Laplace.Chess.Uci',(Join-Path $published 'uci')),@('Laplace.Migrations',(Join-Path $published 'migrations')))){
@@ -96,4 +99,9 @@ if($Publish){
         if($LASTEXITCODE){throw "The $database migration failed; the staged IIS package was not activated."}
     }
     & "$PSScriptRoot/Publish-IisRuntime.ps1" -Installation $Installation -Package $package
+    # Bind shared diagnostic files only after the new API's platform permission
+    # checks are serving. A failed check is reported as an incomplete deployment.
+    & pwsh -NoProfile -File "$PSScriptRoot/Invoke-IisDatabase.ps1" -Installation $Installation -MigrationRuntime $migrationRuntime -Database substrate -Operation status -ConfigureLogs
+    if($LASTEXITCODE){throw 'IIS was published, but application log access verification failed. See the database operation receipt.'}
 }
+}finally{[Environment]::SetEnvironmentVariable('LAPLACE_OPS_LOG_DIR',$previousLogDirectory)}

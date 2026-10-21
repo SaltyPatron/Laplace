@@ -169,6 +169,7 @@ if($declaredOwners){
 if($databaseAccess){$c | Add-Member -NotePropertyName database_access_file -NotePropertyValue ([IO.Path]::GetFullPath($AccessConfiguration)) -Force}
 $c | Add-Member -NotePropertyName platform_owner_policy_file -NotePropertyValue $ownerPolicyPath -Force
 foreach($leaf in 'keys','logs','output'){Protect-IisDirectory (Join-Path $state $leaf) 'Modify'}
+if($databaseAccess){Grant-IisPostgresLogReader (Join-Path $state 'logs') $env:LAPLACE_PG_SERVICE_ACCOUNT}
 Protect-IisDirectory $web 'ReadAndExecute' 'Modify'
 Grant-IisRuntimeReaders $web $runtimeReaders
 Protect-IisDirectory (Join-Path $root 'receipts') 'ReadAndExecute' 'Modify'

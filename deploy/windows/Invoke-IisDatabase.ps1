@@ -7,13 +7,16 @@ param(
     [string]$AccessConfiguration,
     [string]$MigrationRuntime,
     [string]$ReceiptDirectory,
+    [switch]$ConfigureLogs,
     [switch]$InstalledCredentials,
     [switch]$Yes
 )
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 . "$PSScriptRoot/iis-runtime.ps1"
+. "$PSScriptRoot/iis-access.ps1"
 . "$PSScriptRoot/iis-owner-lifecycle.ps1"
+if($ConfigureLogs -and ($Database -ne 'substrate' -or $Operation -ne 'status')){throw '-ConfigureLogs requires substrate status after publication.'}
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
 if(-not $Installation){throw 'Declare the IIS installation with LAPLACE_IIS_INSTALLATION or -Installation.'}
 $c=Read-IisInstallation $Installation
@@ -215,6 +218,15 @@ try {
             $null=Query "SET ROLE `"$role`"; SELECT EXISTS (SELECT FROM laplace.entities), EXISTS (SELECT FROM laplace.consensus); SELECT * FROM ops.substrate_counts(); SELECT laplace.word_id('the'); RESET ROLE;" $selected
             $receipt.substrate_runtime_access_verified=$true
         }
+    }
+    if($ConfigureLogs){
+        $apiLogDirectory=Join-Path $c.directory 'state/logs'
+        Grant-IisPostgresLogReader $apiLogDirectory $env:LAPLACE_PG_SERVICE_ACCOUNT
+        $sqlLogDirectory=$apiLogDirectory.Replace("'","''")
+        $null=Query "SELECT ops.repoint_app_log('api','$sqlLogDirectory');" $selected
+        $null=Query ('SET ROLE "'+$role+'"; DO $log_read$ BEGIN IF NOT EXISTS(SELECT FROM ops.app_log()) THEN RAISE EXCEPTION ''Published API has no readable application log events''; END IF; END $log_read$; RESET ROLE;') $selected
+        $receipt.api_log_directory=$apiLogDirectory
+        $receipt.api_log_source_verified=$true
     }
     $receipt.completed=$true
 }catch{

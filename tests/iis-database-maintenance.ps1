@@ -13,6 +13,7 @@ try {
     $env:LAPLACE_MACHINE_ENV="$work/machine.env"
     '# isolated configuration fixture' | Set-Content $env:LAPLACE_MACHINE_ENV
     $env:LAPLACE_WORK="$work/work";$env:LAPLACE_PGDATA="$work/pgdata"
+    $env:LAPLACE_PG_SERVICE_ACCOUNT=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $env:TEST_EVENTS="$work/events.txt";$env:TEST_DATA=$env:LAPLACE_PGDATA
     'runtime fixture' | Set-Content "$work/site/web/releases/abc1234/migrations/Laplace.Migrations.dll"
     'certificate fixture' | Set-Content "$work/root.crt"
@@ -124,6 +125,12 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
     $events=Get-Content $env:TEST_EVENTS
     Assert (@($events | Where-Object {$_ -match '^sql:(GRANT|REVOKE|ALTER)' }).Count -eq 0) 'Status modified access.'
     Write-Host 'PASS status leaves database access unchanged'
+    '' | Set-Content $env:TEST_EVENTS
+    & $command @invoke -Database substrate -Operation status -ConfigureLogs
+    $events=Get-Content $env:TEST_EVENTS
+    Assert (@($events | Where-Object {$_ -like "sql:SELECT ops.repoint_app_log('api',*"}).Count -eq 1) 'Post-publication IIS application log source was not configured.'
+    Assert (@($events | Where-Object {$_ -like 'sql:SET ROLE*Published API has no readable*'}).Count -eq 1) 'Published API log source was not verified as the runtime role.'
+    Write-Host 'PASS explicit post-publication logging configuration binds and verifies API logs'
     $access.identity_reference='kv/identity';$access.client=$env:COMPUTERNAME.ToLowerInvariant();$access.bao_address='https://fixture.invalid'
     $access | ConvertTo-Json | Set-Content "$work/access.json"
     @'
